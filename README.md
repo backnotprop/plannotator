@@ -4,7 +4,7 @@
 
 # Plannotator
 
-A visual plan review UI for Claude Code that intercepts `ExitPlanMode` and lets you annotate, approve, or provide structured feedback.
+Interactive Plan Review: Mark up and refine your plans using a UI, easily share for team collaboration, automatically integrates with Claude Code plan mode.
 
 ## Install
 
