@@ -73,13 +73,22 @@ const server = Bun.serve({
 // Log to stderr so it doesn't interfere with hook stdout
 console.error(`Plannotator server running on http://localhost:${server.port}`);
 
-// Open browser
-try {
-  await $`open http://localhost:${server.port}`.quiet();
-} catch {
-  // Fallback for non-macOS
-  console.error(`Open browser manually: http://localhost:${server.port}`);
-}
+// Open browser - cross-platform support
+  const url = `http://localhost:${server.port}`;
+  console.error(`Plannotator server running on ${url}`);
+
+  try {
+    const platform = process.platform;
+    if (platform === "win32") {
+      await $`cmd /c start ${url}`.quiet();
+    } else if (platform === "darwin") {
+      await $`open ${url}`.quiet();
+    } else {
+      await $`xdg-open ${url}`.quiet();
+    }
+  } catch {
+    console.error(`Open browser manually: ${url}`);
+  }
 
 // Wait for user decision (blocks until approve/deny)
 const result = await decisionPromise;
