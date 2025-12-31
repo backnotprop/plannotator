@@ -18,7 +18,8 @@
     "opencode-plugin",
     "plannotator",
     "plan-review",
-    "ai-agent"
+    "ai-agent",
+    "coding-agent"
   ],
   "main": "index.ts",
   "files": [
