@@ -4,20 +4,32 @@
 
 # Plannotator
 
-Interactive Plan Review: Mark up and refine your plans using a UI, easily share for team collaboration, automatically integrates with Claude Code plan mode.
+Interactive Plan Review for AI Coding Agents. Mark up and refine your plans using a visual UI, share for team collaboration, and seamlessly integrate with **Claude Code** and **OpenCode**.
 
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=a_AT7cEN_9I">Watch video</a>
-</p>
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=a_AT7cEN_9I">
-    <img src="apps/marketing/public/youtube.png" alt="Watch the demo" width="600" />
-  </a>
-</p>
+<table>
+<tr>
+<td align="center" width="50%">
+<h3>Claude Code</h3>
+<a href="https://www.youtube.com/watch?v=a_AT7cEN_9I">
+<img src="apps/marketing/public/youtube.png" alt="Claude Code Demo" width="100%" />
+</a>
+<p><a href="https://www.youtube.com/watch?v=a_AT7cEN_9I">Watch Demo</a></p>
+</td>
+<td align="center" width="50%">
+<h3>OpenCode</h3>
+<a href="https://youtu.be/_N7uo0EFI-U">
+<img src="apps/marketing/public/youtube-opencode.png" alt="OpenCode Demo" width="100%" />
+</a>
+<p><a href="https://youtu.be/_N7uo0EFI-U">Watch Demo</a></p>
+</td>
+</tr>
+</table>
 
-## Install
+---
 
-**Install the `plannotator` command so Claude Code can use it:**
+## Install for Claude Code
+
+**Install the `plannotator` command:**
 
 **macOS / Linux / WSL:**
 
@@ -42,14 +54,30 @@ irm https://plannotator.ai/install.ps1 | iex
 
 See [apps/hook/README.md](apps/hook/README.md) for detailed installation instructions including a `manual hook` approach.
 
+---
+
+## Install for OpenCode
+
+Add to your `opencode.json`:
+
+```json
+{
+  "plugin": ["@plannotator/opencode"]
+}
+```
+
+That's it! Restart OpenCode and the `submit_plan` tool will be available.
+
+---
+
 ## How It Works
 
-When Claude Code calls `ExitPlanMode`, this hook intercepts and:
+When your AI agent finishes planning, Plannotator:
 
-1. Opens Plannotator UI in your browser
-2. Lets you annotate the plan visually
-3. Approve → Claude proceeds with implementation
-4. Request changes → Your annotations are sent back to Claude
+1. Opens the Plannotator UI in your browser
+2. Lets you annotate the plan visually (delete, insert, replace, comment)
+3. **Approve** → Agent proceeds with implementation
+4. **Request changes** → Your annotations are sent back as structured feedback
 
 ---
 

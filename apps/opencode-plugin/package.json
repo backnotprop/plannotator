@@ -1,0 +1,40 @@
+{
+  "name": "@plannotator/opencode",
+  "version": "0.1.5",
+  "description": "Plannotator plugin for OpenCode - interactive plan review with visual annotation",
+  "author": "backnotprop",
+  "license": "BSL-1.1",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/backnotprop/plannotator.git",
+    "directory": "apps/opencode-plugin"
+  },
+  "homepage": "https://github.com/backnotprop/plannotator",
+  "bugs": {
+    "url": "https://github.com/backnotprop/plannotator/issues"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "plannotator",
+    "plan-review",
+    "ai-agent",
+    "coding-agent"
+  ],
+  "main": "index.ts",
+  "files": [
+    "index.ts",
+    "plannotator.html",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "cp ../hook/dist/index.html ./plannotator.html",
+    "prepublishOnly": "bun run build"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.0.218"
+  },
+  "peerDependencies": {
+    "bun": ">=1.0.0"
+  }
+}

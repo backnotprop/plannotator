@@ -20,6 +20,8 @@
     "dev:marketing": "bun run --cwd apps/marketing dev",
     "build:hook": "bun run --cwd apps/hook build",
     "build:portal": "bun run --cwd apps/portal build",
-    "build:marketing": "bun run --cwd apps/marketing build"
+    "build:marketing": "bun run --cwd apps/marketing build",
+    "build:opencode": "bun run --cwd apps/opencode-plugin build",
+    "build": "bun run build:hook && bun run build:opencode"
   }
 }

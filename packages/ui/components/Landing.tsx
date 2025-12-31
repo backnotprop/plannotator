@@ -47,7 +47,7 @@ export const Landing: React.FC<LandingProps> = ({ onEnter }) => {
           <div className="max-w-2xl">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium mb-6">
               <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-              For Claude Code
+              For Claude Code & OpenCode
             </div>
 
             <div className="flex items-center gap-6 mb-4">
@@ -66,71 +66,82 @@ export const Landing: React.FC<LandingProps> = ({ onEnter }) => {
             </div>
 
             <p className="text-lg text-muted-foreground mb-8 max-w-lg">
-              Interactive Plan Review: Mark up and refine your plans using a UI,
-              easily share for team collaboration, automatically integrates with
-              agent plan mode.
+              Interactive Plan Review for coding agents. Mark up and refine plans visually,
+              share for team collaboration. Works with Claude Code and OpenCode.
             </p>
 
-            <div className="flex items-center gap-3">
-              {/* YouTube button */}
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-3">
+                {/* YouTube button - Claude Code */}
+                <a
+                  href="https://www.youtube.com/watch?v=a_AT7cEN_9I"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-secondary text-white font-medium hover:opacity-90 transition-opacity"
+                >
+                  <svg
+                    className="w-5 h-5"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
+                    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+                  </svg>
+                  Watch for Claude Code
+                </a>
+
+                {/* Open Demo button */}
+                {onEnter ? (
+                  <button
+                    onClick={onEnter}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-primary-foreground font-medium hover:opacity-90 transition-opacity"
+                  >
+                    Open Demo
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M13 7l5 5m0 0l-5 5m5-5H6"
+                      />
+                    </svg>
+                  </button>
+                ) : (
+                  <a
+                    href="https://share.plannotator.ai"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-primary-foreground font-medium hover:opacity-90 transition-opacity"
+                  >
+                    Open Demo
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M13 7l5 5m0 0l-5 5m5-5H6"
+                      />
+                    </svg>
+                  </a>
+                )}
+              </div>
+
+              {/* OpenCode video link */}
               <a
-                href="https://www.youtube.com/watch?v=a_AT7cEN_9I"
+                href="https://youtu.be/_N7uo0EFI-U"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-secondary text-white font-medium hover:opacity-90 transition-opacity"
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
               >
-                <svg
-                  className="w-5 h-5"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                >
-                  <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
-                </svg>
-                See it in action
+                Also watch for OpenCode →
               </a>
-
-              {/* Open Demo button */}
-              {onEnter ? (
-                <button
-                  onClick={onEnter}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-primary-foreground font-medium hover:opacity-90 transition-opacity"
-                >
-                  Open Demo
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M13 7l5 5m0 0l-5 5m5-5H6"
-                    />
-                  </svg>
-                </button>
-              ) : (
-                <a
-                  href="https://share.plannotator.ai"
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-primary-foreground font-medium hover:opacity-90 transition-opacity"
-                >
-                  Open Demo
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M13 7l5 5m0 0l-5 5m5-5H6"
-                    />
-                  </svg>
-                </a>
-              )}
             </div>
           </div>
         </section>
@@ -143,10 +154,9 @@ export const Landing: React.FC<LandingProps> = ({ onEnter }) => {
                 The Problem
               </h3>
               <p className="text-foreground/90">
-                Claude Code shows plans in the terminal. You read them, approve
-                or deny, but giving specific feedback means typing everything
-                out. Hard to reference exact sections. Zero team collaboration
-                features.
+                Coding agents show plans in the terminal. You approve or deny, but
+                giving specific feedback means typing everything out. Hard to
+                reference exact sections. Zero collaboration features.
               </p>
             </div>
             <div>
@@ -154,10 +164,9 @@ export const Landing: React.FC<LandingProps> = ({ onEnter }) => {
                 The Solution
               </h3>
               <p className="text-foreground/90">
-                Select the exact parts of the plan you want to change. Mark it
-                for deletion, add a comment, or suggest a replacement. Share
-                plans and collect team member feedback. Automatically send
-                feedback for Claude Code to act on.
+                Select the exact parts of the plan you want to change. Mark for
+                deletion, add a comment, or suggest a replacement. Share plans
+                with your team. Feedback flows back to your agent automatically.
               </p>
             </div>
           </div>
@@ -344,20 +353,21 @@ export const Landing: React.FC<LandingProps> = ({ onEnter }) => {
           <h2 className="text-xl font-semibold mb-8">How it works</h2>
 
           <div className="space-y-6 max-w-2xl">
-            <Step num={1} title="Hook into ExitPlanMode">
-              <code className="text-xs bg-muted px-2 py-1 rounded font-mono">
-                ExitPlanMode → opens Plannotator with plan content
-              </code>
+            <Step num={1} title="Agent triggers Plannotator">
+              <span className="text-xs">
+                <strong>Claude Code:</strong> ExitPlanMode hook opens UI<br />
+                <strong>OpenCode:</strong> Agent calls submit_plan tool
+              </span>
             </Step>
 
             <Step num={2} title="Annotate visually">
-              Select text → choose action (delete, comment) → annotations appear
+              Select text → choose action (delete, comment, replace) → annotations appear
               in the sidebar
             </Step>
 
             <Step num={3} title="Approve or request changes">
-              Click approve to proceed, or deny with annotations. Feedback flows
-              back to Claude automatically via hooks.
+              Click approve to proceed, or provide feedback with annotations.
+              Feedback flows back to your agent automatically.
             </Step>
           </div>
         </section>
@@ -372,7 +382,11 @@ export const Landing: React.FC<LandingProps> = ({ onEnter }) => {
             </li>
             <li className="flex items-center gap-2">
               <span className="text-primary">•</span>
-              Claude Code plugin with PermissionRequest hook on ExitPlanMode
+              <strong>Claude Code:</strong> Binary + plugin with PermissionRequest hook
+            </li>
+            <li className="flex items-center gap-2">
+              <span className="text-primary">•</span>
+              <strong>OpenCode:</strong> npm package with submit_plan tool
             </li>
             <li className="flex items-center gap-2">
               <span className="text-primary">•</span>
