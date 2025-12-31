@@ -17,10 +17,10 @@ Interactive Plan Review for AI Coding Agents. Mark up and refine your plans usin
 </td>
 <td align="center" width="50%">
 <h3>OpenCode</h3>
-<a href="https://www.youtube.com/watch?v=a_AT7cEN_9I">
-<img src="apps/marketing/public/youtube.png" alt="OpenCode Demo" width="100%" />
+<a href="https://youtu.be/_N7uo0EFI-U">
+<img src="apps/marketing/public/youtube-opencode.png" alt="OpenCode Demo" width="100%" />
 </a>
-<p><a href="https://www.youtube.com/watch?v=a_AT7cEN_9I">Watch Demo</a></p>
+<p><a href="https://youtu.be/_N7uo0EFI-U">Watch Demo</a></p>
 </td>
 </tr>
 </table>

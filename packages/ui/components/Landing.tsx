@@ -135,7 +135,7 @@ export const Landing: React.FC<LandingProps> = ({ onEnter }) => {
 
               {/* OpenCode video link */}
               <a
-                href="https://www.youtube.com/watch?v=a_AT7cEN_9I"
+                href="https://youtu.be/_N7uo0EFI-U"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-sm text-muted-foreground hover:text-foreground transition-colors"
