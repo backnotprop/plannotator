@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  plannotator-ssh:
+    build:
+      context: ../../..
+      dockerfile: tests/manual/ssh/Dockerfile
+    ports:
+      - "2222:22"      # SSH
+      - "19432:19432"  # Plannotator default SSH port
+    stdin_open: true
+    tty: true
