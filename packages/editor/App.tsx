@@ -356,7 +356,7 @@ const App: React.FC = () => {
             >
               <span className="text-sm font-semibold tracking-tight">Plannotator</span>
             </a>
-            <span className="text-xs text-muted-foreground font-mono opacity-60 hidden md:inline">v0.1</span>
+            <span className="text-xs text-muted-foreground font-mono opacity-60 hidden md:inline">v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0'}</span>
           </div>
 
           <div className="flex items-center gap-1 md:gap-2">
