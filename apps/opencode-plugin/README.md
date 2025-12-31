@@ -4,7 +4,16 @@
 
 Interactive Plan Review for OpenCode. Select the exact parts of the plan you want to change—mark for deletion, add a comment, or suggest a replacement. Feedback flows back to your agent automatically.
 
-[![Watch Demo](https://img.youtube.com/vi/_N7uo0EFI-U/maxresdefault.jpg)](https://youtu.be/_N7uo0EFI-U)
+<table>
+<tr>
+<td align="center">
+<strong>Watch Demo</strong><br><br>
+<a href="https://youtu.be/_N7uo0EFI-U">
+<img src="https://img.youtube.com/vi/_N7uo0EFI-U/maxresdefault.jpg" alt="Watch Demo" width="600" />
+</a>
+</td>
+</tr>
+</table>
 
 ## Install
 
