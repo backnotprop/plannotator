@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/opencode",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "description": "Plannotator plugin for OpenCode - interactive plan review with visual annotation",
   "author": "backnotprop",
   "license": "BSL-1.1",
@@ -24,7 +24,8 @@
   "main": "index.ts",
   "files": [
     "index.ts",
-    "plannotator.html"
+    "plannotator.html",
+    "README.md"
   ],
   "scripts": {
     "build": "cp ../hook/dist/index.html ./plannotator.html",
