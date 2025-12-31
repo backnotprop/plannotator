@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="apps/marketing/public/og-image.webp" alt="Plannotator" width="100%" />
+  <img src="apps/marketing/public/og-image.webp" alt="Plannotator" width="80%" />
 </p>
 
 # Plannotator
