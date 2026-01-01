@@ -309,10 +309,10 @@ const App: React.FC = () => {
 
   // Generate default instructions when plan is loaded in API mode
   useEffect(() => {
-    if (isApiMode && markdown && !instructions) {
+    if (isApiMode && markdown && !instructions.trim()) {
       setInstructions(generateDefaultInstructions(markdown));
     }
-  }, [isApiMode, markdown]);
+  }, [isApiMode, markdown, instructions]);
 
   // API mode handlers
   const handleApprove = async () => {
