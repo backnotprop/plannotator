@@ -230,9 +230,19 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState<'approved' | 'denied' | null>(null);
-  const [instructions, setInstructions] = useState('');
-  const [isInstructionsExpanded, setIsInstructionsExpanded] = useState(false);
+  const [instructions, setInstructions] = useState(() => {
+    // Restore instructions from cookies to persist across plan revisions
+    return storage.getItem('plannotator-instructions') || '';
+  });
+  const [isInstructionsExpanded, setIsInstructionsExpanded] = useState(true);
   const viewerRef = useRef<ViewerHandle>(null);
+
+  // Persist instructions to cookies when they change
+  useEffect(() => {
+    if (instructions.trim()) {
+      storage.setItem('plannotator-instructions', instructions);
+    }
+  }, [instructions]);
 
   // URL-based sharing
   const {
