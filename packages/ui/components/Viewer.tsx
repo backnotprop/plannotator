@@ -36,6 +36,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   taterMode
 }, ref) => {
   const [copied, setCopied] = useState(false);
+  const [showGlobalCommentInput, setShowGlobalCommentInput] = useState(false);
+  const [globalCommentValue, setGlobalCommentValue] = useState('');
+  const globalCommentInputRef = useRef<HTMLInputElement>(null);
 
   const handleCopyPlan = async () => {
     try {
@@ -46,6 +49,32 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       console.error('Failed to copy:', e);
     }
   };
+
+  const handleAddGlobalComment = () => {
+    if (!globalCommentValue.trim()) return;
+
+    const newAnnotation: Annotation = {
+      id: `global-${Date.now()}`,
+      blockId: '',
+      startOffset: 0,
+      endOffset: 0,
+      type: AnnotationType.GLOBAL_COMMENT,
+      text: globalCommentValue.trim(),
+      originalText: '',
+      createdA: Date.now(),
+      author: getIdentity(),
+    };
+
+    onAddAnnotation(newAnnotation);
+    setGlobalCommentValue('');
+    setShowGlobalCommentInput(false);
+  };
+
+  useEffect(() => {
+    if (showGlobalCommentInput) {
+      globalCommentInputRef.current?.focus();
+    }
+  }, [showGlobalCommentInput]);
   const containerRef = useRef<HTMLDivElement>(null);
   const highlighterRef = useRef<Highlighter | null>(null);
   const modeRef = useRef<EditorMode>(mode);
@@ -481,28 +510,87 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         ref={containerRef}
         className="w-full max-w-3xl bg-card border border-border/50 rounded-xl shadow-xl p-5 md:p-10 lg:p-14 relative"
       >
-        {/* Copy plan button */}
-        <button
-          onClick={handleCopyPlan}
-          className="absolute top-3 right-3 md:top-5 md:right-5 flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors"
-          title={copied ? 'Copied!' : 'Copy plan'}
-        >
-          {copied ? (
-            <>
-              <svg className="w-3.5 h-3.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-              Copied!
-            </>
+        {/* Header buttons */}
+        <div className="absolute top-3 right-3 md:top-5 md:right-5 flex items-center gap-2">
+          {/* Global comment button/input */}
+          {showGlobalCommentInput ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleAddGlobalComment();
+              }}
+              className="flex items-center gap-1.5 bg-muted/80 rounded-md p-1"
+            >
+              <input
+                ref={globalCommentInputRef}
+                type="text"
+                className="bg-transparent border-none outline-none text-xs w-40 md:w-56 px-2 placeholder:text-muted-foreground"
+                placeholder="Add a global comment..."
+                value={globalCommentValue}
+                onChange={(e) => setGlobalCommentValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    setShowGlobalCommentInput(false);
+                    setGlobalCommentValue('');
+                  }
+                }}
+              />
+              <button
+                type="submit"
+                disabled={!globalCommentValue.trim()}
+                className="px-2 py-1 text-xs font-medium rounded bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-50 transition-all"
+              >
+                Add
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowGlobalCommentInput(false);
+                  setGlobalCommentValue('');
+                }}
+                className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </form>
           ) : (
-            <>
+            <button
+              onClick={() => setShowGlobalCommentInput(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors"
+              title="Add global comment"
+            >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
               </svg>
-              Copy plan
-            </>
+              <span className="hidden md:inline">Global comment</span>
+            </button>
           )}
-        </button>
+
+          {/* Copy plan button */}
+          <button
+            onClick={handleCopyPlan}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors"
+            title={copied ? 'Copied!' : 'Copy plan'}
+          >
+            {copied ? (
+              <>
+                <svg className="w-3.5 h-3.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                <span className="hidden md:inline">Copied!</span>
+              </>
+            ) : (
+              <>
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                <span className="hidden md:inline">Copy plan</span>
+              </>
+            )}
+          </button>
+        </div>
         {blocks.map(block => (
           block.type === 'code' ? (
             <CodeBlock

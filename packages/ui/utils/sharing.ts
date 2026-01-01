@@ -15,7 +15,8 @@ export type ShareableAnnotation =
   | ['D', string, string | null]                    // Deletion: type, original, author
   | ['R', string, string, string | null]            // Replacement: type, original, replacement, author
   | ['C', string, string, string | null]            // Comment: type, original, comment, author
-  | ['I', string, string, string | null];           // Insertion: type, context, new text, author
+  | ['I', string, string, string | null]            // Insertion: type, context, new text, author
+  | ['G', string, string | null];                   // Global Comment: type, comment, author
 
 export interface SharePayload {
   p: string;  // plan markdown
@@ -73,8 +74,14 @@ export async function decompress(b64: string): Promise<SharePayload> {
  */
 export function toShareable(annotations: Annotation[]): ShareableAnnotation[] {
   return annotations.map(ann => {
-    const type = ann.type[0] as 'D' | 'R' | 'C' | 'I';
     const author = ann.author || null;
+
+    // Handle GLOBAL_COMMENT specially - it starts with 'G' (from GLOBAL_COMMENT)
+    if (ann.type === AnnotationType.GLOBAL_COMMENT) {
+      return ['G', ann.text || '', author] as ShareableAnnotation;
+    }
+
+    const type = ann.type[0] as 'D' | 'R' | 'C' | 'I';
 
     if (type === 'D') {
       return ['D', ann.originalText, author] as ShareableAnnotation;
@@ -96,10 +103,30 @@ export function fromShareable(data: ShareableAnnotation[]): Annotation[] {
     'R': AnnotationType.REPLACEMENT,
     'C': AnnotationType.COMMENT,
     'I': AnnotationType.INSERTION,
+    'G': AnnotationType.GLOBAL_COMMENT,
   };
 
   return data.map((item, index) => {
     const type = item[0];
+
+    // Handle global comments specially: ['G', text, author]
+    if (type === 'G') {
+      const text = item[1] as string;
+      const author = item[2] as string | null;
+
+      return {
+        id: `shared-${index}-${Date.now()}`,
+        blockId: '',
+        startOffset: 0,
+        endOffset: 0,
+        type: AnnotationType.GLOBAL_COMMENT,
+        text: text || undefined,
+        originalText: '',
+        createdA: Date.now() + index,
+        author: author || undefined,
+      };
+    }
+
     const originalText = item[1];
     // For deletion: [type, original, author]
     // For others: [type, original, text, author]

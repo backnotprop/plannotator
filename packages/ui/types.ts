@@ -3,6 +3,7 @@ export enum AnnotationType {
   INSERTION = 'INSERTION',
   REPLACEMENT = 'REPLACEMENT',
   COMMENT = 'COMMENT',
+  GLOBAL_COMMENT = 'GLOBAL_COMMENT',
 }
 
 export type EditorMode = 'selection' | 'redline';

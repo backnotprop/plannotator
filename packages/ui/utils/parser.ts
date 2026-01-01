@@ -204,6 +204,11 @@ export const exportDiff = (blocks: Block[], annotations: any[]): string => {
         output += `Feedback on: "${ann.originalText}"\n`;
         output += `> ${ann.text}\n`;
         break;
+
+      case 'GLOBAL_COMMENT':
+        output += `General feedback about the plan\n`;
+        output += `> ${ann.text}\n`;
+        break;
     }
 
     output += '\n';
