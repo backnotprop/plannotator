@@ -1,0 +1,10 @@
+{
+  "id": "plannotator",
+  "name": "Plannotator",
+  "version": "0.0.1",
+  "minAppVersion": "1.0.0",
+  "description": "Interactive plan review with visual annotations. Review AI-generated plans, add feedback, and share with your team.",
+  "author": "backnotprop",
+  "authorUrl": "https://github.com/backnotprop",
+  "isDesktopOnly": true
+}

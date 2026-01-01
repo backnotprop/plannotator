@@ -4,6 +4,8 @@
   "type": "module",
   "exports": {
     ".": "./App.tsx",
+    "./mount": "./mount.tsx",
+    "./embeddable": "./EmbeddableApp.tsx",
     "./styles": "./index.css"
   },
   "dependencies": {
