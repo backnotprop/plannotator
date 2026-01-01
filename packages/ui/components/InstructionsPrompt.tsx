@@ -62,8 +62,15 @@ export const InstructionsPrompt: React.FC<InstructionsPromptProps> = ({
 };
 
 /**
- * Generate default instructions based on the plan content.
- * Attempts to infer a reasonable file path from the plan title/content.
+ * Generates default instructions for handling a plan based on its markdown content.
+ *
+ * The function attempts to infer a reasonable namespace (e.g. `frontend`, `backend`, `database`)
+ * from headings and code blocks in the plan, converts the plan title into a kebab-case file name,
+ * and then constructs a default documentation path under `./docs/specs/{namespace}/{fileName}.md`.
+ *
+ * @param planMarkdown - The full markdown text of the plan, including its title and sections.
+ * @returns A multi-line markdown string containing default instructions that reference the
+ *          inferred documentation path and describe how to handle approval or requested changes.
  */
 export function generateDefaultInstructions(planMarkdown: string): string {
   // Try to extract plan title from first heading
