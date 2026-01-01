@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-REPO="backnotprop/plannotator"
+REPO="bradennapier/plannotator"
 INSTALL_DIR="$HOME/.local/bin"
 
 case "$(uname -s)" in
@@ -77,5 +77,5 @@ echo "Test the install:"
 echo '  echo '"'"'{"tool_input":{"plan":"# Test Plan\\\\n\\\\nHello world"}}'"'"' | plannotator'
 echo ""
 echo "Then install the Claude Code plugin:"
-echo "  /plugin marketplace add backnotprop/plannotator"
+echo "  /plugin marketplace add bradennapier/plannotator"
 echo "  /plugin install plannotator@plannotator"

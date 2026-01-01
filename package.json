@@ -1,17 +1,17 @@
 {
   "name": "plannotator",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "description": "Interactive Plan Review for Claude Code - annotate plans visually, share with team, automatically send feedback",
-  "author": "backnotprop",
+  "author": "bradennapier",
   "license": "BSL-1.1",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/backnotprop/plannotator.git"
+    "url": "git+https://github.com/bradennapier/plannotator.git"
   },
-  "homepage": "https://github.com/backnotprop/plannotator",
+  "homepage": "https://plannotator.ai",
   "bugs": {
-    "url": "https://github.com/backnotprop/plannotator/issues"
+    "url": "https://github.com/bradennapier/plannotator/issues"
   },
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {

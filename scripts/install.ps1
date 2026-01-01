@@ -7,7 +7,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = 'SilentlyContinue'
 
-$REPO = "backnotprop/plannotator"
+$REPO = "bradennapier/plannotator"
 $INSTALL_DIR = "$env:USERPROFILE\.local\bin"
 
 # Check for 32-bit Windows
@@ -105,6 +105,6 @@ Write-Output "Test the install:"
 Write-Output '  echo ''{"tool_input":{"plan":"# Test Plan\\n\\nHello world"}}'' | plannotator'
 Write-Output ""
 Write-Output "Then install the Claude Code plugin:"
-Write-Output "  /plugin marketplace add backnotprop/plannotator"
+Write-Output "  /plugin marketplace add bradennapier/plannotator"
 Write-Output "  /plugin install plannotator@plannotator"
 Write-Output ""
