@@ -137,7 +137,7 @@ export async function generateShareUrl(
     a: toShareable(annotations),
   };
 
-  // Only include instructions if they have content
+  // Only include instructions if they are non-empty after trimming (exclude whitespace-only)
   if (instructions && instructions.trim()) {
     payload.i = instructions.trim();
   }
