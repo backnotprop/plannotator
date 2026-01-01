@@ -257,7 +257,7 @@ const App: React.FC = () => {
 
   // Apply loaded instructions from shared URL
   useEffect(() => {
-    if (loadedInstructions && !instructions) {
+    if (loadedInstructions && !instructions.trim()) {
       setInstructions(loadedInstructions);
     }
   }, [loadedInstructions, instructions]);
