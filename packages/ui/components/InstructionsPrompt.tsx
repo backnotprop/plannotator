@@ -62,15 +62,13 @@ export const InstructionsPrompt: React.FC<InstructionsPromptProps> = ({
 };
 
 /**
- * Generates default instructions for handling a plan based on its markdown content.
+ * Generates default instructions for handling a plan.
  *
- * The function attempts to infer a reasonable namespace (e.g. `frontend`, `backend`, `database`)
- * from headings and code blocks in the plan, converts the plan title into a kebab-case file name,
- * and then constructs a default documentation path under `./docs/specs/{namespace}/{fileName}.md`.
+ * Extracts the plan title and converts it to a kebab-case filename.
+ * Claude already has the plan in context, so it can infer the best path.
  *
- * @param planMarkdown - The full markdown text of the plan, including its title and sections.
- * @returns A multi-line markdown string containing default instructions that reference the
- *          inferred documentation path and describe how to handle approval or requested changes.
+ * @param planMarkdown - The full markdown text of the plan.
+ * @returns Default instructions for Claude.
  */
 export function generateDefaultInstructions(planMarkdown: string): string {
   // Try to extract plan title from first heading
@@ -84,52 +82,16 @@ export function generateDefaultInstructions(planMarkdown: string): string {
         .replace(/[^a-z0-9\s-]/g, '')
         .replace(/\s+/g, '-')
         .replace(/-+/g, '-')
-        .slice(0, 50) // Limit length
+        .slice(0, 50)
     : 'plan';
-
-  // Try to infer namespace from content (e.g., feature area, component name)
-  // Look for patterns like "## Phase:", "## Component:", etc.
-  let namespace = 'general';
-
-  // Check for common patterns that might indicate the plan's domain
-  const phaseMatch = planMarkdown.match(/##\s+(?:Phase\s+\d+[:\s]*)?(.+?)(?:\n|$)/);
-  if (phaseMatch) {
-    const headingContent = phaseMatch[1].toLowerCase();
-    if (headingContent.includes('infrastructure') || headingContent.includes('setup')) {
-      namespace = 'infrastructure';
-    } else if (headingContent.includes('api') || headingContent.includes('backend')) {
-      namespace = 'backend';
-    } else if (headingContent.includes('ui') || headingContent.includes('frontend') || headingContent.includes('component')) {
-      namespace = 'frontend';
-    } else if (headingContent.includes('test')) {
-      namespace = 'testing';
-    } else if (headingContent.includes('deploy') || headingContent.includes('release')) {
-      namespace = 'deployment';
-    }
-  }
-
-  // Check for code blocks to infer language/tech
-  const codeBlockMatch = planMarkdown.match(/```(\w+)/);
-  if (codeBlockMatch) {
-    const lang = codeBlockMatch[1].toLowerCase();
-    if (['tsx', 'jsx', 'react'].includes(lang)) {
-      namespace = 'frontend';
-    } else if (['sql', 'postgres', 'mysql'].includes(lang)) {
-      namespace = 'database';
-    } else if (['dockerfile', 'yaml', 'yml'].includes(lang)) {
-      namespace = 'infrastructure';
-    }
-  }
-
-  const defaultPath = `./docs/specs/${namespace}/${fileName}.md`;
 
   return `# On Plan Approval
 
-- Save this plan to: ${defaultPath}
+- Save this plan to: ./docs/specs/${fileName}.md
+  (or infer a better path based on project context)
 - Do NOT implement the plan automatically unless explicitly requested
 
 # On Changes Requested / Denial
 
-- Handle the feedback as expected and revise the plan
-- Consider any additional context provided in the feedback`;
+- Handle the feedback as expected and revise the plan`;
 }
