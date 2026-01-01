@@ -260,7 +260,7 @@ const App: React.FC = () => {
     if (loadedInstructions && !instructions) {
       setInstructions(loadedInstructions);
     }
-  }, [loadedInstructions]);
+  }, [loadedInstructions, instructions]);
 
   // Apply shared annotations to DOM after they're loaded
   useEffect(() => {
