@@ -94,16 +94,16 @@ export function generateDefaultInstructions(planMarkdown: string): string {
   // Check for common patterns that might indicate the plan's domain
   const phaseMatch = planMarkdown.match(/##\s+(?:Phase\s+\d+[:\s]*)?(.+?)(?:\n|$)/);
   if (phaseMatch) {
-    const phaseName = phaseMatch[1].toLowerCase();
-    if (phaseName.includes('infrastructure') || phaseName.includes('setup')) {
+    const headingContent = phaseMatch[1].toLowerCase();
+    if (headingContent.includes('infrastructure') || headingContent.includes('setup')) {
       namespace = 'infrastructure';
-    } else if (phaseName.includes('api') || phaseName.includes('backend')) {
+    } else if (headingContent.includes('api') || headingContent.includes('backend')) {
       namespace = 'backend';
-    } else if (phaseName.includes('ui') || phaseName.includes('frontend') || phaseName.includes('component')) {
+    } else if (headingContent.includes('ui') || headingContent.includes('frontend') || headingContent.includes('component')) {
       namespace = 'frontend';
-    } else if (phaseName.includes('test')) {
+    } else if (headingContent.includes('test')) {
       namespace = 'testing';
-    } else if (phaseName.includes('deploy') || phaseName.includes('release')) {
+    } else if (headingContent.includes('deploy') || headingContent.includes('release')) {
       namespace = 'deployment';
     }
   }
