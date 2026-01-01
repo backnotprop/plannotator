@@ -75,6 +75,7 @@ enum AnnotationType {
   INSERTION = "INSERTION",
   REPLACEMENT = "REPLACEMENT",
   COMMENT = "COMMENT",
+  GLOBAL_COMMENT = "GLOBAL_COMMENT",
 }
 
 interface Annotation {
@@ -142,7 +143,8 @@ type ShareableAnnotation =
   | ["D", string, string | null] // [type, original, author]
   | ["R", string, string, string | null] // [type, original, replacement, author]
   | ["C", string, string, string | null] // [type, original, comment, author]
-  | ["I", string, string, string | null]; // [type, context, newText, author]
+  | ["I", string, string, string | null] // [type, context, newText, author]
+  | ["G", string, string | null]; // [type, comment, author] - global comment
 ```
 
 **Compression pipeline:**
