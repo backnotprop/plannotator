@@ -191,7 +191,7 @@ if (result.approved) {
       hookEventName: "PermissionRequest",
       decision: {
         behavior: "allow",
-        ...(message ? { message } : {})
+        ...(message && message.trim() ? { message: message.trim() } : {})
       }
     }
   }));
