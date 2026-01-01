@@ -61,8 +61,8 @@ if (!planContent) {
 }
 
 // Promise that resolves when user makes a decision
-let resolveDecision: (result: { approved: boolean; feedback?: string }) => void;
-const decisionPromise = new Promise<{ approved: boolean; feedback?: string }>(
+let resolveDecision: (result: { approved: boolean; feedback?: string; instructions?: string }) => void;
+const decisionPromise = new Promise<{ approved: boolean; feedback?: string; instructions?: string }>(
   (resolve) => { resolveDecision = resolve; }
 );
 
@@ -87,15 +87,24 @@ async function startServer(): Promise<ReturnType<typeof Bun.serve>> {
 
           // API: Approve plan
           if (url.pathname === "/api/approve" && req.method === "POST") {
-            resolveDecision({ approved: true });
+            try {
+              const body = await req.json() as { instructions?: string };
+              resolveDecision({ approved: true, instructions: body.instructions });
+            } catch {
+              resolveDecision({ approved: true });
+            }
             return Response.json({ ok: true });
           }
 
           // API: Deny with feedback
           if (url.pathname === "/api/deny" && req.method === "POST") {
             try {
-              const body = await req.json() as { feedback?: string };
-              resolveDecision({ approved: false, feedback: body.feedback || "Plan rejected by user" });
+              const body = await req.json() as { feedback?: string; instructions?: string };
+              resolveDecision({
+                approved: false,
+                feedback: body.feedback || "Plan rejected by user",
+                instructions: body.instructions
+              });
             } catch {
               resolveDecision({ approved: false, feedback: "Plan rejected by user" });
             }
@@ -170,21 +179,44 @@ server.stop();
 
 // Output JSON for PermissionRequest hook decision control
 if (result.approved) {
+  // Build approval message with instructions
+  let message = "";
+
+  if (result.instructions) {
+    message = `# Plan Approved\n\nThe user has approved this plan. Please follow these instructions:\n\n${result.instructions}`;
+  }
+
   console.log(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "PermissionRequest",
       decision: {
-        behavior: "allow"
+        behavior: "allow",
+        ...(message ? { message } : {})
       }
     }
   }));
 } else {
+  // Build denial message with feedback and instructions
+  let message = "# Plan Changes Requested\n\n";
+
+  if (result.feedback) {
+    message += `## Feedback\n\n${result.feedback}\n\n`;
+  }
+
+  if (result.instructions) {
+    message += `## Additional Instructions\n\n${result.instructions}`;
+  }
+
+  if (!result.feedback && !result.instructions) {
+    message = "Plan changes requested by user";
+  }
+
   console.log(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "PermissionRequest",
       decision: {
         behavior: "deny",
-        message: result.feedback || "Plan changes requested"
+        message: message.trim()
       }
     }
   }));

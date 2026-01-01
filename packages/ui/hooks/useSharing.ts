@@ -37,6 +37,9 @@ interface UseSharingResult {
 
   /** Manually trigger share URL generation */
   refreshShareUrl: () => Promise<void>;
+
+  /** Instructions loaded from share URL (if any) */
+  loadedInstructions: string | null;
 }
 
 export function useSharing(
@@ -44,13 +47,15 @@ export function useSharing(
   annotations: Annotation[],
   setMarkdown: (m: string) => void,
   setAnnotations: (a: Annotation[]) => void,
-  onSharedLoad?: () => void
+  onSharedLoad?: () => void,
+  instructions?: string
 ): UseSharingResult {
   const [isSharedSession, setIsSharedSession] = useState(false);
   const [isLoadingShared, setIsLoadingShared] = useState(true);
   const [shareUrl, setShareUrl] = useState('');
   const [shareUrlSize, setShareUrlSize] = useState('');
   const [pendingSharedAnnotations, setPendingSharedAnnotations] = useState<Annotation[] | null>(null);
+  const [loadedInstructions, setLoadedInstructions] = useState<string | null>(null);
 
   const clearPendingSharedAnnotations = useCallback(() => {
     setPendingSharedAnnotations(null);
@@ -71,6 +76,11 @@ export function useSharing(
 
         // Store for later application to DOM
         setPendingSharedAnnotations(restoredAnnotations);
+
+        // Store loaded instructions (if any)
+        if (payload.i) {
+          setLoadedInstructions(payload.i);
+        }
 
         setIsSharedSession(true);
 
@@ -114,7 +124,7 @@ export function useSharing(
   // Generate share URL when markdown or annotations change
   const refreshShareUrl = useCallback(async () => {
     try {
-      const url = await generateShareUrl(markdown, annotations);
+      const url = await generateShareUrl(markdown, annotations, instructions);
       setShareUrl(url);
       setShareUrlSize(formatUrlSize(url));
     } catch (e) {
@@ -122,7 +132,7 @@ export function useSharing(
       setShareUrl('');
       setShareUrlSize('');
     }
-  }, [markdown, annotations]);
+  }, [markdown, annotations, instructions]);
 
   // Auto-refresh share URL when dependencies change
   useEffect(() => {
@@ -137,5 +147,6 @@ export function useSharing(
     pendingSharedAnnotations,
     clearPendingSharedAnnotations,
     refreshShareUrl,
+    loadedInstructions,
   };
 }

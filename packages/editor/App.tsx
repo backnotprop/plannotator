@@ -13,6 +13,7 @@ import { Settings } from '@plannotator/ui/components/Settings';
 import { useSharing } from '@plannotator/ui/hooks/useSharing';
 import { storage } from '@plannotator/ui/utils/storage';
 import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
+import { InstructionsPrompt, generateDefaultInstructions } from '@plannotator/ui/components/InstructionsPrompt';
 
 const PLAN_CONTENT = `# Implementation Plan: Real-time Collaboration
 
@@ -229,6 +230,8 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState<'approved' | 'denied' | null>(null);
+  const [instructions, setInstructions] = useState('');
+  const [isInstructionsExpanded, setIsInstructionsExpanded] = useState(false);
   const viewerRef = useRef<ViewerHandle>(null);
 
   // URL-based sharing
@@ -239,6 +242,7 @@ const App: React.FC = () => {
     shareUrlSize,
     pendingSharedAnnotations,
     clearPendingSharedAnnotations,
+    loadedInstructions,
   } = useSharing(
     markdown,
     annotations,
@@ -247,8 +251,16 @@ const App: React.FC = () => {
     () => {
       // When loaded from share, mark as loaded
       setIsLoading(false);
-    }
+    },
+    instructions
   );
+
+  // Apply loaded instructions from shared URL
+  useEffect(() => {
+    if (loadedInstructions && !instructions) {
+      setInstructions(loadedInstructions);
+    }
+  }, [loadedInstructions]);
 
   // Apply shared annotations to DOM after they're loaded
   useEffect(() => {
@@ -295,11 +307,22 @@ const App: React.FC = () => {
     setBlocks(parseMarkdownToBlocks(markdown));
   }, [markdown]);
 
+  // Generate default instructions when plan is loaded in API mode
+  useEffect(() => {
+    if (isApiMode && markdown && !instructions) {
+      setInstructions(generateDefaultInstructions(markdown));
+    }
+  }, [isApiMode, markdown]);
+
   // API mode handlers
   const handleApprove = async () => {
     setIsSubmitting(true);
     try {
-      await fetch('/api/approve', { method: 'POST' });
+      await fetch('/api/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instructions: instructions.trim() })
+      });
       setSubmitted('approved');
     } catch {
       setIsSubmitting(false);
@@ -312,7 +335,10 @@ const App: React.FC = () => {
       await fetch('/api/deny', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ feedback: diffOutput })
+        body: JSON.stringify({
+          feedback: diffOutput,
+          instructions: instructions.trim()
+        })
       });
       setSubmitted('denied');
     } catch {
@@ -435,6 +461,17 @@ const App: React.FC = () => {
           {/* Document Area */}
           <main className="flex-1 overflow-y-auto bg-grid">
             <div className="min-h-full flex flex-col items-center p-3 md:p-8">
+              {/* Instructions Prompt - API mode only */}
+              {isApiMode && (
+                <InstructionsPrompt
+                  value={instructions}
+                  onChange={setInstructions}
+                  isExpanded={isInstructionsExpanded}
+                  onToggleExpand={() => setIsInstructionsExpanded(!isInstructionsExpanded)}
+                  disabled={isSubmitting}
+                />
+              )}
+
               {/* Mode Switcher */}
               <div className="w-full max-w-3xl mb-3 md:mb-4 flex justify-start">
                 <ModeSwitcher mode={editorMode} onChange={setEditorMode} taterMode={taterMode} />
@@ -530,7 +567,7 @@ const App: React.FC = () => {
                 </h2>
                 <p className="text-muted-foreground">
                   {submitted === 'approved'
-                    ? 'Claude will proceed with the implementation.'
+                    ? 'Claude will follow your instructions (save plan, etc.).'
                     : 'Claude will revise the plan based on your annotations.'}
                 </p>
               </div>
