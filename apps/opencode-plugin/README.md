@@ -40,6 +40,19 @@ Restart OpenCode. The `submit_plan` tool is now available.
 - **Visual annotations**: Select text, choose an action, see feedback in the sidebar
 - **Runs locally**: No network requests. Plans never leave your machine.
 - **Private sharing**: Plans and annotations compress into the URL itself—share a link, no accounts or backend required
+- **Obsidian integration**: Auto-save approved plans to your vault with frontmatter and tags
+
+## Obsidian Integration
+
+Save approved plans directly to your Obsidian vault.
+
+1. Open Settings in Plannotator UI
+2. Enable "Obsidian Integration" and select your vault
+3. Approved plans save automatically with:
+   - Human-readable filenames: `Title - Jan 2, 2026 2-30pm.md`
+   - YAML frontmatter (`created`, `source`, `tags`)
+   - Auto-extracted tags from plan title and code languages
+   - Backlink to `[[Plannotator Plans]]` for graph view
 
 ## Links
 

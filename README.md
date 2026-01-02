@@ -25,6 +25,8 @@ Interactive Plan Review for AI Coding Agents. Mark up and refine your plans usin
 </tr>
 </table>
 
+> **New:** We now support saving to Obsidian. Approved plans are automatically saved to your vault with frontmatter and tags.
+
 ---
 
 ## Install for Claude Code

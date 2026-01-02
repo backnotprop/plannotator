@@ -69,3 +69,33 @@ When Claude Code calls `ExitPlanMode`, this hook intercepts and:
 2. Lets you annotate the plan visually
 3. Approve → Claude proceeds with implementation
 4. Request changes → Your annotations are sent back to Claude
+
+## Obsidian Integration
+
+Approved plans can be automatically saved to your Obsidian vault.
+
+**Setup:**
+1. Open Settings (gear icon) in Plannotator
+2. Enable "Obsidian Integration"
+3. Select your vault from the dropdown (auto-detected) or enter the path manually
+4. Set folder name (default: `plannotator`)
+
+**What gets saved:**
+- Plans saved with human-readable filenames: `Title - Jan 2, 2026 2-30pm.md`
+- YAML frontmatter with `created`, `source`, and `tags`
+- Tags extracted automatically from the plan title and code languages
+- Backlink to `[[Plannotator Plans]]` for graph connectivity
+
+**Example saved file:**
+```markdown
+---
+created: 2026-01-02T14:30:00.000Z
+source: plannotator
+tags: [plan, authentication, typescript, sql]
+---
+
+[[Plannotator Plans]]
+
+# Implementation Plan: User Authentication
+...
+```
