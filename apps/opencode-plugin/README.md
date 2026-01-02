@@ -4,6 +4,8 @@
 
 Interactive Plan Review for OpenCode. Select the exact parts of the plan you want to change—mark for deletion, add a comment, or suggest a replacement. Feedback flows back to your agent automatically.
 
+Obsidian users can auto-save approved plans to Obsidian as well. 
+
 <table>
 <tr>
 <td align="center">
@@ -53,6 +55,9 @@ Save approved plans directly to your Obsidian vault.
    - YAML frontmatter (`created`, `source`, `tags`)
    - Auto-extracted tags from plan title and code languages
    - Backlink to `[[Plannotator Plans]]` for graph view
+  
+<img width="1190" height="730" alt="image" src="https://github.com/user-attachments/assets/5036a3ea-e5e8-426c-882d-0a1d991c1625" />
+
 
 ## Links
 
