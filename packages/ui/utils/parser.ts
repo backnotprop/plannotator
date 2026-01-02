@@ -66,10 +66,29 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
     // List Items (Simple detection)
     if (trimmed.match(/^(\*|-|\d+\.)\s/)) {
       flush(); // Treat each list item as a separate block for easier annotation
+      // Calculate indentation level from leading whitespace
+      const leadingWhitespace = line.match(/^(\s*)/)?.[1] || '';
+      // Count spaces (2 spaces = 1 level) or tabs (1 tab = 1 level)
+      const spaceCount = leadingWhitespace.replace(/\t/g, '  ').length;
+      const listLevel = Math.floor(spaceCount / 2);
+
+      // Remove list marker
+      let content = trimmed.replace(/^(\*|-|\d+\.)\s/, '');
+
+      // Check for checkbox syntax: [ ] or [x] or [X]
+      let checked: boolean | undefined = undefined;
+      const checkboxMatch = content.match(/^\[([ xX])\]\s*/);
+      if (checkboxMatch) {
+        checked = checkboxMatch[1].toLowerCase() === 'x';
+        content = content.replace(/^\[([ xX])\]\s*/, '');
+      }
+
       blocks.push({
         id: `block-${currentId++}`,
         type: 'list-item',
-        content: trimmed.replace(/^(\*|-|\d+\.)\s/, ''),
+        content,
+        level: listLevel,
+        checked,
         order: currentId,
         startLine: currentLineNum
       });

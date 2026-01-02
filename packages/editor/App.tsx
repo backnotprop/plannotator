@@ -39,8 +39,17 @@ server.on('connection', (socket, request) => {
 
 ### Client Connection
 - Establish persistent connection on document load
+  - Initialize WebSocket with authentication token
+  - Set up heartbeat ping/pong every 30 seconds
+  - Handle connection state changes (connecting, open, closing, closed)
 - Implement reconnection logic with exponential backoff
+  - Start with 1 second delay
+  - Double delay on each retry (max 30 seconds)
+  - Reset delay on successful connection
 - Handle offline state gracefully
+  - Queue local changes in IndexedDB
+  - Show offline indicator in UI
+  - Sync queued changes on reconnect
 
 ### Database Schema
 
@@ -71,9 +80,20 @@ CREATE INDEX idx_collaborators_document ON collaborators(document_id);
 
 Key requirements:
 - Transform insert against insert
+  - Same position: use user ID for deterministic ordering
+  - Different positions: adjust offset of later operation
 - Transform insert against delete
+  - Insert before delete: no change needed
+  - Insert inside deleted range: special handling required
+    - Option A: Move insert to delete start position
+    - Option B: Discard the insert entirely
+  - Insert after delete: adjust insert position
 - Transform delete against delete
+  - Non-overlapping: adjust positions
+  - Overlapping: merge or split operations
 - Maintain cursor positions across transforms
+  - Track cursor as a zero-width insert operation
+  - Update cursor position after each transform
 
 ### Transform Implementation
 
@@ -127,9 +147,26 @@ class OperationalTransform {
 ## Phase 3: UI Updates
 
 1. Show collaborator cursors in real-time
+   - Render cursor as colored vertical line
+   - Add name label above cursor
+   - Animate cursor movement smoothly
 2. Display presence indicators
+   - Avatar stack in header
+   - Dropdown with full collaborator list
+     - Show online/away status
+     - Display last activity time
+     - Allow @mentioning collaborators
 3. Add conflict resolution UI
+   - Highlight conflicting regions
+   - Show diff comparison panel
+   - Provide merge options:
+     - Accept mine
+     - Accept theirs
+     - Manual merge
 4. Implement undo/redo stack per user
+   - Track operations by user ID
+   - Allow undoing only own changes
+   - Show undo history in sidebar
 
 ### React Component for Cursors
 
@@ -206,6 +243,47 @@ export const CursorOverlay: React.FC<CursorOverlayProps> = ({
   }
 }
 \`\`\`
+
+---
+
+## Pre-launch Checklist
+
+- [ ] Infrastructure ready
+  - [x] WebSocket server deployed
+  - [x] Database migrations applied
+  - [ ] Load balancer configured
+    - [ ] SSL certificates installed
+    - [ ] Health checks enabled
+      - [ ] /health endpoint returns 200
+      - [ ] /ready endpoint checks DB connection
+        - [ ] Primary database
+        - [ ] Read replicas
+          - [ ] us-east-1 replica
+          - [ ] eu-west-1 replica
+- [ ] Security audit complete
+  - [x] Authentication flow reviewed
+  - [ ] Rate limiting implemented
+    - [x] 100 req/min for anonymous users
+    - [ ] 1000 req/min for authenticated users
+  - [ ] Input sanitization verified
+- [x] Documentation updated
+  - [x] API reference generated
+  - [x] Integration guide written
+  - [ ] Video tutorials recorded
+
+### Mixed List Styles
+
+* Asterisk item at level 0
+  - Dash item at level 1
+    * Asterisk at level 2
+      - Dash at level 3
+        * Asterisk at level 4
+          - Maximum reasonable depth
+1. Numbered item
+   - Sub-bullet under numbered
+   - Another sub-bullet
+     1. Nested numbered list
+     2. Second nested number
 
 ---
 

@@ -35,8 +35,9 @@ export interface Block {
   id: string;
   type: 'paragraph' | 'heading' | 'blockquote' | 'list-item' | 'code' | 'hr' | 'table';
   content: string; // Plain text content
-  level?: number; // For headings (1-6)
+  level?: number; // For headings (1-6) or list indentation
   language?: string; // For code blocks (e.g., 'rust', 'typescript')
+  checked?: boolean; // For checkbox list items (true = checked, false = unchecked, undefined = not a checkbox)
   order: number; // Sorting order
   startLine: number; // 1-based line number in source
 }
