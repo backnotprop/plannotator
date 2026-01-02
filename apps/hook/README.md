@@ -99,3 +99,6 @@ tags: [plan, authentication, typescript, sql]
 # Implementation Plan: User Authentication
 ...
 ```
+
+<img width="1190" height="730" alt="image" src="https://github.com/user-attachments/assets/1f0876a0-8ace-4bcf-b0d6-4bbb07613b25" />
+
