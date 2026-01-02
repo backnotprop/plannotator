@@ -13,6 +13,7 @@ import { Settings } from '@plannotator/ui/components/Settings';
 import { useSharing } from '@plannotator/ui/hooks/useSharing';
 import { storage } from '@plannotator/ui/utils/storage';
 import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
+import { getObsidianSettings } from '@plannotator/ui/utils/obsidian';
 
 const PLAN_CONTENT = `# Implementation Plan: Real-time Collaboration
 
@@ -377,7 +378,24 @@ const App: React.FC = () => {
   const handleApprove = async () => {
     setIsSubmitting(true);
     try {
-      await fetch('/api/approve', { method: 'POST' });
+      const obsidianSettings = getObsidianSettings();
+
+      // Build request body - include obsidian config if enabled
+      const body = obsidianSettings.enabled && obsidianSettings.vaultPath
+        ? {
+            obsidian: {
+              vaultPath: obsidianSettings.vaultPath,
+              folder: obsidianSettings.folder || 'plannotator',
+              plan: markdown,
+            },
+          }
+        : {};
+
+      await fetch('/api/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
       setSubmitted('approved');
     } catch {
       setIsSubmitting(false);
