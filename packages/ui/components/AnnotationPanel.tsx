@@ -241,19 +241,19 @@ const AnnotationCard: React.FC<{
 
       {/* Global Comment - show text directly */}
       {annotation.type === AnnotationType.GLOBAL_COMMENT ? (
-        <div className="text-xs text-foreground/90 pl-2 border-l-2 border-purple-500/50">
+        <div className="text-xs text-foreground/90 pl-2 border-l-2 border-purple-500/50 whitespace-pre-wrap">
           {annotation.text}
         </div>
       ) : (
         <>
           {/* Original Text */}
-          <div className="text-[11px] font-mono text-muted-foreground bg-muted/50 rounded px-2 py-1.5 truncate">
+          <div className="text-[11px] font-mono text-muted-foreground bg-muted/50 rounded px-2 py-1.5 whitespace-pre-wrap max-h-24 overflow-y-auto">
             "{annotation.originalText}"
           </div>
 
           {/* Comment/Replacement Text */}
           {annotation.text && annotation.type !== AnnotationType.DELETION && (
-            <div className="mt-2 text-xs text-foreground/90 pl-2 border-l-2 border-primary/50">
+            <div className="mt-2 text-xs text-foreground/90 pl-2 border-l-2 border-primary/50 whitespace-pre-wrap">
               {annotation.text}
             </div>
           )}

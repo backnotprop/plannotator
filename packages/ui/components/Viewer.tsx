@@ -947,7 +947,7 @@ const CodeBlockToolbar: React.FC<{
   const [step, setStep] = useState<'menu' | 'input'>('menu');
   const [inputValue, setInputValue] = useState('');
   const [position, setPosition] = useState<{ top: number; right: number }>({ top: 0, right: 0 });
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (step === 'input') inputRef.current?.focus();
@@ -1048,20 +1048,27 @@ const CodeBlockToolbar: React.FC<{
           </button>
         </div>
       ) : (
-        <form onSubmit={handleSubmit} className="flex items-center gap-1.5 p-1.5 pl-3">
-          <input
+        <form onSubmit={handleSubmit} className="flex items-start gap-1.5 p-1.5 pl-3">
+          <textarea
             ref={inputRef}
-            type="text"
-            className="bg-transparent border-none outline-none text-sm w-44 placeholder:text-muted-foreground"
+            rows={1}
+            className="bg-transparent text-sm min-w-44 max-w-80 max-h-32 placeholder:text-muted-foreground resize-none px-2 py-1.5 focus:outline-none focus:bg-muted/30"
+            style={{ fieldSizing: 'content' } as React.CSSProperties}
             placeholder="Add a comment..."
             value={inputValue}
             onChange={e => setInputValue(e.target.value)}
-            onKeyDown={e => e.key === 'Escape' && setStep('menu')}
+            onKeyDown={e => {
+              if (e.key === 'Escape') setStep('menu');
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && inputValue.trim()) {
+                e.preventDefault();
+                onAnnotate(AnnotationType.COMMENT, inputValue);
+              }
+            }}
           />
           <button
             type="submit"
             disabled={!inputValue.trim()}
-            className="px-2 py-1 text-xs font-medium rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-opacity"
+            className="px-[15px] py-1 text-xs font-medium rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-opacity self-stretch"
           >
             Save
           </button>
