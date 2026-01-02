@@ -4,7 +4,7 @@
 
 Interactive Plan Review for OpenCode. Select the exact parts of the plan you want to change—mark for deletion, add a comment, or suggest a replacement. Feedback flows back to your agent automatically.
 
-Obsidian users can auto-save approved plans to Obsidian as well. 
+Obsidian users can auto-save approved plans to Obsidian as well. [See details](#obsidian-integration)
 
 <table>
 <tr>
