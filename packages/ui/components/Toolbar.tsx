@@ -36,8 +36,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({ highlightElement, onAnnotate, 
       const rect = highlightElement.getBoundingClientRect();
       const toolbarTop = rect.top - 48;
 
-      // If selection scrolled out of viewport, close the toolbar
-      if (rect.bottom < 0 || rect.top > window.innerHeight) {
+      // If selection scrolled out of viewport, only close if still in menu step
+      // Don't close when user is typing - they can scroll back to continue
+      if (step === 'menu' && (rect.bottom < 0 || rect.top > window.innerHeight)) {
         onClose();
         return;
       }
@@ -56,7 +57,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({ highlightElement, onAnnotate, 
       window.removeEventListener('scroll', updatePosition, true);
       window.removeEventListener('resize', updatePosition);
     };
-  }, [highlightElement, onClose]);
+  }, [highlightElement, onClose, step]);
 
   if (!highlightElement || !position) return null;
 
