@@ -23,7 +23,7 @@ curl -fsSL https://plannotator.ai/install.cmd -o install.cmd && install.cmd && d
 
 ---
 
-[Plugin Installation](#plugin-installation) · [Manual Installation (Hooks)](#manual-installation-hooks)
+[Plugin Installation](#plugin-installation) · [Manual Installation (Hooks)](#manual-installation-hooks) · [Obsidian Integration](#obsidian-integration)  
 
 ---
 
