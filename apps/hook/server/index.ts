@@ -198,10 +198,10 @@ async function saveToObsidian(
     const filename = generateFilename(plan);
     const filePath = join(targetFolder, filename);
 
-    // Generate content with frontmatter
+    // Generate content with frontmatter and backlink
     const tags = extractTags(plan);
     const frontmatter = generateFrontmatter(tags);
-    const content = `${frontmatter}\n\n${plan}`;
+    const content = `${frontmatter}\n\n[[Plannotator Plans]]\n\n${plan}`;
 
     // Write file
     await Bun.write(filePath, content);
