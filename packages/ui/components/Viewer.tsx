@@ -781,13 +781,38 @@ const BlockRenderer: React.FC<{ block: Block }> = ({ block }) => {
         </blockquote>
       );
 
-    case 'list-item':
+    case 'list-item': {
+      const indent = (block.level || 0) * 1.25; // 1.25rem per level
+      const isCheckbox = block.checked !== undefined;
       return (
-        <div className="flex gap-3 my-1.5" data-block-id={block.id}>
-          <span className="text-primary/60 select-none">•</span>
-          <span className="text-foreground/90 text-sm leading-relaxed"><InlineMarkdown text={block.content} /></span>
+        <div
+          className="flex gap-3 my-1.5"
+          data-block-id={block.id}
+          style={{ marginLeft: `${indent}rem` }}
+        >
+          <span className="select-none shrink-0 flex items-center">
+            {isCheckbox ? (
+              block.checked ? (
+                <svg className="w-4 h-4 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4 text-muted-foreground/50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <circle cx="12" cy="12" r="9" />
+                </svg>
+              )
+            ) : (
+              <span className="text-primary/60">
+                {(block.level || 0) === 0 ? '•' : (block.level || 0) === 1 ? '◦' : '▪'}
+              </span>
+            )}
+          </span>
+          <span className={`text-sm leading-relaxed ${isCheckbox && block.checked ? 'text-muted-foreground line-through' : 'text-foreground/90'}`}>
+            <InlineMarkdown text={block.content} />
+          </span>
         </div>
       );
+    }
 
     case 'code':
       return <CodeBlock block={block} />;
