@@ -72,10 +72,24 @@ if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
     echo "  source ${shell_config}"
 fi
 
+# Clear any cached OpenCode plugin to force fresh download on next run
+rm -rf ~/.cache/opencode/node_modules/@plannotator
+
 echo ""
-echo "Test the install:"
-echo '  echo '"'"'{"tool_input":{"plan":"# Test Plan\\\\n\\\\nHello world"}}'"'"' | plannotator'
+echo "=========================================="
+echo "  USING OPENCODE? YOU DON'T NEED THIS!"
+echo "=========================================="
 echo ""
-echo "Then install the Claude Code plugin:"
+echo "OpenCode users don't need this binary. Just add to your opencode.json:"
+echo ""
+echo '  "plugin": ["@plannotator/opencode@latest"]'
+echo ""
+echo "Then restart OpenCode. We've cleared any cached versions for you."
+echo ""
+echo "=========================================="
+echo "  CLAUDE CODE USERS: YOU'RE ALL SET!"
+echo "=========================================="
+echo ""
+echo "Install the Claude Code plugin:"
 echo "  /plugin marketplace add backnotprop/plannotator"
 echo "  /plugin install plannotator@plannotator"
