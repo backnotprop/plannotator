@@ -1,0 +1,51 @@
+{
+    "name": "@plannotator/mcp",
+    "version": "0.3.0",
+    "description": "Plannotator MCP Server - interactive plan review with visual annotation for AI coding agents",
+    "author": "backnotprop",
+    "license": "BSL-1.1",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/backnotprop/plannotator.git",
+        "directory": "apps/mcp"
+    },
+    "homepage": "https://github.com/backnotprop/plannotator",
+    "bugs": {
+        "url": "https://github.com/backnotprop/plannotator/issues"
+    },
+    "keywords": [
+        "mcp",
+        "model-context-protocol",
+        "plannotator",
+        "plan-review",
+        "ai-agent",
+        "coding-agent",
+        "cursor",
+        "copilot",
+        "roocode",
+        "kilocode",
+        "windsurf",
+        "cline",
+        "antigravity"
+    ],
+    "type": "module",
+    "main": "index.ts",
+    "bin": {
+        "plannotator-mcp": "./index.ts"
+    },
+    "files": [
+        "index.ts",
+        "plannotator.html",
+        "README.md"
+    ],
+    "scripts": {
+        "build": "cp ../hook/dist/index.html ./plannotator.html",
+        "prepublishOnly": "bun run build"
+    },
+    "peerDependencies": {
+        "bun": ">=1.0.0"
+    },
+    "devDependencies": {
+        "bun-types": "^1.0.0"
+    }
+}

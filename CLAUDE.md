@@ -11,6 +11,11 @@ plannotator/
 │   ├── hooks/hooks.json          # PermissionRequest hook config
 │   ├── server/index.ts           # Bun server (reads stdin, serves UI)
 │   └── dist/index.html           # Built single-file app
+├── apps/opencode-plugin/         # OpenCode plugin
+│   └── index.ts                  # Plugin with submit_plan tool
+├── apps/mcp/                     # General MCP Server
+│   ├── index.ts                  # MCP server with submit_plan tool
+│   └── README.md                 # Integration documentation
 ├── packages/
 │   ├── ui/                       # Shared React components
 │   │   ├── components/           # Viewer, Toolbar, Settings, etc.
