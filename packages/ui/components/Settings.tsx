@@ -7,6 +7,11 @@ import {
   saveObsidianSettings,
   type ObsidianSettings,
 } from '../utils/obsidian';
+import {
+  getBearSettings,
+  saveBearSettings,
+  type BearSettings,
+} from '../utils/bear';
 
 interface SettingsProps {
   taterMode: boolean;
@@ -24,11 +29,13 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   });
   const [detectedVaults, setDetectedVaults] = useState<string[]>([]);
   const [vaultsLoading, setVaultsLoading] = useState(false);
+  const [bear, setBear] = useState<BearSettings>({ enabled: false });
 
   useEffect(() => {
     if (showDialog) {
       setIdentity(getIdentity());
       setObsidian(getObsidianSettings());
+      setBear(getBearSettings());
     }
   }, [showDialog]);
 
@@ -54,6 +61,12 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
     const newSettings = { ...obsidian, ...updates };
     setObsidian(newSettings);
     saveObsidianSettings(newSettings);
+  };
+
+  const handleBearChange = (enabled: boolean) => {
+    const newSettings = { enabled };
+    setBear(newSettings);
+    saveBearSettings(newSettings);
   };
 
   const handleRegenerateIdentity = () => {
@@ -234,6 +247,32 @@ tags: [plan, ...]
                     </div>
                   </div>
                 )}
+              </div>
+
+              <div className="border-t border-border" />
+
+              {/* Bear Integration */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium">Bear Notes</div>
+                  <div className="text-xs text-muted-foreground">
+                    Auto-save approved plans to Bear
+                  </div>
+                </div>
+                <button
+                  role="switch"
+                  aria-checked={bear.enabled}
+                  onClick={() => handleBearChange(!bear.enabled)}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    bear.enabled ? 'bg-primary' : 'bg-muted'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
+                      bear.enabled ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
               </div>
             </div>
           </div>

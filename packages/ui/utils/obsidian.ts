@@ -65,7 +65,7 @@ export function isObsidianConfigured(): boolean {
  * @returns Array of lowercase tag strings (max 6)
  */
 export function extractTags(markdown: string): string[] {
-  const tags = new Set<string>(['plan']);
+  const tags = new Set<string>(['plannotator']);
 
   // Common words to exclude from title extraction
   const stopWords = new Set([

@@ -22,11 +22,17 @@ interface ObsidianConfig {
   plan: string;
 }
 
+// --- Bear Integration ---
+
+interface BearConfig {
+  plan: string;
+}
+
 /**
  * Extract tags from markdown content using simple heuristics
  */
 function extractTags(markdown: string): string[] {
-  const tags = new Set<string>(["plan"]);
+  const tags = new Set<string>(["plannotator"]);
 
   const stopWords = new Set([
     "the", "and", "for", "with", "this", "that", "from", "into",
@@ -213,6 +219,37 @@ async function saveToObsidian(
   }
 }
 
+/**
+ * Save plan to Bear using x-callback-url
+ * Returns { success: boolean, error?: string }
+ */
+async function saveToBear(
+  config: BearConfig
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { plan } = config;
+
+    // Extract title and tags
+    const title = extractTitle(plan);
+    const tags = extractTags(plan);
+    const hashtags = tags.map(t => `#${t}`).join(' ');
+
+    // Append hashtags to content
+    const content = `${plan}\n\n${hashtags}`;
+
+    // Build Bear URL
+    const url = `bear://x-callback-url/create?title=${encodeURIComponent(title)}&text=${encodeURIComponent(content)}&open_note=no`;
+
+    // Open Bear via URL scheme
+    await $`open ${url}`.quiet();
+
+    return { success: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return { success: false, error: message };
+  }
+}
+
 // Embed the built HTML at compile time
 import indexHtml from "../dist/index.html" with { type: "text" };
 
@@ -294,12 +331,14 @@ async function startServer(): Promise<ReturnType<typeof Bun.serve>> {
 
           // API: Approve plan
           if (url.pathname === "/api/approve" && req.method === "POST") {
-            // Check for Obsidian integration
+            // Check for note integrations
             try {
               const body = (await req.json().catch(() => ({}))) as {
                 obsidian?: ObsidianConfig;
+                bear?: BearConfig;
               };
 
+              // Obsidian integration
               if (body.obsidian?.vaultPath && body.obsidian?.plan) {
                 const result = await saveToObsidian(body.obsidian);
                 if (result.success) {
@@ -308,9 +347,19 @@ async function startServer(): Promise<ReturnType<typeof Bun.serve>> {
                   console.error(`[Obsidian] Save failed: ${result.error}`);
                 }
               }
+
+              // Bear integration
+              if (body.bear?.plan) {
+                const result = await saveToBear(body.bear);
+                if (result.success) {
+                  console.error(`[Bear] Saved plan to Bear`);
+                } else {
+                  console.error(`[Bear] Save failed: ${result.error}`);
+                }
+              }
             } catch (err) {
-              // Don't block approval on Obsidian errors
-              console.error(`[Obsidian] Error:`, err);
+              // Don't block approval on integration errors
+              console.error(`[Integration] Error:`, err);
             }
 
             resolveDecision({ approved: true });
