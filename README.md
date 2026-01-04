@@ -28,7 +28,7 @@ Interactive Plan Review for AI Coding Agents. Mark up and refine your plans usin
 
 **New:** 
 
- - We now support auto-saving approved plans to [Obsidian](https://obsidian.md/).
+ - We now support auto-saving approved plans to [Obsidian](https://obsidian.md/) and [Bear Notes](https://bear.app/).
 
 ## Install for Claude Code
 
