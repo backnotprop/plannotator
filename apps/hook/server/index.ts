@@ -13,6 +13,7 @@
 import { $ } from "bun";
 import { join } from "path";
 import { mkdirSync, existsSync, statSync } from "fs";
+import { detectProjectName } from "./project";
 
 // --- Obsidian Integration ---
 
@@ -30,9 +31,16 @@ interface BearConfig {
 
 /**
  * Extract tags from markdown content using simple heuristics
+ * Includes project name detection (git repo or directory name)
  */
-function extractTags(markdown: string): string[] {
+async function extractTags(markdown: string): Promise<string[]> {
   const tags = new Set<string>(["plannotator"]);
+
+  // Add project name tag (git repo name or directory fallback)
+  const projectName = await detectProjectName();
+  if (projectName) {
+    tags.add(projectName);
+  }
 
   const stopWords = new Set([
     "the", "and", "for", "with", "this", "that", "from", "into",
@@ -64,7 +72,7 @@ function extractTags(markdown: string): string[] {
     }
   }
 
-  return Array.from(tags).slice(0, 6);
+  return Array.from(tags).slice(0, 7);
 }
 
 /**
@@ -205,7 +213,7 @@ async function saveToObsidian(
     const filePath = join(targetFolder, filename);
 
     // Generate content with frontmatter and backlink
-    const tags = extractTags(plan);
+    const tags = await extractTags(plan);
     const frontmatter = generateFrontmatter(tags);
     const content = `${frontmatter}\n\n[[Plannotator Plans]]\n\n${plan}`;
 
@@ -231,7 +239,7 @@ async function saveToBear(
 
     // Extract title and tags
     const title = extractTitle(plan);
-    const tags = extractTags(plan);
+    const tags = await extractTags(plan);
     const hashtags = tags.map(t => `#${t}`).join(' ');
 
     // Append hashtags to content
