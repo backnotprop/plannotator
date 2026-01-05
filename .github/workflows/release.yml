@@ -39,6 +39,10 @@ jobs:
           bun build apps/hook/server/index.ts --compile --target=bun-linux-x64 --outfile plannotator-linux-x64
           sha256sum plannotator-linux-x64 > plannotator-linux-x64.sha256
 
+          # Linux ARM64
+          bun build apps/hook/server/index.ts --compile --target=bun-linux-arm64 --outfile plannotator-linux-arm64
+          sha256sum plannotator-linux-arm64 > plannotator-linux-arm64.sha256
+
           # Windows x64
           bun build apps/hook/server/index.ts --compile --target=bun-windows-x64 --outfile plannotator-win32-x64.exe
           sha256sum plannotator-win32-x64.exe > plannotator-win32-x64.exe.sha256
