@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@plannotator/editor": "workspace:*",
+    "@plannotator/server": "workspace:*",
     "@plannotator/ui": "workspace:*",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
