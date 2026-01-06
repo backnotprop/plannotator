@@ -87,8 +87,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (activeType && inputValue.trim()) {
-      onAnnotate(activeType, inputValue, imagePaths.length > 0 ? imagePaths : undefined);
+    if (activeType && (inputValue.trim() || imagePaths.length > 0)) {
+      onAnnotate(activeType, inputValue || undefined, imagePaths.length > 0 ? imagePaths : undefined);
     }
   };
 
@@ -177,14 +177,12 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Escape") setStep("menu");
-              // Cmd/Ctrl+Enter to submit
-              if (
-                e.key === "Enter" &&
-                (e.metaKey || e.ctrlKey) &&
-                inputValue.trim()
-              ) {
+              // Enter to submit, Shift+Enter for newline
+              if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                onAnnotate(activeType!, inputValue, imagePaths.length > 0 ? imagePaths : undefined);
+                if (inputValue.trim() || imagePaths.length > 0) {
+                  onAnnotate(activeType!, inputValue || undefined, imagePaths.length > 0 ? imagePaths : undefined);
+                }
               }
             }}
           />
@@ -196,7 +194,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           />
           <button
             type="submit"
-            disabled={!inputValue.trim()}
+            disabled={!inputValue.trim() && imagePaths.length === 0}
             className="px-[15px] py-1 text-xs font-medium rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-opacity self-stretch"
           >
             Save
