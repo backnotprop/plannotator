@@ -85,7 +85,7 @@ export const DecisionBar: React.FC<DecisionBarProps> = ({
 
   return (
     <div className="fixed bottom-0 left-0 right-0 p-4 bg-card/95 backdrop-blur-xl border-t border-border z-50">
-      <div className="max-w-3xl mx-auto flex items-center gap-4">
+      <div className="max-w-5xl xl:max-w-6xl mx-auto flex items-center gap-4">
         {/* Status info */}
         <div className="flex-1 text-sm text-muted-foreground">
           {annotationCount > 0 ? (
