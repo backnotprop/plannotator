@@ -55,7 +55,7 @@ Do NOT proceed with implementation until your plan is approved.
             .describe("A brief 1-2 sentence summary of what the plan accomplishes"),
         },
 
-        async execute(args, _context) {
+        async execute(args, context) {
           const server = await startPlannotatorServer({
             plan: args.plan,
             origin: "opencode",
@@ -70,17 +70,29 @@ Do NOT proceed with implementation until your plan is approved.
           server.stop();
 
           if (result.approved) {
+            // Switch TUI display to build agent
             try {
               await ctx.client.tui.executeCommand({
                 body: { command: "agent_cycle" },
               });
             } catch {
-              // Silently fail - agent switching is optional
+              // Silently fail
             }
 
-            return `Plan approved! Switching to build mode.
+            // Send a new message with build agent - this queues a new loop
+            try {
+              await ctx.client.session.prompt({
+                path: { id: context.sessionID },
+                body: {
+                  agent: "build",
+                  parts: [{ type: "text", text: "Proceed with implementation" }],
+                },
+              });
+            } catch {
+              // Silently fail
+            }
 
-Your plan has been approved by the user. You may now proceed with implementation.
+            return `Plan approved!
 
 Plan Summary: ${args.summary}`;
           } else {
