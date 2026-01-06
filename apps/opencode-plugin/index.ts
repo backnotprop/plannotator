@@ -79,15 +79,22 @@ Do NOT proceed with implementation until your plan is approved.
               // Silently fail
             }
 
-            // Send a new message with build agent - fire and forget (don't await)
-            // Awaiting can cause the message to be queued instead of processed
-            ctx.client.session.prompt({
-              path: { id: context.sessionID },
-              body: {
-                agent: "build",
-                parts: [{ type: "text", text: "Proceed with implementation" }],
-              },
-            }).catch(() => {});
+            // Create a user message with build agent using noReply: true
+            // This ensures the message is created BEFORE we return from the tool,
+            // so the current loop's next iteration will see it.
+            // noReply: true means we don't wait for a new loop to complete.
+            try {
+              await ctx.client.session.prompt({
+                path: { id: context.sessionID },
+                body: {
+                  agent: "build",
+                  noReply: true,
+                  parts: [{ type: "text", text: "Proceed with implementation" }],
+                },
+              });
+            } catch {
+              // Silently fail if session is busy
+            }
 
             return `Plan approved!
 
