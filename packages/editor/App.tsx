@@ -558,26 +558,37 @@ const App: React.FC = () => {
                       ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
                       : 'bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30'
                   }`}
-                  title="Provide Feedback"
+                  title="Deny with Feedback"
                 >
                   <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                   </svg>
-                  <span className="hidden md:inline">{isSubmitting ? 'Sending...' : 'Provide Feedback'}</span>
+                  <span className="hidden md:inline">{isSubmitting ? 'Sending...' : 'Deny with Feedback'}</span>
                 </button>
 
-                <button
-                  onClick={handleApprove}
-                  disabled={isSubmitting}
-                  className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${
-                    isSubmitting
-                      ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
-                      : 'bg-green-600 text-white hover:bg-green-500'
-                  }`}
-                >
-                  <span className="md:hidden">{isSubmitting ? '...' : 'OK'}</span>
-                  <span className="hidden md:inline">{isSubmitting ? 'Approving...' : 'Approve'}</span>
-                </button>
+                <div className="relative group/approve">
+                  <button
+                    onClick={handleApprove}
+                    disabled={isSubmitting}
+                    className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${
+                      isSubmitting
+                        ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
+                        : origin === 'claude-code' && annotations.length > 0
+                          ? 'bg-green-600/50 text-white/70 hover:bg-green-600 hover:text-white'
+                          : 'bg-green-600 text-white hover:bg-green-500'
+                    }`}
+                  >
+                    <span className="md:hidden">{isSubmitting ? '...' : 'OK'}</span>
+                    <span className="hidden md:inline">{isSubmitting ? 'Approving...' : 'Approve'}</span>
+                  </button>
+                  {origin === 'claude-code' && annotations.length > 0 && (
+                    <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
+                      <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
+                      <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
+                      Claude Code doesn't support feedback on approval. Your annotations won't be seen.
+                    </div>
+                  )}
+                </div>
 
                 <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
               </>

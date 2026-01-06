@@ -45,7 +45,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   const [copied, setCopied] = useState(false);
   const [showGlobalCommentInput, setShowGlobalCommentInput] = useState(false);
   const [globalCommentValue, setGlobalCommentValue] = useState('');
-  const globalCommentInputRef = useRef<HTMLInputElement>(null);
+  const globalCommentInputRef = useRef<HTMLTextAreaElement>(null);
 
   const handleCopyPlan = async () => {
     try {
@@ -90,6 +90,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   const [toolbarState, setToolbarState] = useState<{ element: HTMLElement; source: any } | null>(null);
   const [hoveredCodeBlock, setHoveredCodeBlock] = useState<{ block: Block; element: HTMLElement } | null>(null);
   const [isCodeBlockToolbarExiting, setIsCodeBlockToolbarExiting] = useState(false);
+  const [isCodeBlockToolbarLocked, setIsCodeBlockToolbarLocked] = useState(false);
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Keep refs in sync with props
@@ -451,7 +452,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     window.getSelection()?.removeAllRanges();
   };
 
-  const handleCodeBlockAnnotate = (type: AnnotationType, text?: string) => {
+  const handleCodeBlockAnnotate = (type: AnnotationType, text?: string, imagePaths?: string[]) => {
     const highlighter = highlighterRef.current;
     if (!hoveredCodeBlock || !highlighter) return;
 
@@ -499,6 +500,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       originalText: codeText,
       createdA: Date.now(),
       author: getIdentity(),
+      imagePaths,
     };
 
     onAddAnnotationRef.current(newAnnotation);
@@ -506,10 +508,12 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     // Clear selection
     selection?.removeAllRanges();
     setHoveredCodeBlock(null);
+    setIsCodeBlockToolbarLocked(false);
   };
 
   const handleCodeBlockToolbarClose = () => {
     setHoveredCodeBlock(null);
+    setIsCodeBlockToolbarLocked(false);
   };
 
   return (
@@ -520,7 +524,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         className="w-full max-w-3xl bg-card border border-border/50 rounded-xl shadow-xl p-5 md:p-10 lg:p-14 relative"
       >
         {/* Header buttons */}
-        <div className="absolute top-3 right-3 md:top-5 md:right-5 flex items-center gap-2">
+        <div className="absolute top-3 right-3 md:top-5 md:right-5 flex items-start gap-2">
           {/* Attachments button */}
           {onAddGlobalAttachment && onRemoveGlobalAttachment && (
             <AttachmentsButton
@@ -538,12 +542,13 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                 e.preventDefault();
                 handleAddGlobalComment();
               }}
-              className="flex items-center gap-1.5 bg-muted/80 rounded-md p-1"
+              className="flex items-start gap-1.5 bg-muted/80 rounded-md p-1"
             >
-              <input
+              <textarea
                 ref={globalCommentInputRef}
-                type="text"
-                className="bg-transparent border-none outline-none text-xs w-40 md:w-56 px-2 placeholder:text-muted-foreground"
+                rows={1}
+                className="bg-transparent text-xs min-w-40 md:min-w-56 max-w-80 max-h-32 placeholder:text-muted-foreground resize-none px-2 py-1.5 focus:outline-none"
+                style={{ fieldSizing: 'content' } as React.CSSProperties}
                 placeholder="Add a global comment..."
                 value={globalCommentValue}
                 onChange={(e) => setGlobalCommentValue(e.target.value)}
@@ -552,12 +557,19 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                     setShowGlobalCommentInput(false);
                     setGlobalCommentValue('');
                   }
+                  // Enter to submit, Shift+Enter for newline
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    if (globalCommentValue.trim()) {
+                      handleAddGlobalComment();
+                    }
+                  }
                 }}
               />
               <button
                 type="submit"
                 disabled={!globalCommentValue.trim()}
-                className="px-2 py-1 text-xs font-medium rounded bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-50 transition-all"
+                className="self-start px-2 py-1.5 text-xs font-medium rounded bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-50 transition-all"
               >
                 Add
               </button>
@@ -567,7 +579,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   setShowGlobalCommentInput(false);
                   setGlobalCommentValue('');
                 }}
-                className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                className="self-start p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -667,6 +679,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               setIsCodeBlockToolbarExiting(false);
             }}
             onMouseLeave={() => {
+              // Don't close if toolbar is locked (in input mode)
+              if (isCodeBlockToolbarLocked) return;
               hoverTimeoutRef.current = setTimeout(() => {
                 setIsCodeBlockToolbarExiting(true);
                 setTimeout(() => {
@@ -675,6 +689,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                 }, 150);
               }, 100);
             }}
+            onLockChange={setIsCodeBlockToolbarLocked}
           />
         )}
       </article>
@@ -957,20 +972,27 @@ const CodeBlock: React.FC<CodeBlockProps> = ({ block, onHover, onLeave, isHovere
 
 const CodeBlockToolbar: React.FC<{
   element: HTMLElement;
-  onAnnotate: (type: AnnotationType, text?: string) => void;
+  onAnnotate: (type: AnnotationType, text?: string, imagePaths?: string[]) => void;
   onClose: () => void;
   isExiting: boolean;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
-}> = ({ element, onAnnotate, onClose, isExiting, onMouseEnter, onMouseLeave }) => {
+  onLockChange?: (locked: boolean) => void;
+}> = ({ element, onAnnotate, onClose, isExiting, onMouseEnter, onMouseLeave, onLockChange }) => {
   const [step, setStep] = useState<'menu' | 'input'>('menu');
   const [inputValue, setInputValue] = useState('');
+  const [imagePaths, setImagePaths] = useState<string[]>([]);
   const [position, setPosition] = useState<{ top: number; right: number }>({ top: 0, right: 0 });
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (step === 'input') inputRef.current?.focus();
   }, [step]);
+
+  // Notify parent when locked (in input mode)
+  useEffect(() => {
+    onLockChange?.(step === 'input');
+  }, [step, onLockChange]);
 
   // Update position on scroll/resize
   useEffect(() => {
@@ -996,8 +1018,8 @@ const CodeBlockToolbar: React.FC<{
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (inputValue.trim()) {
-      onAnnotate(AnnotationType.COMMENT, inputValue);
+    if (inputValue.trim() || imagePaths.length > 0) {
+      onAnnotate(AnnotationType.COMMENT, inputValue || undefined, imagePaths.length > 0 ? imagePaths : undefined);
     }
   };
 
@@ -1078,15 +1100,24 @@ const CodeBlockToolbar: React.FC<{
             onChange={e => setInputValue(e.target.value)}
             onKeyDown={e => {
               if (e.key === 'Escape') setStep('menu');
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && inputValue.trim()) {
+              // Enter to submit, Shift+Enter for newline
+              if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                onAnnotate(AnnotationType.COMMENT, inputValue);
+                if (inputValue.trim() || imagePaths.length > 0) {
+                  onAnnotate(AnnotationType.COMMENT, inputValue || undefined, imagePaths.length > 0 ? imagePaths : undefined);
+                }
               }
             }}
           />
+          <AttachmentsButton
+            paths={imagePaths}
+            onAdd={(path) => setImagePaths(prev => [...prev, path])}
+            onRemove={(path) => setImagePaths(prev => prev.filter(p => p !== path))}
+            variant="inline"
+          />
           <button
             type="submit"
-            disabled={!inputValue.trim()}
+            disabled={!inputValue.trim() && imagePaths.length === 0}
             className="px-[15px] py-1 text-xs font-medium rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-opacity self-stretch"
           >
             Save

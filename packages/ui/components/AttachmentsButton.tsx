@@ -213,6 +213,9 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
                   </span>
                 )}
               </div>
+              <p className="text-[11px] text-muted-foreground -mt-1">
+                Add images to include with your feedback
+              </p>
 
               {/* Drop zone / file picker */}
               <div
@@ -300,13 +303,16 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
         document.body
       )}
 
-      {/* Image Annotator Dialog */}
-      <ImageAnnotator
-        isOpen={!!annotatorImage || !!editingPath}
-        imageSrc={annotatorImage?.blobUrl ?? (editingPath ? getImageSrc(editingPath) : '')}
-        onAccept={handleAnnotatorAccept}
-        onClose={handleAnnotatorClose}
-      />
+      {/* Image Annotator Dialog - portaled to body for correct positioning */}
+      {(!!annotatorImage || !!editingPath) && createPortal(
+        <ImageAnnotator
+          isOpen={!!annotatorImage || !!editingPath}
+          imageSrc={annotatorImage?.blobUrl ?? (editingPath ? getImageSrc(editingPath) : '')}
+          onAccept={handleAnnotatorAccept}
+          onClose={handleAnnotatorClose}
+        />,
+        document.body
+      )}
     </>
   );
 };
