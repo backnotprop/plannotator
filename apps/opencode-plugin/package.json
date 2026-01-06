@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/opencode",
-  "version": "0.4.0",
+  "version": "0.5.0-beta.2",
   "description": "Plannotator plugin for OpenCode - interactive plan review with visual annotation",
   "author": "backnotprop",
   "license": "BSL-1.1",
@@ -21,14 +21,13 @@
     "ai-agent",
     "coding-agent"
   ],
-  "main": "index.ts",
+  "main": "dist/index.js",
   "files": [
-    "index.ts",
-    "plannotator.html",
+    "dist",
     "README.md"
   ],
   "scripts": {
-    "build": "cp ../hook/dist/index.html ./plannotator.html",
+    "build": "cp ../hook/dist/index.html ./plannotator.html && bun build index.ts --outfile dist/index.js --target bun --external @opencode-ai/plugin",
     "prepublishOnly": "bun run build"
   },
   "dependencies": {

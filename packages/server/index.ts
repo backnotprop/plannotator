@@ -210,24 +210,13 @@ export async function startPlannotatorServer(
         err instanceof Error && err.message.includes("EADDRINUSE");
 
       if (isAddressInUse && attempt < MAX_RETRIES) {
-        console.error(
-          `Port ${configuredPort} in use, retrying in ${RETRY_DELAY_MS}ms... (${attempt}/${MAX_RETRIES})`
-        );
         await Bun.sleep(RETRY_DELAY_MS);
         continue;
       }
 
       if (isAddressInUse) {
-        console.error(
-          `\nError: Port ${configuredPort} is already in use after ${MAX_RETRIES} retries.`
-        );
-        if (isRemote) {
-          console.error(`Another Plannotator session may be running.`);
-          console.error(
-            `To use a different port, set PLANNOTATOR_PORT environment variable.\n`
-          );
-        }
-        throw new Error(`Port ${configuredPort} is already in use`);
+        const hint = isRemote ? " (set PLANNOTATOR_PORT to use different port)" : "";
+        throw new Error(`Port ${configuredPort} in use after ${MAX_RETRIES} retries${hint}`);
       }
 
       throw err;
@@ -262,23 +251,9 @@ export async function handleServerReady(
   isRemote: boolean,
   port: number
 ): Promise<void> {
-  console.error(`\nPlannotator server running on ${url}`);
+  console.error(`Plannotator: ${url}`);
 
-  if (isRemote) {
-    // Remote session: print helpful setup instructions
-    console.error(`\n[Remote Session Detected]`);
-    console.error(
-      `Add this to your local ~/.ssh/config to access Plannotator:\n`
-    );
-    console.error(`  Host your-server-alias`);
-    console.error(`    LocalForward ${port} localhost:${port}\n`);
-    console.error(`Or if using a devcontainer, ensure port ${port} is forwarded.\n`);
-    console.error(`Then open ${url} in your local browser.\n`);
-  } else {
-    // Local session: try to open browser
-    const opened = await openBrowser(url);
-    if (!opened) {
-      console.error(`Open browser manually: ${url}`);
-    }
+  if (!isRemote) {
+    await openBrowser(url);
   }
 }

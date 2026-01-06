@@ -5,13 +5,10 @@
  *   PLANNOTATOR_REMOTE - Set to "1" or "true" to force remote mode (preferred)
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
  *
- * Legacy (deprecated):
- *   SSH_TTY, SSH_CONNECTION - Still supported but will log deprecation warning
+ * Legacy (still supported): SSH_TTY, SSH_CONNECTION
  */
 
 const DEFAULT_REMOTE_PORT = 19432;
-
-let deprecationWarned = false;
 
 /**
  * Check if running in a remote session (SSH, devcontainer, etc.)
@@ -23,17 +20,8 @@ export function isRemoteSession(): boolean {
     return true;
   }
 
-  // Legacy: SSH_TTY/SSH_CONNECTION (deprecated)
+  // Legacy: SSH_TTY/SSH_CONNECTION (deprecated, silent)
   if (process.env.SSH_TTY || process.env.SSH_CONNECTION) {
-    if (!deprecationWarned) {
-      console.error(
-        "[Plannotator] Deprecation warning: SSH_TTY/SSH_CONNECTION detection is deprecated."
-      );
-      console.error(
-        "[Plannotator] Use PLANNOTATOR_REMOTE=1 instead for remote/devcontainer sessions.\n"
-      );
-      deprecationWarned = true;
-    }
     return true;
   }
 
