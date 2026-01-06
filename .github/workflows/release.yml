@@ -25,26 +25,29 @@ jobs:
       - name: Build UI
         run: bun run build:hook
 
+      - name: Bundle server (resolve workspace packages)
+        run: bun build apps/hook/server/index.ts --outfile apps/hook/server/bundle.js --target=bun
+
       - name: Compile binaries (cross-compile all targets)
         run: |
           # macOS ARM64
-          bun build apps/hook/server/index.ts --compile --target=bun-darwin-arm64 --outfile plannotator-darwin-arm64
+          bun build apps/hook/server/bundle.js --compile --target=bun-darwin-arm64 --outfile plannotator-darwin-arm64
           sha256sum plannotator-darwin-arm64 > plannotator-darwin-arm64.sha256
 
           # macOS x64
-          bun build apps/hook/server/index.ts --compile --target=bun-darwin-x64 --outfile plannotator-darwin-x64
+          bun build apps/hook/server/bundle.js --compile --target=bun-darwin-x64 --outfile plannotator-darwin-x64
           sha256sum plannotator-darwin-x64 > plannotator-darwin-x64.sha256
 
           # Linux x64
-          bun build apps/hook/server/index.ts --compile --target=bun-linux-x64 --outfile plannotator-linux-x64
+          bun build apps/hook/server/bundle.js --compile --target=bun-linux-x64 --outfile plannotator-linux-x64
           sha256sum plannotator-linux-x64 > plannotator-linux-x64.sha256
 
           # Linux ARM64
-          bun build apps/hook/server/index.ts --compile --target=bun-linux-arm64 --outfile plannotator-linux-arm64
+          bun build apps/hook/server/bundle.js --compile --target=bun-linux-arm64 --outfile plannotator-linux-arm64
           sha256sum plannotator-linux-arm64 > plannotator-linux-arm64.sha256
 
           # Windows x64
-          bun build apps/hook/server/index.ts --compile --target=bun-windows-x64 --outfile plannotator-win32-x64.exe
+          bun build apps/hook/server/bundle.js --compile --target=bun-windows-x64 --outfile plannotator-win32-x64.exe
           sha256sum plannotator-win32-x64.exe > plannotator-win32-x64.exe.sha256
 
       - name: Upload artifacts
