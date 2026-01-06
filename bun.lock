@@ -43,7 +43,7 @@
     },
     "apps/opencode-plugin": {
       "name": "@plannotator/opencode",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "dependencies": {
         "@opencode-ai/plugin": "^1.0.218",
       },
@@ -77,6 +77,13 @@
         "react": "^19.2.3",
         "react-dom": "^19.2.3",
         "tailwindcss": "^4.1.18",
+      },
+    },
+    "packages/server": {
+      "name": "@plannotator/server",
+      "version": "0.4.0",
+      "peerDependencies": {
+        "bun": ">=1.0.0",
       },
     },
     "packages/ui": {
@@ -228,6 +235,8 @@
     "@plannotator/opencode": ["@plannotator/opencode@workspace:apps/opencode-plugin"],
 
     "@plannotator/portal": ["@plannotator/portal@workspace:apps/portal"],
+
+    "@plannotator/server": ["@plannotator/server@workspace:packages/server"],
 
     "@plannotator/ui": ["@plannotator/ui@workspace:packages/ui"],
 

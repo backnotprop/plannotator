@@ -70,6 +70,28 @@ When Claude Code calls `ExitPlanMode`, this hook intercepts and:
 3. Approve → Claude proceeds with implementation
 4. Request changes → Your annotations are sent back to Claude
 
+## Remote / Devcontainer Usage
+
+When running Claude Code in a remote environment (SSH, devcontainer, WSL), set these environment variables:
+
+```bash
+export PLANNOTATOR_REMOTE=1
+export PLANNOTATOR_PORT=9999  # Choose a port you'll forward
+```
+
+This tells Plannotator to:
+- Use a fixed port instead of a random one (so you can set up port forwarding)
+- Skip auto-opening the browser (since you'll open it manually on your local machine)
+- Print the URL to the terminal for you to access
+
+**Port forwarding in VS Code devcontainers:** The port should be automatically forwarded. Check the "Ports" tab.
+
+**SSH port forwarding:** Add to your `~/.ssh/config`:
+```
+Host your-server
+    LocalForward 9999 localhost:9999
+```
+
 ## Obsidian Integration
 
 Approved plans can be automatically saved to your Obsidian vault.
