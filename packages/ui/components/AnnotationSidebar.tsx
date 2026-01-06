@@ -24,7 +24,7 @@ export const AnnotationSidebar: React.FC<SidebarProps> = ({
   });
 
   return (
-    <div className="w-80 border-l border-border/50 bg-card/50 backdrop-blur-sm h-full flex flex-col transition-colors">
+    <div className="w-[min(22rem,32vw)] min-w-[16rem] border-l border-border/50 bg-card/50 backdrop-blur-sm h-full flex flex-col transition-colors">
       <div className="p-4 border-b border-border/50 flex items-center justify-between">
         <h2 className="font-semibold text-foreground">Review Changes</h2>
         <span className="text-xs bg-muted text-muted-foreground px-2 py-1 rounded-full">
