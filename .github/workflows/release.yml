@@ -25,8 +25,12 @@ jobs:
       - name: Build UI
         run: bun run build:hook
 
+      - name: Debug workspace links
+        run: ls -la node_modules/@plannotator/ || echo "No workspace links found"
+
       - name: Bundle server (resolve workspace packages)
-        run: bun build apps/hook/server/index.ts --outfile apps/hook/server/bundle.js --target=bun
+        working-directory: apps/hook
+        run: bun build server/index.ts --outfile server/bundle.js --target=bun
 
       - name: Compile binaries (cross-compile all targets)
         run: |
