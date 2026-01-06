@@ -53,7 +53,7 @@ claude --plugin-dir ./apps/hook
 | `PLANNOTATOR_REMOTE` | Set to `1` or `true` for remote mode (devcontainer, SSH). Uses fixed port and skips browser open. |
 | `PLANNOTATOR_PORT` | Fixed port to use. Default: random locally, `19432` for remote sessions. |
 
-**Deprecated:** `SSH_TTY` and `SSH_CONNECTION` are still detected but will log a deprecation warning. Use `PLANNOTATOR_REMOTE=1` instead.
+**Legacy:** `SSH_TTY` and `SSH_CONNECTION` are still detected. Prefer `PLANNOTATOR_REMOTE=1` for explicit control.
 
 **Devcontainer/SSH usage:**
 ```bash
