@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Annotation, AnnotationType, Block } from '../types';
 import { isCurrentUser } from '../utils/identity';
+import { ImageThumbnail } from './ImageThumbnail';
 
 interface PanelProps {
   isOpen: boolean;
@@ -258,6 +259,20 @@ const AnnotationCard: React.FC<{
             </div>
           )}
         </>
+      )}
+
+      {/* Attached Images */}
+      {annotation.imagePaths && annotation.imagePaths.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {annotation.imagePaths.map((path, idx) => (
+            <ImageThumbnail
+              key={idx}
+              path={path}
+              size="sm"
+              showRemove={false}
+            />
+          ))}
+        </div>
       )}
     </div>
   );

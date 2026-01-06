@@ -180,8 +180,8 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
   return blocks;
 };
 
-export const exportDiff = (blocks: Block[], annotations: any[]): string => {
-  if (annotations.length === 0) {
+export const exportDiff = (blocks: Block[], annotations: any[], globalAttachments: string[] = []): string => {
+  if (annotations.length === 0 && globalAttachments.length === 0) {
     return 'No changes detected.';
   }
 
@@ -194,7 +194,20 @@ export const exportDiff = (blocks: Block[], annotations: any[]): string => {
   });
 
   let output = `# Plan Feedback\n\n`;
-  output += `I've reviewed this plan and have ${annotations.length} piece${annotations.length > 1 ? 's' : ''} of feedback:\n\n`;
+
+  // Add global reference images section if any
+  if (globalAttachments.length > 0) {
+    output += `## Reference Images\n`;
+    output += `Please review these reference images (use the Read tool to view):\n`;
+    globalAttachments.forEach((path, idx) => {
+      output += `${idx + 1}. \`${path}\`\n`;
+    });
+    output += `\n`;
+  }
+
+  if (annotations.length > 0) {
+    output += `I've reviewed this plan and have ${annotations.length} piece${annotations.length > 1 ? 's' : ''} of feedback:\n\n`;
+  }
 
   sortedAnns.forEach((ann, index) => {
     const block = blocks.find(b => b.id === ann.blockId);
@@ -228,6 +241,14 @@ export const exportDiff = (blocks: Block[], annotations: any[]): string => {
         output += `General feedback about the plan\n`;
         output += `> ${ann.text}\n`;
         break;
+    }
+
+    // Add attached images for this annotation
+    if (ann.imagePaths && ann.imagePaths.length > 0) {
+      output += `**Attached images:**\n`;
+      ann.imagePaths.forEach((path: string) => {
+        output += `- \`${path}\`\n`;
+      });
     }
 
     output += '\n';

@@ -6,6 +6,7 @@ import 'highlight.js/styles/github-dark.css';
 import { Block, Annotation, AnnotationType, EditorMode } from '../types';
 import { Toolbar } from './Toolbar';
 import { TaterSpriteSitting } from './TaterSpriteSitting';
+import { AttachmentsButton } from './AttachmentsButton';
 import { getIdentity } from '../utils/identity';
 
 interface ViewerProps {
@@ -17,6 +18,9 @@ interface ViewerProps {
   selectedAnnotationId: string | null;
   mode: EditorMode;
   taterMode: boolean;
+  globalAttachments?: string[];
+  onAddGlobalAttachment?: (path: string) => void;
+  onRemoveGlobalAttachment?: (path: string) => void;
 }
 
 export interface ViewerHandle {
@@ -33,7 +37,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   onSelectAnnotation,
   selectedAnnotationId,
   mode,
-  taterMode
+  taterMode,
+  globalAttachments = [],
+  onAddGlobalAttachment,
+  onRemoveGlobalAttachment,
 }, ref) => {
   const [copied, setCopied] = useState(false);
   const [showGlobalCommentInput, setShowGlobalCommentInput] = useState(false);
@@ -99,7 +106,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     highlighter: Highlighter,
     source: any,
     type: AnnotationType,
-    text?: string
+    text?: string,
+    imagePaths?: string[]
   ) => {
     const doms = highlighter.getDoms(source.id);
     let blockId = '';
@@ -131,6 +139,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       author: getIdentity(),
       startMeta: source.startMeta,
       endMeta: source.endMeta,
+      imagePaths,
     };
 
     if (type === AnnotationType.DELETION) {
@@ -423,11 +432,11 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     });
   }, [annotations]);
 
-  const handleAnnotate = (type: AnnotationType, text?: string) => {
+  const handleAnnotate = (type: AnnotationType, text?: string, imagePaths?: string[]) => {
     const highlighter = highlighterRef.current;
     if (!toolbarState || !highlighter) return;
 
-    createAnnotationFromSource(highlighter, toolbarState.source, type, text);
+    createAnnotationFromSource(highlighter, toolbarState.source, type, text, imagePaths);
     pendingSourceRef.current = null;
     setToolbarState(null);
     window.getSelection()?.removeAllRanges();
@@ -512,6 +521,16 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       >
         {/* Header buttons */}
         <div className="absolute top-3 right-3 md:top-5 md:right-5 flex items-center gap-2">
+          {/* Attachments button */}
+          {onAddGlobalAttachment && onRemoveGlobalAttachment && (
+            <AttachmentsButton
+              paths={globalAttachments}
+              onAdd={onAddGlobalAttachment}
+              onRemove={onRemoveGlobalAttachment}
+              variant="toolbar"
+            />
+          )}
+
           {/* Global comment button/input */}
           {showGlobalCommentInput ? (
             <form

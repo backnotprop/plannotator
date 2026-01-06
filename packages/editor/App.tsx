@@ -15,6 +15,7 @@ import { storage } from '@plannotator/ui/utils/storage';
 import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
 import { getObsidianSettings } from '@plannotator/ui/utils/obsidian';
 import { getBearSettings } from '@plannotator/ui/utils/bear';
+import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
 
 const PLAN_CONTENT = `# Implementation Plan: Real-time Collaboration
 
@@ -307,9 +308,11 @@ const App: React.FC = () => {
   });
   const [isApiMode, setIsApiMode] = useState(false);
   const [origin, setOrigin] = useState<'claude-code' | 'opencode' | null>(null);
+  const [globalAttachments, setGlobalAttachments] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState<'approved' | 'denied' | null>(null);
+  const [pendingPasteImage, setPendingPasteImage] = useState<{ file: File; blobUrl: string } | null>(null);
   const viewerRef = useRef<ViewerHandle>(null);
 
   // URL-based sharing
@@ -319,12 +322,15 @@ const App: React.FC = () => {
     shareUrl,
     shareUrlSize,
     pendingSharedAnnotations,
+    sharedGlobalAttachments,
     clearPendingSharedAnnotations,
   } = useSharing(
     markdown,
     annotations,
+    globalAttachments,
     setMarkdown,
     setAnnotations,
+    setGlobalAttachments,
     () => {
       // When loaded from share, mark as loaded
       setIsLoading(false);
@@ -376,6 +382,61 @@ const App: React.FC = () => {
   useEffect(() => {
     setBlocks(parseMarkdownToBlocks(markdown));
   }, [markdown]);
+
+  // Global paste listener for image attachments
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (file) {
+            // Show annotator instead of direct upload
+            const blobUrl = URL.createObjectURL(file);
+            setPendingPasteImage({ file, blobUrl });
+          }
+          break;
+        }
+      }
+    };
+
+    document.addEventListener('paste', handlePaste);
+    return () => document.removeEventListener('paste', handlePaste);
+  }, []);
+
+  // Handle paste annotator accept
+  const handlePasteAnnotatorAccept = async (blob: Blob, hasDrawings: boolean) => {
+    if (!pendingPasteImage) return;
+
+    try {
+      const formData = new FormData();
+      const fileToUpload = hasDrawings
+        ? new File([blob], 'annotated.png', { type: 'image/png' })
+        : pendingPasteImage.file;
+      formData.append('file', fileToUpload);
+
+      const res = await fetch('/api/upload', { method: 'POST', body: formData });
+      if (res.ok) {
+        const { path } = await res.json();
+        setGlobalAttachments(prev => [...prev, path]);
+      }
+    } catch {
+      // Upload failed silently
+    } finally {
+      URL.revokeObjectURL(pendingPasteImage.blobUrl);
+      setPendingPasteImage(null);
+    }
+  };
+
+  const handlePasteAnnotatorClose = () => {
+    if (pendingPasteImage) {
+      URL.revokeObjectURL(pendingPasteImage.blobUrl);
+      setPendingPasteImage(null);
+    }
+  };
 
   // API mode handlers
   const handleApprove = async () => {
@@ -442,7 +503,15 @@ const App: React.FC = () => {
     ));
   };
 
-  const diffOutput = useMemo(() => exportDiff(blocks, annotations), [blocks, annotations]);
+  const handleAddGlobalAttachment = (path: string) => {
+    setGlobalAttachments(prev => [...prev, path]);
+  };
+
+  const handleRemoveGlobalAttachment = (path: string) => {
+    setGlobalAttachments(prev => prev.filter(p => p !== path));
+  };
+
+  const diffOutput = useMemo(() => exportDiff(blocks, annotations, globalAttachments), [blocks, annotations, globalAttachments]);
 
   return (
     <ThemeProvider defaultTheme="dark">
@@ -563,6 +632,9 @@ const App: React.FC = () => {
                 selectedAnnotationId={selectedAnnotationId}
                 mode={editorMode}
                 taterMode={taterMode}
+                globalAttachments={globalAttachments}
+                onAddGlobalAttachment={handleAddGlobalAttachment}
+                onRemoveGlobalAttachment={handleRemoveGlobalAttachment}
               />
             </div>
           </main>
@@ -659,6 +731,14 @@ const App: React.FC = () => {
 
         {/* Update notification */}
         <UpdateBanner />
+
+        {/* Image Annotator for pasted images */}
+        <ImageAnnotator
+          isOpen={!!pendingPasteImage}
+          imageSrc={pendingPasteImage?.blobUrl ?? ''}
+          onAccept={handlePasteAnnotatorAccept}
+          onClose={handlePasteAnnotatorClose}
+        />
       </div>
     </ThemeProvider>
   );

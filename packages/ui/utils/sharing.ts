@@ -10,17 +10,18 @@
 
 import { Annotation, AnnotationType } from '../types';
 
-// Minimal shareable annotation format: [type, originalText, text?, author?]
+// Minimal shareable annotation format: [type, originalText, text?, author?, imagePaths?]
 export type ShareableAnnotation =
-  | ['D', string, string | null]                    // Deletion: type, original, author
-  | ['R', string, string, string | null]            // Replacement: type, original, replacement, author
-  | ['C', string, string, string | null]            // Comment: type, original, comment, author
-  | ['I', string, string, string | null]            // Insertion: type, context, new text, author
-  | ['G', string, string | null];                   // Global Comment: type, comment, author
+  | ['D', string, string | null, string[]?]                    // Deletion: type, original, author, images
+  | ['R', string, string, string | null, string[]?]            // Replacement: type, original, replacement, author, images
+  | ['C', string, string, string | null, string[]?]            // Comment: type, original, comment, author, images
+  | ['I', string, string, string | null, string[]?]            // Insertion: type, context, new text, author, images
+  | ['G', string, string | null, string[]?];                   // Global Comment: type, comment, author, images
 
 export interface SharePayload {
   p: string;  // plan markdown
   a: ShareableAnnotation[];
+  g?: string[];  // global attachments (image paths)
 }
 
 /**
@@ -75,20 +76,21 @@ export async function decompress(b64: string): Promise<SharePayload> {
 export function toShareable(annotations: Annotation[]): ShareableAnnotation[] {
   return annotations.map(ann => {
     const author = ann.author || null;
+    const images = ann.imagePaths?.length ? ann.imagePaths : undefined;
 
     // Handle GLOBAL_COMMENT specially - it starts with 'G' (from GLOBAL_COMMENT)
     if (ann.type === AnnotationType.GLOBAL_COMMENT) {
-      return ['G', ann.text || '', author] as ShareableAnnotation;
+      return ['G', ann.text || '', author, images] as ShareableAnnotation;
     }
 
     const type = ann.type[0] as 'D' | 'R' | 'C' | 'I';
 
     if (type === 'D') {
-      return ['D', ann.originalText, author] as ShareableAnnotation;
+      return ['D', ann.originalText, author, images] as ShareableAnnotation;
     }
 
     // R, C, I all have text
-    return [type, ann.originalText, ann.text || '', author] as ShareableAnnotation;
+    return [type, ann.originalText, ann.text || '', author, images] as ShareableAnnotation;
   });
 }
 
@@ -109,10 +111,11 @@ export function fromShareable(data: ShareableAnnotation[]): Annotation[] {
   return data.map((item, index) => {
     const type = item[0];
 
-    // Handle global comments specially: ['G', text, author]
+    // Handle global comments specially: ['G', text, author, images?]
     if (type === 'G') {
       const text = item[1] as string;
       const author = item[2] as string | null;
+      const imagePaths = item[3] as string[] | undefined;
 
       return {
         id: `shared-${index}-${Date.now()}`,
@@ -124,14 +127,16 @@ export function fromShareable(data: ShareableAnnotation[]): Annotation[] {
         originalText: '',
         createdA: Date.now() + index,
         author: author || undefined,
+        imagePaths: imagePaths?.length ? imagePaths : undefined,
       };
     }
 
     const originalText = item[1];
-    // For deletion: [type, original, author]
-    // For others: [type, original, text, author]
+    // For deletion: [type, original, author, images?]
+    // For others: [type, original, text, author, images?]
     const text = type === 'D' ? undefined : item[2] as string;
     const author = type === 'D' ? item[2] as string | null : item[3] as string | null;
+    const imagePaths = type === 'D' ? item[3] as string[] | undefined : item[4] as string[] | undefined;
 
     return {
       id: `shared-${index}-${Date.now()}`,
@@ -143,6 +148,7 @@ export function fromShareable(data: ShareableAnnotation[]): Annotation[] {
       originalText,
       createdA: Date.now() + index,  // Preserve order
       author: author || undefined,
+      imagePaths: imagePaths?.length ? imagePaths : undefined,
       // startMeta/endMeta will be set by web-highlighter
     };
   });
@@ -155,11 +161,13 @@ const SHARE_BASE_URL = 'https://share.plannotator.ai';
 
 export async function generateShareUrl(
   markdown: string,
-  annotations: Annotation[]
+  annotations: Annotation[],
+  globalAttachments?: string[]
 ): Promise<string> {
   const payload: SharePayload = {
     p: markdown,
     a: toShareable(annotations),
+    g: globalAttachments?.length ? globalAttachments : undefined,
   };
 
   const hash = await compress(payload);

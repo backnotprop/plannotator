@@ -32,6 +32,9 @@ interface UseSharingResult {
   /** Annotations loaded from share that need to be applied to DOM */
   pendingSharedAnnotations: Annotation[] | null;
 
+  /** Global attachments loaded from share */
+  sharedGlobalAttachments: string[] | null;
+
   /** Call after applying shared annotations to clear the pending state */
   clearPendingSharedAnnotations: () => void;
 
@@ -42,8 +45,10 @@ interface UseSharingResult {
 export function useSharing(
   markdown: string,
   annotations: Annotation[],
+  globalAttachments: string[],
   setMarkdown: (m: string) => void,
   setAnnotations: (a: Annotation[]) => void,
+  setGlobalAttachments: (g: string[]) => void,
   onSharedLoad?: () => void
 ): UseSharingResult {
   const [isSharedSession, setIsSharedSession] = useState(false);
@@ -51,9 +56,11 @@ export function useSharing(
   const [shareUrl, setShareUrl] = useState('');
   const [shareUrlSize, setShareUrlSize] = useState('');
   const [pendingSharedAnnotations, setPendingSharedAnnotations] = useState<Annotation[] | null>(null);
+  const [sharedGlobalAttachments, setSharedGlobalAttachments] = useState<string[] | null>(null);
 
   const clearPendingSharedAnnotations = useCallback(() => {
     setPendingSharedAnnotations(null);
+    setSharedGlobalAttachments(null);
   }, []);
 
   // Load shared state from URL hash
@@ -68,6 +75,12 @@ export function useSharing(
         // Convert shareable annotations to full annotations
         const restoredAnnotations = fromShareable(payload.a);
         setAnnotations(restoredAnnotations);
+
+        // Restore global attachments if present
+        if (payload.g?.length) {
+          setGlobalAttachments(payload.g);
+          setSharedGlobalAttachments(payload.g);
+        }
 
         // Store for later application to DOM
         setPendingSharedAnnotations(restoredAnnotations);
@@ -92,7 +105,7 @@ export function useSharing(
       console.error('Failed to load from share hash:', e);
       return false;
     }
-  }, [setMarkdown, setAnnotations, onSharedLoad]);
+  }, [setMarkdown, setAnnotations, setGlobalAttachments, onSharedLoad]);
 
   // Load from hash on mount
   useEffect(() => {
@@ -114,7 +127,7 @@ export function useSharing(
   // Generate share URL when markdown or annotations change
   const refreshShareUrl = useCallback(async () => {
     try {
-      const url = await generateShareUrl(markdown, annotations);
+      const url = await generateShareUrl(markdown, annotations, globalAttachments);
       setShareUrl(url);
       setShareUrlSize(formatUrlSize(url));
     } catch (e) {
@@ -122,7 +135,7 @@ export function useSharing(
       setShareUrl('');
       setShareUrlSize('');
     }
-  }, [markdown, annotations]);
+  }, [markdown, annotations, globalAttachments]);
 
   // Auto-refresh share URL when dependencies change
   useEffect(() => {
@@ -135,6 +148,7 @@ export function useSharing(
     shareUrl,
     shareUrlSize,
     pendingSharedAnnotations,
+    sharedGlobalAttachments,
     clearPendingSharedAnnotations,
     refreshShareUrl,
   };

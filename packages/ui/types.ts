@@ -18,6 +18,7 @@ export interface Annotation {
   originalText: string; // The text that was selected
   createdA: number;
   author?: string; // Tater identity for collaborative sharing
+  imagePaths?: string[]; // Attached images (local paths or URLs)
   // web-highlighter metadata for cross-element selections
   startMeta?: {
     parentTagName: string;

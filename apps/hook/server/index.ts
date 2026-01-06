@@ -332,6 +332,45 @@ async function startServer(): Promise<ReturnType<typeof Bun.serve>> {
             return Response.json({ plan: planContent, origin });
           }
 
+          // API: Serve images (local paths or temp uploads)
+          if (url.pathname === "/api/image") {
+            const imagePath = url.searchParams.get("path");
+            if (!imagePath) {
+              return new Response("Missing path parameter", { status: 400 });
+            }
+            try {
+              const file = Bun.file(imagePath);
+              if (!await file.exists()) {
+                return new Response("File not found", { status: 404 });
+              }
+              return new Response(file);
+            } catch {
+              return new Response("Failed to read file", { status: 500 });
+            }
+          }
+
+          // API: Upload image → save to temp → return path
+          if (url.pathname === "/api/upload" && req.method === "POST") {
+            try {
+              const formData = await req.formData();
+              const file = formData.get("file") as File;
+              if (!file) {
+                return new Response("No file provided", { status: 400 });
+              }
+
+              const ext = file.name.split('.').pop() || 'png';
+              const tempDir = "/tmp/plannotator";
+              mkdirSync(tempDir, { recursive: true });
+              const tempPath = `${tempDir}/${crypto.randomUUID()}.${ext}`;
+
+              await Bun.write(tempPath, file);
+              return Response.json({ path: tempPath });
+            } catch (err) {
+              const message = err instanceof Error ? err.message : "Upload failed";
+              return Response.json({ error: message }, { status: 500 });
+            }
+          }
+
           // API: Detect Obsidian vaults
           if (url.pathname === "/api/obsidian/vaults") {
             const vaults = detectObsidianVaults();

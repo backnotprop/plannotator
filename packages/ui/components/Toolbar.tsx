@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
 import { AnnotationType } from "../types";
 import { createPortal } from "react-dom";
+import { AttachmentsButton } from "./AttachmentsButton";
 
 interface ToolbarProps {
   highlightElement: HTMLElement | null;
-  onAnnotate: (type: AnnotationType, text?: string) => void;
+  onAnnotate: (type: AnnotationType, text?: string, imagePaths?: string[]) => void;
   onClose: () => void;
 }
 
@@ -16,6 +17,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   const [step, setStep] = useState<"menu" | "input">("menu");
   const [activeType, setActiveType] = useState<AnnotationType | null>(null);
   const [inputValue, setInputValue] = useState("");
+  const [imagePaths, setImagePaths] = useState<string[]>([]);
   const [position, setPosition] = useState<{
     top: number;
     left: number;
@@ -30,6 +32,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     setStep("menu");
     setActiveType(null);
     setInputValue("");
+    setImagePaths([]);
   }, [highlightElement]);
 
   // Update position on scroll/resize
@@ -85,7 +88,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (activeType && inputValue.trim()) {
-      onAnnotate(activeType, inputValue);
+      onAnnotate(activeType, inputValue, imagePaths.length > 0 ? imagePaths : undefined);
     }
   };
 
@@ -181,9 +184,15 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 inputValue.trim()
               ) {
                 e.preventDefault();
-                onAnnotate(activeType!, inputValue);
+                onAnnotate(activeType!, inputValue, imagePaths.length > 0 ? imagePaths : undefined);
               }
             }}
+          />
+          <AttachmentsButton
+            paths={imagePaths}
+            onAdd={(path) => setImagePaths(prev => [...prev, path])}
+            onRemove={(path) => setImagePaths(prev => prev.filter(p => p !== path))}
+            variant="inline"
           />
           <button
             type="submit"
