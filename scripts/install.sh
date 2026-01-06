@@ -73,7 +73,7 @@ if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
 fi
 
 # Clear any cached OpenCode plugin to force fresh download on next run
-rm -rf ~/.cache/opencode/node_modules/@plannotator
+rm -rf ~/.cache/opencode/node_modules/@plannotator ~/.bun/install/cache/@plannotator 2>/dev/null
 
 echo ""
 echo "=========================================="
