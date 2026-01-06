@@ -28,3 +28,4 @@ apps/opencode-plugin/plannotator.html
 *.njsproj
 *.sln
 *.sw?
+opencode.json

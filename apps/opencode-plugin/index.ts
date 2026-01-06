@@ -5,80 +5,22 @@
  * When the agent calls submit_plan, the Plannotator UI opens for the user to
  * annotate, approve, or request changes to the plan.
  *
+ * Environment variables:
+ *   PLANNOTATOR_REMOTE - Set to "1" or "true" for remote mode (devcontainer, SSH)
+ *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
+ *
  * @packageDocumentation
  */
 
 import { type Plugin, tool } from "@opencode-ai/plugin";
-import { $ } from "bun";
+import {
+  startPlannotatorServer,
+  handleServerReady,
+} from "@plannotator/server";
 
 // @ts-ignore - Bun import attribute for text
 import indexHtml from "./plannotator.html" with { type: "text" };
 const htmlContent = indexHtml as unknown as string;
-
-interface ServerResult {
-  port: number;
-  url: string;
-  waitForDecision: () => Promise<{ approved: boolean; feedback?: string }>;
-  stop: () => void;
-}
-
-async function startPlannotatorServer(planContent: string): Promise<ServerResult> {
-  let resolveDecision: (result: { approved: boolean; feedback?: string }) => void;
-  const decisionPromise = new Promise<{ approved: boolean; feedback?: string }>(
-    (resolve) => { resolveDecision = resolve; }
-  );
-
-  const server = Bun.serve({
-    port: 0,
-    async fetch(req) {
-      const url = new URL(req.url);
-
-      if (url.pathname === "/api/plan") {
-        return Response.json({ plan: planContent, origin: "opencode" });
-      }
-
-      if (url.pathname === "/api/approve" && req.method === "POST") {
-        resolveDecision({ approved: true });
-        return Response.json({ ok: true });
-      }
-
-      if (url.pathname === "/api/deny" && req.method === "POST") {
-        try {
-          const body = await req.json() as { feedback?: string };
-          resolveDecision({ approved: false, feedback: body.feedback || "Plan rejected by user" });
-        } catch {
-          resolveDecision({ approved: false, feedback: "Plan rejected by user" });
-        }
-        return Response.json({ ok: true });
-      }
-
-      return new Response(htmlContent, {
-        headers: { "Content-Type": "text/html" }
-      });
-    },
-  });
-
-  return {
-    port: server.port!,
-    url: `http://localhost:${server.port}`,
-    waitForDecision: () => decisionPromise,
-    stop: () => server.stop(),
-  };
-}
-
-async function openBrowser(url: string): Promise<void> {
-  try {
-    if (process.platform === "win32") {
-      await $`cmd /c start ${url}`.quiet();
-    } else if (process.platform === "darwin") {
-      await $`open ${url}`.quiet();
-    } else {
-      await $`xdg-open ${url}`.quiet();
-    }
-  } catch {
-    // Silently fail - user can open manually if needed
-  }
-}
 
 export const PlannotatorPlugin: Plugin = async (ctx) => {
   return {
@@ -113,26 +55,44 @@ Do NOT proceed with implementation until your plan is approved.
             .describe("A brief 1-2 sentence summary of what the plan accomplishes"),
         },
 
-        async execute(args, _context) {
-          const server = await startPlannotatorServer(args.plan);
-          await openBrowser(server.url);
+        async execute(args, context) {
+          const server = await startPlannotatorServer({
+            plan: args.plan,
+            origin: "opencode",
+            htmlContent,
+            onReady: (url, isRemote, port) => {
+              handleServerReady(url, isRemote, port);
+            },
+          });
 
           const result = await server.waitForDecision();
           await Bun.sleep(1500);
           server.stop();
 
           if (result.approved) {
+            // Switch TUI display to build agent
             try {
               await ctx.client.tui.executeCommand({
                 body: { command: "agent_cycle" },
               });
             } catch {
-              // Silently fail - agent switching is optional
+              // Silently fail
             }
 
-            return `Plan approved! Switching to build mode.
+            // Send a new message with build agent - this queues a new loop
+            try {
+              await ctx.client.session.prompt({
+                path: { id: context.sessionID },
+                body: {
+                  agent: "build",
+                  parts: [{ type: "text", text: "Proceed with implementation" }],
+                },
+              });
+            } catch {
+              // Silently fail
+            }
 
-Your plan has been approved by the user. You may now proceed with implementation.
+            return `Plan approved!
 
 Plan Summary: ${args.summary}`;
           } else {

@@ -6,12 +6,22 @@ A plan review UI for Claude Code that intercepts `ExitPlanMode` via hooks, letti
 
 ```
 plannotator/
-├── apps/hook/                    # Claude Code plugin
-│   ├── .claude-plugin/plugin.json
-│   ├── hooks/hooks.json          # PermissionRequest hook config
-│   ├── server/index.ts           # Bun server (reads stdin, serves UI)
-│   └── dist/index.html           # Built single-file app
+├── apps/
+│   ├── hook/                     # Claude Code plugin
+│   │   ├── .claude-plugin/plugin.json
+│   │   ├── hooks/hooks.json      # PermissionRequest hook config
+│   │   ├── server/index.ts       # Entry point (reads stdin, outputs decision)
+│   │   └── dist/index.html       # Built single-file app
+│   └── opencode-plugin/          # OpenCode plugin
+│       ├── index.ts              # Plugin entry with submit_plan tool
+│       └── plannotator.html      # Built single-file app (copied from hook)
 ├── packages/
+│   ├── server/                   # Shared server implementation
+│   │   ├── index.ts              # startPlannotatorServer(), handleServerReady()
+│   │   ├── remote.ts             # isRemoteSession(), getServerPort()
+│   │   ├── browser.ts            # openBrowser()
+│   │   ├── integrations.ts       # Obsidian, Bear integrations
+│   │   └── project.ts            # Project name detection for tags
 │   ├── ui/                       # Shared React components
 │   │   ├── components/           # Viewer, Toolbar, Settings, etc.
 │   │   ├── utils/                # parser.ts, sharing.ts, storage.ts
@@ -34,6 +44,21 @@ plannotator/
 
 ```bash
 claude --plugin-dir ./apps/hook
+```
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `PLANNOTATOR_REMOTE` | Set to `1` or `true` for remote mode (devcontainer, SSH). Uses fixed port and skips browser open. |
+| `PLANNOTATOR_PORT` | Fixed port to use. Default: random locally, `19432` for remote sessions. |
+
+**Legacy:** `SSH_TTY` and `SSH_CONNECTION` are still detected. Prefer `PLANNOTATOR_REMOTE=1` for explicit control.
+
+**Devcontainer/SSH usage:**
+```bash
+export PLANNOTATOR_REMOTE=1
+export PLANNOTATOR_PORT=9999
 ```
 
 ## Hook Flow
@@ -61,9 +86,9 @@ Deny    → stdout: {"hookSpecificOutput":{"decision":{"behavior":"deny","messag
 | `/api/approve` | POST   | User approved the plan            |
 | `/api/deny`    | POST   | User denied with feedback in body |
 
-**Location:** `apps/hook/server/index.ts`
+**Location:** `packages/server/index.ts` (shared), `apps/hook/server/index.ts` (Claude Code entry), `apps/opencode-plugin/index.ts` (OpenCode entry)
 
-The server reads the hook event from stdin, extracts `tool_input.plan`, and serves the UI. Random port (`Bun.serve({ port: 0 })`) enables multiple concurrent sessions.
+Both plugins use the shared `startPlannotatorServer()` from `packages/server`. The server handles remote detection, port configuration, and all API routes. Port is random locally (`port: 0`) or fixed (`19432`) in remote mode.
 
 ## Data Types
 
@@ -174,8 +199,8 @@ Code blocks use bundled `highlight.js`. Language is extracted from fence (```rus
 ## Requirements
 
 - Bun runtime
-- Claude Code with plugin/hooks support
-- macOS (uses `open` command for browser)
+- Claude Code with plugin/hooks support, or OpenCode
+- Cross-platform: macOS (`open`), Linux (`xdg-open`), Windows (`start`)
 
 ## Development
 

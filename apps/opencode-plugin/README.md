@@ -49,6 +49,24 @@ Restart OpenCode. The `submit_plan` tool is now available.
 - **Private sharing**: Plans and annotations compress into the URL itself—share a link, no accounts or backend required
 - **Obsidian integration**: Auto-save approved plans to your vault with frontmatter and tags
 
+## Devcontainer / Docker
+
+Works in containerized environments. Set two env vars and forward the port:
+
+```json
+{
+  "containerEnv": {
+    "PLANNOTATOR_REMOTE": "1",
+    "PLANNOTATOR_PORT": "9999"
+  },
+  "forwardPorts": [9999]
+}
+```
+
+Then open `http://localhost:9999` when `submit_plan` is called.
+
+See [devcontainer.md](./devcontainer.md) for full setup details.
+
 ## Obsidian Integration
 
 Save approved plans directly to your Obsidian vault.
