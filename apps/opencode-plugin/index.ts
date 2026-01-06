@@ -79,18 +79,15 @@ Do NOT proceed with implementation until your plan is approved.
               // Silently fail
             }
 
-            // Send a new message with build agent - this queues a new loop
-            try {
-              await ctx.client.session.prompt({
-                path: { id: context.sessionID },
-                body: {
-                  agent: "build",
-                  parts: [{ type: "text", text: "Proceed with implementation" }],
-                },
-              });
-            } catch {
-              // Silently fail
-            }
+            // Send a new message with build agent - fire and forget (don't await)
+            // Awaiting can cause the message to be queued instead of processed
+            ctx.client.session.prompt({
+              path: { id: context.sessionID },
+              body: {
+                agent: "build",
+                parts: [{ type: "text", text: "Proceed with implementation" }],
+              },
+            }).catch(() => {});
 
             return `Plan approved!
 

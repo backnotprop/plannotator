@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/opencode",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Plannotator plugin for OpenCode - interactive plan review with visual annotation",
   "author": "backnotprop",
   "license": "BSL-1.1",
