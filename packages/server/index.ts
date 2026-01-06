@@ -34,8 +34,8 @@ export interface ServerOptions {
   origin: string;
   /** HTML content to serve for the UI */
   htmlContent: string;
-  /** Called when server starts with the URL */
-  onReady?: (url: string, isRemote: boolean) => void;
+  /** Called when server starts with the URL, remote status, and port */
+  onReady?: (url: string, isRemote: boolean, port: number) => void;
 }
 
 export interface ServerResult {
@@ -242,7 +242,7 @@ export async function startPlannotatorServer(
 
   // Notify caller that server is ready
   if (onReady) {
-    onReady(serverUrl, isRemote);
+    onReady(serverUrl, isRemote, server.port);
   }
 
   return {

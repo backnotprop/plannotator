@@ -7,7 +7,6 @@
  * Environment variables:
  *   PLANNOTATOR_REMOTE - Set to "1" or "true" for remote mode (preferred)
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
- *   PLANNOTATOR_ORIGIN - Origin identifier (default: "claude-code")
  *
  * Reads hook event from stdin, extracts plan content, serves UI, returns decision.
  */
@@ -40,14 +39,14 @@ if (!planContent) {
 }
 
 // Start the shared server
-const origin = process.env.PLANNOTATOR_ORIGIN || "claude-code";
+const origin = "claude-code";
 
 const server = await startPlannotatorServer({
   plan: planContent,
   origin,
   htmlContent,
-  onReady: (url, isRemote) => {
-    handleServerReady(url, isRemote, server.port);
+  onReady: (url, isRemote, port) => {
+    handleServerReady(url, isRemote, port);
   },
 });
 

@@ -60,8 +60,8 @@ Do NOT proceed with implementation until your plan is approved.
             plan: args.plan,
             origin: "opencode",
             htmlContent,
-            onReady: (url, isRemote) => {
-              handleServerReady(url, isRemote, server.port);
+            onReady: (url, isRemote, port) => {
+              handleServerReady(url, isRemote, port);
             },
           });
 
