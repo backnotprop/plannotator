@@ -636,7 +636,7 @@ const App: React.FC = () => {
           <main className="flex-1 overflow-y-auto bg-grid">
             <div className="min-h-full flex flex-col items-center px-4 py-3 md:px-10 md:py-8 xl:px-16">
               {/* Mode Switcher */}
-              <div className="w-full max-w-3xl 2xl:max-w-5xl mb-3 md:mb-4 flex justify-start">
+              <div className="w-full max-w-4xl 2xl:max-w-5xl mb-3 md:mb-4 flex justify-start">
                 <ModeSwitcher mode={editorMode} onChange={setEditorMode} taterMode={taterMode} />
               </div>
 

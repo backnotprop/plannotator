@@ -517,11 +517,11 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   };
 
   return (
-    <div className="relative z-50 w-full max-w-3xl 2xl:max-w-5xl">
+    <div className="relative z-50 w-full max-w-4xl 2xl:max-w-5xl">
       {taterMode && <TaterSpriteSitting />}
       <article
         ref={containerRef}
-        className="w-full max-w-3xl 2xl:max-w-5xl bg-card border border-border/50 rounded-xl shadow-xl p-5 md:p-8 lg:p-10 xl:p-12 relative"
+        className="w-full max-w-4xl 2xl:max-w-5xl bg-card border border-border/50 rounded-xl shadow-xl p-5 md:p-8 lg:p-10 xl:p-12 relative"
       >
         {/* Header buttons */}
         <div className="absolute top-3 right-3 md:top-5 md:right-5 flex items-start gap-2">
