@@ -36,13 +36,17 @@ The devcontainer is pre-configured with:
    ```bash
    opencode
    ```
+   Or for web interface:
+   ```bash
+   opencode web
+   ```
+   Then access http://localhost:4096 in your browser.
 
 2. Ask OpenCode to create a plan (e.g., "Create a plan to add user authentication")
 
 3. When OpenCode calls `submit_plan`, Plannotator should:
    - Start server on port 9999 (not random)
-   - Print URL to terminal (not try to open browser)
-   - Show: `Plannotator server running on http://localhost:9999`
+   - Not try to open browser (remote mode)
 
 4. Open `http://localhost:9999` in your host browser
 
@@ -55,7 +59,6 @@ The devcontainer is pre-configured with:
 **After fix:**
 - Server uses fixed port 9999
 - No browser open attempt
-- URL printed to terminal
 - Works via port forwarding
 
 ## Troubleshooting
@@ -63,6 +66,11 @@ The devcontainer is pre-configured with:
 **Plugin not updating?**
 ```bash
 rm -rf ~/.cache/opencode/node_modules/@plannotator
+```
+
+**OpenCode crashes/aborts on startup?**
+```bash
+rm -rf ~/.cache/opencode
 ```
 
 **Port not forwarding?**

@@ -244,15 +244,13 @@ export async function startPlannotatorServer(
 }
 
 /**
- * Default behavior: open browser for local, print instructions for remote
+ * Default behavior: open browser for local sessions
  */
 export async function handleServerReady(
   url: string,
   isRemote: boolean,
-  port: number
+  _port: number
 ): Promise<void> {
-  console.error(`Plannotator: ${url}`);
-
   if (!isRemote) {
     await openBrowser(url);
   }
