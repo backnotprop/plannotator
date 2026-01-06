@@ -30,9 +30,9 @@ Add to your `opencode.json`:
 
 Restart OpenCode. The `submit_plan` tool is now available.
 
-> **Existing users:** If you're stuck on an old version, clear the cache and restart:
+> **Existing users:** If you're stuck on an old version, clear both caches and restart:
 > ```bash
-> rm -rf ~/.cache/opencode/node_modules/@plannotator
+> rm -rf ~/.cache/opencode/node_modules/@plannotator ~/.bun/install/cache/@plannotator
 > ```
 
 ## How It Works
