@@ -18,6 +18,11 @@ import {
   AGENT_OPTIONS,
   type AgentSwitchSettings,
 } from '../utils/agentSwitch';
+import {
+  getPlanSaveSettings,
+  savePlanSaveSettings,
+  type PlanSaveSettings,
+} from '../utils/planSave';
 
 interface SettingsProps {
   taterMode: boolean;
@@ -38,6 +43,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const [vaultsLoading, setVaultsLoading] = useState(false);
   const [bear, setBear] = useState<BearSettings>({ enabled: false });
   const [agent, setAgent] = useState<AgentSwitchSettings>({ switchTo: 'build' });
+  const [planSave, setPlanSave] = useState<PlanSaveSettings>({ enabled: true, customPath: null });
 
   useEffect(() => {
     if (showDialog) {
@@ -45,6 +51,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       setObsidian(getObsidianSettings());
       setBear(getBearSettings());
       setAgent(getAgentSwitchSettings());
+      setPlanSave(getPlanSaveSettings());
     }
   }, [showDialog]);
 
@@ -82,6 +89,12 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
     const newSettings = { switchTo };
     setAgent(newSettings);
     saveAgentSwitchSettings(newSettings);
+  };
+
+  const handlePlanSaveChange = (updates: Partial<PlanSaveSettings>) => {
+    const newSettings = { ...planSave, ...updates };
+    setPlanSave(newSettings);
+    savePlanSaveSettings(newSettings);
   };
 
   const handleRegenerateIdentity = () => {
@@ -288,6 +301,50 @@ tags: [plan, ...]
                     }`}
                   />
                 </button>
+              </div>
+
+              <div className="border-t border-border" />
+
+              {/* Plan Saving */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium">Save Plans</div>
+                    <div className="text-xs text-muted-foreground">
+                      Auto-save plans to ~/.plannotator/plans/
+                    </div>
+                  </div>
+                  <button
+                    role="switch"
+                    aria-checked={planSave.enabled}
+                    onClick={() => handlePlanSaveChange({ enabled: !planSave.enabled })}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      planSave.enabled ? 'bg-primary' : 'bg-muted'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
+                        planSave.enabled ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {planSave.enabled && (
+                  <div className="space-y-1.5 pl-0.5">
+                    <label className="text-xs text-muted-foreground">Custom Path (optional)</label>
+                    <input
+                      type="text"
+                      value={planSave.customPath || ''}
+                      onChange={(e) => handlePlanSaveChange({ customPath: e.target.value || null })}
+                      placeholder="~/.plannotator/plans/"
+                      className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                    />
+                    <div className="text-[10px] text-muted-foreground/70">
+                      Leave empty to use default location
+                    </div>
+                  </div>
+                )}
               </div>
 
               {origin === 'opencode' && (

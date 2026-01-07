@@ -17,6 +17,7 @@ import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
 import { getObsidianSettings } from '@plannotator/ui/utils/obsidian';
 import { getBearSettings } from '@plannotator/ui/utils/bear';
 import { getAgentSwitchSettings } from '@plannotator/ui/utils/agentSwitch';
+import { getPlanSaveSettings } from '@plannotator/ui/utils/planSave';
 import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
 
 const PLAN_CONTENT = `# Implementation Plan: Real-time Collaboration
@@ -448,12 +449,19 @@ const App: React.FC = () => {
       const obsidianSettings = getObsidianSettings();
       const bearSettings = getBearSettings();
       const agentSwitchSettings = getAgentSwitchSettings();
+      const planSaveSettings = getPlanSaveSettings();
 
       // Build request body - include integrations if enabled
-      const body: { obsidian?: object; bear?: object; feedback?: string; agentSwitch?: string } = {};
+      const body: { obsidian?: object; bear?: object; feedback?: string; agentSwitch?: string; planSave?: { enabled: boolean; customPath?: string } } = {};
 
       // Always include agent switch setting for OpenCode
       body.agentSwitch = agentSwitchSettings.switchTo;
+
+      // Include plan save settings
+      body.planSave = {
+        enabled: planSaveSettings.enabled,
+        ...(planSaveSettings.customPath && { customPath: planSaveSettings.customPath }),
+      };
 
       if (obsidianSettings.enabled && obsidianSettings.vaultPath) {
         body.obsidian = {
@@ -486,10 +494,17 @@ const App: React.FC = () => {
   const handleDeny = async () => {
     setIsSubmitting(true);
     try {
+      const planSaveSettings = getPlanSaveSettings();
       await fetch('/api/deny', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ feedback: diffOutput })
+        body: JSON.stringify({
+          feedback: diffOutput,
+          planSave: {
+            enabled: planSaveSettings.enabled,
+            ...(planSaveSettings.customPath && { customPath: planSaveSettings.customPath }),
+          },
+        })
       });
       setSubmitted('denied');
     } catch {

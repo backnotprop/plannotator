@@ -13,10 +13,20 @@ import { sanitizeTag } from "./project";
 /**
  * Get the plan storage directory, creating it if needed.
  * Cross-platform: uses os.homedir() for Windows/macOS/Linux compatibility.
+ * @param customPath Optional custom path. Supports ~ for home directory.
  */
-export function getPlanDir(): string {
-  const home = homedir();
-  const planDir = join(home, ".plannotator", "plans");
+export function getPlanDir(customPath?: string | null): string {
+  let planDir: string;
+
+  if (customPath) {
+    // Expand ~ to home directory
+    planDir = customPath.startsWith("~")
+      ? join(homedir(), customPath.slice(1))
+      : customPath;
+  } else {
+    planDir = join(homedir(), ".plannotator", "plans");
+  }
+
   mkdirSync(planDir, { recursive: true });
   return planDir;
 }
@@ -47,8 +57,8 @@ export function generateSlug(plan: string): string {
  * Save the plan markdown to disk.
  * Returns the full path to the saved file.
  */
-export function savePlan(slug: string, content: string): string {
-  const planDir = getPlanDir();
+export function savePlan(slug: string, content: string, customPath?: string | null): string {
+  const planDir = getPlanDir(customPath);
   const filePath = join(planDir, `${slug}.md`);
   writeFileSync(filePath, content, "utf-8");
   return filePath;
@@ -58,8 +68,8 @@ export function savePlan(slug: string, content: string): string {
  * Save annotations (diff) to disk.
  * Returns the full path to the saved file.
  */
-export function saveAnnotations(slug: string, diffContent: string): string {
-  const planDir = getPlanDir();
+export function saveAnnotations(slug: string, diffContent: string, customPath?: string | null): string {
+  const planDir = getPlanDir(customPath);
   const filePath = join(planDir, `${slug}.diff.md`);
   writeFileSync(filePath, diffContent, "utf-8");
   return filePath;
@@ -74,9 +84,10 @@ export function saveFinalSnapshot(
   slug: string,
   status: "approved" | "denied",
   plan: string,
-  diff: string
+  diff: string,
+  customPath?: string | null
 ): string {
-  const planDir = getPlanDir();
+  const planDir = getPlanDir(customPath);
   const filePath = join(planDir, `${slug}-${status}.md`);
 
   // Combine plan with diff appended

@@ -85,9 +85,8 @@ export async function startPlannotatorServer(
   const isRemote = isRemoteSession();
   const configuredPort = getServerPort();
 
-  // Generate slug and save plan immediately
+  // Generate slug for potential saving (actual save happens on decision)
   const slug = generateSlug(plan);
-  const planPath = savePlan(slug, plan);
 
   // Decision promise
   let resolveDecision: (result: {
@@ -172,12 +171,15 @@ export async function startPlannotatorServer(
             // Check for note integrations and optional feedback
             let feedback: string | undefined;
             let agentSwitch: string | undefined;
+            let planSaveEnabled = true; // default to enabled for backwards compat
+            let planSaveCustomPath: string | undefined;
             try {
               const body = (await req.json().catch(() => ({}))) as {
                 obsidian?: ObsidianConfig;
                 bear?: BearConfig;
                 feedback?: string;
                 agentSwitch?: string;
+                planSave?: { enabled: boolean; customPath?: string };
               };
 
               // Capture feedback if provided (for "approve with notes")
@@ -188,6 +190,12 @@ export async function startPlannotatorServer(
               // Capture agent switch setting for OpenCode
               if (body.agentSwitch) {
                 agentSwitch = body.agentSwitch;
+              }
+
+              // Capture plan save settings
+              if (body.planSave !== undefined) {
+                planSaveEnabled = body.planSave.enabled;
+                planSaveCustomPath = body.planSave.customPath;
               }
 
               // Obsidian integration
@@ -214,12 +222,15 @@ export async function startPlannotatorServer(
               console.error(`[Integration] Error:`, err);
             }
 
-            // Save annotations and final snapshot
-            const diff = feedback || "";
-            if (diff) {
-              saveAnnotations(slug, diff);
+            // Save annotations and final snapshot (if enabled)
+            let savedPath: string | undefined;
+            if (planSaveEnabled) {
+              const diff = feedback || "";
+              if (diff) {
+                saveAnnotations(slug, diff, planSaveCustomPath);
+              }
+              savedPath = saveFinalSnapshot(slug, "approved", plan, diff, planSaveCustomPath);
             }
-            const savedPath = saveFinalSnapshot(slug, "approved", plan, diff);
 
             resolveDecision({ approved: true, feedback, savedPath, agentSwitch });
             return Response.json({ ok: true, savedPath });
@@ -228,16 +239,30 @@ export async function startPlannotatorServer(
           // API: Deny with feedback
           if (url.pathname === "/api/deny" && req.method === "POST") {
             let feedback = "Plan rejected by user";
+            let planSaveEnabled = true; // default to enabled for backwards compat
+            let planSaveCustomPath: string | undefined;
             try {
-              const body = (await req.json()) as { feedback?: string };
+              const body = (await req.json()) as {
+                feedback?: string;
+                planSave?: { enabled: boolean; customPath?: string };
+              };
               feedback = body.feedback || feedback;
+
+              // Capture plan save settings
+              if (body.planSave !== undefined) {
+                planSaveEnabled = body.planSave.enabled;
+                planSaveCustomPath = body.planSave.customPath;
+              }
             } catch {
               // Use default feedback
             }
 
-            // Save annotations and final snapshot
-            saveAnnotations(slug, feedback);
-            const savedPath = saveFinalSnapshot(slug, "denied", plan, feedback);
+            // Save annotations and final snapshot (if enabled)
+            let savedPath: string | undefined;
+            if (planSaveEnabled) {
+              saveAnnotations(slug, feedback, planSaveCustomPath);
+              savedPath = saveFinalSnapshot(slug, "denied", plan, feedback, planSaveCustomPath);
+            }
 
             resolveDecision({ approved: false, feedback, savedPath });
             return Response.json({ ok: true, savedPath });
