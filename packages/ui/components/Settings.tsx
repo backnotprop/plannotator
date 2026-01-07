@@ -206,6 +206,36 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                 )}
               </div>
 
+              {origin === 'opencode' && (
+                <>
+                  <div className="border-t border-border" />
+
+                  {/* Agent Switching (OpenCode only) */}
+                  <div className="space-y-2">
+                    <div>
+                      <div className="text-sm font-medium">Agent Switching</div>
+                      <div className="text-xs text-muted-foreground">
+                        Which agent to switch to after plan approval
+                      </div>
+                    </div>
+                    <select
+                      value={agent.switchTo}
+                      onChange={(e) => handleAgentChange(e.target.value as AgentSwitchSettings['switchTo'])}
+                      className="w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer"
+                    >
+                      {AGENT_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="text-[10px] text-muted-foreground/70">
+                      {AGENT_OPTIONS.find(o => o.value === agent.switchTo)?.description}
+                    </div>
+                  </div>
+                </>
+              )}
+
               <div className="border-t border-border" />
 
               {/* Tater Mode */}
@@ -347,36 +377,7 @@ tags: [plan, ...]
                 </button>
               </div>
 
-              {origin === 'opencode' && (
-                <>
-                  <div className="border-t border-border" />
-
-                  {/* Agent Switching (OpenCode only) */}
-                  <div className="space-y-2">
-                    <div>
-                      <div className="text-sm font-medium">Agent Switching</div>
-                      <div className="text-xs text-muted-foreground">
-                        Which agent to switch to after plan approval
-                      </div>
-                    </div>
-                    <select
-                      value={agent.switchTo}
-                      onChange={(e) => handleAgentChange(e.target.value as AgentSwitchSettings['switchTo'])}
-                      className="w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer"
-                    >
-                      {AGENT_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="text-[10px] text-muted-foreground/70">
-                      {AGENT_OPTIONS.find(o => o.value === agent.switchTo)?.description}
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
+              </div>
           </div>
         </div>,
         document.body
