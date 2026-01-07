@@ -70,30 +70,36 @@ Do NOT proceed with implementation until your plan is approved.
           server.stop();
 
           if (result.approved) {
-            // Switch TUI display to build agent
-            try {
-              await ctx.client.tui.executeCommand({
-                body: { command: "agent_cycle" },
-              });
-            } catch {
-              // Silently fail
-            }
+            // Check agent switch setting (defaults to 'build' if not set)
+            const shouldSwitchAgent = result.agentSwitch && result.agentSwitch !== 'disabled';
+            const targetAgent = result.agentSwitch || 'build';
 
-            // Create a user message with build agent using noReply: true
-            // This ensures the message is created BEFORE we return from the tool,
-            // so the current loop's next iteration will see it.
-            // noReply: true means we don't wait for a new loop to complete.
-            try {
-              await ctx.client.session.prompt({
-                path: { id: context.sessionID },
-                body: {
-                  agent: "build",
-                  noReply: true,
-                  parts: [{ type: "text", text: "Proceed with implementation" }],
-                },
-              });
-            } catch {
-              // Silently fail if session is busy
+            if (shouldSwitchAgent) {
+              // Switch TUI display to target agent
+              try {
+                await ctx.client.tui.executeCommand({
+                  body: { command: "agent_cycle" },
+                });
+              } catch {
+                // Silently fail
+              }
+
+              // Create a user message with target agent using noReply: true
+              // This ensures the message is created BEFORE we return from the tool,
+              // so the current loop's next iteration will see it.
+              // noReply: true means we don't wait for a new loop to complete.
+              try {
+                await ctx.client.session.prompt({
+                  path: { id: context.sessionID },
+                  body: {
+                    agent: targetAgent,
+                    noReply: true,
+                    parts: [{ type: "text", text: "Proceed with implementation" }],
+                  },
+                });
+              } catch {
+                // Silently fail if session is busy
+              }
             }
 
             // If user approved with annotations, include them as notes for implementation

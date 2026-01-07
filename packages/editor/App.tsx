@@ -16,6 +16,7 @@ import { storage } from '@plannotator/ui/utils/storage';
 import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
 import { getObsidianSettings } from '@plannotator/ui/utils/obsidian';
 import { getBearSettings } from '@plannotator/ui/utils/bear';
+import { getAgentSwitchSettings } from '@plannotator/ui/utils/agentSwitch';
 import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
 
 const PLAN_CONTENT = `# Implementation Plan: Real-time Collaboration
@@ -446,9 +447,13 @@ const App: React.FC = () => {
     try {
       const obsidianSettings = getObsidianSettings();
       const bearSettings = getBearSettings();
+      const agentSwitchSettings = getAgentSwitchSettings();
 
       // Build request body - include integrations if enabled
-      const body: { obsidian?: object; bear?: object; feedback?: string } = {};
+      const body: { obsidian?: object; bear?: object; feedback?: string; agentSwitch?: string } = {};
+
+      // Always include agent switch setting for OpenCode
+      body.agentSwitch = agentSwitchSettings.switchTo;
 
       if (obsidianSettings.enabled && obsidianSettings.vaultPath) {
         body.obsidian = {

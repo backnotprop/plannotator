@@ -57,6 +57,7 @@ export interface ServerResult {
     approved: boolean;
     feedback?: string;
     savedPath?: string;
+    agentSwitch?: string;
   }>;
   /** Stop the server */
   stop: () => void;
@@ -93,11 +94,13 @@ export async function startPlannotatorServer(
     approved: boolean;
     feedback?: string;
     savedPath?: string;
+    agentSwitch?: string;
   }) => void;
   const decisionPromise = new Promise<{
     approved: boolean;
     feedback?: string;
     savedPath?: string;
+    agentSwitch?: string;
   }>((resolve) => {
     resolveDecision = resolve;
   });
@@ -168,16 +171,23 @@ export async function startPlannotatorServer(
           if (url.pathname === "/api/approve" && req.method === "POST") {
             // Check for note integrations and optional feedback
             let feedback: string | undefined;
+            let agentSwitch: string | undefined;
             try {
               const body = (await req.json().catch(() => ({}))) as {
                 obsidian?: ObsidianConfig;
                 bear?: BearConfig;
                 feedback?: string;
+                agentSwitch?: string;
               };
 
               // Capture feedback if provided (for "approve with notes")
               if (body.feedback) {
                 feedback = body.feedback;
+              }
+
+              // Capture agent switch setting for OpenCode
+              if (body.agentSwitch) {
+                agentSwitch = body.agentSwitch;
               }
 
               // Obsidian integration
@@ -211,7 +221,7 @@ export async function startPlannotatorServer(
             }
             const savedPath = saveFinalSnapshot(slug, "approved", plan, diff);
 
-            resolveDecision({ approved: true, feedback, savedPath });
+            resolveDecision({ approved: true, feedback, savedPath, agentSwitch });
             return Response.json({ ok: true, savedPath });
           }
 
