@@ -256,54 +256,54 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
 
                 {obsidian.enabled && (
                   <div className="space-y-3 pl-0.5">
-                    {/* Vault Path */}
-                    <div className="space-y-1.5">
-                      <label className="text-xs text-muted-foreground">Vault</label>
-                      {vaultsLoading ? (
-                        <div className="w-full px-3 py-2 bg-muted rounded-lg text-xs text-muted-foreground">
-                          Detecting vaults...
-                        </div>
-                      ) : detectedVaults.length > 0 ? (
-                        <select
-                          value={obsidian.vaultPath}
-                          onChange={(e) => handleObsidianChange({ vaultPath: e.target.value })}
-                          className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer"
-                        >
-                          {detectedVaults.map((vault) => (
-                            <option key={vault} value={vault}>
-                              {vault.split('/').pop() || vault}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
+                    {/* Vault & Folder Row */}
+                    <div className="flex gap-3">
+                      {/* Vault Path */}
+                      <div className="flex-1 space-y-1.5">
+                        <label className="text-xs text-muted-foreground">Vault</label>
+                        {vaultsLoading ? (
+                          <div className="w-full px-3 py-2 bg-muted rounded-lg text-xs text-muted-foreground">
+                            Detecting...
+                          </div>
+                        ) : detectedVaults.length > 0 ? (
+                          <select
+                            value={obsidian.vaultPath}
+                            onChange={(e) => handleObsidianChange({ vaultPath: e.target.value })}
+                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer"
+                          >
+                            {detectedVaults.map((vault) => (
+                              <option key={vault} value={vault}>
+                                {vault.split('/').pop() || vault}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            type="text"
+                            value={obsidian.vaultPath}
+                            onChange={(e) => handleObsidianChange({ vaultPath: e.target.value })}
+                            placeholder="/path/to/vault"
+                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                          />
+                        )}
+                      </div>
+
+                      {/* Folder */}
+                      <div className="w-44 space-y-1.5">
+                        <label className="text-xs text-muted-foreground">Folder</label>
                         <input
                           type="text"
-                          value={obsidian.vaultPath}
-                          onChange={(e) => handleObsidianChange({ vaultPath: e.target.value })}
-                          placeholder="/Users/you/Documents/MyVault"
+                          value={obsidian.folder}
+                          onChange={(e) => handleObsidianChange({ folder: e.target.value })}
+                          placeholder="plannotator"
                           className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
                         />
-                      )}
-                      {detectedVaults.length === 0 && !vaultsLoading && (
-                        <div className="text-[10px] text-muted-foreground/70">
-                          No vaults detected. Enter path manually.
-                        </div>
-                      )}
+                      </div>
                     </div>
 
-                    {/* Folder */}
-                    <div className="space-y-1.5">
-                      <label className="text-xs text-muted-foreground">Folder</label>
-                      <input
-                        type="text"
-                        value={obsidian.folder}
-                        onChange={(e) => handleObsidianChange({ folder: e.target.value })}
-                        placeholder="plannotator"
-                        className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
-                      />
-                      <div className="text-[10px] text-muted-foreground/70">
-                        Plans saved to: {obsidian.vaultPath || '...'}/{obsidian.folder || 'plannotator'}/
-                      </div>
+                    {/* Save path preview */}
+                    <div className="text-[10px] text-muted-foreground/70">
+                      Plans saved to: {obsidian.vaultPath || '...'}/{obsidian.folder || 'plannotator'}/
                     </div>
 
                     {/* Frontmatter Preview */}
