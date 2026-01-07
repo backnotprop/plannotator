@@ -123,7 +123,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
           onClick={() => setShowDialog(false)}
         >
           <div
-            className="bg-card border border-border rounded-xl w-full max-w-sm shadow-2xl relative"
+            className="bg-card border border-border rounded-xl w-full max-w-2xl shadow-2xl relative"
             onClick={e => e.stopPropagation()}
           >
             {taterMode && <TaterSpritePullup />}
