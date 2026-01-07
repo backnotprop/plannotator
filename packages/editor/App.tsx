@@ -621,7 +621,7 @@ const App: React.FC = () => {
             )}
 
             <ModeToggle />
-            <Settings taterMode={taterMode} onTaterModeChange={handleTaterModeChange} onIdentityChange={handleIdentityChange} />
+            <Settings taterMode={taterMode} onTaterModeChange={handleTaterModeChange} onIdentityChange={handleIdentityChange} origin={origin} />
 
             <button
               onClick={() => setIsPanelOpen(!isPanelOpen)}
