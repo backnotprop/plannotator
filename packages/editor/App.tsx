@@ -3,6 +3,7 @@ import { parseMarkdownToBlocks, exportDiff } from '@plannotator/ui/utils/parser'
 import { Viewer, ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { ExportModal } from '@plannotator/ui/components/ExportModal';
+import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
 import { Annotation, Block, EditorMode } from '@plannotator/ui/types';
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
 import { ModeToggle } from '@plannotator/ui/components/ModeToggle';
@@ -300,6 +301,7 @@ const App: React.FC = () => {
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [showExport, setShowExport] = useState(false);
   const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
+  const [showClaudeCodeWarning, setShowClaudeCodeWarning] = useState(false);
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [editorMode, setEditorMode] = useState<EditorMode>('selection');
   const [taterMode, setTaterMode] = useState(() => {
@@ -446,7 +448,7 @@ const App: React.FC = () => {
       const bearSettings = getBearSettings();
 
       // Build request body - include integrations if enabled
-      const body: { obsidian?: object; bear?: object } = {};
+      const body: { obsidian?: object; bear?: object; feedback?: string } = {};
 
       if (obsidianSettings.enabled && obsidianSettings.vaultPath) {
         body.obsidian = {
@@ -458,6 +460,11 @@ const App: React.FC = () => {
 
       if (bearSettings.enabled) {
         body.bear = { plan: markdown };
+      }
+
+      // Include annotations as feedback if any exist (for OpenCode "approve with notes")
+      if (annotations.length > 0 || globalAttachments.length > 0) {
+        body.feedback = diffOutput;
       }
 
       await fetch('/api/approve', {
@@ -575,7 +582,14 @@ const App: React.FC = () => {
 
                 <div className="relative group/approve">
                   <button
-                    onClick={handleApprove}
+                    onClick={() => {
+                      // Show warning for Claude Code users with annotations
+                      if (origin === 'claude-code' && annotations.length > 0) {
+                        setShowClaudeCodeWarning(true);
+                      } else {
+                        handleApprove();
+                      }
+                    }}
                     disabled={isSubmitting}
                     className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${
                       isSubmitting
@@ -681,31 +695,40 @@ const App: React.FC = () => {
         />
 
         {/* Feedback prompt dialog */}
-        {showFeedbackPrompt && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
-            <div className="bg-card border border-border rounded-xl w-full max-w-sm shadow-2xl p-6">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-full bg-accent/20 flex items-center justify-center">
-                  <svg className="w-5 h-5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-                  </svg>
-                </div>
-                <h3 className="font-semibold">Add Annotations First</h3>
-              </div>
-              <p className="text-sm text-muted-foreground mb-6">
-                To provide feedback, select text in the plan and add annotations. Claude will use your annotations to revise the plan.
-              </p>
-              <div className="flex justify-end">
-                <button
-                  onClick={() => setShowFeedbackPrompt(false)}
-                  className="px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
-                >
-                  Got it
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        <ConfirmDialog
+          isOpen={showFeedbackPrompt}
+          onClose={() => setShowFeedbackPrompt(false)}
+          title="Add Annotations First"
+          message="To provide feedback, select text in the plan and add annotations. Claude will use your annotations to revise the plan."
+          variant="info"
+        />
+
+        {/* Claude Code annotation warning dialog */}
+        <ConfirmDialog
+          isOpen={showClaudeCodeWarning}
+          onClose={() => setShowClaudeCodeWarning(false)}
+          onConfirm={() => {
+            setShowClaudeCodeWarning(false);
+            handleApprove();
+          }}
+          title="Annotations Won't Be Sent"
+          message={<>Claude Code doesn't yet support feedback on approval. Your {annotations.length} annotation{annotations.length !== 1 ? 's' : ''} will be lost.</>}
+          subMessage={
+            <>
+              To send feedback, use <strong>Deny with Feedback</strong> instead.
+              <br /><br />
+              Want this feature? Upvote these issues:
+              <br />
+              <a href="https://github.com/anthropics/claude-code/issues/16001" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">#16001</a>
+              {' · '}
+              <a href="https://github.com/anthropics/claude-code/issues/15755" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">#15755</a>
+            </>
+          }
+          confirmText="Approve Anyway"
+          cancelText="Cancel"
+          variant="warning"
+          showCancel
+        />
 
         {/* Completion overlay - shown after approve/deny */}
         {submitted && (
