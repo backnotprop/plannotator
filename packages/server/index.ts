@@ -145,12 +145,19 @@ export async function startPlannotatorServer(
 
           // API: Approve plan
           if (url.pathname === "/api/approve" && req.method === "POST") {
-            // Check for note integrations
+            // Check for note integrations and optional feedback
+            let feedback: string | undefined;
             try {
               const body = (await req.json().catch(() => ({}))) as {
                 obsidian?: ObsidianConfig;
                 bear?: BearConfig;
+                feedback?: string;
               };
+
+              // Capture feedback if provided (for "approve with notes")
+              if (body.feedback) {
+                feedback = body.feedback;
+              }
 
               // Obsidian integration
               if (body.obsidian?.vaultPath && body.obsidian?.plan) {
@@ -176,7 +183,7 @@ export async function startPlannotatorServer(
               console.error(`[Integration] Error:`, err);
             }
 
-            resolveDecision({ approved: true });
+            resolveDecision({ approved: true, feedback });
             return Response.json({ ok: true });
           }
 

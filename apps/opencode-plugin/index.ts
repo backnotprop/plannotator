@@ -96,6 +96,21 @@ Do NOT proceed with implementation until your plan is approved.
               // Silently fail if session is busy
             }
 
+            // If user approved with annotations, include them as notes for implementation
+            if (result.feedback) {
+              return `Plan approved with notes!
+
+Plan Summary: ${args.summary}
+
+## Implementation Notes
+
+The user approved your plan but added the following notes to consider during implementation:
+
+${result.feedback}
+
+Proceed with implementation, incorporating these notes where applicable.`;
+            }
+
             return `Plan approved!
 
 Plan Summary: ${args.summary}`;
