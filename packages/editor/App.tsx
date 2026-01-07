@@ -16,6 +16,7 @@ import { storage } from '@plannotator/ui/utils/storage';
 import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
 import { getObsidianSettings } from '@plannotator/ui/utils/obsidian';
 import { getBearSettings } from '@plannotator/ui/utils/bear';
+import { getAgentSettings } from '@plannotator/ui/utils/agent';
 import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
 
 const PLAN_CONTENT = `# Implementation Plan: Real-time Collaboration
@@ -447,8 +448,11 @@ const App: React.FC = () => {
       const obsidianSettings = getObsidianSettings();
       const bearSettings = getBearSettings();
 
-      // Build request body - include integrations if enabled
-      const body: { obsidian?: object; bear?: object; feedback?: string } = {};
+      const agentSettings = getAgentSettings();
+
+      const body: { obsidian?: object; bear?: object; feedback?: string; agentSwitch?: string } = {};
+      
+      body.agentSwitch = agentSettings.switchTo;
 
       if (obsidianSettings.enabled && obsidianSettings.vaultPath) {
         body.obsidian = {

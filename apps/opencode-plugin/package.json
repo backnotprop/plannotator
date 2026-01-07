@@ -31,7 +31,8 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@opencode-ai/plugin": "^1.0.218"
+    "@opencode-ai/plugin": "^1.0.218",
+    "@plannotator/server": "workspace:*"
   },
   "peerDependencies": {
     "bun": ">=1.0.0"
