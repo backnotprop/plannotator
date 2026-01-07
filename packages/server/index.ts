@@ -19,11 +19,18 @@ import {
   type ObsidianConfig,
   type BearConfig,
 } from "./integrations";
+import {
+  generateSlug,
+  savePlan,
+  saveAnnotations,
+  saveFinalSnapshot,
+} from "./storage";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
 export { openBrowser } from "./browser";
 export * from "./integrations";
+export * from "./storage";
 
 // --- Types ---
 
@@ -46,7 +53,11 @@ export interface ServerResult {
   /** Whether running in remote mode */
   isRemote: boolean;
   /** Wait for user decision (approve/deny) */
-  waitForDecision: () => Promise<{ approved: boolean; feedback?: string }>;
+  waitForDecision: () => Promise<{
+    approved: boolean;
+    feedback?: string;
+    savedPath?: string;
+  }>;
   /** Stop the server */
   stop: () => void;
 }
@@ -73,13 +84,23 @@ export async function startPlannotatorServer(
   const isRemote = isRemoteSession();
   const configuredPort = getServerPort();
 
+  // Generate slug and save plan immediately
+  const slug = generateSlug(plan);
+  const planPath = savePlan(slug, plan);
+
   // Decision promise
-  let resolveDecision: (result: { approved: boolean; feedback?: string }) => void;
-  const decisionPromise = new Promise<{ approved: boolean; feedback?: string }>(
-    (resolve) => {
-      resolveDecision = resolve;
-    }
-  );
+  let resolveDecision: (result: {
+    approved: boolean;
+    feedback?: string;
+    savedPath?: string;
+  }) => void;
+  const decisionPromise = new Promise<{
+    approved: boolean;
+    feedback?: string;
+    savedPath?: string;
+  }>((resolve) => {
+    resolveDecision = resolve;
+  });
 
   // Start server with retry logic
   let server: ReturnType<typeof Bun.serve> | null = null;
@@ -183,25 +204,33 @@ export async function startPlannotatorServer(
               console.error(`[Integration] Error:`, err);
             }
 
-            resolveDecision({ approved: true, feedback });
-            return Response.json({ ok: true });
+            // Save annotations and final snapshot
+            const diff = feedback || "";
+            if (diff) {
+              saveAnnotations(slug, diff);
+            }
+            const savedPath = saveFinalSnapshot(slug, "approved", plan, diff);
+
+            resolveDecision({ approved: true, feedback, savedPath });
+            return Response.json({ ok: true, savedPath });
           }
 
           // API: Deny with feedback
           if (url.pathname === "/api/deny" && req.method === "POST") {
+            let feedback = "Plan rejected by user";
             try {
               const body = (await req.json()) as { feedback?: string };
-              resolveDecision({
-                approved: false,
-                feedback: body.feedback || "Plan rejected by user",
-              });
+              feedback = body.feedback || feedback;
             } catch {
-              resolveDecision({
-                approved: false,
-                feedback: "Plan rejected by user",
-              });
+              // Use default feedback
             }
-            return Response.json({ ok: true });
+
+            // Save annotations and final snapshot
+            saveAnnotations(slug, feedback);
+            const savedPath = saveFinalSnapshot(slug, "denied", plan, feedback);
+
+            resolveDecision({ approved: false, feedback, savedPath });
+            return Response.json({ ok: true, savedPath });
           }
 
           // Serve embedded HTML for all other routes (SPA)

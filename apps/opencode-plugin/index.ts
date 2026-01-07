@@ -101,6 +101,7 @@ Do NOT proceed with implementation until your plan is approved.
               return `Plan approved with notes!
 
 Plan Summary: ${args.summary}
+${result.savedPath ? `Saved to: ${result.savedPath}` : ""}
 
 ## Implementation Notes
 
@@ -113,9 +114,11 @@ Proceed with implementation, incorporating these notes where applicable.`;
 
             return `Plan approved!
 
-Plan Summary: ${args.summary}`;
+Plan Summary: ${args.summary}
+${result.savedPath ? `Saved to: ${result.savedPath}` : ""}`;
           } else {
             return `Plan needs revision.
+${result.savedPath ? `\nSaved to: ${result.savedPath}` : ""}
 
 The user has requested changes to your plan. Please review their feedback below and revise your plan accordingly.
 
