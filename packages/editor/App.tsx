@@ -791,9 +791,12 @@ const App: React.FC = () => {
                 </p>
               </div>
 
-              <div className="pt-4 border-t border-border">
+              <div className="pt-4 border-t border-border space-y-2">
                 <p className="text-sm text-muted-foreground">
-                  Return to your <span className="text-foreground font-medium">{agentName}</span> to continue.
+                  You can close this tab and return to <span className="text-foreground font-medium">{agentName}</span>.
+                </p>
+                <p className="text-xs text-muted-foreground/60">
+                  Your response has been sent.
                 </p>
               </div>
             </div>
