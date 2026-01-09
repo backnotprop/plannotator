@@ -540,6 +540,12 @@ const App: React.FC = () => {
 
   const diffOutput = useMemo(() => exportDiff(blocks, annotations, globalAttachments), [blocks, annotations, globalAttachments]);
 
+  const agentName = useMemo(() => {
+    if (origin === 'opencode') return 'OpenCode';
+    if (origin === 'claude-code') return 'Claude Code';
+    return 'Coding Agent';
+  }, [origin]);
+
   return (
     <ThemeProvider defaultTheme="dark">
       <div className="h-screen flex flex-col bg-background overflow-hidden">
@@ -570,7 +576,7 @@ const App: React.FC = () => {
                   ? 'bg-orange-500/15 text-orange-400'
                   : 'bg-zinc-500/20 text-zinc-400'
               }`}>
-                {origin === 'claude-code' ? 'Claude Code' : 'OpenCode'}
+                {agentName}
               </span>
             )}
           </div>
@@ -626,7 +632,7 @@ const App: React.FC = () => {
                     <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
                       <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
                       <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
-                      Claude Code doesn't support feedback on approval. Your annotations won't be seen.
+                      {agentName} doesn't support feedback on approval. Your annotations won't be seen.
                     </div>
                   )}
                 </div>
@@ -719,7 +725,7 @@ const App: React.FC = () => {
           isOpen={showFeedbackPrompt}
           onClose={() => setShowFeedbackPrompt(false)}
           title="Add Annotations First"
-          message="To provide feedback, select text in the plan and add annotations. Claude will use your annotations to revise the plan."
+          message={`To provide feedback, select text in the plan and add annotations. ${agentName} will use your annotations to revise the plan.`}
           variant="info"
         />
 
@@ -732,7 +738,7 @@ const App: React.FC = () => {
             handleApprove();
           }}
           title="Annotations Won't Be Sent"
-          message={<>Claude Code doesn't yet support feedback on approval. Your {annotations.length} annotation{annotations.length !== 1 ? 's' : ''} will be lost.</>}
+          message={<>{agentName} doesn't yet support feedback on approval. Your {annotations.length} annotation{annotations.length !== 1 ? 's' : ''} will be lost.</>}
           subMessage={
             <>
               To send feedback, use <strong>Deny with Feedback</strong> instead.
@@ -776,14 +782,14 @@ const App: React.FC = () => {
                 </h2>
                 <p className="text-muted-foreground">
                   {submitted === 'approved'
-                    ? 'Claude will proceed with the implementation.'
-                    : 'Claude will revise the plan based on your annotations.'}
+                    ? `${agentName} will proceed with the implementation.`
+                    : `${agentName} will revise the plan based on your annotations.`}
                 </p>
               </div>
 
               <div className="pt-4 border-t border-border">
                 <p className="text-sm text-muted-foreground">
-                  Return to your <span className="text-foreground font-medium">Claude Code terminal</span> to continue.
+                  Return to your <span className="text-foreground font-medium">{agentName}</span> to continue.
                 </p>
               </div>
             </div>
