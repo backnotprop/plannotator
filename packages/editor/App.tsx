@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { parseMarkdownToBlocks, exportDiff } from '@plannotator/ui/utils/parser';
+import { parseMarkdownToBlocks, exportDiff, extractFrontmatter, Frontmatter } from '@plannotator/ui/utils/parser';
 import { Viewer, ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { ExportModal } from '@plannotator/ui/components/ExportModal';
@@ -301,6 +301,7 @@ const App: React.FC = () => {
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [blocks, setBlocks] = useState<Block[]>([]);
+  const [frontmatter, setFrontmatter] = useState<Frontmatter | null>(null);
   const [showExport, setShowExport] = useState(false);
   const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
   const [showClaudeCodeWarning, setShowClaudeCodeWarning] = useState(false);
@@ -384,6 +385,8 @@ const App: React.FC = () => {
   }, [isLoadingShared, isSharedSession]);
 
   useEffect(() => {
+    const { frontmatter: fm } = extractFrontmatter(markdown);
+    setFrontmatter(fm);
     setBlocks(parseMarkdownToBlocks(markdown));
   }, [markdown]);
 
@@ -678,6 +681,7 @@ const App: React.FC = () => {
                 ref={viewerRef}
                 blocks={blocks}
                 markdown={markdown}
+                frontmatter={frontmatter}
                 annotations={annotations}
                 onAddAnnotation={handleAddAnnotation}
                 onSelectAnnotation={setSelectedAnnotationId}

@@ -1,12 +1,75 @@
 import { Block } from '../types';
 
 /**
+ * Parsed YAML frontmatter as key-value pairs.
+ */
+export interface Frontmatter {
+  [key: string]: string | string[];
+}
+
+/**
+ * Extract YAML frontmatter from markdown if present.
+ * Returns both the parsed frontmatter and the remaining markdown.
+ */
+export function extractFrontmatter(markdown: string): { frontmatter: Frontmatter | null; content: string } {
+  const trimmed = markdown.trimStart();
+  if (!trimmed.startsWith('---')) {
+    return { frontmatter: null, content: markdown };
+  }
+
+  // Find the closing ---
+  const endIndex = trimmed.indexOf('\n---', 3);
+  if (endIndex === -1) {
+    return { frontmatter: null, content: markdown };
+  }
+
+  // Extract frontmatter content (between the --- delimiters)
+  const frontmatterRaw = trimmed.slice(4, endIndex).trim();
+  const afterFrontmatter = trimmed.slice(endIndex + 4).trimStart();
+
+  // Parse simple YAML (key: value pairs)
+  const frontmatter: Frontmatter = {};
+  let currentKey: string | null = null;
+  let currentArray: string[] | null = null;
+
+  for (const line of frontmatterRaw.split('\n')) {
+    const trimmedLine = line.trim();
+
+    // Array item (- value)
+    if (trimmedLine.startsWith('- ') && currentKey) {
+      const value = trimmedLine.slice(2).trim();
+      if (!currentArray) {
+        currentArray = [];
+        frontmatter[currentKey] = currentArray;
+      }
+      currentArray.push(value);
+      continue;
+    }
+
+    // Key: value pair
+    const colonIndex = trimmedLine.indexOf(':');
+    if (colonIndex > 0) {
+      currentKey = trimmedLine.slice(0, colonIndex).trim();
+      const value = trimmedLine.slice(colonIndex + 1).trim();
+      currentArray = null;
+
+      if (value) {
+        frontmatter[currentKey] = value;
+      }
+    }
+  }
+
+  return { frontmatter, content: afterFrontmatter };
+}
+
+/**
  * A simplified markdown parser that splits content into linear blocks.
  * For a production app, we would use a robust AST walker (remark),
  * but for this demo, we want predictable text-anchoring.
  */
 export const parseMarkdownToBlocks = (markdown: string): Block[] => {
-  const lines = markdown.split('\n');
+  const { content: cleanMarkdown } = extractFrontmatter(markdown);
+  const lines = cleanMarkdown.split('\n');
   const blocks: Block[] = [];
   let currentId = 0;
 

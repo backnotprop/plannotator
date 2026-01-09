@@ -4,6 +4,7 @@ import Highlighter from 'web-highlighter';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
 import { Block, Annotation, AnnotationType, EditorMode } from '../types';
+import { Frontmatter } from '../utils/parser';
 import { Toolbar } from './Toolbar';
 import { TaterSpriteSitting } from './TaterSpriteSitting';
 import { AttachmentsButton } from './AttachmentsButton';
@@ -12,6 +13,7 @@ import { getIdentity } from '../utils/identity';
 interface ViewerProps {
   blocks: Block[];
   markdown: string;
+  frontmatter?: Frontmatter | null;
   annotations: Annotation[];
   onAddAnnotation: (ann: Annotation) => void;
   onSelectAnnotation: (id: string | null) => void;
@@ -29,9 +31,43 @@ export interface ViewerHandle {
   applySharedAnnotations: (annotations: Annotation[]) => void;
 }
 
+/**
+ * Renders YAML frontmatter as a styled metadata card.
+ */
+const FrontmatterCard: React.FC<{ frontmatter: Frontmatter }> = ({ frontmatter }) => {
+  const entries = Object.entries(frontmatter);
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="mt-4 mb-6 p-4 bg-muted/30 border border-border/50 rounded-lg">
+      <div className="grid gap-2 text-sm">
+        {entries.map(([key, value]) => (
+          <div key={key} className="flex gap-2">
+            <span className="font-medium text-muted-foreground min-w-[80px]">{key}:</span>
+            <span className="text-foreground">
+              {Array.isArray(value) ? (
+                <span className="flex flex-wrap gap-1">
+                  {value.map((v, i) => (
+                    <span key={i} className="px-1.5 py-0.5 bg-primary/10 text-primary rounded text-xs">
+                      {v}
+                    </span>
+                  ))}
+                </span>
+              ) : (
+                value
+              )}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   blocks,
   markdown,
+  frontmatter,
   annotations,
   onAddAnnotation,
   onSelectAnnotation,
@@ -622,6 +658,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             )}
           </button>
         </div>
+        {frontmatter && <FrontmatterCard frontmatter={frontmatter} />}
         {blocks.map(block => (
           block.type === 'code' ? (
             <CodeBlock

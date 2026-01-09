@@ -30,3 +30,5 @@ apps/opencode-plugin/plannotator.html
 *.sw?
 opencode.json
 plannotator-local
+# Local research/reference docs (not for repo)
+reference/
