@@ -70,6 +70,14 @@ When Claude Code calls `ExitPlanMode`, this hook intercepts and:
 3. Approve → Claude proceeds with implementation
 4. Request changes → Your annotations are sent back to Claude
 
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `PLANNOTATOR_REMOTE` | Set to `1` for remote mode (devcontainer, SSH). Uses fixed port and skips browser open. |
+| `PLANNOTATOR_PORT` | Fixed port to use. Default: random locally, `19432` for remote sessions. |
+| `PLANNOTATOR_BROWSER` | Custom browser to open plans in. macOS: app name or path. Linux/Windows: executable path. |
+
 ## Remote / Devcontainer Usage
 
 When running Claude Code in a remote environment (SSH, devcontainer, WSL), set these environment variables:

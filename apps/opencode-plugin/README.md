@@ -49,9 +49,17 @@ Restart OpenCode. The `submit_plan` tool is now available.
 - **Private sharing**: Plans and annotations compress into the URL itself—share a link, no accounts or backend required
 - **Obsidian integration**: Auto-save approved plans to your vault with frontmatter and tags
 
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `PLANNOTATOR_REMOTE` | Set to `1` for remote mode (devcontainer, SSH). Uses fixed port and skips browser open. |
+| `PLANNOTATOR_PORT` | Fixed port to use. Default: random locally, `19432` for remote sessions. |
+| `PLANNOTATOR_BROWSER` | Custom browser to open plans in. macOS: app name or path. Linux/Windows: executable path. |
+
 ## Devcontainer / Docker
 
-Works in containerized environments. Set two env vars and forward the port:
+Works in containerized environments. Set the env vars and forward the port:
 
 ```json
 {
