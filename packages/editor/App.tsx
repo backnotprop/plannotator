@@ -16,7 +16,7 @@ import { storage } from '@plannotator/ui/utils/storage';
 import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
 import { getObsidianSettings } from '@plannotator/ui/utils/obsidian';
 import { getBearSettings } from '@plannotator/ui/utils/bear';
-import { getAgentSwitchSettings } from '@plannotator/ui/utils/agentSwitch';
+import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { getPlanSaveSettings } from '@plannotator/ui/utils/planSave';
 import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
 
@@ -457,8 +457,11 @@ const App: React.FC = () => {
       // Build request body - include integrations if enabled
       const body: { obsidian?: object; bear?: object; feedback?: string; agentSwitch?: string; planSave?: { enabled: boolean; customPath?: string } } = {};
 
-      // Always include agent switch setting for OpenCode
-      body.agentSwitch = agentSwitchSettings.switchTo;
+      // Include agent switch setting for OpenCode (effective name handles custom agents)
+      const effectiveAgent = getEffectiveAgentName(agentSwitchSettings);
+      if (effectiveAgent) {
+        body.agentSwitch = effectiveAgent;
+      }
 
       // Include plan save settings
       body.planSave = {

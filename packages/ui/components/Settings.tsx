@@ -85,8 +85,8 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
     saveBearSettings(newSettings);
   };
 
-  const handleAgentChange = (switchTo: AgentSwitchSettings['switchTo']) => {
-    const newSettings = { switchTo };
+  const handleAgentChange = (switchTo: AgentSwitchSettings['switchTo'], customName?: string) => {
+    const newSettings = { switchTo, customName: customName ?? agent.customName };
     setAgent(newSettings);
     saveAgentSwitchSettings(newSettings);
   };
@@ -229,8 +229,19 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                         </option>
                       ))}
                     </select>
+                    {agent.switchTo === 'custom' && (
+                      <input
+                        type="text"
+                        value={agent.customName || ''}
+                        onChange={(e) => handleAgentChange('custom', e.target.value)}
+                        placeholder="Enter agent name..."
+                        className="w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 placeholder:text-muted-foreground/50"
+                      />
+                    )}
                     <div className="text-[10px] text-muted-foreground/70">
-                      {AGENT_OPTIONS.find(o => o.value === agent.switchTo)?.description}
+                      {agent.switchTo === 'custom' && agent.customName
+                        ? `Switch to "${agent.customName}" agent after approval`
+                        : AGENT_OPTIONS.find(o => o.value === agent.switchTo)?.description}
                     </div>
                   </div>
                 </>
