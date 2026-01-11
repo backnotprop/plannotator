@@ -6,9 +6,11 @@
     "./components/*": "./components/*.tsx",
     "./utils/*": "./utils/*.ts",
     "./hooks/*": "./hooks/*.ts",
+    "./lib/*": "./lib/*.ts",
     "./types": "./types.ts"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.49.8",
     "highlight.js": "^11.11.1",
     "perfect-freehand": "^1.2.2",
     "react": "^19.2.3",

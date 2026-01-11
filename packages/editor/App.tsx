@@ -12,6 +12,8 @@ import { TaterSpriteRunning } from '@plannotator/ui/components/TaterSpriteRunnin
 import { TaterSpritePullup } from '@plannotator/ui/components/TaterSpritePullup';
 import { Settings } from '@plannotator/ui/components/Settings';
 import { useSharing } from '@plannotator/ui/hooks/useSharing';
+import { useCollaborativeSession } from '@plannotator/ui/hooks/useCollaborativeSession';
+import { SyncStatusIndicator } from '@plannotator/ui/components/SyncStatusIndicator';
 import { storage } from '@plannotator/ui/utils/storage';
 import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
 import { getObsidianSettings } from '@plannotator/ui/utils/obsidian';
@@ -342,6 +344,21 @@ const App: React.FC = () => {
     }
   );
 
+  // Collaborative session for real-time sync
+  const {
+    sessionId,
+    isCollaborativeAvailable,
+    syncStatus,
+    syncError,
+    sessionUrl,
+    createCollaborativeSession,
+    syncAddAnnotation,
+    syncRemoveAnnotation,
+    pendingRemoteAnnotations,
+    pendingRemoteRemovals,
+    clearPendingRemote,
+  } = useCollaborativeSession(setMarkdown, annotations, setAnnotations);
+
   // Apply shared annotations to DOM after they're loaded
   useEffect(() => {
     if (pendingSharedAnnotations && pendingSharedAnnotations.length > 0) {
@@ -355,6 +372,27 @@ const App: React.FC = () => {
       return () => clearTimeout(timer);
     }
   }, [pendingSharedAnnotations, clearPendingSharedAnnotations]);
+
+  // Apply remote annotations from collaborative session to DOM
+  useEffect(() => {
+    if (pendingRemoteAnnotations && pendingRemoteAnnotations.length > 0) {
+      const timer = setTimeout(() => {
+        viewerRef.current?.applySharedAnnotations(pendingRemoteAnnotations);
+        clearPendingRemote();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [pendingRemoteAnnotations, clearPendingRemote]);
+
+  // Handle remote annotation removals
+  useEffect(() => {
+    if (pendingRemoteRemovals && pendingRemoteRemovals.length > 0) {
+      pendingRemoteRemovals.forEach(id => {
+        viewerRef.current?.removeHighlight(id);
+      });
+      clearPendingRemote();
+    }
+  }, [pendingRemoteRemovals, clearPendingRemote]);
 
   const handleTaterModeChange = (enabled: boolean) => {
     setTaterMode(enabled);
@@ -522,12 +560,24 @@ const App: React.FC = () => {
     setAnnotations(prev => [...prev, ann]);
     setSelectedAnnotationId(ann.id);
     setIsPanelOpen(true);
+    // Sync to collaborative session if active
+    if (sessionId) {
+      syncAddAnnotation(ann);
+    }
   };
 
   const handleDeleteAnnotation = (id: string) => {
     viewerRef.current?.removeHighlight(id);
     setAnnotations(prev => prev.filter(a => a.id !== id));
     if (selectedAnnotationId === id) setSelectedAnnotationId(null);
+    // Sync to collaborative session if active
+    if (sessionId) {
+      syncRemoveAnnotation(id);
+    }
+  };
+
+  const handleCreateCollaborativeSession = async () => {
+    await createCollaborativeSession(markdown);
   };
 
   const handleIdentityChange = (oldIdentity: string, newIdentity: string) => {
@@ -584,6 +634,13 @@ const App: React.FC = () => {
               }`}>
                 {agentName}
               </span>
+            )}
+            {sessionId && (
+              <SyncStatusIndicator
+                status={syncStatus}
+                error={syncError}
+                sessionUrl={sessionUrl}
+              />
             )}
           </div>
 
@@ -725,6 +782,11 @@ const App: React.FC = () => {
           diffOutput={diffOutput}
           annotationCount={annotations.length}
           taterSprite={taterMode ? <TaterSpritePullup /> : undefined}
+          isCollaborativeAvailable={isCollaborativeAvailable}
+          sessionId={sessionId}
+          sessionUrl={sessionUrl}
+          syncStatus={syncStatus}
+          onCreateSession={handleCreateCollaborativeSession}
         />
 
         {/* Feedback prompt dialog */}

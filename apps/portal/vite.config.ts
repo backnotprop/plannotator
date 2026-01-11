@@ -5,7 +5,15 @@ import tailwindcss from '@tailwindcss/vite';
 import pkg from '../../package.json';
 
 export default defineConfig({
+  // Load .env from monorepo root
+  envDir: path.resolve(__dirname, '../..'),
   server: {
+    port: 3001,
+    host: '0.0.0.0',
+  },
+  // Enable SPA fallback for client-side routing (e.g., /session/:id)
+  appType: 'spa',
+  preview: {
     port: 3001,
     host: '0.0.0.0',
   },

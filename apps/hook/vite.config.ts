@@ -6,6 +6,8 @@ import tailwindcss from '@tailwindcss/vite';
 import pkg from '../../package.json';
 
 export default defineConfig({
+  // Load .env from monorepo root
+  envDir: path.resolve(__dirname, '../..'),
   server: {
     port: 3000,
     host: '0.0.0.0',

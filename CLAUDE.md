@@ -24,11 +24,14 @@ plannotator/
 │   │   ├── integrations.ts       # Obsidian, Bear integrations
 │   │   └── project.ts            # Project name detection for tags
 │   ├── ui/                       # Shared React components
-│   │   ├── components/           # Viewer, Toolbar, Settings, etc.
-│   │   ├── utils/                # parser.ts, sharing.ts, storage.ts, planSave.ts, agentSwitch.ts
-│   │   ├── hooks/                # useSharing.ts
+│   │   ├── components/           # Viewer, Toolbar, Settings, SyncStatusIndicator, etc.
+│   │   ├── utils/                # parser.ts, sharing.ts, sessionSharing.ts, storage.ts, etc.
+│   │   ├── hooks/                # useSharing.ts, useCollaborativeSession.ts
+│   │   ├── lib/                  # supabase.ts (client setup)
 │   │   └── types.ts
 │   └── editor/                   # Main App.tsx
+├── supabase/
+│   └── schema.sql                # Database schema for collaborative sessions
 ├── .claude-plugin/marketplace.json  # For marketplace install
 └── legacy/                       # Old pre-monorepo code (reference only)
 ```
@@ -155,11 +158,11 @@ interface Block {
 
 Text highlighting uses `web-highlighter` library. Code blocks use manual `<mark>` wrapping (web-highlighter can't select inside `<pre>`).
 
-## URL Sharing
+## URL Sharing (Quick Share)
 
 **Location:** `packages/ui/utils/sharing.ts`, `packages/ui/hooks/useSharing.ts`
 
-Shares full plan + annotations via URL hash using deflate compression.
+Shares full plan + annotations via URL hash using deflate compression. This is a one-time snapshot - recipients get a frozen copy.
 
 **Payload format:**
 
@@ -190,6 +193,38 @@ type ShareableAnnotation =
 2. Find text positions in rendered DOM via text search
 3. Apply `<mark>` highlights
 4. Clear hash from URL (prevents re-parse on refresh)
+
+## Collaborative Sessions (Live Share)
+
+**Location:** `packages/ui/utils/sessionSharing.ts`, `packages/ui/hooks/useCollaborativeSession.ts`
+
+Real-time collaboration via Supabase. Multiple users can annotate the same plan and see updates instantly.
+
+**Requires Supabase setup:**
+
+1. Create a Supabase project at https://supabase.com
+2. Run the schema in `supabase/schema.sql`
+3. Set environment variables:
+   ```
+   VITE_SUPABASE_URL=https://your-project.supabase.co
+   VITE_SUPABASE_ANON_KEY=your-anon-key
+   ```
+
+**Session URL format:** `share.plannotator.ai/session/{uuid}`
+
+**Flow:**
+
+1. User clicks "Create Live Session" in Export modal
+2. Session created in Supabase with plan markdown
+3. Shareable URL generated
+4. Recipients open URL → auto-subscribe to real-time updates
+5. Annotations sync bidirectionally via Supabase Realtime
+
+**Key files:**
+- `packages/ui/lib/supabase.ts` - Supabase client singleton
+- `packages/ui/hooks/useCollaborativeSession.ts` - Real-time sync hook
+- `packages/ui/utils/sessionSharing.ts` - Session CRUD operations
+- `packages/ui/components/SyncStatusIndicator.tsx` - Connection status display
 
 ## Settings Persistence
 

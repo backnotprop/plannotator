@@ -48,3 +48,20 @@ export interface DiffResult {
   modified: string;
   diffText: string;
 }
+
+// Collaborative session types
+export type SessionMode = 'local' | 'collaborative';
+
+export type SyncStatus = 'disconnected' | 'connecting' | 'connected' | 'syncing' | 'error';
+
+export interface CollaborativeSession {
+  id: string;
+  planMarkdown: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface RemoteAnnotation extends Annotation {
+  isRemote: true;
+  syncedAt: number;
+}
