@@ -209,7 +209,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         type="button"
         onClick={onSave}
         title="Save (Esc)"
-        className="p-1.5 rounded transition-colors bg-green-600 text-white hover:bg-green-500"
+        className="p-1.5 rounded transition-colors bg-success text-success-foreground hover:opacity-90"
       >
         <CheckIcon />
       </button>

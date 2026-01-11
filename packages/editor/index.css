@@ -6,25 +6,29 @@
 @source "./*.tsx";
 
 :root {
-  --background: oklch(0.13 0.02 260);
-  --foreground: oklch(0.95 0.01 260);
-  --card: oklch(0.16 0.02 260);
-  --card-foreground: oklch(0.95 0.01 260);
-  --popover: oklch(0.18 0.025 260);
-  --popover-foreground: oklch(0.95 0.01 260);
+  --background: oklch(0.15 0.02 260);
+  --foreground: oklch(0.90 0.01 260);
+  --card: oklch(0.22 0.02 260);
+  --card-foreground: oklch(0.90 0.01 260);
+  --popover: oklch(0.28 0.025 260);
+  --popover-foreground: oklch(0.90 0.01 260);
   --primary: oklch(0.75 0.18 280);
-  --primary-foreground: oklch(0.13 0.02 260);
+  --primary-foreground: oklch(0.15 0.02 260);
   --secondary: oklch(0.65 0.15 180);
-  --secondary-foreground: oklch(0.13 0.02 260);
-  --muted: oklch(0.22 0.02 260);
-  --muted-foreground: oklch(0.65 0.02 260);
+  --secondary-foreground: oklch(0.15 0.02 260);
+  --muted: oklch(0.26 0.02 260);
+  --muted-foreground: oklch(0.72 0.02 260);
   --accent: oklch(0.70 0.20 60);
-  --accent-foreground: oklch(0.13 0.02 260);
-  --destructive: oklch(0.65 0.22 25);
+  --accent-foreground: oklch(0.15 0.02 260);
+  --destructive: oklch(0.65 0.20 25);
   --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.28 0.02 260);
-  --input: oklch(0.22 0.02 260);
+  --border: oklch(0.35 0.02 260);
+  --input: oklch(0.26 0.02 260);
   --ring: oklch(0.75 0.18 280);
+  --success: oklch(0.72 0.17 150);
+  --success-foreground: oklch(0.15 0.02 260);
+  --warning: oklch(0.75 0.15 85);
+  --warning-foreground: oklch(0.20 0.02 260);
 
   --font-sans: 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
@@ -51,6 +55,10 @@
   --border: oklch(0.88 0.01 260);
   --input: oklch(0.92 0.01 260);
   --ring: oklch(0.50 0.25 280);
+  --success: oklch(0.45 0.20 150);
+  --success-foreground: oklch(1 0 0);
+  --warning: oklch(0.55 0.18 85);
+  --warning-foreground: oklch(0.18 0.02 260);
 }
 
 @theme inline {
@@ -70,6 +78,10 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -95,8 +107,8 @@ body {
 /* Subtle grid background */
 .bg-grid {
   background-image:
-    linear-gradient(to right, oklch(0.25 0.02 260 / 0.5) 1px, transparent 1px),
-    linear-gradient(to bottom, oklch(0.25 0.02 260 / 0.5) 1px, transparent 1px);
+    linear-gradient(to right, oklch(0.32 0.02 260 / 0.5) 1px, transparent 1px),
+    linear-gradient(to bottom, oklch(0.32 0.02 260 / 0.5) 1px, transparent 1px);
   background-size: 24px 24px;
 }
 
@@ -201,15 +213,24 @@ pre code.hljs {
 }
 
 .annotation-highlight.deletion {
-  background: oklch(0.65 0.22 25 / 0.25);
+  background: oklch(0.65 0.20 25 / 0.35);
   text-decoration: line-through;
   text-decoration-color: var(--destructive);
   text-decoration-thickness: 2px;
 }
 
 .annotation-highlight.comment {
-  background: oklch(0.70 0.20 60 / 0.2);
+  background: oklch(0.70 0.18 60 / 0.3);
   border-bottom: 2px solid var(--accent);
+}
+
+/* Light mode: softer highlights */
+.light .annotation-highlight.deletion {
+  background: oklch(0.65 0.22 25 / 0.2);
+}
+
+.light .annotation-highlight.comment {
+  background: oklch(0.70 0.20 60 / 0.15);
 }
 
 .annotation-highlight:hover {

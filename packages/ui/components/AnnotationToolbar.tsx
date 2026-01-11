@@ -162,7 +162,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
             onClick={handleCopy}
             icon={copied ? <CheckIcon /> : <CopyIcon />}
             label={copied ? "Copied!" : "Copy"}
-            className={copied ? "text-green-500" : "text-muted-foreground hover:bg-muted hover:text-foreground"}
+            className={copied ? "text-success" : "text-muted-foreground hover:bg-muted hover:text-foreground"}
           />
           <div className="w-px h-5 bg-border mx-0.5" />
           <ToolbarButton

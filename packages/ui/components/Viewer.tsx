@@ -606,7 +606,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               <button
                 type="submit"
                 disabled={!globalCommentValue.trim()}
-                className="self-start px-2 py-1.5 text-xs font-medium rounded bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-50 transition-all"
+                className="self-start px-2 py-1.5 text-xs font-medium rounded bg-secondary text-secondary-foreground hover:opacity-90 disabled:opacity-50 transition-all"
               >
                 Add
               </button>
@@ -644,7 +644,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           >
             {copied ? (
               <>
-                <svg className="w-3.5 h-3.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg className="w-3.5 h-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
                 <span className="hidden md:inline">Copied!</span>
@@ -872,7 +872,7 @@ const BlockRenderer: React.FC<{ block: Block }> = ({ block }) => {
           <span className="select-none shrink-0 flex items-center">
             {isCheckbox ? (
               block.checked ? (
-                <svg className="w-4 h-4 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                <svg className="w-4 h-4 text-success" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               ) : (
@@ -999,7 +999,7 @@ const CodeBlock: React.FC<CodeBlockProps> = ({ block, onHover, onLeave, isHovere
         title={copied ? 'Copied!' : 'Copy code'}
       >
         {copied ? (
-          <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg className="w-4 h-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
           </svg>
         ) : (

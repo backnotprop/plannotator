@@ -627,8 +627,8 @@ const App: React.FC = () => {
                       isSubmitting
                         ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
                         : origin === 'claude-code' && annotations.length > 0
-                          ? 'bg-green-600/50 text-white/70 hover:bg-green-600 hover:text-white'
-                          : 'bg-green-600 text-white hover:bg-green-500'
+                          ? 'bg-success/50 text-success-foreground/70 hover:bg-success hover:text-success-foreground'
+                          : 'bg-success text-success-foreground hover:opacity-90'
                     }`}
                   >
                     <span className="md:hidden">{isSubmitting ? '...' : 'OK'}</span>
@@ -769,7 +769,7 @@ const App: React.FC = () => {
             <div className="text-center space-y-6 max-w-md px-8">
               <div className={`mx-auto w-16 h-16 rounded-full flex items-center justify-center ${
                 submitted === 'approved'
-                  ? 'bg-green-500/20 text-green-500'
+                  ? 'bg-success/20 text-success'
                   : 'bg-accent/20 text-accent'
               }`}>
                 {submitted === 'approved' ? (
