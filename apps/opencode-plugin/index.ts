@@ -109,8 +109,8 @@ Do NOT proceed with implementation until your plan is approved.
           }
 
           try {
-            // @ts-ignore - Event may have sessionId or sessionID
-            const sessionId = event.sessionId || event.sessionID;
+            // @ts-ignore - Event properties contain sessionID for command.executed events
+            const sessionId = event.properties?.sessionID;
             await ctx.client.session.prompt({
               path: { id: sessionId },
               body: {
