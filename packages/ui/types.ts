@@ -48,3 +48,35 @@ export interface DiffResult {
   modified: string;
   diffText: string;
 }
+
+// Code Review Types
+export type CodeAnnotationType = 'comment' | 'suggestion' | 'concern';
+
+export interface CodeAnnotation {
+  id: string;
+  type: CodeAnnotationType;
+  filePath: string;
+  lineStart: number;
+  lineEnd: number;
+  side: 'old' | 'new'; // Maps to 'deletions' | 'additions' in @pierre/diffs
+  text?: string;
+  suggestedCode?: string;
+  createdAt: number;
+  author?: string;
+}
+
+// For @pierre/diffs integration
+export interface DiffAnnotationMetadata {
+  annotationId: string;
+  type: CodeAnnotationType;
+  text?: string;
+  suggestedCode?: string;
+  author?: string;
+}
+
+export interface SelectedLineRange {
+  start: number;
+  end: number;
+  side: 'deletions' | 'additions';
+  endSide?: 'deletions' | 'additions';
+}

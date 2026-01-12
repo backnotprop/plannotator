@@ -1,0 +1,347 @@
+@import "tailwindcss";
+
+/* Tell Tailwind where to scan for classes */
+@source "../ui/components/**/*.tsx";
+@source "../ui/hooks/**/*.ts";
+@source "./*.tsx";
+@source "./components/**/*.tsx";
+
+:root {
+  --background: oklch(0.15 0.02 260);
+  --foreground: oklch(0.90 0.01 260);
+  --card: oklch(0.22 0.02 260);
+  --card-foreground: oklch(0.90 0.01 260);
+  --popover: oklch(0.28 0.025 260);
+  --popover-foreground: oklch(0.90 0.01 260);
+  --primary: oklch(0.75 0.18 280);
+  --primary-foreground: oklch(0.15 0.02 260);
+  --secondary: oklch(0.65 0.15 180);
+  --secondary-foreground: oklch(0.15 0.02 260);
+  --muted: oklch(0.26 0.02 260);
+  --muted-foreground: oklch(0.72 0.02 260);
+  --accent: oklch(0.70 0.20 60);
+  --accent-foreground: oklch(0.15 0.02 260);
+  --destructive: oklch(0.65 0.20 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.35 0.02 260);
+  --input: oklch(0.26 0.02 260);
+  --ring: oklch(0.75 0.18 280);
+  --success: oklch(0.72 0.17 150);
+  --success-foreground: oklch(0.15 0.02 260);
+  --warning: oklch(0.75 0.15 85);
+  --warning-foreground: oklch(0.20 0.02 260);
+
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --radius: 0.75rem;
+}
+
+.light {
+  --background: oklch(0.97 0.005 260);
+  --foreground: oklch(0.18 0.02 260);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.18 0.02 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.18 0.02 260);
+  --primary: oklch(0.50 0.25 280);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.50 0.18 180);
+  --secondary-foreground: oklch(1 0 0);
+  --muted: oklch(0.92 0.01 260);
+  --muted-foreground: oklch(0.40 0.02 260);
+  --accent: oklch(0.60 0.22 50);
+  --accent-foreground: oklch(0.18 0.02 260);
+  --destructive: oklch(0.50 0.25 25);
+  --destructive-foreground: oklch(1 0 0);
+  --border: oklch(0.88 0.01 260);
+  --input: oklch(0.92 0.01 260);
+  --ring: oklch(0.50 0.25 280);
+  --success: oklch(0.45 0.20 150);
+  --success-foreground: oklch(1 0 0);
+  --warning: oklch(0.55 0.18 85);
+  --warning-foreground: oklch(0.18 0.02 260);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+* {
+  border-color: var(--border);
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--background);
+  color: var(--foreground);
+  font-feature-settings: "ss01", "ss02", "cv01";
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); }
+
+/* Selection */
+::selection {
+  background: oklch(0.75 0.18 280 / 0.3);
+}
+
+/* Smooth transitions */
+* {
+  transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+/* Focus states */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* =====================================================
+   Code Review Specific Styles
+   ===================================================== */
+
+/* @pierre/diffs theme integration */
+diffs-container {
+  --pierre-bg: var(--background);
+  --pierre-fg: var(--foreground);
+}
+
+/* Diff line backgrounds - synchronized with plannotator colors */
+.diff-line-addition {
+  background: oklch(0.72 0.17 150 / 0.12);
+}
+
+.diff-line-deletion {
+  background: oklch(0.65 0.20 25 / 0.12);
+}
+
+.light .diff-line-addition {
+  background: oklch(0.72 0.17 150 / 0.15);
+}
+
+.light .diff-line-deletion {
+  background: oklch(0.65 0.20 25 / 0.15);
+}
+
+/* Review comment thread styling */
+.review-comment {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  font-size: 0.875rem;
+  margin: 0.5rem 0;
+}
+
+.review-comment-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.review-comment-body {
+  color: var(--foreground);
+  line-height: 1.5;
+}
+
+/* Annotation type badges */
+.annotation-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.625rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
+
+.annotation-badge.comment {
+  background: oklch(0.75 0.18 280 / 0.15);
+  color: var(--primary);
+}
+
+.annotation-badge.suggestion {
+  background: oklch(0.72 0.17 150 / 0.15);
+  color: var(--success);
+}
+
+.annotation-badge.concern {
+  background: oklch(0.75 0.15 85 / 0.15);
+  color: var(--warning);
+}
+
+/* Line selection highlight */
+.line-selected {
+  background: oklch(0.75 0.18 280 / 0.15) !important;
+}
+
+/* Hover utility button (GitHub-style +) */
+.hover-add-comment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 0.25rem;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 150ms;
+}
+
+.hover-add-comment:hover {
+  opacity: 1;
+  background: oklch(0.70 0.20 280);
+}
+
+/* File tree styling */
+.file-tree-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  color: var(--muted-foreground);
+}
+
+.file-tree-item:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.file-tree-item.active {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.file-tree-item .file-stats {
+  margin-left: auto;
+  display: flex;
+  gap: 0.375rem;
+  font-size: 0.6875rem;
+}
+
+.file-tree-item .additions {
+  color: var(--success);
+}
+
+.file-tree-item .deletions {
+  color: var(--destructive);
+}
+
+/* Annotation toolbar for code review */
+.review-toolbar {
+  position: absolute;
+  z-index: 100;
+  background: var(--popover);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  padding: 0.5rem;
+}
+
+.review-toolbar-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.625rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--foreground);
+  background: transparent;
+  cursor: pointer;
+}
+
+.review-toolbar-btn:hover {
+  background: var(--muted);
+}
+
+.review-toolbar-btn.primary {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.review-toolbar-btn.primary:hover {
+  background: oklch(0.70 0.20 280);
+}
+
+/* Export modal code blocks */
+.export-code-block {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  background: var(--muted);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Toast animations */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-in-from-bottom-2 {
+  from { transform: translateY(0.5rem) translateX(-50%); }
+  to { transform: translateY(0) translateX(-50%); }
+}
+
+.animate-in {
+  animation-duration: 200ms;
+  animation-timing-function: ease-out;
+  animation-fill-mode: both;
+}
+
+.fade-in {
+  animation-name: fade-in;
+}
+
+.slide-in-from-bottom-2 {
+  animation-name: slide-in-from-bottom-2;
+}

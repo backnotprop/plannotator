@@ -5,6 +5,13 @@
   "description": "Shared server implementation for Plannotator plugins",
   "main": "index.ts",
   "types": "index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./review": "./review.ts",
+    "./remote": "./remote.ts",
+    "./browser": "./browser.ts",
+    "./storage": "./storage.ts"
+  },
   "files": [
     "*.ts"
   ],

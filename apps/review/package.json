@@ -1,0 +1,28 @@
+{
+  "name": "@plannotator/review",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "serve": "bun run server/index.ts"
+  },
+  "dependencies": {
+    "@plannotator/review-editor": "workspace:*",
+    "@plannotator/server": "workspace:*",
+    "@plannotator/ui": "workspace:*",
+    "@pierre/diffs": "^1.0.4",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "tailwindcss": "^4.1.18",
+    "@tailwindcss/vite": "^4.1.18"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0",
+    "vite-plugin-singlefile": "^2.0.3",
+    "@types/node": "^22.14.0"
+  }
+}

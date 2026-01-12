@@ -18,11 +18,16 @@
     "dev:hook": "bun run --cwd apps/hook dev",
     "dev:portal": "bun run --cwd apps/portal dev",
     "dev:marketing": "bun run --cwd apps/marketing dev",
+    "dev:review": "bun run --cwd apps/review dev",
     "build:hook": "bun run --cwd apps/hook build",
     "build:portal": "bun run --cwd apps/portal build",
     "build:marketing": "bun run --cwd apps/marketing build",
     "build:opencode": "bun run --cwd apps/opencode-plugin build",
+    "build:review": "bun run --cwd apps/review build",
     "build": "bun run build:hook && bun run build:opencode",
     "test": "bun test"
+  },
+  "dependencies": {
+    "@pierre/diffs": "^1.0.4"
   }
 }
