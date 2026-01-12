@@ -1,57 +1,16 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { ThemeProvider, useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { ModeToggle } from '@plannotator/ui/components/ModeToggle';
+import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
 import { storage } from '@plannotator/ui/utils/storage';
 import { getIdentity } from '@plannotator/ui/utils/identity';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata } from '@plannotator/ui/types';
 import { DiffViewer } from './components/DiffViewer';
 import { ReviewPanel } from './components/ReviewPanel';
 import { FileTree } from './components/FileTree';
+import { DEMO_DIFF } from './demoData';
 
 declare const __APP_VERSION__: string;
-
-// Demo diff for development
-const DEMO_DIFF = `diff --git a/src/components/Button.tsx b/src/components/Button.tsx
-index 1234567..abcdefg 100644
---- a/src/components/Button.tsx
-+++ b/src/components/Button.tsx
-@@ -1,10 +1,15 @@
--import React from 'react';
-+import React, { useCallback } from 'react';
-
- interface ButtonProps {
-   label: string;
-   onClick: () => void;
-+  disabled?: boolean;
-+  variant?: 'primary' | 'secondary';
- }
-
--export const Button = ({ label, onClick }: ButtonProps) => {
-+export const Button = ({ label, onClick, disabled, variant = 'primary' }: ButtonProps) => {
-+  const handleClick = useCallback(() => {
-+    if (!disabled) onClick();
-+  }, [disabled, onClick]);
-+
-   return (
--    <button onClick={onClick}>
-+    <button onClick={handleClick} disabled={disabled} className={variant}>
-       {label}
-     </button>
-   );
-diff --git a/src/utils/helpers.ts b/src/utils/helpers.ts
-index 2345678..bcdefgh 100644
---- a/src/utils/helpers.ts
-+++ b/src/utils/helpers.ts
-@@ -5,3 +5,8 @@ export function formatDate(date: Date): string {
- export function capitalize(str: string): string {
-   return str.charAt(0).toUpperCase() + str.slice(1);
- }
-+
-+export function debounce<T extends (...args: unknown[]) => void>(fn: T, delay: number): T {
-+  let timeoutId: NodeJS.Timeout;
-+  return ((...args) => { clearTimeout(timeoutId); timeoutId = setTimeout(() => fn(...args), delay); }) as T;
-+}
-`;
 
 interface DiffFile {
   path: string;
@@ -158,17 +117,24 @@ const ReviewApp: React.FC = () => {
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [pendingSelection, setPendingSelection] = useState<SelectedLineRange | null>(null);
   const [showExportModal, setShowExportModal] = useState(false);
-  const [isApiMode, setIsApiMode] = useState(false);
+  const [showNoAnnotationsDialog, setShowNoAnnotationsDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
   const [diffStyle, setDiffStyle] = useState<'split' | 'unified'>(() => {
     return (storage.getItem('review-diff-style') as 'split' | 'unified') || 'split';
   });
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
 
   const identity = useMemo(() => getIdentity(), []);
+
+  // Mark file as viewed when it becomes active
+  useEffect(() => {
+    const activeFile = files[activeFileIndex];
+    if (activeFile && !viewedFiles.has(activeFile.path)) {
+      setViewedFiles(prev => new Set([...prev, activeFile.path]));
+    }
+  }, [activeFileIndex, files]);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -188,6 +154,7 @@ const ReviewApp: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showExportModal]);
 
   // Get annotations for active file
@@ -197,30 +164,16 @@ const ReviewApp: React.FC = () => {
     return annotations.filter(a => a.filePath === activeFile.path);
   }, [annotations, files, activeFileIndex]);
 
-  // Check if we're in API mode
+  // Load demo content
   useEffect(() => {
-    fetch('/api/diff')
-      .then(res => {
-        if (!res.ok) throw new Error('Not in API mode');
-        return res.json();
-      })
-      .then((data: DiffData) => {
-        setDiffData(data);
-        setFiles(parseDiffToFiles(data.rawPatch));
-        setIsApiMode(true);
-      })
-      .catch(() => {
-        // Not in API mode - use demo content
-        const demoFiles = parseDiffToFiles(DEMO_DIFF);
-        setDiffData({
-          files: demoFiles,
-          rawPatch: DEMO_DIFF,
-          gitRef: 'demo',
-        });
-        setFiles(demoFiles);
-        setIsApiMode(false);
-      })
-      .finally(() => setIsLoading(false));
+    const demoFiles = parseDiffToFiles(DEMO_DIFF);
+    setDiffData({
+      files: demoFiles,
+      rawPatch: DEMO_DIFF,
+      gitRef: 'demo',
+    });
+    setFiles(demoFiles);
+    setIsLoading(false);
   }, []);
 
   // Handle diff style change
@@ -242,12 +195,16 @@ const ReviewApp: React.FC = () => {
   ) => {
     if (!pendingSelection || !files[activeFileIndex]) return;
 
+    // Normalize line range (in case user selected bottom-to-top)
+    const lineStart = Math.min(pendingSelection.start, pendingSelection.end);
+    const lineEnd = Math.max(pendingSelection.start, pendingSelection.end);
+
     const newAnnotation: CodeAnnotation = {
       id: generateId(),
       type,
       filePath: files[activeFileIndex].path,
-      lineStart: pendingSelection.start,
-      lineEnd: pendingSelection.end,
+      lineStart,
+      lineEnd,
       side: pendingSelection.side === 'additions' ? 'new' : 'old',
       text,
       suggestedCode,
@@ -267,7 +224,38 @@ const ReviewApp: React.FC = () => {
     }
   }, [selectedAnnotationId]);
 
-  // Copy diff to clipboard
+  // Switch file - clears pending selection to avoid invalid line ranges
+  const handleFileSwitch = useCallback((index: number) => {
+    if (index !== activeFileIndex) {
+      setPendingSelection(null); // Clear selection when switching files
+      setActiveFileIndex(index);
+    }
+  }, [activeFileIndex]);
+
+  // Select annotation - switches file if needed and scrolls to it
+  const handleSelectAnnotation = useCallback((id: string | null) => {
+    if (!id) {
+      setSelectedAnnotationId(null);
+      return;
+    }
+
+    // Find the annotation
+    const annotation = annotations.find(a => a.id === id);
+    if (!annotation) {
+      setSelectedAnnotationId(id);
+      return;
+    }
+
+    // Find and switch to the file containing this annotation
+    const fileIndex = files.findIndex(f => f.path === annotation.filePath);
+    if (fileIndex !== -1 && fileIndex !== activeFileIndex) {
+      handleFileSwitch(fileIndex);
+    }
+
+    setSelectedAnnotationId(id);
+  }, [annotations, files, activeFileIndex, handleFileSwitch]);
+
+  // Copy raw diff to clipboard
   const handleCopyDiff = useCallback(async () => {
     if (!diffData) return;
     try {
@@ -281,28 +269,23 @@ const ReviewApp: React.FC = () => {
     }
   }, [diffData]);
 
-  // Submit feedback
-  const handleSubmitFeedback = useCallback(async () => {
-    if (!isApiMode) {
-      setShowExportModal(true);
+  // Copy feedback markdown to clipboard
+  const handleCopyFeedback = useCallback(async () => {
+    if (annotations.length === 0) {
+      setShowNoAnnotationsDialog(true);
       return;
     }
-
-    setIsSubmitting(true);
     try {
       const feedback = exportReviewFeedback(annotations, files);
-      await fetch('/api/feedback', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ feedback, annotations }),
-      });
-      setSubmitted(true);
+      await navigator.clipboard.writeText(feedback);
+      setCopyFeedback('Feedback copied!');
+      setTimeout(() => setCopyFeedback(null), 2000);
     } catch (err) {
-      console.error('Failed to submit:', err);
-    } finally {
-      setIsSubmitting(false);
+      console.error('Failed to copy:', err);
+      setCopyFeedback('Failed to copy');
+      setTimeout(() => setCopyFeedback(null), 2000);
     }
-  }, [isApiMode, annotations, files]);
+  }, [annotations, files]);
 
   const activeFile = files[activeFileIndex];
   const feedbackMarkdown = useMemo(() =>
@@ -320,37 +303,34 @@ const ReviewApp: React.FC = () => {
     );
   }
 
-  if (submitted) {
-    return (
-      <ThemeProvider defaultTheme="dark">
-        <div className="h-screen flex items-center justify-center bg-background">
-          <div className="text-center">
-            <div className="text-2xl mb-2">Review Submitted</div>
-            <div className="text-muted-foreground text-sm">You can close this tab.</div>
-          </div>
-        </div>
-      </ThemeProvider>
-    );
-  }
-
   return (
     <ThemeProvider defaultTheme="dark">
       <div className="h-screen flex flex-col bg-background overflow-hidden">
         {/* Header */}
-        <header className="h-12 flex items-center justify-between px-4 border-b border-border/50 bg-card/50 backdrop-blur-xl z-50">
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-semibold tracking-tight">Code Review</span>
-            <span className="text-xs text-muted-foreground font-mono opacity-60">
+        <header className="h-12 flex items-center justify-between px-2 md:px-4 border-b border-border/50 bg-card/50 backdrop-blur-xl z-50">
+          <div className="flex items-center gap-2 md:gap-3">
+            <a
+              href="https://github.com/backnotprop/plannotator"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 md:gap-2 hover:opacity-80 transition-opacity"
+            >
+              <span className="text-sm font-semibold tracking-tight">Plannotator</span>
+            </a>
+            <a
+              href="https://github.com/backnotprop/plannotator/releases"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-muted-foreground font-mono opacity-60 hidden md:inline hover:opacity-100 transition-opacity"
+            >
               v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0'}
+            </a>
+            <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-secondary/15 text-secondary hidden md:inline">
+              Code Review
             </span>
-            {diffData?.gitRef && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-muted text-muted-foreground">
-                {diffData.gitRef}
-              </span>
-            )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 md:gap-2">
             {/* Diff style toggle */}
             <div className="flex items-center gap-1 bg-muted rounded-lg p-0.5">
               <button
@@ -375,49 +355,93 @@ const ReviewApp: React.FC = () => {
               </button>
             </div>
 
-            <div className="w-px h-5 bg-border/50" />
-
-            {/* Copy diff */}
+            {/* Primary actions */}
             <button
               onClick={handleCopyDiff}
+              className="px-2 py-1 md:px-2.5 rounded-md text-xs font-medium bg-muted hover:bg-muted/80 transition-colors flex items-center gap-1.5"
+              title="Copy all raw diffs (Cmd+Shift+C)"
+            >
+              {copyFeedback === 'Diff copied!' ? (
+                <>
+                  <svg className="w-3.5 h-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span className="hidden md:inline">Copied!</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                  <span className="hidden md:inline">Copy Raw Diffs</span>
+                </>
+              )}
+            </button>
+
+            <button
+              onClick={handleCopyFeedback}
+              className="px-2 py-1 md:px-2.5 rounded-md text-xs font-medium bg-muted hover:bg-muted/80 transition-colors flex items-center gap-1.5"
+              title="Copy feedback for LLM"
+            >
+              {copyFeedback === 'Feedback copied!' ? (
+                <>
+                  <svg className="w-3.5 h-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span className="hidden md:inline">Copied!</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <span className="hidden md:inline">Copy Feedback</span>
+                </>
+              )}
+            </button>
+
+            <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
+
+            {/* Utilities */}
+            <ModeToggle />
+
+            {/* Settings placeholder */}
+            <button
               className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              title="Copy raw diff"
+              title="Settings"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </button>
+
+            {/* Panel toggle */}
+            <button
+              onClick={() => setIsPanelOpen(!isPanelOpen)}
+              className={`p-1.5 rounded-md text-xs font-medium transition-all ${
+                isPanelOpen
+                  ? 'bg-primary/15 text-primary'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+              }`}
+              title={isPanelOpen ? 'Hide annotations' : 'Show annotations'}
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
               </svg>
             </button>
 
             {/* Export */}
             <button
               onClick={() => setShowExportModal(true)}
-              className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              title="Export feedback"
+              className="p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium bg-muted hover:bg-muted/80 transition-colors"
+              title="Export"
             >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
               </svg>
+              <span className="hidden md:inline">Export</span>
             </button>
-
-            {isApiMode && (
-              <>
-                <div className="w-px h-5 bg-border/50" />
-                <button
-                  onClick={handleSubmitFeedback}
-                  disabled={isSubmitting}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                    isSubmitting
-                      ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
-                      : 'bg-primary text-primary-foreground hover:opacity-90'
-                  }`}
-                >
-                  {isSubmitting ? 'Submitting...' : 'Submit Review'}
-                </button>
-              </>
-            )}
-
-            <div className="w-px h-5 bg-border/50" />
-            <ModeToggle />
           </div>
         </header>
 
@@ -428,8 +452,9 @@ const ReviewApp: React.FC = () => {
             <FileTree
               files={files}
               activeFileIndex={activeFileIndex}
-              onSelectFile={setActiveFileIndex}
+              onSelectFile={handleFileSwitch}
               annotations={annotations}
+              viewedFiles={viewedFiles}
               enableKeyboardNav={!showExportModal}
             />
           )}
@@ -446,7 +471,8 @@ const ReviewApp: React.FC = () => {
                 pendingSelection={pendingSelection}
                 onLineSelection={handleLineSelection}
                 onAddAnnotation={handleAddAnnotation}
-                onSelectAnnotation={setSelectedAnnotationId}
+                onSelectAnnotation={handleSelectAnnotation}
+                onDeleteAnnotation={handleDeleteAnnotation}
               />
             )}
           </main>
@@ -458,8 +484,9 @@ const ReviewApp: React.FC = () => {
             annotations={annotations}
             files={files}
             selectedAnnotationId={selectedAnnotationId}
-            onSelectAnnotation={setSelectedAnnotationId}
+            onSelectAnnotation={handleSelectAnnotation}
             onDeleteAnnotation={handleDeleteAnnotation}
+            feedbackMarkdown={feedbackMarkdown}
           />
         </div>
 
@@ -500,12 +527,14 @@ const ReviewApp: React.FC = () => {
           </div>
         )}
 
-        {/* Copy feedback toast */}
-        {copyFeedback && (
-          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-card border border-border rounded-lg shadow-lg text-sm animate-in fade-in slide-in-from-bottom-2 duration-200">
-            {copyFeedback}
-          </div>
-        )}
+        {/* No annotations dialog */}
+        <ConfirmDialog
+          isOpen={showNoAnnotationsDialog}
+          onClose={() => setShowNoAnnotationsDialog(false)}
+          title="No Annotations"
+          message="You haven't made any annotations yet. There's nothing to copy."
+          variant="info"
+        />
       </div>
     </ThemeProvider>
   );

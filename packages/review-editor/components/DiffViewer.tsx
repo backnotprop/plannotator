@@ -13,6 +13,7 @@ interface DiffViewerProps {
   onLineSelection: (range: SelectedLineRange | null) => void;
   onAddAnnotation: (type: CodeAnnotationType, text?: string, suggestedCode?: string) => void;
   onSelectAnnotation: (id: string | null) => void;
+  onDeleteAnnotation: (id: string) => void;
 }
 
 interface ToolbarState {
@@ -32,12 +33,14 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   onLineSelection,
   onAddAnnotation,
   onSelectAnnotation,
+  onDeleteAnnotation,
 }) => {
   const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const [toolbarState, setToolbarState] = useState<ToolbarState | null>(null);
   const [commentText, setCommentText] = useState('');
   const [suggestedCode, setSuggestedCode] = useState('');
+  const [copied, setCopied] = useState(false);
   const lastMousePosition = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   // Track mouse position continuously for toolbar placement
@@ -45,11 +48,38 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     lastMousePosition.current = { x: e.clientX, y: e.clientY };
   }, []);
 
+  // Clear pending selection when file changes
+  const prevFilePathRef = useRef(filePath);
+  useEffect(() => {
+    if (prevFilePathRef.current !== filePath) {
+      prevFilePathRef.current = filePath;
+      onLineSelection(null); // Clear selection when switching files
+    }
+  }, [filePath, onLineSelection]);
+
+  // Scroll to selected annotation when it changes
+  useEffect(() => {
+    if (!selectedAnnotationId || !containerRef.current) return;
+
+    // Small delay to allow render after file switch
+    const timeoutId = setTimeout(() => {
+      const annotationEl = containerRef.current?.querySelector(
+        `[data-annotation-id="${selectedAnnotationId}"]`
+      );
+      if (annotationEl) {
+        annotationEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 100);
+
+    return () => clearTimeout(timeoutId);
+  }, [selectedAnnotationId]);
+
   // Map annotations to @pierre/diffs format
+  // Place annotation under the last line of the range (GitHub-style)
   const lineAnnotations = useMemo(() => {
     return annotations.map(ann => ({
       side: ann.side === 'new' ? 'additions' : 'deletions' as const,
-      lineNumber: ann.lineStart,
+      lineNumber: ann.lineEnd,
       metadata: {
         annotationId: ann.id,
         type: ann.type,
@@ -126,7 +156,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 
     return (
       <div
-        className="review-comment"
+        className={`review-comment ${meta.type}`}
+        data-annotation-id={meta.annotationId}
         onClick={() => onSelectAnnotation(meta.annotationId)}
       >
         <div className="review-comment-header">
@@ -134,6 +165,18 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
             {meta.type}
           </span>
           {meta.author && <span>{meta.author}</span>}
+          <button
+            className="review-comment-delete"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDeleteAnnotation(meta.annotationId);
+            }}
+            title="Delete annotation"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
         {meta.text && (
           <div className="review-comment-body">{meta.text}</div>
@@ -143,7 +186,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         )}
       </div>
     );
-  }, [onSelectAnnotation]);
+  }, [onSelectAnnotation, onDeleteAnnotation]);
 
   // Store hovered line for the hover utility
   const [hoveredLine, setHoveredLine] = useState<{ lineNumber: number; side: 'deletions' | 'additions' } | null>(null);
@@ -181,13 +224,43 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   return (
     <div ref={containerRef} className="h-full overflow-auto relative" onMouseMove={handleMouseMove}>
       {/* File header */}
-      <div className="sticky top-0 z-10 px-4 py-2 bg-card/95 backdrop-blur border-b border-border">
+      <div className="sticky top-0 z-10 px-4 py-2 bg-card/95 backdrop-blur border-b border-border flex items-center justify-between">
         <span className="font-mono text-sm text-foreground">{filePath}</span>
+        <button
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(patch);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 2000);
+            } catch (err) {
+              console.error('Failed to copy:', err);
+            }
+          }}
+          className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted transition-colors flex items-center gap-1"
+          title="Copy this file's diff"
+        >
+          {copied ? (
+            <>
+              <svg className="w-3.5 h-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+              Copied!
+            </>
+          ) : (
+            <>
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+              Copy Diff
+            </>
+          )}
+        </button>
       </div>
 
       {/* Diff content */}
       <div className="p-4">
         <PatchDiff
+          key={filePath} // Force remount on file change to reset internal state
           patch={patch}
           options={{
             theme: pierreTheme,

@@ -158,21 +158,68 @@ diffs-container {
 
 /* Review comment thread styling */
 .review-comment {
-  background: var(--card);
+  position: relative;
+  background: var(--popover);
   border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
   border-radius: var(--radius);
   padding: 0.75rem;
-  font-size: 0.875rem;
-  margin: 0.5rem 0;
+  padding-left: 1rem;
+  font-size: 0.8125rem;
+  margin: 0.75rem 0;
+  margin-left: -0.5rem;
+  box-shadow:
+    0 4px 12px -2px rgba(0, 0, 0, 0.15),
+    0 2px 4px -1px rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.review-comment:hover {
+  transform: translateX(2px);
+  box-shadow:
+    0 6px 16px -2px rgba(0, 0, 0, 0.2),
+    0 3px 6px -1px rgba(0, 0, 0, 0.12);
+}
+
+/* Color-coded left border by type */
+.review-comment.comment {
+  border-left-color: var(--primary);
+}
+
+.review-comment.suggestion {
+  border-left-color: var(--success);
+}
+
+.review-comment.concern {
+  border-left-color: var(--warning);
 }
 
 .review-comment-header {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-bottom: 0.5rem;
-  font-size: 0.75rem;
+  margin-bottom: 0.375rem;
+  font-size: 0.6875rem;
   color: var(--muted-foreground);
+}
+
+.review-comment-delete {
+  margin-left: auto;
+  padding: 0.25rem;
+  border-radius: 0.25rem;
+  color: var(--muted-foreground);
+  opacity: 0;
+  transition: opacity 150ms, color 150ms, background 150ms;
+}
+
+.review-comment:hover .review-comment-delete {
+  opacity: 1;
+}
+
+.review-comment-delete:hover {
+  color: var(--destructive);
+  background: var(--destructive) / 0.1;
 }
 
 .review-comment-body {
@@ -186,10 +233,9 @@ diffs-container {
   align-items: center;
   padding: 0.125rem 0.5rem;
   border-radius: 9999px;
-  font-size: 0.625rem;
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
   font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.025em;
 }
 
 .annotation-badge.comment {
@@ -239,10 +285,9 @@ diffs-container {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.375rem 0.75rem;
+  padding: 0.25rem 0.5rem;
   border-radius: var(--radius-sm);
-  font-size: 0.8125rem;
-  font-family: var(--font-mono);
+  font-size: 0.75rem;
   cursor: pointer;
   color: var(--muted-foreground);
 }
@@ -257,11 +302,16 @@ diffs-container {
   color: var(--primary-foreground);
 }
 
-.file-tree-item .file-stats {
-  margin-left: auto;
-  display: flex;
-  gap: 0.375rem;
-  font-size: 0.6875rem;
+.file-tree-item.has-annotations {
+  background: var(--primary) / 0.08;
+}
+
+.file-tree-item.has-annotations:hover {
+  background: var(--muted);
+}
+
+.file-tree-item.active.has-annotations {
+  background: var(--primary);
 }
 
 .file-tree-item .additions {
@@ -270,6 +320,12 @@ diffs-container {
 
 .file-tree-item .deletions {
   color: var(--destructive);
+}
+
+.file-tree-item.active .additions,
+.file-tree-item.active .deletions {
+  color: var(--primary-foreground);
+  opacity: 0.8;
 }
 
 /* Annotation toolbar for code review */
