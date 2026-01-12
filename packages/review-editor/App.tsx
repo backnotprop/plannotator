@@ -562,6 +562,7 @@ const ReviewApp: React.FC = () => {
               onTaterModeChange={() => {}}
               onIdentityChange={handleIdentityChange}
               origin={origin}
+              mode="review"
             />
 
             {/* Panel toggle */}
