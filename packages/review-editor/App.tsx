@@ -26,7 +26,7 @@ interface DiffData {
   files: DiffFile[];
   rawPatch: string;
   gitRef: string;
-  origin?: 'opencode';
+  origin?: 'opencode' | 'claude-code';
 }
 
 // Simple diff parser to extract files from unified diff
@@ -128,7 +128,7 @@ const ReviewApp: React.FC = () => {
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
-  const [origin, setOrigin] = useState<'opencode' | null>(null);
+  const [origin, setOrigin] = useState<'opencode' | 'claude-code' | null>(null);
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
@@ -177,7 +177,7 @@ const ReviewApp: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { rawPatch: string; gitRef: string; origin?: 'opencode' }) => {
+      .then((data: { rawPatch: string; gitRef: string; origin?: 'opencode' | 'claude-code' }) => {
         const apiFiles = parseDiffToFiles(data.rawPatch);
         setDiffData({
           files: apiFiles,
@@ -449,7 +449,7 @@ const ReviewApp: React.FC = () => {
               )}
             </button>
 
-            {origin === 'opencode' ? (
+            {origin ? (
               <button
                 onClick={handleSendFeedback}
                 disabled={isSendingFeedback}
@@ -458,7 +458,7 @@ const ReviewApp: React.FC = () => {
                     ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
                     : 'bg-success text-success-foreground hover:opacity-90'
                 }`}
-                title="Send feedback to OpenCode"
+                title="Send feedback"
               >
                 <span>{isSendingFeedback ? 'Sending...' : 'Send Feedback'}</span>
               </button>

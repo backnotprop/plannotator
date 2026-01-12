@@ -1,88 +1,151 @@
 /**
- * Plannotator Ephemeral Server for Claude Code
+ * Plannotator CLI for Claude Code
  *
- * Spawned by ExitPlanMode hook to serve Plannotator UI and handle approve/deny decisions.
- * Supports both local and remote sessions (SSH, devcontainer).
+ * Supports two modes:
+ *
+ * 1. Plan Review (default, no args):
+ *    - Spawned by ExitPlanMode hook
+ *    - Reads hook event from stdin, extracts plan content
+ *    - Serves UI, returns approve/deny decision to stdout
+ *
+ * 2. Code Review (`plannotator review`):
+ *    - Triggered by /review slash command
+ *    - Runs git diff, opens review UI
+ *    - Outputs feedback to stdout (captured by slash command)
  *
  * Environment variables:
  *   PLANNOTATOR_REMOTE - Set to "1" or "true" for remote mode (preferred)
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
- *
- * Reads hook event from stdin, extracts plan content, serves UI, returns decision.
  */
 
 import {
   startPlannotatorServer,
   handleServerReady,
 } from "@plannotator/server";
+import {
+  startReviewServer,
+  handleReviewServerReady,
+} from "@plannotator/server/review";
 
 // Embed the built HTML at compile time
 // @ts-ignore - Bun import attribute for text
-import indexHtml from "../dist/index.html" with { type: "text" };
-const htmlContent = indexHtml as unknown as string;
+import planHtml from "../dist/index.html" with { type: "text" };
+const planHtmlContent = planHtml as unknown as string;
 
-// Read hook event from stdin
-const eventJson = await Bun.stdin.text();
+// @ts-ignore - Bun import attribute for text
+import reviewHtml from "../dist/review.html" with { type: "text" };
+const reviewHtmlContent = reviewHtml as unknown as string;
 
-let planContent = "";
-try {
-  const event = JSON.parse(eventJson);
-  planContent = event.tool_input?.plan || "";
-} catch {
-  console.error("Failed to parse hook event from stdin");
-  process.exit(1);
-}
+// Check for subcommand
+const args = process.argv.slice(2);
 
-if (!planContent) {
-  console.error("No plan content in hook event");
-  process.exit(1);
-}
+if (args[0] === "review") {
+  // ============================================
+  // CODE REVIEW MODE
+  // ============================================
 
-// Start the shared server
-const origin = "claude-code";
+  // Run git diff to get unstaged changes
+  const proc = Bun.spawn(["git", "diff"], { stdout: "pipe", stderr: "pipe" });
+  const rawPatch = await new Response(proc.stdout).text();
+  const stderr = await new Response(proc.stderr).text();
 
-const server = await startPlannotatorServer({
-  plan: planContent,
-  origin,
-  htmlContent,
-  onReady: (url, isRemote, port) => {
-    handleServerReady(url, isRemote, port);
-  },
-});
+  if (stderr) {
+    console.error(stderr.trim());
+  }
 
-// Wait for user decision (blocks until approve/deny)
-const result = await server.waitForDecision();
+  if (!rawPatch.trim()) {
+    console.log("No changes to review.");
+    process.exit(0);
+  }
 
-// Give browser time to receive response and update UI
-await Bun.sleep(1500);
+  // Start review server
+  const server = await startReviewServer({
+    rawPatch,
+    gitRef: "working tree",
+    origin: "claude-code",
+    htmlContent: reviewHtmlContent,
+    onReady: handleReviewServerReady,
+  });
 
-// Cleanup
-server.stop();
+  // Wait for user feedback
+  const result = await server.waitForDecision();
 
-// Output JSON for PermissionRequest hook decision control
-if (result.approved) {
-  console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PermissionRequest",
-        decision: {
-          behavior: "allow",
-        },
-      },
-    })
-  );
+  // Give browser time to receive response and update UI
+  await Bun.sleep(1500);
+
+  // Cleanup
+  server.stop();
+
+  // Output feedback (captured by slash command)
+  console.log(result.feedback || "No feedback provided.");
+  process.exit(0);
+
 } else {
-  console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PermissionRequest",
-        decision: {
-          behavior: "deny",
-          message: result.feedback || "Plan changes requested",
-        },
-      },
-    })
-  );
-}
+  // ============================================
+  // PLAN REVIEW MODE (default)
+  // ============================================
 
-process.exit(0);
+  // Read hook event from stdin
+  const eventJson = await Bun.stdin.text();
+
+  let planContent = "";
+  try {
+    const event = JSON.parse(eventJson);
+    planContent = event.tool_input?.plan || "";
+  } catch {
+    console.error("Failed to parse hook event from stdin");
+    process.exit(1);
+  }
+
+  if (!planContent) {
+    console.error("No plan content in hook event");
+    process.exit(1);
+  }
+
+  // Start the plan review server
+  const server = await startPlannotatorServer({
+    plan: planContent,
+    origin: "claude-code",
+    htmlContent: planHtmlContent,
+    onReady: (url, isRemote, port) => {
+      handleServerReady(url, isRemote, port);
+    },
+  });
+
+  // Wait for user decision (blocks until approve/deny)
+  const result = await server.waitForDecision();
+
+  // Give browser time to receive response and update UI
+  await Bun.sleep(1500);
+
+  // Cleanup
+  server.stop();
+
+  // Output JSON for PermissionRequest hook decision control
+  if (result.approved) {
+    console.log(
+      JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "PermissionRequest",
+          decision: {
+            behavior: "allow",
+          },
+        },
+      })
+    );
+  } else {
+    console.log(
+      JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "PermissionRequest",
+          decision: {
+            behavior: "deny",
+            message: result.feedback || "Plan changes requested",
+          },
+        },
+      })
+    );
+  }
+
+  process.exit(0);
+}

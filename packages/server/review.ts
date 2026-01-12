@@ -26,8 +26,8 @@ export interface ReviewServerOptions {
   gitRef: string;
   /** HTML content to serve for the UI */
   htmlContent: string;
-  /** Origin identifier (e.g., "opencode") for UI customization */
-  origin?: "opencode";
+  /** Origin identifier for UI customization */
+  origin?: "opencode" | "claude-code";
   /** Called when server starts with the URL, remote status, and port */
   onReady?: (url: string, isRemote: boolean, port: number) => void;
 }

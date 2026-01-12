@@ -100,6 +100,28 @@ if ($userPath -notlike "*$INSTALL_DIR*") {
     Write-Output "  `$env:Path += ';$INSTALL_DIR'"
 }
 
+# Install /review slash command
+$claudeCommandsDir = "$env:USERPROFILE\.claude\commands"
+New-Item -ItemType Directory -Force -Path $claudeCommandsDir | Out-Null
+
+$reviewCommand = @"
+---
+description: Open interactive code review for current changes
+allowed-tools: Bash(plannotator:*)
+---
+
+## Code Review Feedback
+
+!``plannotator review``
+
+## Your task
+
+Address the code review feedback above. The user has reviewed your changes in the Plannotator UI and provided specific annotations and comments.
+"@
+
+Set-Content -Path "$claudeCommandsDir\plannotator-review.md" -Value $reviewCommand -Encoding UTF8
+Write-Output "Installed /plannotator-review command to $claudeCommandsDir\plannotator-review.md"
+
 Write-Output ""
 Write-Output "Test the install:"
 Write-Output '  echo ''{"tool_input":{"plan":"# Test Plan\\n\\nHello world"}}'' | plannotator'
@@ -107,4 +129,6 @@ Write-Output ""
 Write-Output "Then install the Claude Code plugin:"
 Write-Output "  /plugin marketplace add backnotprop/plannotator"
 Write-Output "  /plugin install plannotator@plannotator"
+Write-Output ""
+Write-Output "The /plannotator-review command is ready to use!"
 Write-Output ""

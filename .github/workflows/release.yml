@@ -23,7 +23,9 @@ jobs:
         run: bun install
 
       - name: Build UI
-        run: bun run build:hook
+        run: |
+          bun run build:review
+          bun run build:hook
 
       - name: Compile binaries (cross-compile all targets)
         run: |

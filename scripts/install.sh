@@ -75,6 +75,27 @@ fi
 # Clear any cached OpenCode plugin to force fresh download on next run
 rm -rf ~/.cache/opencode/node_modules/@plannotator ~/.bun/install/cache/@plannotator 2>/dev/null
 
+# Install /review slash command
+CLAUDE_COMMANDS_DIR="$HOME/.claude/commands"
+mkdir -p "$CLAUDE_COMMANDS_DIR"
+
+cat > "$CLAUDE_COMMANDS_DIR/plannotator-review.md" << 'COMMAND_EOF'
+---
+description: Open interactive code review for current changes
+allowed-tools: Bash(plannotator:*)
+---
+
+## Code Review Feedback
+
+!`plannotator review`
+
+## Your task
+
+Address the code review feedback above. The user has reviewed your changes in the Plannotator UI and provided specific annotations and comments.
+COMMAND_EOF
+
+echo "Installed /plannotator-review command to ${CLAUDE_COMMANDS_DIR}/plannotator-review.md"
+
 echo ""
 echo "=========================================="
 echo "  USING OPENCODE? YOU DON'T NEED THIS!"
@@ -93,3 +114,5 @@ echo ""
 echo "Install the Claude Code plugin:"
 echo "  /plugin marketplace add backnotprop/plannotator"
 echo "  /plugin install plannotator@plannotator"
+echo ""
+echo "The /plannotator-review command is ready to use!"

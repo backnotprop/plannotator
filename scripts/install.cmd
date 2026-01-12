@@ -127,6 +127,27 @@ if !ERRORLEVEL! neq 0 (
     echo   set PATH=%%PATH%%;!INSTALL_DIR!
 )
 
+REM Install /review slash command
+set "CLAUDE_COMMANDS_DIR=%USERPROFILE%\.claude\commands"
+if not exist "!CLAUDE_COMMANDS_DIR!" mkdir "!CLAUDE_COMMANDS_DIR!"
+
+(
+echo ---
+echo description: Open interactive code review for current changes
+echo allowed-tools: Bash^(plannotator:*^)
+echo ---
+echo.
+echo ## Code Review Feedback
+echo.
+echo !`plannotator review`
+echo.
+echo ## Your task
+echo.
+echo Address the code review feedback above. The user has reviewed your changes in the Plannotator UI and provided specific annotations and comments.
+) > "!CLAUDE_COMMANDS_DIR!\plannotator-review.md"
+
+echo Installed /plannotator-review command to !CLAUDE_COMMANDS_DIR!\plannotator-review.md
+
 echo.
 echo Test the install:
 echo   echo {"tool_input":{"plan":"# Test Plan\\n\\nHello world"}} ^| plannotator
@@ -134,5 +155,7 @@ echo.
 echo Then install the Claude Code plugin:
 echo   /plugin marketplace add backnotprop/plannotator
 echo   /plugin install plannotator@plannotator
+echo.
+echo The /plannotator-review command is ready to use!
 echo.
 exit /b 0
