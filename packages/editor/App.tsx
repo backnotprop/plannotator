@@ -604,12 +604,12 @@ const App: React.FC = () => {
                       ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
                       : 'bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30'
                   }`}
-                  title="Deny with Feedback"
+                  title="Send Feedback"
                 >
                   <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                   </svg>
-                  <span className="hidden md:inline">{isSubmitting ? 'Sending...' : 'Deny with Feedback'}</span>
+                  <span className="hidden md:inline">{isSubmitting ? 'Sending...' : 'Send Feedback'}</span>
                 </button>
 
                 <div className="relative group/approve">
@@ -748,7 +748,7 @@ const App: React.FC = () => {
           message={<>{agentName} doesn't yet support feedback on approval. Your {annotations.length} annotation{annotations.length !== 1 ? 's' : ''} will be lost.</>}
           subMessage={
             <>
-              To send feedback, use <strong>Deny with Feedback</strong> instead.
+              To send feedback, use <strong>Send Feedback</strong> instead.
               <br /><br />
               Want this feature? Upvote these issues:
               <br />
