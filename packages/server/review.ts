@@ -26,6 +26,8 @@ export interface ReviewServerOptions {
   gitRef: string;
   /** HTML content to serve for the UI */
   htmlContent: string;
+  /** Origin identifier (e.g., "opencode") for UI customization */
+  origin?: "opencode";
   /** Called when server starts with the URL, remote status, and port */
   onReady?: (url: string, isRemote: boolean, port: number) => void;
 }
@@ -41,6 +43,7 @@ export interface ReviewServerResult {
   waitForDecision: () => Promise<{
     feedback: string;
     annotations: unknown[];
+    agentSwitch?: string;
   }>;
   /** Stop the server */
   stop: () => void;
@@ -62,7 +65,7 @@ const RETRY_DELAY_MS = 500;
 export async function startReviewServer(
   options: ReviewServerOptions
 ): Promise<ReviewServerResult> {
-  const { rawPatch, gitRef, htmlContent, onReady } = options;
+  const { rawPatch, gitRef, htmlContent, origin, onReady } = options;
 
   const isRemote = isRemoteSession();
   const configuredPort = getServerPort();
@@ -71,10 +74,12 @@ export async function startReviewServer(
   let resolveDecision: (result: {
     feedback: string;
     annotations: unknown[];
+    agentSwitch?: string;
   }) => void;
   const decisionPromise = new Promise<{
     feedback: string;
     annotations: unknown[];
+    agentSwitch?: string;
   }>((resolve) => {
     resolveDecision = resolve;
   });
@@ -95,6 +100,7 @@ export async function startReviewServer(
             return Response.json({
               rawPatch,
               gitRef,
+              origin,
             });
           }
 
@@ -144,11 +150,13 @@ export async function startReviewServer(
               const body = (await req.json()) as {
                 feedback: string;
                 annotations: unknown[];
+                agentSwitch?: string;
               };
 
               resolveDecision({
                 feedback: body.feedback || "",
                 annotations: body.annotations || [],
+                agentSwitch: body.agentSwitch,
               });
 
               return Response.json({ ok: true });

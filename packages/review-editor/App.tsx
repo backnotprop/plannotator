@@ -2,8 +2,10 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { ThemeProvider, useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { ModeToggle } from '@plannotator/ui/components/ModeToggle';
 import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
+import { Settings } from '@plannotator/ui/components/Settings';
 import { storage } from '@plannotator/ui/utils/storage';
 import { getIdentity } from '@plannotator/ui/utils/identity';
+import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata } from '@plannotator/ui/types';
 import { DiffViewer } from './components/DiffViewer';
 import { ReviewPanel } from './components/ReviewPanel';
@@ -24,6 +26,7 @@ interface DiffData {
   files: DiffFile[];
   rawPatch: string;
   gitRef: string;
+  origin?: 'opencode';
 }
 
 // Simple diff parser to extract files from unified diff
@@ -125,6 +128,9 @@ const ReviewApp: React.FC = () => {
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
+  const [origin, setOrigin] = useState<'opencode' | null>(null);
+  const [isSendingFeedback, setIsSendingFeedback] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
 
   const identity = useMemo(() => getIdentity(), []);
 
@@ -164,16 +170,35 @@ const ReviewApp: React.FC = () => {
     return annotations.filter(a => a.filePath === activeFile.path);
   }, [annotations, files, activeFileIndex]);
 
-  // Load demo content
+  // Load diff content - try API first, fall back to demo
   useEffect(() => {
-    const demoFiles = parseDiffToFiles(DEMO_DIFF);
-    setDiffData({
-      files: demoFiles,
-      rawPatch: DEMO_DIFF,
-      gitRef: 'demo',
-    });
-    setFiles(demoFiles);
-    setIsLoading(false);
+    fetch('/api/diff')
+      .then(res => {
+        if (!res.ok) throw new Error('Not in API mode');
+        return res.json();
+      })
+      .then((data: { rawPatch: string; gitRef: string; origin?: 'opencode' }) => {
+        const apiFiles = parseDiffToFiles(data.rawPatch);
+        setDiffData({
+          files: apiFiles,
+          rawPatch: data.rawPatch,
+          gitRef: data.gitRef,
+          origin: data.origin,
+        });
+        setFiles(apiFiles);
+        if (data.origin) setOrigin(data.origin);
+      })
+      .catch(() => {
+        // Not in API mode - use demo content
+        const demoFiles = parseDiffToFiles(DEMO_DIFF);
+        setDiffData({
+          files: demoFiles,
+          rawPatch: DEMO_DIFF,
+          gitRef: 'demo',
+        });
+        setFiles(demoFiles);
+      })
+      .finally(() => setIsLoading(false));
   }, []);
 
   // Handle diff style change
@@ -223,6 +248,13 @@ const ReviewApp: React.FC = () => {
       setSelectedAnnotationId(null);
     }
   }, [selectedAnnotationId]);
+
+  // Handle identity change - update author on existing annotations
+  const handleIdentityChange = useCallback((oldIdentity: string, newIdentity: string) => {
+    setAnnotations(prev => prev.map(ann =>
+      ann.author === oldIdentity ? { ...ann, author: newIdentity } : ann
+    ));
+  }, []);
 
   // Switch file - clears pending selection to avoid invalid line ranges
   const handleFileSwitch = useCallback((index: number) => {
@@ -287,6 +319,40 @@ const ReviewApp: React.FC = () => {
     }
   }, [annotations, files]);
 
+  // Send feedback to OpenCode via API
+  const handleSendFeedback = useCallback(async () => {
+    if (annotations.length === 0) {
+      setShowNoAnnotationsDialog(true);
+      return;
+    }
+    setIsSendingFeedback(true);
+    try {
+      const feedback = exportReviewFeedback(annotations, files);
+      const agentSwitchSettings = getAgentSwitchSettings();
+      const effectiveAgent = getEffectiveAgentName(agentSwitchSettings);
+
+      const res = await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          feedback,
+          annotations,
+          ...(effectiveAgent && { agentSwitch: effectiveAgent }),
+        }),
+      });
+      if (res.ok) {
+        setSubmitted(true);
+      } else {
+        throw new Error('Failed to send');
+      }
+    } catch (err) {
+      console.error('Failed to send feedback:', err);
+      setCopyFeedback('Failed to send');
+      setTimeout(() => setCopyFeedback(null), 2000);
+      setIsSendingFeedback(false);
+    }
+  }, [annotations, files]);
+
   const activeFile = files[activeFileIndex];
   const feedbackMarkdown = useMemo(() =>
     exportReviewFeedback(annotations, files),
@@ -328,6 +394,11 @@ const ReviewApp: React.FC = () => {
             <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-secondary/15 text-secondary hidden md:inline">
               Code Review
             </span>
+            {origin && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-zinc-500/20 text-zinc-400 hidden md:inline">
+                OpenCode
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-1 md:gap-2">
@@ -378,43 +449,53 @@ const ReviewApp: React.FC = () => {
               )}
             </button>
 
-            <button
-              onClick={handleCopyFeedback}
-              className="px-2 py-1 md:px-2.5 rounded-md text-xs font-medium bg-muted hover:bg-muted/80 transition-colors flex items-center gap-1.5"
-              title="Copy feedback for LLM"
-            >
-              {copyFeedback === 'Feedback copied!' ? (
-                <>
-                  <svg className="w-3.5 h-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                  <span className="hidden md:inline">Copied!</span>
-                </>
-              ) : (
-                <>
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  <span className="hidden md:inline">Copy Feedback</span>
-                </>
-              )}
-            </button>
+            {origin === 'opencode' ? (
+              <button
+                onClick={handleSendFeedback}
+                disabled={isSendingFeedback}
+                className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-colors ${
+                  isSendingFeedback
+                    ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
+                    : 'bg-success text-success-foreground hover:opacity-90'
+                }`}
+                title="Send feedback to OpenCode"
+              >
+                <span>{isSendingFeedback ? 'Sending...' : 'Send Feedback'}</span>
+              </button>
+            ) : (
+              <button
+                onClick={handleCopyFeedback}
+                className="px-2 py-1 md:px-2.5 rounded-md text-xs font-medium bg-muted hover:bg-muted/80 transition-colors flex items-center gap-1.5"
+                title="Copy feedback for LLM"
+              >
+                {copyFeedback === 'Feedback copied!' ? (
+                  <>
+                    <svg className="w-3.5 h-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span className="hidden md:inline">Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <span className="hidden md:inline">Copy Feedback</span>
+                  </>
+                )}
+              </button>
+            )}
 
             <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
 
             {/* Utilities */}
             <ModeToggle />
-
-            {/* Settings placeholder */}
-            <button
-              className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              title="Settings"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </button>
+            <Settings
+              taterMode={false}
+              onTaterModeChange={() => {}}
+              onIdentityChange={handleIdentityChange}
+              origin={origin}
+            />
 
             {/* Panel toggle */}
             <button
@@ -535,6 +616,37 @@ const ReviewApp: React.FC = () => {
           message="You haven't made any annotations yet. There's nothing to copy."
           variant="info"
         />
+
+        {/* Completion overlay - shown after sending feedback */}
+        {submitted && (
+          <div className="fixed inset-0 z-[100] bg-background flex items-center justify-center">
+            <div className="text-center space-y-6 max-w-md px-8">
+              <div className="mx-auto w-16 h-16 rounded-full flex items-center justify-center bg-success/20 text-success">
+                <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+
+              <div className="space-y-2">
+                <h2 className="text-xl font-semibold text-foreground">
+                  Feedback Sent
+                </h2>
+                <p className="text-muted-foreground">
+                  OpenCode will address your review feedback.
+                </p>
+              </div>
+
+              <div className="pt-4 border-t border-border space-y-2">
+                <p className="text-sm text-muted-foreground">
+                  You can close this tab and return to <span className="text-foreground font-medium">OpenCode</span>.
+                </p>
+                <p className="text-xs text-muted-foreground/60">
+                  Your feedback has been sent.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </ThemeProvider>
   );

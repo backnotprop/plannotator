@@ -17,10 +17,18 @@ import {
   startPlannotatorServer,
   handleServerReady,
 } from "@plannotator/server";
+import {
+  startReviewServer,
+  handleReviewServerReady,
+} from "@plannotator/server/review";
 
 // @ts-ignore - Bun import attribute for text
 import indexHtml from "./plannotator.html" with { type: "text" };
 const htmlContent = indexHtml as unknown as string;
+
+// @ts-ignore - Bun import attribute for text
+import reviewHtml from "./review-editor.html" with { type: "text" };
+const reviewHtmlContent = reviewHtml as unknown as string;
 
 export const PlannotatorPlugin: Plugin = async (ctx) => {
   return {
@@ -40,6 +48,86 @@ based on their feedback and call submit_plan again.
 
 Do NOT proceed with implementation until your plan is approved.
 `);
+    },
+
+    // Listen for /plannotator-review command
+    event: async ({ event }) => {
+      // Check for command execution event
+      const isCommandEvent =
+        event.type === "command.executed" ||
+        event.type === "tui.command.execute";
+
+      // @ts-ignore - Event structure: event.properties.name for command.executed
+      const commandName = event.properties?.name || event.command || event.payload?.name;
+      const isReviewCommand = commandName === "plannotator-review";
+
+      if (isCommandEvent && isReviewCommand) {
+        ctx.client.app.log({
+          level: "info",
+          message: "Opening code review UI...",
+        });
+
+        // Execute git diff (unstaged changes)
+        const proc = Bun.spawn(["git", "diff"], { stdout: "pipe" });
+        const rawPatch = await new Response(proc.stdout).text();
+
+        if (!rawPatch.trim()) {
+          ctx.client.app.log({
+            level: "warn",
+            message: "No changes to review",
+          });
+          return;
+        }
+
+        const server = await startReviewServer({
+          rawPatch,
+          gitRef: "working tree",
+          origin: "opencode",
+          htmlContent: reviewHtmlContent,
+          onReady: handleReviewServerReady,
+        });
+
+        const result = await server.waitForDecision();
+        await Bun.sleep(1500);
+        server.stop();
+
+        // Send feedback back to the session if provided
+        if (result.feedback) {
+          // Check agent switch setting (defaults to 'build' if not set)
+          const shouldSwitchAgent = result.agentSwitch && result.agentSwitch !== 'disabled';
+          const targetAgent = result.agentSwitch || 'build';
+
+          if (shouldSwitchAgent) {
+            // Switch TUI display to target agent
+            try {
+              await ctx.client.tui.executeCommand({
+                body: { command: "agent_cycle" },
+              });
+            } catch {
+              // Silently fail
+            }
+          }
+
+          try {
+            // @ts-ignore - Event may have sessionId or sessionID
+            const sessionId = event.sessionId || event.sessionID;
+            await ctx.client.session.prompt({
+              path: { id: sessionId },
+              body: {
+                ...(shouldSwitchAgent && { agent: targetAgent }),
+                parts: [
+                  {
+                    type: "text",
+                    text: `# Code Review Feedback\n\n${result.feedback}`,
+                  },
+                ],
+              },
+            });
+          } catch {
+            // Session may not be available
+          }
+        }
+      }
     },
 
     tool: {
