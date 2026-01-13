@@ -280,7 +280,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
               <span className="text-xs text-muted-foreground">
                 {toolbarState.range.start === toolbarState.range.end
                   ? `Line ${toolbarState.range.start}`
-                  : `Lines ${toolbarState.range.start}-${toolbarState.range.end}`}
+                  : `Lines ${Math.min(toolbarState.range.start, toolbarState.range.end)}-${Math.max(toolbarState.range.start, toolbarState.range.end)}`}
               </span>
               <button
                 onClick={handleCancel}

@@ -26,6 +26,7 @@ import {
   startReviewServer,
   handleReviewServerReady,
 } from "@plannotator/server/review";
+import { getGitContext, runGitDiff } from "@plannotator/server/git";
 
 // Embed the built HTML at compile time
 // @ts-ignore - Bun import attribute for text
@@ -44,14 +45,14 @@ if (args[0] === "review") {
   // CODE REVIEW MODE
   // ============================================
 
-  // Run git diff to get unstaged changes
-  const proc = Bun.spawn(["git", "diff"], { stdout: "pipe", stderr: "pipe" });
-  const rawPatch = await new Response(proc.stdout).text();
-  const stderr = await new Response(proc.stderr).text();
+  // Get git context (branches, available diff options)
+  const gitContext = await getGitContext();
 
-  if (stderr) {
-    console.error(stderr.trim());
-  }
+  // Run git diff HEAD (uncommitted changes - default)
+  const { patch: rawPatch, label: gitRef } = await runGitDiff(
+    "uncommitted",
+    gitContext.defaultBranch
+  );
 
   if (!rawPatch.trim()) {
     console.log("No changes to review.");
@@ -61,8 +62,10 @@ if (args[0] === "review") {
   // Start review server
   const server = await startReviewServer({
     rawPatch,
-    gitRef: "working tree",
+    gitRef,
     origin: "claude-code",
+    diffType: "uncommitted",
+    gitContext,
     htmlContent: reviewHtmlContent,
     onReady: handleReviewServerReady,
   });

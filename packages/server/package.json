@@ -10,7 +10,8 @@
     "./review": "./review.ts",
     "./remote": "./remote.ts",
     "./browser": "./browser.ts",
-    "./storage": "./storage.ts"
+    "./storage": "./storage.ts",
+    "./git": "./git.ts"
   },
   "files": [
     "*.ts"

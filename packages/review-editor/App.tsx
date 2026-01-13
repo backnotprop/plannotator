@@ -22,11 +22,24 @@ interface DiffFile {
   deletions: number;
 }
 
+interface DiffOption {
+  id: string;
+  label: string;
+}
+
+interface GitContext {
+  currentBranch: string;
+  defaultBranch: string;
+  diffOptions: DiffOption[];
+}
+
 interface DiffData {
   files: DiffFile[];
   rawPatch: string;
   gitRef: string;
   origin?: 'opencode' | 'claude-code';
+  diffType?: string;
+  gitContext?: GitContext;
 }
 
 // Simple diff parser to extract files from unified diff
@@ -127,6 +140,9 @@ const ReviewApp: React.FC = () => {
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
   const [origin, setOrigin] = useState<'opencode' | 'claude-code' | null>(null);
+  const [diffType, setDiffType] = useState<string>('uncommitted');
+  const [gitContext, setGitContext] = useState<GitContext | null>(null);
+  const [isLoadingDiff, setIsLoadingDiff] = useState(false);
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [submitted, setSubmitted] = useState<'approved' | 'feedback' | false>(false);
@@ -177,16 +193,26 @@ const ReviewApp: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { rawPatch: string; gitRef: string; origin?: 'opencode' | 'claude-code' }) => {
+      .then((data: {
+        rawPatch: string;
+        gitRef: string;
+        origin?: 'opencode' | 'claude-code';
+        diffType?: string;
+        gitContext?: GitContext;
+      }) => {
         const apiFiles = parseDiffToFiles(data.rawPatch);
         setDiffData({
           files: apiFiles,
           rawPatch: data.rawPatch,
           gitRef: data.gitRef,
           origin: data.origin,
+          diffType: data.diffType,
+          gitContext: data.gitContext,
         });
         setFiles(apiFiles);
         if (data.origin) setOrigin(data.origin);
+        if (data.diffType) setDiffType(data.diffType);
+        if (data.gitContext) setGitContext(data.gitContext);
       })
       .catch(() => {
         // Not in API mode - use demo content
@@ -263,6 +289,40 @@ const ReviewApp: React.FC = () => {
       setActiveFileIndex(index);
     }
   }, [activeFileIndex]);
+
+  // Switch diff type (uncommitted, staged, last-commit, branch, etc.)
+  const handleDiffSwitch = useCallback(async (newDiffType: string) => {
+    if (newDiffType === diffType || newDiffType === 'separator') return;
+
+    setIsLoadingDiff(true);
+    try {
+      const res = await fetch('/api/diff/switch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ diffType: newDiffType }),
+      });
+
+      if (!res.ok) throw new Error('Failed to switch diff');
+
+      const data = await res.json() as {
+        rawPatch: string;
+        gitRef: string;
+        diffType: string;
+      };
+
+      const newFiles = parseDiffToFiles(data.rawPatch);
+      setFiles(newFiles);
+      setDiffType(data.diffType);
+      setActiveFileIndex(0);
+      setPendingSelection(null);
+      // Note: We keep existing annotations - they may still be relevant
+      // or user can clear them manually
+    } catch (err) {
+      console.error('Failed to switch diff:', err);
+    } finally {
+      setIsLoadingDiff(false);
+    }
+  }, [diffType]);
 
   // Select annotation - switches file if needed and scrolls to it
   const handleSelectAnnotation = useCallback((id: string | null) => {
@@ -603,12 +663,16 @@ const ReviewApp: React.FC = () => {
               annotations={annotations}
               viewedFiles={viewedFiles}
               enableKeyboardNav={!showExportModal}
+              diffOptions={gitContext?.diffOptions}
+              activeDiffType={diffType}
+              onSelectDiff={handleDiffSwitch}
+              isLoadingDiff={isLoadingDiff}
             />
           )}
 
           {/* Diff viewer */}
           <main className="flex-1 overflow-hidden">
-            {activeFile && (
+            {activeFile ? (
               <DiffViewer
                 patch={activeFile.patch}
                 filePath={activeFile.path}
@@ -621,6 +685,31 @@ const ReviewApp: React.FC = () => {
                 onSelectAnnotation={handleSelectAnnotation}
                 onDeleteAnnotation={handleDeleteAnnotation}
               />
+            ) : (
+              <div className="h-full flex items-center justify-center">
+                <div className="text-center space-y-3 max-w-md px-8">
+                  <div className="mx-auto w-12 h-12 rounded-full bg-muted/50 flex items-center justify-center">
+                    <svg className="w-6 h-6 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-medium text-foreground">No changes</h3>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {diffType === 'uncommitted' && "No uncommitted changes to review."}
+                      {diffType === 'staged' && "No staged changes. Stage some files with git add."}
+                      {diffType === 'unstaged' && "No unstaged changes. All changes are staged."}
+                      {diffType === 'last-commit' && "No changes in the last commit."}
+                      {diffType === 'branch' && `No changes between this branch and ${gitContext?.defaultBranch || 'main'}.`}
+                    </p>
+                  </div>
+                  {gitContext?.diffOptions && gitContext.diffOptions.length > 1 && (
+                    <p className="text-xs text-muted-foreground/60">
+                      Try selecting a different view from the dropdown.
+                    </p>
+                  )}
+                </div>
+              </div>
             )}
           </main>
 

@@ -21,6 +21,7 @@ import {
   startReviewServer,
   handleReviewServerReady,
 } from "@plannotator/server/review";
+import { getGitContext, runGitDiff } from "@plannotator/server/git";
 
 // @ts-ignore - Bun import attribute for text
 import indexHtml from "./plannotator.html" with { type: "text" };
@@ -67,17 +68,14 @@ Do NOT proceed with implementation until your plan is approved.
           message: "Opening code review UI...",
         });
 
-        // Execute git diff (unstaged changes)
-        const proc = Bun.spawn(["git", "diff"], { stdout: "pipe", stderr: "pipe" });
-        const rawPatch = await new Response(proc.stdout).text();
-        const stderr = await new Response(proc.stderr).text();
+        // Get git context (branches, available diff options)
+        const gitContext = await getGitContext();
 
-        if (stderr) {
-          ctx.client.app.log({
-            level: "error",
-            message: stderr.trim(),
-          });
-        }
+        // Run git diff HEAD (uncommitted changes - default)
+        const { patch: rawPatch, label: gitRef } = await runGitDiff(
+          "uncommitted",
+          gitContext.defaultBranch
+        );
 
         if (!rawPatch.trim()) {
           ctx.client.app.log({
@@ -89,8 +87,10 @@ Do NOT proceed with implementation until your plan is approved.
 
         const server = await startReviewServer({
           rawPatch,
-          gitRef: "working tree",
+          gitRef,
           origin: "opencode",
+          diffType: "uncommitted",
+          gitContext,
           htmlContent: reviewHtmlContent,
           onReady: handleReviewServerReady,
         });

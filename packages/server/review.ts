@@ -12,10 +12,12 @@
 import { mkdirSync } from "fs";
 import { isRemoteSession, getServerPort } from "./remote";
 import { openBrowser } from "./browser";
+import { type DiffType, type GitContext, runGitDiff } from "./git";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
 export { openBrowser } from "./browser";
+export { type DiffType, type DiffOption, type GitContext } from "./git";
 
 // --- Types ---
 
@@ -28,6 +30,10 @@ export interface ReviewServerOptions {
   htmlContent: string;
   /** Origin identifier for UI customization */
   origin?: "opencode" | "claude-code";
+  /** Current diff type being displayed */
+  diffType?: DiffType;
+  /** Git context with branch info and available diff options */
+  gitContext?: GitContext;
   /** Called when server starts with the URL, remote status, and port */
   onReady?: (url: string, isRemote: boolean, port: number) => void;
 }
@@ -65,7 +71,12 @@ const RETRY_DELAY_MS = 500;
 export async function startReviewServer(
   options: ReviewServerOptions
 ): Promise<ReviewServerResult> {
-  const { rawPatch, gitRef, htmlContent, origin, onReady } = options;
+  const { htmlContent, origin, gitContext, onReady } = options;
+
+  // Mutable state for diff switching
+  let currentPatch = options.rawPatch;
+  let currentGitRef = options.gitRef;
+  let currentDiffType: DiffType = options.diffType || "uncommitted";
 
   const isRemote = isRemoteSession();
   const configuredPort = getServerPort();
@@ -96,12 +107,48 @@ export async function startReviewServer(
           const url = new URL(req.url);
 
           // API: Get diff content
-          if (url.pathname === "/api/diff") {
+          if (url.pathname === "/api/diff" && req.method === "GET") {
             return Response.json({
-              rawPatch,
-              gitRef,
+              rawPatch: currentPatch,
+              gitRef: currentGitRef,
               origin,
+              diffType: currentDiffType,
+              gitContext,
             });
+          }
+
+          // API: Switch diff type
+          if (url.pathname === "/api/diff/switch" && req.method === "POST") {
+            try {
+              const body = (await req.json()) as { diffType: DiffType };
+              const newDiffType = body.diffType;
+
+              if (!newDiffType) {
+                return Response.json(
+                  { error: "Missing diffType" },
+                  { status: 400 }
+                );
+              }
+
+              // Run the new diff
+              const defaultBranch = gitContext?.defaultBranch || "main";
+              const result = await runGitDiff(newDiffType, defaultBranch);
+
+              // Update state
+              currentPatch = result.patch;
+              currentGitRef = result.label;
+              currentDiffType = newDiffType;
+
+              return Response.json({
+                rawPatch: currentPatch,
+                gitRef: currentGitRef,
+                diffType: currentDiffType,
+              });
+            } catch (err) {
+              const message =
+                err instanceof Error ? err.message : "Failed to switch diff";
+              return Response.json({ error: message }, { status: 500 });
+            }
           }
 
           // API: Serve images (local paths or temp uploads)
