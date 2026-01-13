@@ -93,38 +93,42 @@ Do NOT proceed with implementation until your plan is approved.
 
         // Send feedback back to the session if provided
         if (result.feedback) {
-          // Check agent switch setting (defaults to 'build' if not set)
-          const shouldSwitchAgent = result.agentSwitch && result.agentSwitch !== 'disabled';
-          const targetAgent = result.agentSwitch || 'build';
+          // @ts-ignore - Event properties contain sessionID for command.executed events
+          const sessionId = event.properties?.sessionID;
 
-          if (shouldSwitchAgent) {
-            // Switch TUI display to target agent
+          // Only try to send feedback if we have a valid session ID
+          if (sessionId) {
+            // Check agent switch setting (defaults to 'build' if not set)
+            const shouldSwitchAgent = result.agentSwitch && result.agentSwitch !== 'disabled';
+            const targetAgent = result.agentSwitch || 'build';
+
+            if (shouldSwitchAgent) {
+              // Switch TUI display to target agent
+              try {
+                await ctx.client.tui.executeCommand({
+                  body: { command: "agent_cycle" },
+                });
+              } catch {
+                // Silently fail
+              }
+            }
+
             try {
-              await ctx.client.tui.executeCommand({
-                body: { command: "agent_cycle" },
+              await ctx.client.session.prompt({
+                path: { id: sessionId },
+                body: {
+                  ...(shouldSwitchAgent && { agent: targetAgent }),
+                  parts: [
+                    {
+                      type: "text",
+                      text: `# Code Review Feedback\n\n${result.feedback}`,
+                    },
+                  ],
+                },
               });
             } catch {
-              // Silently fail
+              // Session may not be available
             }
-          }
-
-          try {
-            // @ts-ignore - Event properties contain sessionID for command.executed events
-            const sessionId = event.properties?.sessionID;
-            await ctx.client.session.prompt({
-              path: { id: sessionId },
-              body: {
-                ...(shouldSwitchAgent && { agent: targetAgent }),
-                parts: [
-                  {
-                    type: "text",
-                    text: `# Code Review Feedback\n\n${result.feedback}`,
-                  },
-                ],
-              },
-            });
-          } catch {
-            // Session may not be available
           }
         }
       }
