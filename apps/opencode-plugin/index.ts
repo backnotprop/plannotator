@@ -68,8 +68,16 @@ Do NOT proceed with implementation until your plan is approved.
         });
 
         // Execute git diff (unstaged changes)
-        const proc = Bun.spawn(["git", "diff"], { stdout: "pipe" });
+        const proc = Bun.spawn(["git", "diff"], { stdout: "pipe", stderr: "pipe" });
         const rawPatch = await new Response(proc.stdout).text();
+        const stderr = await new Response(proc.stderr).text();
+
+        if (stderr) {
+          ctx.client.app.log({
+            level: "error",
+            message: stderr.trim(),
+          });
+        }
 
         if (!rawPatch.trim()) {
           ctx.client.app.log({
@@ -113,11 +121,14 @@ Do NOT proceed with implementation until your plan is approved.
               }
             }
 
+            // Use noReply: true to ensure message is created before we return
+            // (same pattern as submit_plan tool to avoid race conditions)
             try {
               await ctx.client.session.prompt({
                 path: { id: sessionId },
                 body: {
                   ...(shouldSwitchAgent && { agent: targetAgent }),
+                  noReply: true,
                   parts: [
                     {
                       type: "text",

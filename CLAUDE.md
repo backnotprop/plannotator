@@ -1,6 +1,6 @@
 # Plannotator
 
-A plan review UI for Claude Code that intercepts `ExitPlanMode` via hooks, letting users approve or request changes with annotated feedback.
+A plan review UI for Claude Code that intercepts `ExitPlanMode` via hooks, letting users approve or request changes with annotated feedback. Also provides code review for git diffs.
 
 ## Project Structure
 
@@ -9,15 +9,23 @@ plannotator/
 ├── apps/
 │   ├── hook/                     # Claude Code plugin
 │   │   ├── .claude-plugin/plugin.json
+│   │   ├── commands/             # Slash commands (plannotator-review.md)
 │   │   ├── hooks/hooks.json      # PermissionRequest hook config
-│   │   ├── server/index.ts       # Entry point (reads stdin, outputs decision)
-│   │   └── dist/index.html       # Built single-file app
-│   └── opencode-plugin/          # OpenCode plugin
-│       ├── index.ts              # Plugin entry with submit_plan tool
-│       └── plannotator.html      # Built single-file app (copied from hook)
+│   │   ├── server/index.ts       # Entry point (plan + review subcommand)
+│   │   └── dist/                 # Built single-file apps (index.html, review.html)
+│   ├── opencode-plugin/          # OpenCode plugin
+│   │   ├── commands/             # Slash commands (plannotator-review.md)
+│   │   ├── index.ts              # Plugin entry with submit_plan tool + review event handler
+│   │   ├── plannotator.html      # Built plan review app
+│   │   └── review-editor.html    # Built code review app
+│   └── review/                   # Standalone review server (for development)
+│       ├── index.html
+│       ├── index.tsx
+│       └── vite.config.ts
 ├── packages/
 │   ├── server/                   # Shared server implementation
 │   │   ├── index.ts              # startPlannotatorServer(), handleServerReady()
+│   │   ├── review.ts             # startReviewServer(), handleReviewServerReady()
 │   │   ├── storage.ts            # Plan saving to disk (getPlanDir, savePlan, etc.)
 │   │   ├── remote.ts             # isRemoteSession(), getServerPort()
 │   │   ├── browser.ts            # openBrowser()
@@ -28,7 +36,12 @@ plannotator/
 │   │   ├── utils/                # parser.ts, sharing.ts, storage.ts, planSave.ts, agentSwitch.ts
 │   │   ├── hooks/                # useSharing.ts
 │   │   └── types.ts
-│   └── editor/                   # Main App.tsx
+│   ├── editor/                   # Plan review App.tsx
+│   └── review-editor/            # Code review UI
+│       ├── App.tsx               # Main review app
+│       ├── components/           # DiffViewer, FileTree, ReviewPanel
+│       ├── demoData.ts           # Demo diff for standalone mode
+│       └── index.css             # Review-specific styles
 ├── .claude-plugin/marketplace.json  # For marketplace install
 └── legacy/                       # Old pre-monorepo code (reference only)
 ```
@@ -63,7 +76,7 @@ export PLANNOTATOR_REMOTE=1
 export PLANNOTATOR_PORT=9999
 ```
 
-## Hook Flow
+## Plan Review Flow
 
 ```
 Claude calls ExitPlanMode
@@ -80,7 +93,27 @@ Approve → stdout: {"hookSpecificOutput":{"decision":{"behavior":"allow"}}}
 Deny    → stdout: {"hookSpecificOutput":{"decision":{"behavior":"deny","message":"..."}}}
 ```
 
+## Code Review Flow
+
+```
+User runs /plannotator-review command
+        ↓
+Claude Code: plannotator review subcommand runs
+OpenCode: event handler intercepts command
+        ↓
+git diff captures unstaged changes
+        ↓
+Review server starts, opens browser with diff viewer
+        ↓
+User annotates code, provides feedback
+        ↓
+Send Feedback → feedback sent to agent session
+Approve → "LGTM" sent to agent session
+```
+
 ## Server API
+
+### Plan Server (`packages/server/index.ts`)
 
 | Endpoint              | Method | Purpose                                    |
 | --------------------- | ------ | ------------------------------------------ |
@@ -91,9 +124,16 @@ Deny    → stdout: {"hookSpecificOutput":{"decision":{"behavior":"deny","messag
 | `/api/upload`         | POST   | Upload image, returns temp path            |
 | `/api/obsidian/vaults`| GET    | Detect available Obsidian vaults           |
 
-**Location:** `packages/server/index.ts`
+### Review Server (`packages/server/review.ts`)
 
-Both plugins use `startPlannotatorServer()` from `packages/server`. Port is random locally or fixed (`19432`) in remote mode.
+| Endpoint              | Method | Purpose                                    |
+| --------------------- | ------ | ------------------------------------------ |
+| `/api/diff`           | GET    | Returns `{ rawPatch, gitRef, origin }`     |
+| `/api/feedback`       | POST   | Submit review (body: feedback, annotations, agentSwitch) |
+| `/api/image`          | GET    | Serve image by path query param            |
+| `/api/upload`         | POST   | Upload image, returns temp path            |
+
+Both servers use random ports locally or fixed port (`19432`) in remote mode.
 
 ## Data Types
 
@@ -213,7 +253,8 @@ Code blocks use bundled `highlight.js`. Language is extracted from fence (```rus
 bun install
 
 # Run any app
-bun run dev:hook       # Hook server
+bun run dev:hook       # Hook server (plan review)
+bun run dev:review     # Review editor (code review)
 bun run dev:portal     # Portal editor
 bun run dev:marketing  # Marketing site
 ```
@@ -222,8 +263,11 @@ bun run dev:marketing  # Marketing site
 
 ```bash
 bun run build:hook       # Single-file HTML for hook server
+bun run build:review     # Code review editor
+bun run build:opencode   # OpenCode plugin (copies HTML from hook + review)
 bun run build:portal     # Static build for share.plannotator.ai
 bun run build:marketing  # Static build for plannotator.ai
+bun run build            # Build hook + opencode (main targets)
 ```
 
 ## Test plugin locally
