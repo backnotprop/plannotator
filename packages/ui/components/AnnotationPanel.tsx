@@ -43,10 +43,10 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
       {/* Header */}
       <div className="p-3 border-b border-border/50">
         <div className="flex items-center justify-between">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
             Annotations
-          </h2>
-          <span className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
+          </span>
+          <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
             {annotations.length}
           </span>
         </div>

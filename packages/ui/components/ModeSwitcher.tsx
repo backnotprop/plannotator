@@ -44,9 +44,9 @@ export const ModeSwitcher: React.FC<ModeSwitcherProps> = ({ mode, onChange, tate
     {/* Help link */}
     <button
       onClick={() => setShowHelp(true)}
-      className="ml-2 text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+      className="ml-3 text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors"
     >
-      how does this work?
+      How does this work?
     </button>
 
     {/* Help Video Dialog */}
@@ -64,7 +64,7 @@ export const ModeSwitcher: React.FC<ModeSwitcherProps> = ({ mode, onChange, tate
             <h3 className="font-semibold text-sm">How Plannotator Works</h3>
             <button
               onClick={() => setShowHelp(false)}
-              className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              className="p-1.5 rounded-sm hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -98,7 +98,7 @@ const ModeButton: React.FC<{
 }> = ({ active, onClick, icon, label, destructive }) => (
   <button
     onClick={onClick}
-    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all ${
+    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-sm text-xs font-medium transition-all ${
       active
         ? destructive
           ? 'bg-destructive/15 text-destructive shadow-sm'

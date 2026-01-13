@@ -343,7 +343,7 @@ export const Landing: React.FC<LandingProps> = ({ onEnter }) => {
 
                 {/* Mock annotation cards */}
                 <div className="space-y-2">
-                  <div className="p-2 rounded-md border border-destructive/30 bg-destructive/5">
+                  <div className="p-2 rounded-sm border border-destructive/30 bg-destructive/5">
                     <div className="flex items-center gap-1 mb-1.5">
                       <div className="w-3 h-3 rounded bg-destructive/20" />
                       <span className="text-[9px] font-semibold text-destructive uppercase">
@@ -353,7 +353,7 @@ export const Landing: React.FC<LandingProps> = ({ onEnter }) => {
                     <div className="h-1.5 w-full bg-muted rounded" />
                   </div>
 
-                  <div className="p-2 rounded-md border border-accent/30 bg-accent/5">
+                  <div className="p-2 rounded-sm border border-accent/30 bg-accent/5">
                     <div className="flex items-center gap-1 mb-1.5">
                       <div className="w-3 h-3 rounded bg-accent/20" />
                       <span className="text-[9px] font-semibold text-accent uppercase">

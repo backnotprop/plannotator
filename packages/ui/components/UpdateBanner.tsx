@@ -135,7 +135,7 @@ export const UpdateBanner: React.FC<UpdateBannerProps> = ({ origin }) => {
             <div className="mt-3 flex items-center gap-2">
               <button
                 onClick={handleCopy}
-                className="flex-1 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:opacity-90 transition-opacity"
+                className="flex-1 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-sm hover:opacity-90 transition-opacity"
               >
                 {copied ? 'Copied!' : 'Copy install command'}
               </button>
@@ -143,7 +143,7 @@ export const UpdateBanner: React.FC<UpdateBannerProps> = ({ origin }) => {
                 href={updateInfo.releaseUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground border border-border rounded-md hover:bg-muted transition-colors"
+                className="px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground border border-border rounded-sm hover:bg-muted transition-colors"
               >
                 Notes
               </a>

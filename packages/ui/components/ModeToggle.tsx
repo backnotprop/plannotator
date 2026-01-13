@@ -20,7 +20,7 @@ export function ModeToggle() {
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+        className="p-2 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
         title="Toggle theme"
       >
         {/* Sun */}

@@ -186,11 +186,11 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           />
         </div>
       ) : (
-        <form onSubmit={handleSubmit} className="flex items-start gap-1.5 p-1.5 pl-3">
+        <form onSubmit={handleSubmit} className="flex items-center gap-1.5 p-1.5">
           <textarea
             ref={inputRef}
             rows={1}
-            className="bg-transparent text-sm min-w-44 max-w-80 max-h-32 placeholder:text-muted-foreground resize-none px-2 py-1.5 focus:outline-none focus:bg-muted/30"
+            className="bg-transparent text-sm min-w-44 max-w-80 max-h-32 placeholder:text-muted-foreground resize-none px-3 py-2 focus:outline-none focus:bg-muted/30 rounded-sm border border-transparent focus:border-border transition-colors"
             style={{ fieldSizing: "content" } as React.CSSProperties}
             placeholder="Add a comment..."
             value={inputValue}
@@ -214,14 +214,15 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           <button
             type="submit"
             disabled={!inputValue.trim() && imagePaths.length === 0}
-            className="px-[15px] py-1 text-xs font-medium rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-opacity self-stretch"
+            className="px-4 py-2 text-xs font-medium rounded-sm bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
           >
             Save
           </button>
           <button
             type="button"
             onClick={() => setStep("menu")}
-            className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            className="p-2 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            title="Cancel"
           >
             <CloseIcon small />
           </button>
@@ -272,7 +273,7 @@ const ToolbarButton: React.FC<{
   <button
     onClick={onClick}
     title={label}
-    className={`p-1.5 rounded-md transition-colors ${className}`}
+    className={`p-1.5 rounded-sm transition-colors ${className}`}
   >
     {icon}
   </button>

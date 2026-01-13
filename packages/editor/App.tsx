@@ -558,7 +558,7 @@ const App: React.FC = () => {
         {/* Tater sprites */}
         {taterMode && <TaterSpriteRunning />}
         {/* Minimal Header */}
-        <header className="h-12 flex items-center justify-between px-2 md:px-4 border-b border-border/50 bg-card/50 backdrop-blur-xl z-50">
+        <header className="py-2.5 flex items-center justify-between px-2 md:px-4 border-b border-border/50 bg-card/50 backdrop-blur-xl z-50">
           <div className="flex items-center gap-2 md:gap-3">
             <a
               href="https://plannotator.ai"
@@ -566,13 +566,13 @@ const App: React.FC = () => {
               rel="noopener noreferrer"
               className="flex items-center gap-1.5 md:gap-2 hover:opacity-80 transition-opacity"
             >
-              <span className="text-sm font-semibold tracking-tight">Plannotator</span>
+              <span className="text-sm font-semibold">Plannotator</span>
             </a>
             <a
               href="https://github.com/backnotprop/plannotator/releases"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-muted-foreground font-mono opacity-60 hidden md:inline hover:opacity-100 transition-opacity"
+              className="text-xs text-muted-foreground font-mono opacity-70 hidden md:inline hover:opacity-100 transition-opacity"
             >
               v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0'}
             </a>
@@ -599,7 +599,7 @@ const App: React.FC = () => {
                     }
                   }}
                   disabled={isSubmitting}
-                  className={`p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium transition-all ${
+                  className={`px-2.5 py-1.5 rounded-sm text-sm font-medium transition-all flex items-center gap-1.5 ${
                     isSubmitting
                       ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
                       : 'bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30'
@@ -623,7 +623,7 @@ const App: React.FC = () => {
                       }
                     }}
                     disabled={isSubmitting}
-                    className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${
+                    className={`px-2.5 py-1.5 rounded-sm text-sm font-medium transition-all ${
                       isSubmitting
                         ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
                         : origin === 'claude-code' && annotations.length > 0
@@ -652,7 +652,7 @@ const App: React.FC = () => {
 
             <button
               onClick={() => setIsPanelOpen(!isPanelOpen)}
-              className={`p-1.5 rounded-md text-xs font-medium transition-all ${
+              className={`p-2 rounded-sm text-sm font-medium transition-all ${
                 isPanelOpen
                   ? 'bg-primary/15 text-primary'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted'
@@ -665,7 +665,7 @@ const App: React.FC = () => {
 
             <button
               onClick={() => setShowExport(true)}
-              className="p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium bg-muted hover:bg-muted/80 transition-colors"
+              className="px-2.5 py-1.5 rounded-sm text-sm font-medium bg-muted hover:bg-muted/80 transition-colors flex items-center gap-1.5"
               title="Export"
             >
               <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
