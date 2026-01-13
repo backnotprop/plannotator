@@ -807,7 +807,7 @@ const App: React.FC = () => {
         )}
 
         {/* Update notification */}
-        <UpdateBanner />
+        <UpdateBanner origin={origin} />
 
         {/* Image Annotator for pasted images */}
         <ImageAnnotator
