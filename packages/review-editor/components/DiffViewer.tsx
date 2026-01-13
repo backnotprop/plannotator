@@ -19,8 +19,6 @@ interface DiffViewerProps {
 interface ToolbarState {
   position: { top: number; left: number };
   range: SelectedLineRange;
-  step: 'menu' | 'input';
-  type?: CodeAnnotationType;
 }
 
 export const DiffViewer: React.FC<DiffViewerProps> = ({
@@ -40,6 +38,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   const [toolbarState, setToolbarState] = useState<ToolbarState | null>(null);
   const [commentText, setCommentText] = useState('');
   const [suggestedCode, setSuggestedCode] = useState('');
+  const [showSuggestedCode, setShowSuggestedCode] = useState(false);
   const [copied, setCopied] = useState(false);
   const lastMousePosition = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
@@ -107,37 +106,25 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         left: mousePos.x,
       },
       range,
-      step: 'menu',
     });
     onLineSelection(range);
   }, [onLineSelection]);
 
-  // Handle toolbar menu selection
-  const handleMenuSelect = useCallback((type: CodeAnnotationType) => {
-    if (!toolbarState) return;
-
-    if (type === 'comment') {
-      setToolbarState({ ...toolbarState, step: 'input', type });
-    } else {
-      // For suggestion/concern, also show input
-      setToolbarState({ ...toolbarState, step: 'input', type });
-    }
-  }, [toolbarState]);
-
   // Handle annotation submission
   const handleSubmitAnnotation = useCallback(() => {
-    if (!toolbarState?.type) return;
+    if (!toolbarState || !commentText.trim()) return;
 
     onAddAnnotation(
-      toolbarState.type,
-      commentText || undefined,
-      toolbarState.type === 'suggestion' ? suggestedCode || undefined : undefined
+      'comment',
+      commentText,
+      suggestedCode.trim() || undefined
     );
 
     // Reset state
     setToolbarState(null);
     setCommentText('');
     setSuggestedCode('');
+    setShowSuggestedCode(false);
   }, [toolbarState, commentText, suggestedCode, onAddAnnotation]);
 
   // Handle cancel
@@ -145,6 +132,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     setToolbarState(null);
     setCommentText('');
     setSuggestedCode('');
+    setShowSuggestedCode(false);
     onLineSelection(null);
   }, [onLineSelection]);
 
@@ -156,22 +144,19 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 
     return (
       <div
-        className={`review-comment ${meta.type}`}
+        className="review-comment"
         data-annotation-id={meta.annotationId}
         onClick={() => onSelectAnnotation(meta.annotationId)}
       >
         <div className="review-comment-header">
-          <span className={`annotation-badge ${meta.type}`}>
-            {meta.type}
-          </span>
-          {meta.author && <span>{meta.author}</span>}
+          {meta.author && <span className="text-xs text-muted-foreground">{meta.author}</span>}
           <button
             className="review-comment-delete"
             onClick={(e) => {
               e.stopPropagation();
               onDeleteAnnotation(meta.annotationId);
             }}
-            title="Delete annotation"
+            title="Delete"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -182,14 +167,14 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           <div className="review-comment-body">{meta.text}</div>
         )}
         {meta.suggestedCode && (
-          <pre className="export-code-block mt-2 text-xs">{meta.suggestedCode}</pre>
+          <div className="mt-2">
+            <div className="text-[10px] text-muted-foreground mb-1">Suggested:</div>
+            <pre className="export-code-block text-xs">{meta.suggestedCode}</pre>
+          </div>
         )}
       </div>
     );
   }, [onSelectAnnotation, onDeleteAnnotation]);
-
-  // Store hovered line for the hover utility
-  const [hoveredLine, setHoveredLine] = useState<{ lineNumber: number; side: 'deletions' | 'additions' } | null>(null);
 
   // Render hover utility (+ button) - returns React element
   const renderHoverUtility = useCallback((getHoveredLine: () => { lineNumber: number; side: 'deletions' | 'additions' } | undefined) => {
@@ -278,7 +263,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         />
       </div>
 
-      {/* Annotation toolbar */}
+      {/* Annotation toolbar - single-step comment input */}
       {toolbarState && (
         <div
           className="review-toolbar"
@@ -290,92 +275,72 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
             zIndex: 1000,
           }}
         >
-          {toolbarState.step === 'menu' ? (
-            <div className="flex gap-1">
-              <button
-                onClick={() => handleMenuSelect('comment')}
-                className="review-toolbar-btn"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                </svg>
-                Comment
-              </button>
-              <button
-                onClick={() => handleMenuSelect('suggestion')}
-                className="review-toolbar-btn"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                </svg>
-                Suggestion
-              </button>
-              <button
-                onClick={() => handleMenuSelect('concern')}
-                className="review-toolbar-btn"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-                Concern
-              </button>
-              <div className="w-px h-5 bg-border/50 mx-1" />
+          <div className="w-80">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-muted-foreground">
+                {toolbarState.range.start === toolbarState.range.end
+                  ? `Line ${toolbarState.range.start}`
+                  : `Lines ${toolbarState.range.start}-${toolbarState.range.end}`}
+              </span>
               <button
                 onClick={handleCancel}
-                className="review-toolbar-btn text-muted-foreground"
+                className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                title="Cancel"
               >
-                Cancel
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
               </button>
             </div>
-          ) : (
-            <div className="w-72">
-              <div className="flex items-center gap-2 mb-2">
-                <span className={`annotation-badge ${toolbarState.type}`}>
-                  {toolbarState.type}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {toolbarState.range.start === toolbarState.range.end
-                    ? `Line ${toolbarState.range.start}`
-                    : `Lines ${toolbarState.range.start}-${toolbarState.range.end}`}
-                </span>
-              </div>
 
+            <textarea
+              value={commentText}
+              onChange={(e) => setCommentText(e.target.value)}
+              placeholder="Leave feedback..."
+              className="w-full px-3 py-2 bg-muted rounded-lg text-xs resize-none focus:outline-none focus:ring-1 focus:ring-primary/50"
+              rows={3}
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  handleCancel();
+                } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                  handleSubmitAnnotation();
+                }
+              }}
+            />
+
+            {/* Optional suggested code section */}
+            {showSuggestedCode ? (
               <textarea
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                placeholder={toolbarState.type === 'suggestion' ? 'Explain your suggestion...' : 'Add a comment...'}
-                className="w-full px-3 py-2 bg-muted rounded-lg text-xs resize-none focus:outline-none focus:ring-1 focus:ring-primary/50"
+                value={suggestedCode}
+                onChange={(e) => setSuggestedCode(e.target.value)}
+                placeholder="Suggested code..."
+                className="w-full px-3 py-2 mt-2 bg-muted rounded-lg text-xs font-mono resize-none focus:outline-none focus:ring-1 focus:ring-primary/50"
                 rows={3}
                 autoFocus
               />
+            ) : (
+              <button
+                onClick={() => setShowSuggestedCode(true)}
+                className="mt-2 text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                Add suggested code
+              </button>
+            )}
 
-              {toolbarState.type === 'suggestion' && (
-                <textarea
-                  value={suggestedCode}
-                  onChange={(e) => setSuggestedCode(e.target.value)}
-                  placeholder="Suggested code replacement..."
-                  className="w-full px-3 py-2 mt-2 bg-muted rounded-lg text-xs font-mono resize-none focus:outline-none focus:ring-1 focus:ring-primary/50"
-                  rows={3}
-                />
-              )}
-
-              <div className="flex justify-end gap-2 mt-2">
-                <button
-                  onClick={handleCancel}
-                  className="review-toolbar-btn text-muted-foreground"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSubmitAnnotation}
-                  disabled={!commentText.trim()}
-                  className="review-toolbar-btn primary disabled:opacity-50"
-                >
-                  Add
-                </button>
-              </div>
+            <div className="flex justify-end gap-2 mt-3">
+              <button
+                onClick={handleSubmitAnnotation}
+                disabled={!commentText.trim()}
+                className="review-toolbar-btn primary disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Add Comment
+              </button>
             </div>
-          )}
+          </div>
         </div>
       )}
     </div>

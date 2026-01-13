@@ -93,16 +93,14 @@ function exportReviewFeedback(annotations: CodeAnnotation[], files: DiffFile[]):
         ? `Line ${ann.lineStart}`
         : `Lines ${ann.lineStart}-${ann.lineEnd}`;
 
-      const typeLabel = ann.type.charAt(0).toUpperCase() + ann.type.slice(1);
-
-      output += `### ${i + 1}. ${lineRange} (${ann.side}): ${typeLabel}\n`;
+      output += `### ${lineRange} (${ann.side})\n`;
 
       if (ann.text) {
-        output += `> ${ann.text}\n`;
+        output += `${ann.text}\n`;
       }
 
       if (ann.suggestedCode) {
-        output += `\n**Suggested:**\n\`\`\`\n${ann.suggestedCode}\n\`\`\`\n`;
+        output += `\n**Suggested code:**\n\`\`\`\n${ann.suggestedCode}\n\`\`\`\n`;
       }
 
       output += '\n';

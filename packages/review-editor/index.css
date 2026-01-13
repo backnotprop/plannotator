@@ -227,32 +227,6 @@ diffs-container {
   line-height: 1.5;
 }
 
-/* Annotation type badges */
-.annotation-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.125rem 0.5rem;
-  border-radius: 9999px;
-  font-family: var(--font-sans);
-  font-size: 0.6875rem;
-  font-weight: 500;
-}
-
-.annotation-badge.comment {
-  background: oklch(0.75 0.18 280 / 0.15);
-  color: var(--primary);
-}
-
-.annotation-badge.suggestion {
-  background: oklch(0.72 0.17 150 / 0.15);
-  color: var(--success);
-}
-
-.annotation-badge.concern {
-  background: oklch(0.75 0.15 85 / 0.15);
-  color: var(--warning);
-}
-
 /* Line selection highlight */
 .line-selected {
   background: oklch(0.75 0.18 280 / 0.15) !important;
