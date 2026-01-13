@@ -530,6 +530,12 @@ const App: React.FC = () => {
     if (selectedAnnotationId === id) setSelectedAnnotationId(null);
   };
 
+  const handleEditAnnotation = (id: string, updates: Partial<Annotation>) => {
+    setAnnotations(prev => prev.map(ann =>
+      ann.id === id ? { ...ann, ...updates } : ann
+    ));
+  };
+
   const handleIdentityChange = (oldIdentity: string, newIdentity: string) => {
     setAnnotations(prev => prev.map(ann =>
       ann.author === oldIdentity ? { ...ann, author: newIdentity } : ann
@@ -712,6 +718,7 @@ const App: React.FC = () => {
             selectedId={selectedAnnotationId}
             onSelect={setSelectedAnnotationId}
             onDelete={handleDeleteAnnotation}
+            onEdit={handleEditAnnotation}
             shareUrl={shareUrl}
           />
         </div>

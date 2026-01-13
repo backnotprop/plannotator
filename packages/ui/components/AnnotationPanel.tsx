@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Annotation, AnnotationType, Block } from '../types';
 import { isCurrentUser } from '../utils/identity';
 import { ImageThumbnail } from './ImageThumbnail';
@@ -9,6 +9,7 @@ interface PanelProps {
   blocks: Block[];
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
+  onEdit?: (id: string, updates: Partial<Annotation>) => void;
   selectedId: string | null;
   shareUrl?: string;
 }
@@ -19,6 +20,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   blocks,
   onSelect,
   onDelete,
+  onEdit,
   selectedId,
   shareUrl
 }) => {
@@ -73,6 +75,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
               isSelected={selectedId === ann.id}
               onSelect={() => onSelect(ann.id)}
               onDelete={() => onDelete(ann.id)}
+              onEdit={onEdit ? (updates: Partial<Annotation>) => onEdit(ann.id, updates) : undefined}
             />
           ))
         )}
@@ -128,7 +131,54 @@ const AnnotationCard: React.FC<{
   isSelected: boolean;
   onSelect: () => void;
   onDelete: () => void;
-}> = ({ annotation, isSelected, onSelect, onDelete }) => {
+  onEdit?: (updates: Partial<Annotation>) => void;
+}> = ({ annotation, isSelected, onSelect, onDelete, onEdit }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState(annotation.text || '');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (isEditing && textareaRef.current) {
+      textareaRef.current.focus();
+      textareaRef.current.select();
+    }
+  }, [isEditing]);
+
+  // Update editText when annotation.text changes
+  useEffect(() => {
+    if (!isEditing) {
+      setEditText(annotation.text || '');
+    }
+  }, [annotation.text, isEditing]);
+
+  const handleStartEdit = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditText(annotation.text || '');
+    setIsEditing(true);
+  };
+
+  const handleSaveEdit = () => {
+    if (onEdit) {
+      onEdit({ text: editText });
+    }
+    setIsEditing(false);
+  };
+
+  const handleCancelEdit = () => {
+    setEditText(annotation.text || '');
+    setIsEditing(false);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      handleSaveEdit();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      handleCancelEdit();
+    }
+  };
+
   const typeConfig = {
     [AnnotationType.DELETION]: {
       label: 'Delete',
@@ -215,7 +265,7 @@ const AnnotationCard: React.FC<{
         </div>
       )}
 
-      {/* Type Badge + Timestamp + Delete */}
+      {/* Type Badge + Timestamp + Actions */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <div className={`flex items-center gap-1.5 ${config.color}`}>
@@ -230,21 +280,66 @@ const AnnotationCard: React.FC<{
             {formatTimestamp(annotation.createdA)}
           </span>
         </div>
-        <button
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
-        >
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+          {onEdit && annotation.type !== AnnotationType.DELETION && !isEditing && (
+            <button
+              onClick={handleStartEdit}
+              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-all"
+              title="Edit annotation"
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+            </button>
+          )}
+          <button
+            onClick={(e: React.MouseEvent<HTMLButtonElement>) => { e.stopPropagation(); onDelete(); }}
+            className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+            title="Delete annotation"
+          >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Global Comment - show text directly */}
       {annotation.type === AnnotationType.GLOBAL_COMMENT ? (
-        <div className="text-xs text-foreground/90 pl-2 border-l-2 border-purple-500/50 whitespace-pre-wrap">
-          {annotation.text}
-        </div>
+        isEditing ? (
+          <div className="space-y-2">
+            <textarea
+              ref={textareaRef}
+              value={editText}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setEditText(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onClick={(e: React.MouseEvent<HTMLTextAreaElement>) => e.stopPropagation()}
+              className="w-full text-xs text-foreground/90 pl-2 border-l-2 border-purple-500/50 bg-background border border-border rounded px-2 py-1.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary/50"
+              rows={Math.min(editText.split('\n').length + 1, 8)}
+            />
+            <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+              <span>Press Cmd+Enter to save, Esc to cancel</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={(e: React.MouseEvent<HTMLButtonElement>) => { e.stopPropagation(); handleSaveEdit(); }}
+                className="px-2 py-1 text-[10px] font-medium rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+              >
+                Save
+              </button>
+              <button
+                onClick={(e: React.MouseEvent<HTMLButtonElement>) => { e.stopPropagation(); handleCancelEdit(); }}
+                className="px-2 py-1 text-[10px] font-medium rounded bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="text-xs text-foreground/90 pl-2 border-l-2 border-purple-500/50 whitespace-pre-wrap">
+            {annotation.text}
+          </div>
+        )
       ) : (
         <>
           {/* Original Text */}
@@ -253,10 +348,43 @@ const AnnotationCard: React.FC<{
           </div>
 
           {/* Comment/Replacement Text */}
-          {annotation.text && annotation.type !== AnnotationType.DELETION && (
-            <div className="mt-2 text-xs text-foreground/90 pl-2 border-l-2 border-primary/50 whitespace-pre-wrap">
-              {annotation.text}
-            </div>
+          {annotation.type !== AnnotationType.DELETION && (
+            isEditing ? (
+              <div className="mt-2 space-y-2">
+                <textarea
+                  ref={textareaRef}
+                  value={editText}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setEditText(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  onClick={(e: React.MouseEvent<HTMLTextAreaElement>) => e.stopPropagation()}
+                  className="w-full text-xs text-foreground/90 pl-2 border-l-2 border-primary/50 bg-background border border-border rounded px-2 py-1.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  rows={Math.min(editText.split('\n').length + 1, 8)}
+                />
+                <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                  <span>Press Cmd+Enter to save, Esc to cancel</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={(e: React.MouseEvent<HTMLButtonElement>) => { e.stopPropagation(); handleSaveEdit(); }}
+                    className="px-2 py-1 text-[10px] font-medium rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={(e: React.MouseEvent<HTMLButtonElement>) => { e.stopPropagation(); handleCancelEdit(); }}
+                    className="px-2 py-1 text-[10px] font-medium rounded bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              annotation.text && (
+                <div className="mt-2 text-xs text-foreground/90 pl-2 border-l-2 border-primary/50 whitespace-pre-wrap">
+                  {annotation.text}
+                </div>
+              )
+            )
           )}
         </>
       )}
