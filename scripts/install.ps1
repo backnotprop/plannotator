@@ -42,10 +42,20 @@ $checksumUrl = "$binaryUrl.sha256"
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
 $tmpFile = [System.IO.Path]::GetTempFileName()
-Invoke-WebRequest -Uri $binaryUrl -OutFile $tmpFile
+
+# Use -UseBasicParsing to avoid security prompts and ensure consistent behavior
+Invoke-WebRequest -Uri $binaryUrl -OutFile $tmpFile -UseBasicParsing
 
 # Verify checksum
-$expectedChecksum = (Invoke-WebRequest -Uri $checksumUrl).Content.Split(" ")[0].Trim()
+# Note: In Windows PowerShell 5.1, Invoke-WebRequest returns .Content as byte[] for non-HTML responses.
+# We must handle both byte[] (PS 5.1) and string (PS 7+) for cross-version compatibility.
+$checksumResponse = Invoke-WebRequest -Uri $checksumUrl -UseBasicParsing
+if ($checksumResponse.Content -is [byte[]]) {
+    $checksumContent = [System.Text.Encoding]::UTF8.GetString($checksumResponse.Content)
+} else {
+    $checksumContent = $checksumResponse.Content
+}
+$expectedChecksum = $checksumContent.Split(" ")[0].Trim().ToLower()
 $actualChecksum = (Get-FileHash -Path $tmpFile -Algorithm SHA256).Hash.ToLower()
 
 if ($actualChecksum -ne $expectedChecksum) {
