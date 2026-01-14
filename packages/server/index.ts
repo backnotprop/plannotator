@@ -41,6 +41,8 @@ export interface ServerOptions {
   origin: string;
   /** HTML content to serve for the UI */
   htmlContent: string;
+  /** Current permission mode to preserve (Claude Code only) */
+  permissionMode?: string;
   /** Called when server starts with the URL, remote status, and port */
   onReady?: (url: string, isRemote: boolean, port: number) => void;
 }
@@ -58,6 +60,7 @@ export interface ServerResult {
     feedback?: string;
     savedPath?: string;
     agentSwitch?: string;
+    permissionMode?: string;
   }>;
   /** Stop the server */
   stop: () => void;
@@ -80,7 +83,7 @@ const RETRY_DELAY_MS = 500;
 export async function startPlannotatorServer(
   options: ServerOptions
 ): Promise<ServerResult> {
-  const { plan, origin, htmlContent, onReady } = options;
+  const { plan, origin, htmlContent, permissionMode, onReady } = options;
 
   const isRemote = isRemoteSession();
   const configuredPort = getServerPort();
@@ -94,12 +97,14 @@ export async function startPlannotatorServer(
     feedback?: string;
     savedPath?: string;
     agentSwitch?: string;
+    permissionMode?: string;
   }) => void;
   const decisionPromise = new Promise<{
     approved: boolean;
     feedback?: string;
     savedPath?: string;
     agentSwitch?: string;
+    permissionMode?: string;
   }>((resolve) => {
     resolveDecision = resolve;
   });
@@ -117,7 +122,7 @@ export async function startPlannotatorServer(
 
           // API: Get plan content
           if (url.pathname === "/api/plan") {
-            return Response.json({ plan, origin });
+            return Response.json({ plan, origin, permissionMode });
           }
 
           // API: Serve images (local paths or temp uploads)
@@ -171,6 +176,7 @@ export async function startPlannotatorServer(
             // Check for note integrations and optional feedback
             let feedback: string | undefined;
             let agentSwitch: string | undefined;
+            let requestedPermissionMode: string | undefined;
             let planSaveEnabled = true; // default to enabled for backwards compat
             let planSaveCustomPath: string | undefined;
             try {
@@ -180,6 +186,7 @@ export async function startPlannotatorServer(
                 feedback?: string;
                 agentSwitch?: string;
                 planSave?: { enabled: boolean; customPath?: string };
+                permissionMode?: string;
               };
 
               // Capture feedback if provided (for "approve with notes")
@@ -190,6 +197,11 @@ export async function startPlannotatorServer(
               // Capture agent switch setting for OpenCode
               if (body.agentSwitch) {
                 agentSwitch = body.agentSwitch;
+              }
+
+              // Capture permission mode from client request (Claude Code)
+              if (body.permissionMode) {
+                requestedPermissionMode = body.permissionMode;
               }
 
               // Capture plan save settings
@@ -232,7 +244,9 @@ export async function startPlannotatorServer(
               savedPath = saveFinalSnapshot(slug, "approved", plan, diff, planSaveCustomPath);
             }
 
-            resolveDecision({ approved: true, feedback, savedPath, agentSwitch });
+            // Use permission mode from client request if provided, otherwise fall back to hook input
+            const effectivePermissionMode = requestedPermissionMode || permissionMode;
+            resolveDecision({ approved: true, feedback, savedPath, agentSwitch, permissionMode: effectivePermissionMode });
             return Response.json({ ok: true, savedPath });
           }
 

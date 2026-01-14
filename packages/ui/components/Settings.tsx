@@ -23,6 +23,12 @@ import {
   savePlanSaveSettings,
   type PlanSaveSettings,
 } from '../utils/planSave';
+import {
+  getPermissionModeSettings,
+  savePermissionModeSettings,
+  PERMISSION_MODE_OPTIONS,
+  type PermissionMode,
+} from '../utils/permissionMode';
 
 interface SettingsProps {
   taterMode: boolean;
@@ -46,6 +52,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const [bear, setBear] = useState<BearSettings>({ enabled: false });
   const [agent, setAgent] = useState<AgentSwitchSettings>({ switchTo: 'build' });
   const [planSave, setPlanSave] = useState<PlanSaveSettings>({ enabled: true, customPath: null });
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
 
   useEffect(() => {
     if (showDialog) {
@@ -54,6 +61,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       setBear(getBearSettings());
       setAgent(getAgentSwitchSettings());
       setPlanSave(getPlanSaveSettings());
+      setPermissionMode(getPermissionModeSettings().mode);
     }
   }, [showDialog]);
 
@@ -97,6 +105,11 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
     const newSettings = { ...planSave, ...updates };
     setPlanSave(newSettings);
     savePlanSaveSettings(newSettings);
+  };
+
+  const handlePermissionModeChange = (mode: PermissionMode) => {
+    setPermissionMode(mode);
+    savePermissionModeSettings(mode);
   };
 
   const handleRegenerateIdentity = () => {
@@ -248,6 +261,36 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                       {agent.switchTo === 'custom' && agent.customName
                         ? `Switch to "${agent.customName}" agent after approval`
                         : AGENT_OPTIONS.find(o => o.value === agent.switchTo)?.description}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {origin === 'claude-code' && mode === 'plan' && (
+                <>
+                  <div className="border-t border-border" />
+
+                  {/* Permission Mode (Claude Code only) */}
+                  <div className="space-y-2">
+                    <div>
+                      <div className="text-sm font-medium">Permission Mode</div>
+                      <div className="text-xs text-muted-foreground">
+                        Automation level after plan approval
+                      </div>
+                    </div>
+                    <select
+                      value={permissionMode}
+                      onChange={(e) => handlePermissionModeChange(e.target.value as PermissionMode)}
+                      className="w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer"
+                    >
+                      {PERMISSION_MODE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="text-[10px] text-muted-foreground/70">
+                      {PERMISSION_MODE_OPTIONS.find(o => o.value === permissionMode)?.description}
                     </div>
                   </div>
                 </>
