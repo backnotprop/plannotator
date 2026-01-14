@@ -87,9 +87,11 @@ if (args[0] === "review") {
   const eventJson = await Bun.stdin.text();
 
   let planContent = "";
+  let permissionMode = "default";
   try {
     const event = JSON.parse(eventJson);
     planContent = event.tool_input?.plan || "";
+    permissionMode = event.permission_mode || "default";
   } catch {
     console.error("Failed to parse hook event from stdin");
     process.exit(1);
@@ -104,6 +106,7 @@ if (args[0] === "review") {
   const server = await startPlannotatorServer({
     plan: planContent,
     origin: "claude-code",
+    permissionMode,
     htmlContent: planHtmlContent,
     onReady: (url, isRemote, port) => {
       handleServerReady(url, isRemote, port);
@@ -121,12 +124,23 @@ if (args[0] === "review") {
 
   // Output JSON for PermissionRequest hook decision control
   if (result.approved) {
+    // Build updatedPermissions to preserve the current permission mode
+    const updatedPermissions = [];
+    if (result.permissionMode) {
+      updatedPermissions.push({
+        type: "setMode",
+        mode: result.permissionMode,
+        destination: "session",
+      });
+    }
+
     console.log(
       JSON.stringify({
         hookSpecificOutput: {
           hookEventName: "PermissionRequest",
           decision: {
             behavior: "allow",
+            ...(updatedPermissions.length > 0 && { updatedPermissions }),
           },
         },
       })
