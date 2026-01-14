@@ -53,7 +53,7 @@ export async function openBrowser(url: string): Promise<boolean> {
       if (platform === "darwin") {
         await $`open -a ${browser} ${url}`.quiet();
       } else if (platform === "win32" || wsl) {
-        await $`cmd.exe /c start ${browser} ${url}`.quiet();
+        await $`cmd.exe /c start "" ${browser} ${url}`.quiet();
       } else {
         await $`${browser} ${url}`.quiet();
       }
