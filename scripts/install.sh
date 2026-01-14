@@ -2,7 +2,7 @@
 set -e
 
 REPO="backnotprop/plannotator"
-INSTALL_DIR="$HOME/.local/bin"
+INSTALL_DIR="${XDG_DATA_HOME:-$HOME/.local}/bin"
 
 case "$(uname -s)" in
     Darwin) os="darwin" ;;
@@ -73,7 +73,8 @@ if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
 fi
 
 # Clear any cached OpenCode plugin to force fresh download on next run
-rm -rf ~/.cache/opencode/node_modules/@plannotator ~/.bun/install/cache/@plannotator 2>/dev/null
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}"
+rm -rf "$CACHE_DIR/opencode/node_modules/@plannotator" "$HOME/.bun/install/cache/@plannotator" 2>/dev/null || true
 
 # Install /review slash command
 CLAUDE_COMMANDS_DIR="$HOME/.claude/commands"
@@ -97,7 +98,7 @@ COMMAND_EOF
 echo "Installed /plannotator-review command to ${CLAUDE_COMMANDS_DIR}/plannotator-review.md"
 
 # Install OpenCode slash command
-OPENCODE_COMMANDS_DIR="$HOME/.config/opencode/command"
+OPENCODE_COMMANDS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/command"
 mkdir -p "$OPENCODE_COMMANDS_DIR"
 
 cat > "$OPENCODE_COMMANDS_DIR/plannotator-review.md" << 'COMMAND_EOF'
