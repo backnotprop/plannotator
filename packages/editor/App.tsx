@@ -18,6 +18,12 @@ import { getObsidianSettings } from '@plannotator/ui/utils/obsidian';
 import { getBearSettings } from '@plannotator/ui/utils/bear';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { getPlanSaveSettings } from '@plannotator/ui/utils/planSave';
+import {
+  getPermissionModeSettings,
+  needsPermissionModeSetup,
+  type PermissionMode,
+} from '@plannotator/ui/utils/permissionMode';
+import { PermissionModeSetup } from '@plannotator/ui/components/PermissionModeSetup';
 import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
 
 const PLAN_CONTENT = `# Implementation Plan: Real-time Collaboration
@@ -318,6 +324,8 @@ const App: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState<'approved' | 'denied' | null>(null);
   const [pendingPasteImage, setPendingPasteImage] = useState<{ file: File; blobUrl: string } | null>(null);
+  const [showPermissionModeSetup, setShowPermissionModeSetup] = useState(false);
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
   const viewerRef = useRef<ViewerHandle>(null);
 
   // URL-based sharing
@@ -375,7 +383,15 @@ const App: React.FC = () => {
       .then((data: { plan: string; origin?: 'claude-code' | 'opencode' }) => {
         setMarkdown(data.plan);
         setIsApiMode(true);
-        if (data.origin) setOrigin(data.origin);
+        if (data.origin) {
+          setOrigin(data.origin);
+          // For Claude Code, check if user needs to configure permission mode
+          if (data.origin === 'claude-code' && needsPermissionModeSetup()) {
+            setShowPermissionModeSetup(true);
+          }
+          // Load saved permission mode preference
+          setPermissionMode(getPermissionModeSettings().mode);
+        }
       })
       .catch(() => {
         // Not in API mode - use default content
@@ -455,7 +471,12 @@ const App: React.FC = () => {
       const planSaveSettings = getPlanSaveSettings();
 
       // Build request body - include integrations if enabled
-      const body: { obsidian?: object; bear?: object; feedback?: string; agentSwitch?: string; planSave?: { enabled: boolean; customPath?: string } } = {};
+      const body: { obsidian?: object; bear?: object; feedback?: string; agentSwitch?: string; planSave?: { enabled: boolean; customPath?: string }; permissionMode?: string } = {};
+
+      // Include permission mode for Claude Code
+      if (origin === 'claude-code') {
+        body.permissionMode = permissionMode;
+      }
 
       // Include agent switch setting for OpenCode (effective name handles custom agents)
       const effectiveAgent = getEffectiveAgentName(agentSwitchSettings);
@@ -815,6 +836,15 @@ const App: React.FC = () => {
           imageSrc={pendingPasteImage?.blobUrl ?? ''}
           onAccept={handlePasteAnnotatorAccept}
           onClose={handlePasteAnnotatorClose}
+        />
+
+        {/* Permission Mode Setup (Claude Code first-time) */}
+        <PermissionModeSetup
+          isOpen={showPermissionModeSetup}
+          onComplete={(mode) => {
+            setPermissionMode(mode);
+            setShowPermissionModeSetup(false);
+          }}
         />
       </div>
     </ThemeProvider>
