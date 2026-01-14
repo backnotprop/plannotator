@@ -29,7 +29,7 @@
   ],
   "scripts": {
     "build": "cp ../hook/dist/index.html ./plannotator.html && cp ../review/dist/index.html ./review-editor.html && bun build index.ts --outfile dist/index.js --target bun --external @opencode-ai/plugin",
-    "postinstall": "mkdir -p ~/.config/opencode/command && cp ./commands/*.md ~/.config/opencode/command/ 2>/dev/null || true",
+    "postinstall": "mkdir -p ${XDG_CONFIG_HOME:-$HOME/.config}/opencode/command && cp ./commands/*.md ${XDG_CONFIG_HOME:-$HOME/.config}/opencode/command/ 2>/dev/null || true",
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
