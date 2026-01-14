@@ -209,7 +209,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   return (
     <div ref={containerRef} className="h-full overflow-auto relative" onMouseMove={handleMouseMove}>
       {/* File header */}
-      <div className="sticky top-0 z-10 px-4 py-2 bg-card/95 backdrop-blur border-b border-border flex items-center justify-between">
+      <div className="sticky top-0 z-10 px-4 py-2.5 bg-card/95 backdrop-blur border-b border-border flex items-center justify-between">
         <span className="font-mono text-sm text-foreground">{filePath}</span>
         <button
           onClick={async () => {
@@ -276,7 +276,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           }}
         >
           <div className="w-80">
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between mb-3">
               <span className="text-xs text-muted-foreground">
                 {toolbarState.range.start === toolbarState.range.end
                   ? `Line ${toolbarState.range.start}`
@@ -297,7 +297,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
               value={commentText}
               onChange={(e) => setCommentText(e.target.value)}
               placeholder="Leave feedback..."
-              className="w-full px-3 py-2 bg-muted rounded-lg text-xs resize-none focus:outline-none focus:ring-1 focus:ring-primary/50"
+              className="w-full px-3 py-2 bg-muted rounded-sm text-xs resize-none focus:outline-none focus:ring-1 focus:ring-primary/50"
               rows={3}
               autoFocus
               onKeyDown={(e) => {
@@ -315,7 +315,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                 value={suggestedCode}
                 onChange={(e) => setSuggestedCode(e.target.value)}
                 placeholder="Suggested code..."
-                className="w-full px-3 py-2 mt-2 bg-muted rounded-lg text-xs font-mono resize-none focus:outline-none focus:ring-1 focus:ring-primary/50"
+                className="w-full px-3 py-2 mt-2 bg-muted rounded-sm text-xs font-mono resize-none focus:outline-none focus:ring-1 focus:ring-primary/50"
                 rows={3}
                 autoFocus
               />

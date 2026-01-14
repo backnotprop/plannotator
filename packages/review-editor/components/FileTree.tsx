@@ -101,7 +101,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
               value={activeDiffType || 'uncommitted'}
               onChange={(e) => onSelectDiff(e.target.value)}
               disabled={isLoadingDiff}
-              className="w-full px-2.5 py-1.5 bg-muted rounded-md text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer disabled:opacity-50 disabled:cursor-wait appearance-none pr-7"
+              className="w-full px-2.5 py-1.5 bg-muted rounded-sm text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer disabled:opacity-50 disabled:cursor-wait appearance-none pr-7"
             >
               {diffOptions.map((option, index) => (
                 option.id === 'separator' ? (
@@ -146,16 +146,16 @@ export const FileTree: React.FC<FileTreeProps> = ({
               onClick={() => onSelectFile(index)}
               className={`file-tree-item w-full text-left group ${isActive ? 'active' : ''} ${annotationCount > 0 ? 'has-annotations' : ''}`}
             >
-              <div className="flex items-center gap-1 flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-1 min-w-0">
                 <span className="truncate">{fileName}</span>
                 {isViewed && (
-                  <svg className="w-3 h-3 flex-shrink-0 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <svg className="w-3 h-3 flex-shrink-0 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                     <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                   </svg>
                 )}
               </div>
-              <div className="flex items-center gap-1.5 flex-shrink-0 text-[10px]">
+              <div className="flex items-center gap-1.5 flex-shrink-0 text-xs">
                 {annotationCount > 0 && (
                   <span className="text-primary font-medium">{annotationCount}</span>
                 )}
@@ -169,7 +169,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
 
       {/* Footer */}
       <div className="p-3 border-t border-border/50 text-xs text-muted-foreground space-y-2">
-        <div className="flex justify-between">
+        <div className="flex justify-between text-sm">
           <span>Total changes:</span>
           <span className="file-stats">
             <span className="additions">
@@ -181,7 +181,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
           </span>
         </div>
         {enableKeyboardNav && (
-          <div className="text-[10px] text-muted-foreground/50 text-center">
+          <div className="text-xs text-muted-foreground/60 text-center">
             j/k or arrows to navigate
           </div>
         )}

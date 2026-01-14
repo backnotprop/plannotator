@@ -81,7 +81,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               </span>
               <button
                 onClick={onClose}
-                className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                className="p-1.5 rounded-sm hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -97,7 +97,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           <div className="flex gap-1 bg-muted rounded-lg p-1 mb-4">
             <button
               onClick={() => setActiveTab('share')}
-              className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+              className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-sm transition-colors ${
                 activeTab === 'share'
                   ? 'bg-background text-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground'
@@ -107,7 +107,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </button>
             <button
               onClick={() => setActiveTab('diff')}
-              className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+              className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-sm transition-colors ${
                 activeTab === 'diff'
                   ? 'bg-background text-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground'
@@ -173,13 +173,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           <div className="p-4 border-t border-border flex justify-end gap-2">
             <button
               onClick={handleCopyDiff}
-              className="px-3 py-1.5 rounded-md text-xs font-medium bg-muted hover:bg-muted/80 transition-colors"
+              className="px-3 py-1.5 rounded-sm text-xs font-medium bg-muted hover:bg-muted/80 transition-colors"
             >
               {copied ? 'Copied!' : 'Copy'}
             </button>
             <button
               onClick={handleDownloadDiff}
-              className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+              className="px-3 py-1.5 rounded-sm text-xs font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
             >
               Download .diff
             </button>

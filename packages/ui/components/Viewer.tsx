@@ -579,12 +579,12 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                 e.preventDefault();
                 handleAddGlobalComment();
               }}
-              className="flex items-start gap-1.5 bg-muted/80 rounded-md p-1"
+              className="flex items-center gap-1.5 bg-muted/80 rounded-sm p-1"
             >
               <textarea
                 ref={globalCommentInputRef}
                 rows={1}
-                className="bg-transparent text-xs min-w-40 md:min-w-56 max-w-80 max-h-32 placeholder:text-muted-foreground resize-none px-2 py-1.5 focus:outline-none"
+                className="bg-transparent text-xs min-w-40 md:min-w-56 max-w-80 max-h-32 placeholder:text-muted-foreground resize-none px-3 py-1.5 focus:outline-none focus:bg-muted/30 rounded-sm border border-transparent focus:border-border transition-colors"
                 style={{ fieldSizing: 'content' } as React.CSSProperties}
                 placeholder="Add a global comment..."
                 value={globalCommentValue}
@@ -606,7 +606,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               <button
                 type="submit"
                 disabled={!globalCommentValue.trim()}
-                className="self-start px-2 py-1.5 text-xs font-medium rounded bg-secondary text-secondary-foreground hover:opacity-90 disabled:opacity-50 transition-all"
+                className="px-4 py-1.5 text-xs font-medium rounded-sm bg-secondary text-secondary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
                 Add
               </button>
@@ -616,7 +616,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   setShowGlobalCommentInput(false);
                   setGlobalCommentValue('');
                 }}
-                className="self-start p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                className="p-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                title="Cancel"
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -626,7 +627,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           ) : (
             <button
               onClick={() => setShowGlobalCommentInput(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-sm transition-colors"
               title="Add global comment"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -639,7 +640,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           {/* Copy plan button */}
           <button
             onClick={handleCopyPlan}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-sm transition-colors"
             title={copied ? 'Copied!' : 'Copy plan'}
           >
             {copied ? (
@@ -995,7 +996,7 @@ const CodeBlock: React.FC<CodeBlockProps> = ({ block, onHover, onLeave, isHovere
     >
       <button
         onClick={handleCopy}
-        className="absolute top-2 right-2 p-1.5 rounded-md bg-muted/80 hover:bg-muted text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity z-10"
+        className="absolute top-2 right-2 p-1.5 rounded-sm bg-muted/80 hover:bg-muted text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity z-10"
         title={copied ? 'Copied!' : 'Copy code'}
       >
         {copied ? (

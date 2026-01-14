@@ -139,7 +139,7 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
         ref={buttonRef}
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="group relative flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+        className="group relative flex items-center gap-1.5 px-2 py-1.5 rounded-sm text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
       >
         {/* Show stacked thumbnails if we have images */}
         {paths.length > 0 ? (
@@ -264,13 +264,13 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
                   onChange={(e) => setManualPath(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleManualAdd()}
                   placeholder="Paste path or URL..."
-                  className="flex-1 px-2 py-1.5 text-xs bg-background border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-primary"
+                  className="flex-1 px-2 py-1.5 text-xs bg-background border border-border rounded-sm focus:outline-none focus:ring-1 focus:ring-primary"
                 />
                 <button
                   type="button"
                   onClick={handleManualAdd}
                   disabled={!manualPath.trim()}
-                  className="px-2 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-2 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Add
                 </button>

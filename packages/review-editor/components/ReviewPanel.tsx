@@ -77,17 +77,19 @@ export const ReviewPanel: React.FC<ReviewPanelProps> = ({
 
   return (
     <aside className="w-72 border-l border-border/50 bg-card/30 backdrop-blur-sm flex flex-col">
-        {/* Header */}
-        <div className="p-3 border-b border-border/50">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Annotations
-            </h2>
-            <span className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-              {annotations.length}
-            </span>
-          </div>
+      {/* Header */}
+      <div className="p-3 border-b border-border/50">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            Annotations
+          </span>
+          <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+            {annotations.length}
+          </span>
         </div>
+      </div>
+
+        
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
@@ -163,7 +165,7 @@ export const ReviewPanel: React.FC<ReviewPanelProps> = ({
                               e.stopPropagation();
                               onDeleteAnnotation(annotation.id);
                             }}
-                            className="absolute top-2 right-2 p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+                            className="absolute top-2 right-2 p-1 rounded-sm opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
                             title="Delete annotation"
                           >
                             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

@@ -76,7 +76,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           {showCancel && (
             <button
               onClick={onClose}
-              className="px-4 py-2 rounded-md text-sm font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-opacity"
+              className="px-4 py-2 rounded-sm text-sm font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-opacity"
             >
               {cancelText}
             </button>
@@ -89,7 +89,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
                 onClose();
               }
             }}
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-opacity ${buttonColors[variant]}`}
+            className={`px-4 py-2 rounded-sm text-sm font-medium transition-opacity ${buttonColors[variant]}`}
           >
             {confirmText}
           </button>
