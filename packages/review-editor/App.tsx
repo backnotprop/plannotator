@@ -444,6 +444,35 @@ const ReviewApp: React.FC = () => {
     }
   }, []);
 
+  // Cmd/Ctrl+Enter keyboard shortcut to approve or send feedback
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
+
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (showExportModal || showNoAnnotationsDialog || showApproveWarning) return;
+      if (submitted || isSendingFeedback || isApproving) return;
+      if (!origin) return; // Demo mode
+
+      e.preventDefault();
+
+      // No annotations → Approve, otherwise → Send Feedback
+      if (annotations.length === 0) {
+        handleApprove();
+      } else {
+        handleSendFeedback();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    showExportModal, showNoAnnotationsDialog, showApproveWarning,
+    submitted, isSendingFeedback, isApproving, origin, annotations.length,
+    handleApprove, handleSendFeedback
+  ]);
+
   const activeFile = files[activeFileIndex];
   const feedbackMarkdown = useMemo(() =>
     exportReviewFeedback(annotations, files),

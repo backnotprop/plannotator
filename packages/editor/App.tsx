@@ -544,6 +544,44 @@ const App: React.FC = () => {
     }
   };
 
+  // Global keyboard shortcuts (Cmd/Ctrl+Enter to submit)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle Cmd/Ctrl+Enter
+      if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
+
+      // Don't intercept if typing in an input/textarea
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+      // Don't intercept if any modal is open
+      if (showExport || showFeedbackPrompt || showClaudeCodeWarning ||
+          showPermissionModeSetup || pendingPasteImage) return;
+
+      // Don't intercept if already submitted or submitting
+      if (submitted || isSubmitting) return;
+
+      // Don't intercept in demo/share mode (no API)
+      if (!isApiMode) return;
+
+      e.preventDefault();
+
+      // No annotations → Approve, otherwise → Send Feedback
+      if (annotations.length === 0) {
+        handleApprove();
+      } else {
+        handleDeny();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    showExport, showFeedbackPrompt, showClaudeCodeWarning,
+    showPermissionModeSetup, pendingPasteImage,
+    submitted, isSubmitting, isApiMode, annotations.length,
+  ]);
+
   const handleAddAnnotation = (ann: Annotation) => {
     setAnnotations(prev => [...prev, ann]);
     setSelectedAnnotationId(ann.id);
