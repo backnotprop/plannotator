@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, forwardRef, useImperativeHandle, useCallback } from 'react';
-import Highlighter from 'web-highlighter';
+import Highlighter from '@plannotator/web-highlighter';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
 import { Block, Annotation, AnnotationType, EditorMode } from '../types';
@@ -433,8 +433,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             window.getSelection()?.removeAllRanges();
           } else {
             // Show toolbar in selection mode
-            // Capture selection text now (preserves line breaks between blocks)
-            const selectionText = window.getSelection()?.toString() || source.text;
+            // Use source.text from web-highlighter (complete text, captured before DOM modification)
+            // Note: Selection.toString() would be truncated since web-highlighter already wrapped the selection
+            const selectionText = source.text;
             pendingSourceRef.current = source;
             setToolbarState({ element: doms[0] as HTMLElement, source, selectionText });
           }
