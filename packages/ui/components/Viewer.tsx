@@ -142,6 +142,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     const handleKeyDown = async (e: KeyboardEvent) => {
       // Check for Cmd+C (Mac) or Ctrl+C (Windows/Linux)
       if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
+        // Don't intercept if typing in an input/textarea
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
         // If we have an active selection with captured text, use that
         if (toolbarState?.selectionText) {
           e.preventDefault();
