@@ -137,6 +137,28 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     onAddAnnotationRef.current = onAddAnnotation;
   }, [onAddAnnotation]);
 
+  // Cmd+C / Ctrl+C keyboard shortcut for copying selected text
+  useEffect(() => {
+    const handleKeyDown = async (e: KeyboardEvent) => {
+      // Check for Cmd+C (Mac) or Ctrl+C (Windows/Linux)
+      if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
+        // If we have an active selection with captured text, use that
+        if (toolbarState?.selectionText) {
+          e.preventDefault();
+          try {
+            await navigator.clipboard.writeText(toolbarState.selectionText);
+          } catch (err) {
+            console.error('Failed to copy:', err);
+          }
+        }
+        // Otherwise let the browser handle default copy behavior
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [toolbarState]);
+
   // Helper to create annotation from highlighter source
   const createAnnotationFromSource = (
     highlighter: Highlighter,
