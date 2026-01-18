@@ -51,30 +51,18 @@ export const PlannotatorPlugin: Plugin = async (ctx) => {
   }
 
   return {
-    "experimental.chat.system.transform": async (_input, output) => {
-      // Skip adding Plan Submission prompt for title generation requests
-      // Title generation has a specific system prompt containing "title generator"
-      // and typically has no tools
-      const existingSystem = output.system.join("\n").toLowerCase();
-      if (existingSystem.includes("title generator") || existingSystem.includes("generate a title")) {
-        return; // Skip - this is a title generation request
+    // Inject planning reminder only for plan agent (not sub-agents)
+    "chat.message": async (input, output) => {
+      if (input.agent === "plan" && input.sessionID && input.messageID) {
+        output.parts.unshift({
+          id: `plannotator-${Date.now()}`,
+          sessionID: input.sessionID,
+          messageID: input.messageID,
+          type: "text",
+          text: `[Reminder: When your plan is complete, call \`submit_plan\` for interactive user review. Do not proceed with implementation until the plan is approved.]`,
+          synthetic: true,
+        });
       }
-
-      output.system.push(`
-## Plan Submission
-
-When you have completed your plan, you MUST call the \`submit_plan\` tool to submit it for user review.
-The user will be able to:
-- Review your plan visually in a dedicated UI
-- Annotate specific sections with feedback
-- Approve the plan to proceed with implementation
-- Request changes with detailed feedback
-
-If your plan is rejected, you will receive the user's annotated feedback. Revise your plan
-based on their feedback and call submit_plan again.
-
-Do NOT proceed with implementation until your plan is approved.
-`);
     },
 
     // Listen for /plannotator-review command
@@ -166,6 +154,12 @@ Do NOT proceed with implementation until your plan is approved.
         },
 
         async execute(args, context) {
+          // Block sub-agents from using this tool
+          const subAgents = ["general", "explore"];
+          if (subAgents.includes(context.agent)) {
+            return `The submit_plan tool is only available to primary agents (plan, build). Sub-agents cannot submit plans directly.`;
+          }
+
           const server = await startPlannotatorServer({
             plan: args.plan,
             origin: "opencode",
