@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { getAgentSwitchSettings, getEffectiveAgentName } from '../utils/agentSwitch';
+import { getAgentSwitchSettings } from '../utils/agentSwitch';
 
 export interface Agent {
   id: string;

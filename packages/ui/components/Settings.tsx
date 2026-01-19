@@ -271,6 +271,14 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                       {/* Dynamic agents from OpenCode API */}
                       {availableAgents.length > 0 ? (
                         <>
+                          {/* Show invalid saved value as disabled option if not in list */}
+                          {agent.switchTo !== 'custom' &&
+                           agent.switchTo !== 'disabled' &&
+                           !availableAgents.some(a => a.id.toLowerCase() === agent.switchTo.toLowerCase()) && (
+                            <option value={agent.switchTo} disabled>
+                              {agent.switchTo} (not found)
+                            </option>
+                          )}
                           {availableAgents.map((a) => (
                             <option key={a.id} value={a.id}>
                               {a.name}
