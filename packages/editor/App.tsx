@@ -12,6 +12,7 @@ import { TaterSpriteRunning } from '@plannotator/ui/components/TaterSpriteRunnin
 import { TaterSpritePullup } from '@plannotator/ui/components/TaterSpritePullup';
 import { Settings } from '@plannotator/ui/components/Settings';
 import { useSharing } from '@plannotator/ui/hooks/useSharing';
+import { useAgents } from '@plannotator/ui/hooks/useAgents';
 import { storage } from '@plannotator/ui/utils/storage';
 import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
 import { getObsidianSettings, getEffectiveVaultPath, CUSTOM_PATH_SENTINEL } from '@plannotator/ui/utils/obsidian';
@@ -312,7 +313,6 @@ const App: React.FC = () => {
   const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
   const [showClaudeCodeWarning, setShowClaudeCodeWarning] = useState(false);
   const [showAgentWarning, setShowAgentWarning] = useState(false);
-  const [availableAgents, setAvailableAgents] = useState<{ id: string; name: string }[]>([]);
   const [agentWarningMessage, setAgentWarningMessage] = useState('');
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [editorMode, setEditorMode] = useState<EditorMode>('selection');
@@ -353,6 +353,9 @@ const App: React.FC = () => {
       setIsLoading(false);
     }
   );
+
+  // Fetch available agents for OpenCode (for validation on approve)
+  const { agents: availableAgents, validateAgent, getAgentWarning } = useAgents(origin);
 
   // Apply shared annotations to DOM after they're loaded
   useEffect(() => {
@@ -406,22 +409,6 @@ const App: React.FC = () => {
       })
       .finally(() => setIsLoading(false));
   }, [isLoadingShared, isSharedSession]);
-
-  // Fetch available agents for OpenCode (for validation on approve)
-  useEffect(() => {
-    if (origin !== 'opencode') return;
-
-    fetch('/api/agents')
-      .then(res => res.json())
-      .then((data: { agents?: { id: string; name: string }[] }) => {
-        if (data.agents?.length) {
-          setAvailableAgents(data.agents);
-        }
-      })
-      .catch(() => {
-        // Ignore errors - validation will be skipped if no agents
-      });
-  }, [origin]);
 
   useEffect(() => {
     const { frontmatter: fm } = extractFrontmatter(markdown);
@@ -588,16 +575,12 @@ const App: React.FC = () => {
       // No annotations → Approve, otherwise → Send Feedback
       if (annotations.length === 0) {
         // Check if agent exists for OpenCode users
-        if (origin === 'opencode' && availableAgents.length > 0) {
-          const agentSettings = getAgentSwitchSettings();
-          const effectiveAgent = getEffectiveAgentName(agentSettings);
-          if (effectiveAgent && effectiveAgent !== 'disabled') {
-            const exists = availableAgents.some(a => a.id.toLowerCase() === effectiveAgent.toLowerCase());
-            if (!exists) {
-              setAgentWarningMessage(`Agent "${effectiveAgent}" was not found in OpenCode. Approving may cause an error.`);
-              setShowAgentWarning(true);
-              return;
-            }
+        if (origin === 'opencode') {
+          const warning = getAgentWarning();
+          if (warning) {
+            setAgentWarningMessage(warning);
+            setShowAgentWarning(true);
+            return;
           }
         }
         handleApprove();
@@ -612,7 +595,7 @@ const App: React.FC = () => {
     showExport, showFeedbackPrompt, showClaudeCodeWarning, showAgentWarning,
     showPermissionModeSetup, pendingPasteImage,
     submitted, isSubmitting, isApiMode, annotations.length,
-    origin, availableAgents,
+    origin, getAgentWarning,
   ]);
 
   const handleAddAnnotation = (ann: Annotation) => {
@@ -725,16 +708,12 @@ const App: React.FC = () => {
                       }
 
                       // Check if agent exists for OpenCode users
-                      if (origin === 'opencode' && availableAgents.length > 0) {
-                        const agentSettings = getAgentSwitchSettings();
-                        const effectiveAgent = getEffectiveAgentName(agentSettings);
-                        if (effectiveAgent && effectiveAgent !== 'disabled') {
-                          const exists = availableAgents.some(a => a.id.toLowerCase() === effectiveAgent.toLowerCase());
-                          if (!exists) {
-                            setAgentWarningMessage(`Agent "${effectiveAgent}" was not found in OpenCode. Approving may cause an error.`);
-                            setShowAgentWarning(true);
-                            return;
-                          }
+                      if (origin === 'opencode') {
+                        const warning = getAgentWarning();
+                        if (warning) {
+                          setAgentWarningMessage(warning);
+                          setShowAgentWarning(true);
+                          return;
                         }
                       }
 

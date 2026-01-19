@@ -30,6 +30,7 @@ import {
   PERMISSION_MODE_OPTIONS,
   type PermissionMode,
 } from '../utils/permissionMode';
+import { useAgents } from '../hooks/useAgents';
 
 interface SettingsProps {
   taterMode: boolean;
@@ -54,43 +55,26 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const [agent, setAgent] = useState<AgentSwitchSettings>({ switchTo: 'build' });
   const [planSave, setPlanSave] = useState<PlanSaveSettings>({ enabled: true, customPath: null });
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
-  const [availableAgents, setAvailableAgents] = useState<{ id: string; name: string; description?: string }[]>([]);
   const [agentWarning, setAgentWarning] = useState<string | null>(null);
+
+  // Fetch available agents for OpenCode
+  const { agents: availableAgents, validateAgent, getAgentWarning } = useAgents(origin ?? null);
 
   useEffect(() => {
     if (showDialog) {
       setIdentity(getIdentity());
       setObsidian(getObsidianSettings());
       setBear(getBearSettings());
-      const savedAgent = getAgentSwitchSettings();
-      setAgent(savedAgent);
+      setAgent(getAgentSwitchSettings());
       setPlanSave(getPlanSaveSettings());
       setPermissionMode(getPermissionModeSettings().mode);
 
-      // Validate agent setting when dialog opens (if we have available agents)
-      if (origin === 'opencode' && availableAgents.length > 0) {
-        if (savedAgent.switchTo === 'disabled') {
-          setAgentWarning(null);
-        } else if (savedAgent.switchTo === 'custom') {
-          if (savedAgent.customName) {
-            const exists = availableAgents.some(a => a.id.toLowerCase() === savedAgent.customName.toLowerCase());
-            if (!exists) {
-              setAgentWarning(`Agent "${savedAgent.customName}" not found in OpenCode. It may cause errors.`);
-            } else {
-              setAgentWarning(null);
-            }
-          }
-        } else {
-          const exists = availableAgents.some(a => a.id.toLowerCase() === savedAgent.switchTo.toLowerCase());
-          if (!exists) {
-            setAgentWarning(`Agent "${savedAgent.switchTo}" not found in OpenCode. Select another or it may cause errors.`);
-          } else {
-            setAgentWarning(null);
-          }
-        }
+      // Validate agent setting when dialog opens
+      if (origin === 'opencode') {
+        setAgentWarning(getAgentWarning());
       }
     }
-  }, [showDialog, availableAgents, origin]);
+  }, [showDialog, availableAgents, origin, getAgentWarning]);
 
   // Fetch detected vaults when Obsidian is enabled
   useEffect(() => {
@@ -109,46 +93,6 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
         .finally(() => setVaultsLoading(false));
     }
   }, [obsidian.enabled]);
-
-  // Fetch available agents for OpenCode
-  useEffect(() => {
-    if (origin !== 'opencode') return;
-
-    fetch('/api/agents')
-      .then(res => res.json())
-      .then((data: { agents?: { id: string; name: string; description?: string }[] }) => {
-        if (data.agents?.length) {
-          setAvailableAgents(data.agents);
-
-          // Check if saved setting is valid
-          const saved = getAgentSwitchSettings();
-          if (saved.switchTo === 'disabled') {
-            setAgentWarning(null);
-          } else if (saved.switchTo === 'custom') {
-            // Validate custom agent name if set
-            if (saved.customName) {
-              const exists = data.agents.some(a => a.id.toLowerCase() === saved.customName.toLowerCase());
-              if (!exists) {
-                setAgentWarning(`Agent "${saved.customName}" not found in OpenCode. It may cause errors.`);
-              } else {
-                setAgentWarning(null);
-              }
-            }
-          } else {
-            const exists = data.agents.some(a => a.id.toLowerCase() === saved.switchTo.toLowerCase());
-            if (!exists) {
-              setAgentWarning(`Agent "${saved.switchTo}" not found in OpenCode. Select another or it may cause errors.`);
-            } else {
-              setAgentWarning(null);
-            }
-          }
-        }
-      })
-      .catch(() => {
-        // Use fallback options on error
-        setAvailableAgents([]);
-      });
-  }, [origin]);
 
   const handleObsidianChange = (updates: Partial<ObsidianSettings>) => {
     const newSettings = { ...obsidian, ...updates };
@@ -353,8 +297,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                           handleAgentChange('custom', customName);
                           // Validate custom agent name against available agents
                           if (customName && availableAgents.length > 0) {
-                            const exists = availableAgents.some(a => a.id.toLowerCase() === customName.toLowerCase());
-                            if (!exists) {
+                            if (!validateAgent(customName)) {
                               setAgentWarning(`Agent "${customName}" not found in OpenCode. It may cause errors.`);
                             } else {
                               setAgentWarning(null);
