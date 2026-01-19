@@ -20,6 +20,10 @@ interface AnnotationToolbarProps {
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
   onLockChange?: (locked: boolean) => void;
+  /** Start in input step instead of menu (for comment mode) */
+  initialStep?: 'menu' | 'input';
+  /** Pre-set annotation type when starting in input step */
+  initialType?: AnnotationType;
 }
 
 export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
@@ -33,9 +37,11 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   onMouseEnter,
   onMouseLeave,
   onLockChange,
+  initialStep = 'menu',
+  initialType,
 }) => {
-  const [step, setStep] = useState<"menu" | "input">("menu");
-  const [activeType, setActiveType] = useState<AnnotationType | null>(null);
+  const [step, setStep] = useState<"menu" | "input">(initialStep);
+  const [activeType, setActiveType] = useState<AnnotationType | null>(initialType ?? null);
   const [inputValue, setInputValue] = useState("");
   const [imagePaths, setImagePaths] = useState<string[]>([]);
   const [position, setPosition] = useState<{ top: number; left?: number; right?: number } | null>(null);
@@ -54,19 +60,30 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     setTimeout(() => setCopied(false), 1500);
   };
 
-  // Focus input when entering input step
+  // Focus input when entering input step (including on mount with initialStep='input')
   useEffect(() => {
-    if (step === "input") inputRef.current?.focus();
-  }, [step]);
+    if (step === "input") {
+      // Use setTimeout to ensure DOM is fully ready (portals can have timing issues)
+      const timeoutId = setTimeout(() => {
+        const input = inputRef.current;
+        if (input) {
+          input.focus();
+          // Move cursor to end (for type-to-comment with pre-populated char)
+          input.selectionStart = input.selectionEnd = input.value.length;
+        }
+      }, 0);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [step, element]); // Also re-run when element changes (new selection)
 
   // Reset state when element changes
   useEffect(() => {
-    setStep("menu");
-    setActiveType(null);
+    setStep(initialStep);
+    setActiveType(initialType ?? null);
     setInputValue("");
     setImagePaths([]);
     setCopied(false);
-  }, [element]);
+  }, [element, initialStep, initialType]);
 
   // Notify parent when locked (in input mode)
   useEffect(() => {
@@ -106,6 +123,28 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       window.removeEventListener("resize", updatePosition);
     };
   }, [element, positionMode, closeOnScrollOut, step, onClose]);
+
+  // Type-to-comment: start typing in menu step → auto-transition to comment input
+  useEffect(() => {
+    if (step !== "menu") return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if modifier keys are held (except shift for capitals)
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      // Ignore special keys
+      if (e.key === "Escape" || e.key === "Tab" || e.key === "Enter") return;
+      // Only trigger on printable characters (single char keys)
+      if (e.key.length !== 1) return;
+
+      // Transition to comment mode with the typed character
+      setActiveType(AnnotationType.COMMENT);
+      setInputValue(e.key);
+      setStep("input");
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [step]);
 
   if (!position) return null;
 

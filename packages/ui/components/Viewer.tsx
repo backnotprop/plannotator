@@ -122,7 +122,13 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   const modeRef = useRef<EditorMode>(mode);
   const onAddAnnotationRef = useRef(onAddAnnotation);
   const pendingSourceRef = useRef<any>(null);
-  const [toolbarState, setToolbarState] = useState<{ element: HTMLElement; source: any; selectionText: string } | null>(null);
+  const [toolbarState, setToolbarState] = useState<{
+    element: HTMLElement;
+    source: any;
+    selectionText: string;
+    initialStep?: 'menu' | 'input';
+    initialType?: AnnotationType;
+  } | null>(null);
   const [hoveredCodeBlock, setHoveredCodeBlock] = useState<{ block: Block; element: HTMLElement } | null>(null);
   const [isCodeBlockToolbarExiting, setIsCodeBlockToolbarExiting] = useState(false);
   const [isCodeBlockToolbarLocked, setIsCodeBlockToolbarLocked] = useState(false);
@@ -457,10 +463,19 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             // Auto-delete in redline mode
             createAnnotationFromSource(highlighter, source, AnnotationType.DELETION);
             window.getSelection()?.removeAllRanges();
+          } else if (modeRef.current === 'comment') {
+            // Comment mode - show input directly
+            const selectionText = source.text;
+            pendingSourceRef.current = source;
+            setToolbarState({
+              element: doms[0] as HTMLElement,
+              source,
+              selectionText,
+              initialStep: 'input',
+              initialType: AnnotationType.COMMENT,
+            });
           } else {
-            // Show toolbar in selection mode
-            // Use source.text from web-highlighter (complete text, captured before DOM modification)
-            // Note: Selection.toString() would be truncated since web-highlighter already wrapped the selection
+            // Selection mode - show toolbar menu
             const selectionText = source.text;
             pendingSourceRef.current = source;
             setToolbarState({ element: doms[0] as HTMLElement, source, selectionText });
@@ -732,6 +747,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             onClose={handleToolbarClose}
             copyText={toolbarState.selectionText}
             closeOnScrollOut
+            initialStep={toolbarState.initialStep}
+            initialType={toolbarState.initialType}
           />
         )}
 

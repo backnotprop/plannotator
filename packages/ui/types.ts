@@ -6,7 +6,7 @@ export enum AnnotationType {
   GLOBAL_COMMENT = 'GLOBAL_COMMENT',
 }
 
-export type EditorMode = 'selection' | 'redline';
+export type EditorMode = 'selection' | 'comment' | 'redline';
 
 export interface Annotation {
   id: string;
