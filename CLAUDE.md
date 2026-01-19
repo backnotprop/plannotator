@@ -270,6 +270,14 @@ bun run build:marketing  # Static build for plannotator.ai
 bun run build            # Build hook + opencode (main targets)
 ```
 
+**Important:** The OpenCode plugin copies pre-built HTML from `apps/hook/dist/` and `apps/review/dist/`. When making UI changes (in `packages/ui/`, `packages/editor/`, or `packages/review-editor/`), you must rebuild the hook/review first:
+
+```bash
+bun run build:hook && bun run build:opencode   # For UI changes
+```
+
+Running only `build:opencode` will copy stale HTML files.
+
 ## Test plugin locally
 
 ```

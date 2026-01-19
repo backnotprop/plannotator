@@ -62,11 +62,35 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       setIdentity(getIdentity());
       setObsidian(getObsidianSettings());
       setBear(getBearSettings());
-      setAgent(getAgentSwitchSettings());
+      const savedAgent = getAgentSwitchSettings();
+      setAgent(savedAgent);
       setPlanSave(getPlanSaveSettings());
       setPermissionMode(getPermissionModeSettings().mode);
+
+      // Validate agent setting when dialog opens (if we have available agents)
+      if (origin === 'opencode' && availableAgents.length > 0) {
+        if (savedAgent.switchTo === 'disabled') {
+          setAgentWarning(null);
+        } else if (savedAgent.switchTo === 'custom') {
+          if (savedAgent.customName) {
+            const exists = availableAgents.some(a => a.id.toLowerCase() === savedAgent.customName.toLowerCase());
+            if (!exists) {
+              setAgentWarning(`Agent "${savedAgent.customName}" not found in OpenCode. It may cause errors.`);
+            } else {
+              setAgentWarning(null);
+            }
+          }
+        } else {
+          const exists = availableAgents.some(a => a.id.toLowerCase() === savedAgent.switchTo.toLowerCase());
+          if (!exists) {
+            setAgentWarning(`Agent "${savedAgent.switchTo}" not found in OpenCode. Select another or it may cause errors.`);
+          } else {
+            setAgentWarning(null);
+          }
+        }
+      }
     }
-  }, [showDialog]);
+  }, [showDialog, availableAgents, origin]);
 
   // Fetch detected vaults when Obsidian is enabled
   useEffect(() => {
@@ -98,8 +122,20 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
 
           // Check if saved setting is valid
           const saved = getAgentSwitchSettings();
-          if (saved.switchTo !== 'disabled' && saved.switchTo !== 'custom') {
-            const exists = data.agents.some(a => a.id === saved.switchTo);
+          if (saved.switchTo === 'disabled') {
+            setAgentWarning(null);
+          } else if (saved.switchTo === 'custom') {
+            // Validate custom agent name if set
+            if (saved.customName) {
+              const exists = data.agents.some(a => a.id.toLowerCase() === saved.customName.toLowerCase());
+              if (!exists) {
+                setAgentWarning(`Agent "${saved.customName}" not found in OpenCode. It may cause errors.`);
+              } else {
+                setAgentWarning(null);
+              }
+            }
+          } else {
+            const exists = data.agents.some(a => a.id.toLowerCase() === saved.switchTo.toLowerCase());
             if (!exists) {
               setAgentWarning(`Agent "${saved.switchTo}" not found in OpenCode. Select another or it may cause errors.`);
             } else {
@@ -312,7 +348,21 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                       <input
                         type="text"
                         value={agent.customName || ''}
-                        onChange={(e) => handleAgentChange('custom', e.target.value)}
+                        onChange={(e) => {
+                          const customName = e.target.value;
+                          handleAgentChange('custom', customName);
+                          // Validate custom agent name against available agents
+                          if (customName && availableAgents.length > 0) {
+                            const exists = availableAgents.some(a => a.id.toLowerCase() === customName.toLowerCase());
+                            if (!exists) {
+                              setAgentWarning(`Agent "${customName}" not found in OpenCode. It may cause errors.`);
+                            } else {
+                              setAgentWarning(null);
+                            }
+                          } else {
+                            setAgentWarning(null);
+                          }
+                        }}
                         placeholder="Enter agent name..."
                         className="w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 placeholder:text-muted-foreground/50"
                       />

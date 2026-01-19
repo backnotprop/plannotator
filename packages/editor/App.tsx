@@ -311,6 +311,9 @@ const App: React.FC = () => {
   const [showExport, setShowExport] = useState(false);
   const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
   const [showClaudeCodeWarning, setShowClaudeCodeWarning] = useState(false);
+  const [showAgentWarning, setShowAgentWarning] = useState(false);
+  const [availableAgents, setAvailableAgents] = useState<{ id: string; name: string }[]>([]);
+  const [agentWarningMessage, setAgentWarningMessage] = useState('');
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [editorMode, setEditorMode] = useState<EditorMode>('selection');
   const [taterMode, setTaterMode] = useState(() => {
@@ -403,6 +406,22 @@ const App: React.FC = () => {
       })
       .finally(() => setIsLoading(false));
   }, [isLoadingShared, isSharedSession]);
+
+  // Fetch available agents for OpenCode (for validation on approve)
+  useEffect(() => {
+    if (origin !== 'opencode') return;
+
+    fetch('/api/agents')
+      .then(res => res.json())
+      .then((data: { agents?: { id: string; name: string }[] }) => {
+        if (data.agents?.length) {
+          setAvailableAgents(data.agents);
+        }
+      })
+      .catch(() => {
+        // Ignore errors - validation will be skipped if no agents
+      });
+  }, [origin]);
 
   useEffect(() => {
     const { frontmatter: fm } = extractFrontmatter(markdown);
@@ -556,7 +575,7 @@ const App: React.FC = () => {
 
       // Don't intercept if any modal is open
       if (showExport || showFeedbackPrompt || showClaudeCodeWarning ||
-          showPermissionModeSetup || pendingPasteImage) return;
+          showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
 
       // Don't intercept if already submitted or submitting
       if (submitted || isSubmitting) return;
@@ -568,6 +587,19 @@ const App: React.FC = () => {
 
       // No annotations → Approve, otherwise → Send Feedback
       if (annotations.length === 0) {
+        // Check if agent exists for OpenCode users
+        if (origin === 'opencode' && availableAgents.length > 0) {
+          const agentSettings = getAgentSwitchSettings();
+          const effectiveAgent = getEffectiveAgentName(agentSettings);
+          if (effectiveAgent && effectiveAgent !== 'disabled') {
+            const exists = availableAgents.some(a => a.id.toLowerCase() === effectiveAgent.toLowerCase());
+            if (!exists) {
+              setAgentWarningMessage(`Agent "${effectiveAgent}" was not found in OpenCode. Approving may cause an error.`);
+              setShowAgentWarning(true);
+              return;
+            }
+          }
+        }
         handleApprove();
       } else {
         handleDeny();
@@ -577,9 +609,10 @@ const App: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
-    showExport, showFeedbackPrompt, showClaudeCodeWarning,
+    showExport, showFeedbackPrompt, showClaudeCodeWarning, showAgentWarning,
     showPermissionModeSetup, pendingPasteImage,
     submitted, isSubmitting, isApiMode, annotations.length,
+    origin, availableAgents,
   ]);
 
   const handleAddAnnotation = (ann: Annotation) => {
@@ -688,9 +721,24 @@ const App: React.FC = () => {
                       // Show warning for Claude Code users with annotations
                       if (origin === 'claude-code' && annotations.length > 0) {
                         setShowClaudeCodeWarning(true);
-                      } else {
-                        handleApprove();
+                        return;
                       }
+
+                      // Check if agent exists for OpenCode users
+                      if (origin === 'opencode' && availableAgents.length > 0) {
+                        const agentSettings = getAgentSwitchSettings();
+                        const effectiveAgent = getEffectiveAgentName(agentSettings);
+                        if (effectiveAgent && effectiveAgent !== 'disabled') {
+                          const exists = availableAgents.some(a => a.id.toLowerCase() === effectiveAgent.toLowerCase());
+                          if (!exists) {
+                            setAgentWarningMessage(`Agent "${effectiveAgent}" was not found in OpenCode. Approving may cause an error.`);
+                            setShowAgentWarning(true);
+                            return;
+                          }
+                        }
+                      }
+
+                      handleApprove();
                     }}
                     disabled={isSubmitting}
                     className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${
@@ -828,6 +876,27 @@ const App: React.FC = () => {
               <a href="https://github.com/anthropics/claude-code/issues/16001" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">#16001</a>
               {' · '}
               <a href="https://github.com/anthropics/claude-code/issues/15755" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">#15755</a>
+            </>
+          }
+          confirmText="Approve Anyway"
+          cancelText="Cancel"
+          variant="warning"
+          showCancel
+        />
+
+        {/* OpenCode agent not found warning dialog */}
+        <ConfirmDialog
+          isOpen={showAgentWarning}
+          onClose={() => setShowAgentWarning(false)}
+          onConfirm={() => {
+            setShowAgentWarning(false);
+            handleApprove();
+          }}
+          title="Agent Not Found"
+          message={agentWarningMessage}
+          subMessage={
+            <>
+              You can change the agent in <strong>Settings</strong>, or approve anyway and OpenCode will use the default agent.
             </>
           }
           confirmText="Approve Anyway"
