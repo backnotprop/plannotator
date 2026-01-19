@@ -38,6 +38,12 @@ export interface ReviewServerOptions {
   sharingEnabled?: boolean;
   /** Called when server starts with the URL, remote status, and port */
   onReady?: (url: string, isRemote: boolean, port: number) => void;
+  /** OpenCode client for querying available agents (OpenCode only) */
+  opencodeClient?: {
+    app: {
+      agents: (options?: object) => Promise<{ data?: Array<{ name: string; description?: string; mode: string; hidden?: boolean }> }>;
+    };
+  };
 }
 
 export interface ReviewServerResult {
@@ -191,6 +197,24 @@ export async function startReviewServer(
               const message =
                 err instanceof Error ? err.message : "Upload failed";
               return Response.json({ error: message }, { status: 500 });
+            }
+          }
+
+          // API: Get available agents (OpenCode only)
+          if (url.pathname === "/api/agents") {
+            if (!options.opencodeClient) {
+              return Response.json({ agents: [] });
+            }
+
+            try {
+              const result = await options.opencodeClient.app.agents({});
+              const agents = (result.data ?? [])
+                .filter((a) => a.mode === "primary" && !a.hidden)
+                .map((a) => ({ id: a.name, name: a.name, description: a.description }));
+
+              return Response.json({ agents });
+            } catch {
+              return Response.json({ agents: [], error: "Failed to fetch agents" });
             }
           }
 

@@ -122,6 +122,7 @@ Do NOT proceed with implementation until your plan is approved.
           gitContext,
           sharingEnabled: await getSharingEnabled(),
           htmlContent: reviewHtmlContent,
+          opencodeClient: ctx.client,
           onReady: handleReviewServerReady,
         });
 
@@ -181,6 +182,7 @@ Do NOT proceed with implementation until your plan is approved.
             origin: "opencode",
             sharingEnabled: await getSharingEnabled(),
             htmlContent,
+            opencodeClient: ctx.client,
             onReady: (url, isRemote, port) => {
               handleServerReady(url, isRemote, port);
             },
