@@ -15,6 +15,19 @@ $arch = if ([Environment]::Is64BitOperatingSystem) {
 $platform = "win32-$arch"
 $binaryName = "plannotator-$platform.exe"
 
+# Clean up old install locations that may take precedence in PATH
+$oldLocations = @(
+    "$env:USERPROFILE\.local\bin\plannotator.exe",
+    "$env:USERPROFILE\.local\bin\plannotator"
+)
+
+foreach ($oldPath in $oldLocations) {
+    if (Test-Path $oldPath) {
+        Write-Host "Removing old installation at $oldPath..."
+        Remove-Item -Force $oldPath -ErrorAction SilentlyContinue
+    }
+}
+
 Write-Host "Fetching latest version..."
 $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest"
 $latestTag = $release.tag_name
