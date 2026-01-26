@@ -1,0 +1,19 @@
+{
+  "name": "@plannotator/native",
+  "version": "0.1.0",
+  "description": "React Native components for Plannotator - plan review UI",
+  "main": "index.ts",
+  "types": "index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./components/*": "./components/*.tsx",
+    "./hooks/*": "./hooks/*.ts"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-native": ">=0.70.0"
+  },
+  "dependencies": {
+    "@plannotator/core": "workspace:*"
+  }
+}

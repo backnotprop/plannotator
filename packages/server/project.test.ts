@@ -105,10 +105,10 @@ describe("detectProjectName", () => {
     }
   });
 
-  // This test verifies we get "planning-hook" when run from this repo
+  // This test verifies we get "plannotator" when run from this repo
   test("detects current repo name", async () => {
     const result = await detectProjectName();
-    // We're in the planning-hook repo, so should get that name
-    expect(result).toBe("planning-hook");
+    // We're in the plannotator repo, so should get that name
+    expect(result).toBe("plannotator");
   });
 });

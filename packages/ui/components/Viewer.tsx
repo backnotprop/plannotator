@@ -2,7 +2,7 @@ import React, { useRef, useState, useEffect, forwardRef, useImperativeHandle, us
 import Highlighter from 'web-highlighter';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
-import { Block, Annotation, AnnotationType, EditorMode } from '../types';
+import { Block, Annotation, AnnotationType, EditorMode, ReviewTag, type ValidationMarker } from '../types';
 import { Frontmatter } from '../utils/parser';
 import { AnnotationToolbar } from './AnnotationToolbar';
 import { TaterSpriteSitting } from './TaterSpriteSitting';
@@ -22,6 +22,8 @@ interface ViewerProps {
   globalAttachments?: string[];
   onAddGlobalAttachment?: (path: string) => void;
   onRemoveGlobalAttachment?: (path: string) => void;
+  /** Existing validation markers in the source file (annotate mode) */
+  existingMarkers?: ValidationMarker[];
 }
 
 export interface ViewerHandle {
@@ -76,6 +78,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   globalAttachments = [],
   onAddGlobalAttachment,
   onRemoveGlobalAttachment,
+  existingMarkers = [],
 }, ref) => {
   const [copied, setCopied] = useState(false);
   const [showGlobalCommentInput, setShowGlobalCommentInput] = useState(false);
@@ -103,7 +106,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       type: AnnotationType.GLOBAL_COMMENT,
       text: globalCommentValue.trim(),
       originalText: '',
-      createdA: Date.now(),
+      createdAt: Date.now(),
       author: getIdentity(),
     };
 
@@ -143,7 +146,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     source: any,
     type: AnnotationType,
     text?: string,
-    imagePaths?: string[]
+    imagePaths?: string[],
+    tag?: ReviewTag,
+    isMacro?: boolean
   ) => {
     const doms = highlighter.getDoms(source.id);
     let blockId = '';
@@ -169,9 +174,11 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       startOffset,
       endOffset: startOffset + source.text.length,
       type,
+      tag,
+      isMacro,
       text,
       originalText: source.text,
-      createdA: Date.now(),
+      createdAt: Date.now(),
       author: getIdentity(),
       startMeta: source.startMeta,
       endMeta: source.endMeta,
@@ -470,11 +477,11 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     });
   }, [annotations]);
 
-  const handleAnnotate = (type: AnnotationType, text?: string, imagePaths?: string[]) => {
+  const handleAnnotate = (type: AnnotationType, text?: string, imagePaths?: string[], tag?: ReviewTag, isMacro?: boolean) => {
     const highlighter = highlighterRef.current;
     if (!toolbarState || !highlighter) return;
 
-    createAnnotationFromSource(highlighter, toolbarState.source, type, text, imagePaths);
+    createAnnotationFromSource(highlighter, toolbarState.source, type, text, imagePaths, tag, isMacro);
     pendingSourceRef.current = null;
     setToolbarState(null);
     window.getSelection()?.removeAllRanges();
@@ -489,7 +496,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     window.getSelection()?.removeAllRanges();
   };
 
-  const handleCodeBlockAnnotate = (type: AnnotationType, text?: string, imagePaths?: string[]) => {
+  const handleCodeBlockAnnotate = (type: AnnotationType, text?: string, imagePaths?: string[], tag?: ReviewTag, isMacro?: boolean) => {
     const highlighter = highlighterRef.current;
     if (!hoveredCodeBlock || !highlighter) return;
 
@@ -533,9 +540,11 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       startOffset: 0,
       endOffset: codeText.length,
       type,
+      tag,
+      isMacro,
       text,
       originalText: codeText,
-      createdA: Date.now(),
+      createdAt: Date.now(),
       author: getIdentity(),
       imagePaths,
     };
@@ -660,11 +669,18 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           </button>
         </div>
         {frontmatter && <FrontmatterCard frontmatter={frontmatter} />}
-        {blocks.map(block => (
-          block.type === 'code' ? (
+        {blocks.map(block => {
+          // Find validation marker for this block (marker line is typically 1 after heading line)
+          const blockMarker = existingMarkers.find(m =>
+            m.line === block.startLine + 1 || // Marker right after heading
+            (m.context && block.content.includes(m.context.slice(0, 20)))
+          );
+
+          return block.type === 'code' ? (
             <CodeBlock
               key={block.id}
               block={block}
+              validationMarker={blockMarker}
               onHover={(element) => {
                 // Clear any pending leave timeout
                 if (hoverTimeoutRef.current) {
@@ -692,9 +708,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               isHovered={hoveredCodeBlock?.block.id === block.id}
             />
           ) : (
-            <BlockRenderer key={block.id} block={block} />
-          )
-        ))}
+            <BlockRenderer key={block.id} block={block} validationMarker={blockMarker} />
+          );
+        })}
 
         {/* Text selection toolbar */}
         {toolbarState && (
@@ -838,7 +854,7 @@ const parseTableContent = (content: string): { headers: string[]; rows: string[]
   return { headers, rows };
 };
 
-const BlockRenderer: React.FC<{ block: Block }> = ({ block }) => {
+const BlockRenderer: React.FC<{ block: Block; validationMarker?: ValidationMarker }> = ({ block, validationMarker }) => {
   switch (block.type) {
     case 'heading':
       const Tag = `h${block.level || 1}` as keyof JSX.IntrinsicElements;
@@ -848,7 +864,25 @@ const BlockRenderer: React.FC<{ block: Block }> = ({ block }) => {
         3: 'text-base font-semibold mb-2 mt-6 text-foreground/80',
       }[block.level || 1] || 'text-base font-semibold mb-2 mt-4';
 
-      return <Tag className={styles} data-block-id={block.id}><InlineMarkdown text={block.content} /></Tag>;
+      return (
+        <div className="flex items-center gap-2" data-block-id={block.id}>
+          <Tag className={styles}><InlineMarkdown text={block.content} /></Tag>
+          {validationMarker && (
+            <span
+              className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 ${
+                validationMarker.tag === '@LOCKED'
+                  ? 'bg-red-500/15 text-red-400'
+                  : validationMarker.tag === '@APPROVED'
+                    ? 'bg-green-500/15 text-green-400'
+                    : 'bg-blue-500/15 text-blue-400'
+              }`}
+              title={`This section is marked as ${validationMarker.tag}${validationMarker.attributes?.by ? ` by ${validationMarker.attributes.by}` : ''}`}
+            >
+              {validationMarker.tag}
+            </span>
+          )}
+        </div>
+      );
 
     case 'blockquote':
       return (
@@ -946,12 +980,13 @@ const BlockRenderer: React.FC<{ block: Block }> = ({ block }) => {
 
 interface CodeBlockProps {
   block: Block;
-  onHover: (element: HTMLElement) => void;
-  onLeave: () => void;
-  isHovered: boolean;
+  onHover?: (element: HTMLElement) => void;
+  onLeave?: () => void;
+  isHovered?: boolean;
+  validationMarker?: ValidationMarker;
 }
 
-const CodeBlock: React.FC<CodeBlockProps> = ({ block, onHover, onLeave, isHovered }) => {
+const CodeBlock: React.FC<CodeBlockProps> = ({ block, onHover, onLeave, isHovered, validationMarker }) => {
   const [copied, setCopied] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const codeRef = useRef<HTMLElement>(null);
@@ -993,6 +1028,22 @@ const CodeBlock: React.FC<CodeBlockProps> = ({ block, onHover, onLeave, isHovere
       onMouseEnter={handleMouseEnter}
       onMouseLeave={onLeave}
     >
+      {/* Validation marker badge */}
+      {validationMarker && (
+        <span
+          className={`absolute top-2 left-2 text-[10px] px-1.5 py-0.5 rounded font-medium z-10 ${
+            validationMarker.tag === '@LOCKED'
+              ? 'bg-red-500/15 text-red-400'
+              : validationMarker.tag === '@APPROVED'
+                ? 'bg-green-500/15 text-green-400'
+                : 'bg-blue-500/15 text-blue-400'
+          }`}
+          title={`This code block is marked as ${validationMarker.tag}`}
+        >
+          {validationMarker.tag}
+        </span>
+      )}
+
       <button
         onClick={handleCopy}
         className="absolute top-2 right-2 p-1.5 rounded-md bg-muted/80 hover:bg-muted text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity z-10"

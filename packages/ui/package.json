@@ -9,6 +9,7 @@
     "./types": "./types.ts"
   },
   "dependencies": {
+    "@plannotator/core": "workspace:*",
     "highlight.js": "^11.11.1",
     "perfect-freehand": "^1.2.2",
     "react": "^19.2.3",

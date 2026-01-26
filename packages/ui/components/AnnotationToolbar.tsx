@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { AnnotationType } from "../types";
+import { AnnotationType, ReviewTag, REVIEW_TAG_CATEGORIES } from "../types";
 import { createPortal } from "react-dom";
 import { AttachmentsButton } from "./AttachmentsButton";
 
@@ -8,7 +8,7 @@ type PositionMode = 'center-above' | 'top-right';
 interface AnnotationToolbarProps {
   element: HTMLElement;
   positionMode: PositionMode;
-  onAnnotate: (type: AnnotationType, text?: string, imagePaths?: string[]) => void;
+  onAnnotate: (type: AnnotationType, text?: string, imagePaths?: string[], tag?: ReviewTag, isMacro?: boolean) => void;
   onClose: () => void;
   /** Text to copy (for text selection, pass source.text) */
   copyText?: string;
@@ -38,9 +38,13 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   const [activeType, setActiveType] = useState<AnnotationType | null>(null);
   const [inputValue, setInputValue] = useState("");
   const [imagePaths, setImagePaths] = useState<string[]>([]);
+  const [selectedTag, setSelectedTag] = useState<ReviewTag | undefined>(undefined);
+  const [isMacro, setIsMacro] = useState(false);
+  const [showTagDropdown, setShowTagDropdown] = useState(false);
   const [position, setPosition] = useState<{ top: number; left?: number; right?: number } | null>(null);
   const [copied, setCopied] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const tagDropdownRef = useRef<HTMLDivElement>(null);
 
   const handleCopy = async () => {
     // Use provided copyText, or fall back to code element / element text
@@ -65,8 +69,24 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     setActiveType(null);
     setInputValue("");
     setImagePaths([]);
+    setSelectedTag(undefined);
+    setIsMacro(false);
+    setShowTagDropdown(false);
     setCopied(false);
   }, [element]);
+
+  // Close tag dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (tagDropdownRef.current && !tagDropdownRef.current.contains(e.target as Node)) {
+        setShowTagDropdown(false);
+      }
+    };
+    if (showTagDropdown) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showTagDropdown]);
 
   // Notify parent when locked (in input mode)
   useEffect(() => {
@@ -121,7 +141,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (activeType && (inputValue.trim() || imagePaths.length > 0)) {
-      onAnnotate(activeType, inputValue || undefined, imagePaths.length > 0 ? imagePaths : undefined);
+      onAnnotate(activeType, inputValue || undefined, imagePaths.length > 0 ? imagePaths : undefined, selectedTag, isMacro || undefined);
     }
   };
 
@@ -186,7 +206,90 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           />
         </div>
       ) : (
-        <form onSubmit={handleSubmit} className="flex items-start gap-1.5 p-1.5 pl-3">
+        <form onSubmit={handleSubmit} className="flex items-start gap-1.5 p-1.5 pl-2">
+          {/* Tag Selector Dropdown */}
+          <div className="relative" ref={tagDropdownRef}>
+            <button
+              type="button"
+              onClick={() => setShowTagDropdown(!showTagDropdown)}
+              className={`px-2 py-1.5 text-xs rounded transition-colors ${
+                selectedTag
+                  ? 'bg-primary/20 text-primary font-medium'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+              }`}
+              title={selectedTag ? `Tag: ${selectedTag}` : 'Add tag (optional)'}
+            >
+              {selectedTag ? selectedTag : <TagIcon />}
+            </button>
+            {showTagDropdown && (
+              <div className="absolute left-0 top-full mt-1 bg-popover border border-border rounded-lg shadow-xl z-50 min-w-[180px] py-1 max-h-64 overflow-y-auto">
+                <button
+                  type="button"
+                  onClick={() => { setSelectedTag(undefined); setShowTagDropdown(false); }}
+                  className={`w-full px-3 py-1.5 text-left text-xs hover:bg-muted transition-colors ${
+                    !selectedTag ? 'text-muted-foreground font-medium' : 'text-muted-foreground'
+                  }`}
+                >
+                  No tag
+                </button>
+                <div className="h-px bg-border my-1" />
+                <div className="px-3 py-1 text-[10px] text-muted-foreground/60 uppercase font-medium">Modification</div>
+                {REVIEW_TAG_CATEGORIES.modification.map(tag => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => { setSelectedTag(tag); setShowTagDropdown(false); }}
+                    className={`w-full px-3 py-1.5 text-left text-xs hover:bg-muted transition-colors ${
+                      selectedTag === tag ? 'bg-primary/10 text-primary font-medium' : 'text-foreground'
+                    }`}
+                  >
+                    {tag}
+                  </button>
+                ))}
+                <div className="h-px bg-border my-1" />
+                <div className="px-3 py-1 text-[10px] text-muted-foreground/60 uppercase font-medium">Vérification</div>
+                {REVIEW_TAG_CATEGORIES.verification.map(tag => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => { setSelectedTag(tag); setShowTagDropdown(false); }}
+                    className={`w-full px-3 py-1.5 text-left text-xs hover:bg-muted transition-colors ${
+                      selectedTag === tag ? 'bg-primary/10 text-primary font-medium' : 'text-foreground'
+                    }`}
+                  >
+                    {tag}
+                  </button>
+                ))}
+                <div className="h-px bg-border my-1" />
+                <div className="px-3 py-1 text-[10px] text-muted-foreground/60 uppercase font-medium">Validation</div>
+                {REVIEW_TAG_CATEGORIES.validation.map(tag => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => { setSelectedTag(tag); setShowTagDropdown(false); }}
+                    className={`w-full px-3 py-1.5 text-left text-xs hover:bg-muted transition-colors ${
+                      selectedTag === tag ? 'bg-primary/10 text-primary font-medium' : 'text-foreground'
+                    }`}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {/* [MACRO] Toggle */}
+          <button
+            type="button"
+            onClick={() => setIsMacro(!isMacro)}
+            className={`px-2 py-1.5 text-[10px] font-medium rounded transition-colors whitespace-nowrap ${
+              isMacro
+                ? 'bg-warning/20 text-warning border border-warning/40'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted border border-transparent'
+            }`}
+            title={isMacro ? "Impact multi-document activé" : "Marquer comme changement avec impact multi-document"}
+          >
+            [MACRO]
+          </button>
           <textarea
             ref={inputRef}
             rows={1}
@@ -200,7 +303,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 if (inputValue.trim() || imagePaths.length > 0) {
-                  onAnnotate(activeType!, inputValue || undefined, imagePaths.length > 0 ? imagePaths : undefined);
+                  onAnnotate(activeType!, inputValue || undefined, imagePaths.length > 0 ? imagePaths : undefined, selectedTag, isMacro || undefined);
                 }
               }
             }}
@@ -260,6 +363,12 @@ const CommentIcon = () => (
 const CloseIcon: React.FC<{ small?: boolean }> = ({ small }) => (
   <svg className={small ? "w-3.5 h-3.5" : "w-4 h-4"} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+  </svg>
+);
+
+const TagIcon = () => (
+  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
   </svg>
 );
 

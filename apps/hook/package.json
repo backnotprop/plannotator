@@ -18,10 +18,11 @@
     "@tailwindcss/vite": "^4.1.18"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^5.0.0",
+    "@types/node": "^22.14.0",
+    "@vitejs/plugin-react": "4.3.4",
+    "micromatch": "^4.0.8",
     "typescript": "~5.8.2",
     "vite": "^6.2.0",
-    "vite-plugin-singlefile": "^2.0.3",
-    "@types/node": "^22.14.0"
+    "vite-plugin-singlefile": "^2.0.3"
   }
 }

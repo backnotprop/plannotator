@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Annotation, AnnotationType, Block } from '../types';
+import { Annotation, AnnotationType, Block, ReviewTag } from '../types';
 import { isCurrentUser } from '../utils/identity';
 import { ImageThumbnail } from './ImageThumbnail';
 
@@ -27,7 +27,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   sharingEnabled = true
 }) => {
   const [copied, setCopied] = useState(false);
-  const sortedAnnotations = [...annotations].sort((a, b) => a.createdA - b.createdA);
+  const sortedAnnotations = [...annotations].sort((a, b) => a.createdAt - b.createdAt);
 
   const handleQuickShare = async () => {
     if (!shareUrl) return;
@@ -267,7 +267,7 @@ const AnnotationCard: React.FC<{
         </div>
       )}
 
-      {/* Type Badge + Timestamp + Actions */}
+      {/* Type Badge + Tag + Timestamp + Actions */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <div className={`flex items-center gap-1.5 ${config.color}`}>
@@ -278,8 +278,18 @@ const AnnotationCard: React.FC<{
               {config.label}
             </span>
           </div>
+          {annotation.tag && (
+            <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-primary/15 text-primary">
+              {annotation.tag}
+            </span>
+          )}
+          {annotation.isMacro && (
+            <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-warning/20 text-warning border border-warning/30">
+              [MACRO]
+            </span>
+          )}
           <span className="text-[10px] text-muted-foreground/50">
-            {formatTimestamp(annotation.createdA)}
+            {formatTimestamp(annotation.createdAt)}
           </span>
         </div>
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">

@@ -8,15 +8,15 @@
  * Inspired by textarea.my's approach.
  */
 
-import { Annotation, AnnotationType } from '../types';
+import { Annotation, AnnotationType, ReviewTag } from '../types';
 
-// Minimal shareable annotation format: [type, originalText, text?, author?, imagePaths?]
+// Minimal shareable annotation format: [type, originalText, text?, author?, imagePaths?, tag?]
 export type ShareableAnnotation =
-  | ['D', string, string | null, string[]?]                    // Deletion: type, original, author, images
-  | ['R', string, string, string | null, string[]?]            // Replacement: type, original, replacement, author, images
-  | ['C', string, string, string | null, string[]?]            // Comment: type, original, comment, author, images
-  | ['I', string, string, string | null, string[]?]            // Insertion: type, context, new text, author, images
-  | ['G', string, string | null, string[]?];                   // Global Comment: type, comment, author, images
+  | ['D', string, string | null, string[]?, string?]                    // Deletion: type, original, author, images, tag
+  | ['R', string, string, string | null, string[]?, string?]            // Replacement: type, original, replacement, author, images, tag
+  | ['C', string, string, string | null, string[]?, string?]            // Comment: type, original, comment, author, images, tag
+  | ['I', string, string, string | null, string[]?, string?]            // Insertion: type, context, new text, author, images, tag
+  | ['G', string, string | null, string[]?, string?];                   // Global Comment: type, comment, author, images, tag
 
 export interface SharePayload {
   p: string;  // plan markdown
@@ -77,20 +77,21 @@ export function toShareable(annotations: Annotation[]): ShareableAnnotation[] {
   return annotations.map(ann => {
     const author = ann.author || null;
     const images = ann.imagePaths?.length ? ann.imagePaths : undefined;
+    const tag = ann.tag || undefined;
 
     // Handle GLOBAL_COMMENT specially - it starts with 'G' (from GLOBAL_COMMENT)
     if (ann.type === AnnotationType.GLOBAL_COMMENT) {
-      return ['G', ann.text || '', author, images] as ShareableAnnotation;
+      return ['G', ann.text || '', author, images, tag] as ShareableAnnotation;
     }
 
     const type = ann.type[0] as 'D' | 'R' | 'C' | 'I';
 
     if (type === 'D') {
-      return ['D', ann.originalText, author, images] as ShareableAnnotation;
+      return ['D', ann.originalText, author, images, tag] as ShareableAnnotation;
     }
 
     // R, C, I all have text
-    return [type, ann.originalText, ann.text || '', author, images] as ShareableAnnotation;
+    return [type, ann.originalText, ann.text || '', author, images, tag] as ShareableAnnotation;
   });
 }
 
@@ -111,11 +112,12 @@ export function fromShareable(data: ShareableAnnotation[]): Annotation[] {
   return data.map((item, index) => {
     const type = item[0];
 
-    // Handle global comments specially: ['G', text, author, images?]
+    // Handle global comments specially: ['G', text, author, images?, tag?]
     if (type === 'G') {
       const text = item[1] as string;
       const author = item[2] as string | null;
       const imagePaths = item[3] as string[] | undefined;
+      const tag = item[4] as string | undefined;
 
       return {
         id: `shared-${index}-${Date.now()}`,
@@ -125,18 +127,20 @@ export function fromShareable(data: ShareableAnnotation[]): Annotation[] {
         type: AnnotationType.GLOBAL_COMMENT,
         text: text || undefined,
         originalText: '',
-        createdA: Date.now() + index,
+        createdAt: Date.now() + index,
         author: author || undefined,
         imagePaths: imagePaths?.length ? imagePaths : undefined,
+        tag: tag as ReviewTag | undefined,
       };
     }
 
     const originalText = item[1];
-    // For deletion: [type, original, author, images?]
-    // For others: [type, original, text, author, images?]
+    // For deletion: [type, original, author, images?, tag?]
+    // For others: [type, original, text, author, images?, tag?]
     const text = type === 'D' ? undefined : item[2] as string;
     const author = type === 'D' ? item[2] as string | null : item[3] as string | null;
     const imagePaths = type === 'D' ? item[3] as string[] | undefined : item[4] as string[] | undefined;
+    const tag = type === 'D' ? item[4] as string | undefined : item[5] as string | undefined;
 
     return {
       id: `shared-${index}-${Date.now()}`,
@@ -146,9 +150,10 @@ export function fromShareable(data: ShareableAnnotation[]): Annotation[] {
       type: typeMap[type],
       text: text || undefined,
       originalText,
-      createdA: Date.now() + index,  // Preserve order
+      createdAt: Date.now() + index,  // Preserve order
       author: author || undefined,
       imagePaths: imagePaths?.length ? imagePaths : undefined,
+      tag: tag as ReviewTag | undefined,
       // startMeta/endMeta will be set by web-highlighter
     };
   });

@@ -1,0 +1,13 @@
+{
+  "name": "@plannotator/core",
+  "version": "0.1.0",
+  "description": "Core logic for Plannotator - markdown parsing, annotations, and diff export",
+  "main": "index.ts",
+  "types": "index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./types": "./types.ts",
+    "./parser": "./parser.ts"
+  },
+  "dependencies": {}
+}

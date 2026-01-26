@@ -24,7 +24,24 @@ import {
   savePlan,
   saveAnnotations,
   saveFinalSnapshot,
+  extractFirstHeading,
 } from "./storage";
+
+// --- Version Tracking ---
+// Track plan versions by title (H1) within a session
+const planVersions = new Map<string, number>();
+
+/**
+ * Get the version number for a plan based on its title.
+ * Increments version each time the same title is seen.
+ */
+function getPlanVersion(plan: string): number {
+  const heading = extractFirstHeading(plan) || "untitled";
+  const currentVersion = planVersions.get(heading) || 0;
+  const newVersion = currentVersion + 1;
+  planVersions.set(heading, newVersion);
+  return newVersion;
+}
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -93,6 +110,11 @@ export async function startPlannotatorServer(
   // Generate slug for potential saving (actual save happens on decision)
   const slug = generateSlug(plan);
 
+  // Extract metadata for UI display
+  const planTitle = extractFirstHeading(plan) || "Untitled Plan";
+  const planVersion = getPlanVersion(plan);
+  const planTimestamp = new Date().toISOString();
+
   // Decision promise
   let resolveDecision: (result: {
     approved: boolean;
@@ -124,7 +146,16 @@ export async function startPlannotatorServer(
 
           // API: Get plan content
           if (url.pathname === "/api/plan") {
-            return Response.json({ plan, origin, permissionMode, sharingEnabled });
+            return Response.json({
+              plan,
+              origin,
+              permissionMode,
+              sharingEnabled,
+              // Metadata for UI header
+              title: planTitle,
+              version: planVersion,
+              timestamp: planTimestamp,
+            });
           }
 
           // API: Serve images (local paths or temp uploads)

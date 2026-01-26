@@ -8,6 +8,7 @@
   "exports": {
     ".": "./index.ts",
     "./review": "./review.ts",
+    "./annotate": "./annotate.ts",
     "./remote": "./remote.ts",
     "./browser": "./browser.ts",
     "./storage": "./storage.ts",
@@ -16,6 +17,9 @@
   "files": [
     "*.ts"
   ],
+  "dependencies": {
+    "@plannotator/core": "workspace:*"
+  },
   "peerDependencies": {
     "bun": ">=1.0.0"
   }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { parseMarkdownToBlocks, exportDiff, extractFrontmatter, Frontmatter } from '@plannotator/ui/utils/parser';
+import { isValidationTag, countValidationAnnotations, type ValidationMarker } from '@plannotator/ui/utils/markers';
 import { Viewer, ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { ExportModal } from '@plannotator/ui/components/ExportModal';
@@ -327,6 +328,15 @@ const App: React.FC = () => {
   const [showPermissionModeSetup, setShowPermissionModeSetup] = useState(false);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
   const [sharingEnabled, setSharingEnabled] = useState(true);
+  // Plan metadata for header display
+  const [planTitle, setPlanTitle] = useState<string | null>(null);
+  const [planVersion, setPlanVersion] = useState<number | null>(null);
+  const [planTimestamp, setPlanTimestamp] = useState<string | null>(null);
+  // Annotate mode state (for /plannotator-annotate command)
+  const [annotateMode, setAnnotateMode] = useState(false);
+  const [filePath, setFilePath] = useState<string | null>(null);
+  const [existingMarkers, setExistingMarkers] = useState<ValidationMarker[]>([]);
+  const [saveMarkersStatus, setSaveMarkersStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const viewerRef = useRef<ViewerHandle>(null);
 
   // URL-based sharing
@@ -381,11 +391,31 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: 'claude-code' | 'opencode'; sharingEnabled?: boolean }) => {
+      .then((data: {
+          plan: string;
+          origin?: 'claude-code' | 'opencode';
+          sharingEnabled?: boolean;
+          title?: string;
+          version?: number;
+          timestamp?: string;
+          mode?: 'plan' | 'annotate';
+          filePath?: string;
+          existingMarkers?: ValidationMarker[];
+        }) => {
         setMarkdown(data.plan);
         setIsApiMode(true);
         if (data.sharingEnabled !== undefined) {
           setSharingEnabled(data.sharingEnabled);
+        }
+        // Store plan metadata
+        if (data.title) setPlanTitle(data.title);
+        if (data.version) setPlanVersion(data.version);
+        if (data.timestamp) setPlanTimestamp(data.timestamp);
+        // Detect annotate mode (for /plannotator-annotate command)
+        if (data.mode === 'annotate') {
+          setAnnotateMode(true);
+          if (data.filePath) setFilePath(data.filePath);
+          if (data.existingMarkers) setExistingMarkers(data.existingMarkers);
         }
         if (data.origin) {
           setOrigin(data.origin);
@@ -544,6 +574,40 @@ const App: React.FC = () => {
     }
   };
 
+  // Save validation markers to source file (annotate mode only)
+  const handleSaveMarkers = async () => {
+    if (!annotateMode) return;
+
+    const validationCount = countValidationAnnotations(annotations);
+    if (validationCount === 0) return;
+
+    setSaveMarkersStatus('saving');
+    try {
+      const res = await fetch('/api/save-markers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ annotations }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        setSaveMarkersStatus('saved');
+        // Update existing markers with newly added ones
+        if (data.markers && data.markers.length > 0) {
+          setExistingMarkers(prev => [...prev, ...data.markers]);
+        }
+        // Reset status after a delay
+        setTimeout(() => setSaveMarkersStatus('idle'), 2000);
+      } else {
+        setSaveMarkersStatus('error');
+        setTimeout(() => setSaveMarkersStatus('idle'), 3000);
+      }
+    } catch {
+      setSaveMarkersStatus('error');
+      setTimeout(() => setSaveMarkersStatus('idle'), 3000);
+    }
+  };
+
   // Global keyboard shortcuts (Cmd/Ctrl+Enter to submit)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -616,6 +680,9 @@ const App: React.FC = () => {
 
   const diffOutput = useMemo(() => exportDiff(blocks, annotations, globalAttachments), [blocks, annotations, globalAttachments]);
 
+  // Count validation annotations for "Save Markers" button
+  const validationAnnotationCount = useMemo(() => countValidationAnnotations(annotations), [annotations]);
+
   const agentName = useMemo(() => {
     if (origin === 'opencode') return 'OpenCode';
     if (origin === 'claude-code') return 'Claude Code';
@@ -655,9 +722,62 @@ const App: React.FC = () => {
                 {agentName}
               </span>
             )}
+            {annotateMode && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-blue-500/15 text-blue-400 hidden md:inline">
+                Annotate
+              </span>
+            )}
+            {filePath && (
+              <span className="text-xs text-muted-foreground hidden lg:inline truncate max-w-[200px]" title={filePath}>
+                {filePath.split(/[/\\]/).pop()}
+              </span>
+            )}
+            {existingMarkers.length > 0 && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-green-500/15 text-green-400 hidden lg:inline" title="Existing validation markers in file">
+                {existingMarkers.length} marker{existingMarkers.length !== 1 ? 's' : ''}
+              </span>
+            )}
+            {planTitle && planVersion && (
+              <span className="text-xs text-muted-foreground hidden lg:inline truncate max-w-[200px]" title={planTitle}>
+                <span className="opacity-60">v{planVersion}</span>
+                {planTimestamp && (
+                  <span className="opacity-40 ml-1.5">
+                    {new Date(planTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                )}
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-1 md:gap-2">
+            {/* Save Markers button (annotate mode only) */}
+            {annotateMode && validationAnnotationCount > 0 && (
+              <button
+                onClick={handleSaveMarkers}
+                disabled={saveMarkersStatus === 'saving'}
+                className={`p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium transition-all ${
+                  saveMarkersStatus === 'saving'
+                    ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
+                    : saveMarkersStatus === 'saved'
+                      ? 'bg-success/20 text-success border border-success/30'
+                      : saveMarkersStatus === 'error'
+                        ? 'bg-destructive/20 text-destructive border border-destructive/30'
+                        : 'bg-green-500/15 text-green-500 hover:bg-green-500/25 border border-green-500/30'
+                }`}
+                title={`Save ${validationAnnotationCount} validation marker(s) to file`}
+              >
+                <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="hidden md:inline">
+                  {saveMarkersStatus === 'saving' ? 'Saving...' :
+                   saveMarkersStatus === 'saved' ? 'Saved!' :
+                   saveMarkersStatus === 'error' ? 'Error' :
+                   `Save Markers (${validationAnnotationCount})`}
+                </span>
+              </button>
+            )}
+
             {isApiMode && (
               <>
                 <button
@@ -770,6 +890,7 @@ const App: React.FC = () => {
                 globalAttachments={globalAttachments}
                 onAddGlobalAttachment={handleAddGlobalAttachment}
                 onRemoveGlobalAttachment={handleRemoveGlobalAttachment}
+                existingMarkers={existingMarkers}
               />
             </div>
           </main>

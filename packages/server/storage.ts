@@ -34,7 +34,7 @@ export function getPlanDir(customPath?: string | null): string {
 /**
  * Extract the first heading from markdown content.
  */
-function extractFirstHeading(markdown: string): string | null {
+export function extractFirstHeading(markdown: string): string | null {
   const match = markdown.match(/^#\s+(.+)$/m);
   if (!match) return null;
   return match[1].trim();

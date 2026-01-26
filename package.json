@@ -29,5 +29,9 @@
   },
   "dependencies": {
     "@pierre/diffs": "^1.0.4"
+  },
+  "devDependencies": {
+    "micromatch": "^4.0.8",
+    "typescript": "^5.9.3"
   }
 }
