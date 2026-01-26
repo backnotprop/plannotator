@@ -9,15 +9,10 @@ plannotator/
 ├── apps/
 │   ├── hook/                     # Claude Code plugin
 │   │   ├── .claude-plugin/plugin.json
-│   │   ├── commands/             # Slash commands (plannotator-review.md)
+│   │   ├── commands/             # Slash commands (plannotator-review.md, plannotator-annotate.md)
 │   │   ├── hooks/hooks.json      # PermissionRequest hook config
-│   │   ├── server/index.ts       # Entry point (plan + review subcommand)
+│   │   ├── server/index.ts       # Entry point (plan + review + annotate subcommands)
 │   │   └── dist/                 # Built single-file apps (index.html, review.html)
-│   ├── opencode-plugin/          # OpenCode plugin
-│   │   ├── commands/             # Slash commands (plannotator-review.md)
-│   │   ├── index.ts              # Plugin entry with submit_plan tool + review event handler
-│   │   ├── plannotator.html      # Built plan review app
-│   │   └── review-editor.html    # Built code review app
 │   └── review/                   # Standalone review server (for development)
 │       ├── index.html
 │       ├── index.tsx
@@ -104,8 +99,7 @@ Deny    → stdout: {"hookSpecificOutput":{"decision":{"behavior":"deny","messag
 ```
 User runs /plannotator-review command
         ↓
-Claude Code: plannotator review subcommand runs
-OpenCode: event handler intercepts command
+plannotator review subcommand runs
         ↓
 git diff captures unstaged changes
         ↓
@@ -317,7 +311,7 @@ type ShareableAnnotation =
 
 **Location:** `packages/ui/utils/storage.ts`, `planSave.ts`, `agentSwitch.ts`
 
-Uses cookies (not localStorage) because each hook invocation runs on a random port. Settings include identity, plan saving (enabled/custom path), and agent switching (OpenCode only).
+Uses cookies (not localStorage) because each hook invocation runs on a random port. Settings include identity and plan saving (enabled/custom path).
 
 ## Syntax Highlighting
 
@@ -326,7 +320,7 @@ Code blocks use bundled `highlight.js`. Language is extracted from fence (```rus
 ## Requirements
 
 - Bun runtime
-- Claude Code with plugin/hooks support, or OpenCode
+- Claude Code with plugin/hooks support
 - Cross-platform: macOS (`open`), Linux (`xdg-open`), Windows (`start`)
 
 ## Development
@@ -344,21 +338,12 @@ bun run dev:marketing  # Marketing site
 ## Build
 
 ```bash
-bun run build:hook       # Single-file HTML for hook server
+bun run build:hook       # Single-file HTML for hook server (main target)
 bun run build:review     # Code review editor
-bun run build:opencode   # OpenCode plugin (copies HTML from hook + review)
 bun run build:portal     # Static build for share.plannotator.ai
 bun run build:marketing  # Static build for plannotator.ai
-bun run build            # Build hook + opencode (main targets)
+bun run build            # Alias for build:hook
 ```
-
-**Important:** The OpenCode plugin copies pre-built HTML from `apps/hook/dist/` and `apps/review/dist/`. When making UI changes (in `packages/ui/`, `packages/editor/`, or `packages/review-editor/`), you must rebuild the hook/review first:
-
-```bash
-bun run build:hook && bun run build:opencode   # For UI changes
-```
-
-Running only `build:opencode` will copy stale HTML files.
 
 ## Test plugin locally
 

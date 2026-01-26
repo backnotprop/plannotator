@@ -25,9 +25,8 @@
     "build:hook": "bun run --cwd apps/hook build",
     "build:portal": "bun run --cwd apps/portal build",
     "build:marketing": "bun run --cwd apps/marketing build",
-    "build:opencode": "bun run --cwd apps/opencode-plugin build",
     "build:review": "bun run --cwd apps/review build",
-    "build": "bun run build:hook && bun run build:opencode",
+    "build": "bun run build:hook",
     "test": "bun test"
   },
   "dependencies": {
