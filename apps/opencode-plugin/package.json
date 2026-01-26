@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/opencode",
-  "version": "0.6.4",
+  "version": "0.6.7",
   "description": "Plannotator plugin for OpenCode - interactive plan review with visual annotation",
   "author": "backnotprop",
   "license": "BSL-1.1",
@@ -35,7 +35,7 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@opencode-ai/plugin": "^1.0.218"
+    "@opencode-ai/plugin": "^1.1.10"
   },
   "peerDependencies": {
     "bun": ">=1.0.0"

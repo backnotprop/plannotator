@@ -30,6 +30,7 @@ import {
   PERMISSION_MODE_OPTIONS,
   type PermissionMode,
 } from '../utils/permissionMode';
+import { useAgents } from '../hooks/useAgents';
 
 interface SettingsProps {
   taterMode: boolean;
@@ -54,6 +55,10 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const [agent, setAgent] = useState<AgentSwitchSettings>({ switchTo: 'build' });
   const [planSave, setPlanSave] = useState<PlanSaveSettings>({ enabled: true, customPath: null });
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
+  const [agentWarning, setAgentWarning] = useState<string | null>(null);
+
+  // Fetch available agents for OpenCode
+  const { agents: availableAgents, validateAgent, getAgentWarning } = useAgents(origin ?? null);
 
   useEffect(() => {
     if (showDialog) {
@@ -63,8 +68,13 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       setAgent(getAgentSwitchSettings());
       setPlanSave(getPlanSaveSettings());
       setPermissionMode(getPermissionModeSettings().mode);
+
+      // Validate agent setting when dialog opens
+      if (origin === 'opencode') {
+        setAgentWarning(getAgentWarning());
+      }
     }
-  }, [showDialog]);
+  }, [showDialog, availableAgents, origin, getAgentWarning]);
 
   // Fetch detected vaults when Obsidian is enabled
   useEffect(() => {
@@ -238,22 +248,72 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                         Which agent to switch to after plan approval
                       </div>
                     </div>
+
+                    {/* Warning banner when saved agent not found */}
+                    {agentWarning && (
+                      <div className="flex items-start gap-2 p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg text-xs text-amber-600 dark:text-amber-400">
+                        <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        <span>{agentWarning}</span>
+                      </div>
+                    )}
+
                     <select
                       value={agent.switchTo}
-                      onChange={(e) => handleAgentChange(e.target.value as AgentSwitchSettings['switchTo'])}
+                      onChange={(e) => {
+                        handleAgentChange(e.target.value);
+                        // Clear warning when user selects a different agent
+                        setAgentWarning(null);
+                      }}
                       className="w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer"
                     >
-                      {AGENT_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
+                      {/* Dynamic agents from OpenCode API */}
+                      {availableAgents.length > 0 ? (
+                        <>
+                          {/* Show invalid saved value as disabled option if not in list */}
+                          {agent.switchTo !== 'custom' &&
+                           agent.switchTo !== 'disabled' &&
+                           !availableAgents.some(a => a.id.toLowerCase() === agent.switchTo.toLowerCase()) && (
+                            <option value={agent.switchTo} disabled>
+                              {agent.switchTo} (not found)
+                            </option>
+                          )}
+                          {availableAgents.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {a.name}
+                            </option>
+                          ))}
+                          <option value="custom">Custom</option>
+                          <option value="disabled">Disabled</option>
+                        </>
+                      ) : (
+                        /* Fallback to hardcoded options */
+                        AGENT_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))
+                      )}
                     </select>
                     {agent.switchTo === 'custom' && (
                       <input
                         type="text"
                         value={agent.customName || ''}
-                        onChange={(e) => handleAgentChange('custom', e.target.value)}
+                        onChange={(e) => {
+                          const customName = e.target.value;
+                          handleAgentChange('custom', customName);
+                          // Validate custom agent name against available agents
+                          if (customName && availableAgents.length > 0) {
+                            if (!validateAgent(customName)) {
+                              setAgentWarning(`Agent "${customName}" not found in OpenCode. It may cause errors.`);
+                            } else {
+                              setAgentWarning(null);
+                            }
+                          } else {
+                            setAgentWarning(null);
+                          }
+                        }}
                         placeholder="Enter agent name..."
                         className="w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 placeholder:text-muted-foreground/50"
                       />
@@ -261,7 +321,9 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                     <div className="text-[10px] text-muted-foreground/70">
                       {agent.switchTo === 'custom' && agent.customName
                         ? `Switch to "${agent.customName}" agent after approval`
-                        : AGENT_OPTIONS.find(o => o.value === agent.switchTo)?.description}
+                        : agent.switchTo === 'disabled'
+                          ? 'Stay on current agent after approval'
+                          : `Switch to ${agent.switchTo} agent after approval`}
                     </div>
                   </div>
                 </>

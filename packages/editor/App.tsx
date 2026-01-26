@@ -13,6 +13,7 @@ import { TaterSpriteRunning } from '@plannotator/ui/components/TaterSpriteRunnin
 import { TaterSpritePullup } from '@plannotator/ui/components/TaterSpritePullup';
 import { Settings } from '@plannotator/ui/components/Settings';
 import { useSharing } from '@plannotator/ui/hooks/useSharing';
+import { useAgents } from '@plannotator/ui/hooks/useAgents';
 import { storage } from '@plannotator/ui/utils/storage';
 import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
 import { getObsidianSettings, getEffectiveVaultPath, CUSTOM_PATH_SENTINEL } from '@plannotator/ui/utils/obsidian';
@@ -312,6 +313,8 @@ const App: React.FC = () => {
   const [showExport, setShowExport] = useState(false);
   const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
   const [showClaudeCodeWarning, setShowClaudeCodeWarning] = useState(false);
+  const [showAgentWarning, setShowAgentWarning] = useState(false);
+  const [agentWarningMessage, setAgentWarningMessage] = useState('');
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [editorMode, setEditorMode] = useState<EditorMode>('selection');
   const [taterMode, setTaterMode] = useState(() => {
@@ -360,6 +363,9 @@ const App: React.FC = () => {
       setIsLoading(false);
     }
   );
+
+  // Fetch available agents for OpenCode (for validation on approve)
+  const { agents: availableAgents, validateAgent, getAgentWarning } = useAgents(origin);
 
   // Apply shared annotations to DOM after they're loaded
   useEffect(() => {
@@ -620,7 +626,7 @@ const App: React.FC = () => {
 
       // Don't intercept if any modal is open
       if (showExport || showFeedbackPrompt || showClaudeCodeWarning ||
-          showPermissionModeSetup || pendingPasteImage) return;
+          showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
 
       // Don't intercept if already submitted or submitting
       if (submitted || isSubmitting) return;
@@ -632,6 +638,15 @@ const App: React.FC = () => {
 
       // No annotations → Approve, otherwise → Send Feedback
       if (annotations.length === 0) {
+        // Check if agent exists for OpenCode users
+        if (origin === 'opencode') {
+          const warning = getAgentWarning();
+          if (warning) {
+            setAgentWarningMessage(warning);
+            setShowAgentWarning(true);
+            return;
+          }
+        }
         handleApprove();
       } else {
         handleDeny();
@@ -641,9 +656,10 @@ const App: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
-    showExport, showFeedbackPrompt, showClaudeCodeWarning,
+    showExport, showFeedbackPrompt, showClaudeCodeWarning, showAgentWarning,
     showPermissionModeSetup, pendingPasteImage,
     submitted, isSubmitting, isApiMode, annotations.length,
+    origin, getAgentWarning,
   ]);
 
   const handleAddAnnotation = (ann: Annotation) => {
@@ -808,9 +824,20 @@ const App: React.FC = () => {
                       // Show warning for Claude Code users with annotations
                       if (origin === 'claude-code' && annotations.length > 0) {
                         setShowClaudeCodeWarning(true);
-                      } else {
-                        handleApprove();
+                        return;
                       }
+
+                      // Check if agent exists for OpenCode users
+                      if (origin === 'opencode') {
+                        const warning = getAgentWarning();
+                        if (warning) {
+                          setAgentWarningMessage(warning);
+                          setShowAgentWarning(true);
+                          return;
+                        }
+                      }
+
+                      handleApprove();
                     }}
                     disabled={isSubmitting}
                     className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${
@@ -949,6 +976,27 @@ const App: React.FC = () => {
               <a href="https://github.com/anthropics/claude-code/issues/16001" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">#16001</a>
               {' · '}
               <a href="https://github.com/anthropics/claude-code/issues/15755" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">#15755</a>
+            </>
+          }
+          confirmText="Approve Anyway"
+          cancelText="Cancel"
+          variant="warning"
+          showCancel
+        />
+
+        {/* OpenCode agent not found warning dialog */}
+        <ConfirmDialog
+          isOpen={showAgentWarning}
+          onClose={() => setShowAgentWarning(false)}
+          onConfirm={() => {
+            setShowAgentWarning(false);
+            handleApprove();
+          }}
+          title="Agent Not Found"
+          message={agentWarningMessage}
+          subMessage={
+            <>
+              You can change the agent in <strong>Settings</strong>, or approve anyway and OpenCode will use the default agent.
             </>
           }
           confirmText="Approve Anyway"

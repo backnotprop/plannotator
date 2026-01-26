@@ -13,14 +13,16 @@ import { storage } from './storage';
 const STORAGE_KEY = 'plannotator-agent-switch';
 const CUSTOM_NAME_KEY = 'plannotator-agent-custom';
 
-export type AgentSwitchOption = 'build' | 'disabled' | 'custom';
+// AgentSwitchOption is now a string to support dynamic agent names from OpenCode
+export type AgentSwitchOption = string;
 
 export interface AgentSwitchSettings {
   switchTo: AgentSwitchOption;
   customName?: string;
 }
 
-export const AGENT_OPTIONS: { value: AgentSwitchOption; label: string; description: string }[] = [
+// Fallback options when API is unavailable or for non-OpenCode origins
+export const AGENT_OPTIONS: { value: string; label: string; description: string }[] = [
   { value: 'build', label: 'Build', description: 'Switch to build agent after approval' },
   { value: 'custom', label: 'Custom', description: 'Switch to a custom agent after approval' },
   { value: 'disabled', label: 'Disabled', description: 'Stay on current agent after approval' },
@@ -37,7 +39,8 @@ export function getAgentSwitchSettings(): AgentSwitchSettings {
   const stored = storage.getItem(STORAGE_KEY);
   const customName = storage.getItem(CUSTOM_NAME_KEY) || undefined;
 
-  if (stored === 'disabled' || stored === 'build' || stored === 'custom') {
+  // Accept any non-empty string (supports dynamic agent names from OpenCode)
+  if (stored) {
     return { switchTo: stored, customName };
   }
   return DEFAULT_SETTINGS;

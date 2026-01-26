@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, forwardRef, useImperativeHandle, useCallback } from 'react';
-import Highlighter from 'web-highlighter';
+import Highlighter from '@plannotator/web-highlighter';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
 import { Block, Annotation, AnnotationType, EditorMode, ReviewTag, type ValidationMarker } from '../types';
@@ -125,7 +125,13 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   const modeRef = useRef<EditorMode>(mode);
   const onAddAnnotationRef = useRef(onAddAnnotation);
   const pendingSourceRef = useRef<any>(null);
-  const [toolbarState, setToolbarState] = useState<{ element: HTMLElement; source: any; selectionText: string } | null>(null);
+  const [toolbarState, setToolbarState] = useState<{
+    element: HTMLElement;
+    source: any;
+    selectionText: string;
+    initialStep?: 'menu' | 'input';
+    initialType?: AnnotationType;
+  } | null>(null);
   const [hoveredCodeBlock, setHoveredCodeBlock] = useState<{ block: Block; element: HTMLElement } | null>(null);
   const [isCodeBlockToolbarExiting, setIsCodeBlockToolbarExiting] = useState(false);
   const [isCodeBlockToolbarLocked, setIsCodeBlockToolbarLocked] = useState(false);
@@ -139,6 +145,32 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   useEffect(() => {
     onAddAnnotationRef.current = onAddAnnotation;
   }, [onAddAnnotation]);
+
+  // Cmd+C / Ctrl+C keyboard shortcut for copying selected text
+  useEffect(() => {
+    const handleKeyDown = async (e: KeyboardEvent) => {
+      // Check for Cmd+C (Mac) or Ctrl+C (Windows/Linux)
+      if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
+        // Don't intercept if typing in an input/textarea
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+        // If we have an active selection with captured text, use that
+        if (toolbarState?.selectionText) {
+          e.preventDefault();
+          try {
+            await navigator.clipboard.writeText(toolbarState.selectionText);
+          } catch (err) {
+            console.error('Failed to copy:', err);
+          }
+        }
+        // Otherwise let the browser handle default copy behavior
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [toolbarState]);
 
   // Helper to create annotation from highlighter source
   const createAnnotationFromSource = (
@@ -438,10 +470,20 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             // Auto-delete in redline mode
             createAnnotationFromSource(highlighter, source, AnnotationType.DELETION);
             window.getSelection()?.removeAllRanges();
+          } else if (modeRef.current === 'comment') {
+            // Comment mode - show input directly
+            const selectionText = source.text;
+            pendingSourceRef.current = source;
+            setToolbarState({
+              element: doms[0] as HTMLElement,
+              source,
+              selectionText,
+              initialStep: 'input',
+              initialType: AnnotationType.COMMENT,
+            });
           } else {
-            // Show toolbar in selection mode
-            // Capture selection text now (preserves line breaks between blocks)
-            const selectionText = window.getSelection()?.toString() || source.text;
+            // Selection mode - show toolbar menu
+            const selectionText = source.text;
             pendingSourceRef.current = source;
             setToolbarState({ element: doms[0] as HTMLElement, source, selectionText });
           }
@@ -721,6 +763,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             onClose={handleToolbarClose}
             copyText={toolbarState.selectionText}
             closeOnScrollOut
+            initialStep={toolbarState.initialStep}
+            initialType={toolbarState.initialType}
           />
         )}
 

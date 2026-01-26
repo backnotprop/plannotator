@@ -51,13 +51,65 @@ export const PlannotatorPlugin: Plugin = async (ctx) => {
   }
 
   return {
-    "experimental.chat.system.transform": async (_input, output) => {
-      // Skip adding Plan Submission prompt for title generation requests
-      // Title generation has a specific system prompt containing "title generator"
-      // and typically has no tools
+    // Register submit_plan as primary-only tool (hidden from sub-agents)
+    config: async (opencodeConfig) => {
+      const existingPrimaryTools = opencodeConfig.experimental?.primary_tools ?? [];
+      if (!existingPrimaryTools.includes("submit_plan")) {
+        opencodeConfig.experimental = {
+          ...opencodeConfig.experimental,
+          primary_tools: [...existingPrimaryTools, "submit_plan"],
+        };
+      }
+    },
+
+    // Inject planning instructions into system prompt
+    "experimental.chat.system.transform": async (input, output) => {
+      // Skip for title generation requests
       const existingSystem = output.system.join("\n").toLowerCase();
       if (existingSystem.includes("title generator") || existingSystem.includes("generate a title")) {
-        return; // Skip - this is a title generation request
+        return;
+      }
+
+      try {
+        // Fetch session messages to determine current agent
+        const messagesResponse = await ctx.client.session.messages({
+          path: { id: input.sessionID }
+        });
+        const messages = messagesResponse.data;
+
+        // Find last user message (reverse iteration)
+        let lastUserAgent: string | undefined;
+        if (messages) {
+          for (let i = messages.length - 1; i >= 0; i--) {
+            const msg = messages[i];
+            if (msg.info.role === "user") {
+              // @ts-ignore - UserMessage has agent field
+              lastUserAgent = msg.info.agent;
+              break;
+            }
+          }
+        }
+
+        // Skip if agent detection fails (safer)
+        if (!lastUserAgent) return;
+
+        // Hardcoded exclusion: build agent
+        if (lastUserAgent === "build") return;
+
+        // Dynamic exclusion: check agent mode via API
+        const agentsResponse = await ctx.client.app.agents({
+          query: { directory: ctx.directory }
+        });
+        const agents = agentsResponse.data;
+        const agent = agents?.find((a: { name: string }) => a.name === lastUserAgent);
+
+        // Skip if agent is a sub-agent
+        // @ts-ignore - Agent has mode field
+        if (agent?.mode === "subagent") return;
+
+      } catch {
+        // Skip injection on any error (safer)
+        return;
       }
 
       output.system.push(`
@@ -112,6 +164,7 @@ Do NOT proceed with implementation until your plan is approved.
           gitContext,
           sharingEnabled: await getSharingEnabled(),
           htmlContent: reviewHtmlContent,
+          opencodeClient: ctx.client,
           onReady: handleReviewServerReady,
         });
 
@@ -171,6 +224,7 @@ Do NOT proceed with implementation until your plan is approved.
             origin: "opencode",
             sharingEnabled: await getSharingEnabled(),
             htmlContent,
+            opencodeClient: ctx.client,
             onReady: (url, isRemote, port) => {
               handleServerReady(url, isRemote, port);
             },

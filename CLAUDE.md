@@ -23,8 +23,14 @@ plannotator/
 │       ├── index.tsx
 │       └── vite.config.ts
 ├── packages/
+│   ├── core/                     # Shared types and utilities (CUSTOM)
+│   │   ├── types.ts              # AnnotationType, ReviewTag, Annotation, Block
+│   │   ├── parser.ts             # parseMarkdownToBlocks(), exportDiff()
+│   │   ├── markers.ts            # injectValidationMarkers(), extractValidationMarkers()
+│   │   └── index.ts              # Re-exports
 │   ├── server/                   # Shared server implementation
 │   │   ├── index.ts              # startPlannotatorServer(), handleServerReady()
+│   │   ├── annotate.ts           # startAnnotateServer() (CUSTOM)
 │   │   ├── review.ts             # startReviewServer(), handleReviewServerReady()
 │   │   ├── storage.ts            # Plan saving to disk (getPlanDir, savePlan, etc.)
 │   │   ├── remote.ts             # isRemoteSession(), getServerPort()
@@ -33,9 +39,9 @@ plannotator/
 │   │   └── project.ts            # Project name detection for tags
 │   ├── ui/                       # Shared React components
 │   │   ├── components/           # Viewer, Toolbar, Settings, etc.
-│   │   ├── utils/                # parser.ts, sharing.ts, storage.ts, planSave.ts, agentSwitch.ts
+│   │   ├── utils/                # sharing.ts, storage.ts, planSave.ts, agentSwitch.ts
 │   │   ├── hooks/                # useSharing.ts
-│   │   └── types.ts
+│   │   └── types.ts              # Re-exports from @plannotator/core
 │   ├── editor/                   # Plan review App.tsx
 │   └── review-editor/            # Code review UI
 │       ├── App.tsx               # Main review app
@@ -137,7 +143,7 @@ Both servers use random ports locally or fixed port (`19432`) in remote mode.
 
 ## Data Types
 
-**Location:** `packages/ui/types.ts`
+**Location:** `packages/core/types.ts` (re-exported from `packages/ui/types.ts`)
 
 ```typescript
 enum AnnotationType {
@@ -148,30 +154,106 @@ enum AnnotationType {
   GLOBAL_COMMENT = "GLOBAL_COMMENT",
 }
 
+// Review methodology tags for structured feedback
+enum ReviewTag {
+  // Modification (action required)
+  TODO = "@TODO",
+  FIX = "@FIX",
+  CLARIFY = "@CLARIFY",
+  MISSING = "@MISSING",
+  ADD_EXAMPLE = "@ADD-EXAMPLE",
+  // Verification (fact-checking)
+  VERIFY = "@VERIFY",
+  VERIFY_SOURCES = "@VERIFY-SOURCES",
+  CHECK_FORMULA = "@CHECK-FORMULA",
+  CHECK_LINK = "@CHECK-LINK",
+  // Validation
+  OK = "@OK",
+  APPROVED = "@APPROVED",
+  LOCKED = "@LOCKED",
+}
+
 interface Annotation {
   id: string;
   blockId: string;
   startOffset: number;
   endOffset: number;
   type: AnnotationType;
-  text?: string; // For comment/replacement/insertion
+  tag?: ReviewTag;      // Optional methodology tag
+  isMacro?: boolean;    // [MACRO] flag - cross-document impact
+  text?: string;        // For comment/replacement/insertion
   originalText: string; // The selected text
-  createdA: number; // Timestamp
-  author?: string; // Tater identity
+  createdAt: number;    // Timestamp
+  author?: string;      // Tater identity
+  imagePaths?: string[];
   startMeta?: { parentTagName; parentIndex; textOffset };
   endMeta?: { parentTagName; parentIndex; textOffset };
 }
 
 interface Block {
   id: string;
-  type: "paragraph" | "heading" | "blockquote" | "list-item" | "code" | "hr";
+  type: "paragraph" | "heading" | "blockquote" | "list-item" | "code" | "hr" | "table";
   content: string;
-  level?: number; // For headings (1-6)
+  level?: number;    // For headings (1-6)
   language?: string; // For code blocks
+  checked?: boolean; // For checkbox list items
   order: number;
   startLine: number;
 }
 ```
+
+## Custom Features (Fork Extensions)
+
+### Review Tags
+
+Structured methodology tags for annotations. Available in toolbar dropdown:
+
+| Category | Tags | Purpose |
+|----------|------|---------|
+| Modification | `@TODO`, `@FIX`, `@CLARIFY`, `@MISSING`, `@ADD-EXAMPLE` | Action required |
+| Verification | `@VERIFY`, `@VERIFY-SOURCES`, `@CHECK-FORMULA`, `@CHECK-LINK` | Fact-checking |
+| Validation | `@OK`, `@APPROVED`, `@LOCKED` | Section validation |
+
+### [MACRO] Flag
+
+Toggle button in toolbar to mark annotations with cross-document impact. When enabled:
+- Badge appears in annotation panel
+- Export includes `[MACRO]` prefix: `## 1. @FIX [MACRO] Feedback on:`
+- Claude understands to check related documents
+
+### Annotate Mode
+
+Annotate any markdown file (not just plans from ExitPlanMode):
+
+```bash
+plannotator annotate <file.md>
+# Or via slash command:
+/plannotator-annotate README.md
+```
+
+Features:
+- File path shown in header
+- Save Markers button (validation markers only)
+- Feedback exported to stdout
+
+### Persistent Validation Markers
+
+Validation tags (@OK, @APPROVED, @LOCKED) can be saved to source file as HTML comments:
+
+```markdown
+<!-- @APPROVED -->
+## Step 1: Initialize
+```
+
+API endpoint: `POST /api/save-markers` (annotate mode only)
+
+### Annotate Server (`packages/server/annotate.ts`)
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/plan` | GET | Returns `{ plan, mode: "annotate", filePath, existingMarkers }` |
+| `/api/save-markers` | POST | Write validation markers to source file |
+| `/api/feedback` | POST | Submit feedback (resolves with feedback text) |
 
 ## Markdown Parser
 
@@ -269,6 +351,14 @@ bun run build:portal     # Static build for share.plannotator.ai
 bun run build:marketing  # Static build for plannotator.ai
 bun run build            # Build hook + opencode (main targets)
 ```
+
+**Important:** The OpenCode plugin copies pre-built HTML from `apps/hook/dist/` and `apps/review/dist/`. When making UI changes (in `packages/ui/`, `packages/editor/`, or `packages/review-editor/`), you must rebuild the hook/review first:
+
+```bash
+bun run build:hook && bun run build:opencode   # For UI changes
+```
+
+Running only `build:opencode` will copy stale HTML files.
 
 ## Test plugin locally
 

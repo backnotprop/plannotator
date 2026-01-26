@@ -1,6 +1,6 @@
 {
   "name": "plannotator",
-  "version": "0.6.4",
+  "version": "0.6.7",
   "private": true,
   "description": "Interactive Plan Review for Claude Code - annotate plans visually, share with team, automatically send feedback",
   "author": "backnotprop",
@@ -13,7 +13,10 @@
   "bugs": {
     "url": "https://github.com/backnotprop/plannotator/issues"
   },
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev:hook": "bun run --cwd apps/hook dev",
     "dev:portal": "bun run --cwd apps/portal dev",

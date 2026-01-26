@@ -53,7 +53,7 @@ export const REVIEW_TAG_CATEGORIES = {
   validation: [ReviewTag.OK, ReviewTag.APPROVED, ReviewTag.LOCKED],
 } as const;
 
-export type EditorMode = 'selection' | 'redline';
+export type EditorMode = 'selection' | 'comment' | 'redline';
 
 export interface Annotation {
   id: string;

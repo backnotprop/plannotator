@@ -19,6 +19,14 @@ esac
 platform="${os}-${arch}"
 binary_name="plannotator-${platform}"
 
+# Clean up old Windows install locations (for users running bash on Windows)
+if [ -n "$USERPROFILE" ]; then
+    # Running on Windows (Git Bash, MSYS, etc.) - clean up old locations
+    rm -f "$USERPROFILE/.local/bin/plannotator" "$USERPROFILE/.local/bin/plannotator.exe" 2>/dev/null || true
+    rm -f "$LOCALAPPDATA/plannotator/plannotator.exe" 2>/dev/null || true
+    echo "Cleaned up old Windows install locations"
+fi
+
 echo "Fetching latest version..."
 latest_tag=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
 
@@ -50,6 +58,9 @@ if [ "$actual_checksum" != "$expected_checksum" ]; then
     rm -f "$tmp_file"
     exit 1
 fi
+
+# Remove old binary first (handles Windows .exe and locked file issues)
+rm -f "$INSTALL_DIR/plannotator" "$INSTALL_DIR/plannotator.exe" 2>/dev/null || true
 
 mv "$tmp_file" "$INSTALL_DIR/plannotator"
 chmod +x "$INSTALL_DIR/plannotator"
