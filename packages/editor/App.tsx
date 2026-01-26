@@ -818,6 +818,8 @@ const App: React.FC = () => {
                   <span className="hidden md:inline">{isSubmitting ? 'Sending...' : 'Send Feedback'}</span>
                 </button>
 
+                {/* Approve button - hidden in annotate mode (no plan to approve) */}
+                {!annotateMode && (
                 <div className="relative group/approve">
                   <button
                     onClick={() => {
@@ -825,16 +827,6 @@ const App: React.FC = () => {
                       if (origin === 'claude-code' && annotations.length > 0) {
                         setShowClaudeCodeWarning(true);
                         return;
-                      }
-
-                      // Check if agent exists for OpenCode users
-                      if (origin === 'opencode') {
-                        const warning = getAgentWarning();
-                        if (warning) {
-                          setAgentWarningMessage(warning);
-                          setShowAgentWarning(true);
-                          return;
-                        }
                       }
 
                       handleApprove();
@@ -859,8 +851,12 @@ const App: React.FC = () => {
                     </div>
                   )}
                 </div>
+                )}
 
-                <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
+                {/* Separator - also hidden in annotate mode */}
+                {!annotateMode && (
+                  <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
+                )}
               </>
             )}
 
