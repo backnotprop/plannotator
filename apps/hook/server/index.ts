@@ -94,16 +94,33 @@ if (args[0] === "review") {
   // MARKDOWN ANNOTATION MODE
   // ============================================
 
-  const filePath = args[1];
+  let filePath = args[1];
   if (!filePath) {
     console.error("Usage: plannotator annotate <file.md>");
     process.exit(1);
   }
 
-  // Resolve path
+  // Strip @ prefix if present (Claude Code file reference syntax)
+  if (filePath.startsWith("@")) {
+    filePath = filePath.slice(1);
+  }
+
+  // Resolve path - use PLANNOTATOR_CWD if set (original working directory before script cd'd)
+  const originalCwd = process.env.PLANNOTATOR_CWD || process.cwd();
+
+  // Debug: log path resolution (visible in stderr, won't interfere with stdout JSON)
+  if (process.env.PLANNOTATOR_DEBUG) {
+    console.error(`[DEBUG] Original CWD: ${originalCwd}`);
+    console.error(`[DEBUG] File path arg: ${filePath}`);
+  }
+
   const absolutePath = path.isAbsolute(filePath)
     ? filePath
-    : path.join(process.cwd(), filePath);
+    : path.join(originalCwd, filePath);
+
+  if (process.env.PLANNOTATOR_DEBUG) {
+    console.error(`[DEBUG] Resolved path: ${absolutePath}`);
+  }
 
   // Read file
   const file = Bun.file(absolutePath);
