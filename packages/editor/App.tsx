@@ -32,6 +32,23 @@ const PLAN_CONTENT = `# Implementation Plan: Real-time Collaboration
 ## Overview
 Add real-time collaboration features to the editor using WebSocket connections and operational transforms.
 
+### Architecture
+
+\`\`\`mermaid
+flowchart LR
+    subgraph Client["Client Browser"]
+        UI[React UI] --> OT[OT Engine]
+        OT <--> WS[WebSocket Client]
+    end
+
+    subgraph Server["Backend"]
+        WSS[WebSocket Server] <--> OTS[OT Transform]
+        OTS <--> DB[(PostgreSQL)]
+    end
+
+    WS <--> WSS
+\`\`\`
+
 ## Phase 1: Infrastructure
 
 ### WebSocket Server
