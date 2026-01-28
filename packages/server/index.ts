@@ -25,6 +25,7 @@ import {
   saveAnnotations,
   saveFinalSnapshot,
 } from "./storage";
+import { getRepoInfo } from "./repo";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -99,6 +100,9 @@ export async function startPlannotatorServer(
   // Generate slug for potential saving (actual save happens on decision)
   const slug = generateSlug(plan);
 
+  // Detect repo info (cached for this session)
+  const repoInfo = await getRepoInfo();
+
   // Decision promise
   let resolveDecision: (result: {
     approved: boolean;
@@ -130,7 +134,7 @@ export async function startPlannotatorServer(
 
           // API: Get plan content
           if (url.pathname === "/api/plan") {
-            return Response.json({ plan, origin, permissionMode, sharingEnabled });
+            return Response.json({ plan, origin, permissionMode, sharingEnabled, repoInfo });
           }
 
           // API: Serve images (local paths or temp uploads)

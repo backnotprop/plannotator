@@ -11,7 +11,8 @@
     "./remote": "./remote.ts",
     "./browser": "./browser.ts",
     "./storage": "./storage.ts",
-    "./git": "./git.ts"
+    "./git": "./git.ts",
+    "./repo": "./repo.ts"
   },
   "files": [
     "*.ts"

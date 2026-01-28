@@ -347,6 +347,7 @@ const App: React.FC = () => {
   const [showPermissionModeSetup, setShowPermissionModeSetup] = useState(false);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
   const [sharingEnabled, setSharingEnabled] = useState(true);
+  const [repoInfo, setRepoInfo] = useState<{ display: string; branch?: string } | null>(null);
   const viewerRef = useRef<ViewerHandle>(null);
 
   // URL-based sharing
@@ -404,11 +405,14 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: 'claude-code' | 'opencode'; sharingEnabled?: boolean }) => {
+      .then((data: { plan: string; origin?: 'claude-code' | 'opencode'; sharingEnabled?: boolean; repoInfo?: { display: string; branch?: string } }) => {
         setMarkdown(data.plan);
         setIsApiMode(true);
         if (data.sharingEnabled !== undefined) {
           setSharingEnabled(data.sharingEnabled);
+        }
+        if (data.repoInfo) {
+          setRepoInfo(data.repoInfo);
         }
         if (data.origin) {
           setOrigin(data.origin);
@@ -814,6 +818,7 @@ const App: React.FC = () => {
                 globalAttachments={globalAttachments}
                 onAddGlobalAttachment={handleAddGlobalAttachment}
                 onRemoveGlobalAttachment={handleRemoveGlobalAttachment}
+                repoInfo={repoInfo}
               />
             </div>
           </main>

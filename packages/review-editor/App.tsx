@@ -150,6 +150,7 @@ const ReviewApp: React.FC = () => {
   const [submitted, setSubmitted] = useState<'approved' | 'feedback' | false>(false);
   const [showApproveWarning, setShowApproveWarning] = useState(false);
   const [sharingEnabled, setSharingEnabled] = useState(true);
+  const [repoInfo, setRepoInfo] = useState<{ display: string; branch?: string } | null>(null);
 
   const identity = useMemo(() => getIdentity(), []);
 
@@ -203,6 +204,7 @@ const ReviewApp: React.FC = () => {
         diffType?: string;
         gitContext?: GitContext;
         sharingEnabled?: boolean;
+        repoInfo?: { display: string; branch?: string };
       }) => {
         const apiFiles = parseDiffToFiles(data.rawPatch);
         setDiffData({
@@ -219,6 +221,7 @@ const ReviewApp: React.FC = () => {
         if (data.diffType) setDiffType(data.diffType);
         if (data.gitContext) setGitContext(data.gitContext);
         if (data.sharingEnabled !== undefined) setSharingEnabled(data.sharingEnabled);
+        if (data.repoInfo) setRepoInfo(data.repoInfo);
       })
       .catch(() => {
         // Not in API mode - use demo content
@@ -522,6 +525,14 @@ const ReviewApp: React.FC = () => {
               }`}>
                 {origin === 'claude-code' ? 'Claude Code' : 'OpenCode'}
               </span>
+            )}
+            {repoInfo && (
+              <>
+                <span className="text-muted-foreground/40 hidden md:inline">|</span>
+                <span className="text-xs text-muted-foreground/60 font-mono hidden md:inline truncate max-w-[200px]" title={repoInfo.display}>
+                  {repoInfo.display}
+                </span>
+              </>
             )}
           </div>
 
