@@ -27,6 +27,7 @@ import {
 } from '@plannotator/ui/utils/permissionMode';
 import { PermissionModeSetup } from '@plannotator/ui/components/PermissionModeSetup';
 import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
+import { PlanEvolutionPanel } from '@plannotator/ui/components/PlanEvolutionPanel';
 
 const PLAN_CONTENT = `# Implementation Plan: Real-time Collaboration
 
@@ -340,6 +341,7 @@ const App: React.FC = () => {
   const [filePath, setFilePath] = useState<string | null>(null);
   const [existingMarkers, setExistingMarkers] = useState<ValidationMarker[]>([]);
   const [saveMarkersStatus, setSaveMarkersStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [showEvolutionPanel, setShowEvolutionPanel] = useState(false);
   const viewerRef = useRef<ViewerHandle>(null);
 
   // URL-based sharing
@@ -876,6 +878,20 @@ const App: React.FC = () => {
               </svg>
             </button>
 
+            {/* Evolution button - only in API plan mode */}
+            {isApiMode && !annotateMode && (
+              <button
+                onClick={() => setShowEvolutionPanel(true)}
+                className="p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium bg-muted hover:bg-muted/80 transition-colors"
+                title="Show Plan Evolution"
+              >
+                <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+                <span className="hidden md:inline">Evolution</span>
+              </button>
+            )}
+
             <button
               onClick={() => setShowExport(true)}
               className="p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium bg-muted hover:bg-muted/80 transition-colors"
@@ -1062,6 +1078,12 @@ const App: React.FC = () => {
             setPermissionMode(mode);
             setShowPermissionModeSetup(false);
           }}
+        />
+
+        {/* Plan Evolution Panel */}
+        <PlanEvolutionPanel
+          isOpen={showEvolutionPanel}
+          onClose={() => setShowEvolutionPanel(false)}
         />
       </div>
     </ThemeProvider>

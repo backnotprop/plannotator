@@ -37,3 +37,11 @@ export {
   type ValidationMarker,
   type MarkerInjectionResult,
 } from './markers';
+
+// Plan Diff (version comparison)
+export {
+  diffBlocks,
+  diffSummary,
+  type DiffType,
+  type BlockDiff,
+} from './planDiff';

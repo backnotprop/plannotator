@@ -26,6 +26,13 @@ import {
   saveFinalSnapshot,
   extractFirstHeading,
 } from "./storage";
+import {
+  listVersions,
+  saveVersion,
+  loadVersion,
+  getLatestVersion,
+} from "./planHistory";
+import { parseMarkdownToBlocks, diffBlocks, diffSummary } from "@plannotator/core";
 
 // --- Version Tracking ---
 // Track plan versions by title (H1) within a session
@@ -228,6 +235,107 @@ export async function startPlannotatorServer(
             }
           }
 
+          // API: List plan versions
+          if (url.pathname === "/api/plan/versions") {
+            const slugParam = url.searchParams.get("slug");
+            const targetSlug = slugParam || slug;
+
+            try {
+              const versions = listVersions(targetSlug);
+              return Response.json({
+                slug: targetSlug,
+                versions,
+                currentVersion: planVersion,
+              });
+            } catch (err) {
+              const message = err instanceof Error ? err.message : "Failed to list versions";
+              return Response.json({ error: message }, { status: 500 });
+            }
+          }
+
+          // API: Get diff between two versions
+          if (url.pathname === "/api/plan/diff") {
+            const slugParam = url.searchParams.get("slug");
+            const v1Param = url.searchParams.get("v1");
+            const v2Param = url.searchParams.get("v2");
+
+            if (!v1Param || !v2Param) {
+              return Response.json(
+                { error: "Missing v1 or v2 parameters" },
+                { status: 400 }
+              );
+            }
+
+            const targetSlug = slugParam || slug;
+            const v1 = parseInt(v1Param, 10);
+            const v2 = parseInt(v2Param, 10);
+
+            try {
+              const content1 = loadVersion(targetSlug, v1);
+              const content2 = loadVersion(targetSlug, v2);
+
+              if (!content1 || !content2) {
+                return Response.json(
+                  { error: `Version ${!content1 ? v1 : v2} not found` },
+                  { status: 404 }
+                );
+              }
+
+              const blocks1 = parseMarkdownToBlocks(content1);
+              const blocks2 = parseMarkdownToBlocks(content2);
+              const diff = diffBlocks(blocks1, blocks2);
+              const summary = diffSummary(diff);
+
+              return Response.json({
+                slug: targetSlug,
+                v1,
+                v2,
+                diff,
+                summary,
+              });
+            } catch (err) {
+              const message = err instanceof Error ? err.message : "Failed to compute diff";
+              return Response.json({ error: message }, { status: 500 });
+            }
+          }
+
+          // API: Load a specific version
+          if (url.pathname === "/api/plan/version") {
+            const slugParam = url.searchParams.get("slug");
+            const versionParam = url.searchParams.get("version");
+
+            if (!versionParam) {
+              return Response.json(
+                { error: "Missing version parameter" },
+                { status: 400 }
+              );
+            }
+
+            const targetSlug = slugParam || slug;
+            const version = parseInt(versionParam, 10);
+
+            try {
+              const content = loadVersion(targetSlug, version);
+              if (!content) {
+                return Response.json(
+                  { error: `Version ${version} not found` },
+                  { status: 404 }
+                );
+              }
+
+              const blocks = parseMarkdownToBlocks(content);
+              return Response.json({
+                slug: targetSlug,
+                version,
+                content,
+                blocks,
+              });
+            } catch (err) {
+              const message = err instanceof Error ? err.message : "Failed to load version";
+              return Response.json({ error: message }, { status: 500 });
+            }
+          }
+
           // API: Approve plan
           if (url.pathname === "/api/approve" && req.method === "POST") {
             // Check for note integrations and optional feedback
@@ -291,6 +399,19 @@ export async function startPlannotatorServer(
               console.error(`[Integration] Error:`, err);
             }
 
+            // Auto-save version for plan evolution tracking
+            let versionSaved: { version: number; path: string; skipped: boolean } | undefined;
+            if (planSaveEnabled) {
+              try {
+                versionSaved = saveVersion(slug, plan, planSaveCustomPath);
+                if (!versionSaved.skipped) {
+                  console.error(`[PlanHistory] Saved version ${versionSaved.version}: ${versionSaved.path}`);
+                }
+              } catch (err) {
+                console.error(`[PlanHistory] Failed to save version:`, err);
+              }
+            }
+
             // Save annotations and final snapshot (if enabled)
             let savedPath: string | undefined;
             if (planSaveEnabled) {
@@ -326,6 +447,18 @@ export async function startPlannotatorServer(
               }
             } catch {
               // Use default feedback
+            }
+
+            // Auto-save version for plan evolution tracking (even on deny)
+            if (planSaveEnabled) {
+              try {
+                const versionSaved = saveVersion(slug, plan, planSaveCustomPath);
+                if (!versionSaved.skipped) {
+                  console.error(`[PlanHistory] Saved version ${versionSaved.version}: ${versionSaved.path}`);
+                }
+              } catch (err) {
+                console.error(`[PlanHistory] Failed to save version:`, err);
+              }
             }
 
             // Save annotations and final snapshot (if enabled)
