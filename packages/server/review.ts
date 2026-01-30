@@ -13,6 +13,7 @@ import { mkdirSync } from "fs";
 import { isRemoteSession, getServerPort } from "./remote";
 import { openBrowser } from "./browser";
 import { type DiffType, type GitContext, runGitDiff } from "./git";
+import { getRepoInfo } from "./repo";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -89,6 +90,9 @@ export async function startReviewServer(
   const isRemote = isRemoteSession();
   const configuredPort = getServerPort();
 
+  // Detect repo info (cached for this session)
+  const repoInfo = await getRepoInfo();
+
   // Decision promise
   let resolveDecision: (result: {
     feedback: string;
@@ -123,6 +127,7 @@ export async function startReviewServer(
               diffType: currentDiffType,
               gitContext,
               sharingEnabled,
+              repoInfo,
             });
           }
 

@@ -2,12 +2,13 @@
 # Sandbox script for testing Plannotator OpenCode plugin locally
 #
 # Usage:
-#   ./sandbox-opencode.sh [--disable-sharing] [--keep]
+#   ./sandbox-opencode.sh [--disable-sharing] [--keep] [--no-git]
 #
 # Options:
 #   --disable-sharing  Create opencode.json with "share": "disabled" to test
 #                      the sharing disable feature without env var pollution
 #   --keep             Don't clean up sandbox on exit (for debugging)
+#   --no-git           Don't initialize git repo (tests non-git fallback)
 #
 # What it does:
 #   1. Builds the plugin (ensures latest code)
@@ -29,6 +30,7 @@ PLUGIN_DIR="$PROJECT_ROOT/apps/opencode-plugin"
 # Parse CLI flags
 DISABLE_SHARING=false
 KEEP_SANDBOX=false
+NO_GIT=false
 for arg in "$@"; do
   case $arg in
     --disable-sharing)
@@ -37,6 +39,10 @@ for arg in "$@"; do
       ;;
     --keep)
       KEEP_SANDBOX=true
+      shift
+      ;;
+    --no-git)
+      NO_GIT=true
       shift
       ;;
   esac
@@ -70,11 +76,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Initialize git repo
+# Initialize git repo (unless --no-git)
 cd "$SANDBOX_DIR"
-git init -q
-git config user.email "test@example.com"
-git config user.name "Test User"
+if [ "$NO_GIT" = false ]; then
+  git init -q
+  git config user.email "test@example.com"
+  git config user.name "Test User"
+fi
 
 # Create initial project structure
 mkdir -p src/{api,components,hooks,utils,types}
@@ -708,8 +716,10 @@ cat > .opencode/package.json << 'EOF'
 }
 EOF
 
-git add .
-git commit -q -m "Initial commit: Task manager app"
+if [ "$NO_GIT" = false ]; then
+  git add .
+  git commit -q -m "Initial commit: Task manager app"
+fi
 
 # =============================================================================
 # Make uncommitted changes (simulating a feature branch with multiple changes)
@@ -1517,8 +1527,12 @@ describe('formatters', () => {
 EOF
 
 echo ""
-echo "Git status (uncommitted changes for /plannotator-review):"
-git diff --stat
+if [ "$NO_GIT" = false ]; then
+  echo "Git status (uncommitted changes for /plannotator-review):"
+  git diff --stat
+else
+  echo "Git: DISABLED (--no-git flag)"
+fi
 echo ""
 
 # Set up local plugin via loader file
@@ -1555,6 +1569,11 @@ fi
 echo "=== Sandbox Ready ==="
 echo ""
 echo "Directory: $SANDBOX_DIR"
+if [ "$NO_GIT" = true ]; then
+  echo "Git: DISABLED (--no-git)"
+else
+  echo "Git: enabled"
+fi
 if [ "$DISABLE_SHARING" = true ]; then
   echo "Sharing: DISABLED (via opencode.json config)"
 else
@@ -1563,7 +1582,9 @@ fi
 echo ""
 echo "To test:"
 echo "  1. Plan mode: Ask the agent to plan something"
-echo "  2. Code review: Run /plannotator-review"
+if [ "$NO_GIT" = false ]; then
+  echo "  2. Code review: Run /plannotator-review"
+fi
 echo ""
 echo "Launching OpenCode..."
 echo ""

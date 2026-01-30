@@ -1,7 +1,7 @@
 {
   "name": "plannotator",
   "description": "Interactive Plan Review: Mark up and refine your plans using a UI, easily share for team collaboration, automatically integrates with plan mode hooks.",
-  "version": "0.6.7",
+  "version": "0.6.8",
   "author": {
     "name": "backnotprop"
   },

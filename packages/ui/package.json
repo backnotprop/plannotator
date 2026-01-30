@@ -10,11 +10,12 @@
   },
   "dependencies": {
     "@plannotator/core": "workspace:*",
+    "@plannotator/web-highlighter": "^0.8.1",
     "highlight.js": "^11.11.1",
+    "mermaid": "^11.12.2",
     "perfect-freehand": "^1.2.2",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "unique-username-generator": "^1.5.1",
-    "@plannotator/web-highlighter": "^0.8.1"
+    "unique-username-generator": "^1.5.1"
   }
 }

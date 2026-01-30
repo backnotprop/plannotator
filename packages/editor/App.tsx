@@ -34,6 +34,23 @@ const PLAN_CONTENT = `# Implementation Plan: Real-time Collaboration
 ## Overview
 Add real-time collaboration features to the editor using WebSocket connections and operational transforms.
 
+### Architecture
+
+\`\`\`mermaid
+flowchart LR
+    subgraph Client["Client Browser"]
+        UI[React UI] --> OT[OT Engine]
+        OT <--> WS[WebSocket Client]
+    end
+
+    subgraph Server["Backend"]
+        WSS[WebSocket Server] <--> OTS[OT Transform]
+        OTS <--> DB[(PostgreSQL)]
+    end
+
+    WS <--> WSS
+\`\`\`
+
 ## Phase 1: Infrastructure
 
 ### WebSocket Server
@@ -332,6 +349,7 @@ const App: React.FC = () => {
   const [showPermissionModeSetup, setShowPermissionModeSetup] = useState(false);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
   const [sharingEnabled, setSharingEnabled] = useState(true);
+  const [repoInfo, setRepoInfo] = useState<{ display: string; branch?: string } | null>(null);
   // Plan metadata for header display
   const [planTitle, setPlanTitle] = useState<string | null>(null);
   const [planVersion, setPlanVersion] = useState<number | null>(null);
@@ -399,10 +417,11 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: {
+.then((data: {
           plan: string;
           origin?: 'claude-code' | 'opencode';
           sharingEnabled?: boolean;
+          repoInfo?: { display: string; branch?: string };
           title?: string;
           version?: number;
           timestamp?: string;
@@ -414,6 +433,9 @@ const App: React.FC = () => {
         setIsApiMode(true);
         if (data.sharingEnabled !== undefined) {
           setSharingEnabled(data.sharingEnabled);
+        }
+        if (data.repoInfo) {
+          setRepoInfo(data.repoInfo);
         }
         // Store plan metadata
         if (data.title) setPlanTitle(data.title);
@@ -930,6 +952,7 @@ const App: React.FC = () => {
                 onAddGlobalAttachment={handleAddGlobalAttachment}
                 onRemoveGlobalAttachment={handleRemoveGlobalAttachment}
                 existingMarkers={existingMarkers}
+                repoInfo={repoInfo}
               />
             </div>
           </main>

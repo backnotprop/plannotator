@@ -1,6 +1,6 @@
 {
   "name": "plannotator",
-  "version": "0.6.7",
+  "version": "0.6.8",
   "private": true,
   "description": "Interactive Plan Review for Claude Code - annotate plans visually, share with team, automatically send feedback",
   "author": "backnotprop",

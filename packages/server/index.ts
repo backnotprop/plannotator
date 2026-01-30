@@ -26,6 +26,7 @@ import {
   saveFinalSnapshot,
   extractFirstHeading,
 } from "./storage";
+import { getRepoInfo } from "./repo";
 import {
   listVersions,
   saveVersion,
@@ -123,6 +124,9 @@ export async function startPlannotatorServer(
   // Generate slug for potential saving (actual save happens on decision)
   const slug = generateSlug(plan);
 
+// Detect repo info (cached for this session)
+  const repoInfo = await getRepoInfo();
+
   // Extract metadata for UI display
   const planTitle = extractFirstHeading(plan) || "Untitled Plan";
   const planVersion = getPlanVersion(plan);
@@ -164,6 +168,7 @@ export async function startPlannotatorServer(
               origin,
               permissionMode,
               sharingEnabled,
+              repoInfo,
               // Metadata for UI header
               title: planTitle,
               version: planVersion,

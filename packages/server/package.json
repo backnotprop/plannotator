@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/server",
-  "version": "0.6.7",
+  "version": "0.6.8",
   "private": true,
   "description": "Shared server implementation for Plannotator plugins",
   "main": "index.ts",
@@ -12,7 +12,8 @@
     "./remote": "./remote.ts",
     "./browser": "./browser.ts",
     "./storage": "./storage.ts",
-    "./git": "./git.ts"
+    "./git": "./git.ts",
+    "./repo": "./repo.ts"
   },
   "files": [
     "*.ts"
