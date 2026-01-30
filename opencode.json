@@ -1,0 +1,11 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["README.md", "CLAUDE.md"],
+  "plugin": [
+    "@tarquinen/opencode-dcp@latest",
+    "@ramtinj95/opencode-tokenscope@latest",
+    "opencode-todo-reminder@latest",
+    "opencode-command-hooks@latest",
+    "@plannotator/opencode@latest"
+  ]
+}
