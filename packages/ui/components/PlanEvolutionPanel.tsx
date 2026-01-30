@@ -5,7 +5,7 @@
  * Git-diff style colors: green (added), red (removed), yellow (modified), grey (unchanged).
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { Block, BlockDiff, DiffType } from '@plannotator/core';
 
 interface PlanVersion {
@@ -118,13 +118,17 @@ const BlockRenderer: React.FC<{ block: Block; diffType: DiffType }> = ({ block, 
   );
 };
 
-const DiffColumn: React.FC<{
-  title: string;
-  version: number;
-  timestamp: string;
-  diffs: BlockDiff[];
-  side: 'old' | 'new';
-}> = ({ title, version, timestamp, diffs, side }) => {
+const DiffColumn = React.forwardRef<
+  HTMLDivElement,
+  {
+    title: string;
+    version: number;
+    timestamp: string;
+    diffs: BlockDiff[];
+    side: 'old' | 'new';
+    onScroll?: (e: React.UIEvent<HTMLDivElement>) => void;
+  }
+>(({ title, version, timestamp, diffs, side, onScroll }, ref) => {
   const formattedDate = new Date(timestamp).toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
@@ -133,7 +137,7 @@ const DiffColumn: React.FC<{
   });
 
   return (
-    <div className="flex-1 min-w-0 overflow-y-auto">
+    <div ref={ref} className="flex-1 min-w-0 overflow-y-auto" onScroll={onScroll}>
       <div className="sticky top-0 bg-card border-b border-border p-3 z-10">
         <div className="flex items-center justify-between">
           <span className="font-medium">Version {version}</span>
@@ -187,7 +191,9 @@ const DiffColumn: React.FC<{
       </div>
     </div>
   );
-};
+});
+
+DiffColumn.displayName = 'DiffColumn';
 
 const SummaryBadge: React.FC<{ type: DiffType; count: number }> = ({ type, count }) => {
   if (count === 0) return null;
@@ -225,6 +231,34 @@ export const PlanEvolutionPanel: React.FC<PlanEvolutionPanelProps> = ({
   const [summary, setSummary] = useState<DiffSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Scroll synchronization
+  const leftColumnRef = useRef<HTMLDivElement>(null);
+  const rightColumnRef = useRef<HTMLDivElement>(null);
+  const isScrollingSyncRef = useRef(false);
+
+  const handleScroll = useCallback((source: 'left' | 'right') => {
+    if (isScrollingSyncRef.current) return;
+
+    const sourceRef = source === 'left' ? leftColumnRef : rightColumnRef;
+    const targetRef = source === 'left' ? rightColumnRef : leftColumnRef;
+
+    if (!sourceRef.current || !targetRef.current) return;
+
+    isScrollingSyncRef.current = true;
+
+    // Sync by scroll percentage for proportional scrolling
+    const sourceEl = sourceRef.current;
+    const targetEl = targetRef.current;
+
+    const scrollPercentage = sourceEl.scrollTop / (sourceEl.scrollHeight - sourceEl.clientHeight || 1);
+    targetEl.scrollTop = scrollPercentage * (targetEl.scrollHeight - targetEl.clientHeight);
+
+    // Reset flag after scroll settles
+    requestAnimationFrame(() => {
+      isScrollingSyncRef.current = false;
+    });
+  }, []);
 
   // Fetch versions when panel opens
   useEffect(() => {
@@ -398,18 +432,22 @@ export const PlanEvolutionPanel: React.FC<PlanEvolutionPanelProps> = ({
           {!loading && !error && versions.length >= 2 && selectedV1 !== selectedV2 && v1Data && v2Data && (
             <div className="flex h-full divide-x divide-border">
               <DiffColumn
+                ref={leftColumnRef}
                 title="Previous"
                 version={v1Data.version}
                 timestamp={v1Data.timestamp}
                 diffs={diffs}
                 side="old"
+                onScroll={() => handleScroll('left')}
               />
               <DiffColumn
+                ref={rightColumnRef}
                 title="Current"
                 version={v2Data.version}
                 timestamp={v2Data.timestamp}
                 diffs={diffs}
                 side="new"
+                onScroll={() => handleScroll('right')}
               />
             </div>
           )}
