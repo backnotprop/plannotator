@@ -89,6 +89,12 @@ bun run dev:hook
 # Code review UI
 bun run dev:review
 # Opens http://localhost:5174
+
+# Portal (share.plannotator.ai)
+bun run dev:portal
+
+# Marketing site (plannotator.ai)
+bun run dev:marketing
 ```
 
 **Note:** Development servers run standalone without plugin integration. Changes appear instantly without rebuild.
@@ -139,17 +145,15 @@ Always rebuild hook/review apps BEFORE building OpenCode if you changed UI code.
 
 ### Test Scripts
 
-Three test scripts simulate plugin behavior locally:
+UI test scripts simulate plugin behavior locally:
 
 ```bash
-# Test plan review UI (Claude Code simulation)
-./tests/manual/local/test-hook.sh
+# Plan review UI tests
+./tests/manual/local/test-hook.sh          # Claude Code simulation
+./tests/manual/local/test-hook-2.sh        # OpenCode origin badge test
 
-# Test OpenCode origin badge
-./tests/manual/local/test-hook-2.sh
-
-# Test code review UI
-./tests/manual/local/test-opencode-review.sh
+# Code review UI test
+./tests/manual/local/test-opencode-review.sh  # Code review UI test
 ```
 
 ### What Each Script Does
@@ -173,6 +177,8 @@ Three test scripts simulate plugin behavior locally:
 3. Opens browser with code review UI
 4. Verifies "OpenCode" badge + "Send Feedback" button (not "Copy Feedback")
 5. Tests feedback submission flow
+
+See [tests/README.md](../tests/README.md) for additional integration and utility test scripts.
 
 ### Manual Testing Workflow
 
