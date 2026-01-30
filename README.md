@@ -97,6 +97,18 @@ When your AI agent finishes planning, Plannotator:
 
 ---
 
+## Contributing
+
+We welcome contributions! Please see:
+
+- **[CONTRIBUTING.md](./CONTRIBUTING.md)** - Legal requirements (License, CLA)
+- **[docs/UI-TESTING.md](./docs/UI-TESTING.md)** - How to test UI changes
+- **[docs/CODE-STYLE.md](./docs/CODE-STYLE.md)** - Code style guidelines
+
+For bug reports and feature requests, please [open an issue](https://github.com/backnotprop/plannotator/issues).
+
+---
+
 ## License
 
 **Copyright (c) 2025 backnotprop.**

@@ -648,7 +648,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         )}
 
         {/* Header buttons - top right */}
-        <div className="absolute top-3 right-3 md:top-5 md:right-5 flex items-start gap-2">
+        <div className="sticky top-3 z-30 float-right flex items-start gap-2 bg-card/95 backdrop-blur-sm rounded-lg p-2 -mr-2 -mt-2">
           {/* Attachments button */}
           {onAddGlobalAttachment && onRemoveGlobalAttachment && (
             <AttachmentsButton
@@ -939,7 +939,7 @@ const BlockRenderer: React.FC<{ block: Block }> = ({ block }) => {
         3: 'text-base font-semibold mb-2 mt-6 text-foreground/80',
       }[block.level || 1] || 'text-base font-semibold mb-2 mt-4';
 
-      return <Tag className={styles} data-block-id={block.id}><InlineMarkdown text={block.content} /></Tag>;
+      return <Tag className={styles} data-block-id={block.id} data-block-type="heading"><InlineMarkdown text={block.content} /></Tag>;
 
     case 'blockquote':
       return (
