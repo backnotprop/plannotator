@@ -14,6 +14,7 @@ interface DiffViewerProps {
   onAddAnnotation: (type: CodeAnnotationType, text?: string, suggestedCode?: string) => void;
   onSelectAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
+  onAddFileComment?: (text: string) => void;
 }
 
 interface ToolbarState {
@@ -32,6 +33,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   onAddAnnotation,
   onSelectAnnotation,
   onDeleteAnnotation,
+  onAddFileComment,
 }) => {
   const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -40,7 +42,17 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   const [suggestedCode, setSuggestedCode] = useState('');
   const [showSuggestedCode, setShowSuggestedCode] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [showFileComment, setShowFileComment] = useState(false);
+  const [fileCommentText, setFileCommentText] = useState('');
   const lastMousePosition = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // Submit file comment
+  const handleSubmitFileComment = useCallback(() => {
+    if (!fileCommentText.trim() || !onAddFileComment) return;
+    onAddFileComment(fileCommentText.trim());
+    setFileCommentText('');
+    setShowFileComment(false);
+  }, [fileCommentText, onAddFileComment]);
 
   // Track mouse position continuously for toolbar placement
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
@@ -211,35 +223,96 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       {/* File header */}
       <div className="sticky top-0 z-10 px-4 py-2 bg-card/95 backdrop-blur border-b border-border flex items-center justify-between">
         <span className="font-mono text-sm text-foreground">{filePath}</span>
-        <button
-          onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(patch);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 2000);
-            } catch (err) {
-              console.error('Failed to copy:', err);
-            }
-          }}
-          className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted transition-colors flex items-center gap-1"
-          title="Copy this file's diff"
-        >
-          {copied ? (
-            <>
-              <svg className="w-3.5 h-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-              Copied!
-            </>
-          ) : (
-            <>
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
-              Copy Diff
-            </>
+        <div className="flex items-center gap-1">
+          {/* File comment button */}
+          {onAddFileComment && (
+            <div className="relative">
+              <button
+                onClick={() => setShowFileComment(!showFileComment)}
+                className={`text-xs px-2 py-1 rounded transition-colors flex items-center gap-1 ${
+                  showFileComment
+                    ? 'bg-accent/15 text-accent'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`}
+                title="Comment on this file"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                </svg>
+                File
+              </button>
+              {/* File comment popover */}
+              {showFileComment && (
+                <div className="absolute right-0 top-full mt-1 w-72 p-2 bg-popover border border-border rounded-lg shadow-xl z-20">
+                  <textarea
+                    value={fileCommentText}
+                    onChange={(e) => setFileCommentText(e.target.value)}
+                    placeholder="Comment on this file..."
+                    className="w-full px-2.5 py-2 bg-muted rounded-md text-xs resize-none focus:outline-none focus:ring-1 focus:ring-primary/50"
+                    rows={3}
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        setShowFileComment(false);
+                        setFileCommentText('');
+                      } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                        handleSubmitFileComment();
+                      }
+                    }}
+                  />
+                  <div className="flex justify-end gap-1.5 mt-2">
+                    <button
+                      onClick={() => {
+                        setShowFileComment(false);
+                        setFileCommentText('');
+                      }}
+                      className="px-2 py-1 text-[10px] rounded text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleSubmitFileComment}
+                      disabled={!fileCommentText.trim()}
+                      className="px-2 py-1 text-[10px] rounded font-medium bg-accent text-accent-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
-        </button>
+          {/* Copy diff button */}
+          <button
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(patch);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              } catch (err) {
+                console.error('Failed to copy:', err);
+              }
+            }}
+            className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted transition-colors flex items-center gap-1"
+            title="Copy this file's diff"
+          >
+            {copied ? (
+              <>
+                <svg className="w-3.5 h-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                Copied!
+              </>
+            ) : (
+              <>
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                Copy Diff
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Diff content */}

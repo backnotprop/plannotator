@@ -82,28 +82,77 @@ function generateId(): string {
   return Math.random().toString(36).substring(2, 9);
 }
 
+// Sentinel for global comments (not tied to any file)
+const GLOBAL_FILE_PATH = '__global__';
+
+// Check if annotation is global (entire review)
+function isGlobalAnnotation(ann: CodeAnnotation): boolean {
+  return ann.filePath === GLOBAL_FILE_PATH;
+}
+
+// Check if annotation is file-level (entire file, not specific lines)
+function isFileAnnotation(ann: CodeAnnotation): boolean {
+  return ann.filePath !== GLOBAL_FILE_PATH && ann.lineStart === 0 && ann.lineEnd === 0;
+}
+
 // Export annotations as markdown feedback
 function exportReviewFeedback(annotations: CodeAnnotation[], files: DiffFile[]): string {
   if (annotations.length === 0) {
     return '# Code Review\n\nNo feedback provided.';
   }
 
+  // Separate global, file-level, and line-level annotations
+  const globalAnnotations = annotations.filter(isGlobalAnnotation);
+  const fileAnnotations = annotations.filter(isFileAnnotation);
+  const lineAnnotations = annotations.filter(a => !isGlobalAnnotation(a) && !isFileAnnotation(a));
+
+  // Group line annotations by file
   const grouped = new Map<string, CodeAnnotation[]>();
-  for (const ann of annotations) {
+  for (const ann of lineAnnotations) {
     const existing = grouped.get(ann.filePath) || [];
     existing.push(ann);
     grouped.set(ann.filePath, existing);
   }
 
+  // Group file annotations by file
+  const fileComments = new Map<string, CodeAnnotation[]>();
+  for (const ann of fileAnnotations) {
+    const existing = fileComments.get(ann.filePath) || [];
+    existing.push(ann);
+    fileComments.set(ann.filePath, existing);
+  }
+
   let output = '# Code Review Feedback\n\n';
 
-  for (const [filePath, fileAnnotations] of grouped) {
+  // Global comments first
+  if (globalAnnotations.length > 0) {
+    output += '## General Feedback\n\n';
+    for (const ann of globalAnnotations) {
+      if (ann.text) {
+        output += `> ${ann.text}\n\n`;
+      }
+    }
+  }
+
+  // Get all files with any annotations
+  const allFilePaths = new Set([...grouped.keys(), ...fileComments.keys()]);
+
+  for (const filePath of allFilePaths) {
     output += `## ${filePath}\n\n`;
 
-    const sorted = [...fileAnnotations].sort((a, b) => a.lineStart - b.lineStart);
+    // File-level comments first
+    const fileAnns = fileComments.get(filePath) || [];
+    for (const ann of fileAnns) {
+      if (ann.text) {
+        output += `**File comment:** ${ann.text}\n\n`;
+      }
+    }
 
-    for (let i = 0; i < sorted.length; i++) {
-      const ann = sorted[i];
+    // Then line-level annotations
+    const lineAnns = grouped.get(filePath) || [];
+    const sorted = [...lineAnns].sort((a, b) => a.lineStart - b.lineStart);
+
+    for (const ann of sorted) {
       const lineRange = ann.lineStart === ann.lineEnd
         ? `Line ${ann.lineStart}`
         : `Lines ${ann.lineStart}-${ann.lineEnd}`;
@@ -303,6 +352,40 @@ const ReviewApp: React.FC = () => {
       setSelectedAnnotationId(null);
     }
   }, [selectedAnnotationId]);
+
+  // Add global comment (entire review)
+  const handleAddGlobalComment = useCallback((text: string) => {
+    if (!text.trim()) return;
+    const newAnnotation: CodeAnnotation = {
+      id: generateId(),
+      type: 'comment',
+      filePath: GLOBAL_FILE_PATH,
+      lineStart: 0,
+      lineEnd: 0,
+      side: 'new',
+      text: text.trim(),
+      createdAt: Date.now(),
+      author: identity,
+    };
+    setAnnotations(prev => [...prev, newAnnotation]);
+  }, [identity]);
+
+  // Add file comment (entire file)
+  const handleAddFileComment = useCallback((filePath: string, text: string) => {
+    if (!text.trim()) return;
+    const newAnnotation: CodeAnnotation = {
+      id: generateId(),
+      type: 'comment',
+      filePath,
+      lineStart: 0,
+      lineEnd: 0,
+      side: 'new',
+      text: text.trim(),
+      createdAt: Date.now(),
+      author: identity,
+    };
+    setAnnotations(prev => [...prev, newAnnotation]);
+  }, [identity]);
 
   // Handle identity change - update author on existing annotations
   const handleIdentityChange = useCallback((oldIdentity: string, newIdentity: string) => {
@@ -755,6 +838,7 @@ const ReviewApp: React.FC = () => {
                 onAddAnnotation={handleAddAnnotation}
                 onSelectAnnotation={handleSelectAnnotation}
                 onDeleteAnnotation={handleDeleteAnnotation}
+                onAddFileComment={(text) => handleAddFileComment(activeFile.path, text)}
               />
             ) : (
               <div className="h-full flex items-center justify-center">
@@ -793,6 +877,7 @@ const ReviewApp: React.FC = () => {
             selectedAnnotationId={selectedAnnotationId}
             onSelectAnnotation={handleSelectAnnotation}
             onDeleteAnnotation={handleDeleteAnnotation}
+            onAddGlobalComment={handleAddGlobalComment}
             feedbackMarkdown={feedbackMarkdown}
           />
         </div>
