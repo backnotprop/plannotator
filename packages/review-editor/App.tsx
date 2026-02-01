@@ -154,13 +154,25 @@ const ReviewApp: React.FC = () => {
 
   const identity = useMemo(() => getIdentity(), []);
 
-  // Mark file as viewed when it becomes active
+  // Toggle file viewed status (manual control)
+  const toggleViewedFile = useCallback((filePath: string) => {
+    setViewedFiles(prev => {
+      const next = new Set(prev);
+      if (next.has(filePath)) {
+        next.delete(filePath);
+      } else {
+        next.add(filePath);
+      }
+      return next;
+    });
+  }, []);
+
+  // Persist viewed files to cookie when changed
   useEffect(() => {
-    const activeFile = files[activeFileIndex];
-    if (activeFile && !viewedFiles.has(activeFile.path)) {
-      setViewedFiles(prev => new Set([...prev, activeFile.path]));
-    }
-  }, [activeFileIndex, files]);
+    if (!diffData?.gitRef) return;
+    const paths = Array.from(viewedFiles);
+    storage.setItem(`review-viewed-${diffData.gitRef}`, JSON.stringify(paths));
+  }, [viewedFiles, diffData?.gitRef]);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -222,6 +234,14 @@ const ReviewApp: React.FC = () => {
         if (data.gitContext) setGitContext(data.gitContext);
         if (data.sharingEnabled !== undefined) setSharingEnabled(data.sharingEnabled);
         if (data.repoInfo) setRepoInfo(data.repoInfo);
+        // Restore viewed files from cookie
+        const savedViewed = storage.getItem(`review-viewed-${data.gitRef}`);
+        if (savedViewed) {
+          try {
+            const paths = JSON.parse(savedViewed) as string[];
+            setViewedFiles(new Set(paths));
+          } catch { /* ignore parse errors */ }
+        }
       })
       .catch(() => {
         // Not in API mode - use demo content
@@ -712,6 +732,7 @@ const ReviewApp: React.FC = () => {
               onSelectFile={handleFileSwitch}
               annotations={annotations}
               viewedFiles={viewedFiles}
+              onToggleViewed={toggleViewedFile}
               enableKeyboardNav={!showExportModal}
               diffOptions={gitContext?.diffOptions}
               activeDiffType={diffType}
