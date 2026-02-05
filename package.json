@@ -29,5 +29,8 @@
   },
   "dependencies": {
     "@pierre/diffs": "^1.0.4"
+  },
+  "devDependencies": {
+    "happy-dom": "^20.5.0"
   }
 }
