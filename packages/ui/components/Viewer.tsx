@@ -327,8 +327,25 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       const manualHighlights = containerRef.current?.querySelectorAll(`[data-bind-id="${id}"]`);
       manualHighlights?.forEach(el => {
         const parent = el.parentNode;
-        while (el.firstChild) {
-          parent?.insertBefore(el.firstChild, el);
+        
+        // Check if this is a code block annotation (parent is <code> element)
+        if (parent && parent.nodeName === 'CODE') {
+          // For code blocks, we need to restore the plain text and re-highlight
+          const codeEl = parent as HTMLElement;
+          const plainText = el.textContent || '';
+          codeEl.textContent = plainText;
+          
+          // Re-apply syntax highlighting
+          const block = blocks.find(b => b.id === codeEl.closest('[data-block-id]')?.getAttribute('data-block-id'));
+          if (block?.language) {
+            codeEl.className = `hljs font-mono language-${block.language}`;
+            hljs.highlightElement(codeEl);
+          }
+        } else {
+          // For regular text, unwrap the mark
+          while (el.firstChild) {
+            parent?.insertBefore(el.firstChild, el);
+          }
         }
         el.remove();
       });
@@ -567,27 +584,17 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     const codeEl = hoveredCodeBlock.element.querySelector('code');
     if (!codeEl) return;
 
-    // Create a range that selects all content in the code block
-    const range = document.createRange();
-    range.selectNodeContents(codeEl);
-
-    // Set the browser selection to this range
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-
     // Use highlighter.fromRange which triggers CREATE event internally
     // We need to handle this synchronously, so we'll create the annotation directly
     const id = `codeblock-${Date.now()}`;
     const codeText = codeEl.textContent || '';
 
-    // Wrap the content manually
+    // Instead of using surroundContents (which breaks with syntax-highlighted code),
+    // we replace the innerHTML entirely with a mark wrapper containing the plain text
     const wrapper = document.createElement('mark');
     wrapper.className = 'annotation-highlight';
     wrapper.dataset.bindId = id;
-
-    // Extract and wrap content
-    range.surroundContents(wrapper);
+    wrapper.textContent = codeText;
 
     // Add the appropriate class
     if (type === AnnotationType.DELETION) {
@@ -595,6 +602,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     } else if (type === AnnotationType.COMMENT) {
       wrapper.classList.add('comment');
     }
+
+    // Replace code element's content with the wrapper
+    codeEl.innerHTML = '';
+    codeEl.appendChild(wrapper);
 
     // Create the annotation
     const newAnnotation: Annotation = {
@@ -613,7 +624,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     onAddAnnotationRef.current(newAnnotation);
 
     // Clear selection
-    selection?.removeAllRanges();
+    window.getSelection()?.removeAllRanges();
     setHoveredCodeBlock(null);
     setIsCodeBlockToolbarLocked(false);
   };
