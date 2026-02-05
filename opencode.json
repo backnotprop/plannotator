@@ -1,11 +1,15 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "instructions": ["README.md", "CLAUDE.md"],
+  "instructions": ["README.md", "CLAUDE.md", "docs/CODE-STYLE.md", "docs/UI-TESTING.md"],
+  "mcp": {
+    "playwright": {
+      "type": "local",
+      "command": ["npx", "@playwright/mcp@latest"],
+      "enabled": true
+    }
+  },
   "plugin": [
     "@tarquinen/opencode-dcp@latest",
-    "@ramtinj95/opencode-tokenscope@latest",
-    "opencode-todo-reminder@latest",
-    "opencode-command-hooks@latest",
-    "@plannotator/opencode@latest"
+    "opencode-todo-reminder@latest"
   ]
 }
