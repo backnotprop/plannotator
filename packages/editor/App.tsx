@@ -354,7 +354,8 @@ const App: React.FC = () => {
   const containerRef = useRef<HTMLElement>(null);
 
   // Track active section for TOC highlighting
-  const activeSection = useActiveSection(containerRef);
+  const headingCount = useMemo(() => blocks.filter(b => b.type === 'heading').length, [blocks]);
+  const activeSection = useActiveSection(containerRef, headingCount);
 
   // URL-based sharing
   const {
