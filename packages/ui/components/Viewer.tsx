@@ -49,6 +49,7 @@ interface ViewerProps {
   onAddGlobalAttachment?: (path: string) => void;
   onRemoveGlobalAttachment?: (path: string) => void;
   repoInfo?: { display: string; branch?: string } | null;
+  stickyActions?: boolean;
 }
 
 export interface ViewerHandle {
@@ -104,6 +105,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   onAddGlobalAttachment,
   onRemoveGlobalAttachment,
   repoInfo,
+  stickyActions = true,
 }, ref) => {
   const [copied, setCopied] = useState(false);
   const [showGlobalCommentInput, setShowGlobalCommentInput] = useState(false);
@@ -659,7 +661,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         )}
 
         {/* Header buttons - top right */}
-        <div className="sticky top-3 z-30 float-right flex items-start gap-2 bg-card/95 backdrop-blur-sm rounded-lg p-2 -mr-2 -mt-2">
+        <div className={`${stickyActions ? 'sticky top-3' : ''} z-30 float-right flex items-start gap-2 bg-card/95 backdrop-blur-sm rounded-lg p-2 -mr-2 -mt-2`}>
           {/* Attachments button */}
           {onAddGlobalAttachment && onRemoveGlobalAttachment && (
             <AttachmentsButton

@@ -21,6 +21,7 @@ import { getObsidianSettings, getEffectiveVaultPath, CUSTOM_PATH_SENTINEL } from
 import { getBearSettings } from '@plannotator/ui/utils/bear';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { getPlanSaveSettings } from '@plannotator/ui/utils/planSave';
+import { getUIPreferences, type UIPreferences } from '@plannotator/ui/utils/uiPreferences';
 import {
   getPermissionModeSettings,
   needsPermissionModeSetup,
@@ -339,6 +340,7 @@ const App: React.FC = () => {
     const stored = storage.getItem('plannotator-tater-mode');
     return stored === 'true';
   });
+  const [uiPrefs, setUiPrefs] = useState(() => getUIPreferences());
   const [isApiMode, setIsApiMode] = useState(false);
   const [origin, setOrigin] = useState<'claude-code' | 'opencode' | null>(null);
   const [globalAttachments, setGlobalAttachments] = useState<string[]>([]);
@@ -778,7 +780,7 @@ const App: React.FC = () => {
             )}
 
             <ModeToggle />
-            <Settings taterMode={taterMode} onTaterModeChange={handleTaterModeChange} onIdentityChange={handleIdentityChange} origin={origin} />
+            <Settings taterMode={taterMode} onTaterModeChange={handleTaterModeChange} onIdentityChange={handleIdentityChange} origin={origin} onUIPreferencesChange={setUiPrefs} />
 
             <button
               onClick={() => setIsPanelOpen(!isPanelOpen)}
@@ -809,13 +811,15 @@ const App: React.FC = () => {
         {/* Main Content */}
         <div className="flex-1 flex overflow-hidden">
           {/* Table of Contents */}
-          <TableOfContents
-            blocks={blocks}
-            annotations={annotations}
-            activeId={activeSection}
-            onNavigate={handleTocNavigate}
-            className="hidden lg:block w-60 sticky top-12 h-[calc(100vh-3rem)] flex-shrink-0"
-          />
+          {uiPrefs.tocEnabled && (
+            <TableOfContents
+              blocks={blocks}
+              annotations={annotations}
+              activeId={activeSection}
+              onNavigate={handleTocNavigate}
+              className="hidden lg:block w-60 sticky top-12 h-[calc(100vh-3rem)] flex-shrink-0"
+            />
+          )}
 
           {/* Document Area */}
           <main ref={containerRef} className="flex-1 overflow-y-auto bg-grid">
@@ -840,6 +844,7 @@ const App: React.FC = () => {
                 onAddGlobalAttachment={handleAddGlobalAttachment}
                 onRemoveGlobalAttachment={handleRemoveGlobalAttachment}
                 repoInfo={repoInfo}
+                stickyActions={uiPrefs.stickyActionsEnabled}
               />
             </div>
           </main>
