@@ -163,6 +163,20 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   const [isCodeBlockToolbarExiting, setIsCodeBlockToolbarExiting] = useState(false);
   const [isCodeBlockToolbarLocked, setIsCodeBlockToolbarLocked] = useState(false);
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const stickySentinelRef = useRef<HTMLDivElement>(null);
+  const [isStuck, setIsStuck] = useState(false);
+
+  // Detect when sticky action bar is "stuck" to show card background
+  useEffect(() => {
+    if (!stickyActions || !stickySentinelRef.current) return;
+    const scrollContainer = document.querySelector('main');
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsStuck(!entry.isIntersecting),
+      { root: scrollContainer, threshold: 0 }
+    );
+    observer.observe(stickySentinelRef.current);
+    return () => observer.disconnect();
+  }, [stickyActions]);
 
   // Keep refs in sync with props
   useEffect(() => {
@@ -660,8 +674,11 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           </div>
         )}
 
+        {/* Sentinel for sticky detection */}
+        {stickyActions && <div ref={stickySentinelRef} className="h-0 w-0 float-right" aria-hidden="true" />}
+
         {/* Header buttons - top right */}
-        <div className={`${stickyActions ? 'sticky top-3' : ''} z-30 float-right flex items-start gap-2 bg-card/95 backdrop-blur-sm rounded-lg p-2 -mr-2 -mt-2`}>
+        <div className={`${stickyActions ? 'sticky top-3' : ''} z-30 float-right flex items-start gap-2 rounded-lg p-2 transition-colors duration-150 ${isStuck ? 'bg-card/95 backdrop-blur-sm shadow-sm' : ''} -mr-4 -mt-4 md:-mr-5 md:-mt-5 lg:-mr-7 lg:-mt-7 xl:-mr-9 xl:-mt-9`}>
           {/* Attachments button */}
           {onAddGlobalAttachment && onRemoveGlobalAttachment && (
             <AttachmentsButton
