@@ -32,7 +32,7 @@ function TocItemComponent({
   hasChildren,
 }: TocItemProps) {
   const isActive = item.id === activeId;
-  const indent = item.level === 1 ? 'pl-0' : item.level === 2 ? 'pl-4' : 'pl-6';
+  const indent = item.level === 1 ? 'pl-1.5' : item.level === 2 ? 'pl-4' : 'pl-6';
 
   return (
     <li className="list-none">
@@ -69,12 +69,12 @@ function TocItemComponent({
           type="button"
           onClick={() => onNavigate(item.id)}
           className={`
-            flex-1 text-left text-sm py-1.5 px-2 rounded transition-colors
+            flex-1 text-left text-xs py-1 px-1.5 rounded transition-colors
             ${indent}
             ${hasChildren ? '' : 'ml-6'}
             ${
               isActive
-                ? 'text-primary bg-primary/10 border-l-2 border-primary font-medium'
+                ? 'text-primary bg-primary/10'
                 : 'text-foreground/80 hover:text-foreground hover:bg-muted/50'
             }
           `}
@@ -86,7 +86,7 @@ function TocItemComponent({
             </span>
             {item.annotationCount > 0 && (
               <span
-                className="flex-shrink-0 bg-accent text-accent-foreground rounded-full px-1.5 py-0.5 text-xs font-medium"
+                className="flex-shrink-0 bg-accent text-accent-foreground rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-medium"
                 title={`${item.annotationCount} annotation${item.annotationCount === 1 ? '' : 's'}`}
               >
                 {item.annotationCount}
