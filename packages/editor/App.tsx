@@ -912,19 +912,6 @@ const App: React.FC = () => {
               </svg>
             </button>
 
-            {sharingEnabled && (
-              <button
-                onClick={() => setShowImport(true)}
-                className="p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium bg-muted hover:bg-muted/80 transition-colors"
-                title="Import teammate review"
-              >
-                <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                <span className="hidden md:inline">Import</span>
-              </button>
-            )}
-
             <div className="relative flex" data-export-dropdown>
               <button
                 onClick={() => { setInitialExportTab(undefined); setShowExport(true); }}
@@ -1003,6 +990,23 @@ const App: React.FC = () => {
                     <div className="px-3 py-2 text-[10px] text-muted-foreground">
                       No notes apps configured.
                     </div>
+                  )}
+                  {sharingEnabled && (
+                    <>
+                      <div className="my-1 border-t border-border" />
+                      <button
+                        onClick={() => {
+                          setShowExportDropdown(false);
+                          setShowImport(true);
+                        }}
+                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors flex items-center gap-2"
+                      >
+                        <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        Import Review
+                      </button>
+                    </>
                   )}
                 </div>
               )}
