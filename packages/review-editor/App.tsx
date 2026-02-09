@@ -141,6 +141,7 @@ const ReviewApp: React.FC = () => {
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
+  const [hideViewedFiles, setHideViewedFiles] = useState(false);
   const [origin, setOrigin] = useState<'opencode' | 'claude-code' | null>(null);
   const [diffType, setDiffType] = useState<string>('uncommitted');
   const [gitContext, setGitContext] = useState<GitContext | null>(null);
@@ -153,14 +154,6 @@ const ReviewApp: React.FC = () => {
   const [repoInfo, setRepoInfo] = useState<{ display: string; branch?: string } | null>(null);
 
   const identity = useMemo(() => getIdentity(), []);
-
-  // Mark file as viewed when it becomes active
-  useEffect(() => {
-    const activeFile = files[activeFileIndex];
-    if (activeFile && !viewedFiles.has(activeFile.path)) {
-      setViewedFiles(prev => new Set([...prev, activeFile.path]));
-    }
-  }, [activeFileIndex, files]);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -294,10 +287,22 @@ const ReviewApp: React.FC = () => {
   // Switch file - clears pending selection to avoid invalid line ranges
   const handleFileSwitch = useCallback((index: number) => {
     if (index !== activeFileIndex) {
-      setPendingSelection(null); // Clear selection when switching files
+      setPendingSelection(null);
       setActiveFileIndex(index);
     }
   }, [activeFileIndex]);
+
+  const handleToggleViewed = useCallback((filePath: string) => {
+    setViewedFiles(prev => {
+      const next = new Set(prev);
+      if (next.has(filePath)) {
+        next.delete(filePath);
+      } else {
+        next.add(filePath);
+      }
+      return next;
+    });
+  }, []);
 
   // Switch diff type (uncommitted, staged, last-commit, branch, etc.)
   const handleDiffSwitch = useCallback(async (newDiffType: string) => {
@@ -712,6 +717,9 @@ const ReviewApp: React.FC = () => {
               onSelectFile={handleFileSwitch}
               annotations={annotations}
               viewedFiles={viewedFiles}
+              onToggleViewed={handleToggleViewed}
+              hideViewedFiles={hideViewedFiles}
+              onToggleHideViewed={() => setHideViewedFiles(prev => !prev)}
               enableKeyboardNav={!showExportModal}
               diffOptions={gitContext?.diffOptions}
               activeDiffType={diffType}
@@ -734,6 +742,8 @@ const ReviewApp: React.FC = () => {
                 onAddAnnotation={handleAddAnnotation}
                 onSelectAnnotation={handleSelectAnnotation}
                 onDeleteAnnotation={handleDeleteAnnotation}
+                isViewed={viewedFiles.has(activeFile.path)}
+                onToggleViewed={() => handleToggleViewed(activeFile.path)}
               />
             ) : (
               <div className="h-full flex items-center justify-center">

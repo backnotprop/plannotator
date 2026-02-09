@@ -22,6 +22,7 @@ import { getBearSettings } from '@plannotator/ui/utils/bear';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { getPlanSaveSettings } from '@plannotator/ui/utils/planSave';
 import { getUIPreferences, type UIPreferences } from '@plannotator/ui/utils/uiPreferences';
+import { getEditorMode, saveEditorMode } from '@plannotator/ui/utils/editorMode';
 import {
   getPermissionModeSettings,
   needsPermissionModeSetup,
@@ -335,7 +336,7 @@ const App: React.FC = () => {
   const [showAgentWarning, setShowAgentWarning] = useState(false);
   const [agentWarningMessage, setAgentWarningMessage] = useState('');
   const [isPanelOpen, setIsPanelOpen] = useState(true);
-  const [editorMode, setEditorMode] = useState<EditorMode>('selection');
+  const [editorMode, setEditorMode] = useState<EditorMode>(getEditorMode);
   const [taterMode, setTaterMode] = useState(() => {
     const stored = storage.getItem('plannotator-tater-mode');
     return stored === 'true';
@@ -401,6 +402,11 @@ const App: React.FC = () => {
   const handleTaterModeChange = (enabled: boolean) => {
     setTaterMode(enabled);
     storage.setItem('plannotator-tater-mode', String(enabled));
+  };
+
+  const handleEditorModeChange = (mode: EditorMode) => {
+    setEditorMode(mode);
+    saveEditorMode(mode);
   };
 
   // Check if we're in API mode (served from Bun hook server)
@@ -826,7 +832,7 @@ const App: React.FC = () => {
             <div className="min-h-full flex flex-col items-center px-4 py-3 md:px-10 md:py-8 xl:px-16">
               {/* Mode Switcher */}
               <div className="w-full max-w-[832px] 2xl:max-w-5xl mb-3 md:mb-4 flex justify-start">
-                <ModeSwitcher mode={editorMode} onChange={setEditorMode} taterMode={taterMode} />
+                <ModeSwitcher mode={editorMode} onChange={handleEditorModeChange} taterMode={taterMode} />
               </div>
 
               <Viewer
