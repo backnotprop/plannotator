@@ -3,6 +3,7 @@ import { parseMarkdownToBlocks, exportDiff, extractFrontmatter, Frontmatter } fr
 import { Viewer, ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { ExportModal } from '@plannotator/ui/components/ExportModal';
+import { ImportModal } from '@plannotator/ui/components/ImportModal';
 import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
 import { Annotation, Block, EditorMode } from '@plannotator/ui/types';
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
@@ -333,6 +334,7 @@ const App: React.FC = () => {
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [frontmatter, setFrontmatter] = useState<Frontmatter | null>(null);
   const [showExport, setShowExport] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
   const [showClaudeCodeWarning, setShowClaudeCodeWarning] = useState(false);
   const [showAgentWarning, setShowAgentWarning] = useState(false);
@@ -375,6 +377,7 @@ const App: React.FC = () => {
     pendingSharedAnnotations,
     sharedGlobalAttachments,
     clearPendingSharedAnnotations,
+    importFromShareUrl,
   } = useSharing(
     markdown,
     annotations,
@@ -605,7 +608,7 @@ const App: React.FC = () => {
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
       // Don't intercept if any modal is open
-      if (showExport || showFeedbackPrompt || showClaudeCodeWarning ||
+      if (showExport || showImport || showFeedbackPrompt || showClaudeCodeWarning ||
           showAgentWarning || showPermissionModeSetup || showUIFeaturesSetup || pendingPasteImage) return;
 
       // Don't intercept if already submitted or submitting
@@ -636,7 +639,7 @@ const App: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
-    showExport, showFeedbackPrompt, showClaudeCodeWarning, showAgentWarning,
+    showExport, showImport, showFeedbackPrompt, showClaudeCodeWarning, showAgentWarning,
     showPermissionModeSetup, showUIFeaturesSetup, pendingPasteImage,
     submitted, isSubmitting, isApiMode, annotations.length,
     origin, getAgentWarning,
@@ -909,6 +912,19 @@ const App: React.FC = () => {
               </svg>
             </button>
 
+            {sharingEnabled && (
+              <button
+                onClick={() => setShowImport(true)}
+                className="p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium bg-muted hover:bg-muted/80 transition-colors"
+                title="Import teammate review"
+              >
+                <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                <span className="hidden md:inline">Import</span>
+              </button>
+            )}
+
             <div className="relative flex" data-export-dropdown>
               <button
                 onClick={() => { setInitialExportTab(undefined); setShowExport(true); }}
@@ -1062,6 +1078,13 @@ const App: React.FC = () => {
           markdown={markdown}
           isApiMode={isApiMode}
           initialTab={initialExportTab}
+        />
+
+        {/* Import Modal */}
+        <ImportModal
+          isOpen={showImport}
+          onClose={() => setShowImport(false)}
+          onImport={importFromShareUrl}
         />
 
         {/* Feedback prompt dialog */}

@@ -12,9 +12,17 @@ import { Annotation } from '../types';
 import {
   parseShareHash,
   generateShareUrl,
+  decompress,
   fromShareable,
   formatUrlSize,
 } from '../utils/sharing';
+
+export interface ImportResult {
+  success: boolean;
+  count: number;
+  planTitle: string;
+  error?: string;
+}
 
 interface UseSharingResult {
   /** Whether the current session was loaded from a shared URL */
@@ -40,6 +48,9 @@ interface UseSharingResult {
 
   /** Manually trigger share URL generation */
   refreshShareUrl: () => Promise<void>;
+
+  /** Import annotations from a teammate's share URL */
+  importFromShareUrl: (url: string) => Promise<ImportResult>;
 }
 
 export function useSharing(
@@ -142,6 +153,64 @@ export function useSharing(
     refreshShareUrl();
   }, [refreshShareUrl]);
 
+  // Import annotations from a teammate's share URL
+  const importFromShareUrl = useCallback(async (url: string): Promise<ImportResult> => {
+    try {
+      // Extract hash from URL
+      const hashIndex = url.indexOf('#');
+      if (hashIndex === -1) {
+        return { success: false, count: 0, planTitle: '', error: 'Invalid share URL: no hash fragment found' };
+      }
+      const hash = url.slice(hashIndex + 1);
+      if (!hash) {
+        return { success: false, count: 0, planTitle: '', error: 'Invalid share URL: empty hash' };
+      }
+
+      // Decompress payload
+      const payload = await decompress(hash);
+
+      // Extract plan title from embedded plan text
+      const lines = (payload.p || '').trim().split('\n');
+      const titleLine = lines.find(l => l.startsWith('#'));
+      const planTitle = titleLine ? titleLine.replace(/^#+\s*/, '').trim() : 'Unknown Plan';
+
+      // Convert to full annotations
+      const importedAnnotations = fromShareable(payload.a);
+
+      if (importedAnnotations.length === 0) {
+        return { success: true, count: 0, planTitle, error: 'No annotations found in share link' };
+      }
+
+      // Deduplicate: skip annotations that already exist (by originalText + type + text)
+      const newAnnotations = importedAnnotations.filter(imp =>
+        !annotations.some(existing =>
+          existing.originalText === imp.originalText &&
+          existing.type === imp.type &&
+          existing.text === imp.text
+        )
+      );
+
+      if (newAnnotations.length > 0) {
+        // Merge: append new annotations to existing ones
+        setAnnotations([...annotations, ...newAnnotations]);
+
+        // Set as pending so they get applied to DOM highlights
+        setPendingSharedAnnotations(newAnnotations);
+
+        // Handle global attachments
+        if (payload.g?.length) {
+          setGlobalAttachments([...globalAttachments, ...payload.g]);
+          setSharedGlobalAttachments(payload.g);
+        }
+      }
+
+      return { success: true, count: newAnnotations.length, planTitle };
+    } catch (e) {
+      const errorMessage = e instanceof Error ? e.message : 'Failed to decompress share URL';
+      return { success: false, count: 0, planTitle: '', error: errorMessage };
+    }
+  }, [annotations, globalAttachments, setAnnotations, setGlobalAttachments]);
+
   return {
     isSharedSession,
     isLoadingShared,
@@ -151,5 +220,6 @@ export function useSharing(
     sharedGlobalAttachments,
     clearPendingSharedAnnotations,
     refreshShareUrl,
+    importFromShareUrl,
   };
 }
