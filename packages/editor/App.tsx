@@ -22,7 +22,7 @@ import { getBearSettings } from '@plannotator/ui/utils/bear';
 import { getDefaultNotesApp } from '@plannotator/ui/utils/defaultNotesApp';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { getPlanSaveSettings } from '@plannotator/ui/utils/planSave';
-import { getUIPreferences, type UIPreferences } from '@plannotator/ui/utils/uiPreferences';
+import { getUIPreferences, needsUIFeaturesSetup, type UIPreferences } from '@plannotator/ui/utils/uiPreferences';
 import { getEditorMode, saveEditorMode } from '@plannotator/ui/utils/editorMode';
 import {
   getPermissionModeSettings,
@@ -30,6 +30,7 @@ import {
   type PermissionMode,
 } from '@plannotator/ui/utils/permissionMode';
 import { PermissionModeSetup } from '@plannotator/ui/components/PermissionModeSetup';
+import { UIFeaturesSetup } from '@plannotator/ui/components/UIFeaturesSetup';
 import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
 
 const PLAN_CONTENT = `# Implementation Plan: Real-time Collaboration
@@ -351,6 +352,7 @@ const App: React.FC = () => {
   const [submitted, setSubmitted] = useState<'approved' | 'denied' | null>(null);
   const [pendingPasteImage, setPendingPasteImage] = useState<{ file: File; blobUrl: string } | null>(null);
   const [showPermissionModeSetup, setShowPermissionModeSetup] = useState(false);
+  const [showUIFeaturesSetup, setShowUIFeaturesSetup] = useState(false);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
   const [sharingEnabled, setSharingEnabled] = useState(true);
   const [repoInfo, setRepoInfo] = useState<{ display: string; branch?: string } | null>(null);
@@ -438,6 +440,8 @@ const App: React.FC = () => {
           // For Claude Code, check if user needs to configure permission mode
           if (data.origin === 'claude-code' && needsPermissionModeSetup()) {
             setShowPermissionModeSetup(true);
+          } else if (needsUIFeaturesSetup()) {
+            setShowUIFeaturesSetup(true);
           }
           // Load saved permission mode preference
           setPermissionMode(getPermissionModeSettings().mode);
@@ -602,7 +606,7 @@ const App: React.FC = () => {
 
       // Don't intercept if any modal is open
       if (showExport || showFeedbackPrompt || showClaudeCodeWarning ||
-          showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
+          showAgentWarning || showPermissionModeSetup || showUIFeaturesSetup || pendingPasteImage) return;
 
       // Don't intercept if already submitted or submitting
       if (submitted || isSubmitting) return;
@@ -633,7 +637,7 @@ const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
     showExport, showFeedbackPrompt, showClaudeCodeWarning, showAgentWarning,
-    showPermissionModeSetup, pendingPasteImage,
+    showPermissionModeSetup, showUIFeaturesSetup, pendingPasteImage,
     submitted, isSubmitting, isApiMode, annotations.length,
     origin, getAgentWarning,
   ]);
@@ -734,7 +738,7 @@ const App: React.FC = () => {
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
       if (showExport || showFeedbackPrompt || showClaudeCodeWarning ||
-          showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
+          showAgentWarning || showPermissionModeSetup || showUIFeaturesSetup || pendingPasteImage) return;
 
       if (submitted || !isApiMode) return;
 
@@ -760,7 +764,7 @@ const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleSaveShortcut);
   }, [
     showExport, showFeedbackPrompt, showClaudeCodeWarning, showAgentWarning,
-    showPermissionModeSetup, pendingPasteImage,
+    showPermissionModeSetup, showUIFeaturesSetup, pendingPasteImage,
     submitted, isApiMode, markdown, diffOutput,
   ]);
 
@@ -1188,6 +1192,18 @@ const App: React.FC = () => {
           onComplete={(mode) => {
             setPermissionMode(mode);
             setShowPermissionModeSetup(false);
+            if (needsUIFeaturesSetup()) {
+              setShowUIFeaturesSetup(true);
+            }
+          }}
+        />
+
+        {/* UI Features Setup (TOC & Sticky Actions) */}
+        <UIFeaturesSetup
+          isOpen={showUIFeaturesSetup}
+          onComplete={(prefs) => {
+            setUiPrefs(prefs);
+            setShowUIFeaturesSetup(false);
           }}
         />
       </div>
