@@ -35,6 +35,11 @@ import {
   PERMISSION_MODE_OPTIONS,
   type PermissionMode,
 } from '../utils/permissionMode';
+import {
+  getDefaultNotesApp,
+  saveDefaultNotesApp,
+  type DefaultNotesApp,
+} from '../utils/defaultNotesApp';
 import { useAgents } from '../hooks/useAgents';
 
 type SettingsTab = 'general' | 'display' | 'saving';
@@ -66,6 +71,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const [uiPrefs, setUiPrefs] = useState<UIPreferences>({ tocEnabled: true, stickyActionsEnabled: true });
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
   const [agentWarning, setAgentWarning] = useState<string | null>(null);
+  const [defaultNotesApp, setDefaultNotesApp] = useState<DefaultNotesApp>('ask');
 
   // Fetch available agents for OpenCode
   const { agents: availableAgents, validateAgent, getAgentWarning } = useAgents(origin ?? null);
@@ -88,6 +94,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       setPlanSave(getPlanSaveSettings());
       setUiPrefs(getUIPreferences());
       setPermissionMode(getPermissionModeSettings().mode);
+      setDefaultNotesApp(getDefaultNotesApp());
 
       // Validate agent setting when dialog opens
       if (origin === 'opencode') {
@@ -148,6 +155,11 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const handlePermissionModeChange = (mode: PermissionMode) => {
     setPermissionMode(mode);
     savePermissionModeSettings(mode);
+  };
+
+  const handleDefaultNotesAppChange = (app: DefaultNotesApp) => {
+    setDefaultNotesApp(app);
+    saveDefaultNotesApp(app);
   };
 
   const handleRegenerateIdentity = () => {
@@ -476,6 +488,35 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                           </div>
                         </div>
                       )}
+                    </div>
+
+                    <div className="border-t border-border" />
+
+                    {/* Default Notes App */}
+                    <div className="space-y-2">
+                      <div>
+                        <div className="text-sm font-medium">Default Save Action</div>
+                        <div className="text-xs text-muted-foreground">
+                          Used for keyboard shortcut ({navigator.platform?.includes('Mac') ? 'Cmd' : 'Ctrl'}+S)
+                        </div>
+                      </div>
+                      <select
+                        value={defaultNotesApp}
+                        onChange={(e) => handleDefaultNotesAppChange(e.target.value as DefaultNotesApp)}
+                        className="w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer"
+                      >
+                        <option value="ask">Ask each time</option>
+                        <option value="download">Download Diff</option>
+                        {obsidian.enabled && <option value="obsidian">Obsidian</option>}
+                        {bear.enabled && <option value="bear">Bear</option>}
+                      </select>
+                      <div className="text-[10px] text-muted-foreground/70">
+                        {defaultNotesApp === 'ask'
+                          ? 'Opens Export dialog with Notes tab'
+                          : defaultNotesApp === 'download'
+                            ? `${navigator.platform?.includes('Mac') ? 'Cmd' : 'Ctrl'}+S downloads the diff file`
+                            : `${navigator.platform?.includes('Mac') ? 'Cmd' : 'Ctrl'}+S saves directly to ${defaultNotesApp === 'obsidian' ? 'Obsidian' : 'Bear'}`}
+                      </div>
                     </div>
 
                     <div className="border-t border-border" />

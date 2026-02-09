@@ -17,8 +17,9 @@ import { useAgents } from '@plannotator/ui/hooks/useAgents';
 import { useActiveSection } from '@plannotator/ui/hooks/useActiveSection';
 import { storage } from '@plannotator/ui/utils/storage';
 import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
-import { getObsidianSettings, getEffectiveVaultPath, CUSTOM_PATH_SENTINEL } from '@plannotator/ui/utils/obsidian';
+import { getObsidianSettings, getEffectiveVaultPath, isObsidianConfigured, CUSTOM_PATH_SENTINEL } from '@plannotator/ui/utils/obsidian';
 import { getBearSettings } from '@plannotator/ui/utils/bear';
+import { getDefaultNotesApp } from '@plannotator/ui/utils/defaultNotesApp';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { getPlanSaveSettings } from '@plannotator/ui/utils/planSave';
 import { getUIPreferences, type UIPreferences } from '@plannotator/ui/utils/uiPreferences';
@@ -353,6 +354,9 @@ const App: React.FC = () => {
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
   const [sharingEnabled, setSharingEnabled] = useState(true);
   const [repoInfo, setRepoInfo] = useState<{ display: string; branch?: string } | null>(null);
+  const [showExportDropdown, setShowExportDropdown] = useState(false);
+  const [initialExportTab, setInitialExportTab] = useState<'share' | 'diff' | 'notes'>();
+  const [noteSaveToast, setNoteSaveToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const viewerRef = useRef<ViewerHandle>(null);
   const containerRef = useRef<HTMLElement>(null);
 
@@ -673,6 +677,106 @@ const App: React.FC = () => {
 
   const diffOutput = useMemo(() => exportDiff(blocks, annotations, globalAttachments), [blocks, annotations, globalAttachments]);
 
+  // Quick-save handlers for export dropdown and keyboard shortcut
+  const handleDownloadDiff = () => {
+    setShowExportDropdown(false);
+    const blob = new Blob([diffOutput], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'annotations.diff';
+    a.click();
+    URL.revokeObjectURL(url);
+    setNoteSaveToast({ type: 'success', message: 'Downloaded diff' });
+    setTimeout(() => setNoteSaveToast(null), 3000);
+  };
+
+  const handleQuickSaveToNotes = async (target: 'obsidian' | 'bear') => {
+    setShowExportDropdown(false);
+    const body: { obsidian?: object; bear?: object } = {};
+
+    if (target === 'obsidian') {
+      const s = getObsidianSettings();
+      const vaultPath = getEffectiveVaultPath(s);
+      if (vaultPath) {
+        body.obsidian = { vaultPath, folder: s.folder || 'plannotator', plan: markdown };
+      }
+    }
+    if (target === 'bear') {
+      body.bear = { plan: markdown };
+    }
+
+    try {
+      const res = await fetch('/api/save-notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      const result = data.results?.[target];
+      if (result?.success) {
+        setNoteSaveToast({ type: 'success', message: `Saved to ${target === 'obsidian' ? 'Obsidian' : 'Bear'}` });
+      } else {
+        setNoteSaveToast({ type: 'error', message: result?.error || 'Save failed' });
+      }
+    } catch {
+      setNoteSaveToast({ type: 'error', message: 'Save failed' });
+    }
+    setTimeout(() => setNoteSaveToast(null), 3000);
+  };
+
+  // Cmd/Ctrl+S keyboard shortcut — save to default notes app
+  useEffect(() => {
+    const handleSaveShortcut = (e: KeyboardEvent) => {
+      if (e.key !== 's' || !(e.metaKey || e.ctrlKey)) return;
+
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+      if (showExport || showFeedbackPrompt || showClaudeCodeWarning ||
+          showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
+
+      if (submitted || !isApiMode) return;
+
+      e.preventDefault();
+
+      const defaultApp = getDefaultNotesApp();
+      const obsOk = isObsidianConfigured();
+      const bearOk = getBearSettings().enabled;
+
+      if (defaultApp === 'download') {
+        handleDownloadDiff();
+      } else if (defaultApp === 'obsidian' && obsOk) {
+        handleQuickSaveToNotes('obsidian');
+      } else if (defaultApp === 'bear' && bearOk) {
+        handleQuickSaveToNotes('bear');
+      } else {
+        setInitialExportTab('notes');
+        setShowExport(true);
+      }
+    };
+
+    window.addEventListener('keydown', handleSaveShortcut);
+    return () => window.removeEventListener('keydown', handleSaveShortcut);
+  }, [
+    showExport, showFeedbackPrompt, showClaudeCodeWarning, showAgentWarning,
+    showPermissionModeSetup, pendingPasteImage,
+    submitted, isApiMode, markdown, diffOutput,
+  ]);
+
+  // Close export dropdown on click outside
+  useEffect(() => {
+    if (!showExportDropdown) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('[data-export-dropdown]')) {
+        setShowExportDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showExportDropdown]);
+
   const agentName = useMemo(() => {
     if (origin === 'opencode') return 'OpenCode';
     if (origin === 'claude-code') return 'Claude Code';
@@ -801,16 +905,88 @@ const App: React.FC = () => {
               </svg>
             </button>
 
-            <button
-              onClick={() => setShowExport(true)}
-              className="p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium bg-muted hover:bg-muted/80 transition-colors"
-              title="Export"
-            >
-              <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-              </svg>
-              <span className="hidden md:inline">Export</span>
-            </button>
+            <div className="relative flex" data-export-dropdown>
+              <button
+                onClick={() => { setInitialExportTab(undefined); setShowExport(true); }}
+                className="p-1.5 md:px-2.5 md:py-1 rounded-l-md text-xs font-medium bg-muted hover:bg-muted/80 transition-colors"
+                title="Export"
+              >
+                <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+                <span className="hidden md:inline">Export</span>
+              </button>
+              <button
+                onClick={() => setShowExportDropdown(prev => !prev)}
+                className="px-1 md:px-1.5 rounded-r-md text-xs bg-muted hover:bg-muted/80 border-l border-border/50 transition-colors flex items-center"
+                title="Quick save options"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {showExportDropdown && (
+                <div className="absolute top-full right-0 mt-1 w-48 bg-popover border border-border rounded-lg shadow-xl z-50 py-1">
+                  {sharingEnabled && (
+                    <button
+                      onClick={async () => {
+                        setShowExportDropdown(false);
+                        try {
+                          await navigator.clipboard.writeText(shareUrl);
+                          setNoteSaveToast({ type: 'success', message: 'Share link copied' });
+                        } catch {
+                          setNoteSaveToast({ type: 'error', message: 'Failed to copy' });
+                        }
+                        setTimeout(() => setNoteSaveToast(null), 3000);
+                      }}
+                      className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors flex items-center gap-2"
+                    >
+                      <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                      </svg>
+                      Copy Share Link
+                    </button>
+                  )}
+                  <button
+                    onClick={handleDownloadDiff}
+                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors flex items-center gap-2"
+                  >
+                    <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    Download Diff
+                  </button>
+                  {isApiMode && isObsidianConfigured() && (
+                    <button
+                      onClick={() => handleQuickSaveToNotes('obsidian')}
+                      className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors flex items-center gap-2"
+                    >
+                      <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                      </svg>
+                      Save to Obsidian
+                    </button>
+                  )}
+                  {isApiMode && getBearSettings().enabled && (
+                    <button
+                      onClick={() => handleQuickSaveToNotes('bear')}
+                      className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors flex items-center gap-2"
+                    >
+                      <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                      </svg>
+                      Save to Bear
+                    </button>
+                  )}
+                  {isApiMode && !isObsidianConfigured() && !getBearSettings().enabled && (
+                    <div className="px-3 py-2 text-[10px] text-muted-foreground">
+                      No notes apps configured.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
@@ -872,13 +1048,16 @@ const App: React.FC = () => {
         {/* Export Modal */}
         <ExportModal
           isOpen={showExport}
-          onClose={() => setShowExport(false)}
+          onClose={() => { setShowExport(false); setInitialExportTab(undefined); }}
           shareUrl={shareUrl}
           shareUrlSize={shareUrlSize}
           diffOutput={diffOutput}
           annotationCount={annotations.length}
           taterSprite={taterMode ? <TaterSpritePullup /> : undefined}
           sharingEnabled={sharingEnabled}
+          markdown={markdown}
+          isApiMode={isApiMode}
+          initialTab={initialExportTab}
         />
 
         {/* Feedback prompt dialog */}
@@ -937,6 +1116,17 @@ const App: React.FC = () => {
           variant="warning"
           showCancel
         />
+
+        {/* Save-to-notes toast */}
+        {noteSaveToast && (
+          <div className={`fixed top-16 right-4 z-50 px-3 py-2 rounded-lg text-xs font-medium shadow-lg transition-opacity ${
+            noteSaveToast.type === 'success'
+              ? 'bg-success/15 text-success border border-success/30'
+              : 'bg-destructive/15 text-destructive border border-destructive/30'
+          }`}>
+            {noteSaveToast.message}
+          </div>
+        )}
 
         {/* Completion overlay - shown after approve/deny */}
         {submitted && (

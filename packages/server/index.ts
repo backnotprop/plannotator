@@ -18,6 +18,7 @@ import {
   saveToBear,
   type ObsidianConfig,
   type BearConfig,
+  type IntegrationResult,
 } from "./integrations";
 import {
   generateSlug,
@@ -199,6 +200,41 @@ export async function startPlannotatorServer(
             } catch {
               return Response.json({ agents: [], error: "Failed to fetch agents" });
             }
+          }
+
+          // API: Save to notes (decoupled from approve/deny)
+          if (url.pathname === "/api/save-notes" && req.method === "POST") {
+            const results: { obsidian?: IntegrationResult; bear?: IntegrationResult } = {};
+
+            try {
+              const body = (await req.json()) as {
+                obsidian?: ObsidianConfig;
+                bear?: BearConfig;
+              };
+
+              if (body.obsidian?.vaultPath && body.obsidian?.plan) {
+                results.obsidian = await saveToObsidian(body.obsidian);
+                if (results.obsidian.success) {
+                  console.error(`[Obsidian] Saved plan to: ${results.obsidian.path}`);
+                } else {
+                  console.error(`[Obsidian] Save failed: ${results.obsidian.error}`);
+                }
+              }
+
+              if (body.bear?.plan) {
+                results.bear = await saveToBear(body.bear);
+                if (results.bear.success) {
+                  console.error(`[Bear] Saved plan to Bear`);
+                } else {
+                  console.error(`[Bear] Save failed: ${results.bear.error}`);
+                }
+              }
+            } catch (err) {
+              console.error(`[Save Notes] Error:`, err);
+              return Response.json({ error: "Save failed" }, { status: 500 });
+            }
+
+            return Response.json({ ok: true, results });
           }
 
           // API: Approve plan
