@@ -2,7 +2,7 @@
  * Import Modal for loading teammate annotations from a share URL
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import type { ImportResult } from '../hooks/useSharing';
 
 interface ImportModalProps {
@@ -19,6 +19,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
+  const autoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   if (!isOpen) return null;
 
@@ -31,7 +32,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     setLoading(false);
     if (res.success && res.count > 0) {
       // Auto-close after successful import
-      setTimeout(() => {
+      autoCloseTimer.current = setTimeout(() => {
+        autoCloseTimer.current = null;
         setUrl('');
         setResult(null);
         onClose();
@@ -40,6 +42,10 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   };
 
   const handleClose = () => {
+    if (autoCloseTimer.current) {
+      clearTimeout(autoCloseTimer.current);
+      autoCloseTimer.current = null;
+    }
     setUrl('');
     setResult(null);
     onClose();

@@ -197,9 +197,12 @@ export function useSharing(
         // Set as pending so they get applied to DOM highlights
         setPendingSharedAnnotations(newAnnotations);
 
-        // Handle global attachments
+        // Handle global attachments (deduplicate by path)
         if (payload.g?.length) {
-          setGlobalAttachments([...globalAttachments, ...payload.g]);
+          const newPaths = payload.g.filter(p => !globalAttachments.includes(p));
+          if (newPaths.length > 0) {
+            setGlobalAttachments([...globalAttachments, ...newPaths]);
+          }
           setSharedGlobalAttachments(payload.g);
         }
       }
