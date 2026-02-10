@@ -57,12 +57,37 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
   const [svg, setSvg] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [showSource, setShowSource] = useState(true);
-  const [zoomLevel, setZoomLevel] = useState(1.0);
+
+  // All zoom/pan state as refs to avoid re-renders
+  const zoomLevelRef = useRef(1.0);
   const isDraggingRef = useRef(false);
   const baseViewBoxRef = useRef<ViewBox | null>(null);
   const panOffsetRef = useRef({ x: 0, y: 0 });
   const dragStartRef = useRef({ x: 0, y: 0 });
   const panStartRef = useRef({ x: 0, y: 0 });
+
+  // UI refs for zoom controls
+  const zoomInBtnRef = useRef<HTMLButtonElement>(null);
+  const zoomOutBtnRef = useRef<HTMLButtonElement>(null);
+  const zoomDisplayRef = useRef<HTMLSpanElement>(null);
+
+  // Update zoom level, viewBox, and UI without React re-render
+  const updateZoom = useCallback((newZoom: number) => {
+    zoomLevelRef.current = newZoom;
+
+    if (containerRef.current && baseViewBoxRef.current) {
+      const svgEl = containerRef.current.querySelector('svg');
+      if (svgEl) applyView(svgEl, baseViewBoxRef.current, newZoom, panOffsetRef.current);
+    }
+
+    if (zoomInBtnRef.current) zoomInBtnRef.current.disabled = newZoom >= MAX_ZOOM;
+    if (zoomOutBtnRef.current) zoomOutBtnRef.current.disabled = newZoom <= MIN_ZOOM;
+    if (zoomDisplayRef.current) {
+      const show = Math.abs(newZoom - 1.0) > 0.001;
+      zoomDisplayRef.current.textContent = show ? `${Math.round(newZoom * 100)}%` : '';
+      zoomDisplayRef.current.hidden = !show;
+    }
+  }, []);
 
   // Render mermaid diagram
   useEffect(() => {
@@ -86,7 +111,7 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
 
   // Reset zoom and pan when content changes
   useEffect(() => {
-    setZoomLevel(1.0);
+    zoomLevelRef.current = 1.0;
     baseViewBoxRef.current = null;
     panOffsetRef.current = { x: 0, y: 0 };
   }, [block.content]);
@@ -94,13 +119,13 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
   // Reset zoom and pan when switching from source back to diagram
   useEffect(() => {
     if (!showSource) {
-      setZoomLevel(1.0);
+      zoomLevelRef.current = 1.0;
       panOffsetRef.current = { x: 0, y: 0 };
       baseViewBoxRef.current = null;
     }
   }, [showSource]);
 
-  // Compute base viewBox from rendered SVG and apply initial zoom
+  // Compute base viewBox from rendered SVG and apply initial view
   useEffect(() => {
     if (!svg || showSource || !containerRef.current) return;
 
@@ -128,54 +153,36 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
     }
   }, [svg, showSource]);
 
-  // Apply zoom level changes to the existing SVG (pan is read from ref)
-  useEffect(() => {
-    if (!containerRef.current || !baseViewBoxRef.current || showSource) return;
-
-    const svgEl = containerRef.current.querySelector('svg');
-    if (!svgEl) return;
-
-    applyView(svgEl, baseViewBoxRef.current, zoomLevel, panOffsetRef.current);
-  }, [zoomLevel, showSource]);
-
-  // Ctrl+Wheel zoom support
+  // Wheel zoom support
   useEffect(() => {
     if (showSource || !containerRef.current) return;
 
     const container = containerRef.current;
     const handleWheel = (e: WheelEvent) => {
-      if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
-
-      setZoomLevel(prev => {
-        const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
-        return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev + delta));
-      });
+      const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
+      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoomLevelRef.current + delta));
+      updateZoom(newZoom);
     };
 
     container.addEventListener('wheel', handleWheel, { passive: false });
     return () => container.removeEventListener('wheel', handleWheel);
-  }, [showSource]);
+  }, [showSource, updateZoom]);
 
   const handleZoomIn = useCallback(() => {
-    setZoomLevel(prev => Math.min(prev + ZOOM_STEP, MAX_ZOOM));
-  }, []);
+    updateZoom(Math.min(zoomLevelRef.current + ZOOM_STEP, MAX_ZOOM));
+  }, [updateZoom]);
 
   const handleZoomOut = useCallback(() => {
-    setZoomLevel(prev => Math.max(prev - ZOOM_STEP, MIN_ZOOM));
-  }, []);
+    updateZoom(Math.max(zoomLevelRef.current - ZOOM_STEP, MIN_ZOOM));
+  }, [updateZoom]);
 
   const handleFitToScreen = useCallback(() => {
-    setZoomLevel(1.0);
     panOffsetRef.current = { x: 0, y: 0 };
-    // Apply immediately since panOffset is a ref (won't trigger the zoom effect)
-    if (containerRef.current && baseViewBoxRef.current) {
-      const svgEl = containerRef.current.querySelector('svg');
-      if (svgEl) applyView(svgEl, baseViewBoxRef.current, 1.0, { x: 0, y: 0 });
-    }
-  }, []);
+    updateZoom(1.0);
+  }, [updateZoom]);
 
-  // Drag-to-pan handlers (all ref-based to avoid re-renders that reset SVG DOM)
+  // Drag-to-pan handlers (all ref-based to avoid re-renders)
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return;
     e.preventDefault();
@@ -193,8 +200,9 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
 
     const rect = svgEl.getBoundingClientRect();
     const base = baseViewBoxRef.current;
-    const scaleX = (base.width / zoomLevel) / rect.width;
-    const scaleY = (base.height / zoomLevel) / rect.height;
+    const zoom = zoomLevelRef.current;
+    const scaleX = (base.width / zoom) / rect.width;
+    const scaleY = (base.height / zoom) / rect.height;
 
     const dx = e.clientX - dragStartRef.current.x;
     const dy = e.clientY - dragStartRef.current.y;
@@ -204,8 +212,8 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
       y: panStartRef.current.y - dy * scaleY,
     };
 
-    applyView(svgEl, base, zoomLevel, panOffsetRef.current);
-  }, [zoomLevel]);
+    applyView(svgEl, base, zoom, panOffsetRef.current);
+  }, []);
 
   const stopDragging = useCallback(() => {
     if (!isDraggingRef.current) return;
@@ -255,8 +263,8 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
         {!showSource && svg && (
           <div className="flex flex-col gap-0.5 bg-muted/80 rounded-md p-0.5">
             <button
+              ref={zoomInBtnRef}
               onClick={handleZoomIn}
-              disabled={zoomLevel >= MAX_ZOOM}
               className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
               title="Zoom in"
               aria-label="Zoom in"
@@ -276,8 +284,8 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
               </svg>
             </button>
             <button
+              ref={zoomOutBtnRef}
               onClick={handleZoomOut}
-              disabled={zoomLevel <= MIN_ZOOM}
               className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
               title="Zoom out"
               aria-label="Zoom out"
@@ -286,23 +294,25 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14" />
               </svg>
             </button>
-            {Math.abs(zoomLevel - 1.0) > 0.001 && (
-              <span className="text-[10px] text-center text-muted-foreground tabular-nums leading-tight">
-                {Math.round(zoomLevel * 100)}%
-              </span>
-            )}
+            <span
+              ref={zoomDisplayRef}
+              hidden
+              className="text-[10px] text-center text-muted-foreground tabular-nums leading-tight"
+            />
           </div>
         )}
       </div>
 
-      {showSource ? (
-        <pre className="rounded-lg text-[13px] overflow-x-auto bg-muted/50 border border-border/30 p-4">
-          <code className="hljs font-mono language-mermaid">{block.content}</code>
-        </pre>
-      ) : (
+      {/* Code block always in DOM for sizing; invisible when showing diagram */}
+      <pre className={`rounded-lg text-[13px] overflow-x-auto bg-muted/50 border border-border/30 p-4${!showSource ? ' invisible' : ''}`}>
+        <code className="hljs font-mono language-mermaid">{block.content}</code>
+      </pre>
+
+      {/* Diagram overlay - same size as code block */}
+      {!showSource && svg && (
         <div
           ref={containerRef}
-          className="rounded-lg bg-muted/30 border border-border/30 p-4 overflow-hidden flex justify-center select-none cursor-grab"
+          className="absolute inset-0 rounded-lg bg-muted/30 border border-border/30 p-4 overflow-hidden flex justify-center select-none cursor-grab"
           dangerouslySetInnerHTML={{ __html: svg }}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
