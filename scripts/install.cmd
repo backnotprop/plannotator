@@ -128,7 +128,11 @@ if !ERRORLEVEL! neq 0 (
 )
 
 REM Install /review slash command
-set "CLAUDE_COMMANDS_DIR=%USERPROFILE%\.claude\commands"
+if defined CLAUDE_CONFIG_DIR (
+    set "CLAUDE_COMMANDS_DIR=%CLAUDE_CONFIG_DIR%\commands"
+) else (
+    set "CLAUDE_COMMANDS_DIR=%USERPROFILE%\.claude\commands"
+)
 if not exist "!CLAUDE_COMMANDS_DIR!" mkdir "!CLAUDE_COMMANDS_DIR!"
 
 (

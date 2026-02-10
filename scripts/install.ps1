@@ -87,7 +87,7 @@ Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\opencode\node_modules\@plan
 Remove-Item -Recurse -Force "$env:USERPROFILE\.bun\install\cache\@plannotator" -ErrorAction SilentlyContinue
 
 # Install Claude Code slash command
-$claudeCommandsDir = "$env:USERPROFILE\.claude\commands"
+$claudeCommandsDir = if ($env:CLAUDE_CONFIG_DIR) { "$env:CLAUDE_CONFIG_DIR\commands" } else { "$env:USERPROFILE\.claude\commands" }
 New-Item -ItemType Directory -Force -Path $claudeCommandsDir | Out-Null
 
 @"

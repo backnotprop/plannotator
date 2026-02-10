@@ -87,7 +87,7 @@ fi
 rm -rf "$HOME/.cache/opencode/node_modules/@plannotator" "$HOME/.bun/install/cache/@plannotator" 2>/dev/null || true
 
 # Install /review slash command
-CLAUDE_COMMANDS_DIR="$HOME/.claude/commands"
+CLAUDE_COMMANDS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/commands"
 mkdir -p "$CLAUDE_COMMANDS_DIR"
 
 cat > "$CLAUDE_COMMANDS_DIR/plannotator-review.md" << 'COMMAND_EOF'
