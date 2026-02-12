@@ -3,7 +3,7 @@
   "version": "0.7.0",
   "description": "Plannotator plugin for OpenCode - interactive plan review with visual annotation",
   "author": "backnotprop",
-  "license": "BSL-1.1",
+  "license": "MIT OR Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/backnotprop/plannotator.git",
