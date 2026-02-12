@@ -99,4 +99,4 @@ Save approved plans directly to your Obsidian vault.
 
 ## License
 
-Copyright 2025 N0, INC. Licensed under [MIT](../../LICENSE-MIT) or [Apache-2.0](../../LICENSE-APACHE).
+Copyright 2025 backnotprop Licensed under [MIT](../../LICENSE-MIT) or [Apache-2.0](../../LICENSE-APACHE).

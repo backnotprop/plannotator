@@ -99,7 +99,7 @@ When your AI agent finishes planning, Plannotator:
 
 ## License
 
-Copyright 2025 N0, INC.
+Copyright 2025 backnotprop
 
 This project is licensed under either of
 
