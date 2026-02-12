@@ -359,6 +359,7 @@ const App: React.FC = () => {
   const [showUIFeaturesSetup, setShowUIFeaturesSetup] = useState(false);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
   const [sharingEnabled, setSharingEnabled] = useState(true);
+  const [shareBaseUrl, setShareBaseUrl] = useState<string | undefined>(undefined);
   const [repoInfo, setRepoInfo] = useState<{ display: string; branch?: string } | null>(null);
   const [showExportDropdown, setShowExportDropdown] = useState(false);
   const [initialExportTab, setInitialExportTab] = useState<'share' | 'diff' | 'notes'>();
@@ -398,7 +399,8 @@ const App: React.FC = () => {
     () => {
       // When loaded from share, mark as loaded
       setIsLoading(false);
-    }
+    },
+    shareBaseUrl
   );
 
   // Fetch available agents for OpenCode (for validation on approve)
@@ -439,11 +441,14 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: 'claude-code' | 'opencode'; sharingEnabled?: boolean; repoInfo?: { display: string; branch?: string } }) => {
+      .then((data: { plan: string; origin?: 'claude-code' | 'opencode'; sharingEnabled?: boolean; shareBaseUrl?: string; repoInfo?: { display: string; branch?: string } }) => {
         setMarkdown(data.plan);
         setIsApiMode(true);
         if (data.sharingEnabled !== undefined) {
           setSharingEnabled(data.sharingEnabled);
+        }
+        if (data.shareBaseUrl) {
+          setShareBaseUrl(data.shareBaseUrl);
         }
         if (data.repoInfo) {
           setRepoInfo(data.repoInfo);
@@ -1113,6 +1118,7 @@ const App: React.FC = () => {
           isOpen={showImport}
           onClose={() => setShowImport(false)}
           onImport={importFromShareUrl}
+          shareBaseUrl={shareBaseUrl}
         />
 
         {/* Feedback prompt dialog */}

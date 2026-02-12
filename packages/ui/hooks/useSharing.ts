@@ -60,7 +60,8 @@ export function useSharing(
   setMarkdown: (m: string) => void,
   setAnnotations: (a: Annotation[]) => void,
   setGlobalAttachments: (g: string[]) => void,
-  onSharedLoad?: () => void
+  onSharedLoad?: () => void,
+  shareBaseUrl?: string
 ): UseSharingResult {
   const [isSharedSession, setIsSharedSession] = useState(false);
   const [isLoadingShared, setIsLoadingShared] = useState(true);
@@ -138,7 +139,7 @@ export function useSharing(
   // Generate share URL when markdown or annotations change
   const refreshShareUrl = useCallback(async () => {
     try {
-      const url = await generateShareUrl(markdown, annotations, globalAttachments);
+      const url = await generateShareUrl(markdown, annotations, globalAttachments, shareBaseUrl);
       setShareUrl(url);
       setShareUrlSize(formatUrlSize(url));
     } catch (e) {
@@ -146,7 +147,7 @@ export function useSharing(
       setShareUrl('');
       setShareUrlSize('');
     }
-  }, [markdown, annotations, globalAttachments]);
+  }, [markdown, annotations, globalAttachments, shareBaseUrl]);
 
   // Auto-refresh share URL when dependencies change
   useEffect(() => {

@@ -47,6 +47,8 @@ export interface ServerOptions {
   permissionMode?: string;
   /** Whether URL sharing is enabled (default: true) */
   sharingEnabled?: boolean;
+  /** Custom base URL for share links (default: https://share.plannotator.ai) */
+  shareBaseUrl?: string;
   /** Called when server starts with the URL, remote status, and port */
   onReady?: (url: string, isRemote: boolean, port: number) => void;
   /** OpenCode client for querying available agents (OpenCode only) */
@@ -93,7 +95,7 @@ const RETRY_DELAY_MS = 500;
 export async function startPlannotatorServer(
   options: ServerOptions
 ): Promise<ServerResult> {
-  const { plan, origin, htmlContent, permissionMode, sharingEnabled = true, onReady } = options;
+  const { plan, origin, htmlContent, permissionMode, sharingEnabled = true, shareBaseUrl, onReady } = options;
 
   const isRemote = isRemoteSession();
   const configuredPort = getServerPort();
@@ -135,7 +137,7 @@ export async function startPlannotatorServer(
 
           // API: Get plan content
           if (url.pathname === "/api/plan") {
-            return Response.json({ plan, origin, permissionMode, sharingEnabled, repoInfo });
+            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, repoInfo });
           }
 
           // API: Serve images (local paths or temp uploads)
