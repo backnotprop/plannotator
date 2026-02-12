@@ -129,10 +129,12 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     if (step !== "menu") return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Escape closes the toolbar
+      if (e.key === "Escape") { onClose(); return; }
       // Ignore if modifier keys are held (except shift for capitals)
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       // Ignore special keys
-      if (e.key === "Escape" || e.key === "Tab" || e.key === "Enter") return;
+      if (e.key === "Tab" || e.key === "Enter") return;
       // Only trigger on printable characters (single char keys)
       if (e.key.length !== 1) return;
 
