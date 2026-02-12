@@ -43,6 +43,9 @@ const args = process.argv.slice(2);
 // Check if URL sharing is enabled (default: true)
 const sharingEnabled = process.env.PLANNOTATOR_SHARE !== "disabled";
 
+// Custom share portal URL for self-hosting
+const shareBaseUrl = process.env.PLANNOTATOR_SHARE_URL || undefined;
+
 if (args[0] === "review") {
   // ============================================
   // CODE REVIEW MODE
@@ -65,6 +68,7 @@ if (args[0] === "review") {
     diffType: "uncommitted",
     gitContext,
     sharingEnabled,
+    shareBaseUrl,
     htmlContent: reviewHtmlContent,
     onReady: handleReviewServerReady,
   });
@@ -112,6 +116,7 @@ if (args[0] === "review") {
     origin: "claude-code",
     permissionMode,
     sharingEnabled,
+    shareBaseUrl,
     htmlContent: planHtmlContent,
     onReady: (url, isRemote, port) => {
       handleServerReady(url, isRemote, port);

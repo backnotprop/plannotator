@@ -37,6 +37,8 @@ export interface ReviewServerOptions {
   gitContext?: GitContext;
   /** Whether URL sharing is enabled (default: true) */
   sharingEnabled?: boolean;
+  /** Custom base URL for share links (default: https://share.plannotator.ai) */
+  shareBaseUrl?: string;
   /** Called when server starts with the URL, remote status, and port */
   onReady?: (url: string, isRemote: boolean, port: number) => void;
   /** OpenCode client for querying available agents (OpenCode only) */
@@ -80,7 +82,7 @@ const RETRY_DELAY_MS = 500;
 export async function startReviewServer(
   options: ReviewServerOptions
 ): Promise<ReviewServerResult> {
-  const { htmlContent, origin, gitContext, sharingEnabled = true, onReady } = options;
+  const { htmlContent, origin, gitContext, sharingEnabled = true, shareBaseUrl, onReady } = options;
 
   // Mutable state for diff switching
   let currentPatch = options.rawPatch;
@@ -127,6 +129,7 @@ export async function startReviewServer(
               diffType: currentDiffType,
               gitContext,
               sharingEnabled,
+              shareBaseUrl,
               repoInfo,
             });
           }

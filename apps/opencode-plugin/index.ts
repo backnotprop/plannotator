@@ -50,6 +50,11 @@ export const PlannotatorPlugin: Plugin = async (ctx) => {
     return process.env.PLANNOTATOR_SHARE !== "disabled";
   }
 
+  // Custom share portal URL for self-hosting
+  function getShareBaseUrl(): string | undefined {
+    return process.env.PLANNOTATOR_SHARE_URL || undefined;
+  }
+
   return {
     // Register submit_plan as primary-only tool (hidden from sub-agents)
     config: async (opencodeConfig) => {
@@ -163,6 +168,7 @@ Do NOT proceed with implementation until your plan is approved.
           diffType: "uncommitted",
           gitContext,
           sharingEnabled: await getSharingEnabled(),
+          shareBaseUrl: getShareBaseUrl(),
           htmlContent: reviewHtmlContent,
           opencodeClient: ctx.client,
           onReady: handleReviewServerReady,
@@ -223,6 +229,7 @@ Do NOT proceed with implementation until your plan is approved.
             plan: args.plan,
             origin: "opencode",
             sharingEnabled: await getSharingEnabled(),
+            shareBaseUrl: getShareBaseUrl(),
             htmlContent,
             opencodeClient: ctx.client,
             onReady: (url, isRemote, port) => {

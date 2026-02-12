@@ -157,12 +157,11 @@ export function fromShareable(data: ShareableAnnotation[]): Annotation[] {
 /**
  * Generate a full shareable URL from plan and annotations
  */
-const SHARE_BASE_URL = 'https://share.plannotator.ai';
-
 export async function generateShareUrl(
   markdown: string,
   annotations: Annotation[],
-  globalAttachments?: string[]
+  globalAttachments?: string[],
+  baseUrl: string = 'https://share.plannotator.ai'
 ): Promise<string> {
   const payload: SharePayload = {
     p: markdown,
@@ -171,7 +170,7 @@ export async function generateShareUrl(
   };
 
   const hash = await compress(payload);
-  return `${SHARE_BASE_URL}/#${hash}`;
+  return `${baseUrl}/#${hash}`;
 }
 
 /**

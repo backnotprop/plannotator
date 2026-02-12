@@ -9,12 +9,14 @@ interface ImportModalProps {
   isOpen: boolean;
   onClose: () => void;
   onImport: (url: string) => Promise<ImportResult>;
+  shareBaseUrl?: string;
 }
 
 export const ImportModal: React.FC<ImportModalProps> = ({
   isOpen,
   onClose,
   onImport,
+  shareBaseUrl,
 }) => {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
@@ -89,7 +91,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
               value={url}
               onChange={e => setUrl(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="https://share.plannotator.ai/#..."
+              placeholder={`${shareBaseUrl || 'https://share.plannotator.ai'}/#...`}
               className="w-full bg-muted rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-accent/50"
               disabled={loading}
               autoFocus
