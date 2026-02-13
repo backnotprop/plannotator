@@ -18,6 +18,8 @@ plannotator/
 │   │   ├── index.ts              # Plugin entry with submit_plan tool + review/annotate event handlers
 │   │   ├── plannotator.html      # Built plan review app
 │   │   └── review-editor.html    # Built code review app
+│   ├── marketing/                # Marketing site, docs, and blog (plannotator.ai)
+│   │   └── astro.config.mjs      # Astro 5 static site with content collections
 │   └── review/                   # Standalone review server (for development)
 │       ├── index.html
 │       ├── index.tsx
@@ -315,6 +317,10 @@ bun run build:hook && bun run build:opencode   # For UI changes
 ```
 
 Running only `build:opencode` will copy stale HTML files.
+
+## Marketing Site
+
+`apps/marketing/` is the plannotator.ai website — landing page, documentation, and blog. Built with Astro 5 (static output, zero client JS except a theme toggle island). Docs are markdown files in `src/content/docs/`, blog posts in `src/content/blog/`, both using Astro content collections. Tailwind CSS v4 via `@tailwindcss/vite`. Deploys to S3/CloudFront via GitHub Actions on push to main.
 
 ## Test plugin locally
 

@@ -1,0 +1,14 @@
+---
+import Base from './Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+---
+<Base title="Plannotator - Visual Plan Review for Claude Code">
+  <div class="min-h-screen bg-background text-foreground">
+    <Nav />
+    <div class="max-w-4xl mx-auto border-x border-border/30">
+      <slot />
+      <Footer />
+    </div>
+  </div>
+</Base>

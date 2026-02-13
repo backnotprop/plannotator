@@ -1,0 +1,51 @@
+---
+import Base from './Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+
+interface Props {
+  title: string;
+  description: string;
+  date: Date;
+  author: string;
+  tags: string[];
+}
+
+const { title, description, date, author, tags } = Astro.props;
+const formattedDate = date.toLocaleDateString('en-US', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+});
+---
+<Base title={`${title} - Plannotator Blog`} description={description}>
+  <div class="min-h-screen bg-background text-foreground">
+    <Nav />
+    <div class="max-w-3xl mx-auto px-8 pt-20 pb-16">
+      <nav class="text-xs text-muted-foreground mb-6" aria-label="Breadcrumb">
+        <a href="/blog/" class="hover:text-foreground transition-colors">Blog</a>
+        <span class="mx-1.5">/</span>
+        <span class="text-foreground">{title}</span>
+      </nav>
+      <header class="mb-8">
+        <h1 class="text-2xl font-bold tracking-tight mb-2">{title}</h1>
+        <div class="flex items-center gap-2 text-xs text-muted-foreground">
+          <time datetime={date.toISOString()}>{formattedDate}</time>
+          <span>&middot;</span>
+          <span>{author}</span>
+        </div>
+        {tags.length > 0 && (
+          <div class="flex gap-1.5 mt-3">
+            {tags.map((tag) => (
+              <span class="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">{tag}</span>
+            ))}
+          </div>
+        )}
+      </header>
+      <article class="prose">
+        <slot />
+      </article>
+    </div>
+    <Footer />
+  </div>
+</Base>

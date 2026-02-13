@@ -1,0 +1,35 @@
+---
+import Base from '../../layouts/Base.astro';
+import Nav from '../../components/Nav.astro';
+import Footer from '../../components/Footer.astro';
+import BlogCard from '../../components/BlogCard.astro';
+import { getCollection } from 'astro:content';
+
+const posts = (await getCollection('blog'))
+  .filter((post) => !post.data.draft)
+  .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
+---
+<Base title="Blog - Plannotator" description="News and updates from Plannotator">
+  <div class="min-h-screen bg-background text-foreground">
+    <Nav />
+    <div class="max-w-3xl mx-auto px-8 pt-20 pb-16">
+      <h1 class="text-2xl font-bold tracking-tight mb-8">Blog</h1>
+      <div class="space-y-4">
+        {posts.map((post) => (
+          <BlogCard
+            title={post.data.title}
+            description={post.data.description}
+            date={post.data.date}
+            author={post.data.author}
+            tags={post.data.tags}
+            href={`/blog/${post.id}/`}
+          />
+        ))}
+      </div>
+      {posts.length === 0 && (
+        <p class="text-sm text-muted-foreground">No posts yet.</p>
+      )}
+    </div>
+    <Footer />
+  </div>
+</Base>

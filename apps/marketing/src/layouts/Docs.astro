@@ -1,0 +1,63 @@
+---
+import Base from './Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import DocsSidebar from '../components/DocsSidebar.astro';
+import DocsToc from '../components/DocsToc.astro';
+import { getCollection } from 'astro:content';
+
+interface Props {
+  title: string;
+  description: string;
+  headings: { depth: number; slug: string; text: string }[];
+  currentId: string;
+}
+
+const { title, description, headings, currentId } = Astro.props;
+
+// Compute prev/next
+const allDocs = (await getCollection('docs')).sort(
+  (a, b) => a.data.sidebar.order - b.data.sidebar.order
+);
+const currentIndex = allDocs.findIndex((d) => d.id === currentId);
+const prev = currentIndex > 0 ? allDocs[currentIndex - 1] : null;
+const next = currentIndex < allDocs.length - 1 ? allDocs[currentIndex + 1] : null;
+---
+<Base title={`${title} - Plannotator Docs`} description={description}>
+  <div class="min-h-screen bg-background text-foreground">
+    <Nav />
+    <div class="flex pt-12 min-h-screen">
+      <DocsSidebar />
+      <main class="flex-1 min-w-0 px-8 py-8">
+        <div class="max-w-3xl mx-auto">
+          <!-- Breadcrumbs -->
+          <nav class="text-xs text-muted-foreground mb-4" aria-label="Breadcrumb">
+            <a href="/docs/getting-started/installation/" class="hover:text-foreground transition-colors">Docs</a>
+            <span class="mx-1.5">/</span>
+            <span class="text-foreground">{title}</span>
+          </nav>
+
+          <article class="prose">
+            <slot />
+          </article>
+
+          <!-- Prev/Next -->
+          <nav class="flex justify-between mt-12 pt-6 border-t border-border/30" aria-label="Pagination">
+          {prev ? (
+            <a href={`/docs/${prev.id}/`} class="text-xs text-muted-foreground hover:text-foreground transition-colors">
+              &larr; {prev.data.title}
+            </a>
+          ) : <span />}
+          {next ? (
+            <a href={`/docs/${next.id}/`} class="text-xs text-muted-foreground hover:text-foreground transition-colors">
+              {next.data.title} &rarr;
+            </a>
+          ) : <span />}
+          </nav>
+        </div>
+      </main>
+      <DocsToc headings={headings} />
+    </div>
+    <Footer />
+  </div>
+</Base>
