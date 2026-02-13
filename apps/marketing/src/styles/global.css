@@ -251,6 +251,30 @@ body {
 .prose pre {
   margin-bottom: 1rem;
   overflow-x: auto;
+  position: relative;
+}
+
+.prose pre .copy-btn {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  padding: 0.25rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.prose pre:hover .copy-btn {
+  opacity: 1;
+}
+
+.prose pre .copy-btn:hover {
+  color: var(--foreground);
+  background: var(--muted);
 }
 
 .prose pre code {
