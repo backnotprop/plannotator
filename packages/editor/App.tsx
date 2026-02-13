@@ -35,6 +35,7 @@ import {
 import { PermissionModeSetup } from '@plannotator/ui/components/PermissionModeSetup';
 import { UIFeaturesSetup } from '@plannotator/ui/components/UIFeaturesSetup';
 import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
+import { deriveImageName } from '@plannotator/ui/components/AttachmentsButton';
 
 const PLAN_CONTENT = `# Implementation Plan: Real-time Collaboration
 
@@ -355,7 +356,7 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState<'approved' | 'denied' | null>(null);
-  const [pendingPasteImage, setPendingPasteImage] = useState<{ file: File; blobUrl: string } | null>(null);
+  const [pendingPasteImage, setPendingPasteImage] = useState<{ file: File; blobUrl: string; initialName: string } | null>(null);
   const [showPermissionModeSetup, setShowPermissionModeSetup] = useState(false);
   const [showUIFeaturesSetup, setShowUIFeaturesSetup] = useState(false);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
@@ -493,9 +494,10 @@ const App: React.FC = () => {
           e.preventDefault();
           const file = item.getAsFile();
           if (file) {
-            // Show annotator instead of direct upload
+            // Derive name before showing annotator so user sees it immediately
+            const initialName = deriveImageName(file.name, globalAttachments.map(g => g.name));
             const blobUrl = URL.createObjectURL(file);
-            setPendingPasteImage({ file, blobUrl });
+            setPendingPasteImage({ file, blobUrl, initialName });
           }
           break;
         }
@@ -506,8 +508,8 @@ const App: React.FC = () => {
     return () => document.removeEventListener('paste', handlePaste);
   }, []);
 
-  // Handle paste annotator accept
-  const handlePasteAnnotatorAccept = async (blob: Blob, hasDrawings: boolean) => {
+  // Handle paste annotator accept — name comes from ImageAnnotator
+  const handlePasteAnnotatorAccept = async (blob: Blob, hasDrawings: boolean, name: string) => {
     if (!pendingPasteImage) return;
 
     try {
@@ -520,25 +522,6 @@ const App: React.FC = () => {
       const res = await fetch('/api/upload', { method: 'POST', body: formData });
       if (res.ok) {
         const data = await res.json();
-        const originalName = data.originalName || 'paste';
-        const existingNames = globalAttachments.map(g => g.name);
-        // Derive a clean name
-        const base = originalName.replace(/\.[^.]+$/, '').toLowerCase()
-          .replace(/[_\s]+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
-        const isGeneric = ['annotated', 'image', 'screenshot', 'paste', 'clipboard', 'untitled'].includes(base);
-        let name: string;
-        if (!base || isGeneric) {
-          let n = 1;
-          while (existingNames.includes(`image-${n}`)) n++;
-          name = `image-${n}`;
-        } else {
-          name = base;
-          if (existingNames.includes(name)) {
-            let n = 2;
-            while (existingNames.includes(`${name}-${n}`)) n++;
-            name = `${name}-${n}`;
-          }
-        }
         setGlobalAttachments(prev => [...prev, { path: data.path, name }]);
       }
     } catch {
@@ -752,11 +735,6 @@ const App: React.FC = () => {
     setGlobalAttachments(prev => prev.filter(p => p.path !== path));
   };
 
-  const handleRenameGlobalAttachment = (path: string, newName: string) => {
-    setGlobalAttachments(prev => prev.map(img =>
-      img.path === path ? { ...img, name: newName } : img
-    ));
-  };
 
   const handleTocNavigate = (blockId: string) => {
     // Navigation handled by TableOfContents component
@@ -1136,7 +1114,6 @@ const App: React.FC = () => {
                 globalAttachments={globalAttachments}
                 onAddGlobalAttachment={handleAddGlobalAttachment}
                 onRemoveGlobalAttachment={handleRemoveGlobalAttachment}
-                onRenameGlobalAttachment={handleRenameGlobalAttachment}
                 repoInfo={repoInfo}
                 stickyActions={uiPrefs.stickyActionsEnabled}
               />
@@ -1304,6 +1281,7 @@ const App: React.FC = () => {
         <ImageAnnotator
           isOpen={!!pendingPasteImage}
           imageSrc={pendingPasteImage?.blobUrl ?? ''}
+          initialName={pendingPasteImage?.initialName}
           onAccept={handlePasteAnnotatorAccept}
           onClose={handlePasteAnnotatorClose}
         />

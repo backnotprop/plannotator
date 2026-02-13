@@ -9,7 +9,7 @@ import type { ImageAttachment } from '../types';
  * "Login Mockup.png" → "login-mockup"
  * "annotated.png" or generic names → "image-N"
  */
-function deriveImageName(originalName: string, existingNames: string[]): string {
+export function deriveImageName(originalName: string, existingNames: string[]): string {
   const base = originalName.replace(/\.[^.]+$/, '');
   const generic = ['annotated', 'image', 'screenshot', 'paste', 'clipboard', 'untitled'];
 
@@ -44,7 +44,6 @@ interface AttachmentsButtonProps {
   images: ImageAttachment[];
   onAdd: (image: ImageAttachment) => void;
   onRemove: (path: string) => void;
-  onRename?: (path: string, newName: string) => void;
   variant?: 'toolbar' | 'inline';
 }
 
@@ -52,7 +51,6 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
   images,
   onAdd,
   onRemove,
-  onRename,
   variant = 'toolbar',
 }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -64,8 +62,8 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
   const [position, setPosition] = useState({ top: 0, left: 0 });
 
   // Annotator state
-  const [annotatorImage, setAnnotatorImage] = useState<{ file: File; blobUrl: string } | null>(null);
-  const [editingPath, setEditingPath] = useState<string | null>(null);
+  const [annotatorImage, setAnnotatorImage] = useState<{ file: File; blobUrl: string; initialName: string } | null>(null);
+  const [editingImage, setEditingImage] = useState<{ path: string; name: string } | null>(null);
 
   // Update popover position when opened
   useEffect(() => {
@@ -90,25 +88,24 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
   }, [isOpen]);
 
   const handleFileSelect = (file: File) => {
-    // Show annotator instead of uploading directly
+    // Derive name before opening annotator so user sees it immediately
+    const initialName = deriveImageName(file.name, images.map(i => i.name));
     const blobUrl = URL.createObjectURL(file);
-    setAnnotatorImage({ file, blobUrl });
+    setAnnotatorImage({ file, blobUrl, initialName });
     setIsOpen(false); // Close popover when annotator opens
   };
 
-  const handleAnnotatorAccept = async (blob: Blob, hasDrawings: boolean) => {
+  const handleAnnotatorAccept = async (blob: Blob, hasDrawings: boolean, name: string) => {
     setUploading(true);
     try {
       const formData = new FormData();
-      let originalFileName = 'annotated.png';
       // Use annotated blob if drawings exist, otherwise original file
       if (annotatorImage) {
         const fileToUpload = hasDrawings
           ? new File([blob], 'annotated.png', { type: 'image/png' })
           : annotatorImage.file;
         formData.append('file', fileToUpload);
-        originalFileName = hasDrawings ? 'annotated.png' : annotatorImage.file.name;
-      } else if (editingPath) {
+      } else if (editingImage) {
         // Re-editing: always upload the new blob
         formData.append('file', new File([blob], 'annotated.png', { type: 'image/png' }));
       }
@@ -117,13 +114,10 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
       const data = await res.json();
       if (data.path) {
         // If re-editing, remove old path first
-        if (editingPath) {
-          onRemove(editingPath);
+        if (editingImage) {
+          onRemove(editingImage.path);
         }
-        const name = deriveImageName(
-          data.originalName || originalFileName,
-          images.map(i => i.name)
-        );
+        // Use the name from the annotator (user may have edited it)
         onAdd({ path: data.path, name });
       }
     } catch (err) {
@@ -135,7 +129,7 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
         URL.revokeObjectURL(annotatorImage.blobUrl);
         setAnnotatorImage(null);
       }
-      setEditingPath(null);
+      setEditingImage(null);
     }
   };
 
@@ -144,7 +138,7 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
       URL.revokeObjectURL(annotatorImage.blobUrl);
       setAnnotatorImage(null);
     }
-    setEditingPath(null);
+    setEditingImage(null);
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -181,7 +175,10 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
     images.forEach(img => onRemove(img.path));
   };
 
-  const paths = images.map(i => i.path);
+  // Determine annotator props
+  const annotatorOpen = !!annotatorImage || !!editingImage;
+  const annotatorSrc = annotatorImage?.blobUrl ?? (editingImage ? getImageSrc(editingImage.path) : '');
+  const annotatorInitialName = annotatorImage?.initialName ?? editingImage?.name ?? '';
 
   return (
     <>
@@ -327,7 +324,7 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
                 </button>
               </div>
 
-              {/* Grid of current attachments with editable names */}
+              {/* Grid of current attachments */}
               {images.length > 0 && (
                 <div className="space-y-2">
                   <div className="text-xs text-muted-foreground">Current</div>
@@ -338,19 +335,18 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
                           path={img.path}
                           size="md"
                           onClick={() => {
-                            setEditingPath(img.path);
+                            setEditingImage({ path: img.path, name: img.name });
                             setIsOpen(false);
                           }}
                           onRemove={() => onRemove(img.path)}
                           showRemove
                         />
-                        <input
-                          type="text"
-                          value={img.name}
-                          onChange={(e) => onRename?.(img.path, e.target.value)}
-                          className="w-full text-[9px] text-center text-muted-foreground bg-transparent border-b border-transparent hover:border-border focus:border-primary focus:text-foreground focus:outline-none mt-0.5 truncate"
+                        <div
+                          className="text-[9px] text-muted-foreground truncate max-w-[3.5rem] mt-0.5 mx-auto"
                           title={img.name}
-                        />
+                        >
+                          {img.name}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -363,10 +359,11 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
       )}
 
       {/* Image Annotator Dialog - portaled to body for correct positioning */}
-      {(!!annotatorImage || !!editingPath) && createPortal(
+      {annotatorOpen && createPortal(
         <ImageAnnotator
-          isOpen={!!annotatorImage || !!editingPath}
-          imageSrc={annotatorImage?.blobUrl ?? (editingPath ? getImageSrc(editingPath) : '')}
+          isOpen={annotatorOpen}
+          imageSrc={annotatorSrc}
+          initialName={annotatorInitialName}
           onAccept={handleAnnotatorAccept}
           onClose={handleAnnotatorClose}
         />,

@@ -23,7 +23,6 @@ interface ViewerProps {
   globalAttachments?: ImageAttachment[];
   onAddGlobalAttachment?: (image: ImageAttachment) => void;
   onRemoveGlobalAttachment?: (path: string) => void;
-  onRenameGlobalAttachment?: (path: string, newName: string) => void;
   repoInfo?: { display: string; branch?: string } | null;
   stickyActions?: boolean;
 }
@@ -80,7 +79,6 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   globalAttachments = [],
   onAddGlobalAttachment,
   onRemoveGlobalAttachment,
-  onRenameGlobalAttachment,
   repoInfo,
   stickyActions = true,
 }, ref) => {
@@ -662,7 +660,6 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               images={globalAttachments}
               onAdd={onAddGlobalAttachment}
               onRemove={onRemoveGlobalAttachment}
-              onRename={onRenameGlobalAttachment}
               variant="toolbar"
             />
           )}

@@ -8,8 +8,10 @@ import { DEFAULT_STATE } from './types';
 interface ImageAnnotatorProps {
   imageSrc: string;
   isOpen: boolean;
-  onAccept: (blob: Blob, hasDrawings: boolean) => Promise<void>;
+  onAccept: (blob: Blob, hasDrawings: boolean, name: string) => Promise<void>;
   onClose: () => void;
+  /** Pre-populated image name (derived from filename) */
+  initialName?: string;
 }
 
 export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
@@ -17,23 +19,38 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
   isOpen,
   onAccept,
   onClose,
+  initialName = '',
 }) => {
   const [state, setState] = useState<AnnotatorState>(DEFAULT_STATE);
   const [saving, setSaving] = useState(false);
+  const [name, setName] = useState(initialName);
   const imageRef = useRef<HTMLImageElement | null>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
   // Reset state when dialog opens
   useEffect(() => {
     if (isOpen) {
       setState(DEFAULT_STATE);
+      setName(initialName);
     }
-  }, [isOpen]);
+  }, [isOpen, initialName]);
 
   // Keyboard shortcuts
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept when typing in the name input
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT') {
+        if (e.key === 'Escape') {
+          // Blur and let the next Escape close
+          target.blur();
+          e.preventDefault();
+        }
+        return;
+      }
+
       // Escape or Enter to accept
       if (e.key === 'Escape' || e.key === 'Enter') {
         e.preventDefault();
@@ -129,12 +146,13 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
       }
 
       const hasDrawings = state.strokes.length > 0;
+      const finalName = name.trim() || initialName || 'image';
 
       // If no drawings, just pass through original image
       if (!hasDrawings) {
         const response = await fetch(imageSrc);
         const blob = await response.blob();
-        await onAccept(blob, false);
+        await onAccept(blob, false, finalName);
         onClose();
         return;
       }
@@ -160,7 +178,7 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
       // Convert to blob
       canvas.toBlob(async (blob) => {
         if (blob) {
-          await onAccept(blob, true);
+          await onAccept(blob, true, finalName);
         }
         onClose();
       }, 'image/png');
@@ -212,6 +230,27 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
           onStrokeEnd={handleStrokeEnd}
           onImageLoad={handleImageLoad}
         />
+
+        {/* Image name input */}
+        {initialName && (
+          <div className="flex items-center gap-2 w-full max-w-xs">
+            <label className="text-xs text-muted-foreground whitespace-nowrap">Name</label>
+            <input
+              ref={nameInputRef}
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleAccept();
+                }
+              }}
+              className="flex-1 px-2 py-1 text-xs bg-muted/50 border border-border rounded-md text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              placeholder="Image name..."
+            />
+          </div>
+        )}
 
         {/* Accept hint */}
         <div className="text-xs text-muted-foreground">

@@ -248,7 +248,6 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
             images={images}
             onAdd={(img) => setImages((prev) => [...prev, img])}
             onRemove={(path) => setImages((prev) => prev.filter((i) => i.path !== path))}
-            onRename={(path, newName) => setImages((prev) => prev.map((i) => i.path === path ? { ...i, name: newName } : i))}
             variant="inline"
           />
           <button
