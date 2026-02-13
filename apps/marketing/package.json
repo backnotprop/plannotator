@@ -4,22 +4,24 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "dev": "astro dev --port 3002 --host 0.0.0.0",
+    "build": "astro build",
+    "preview": "astro preview"
   },
   "dependencies": {
-    "@plannotator/ui": "workspace:*",
-    "@plannotator/editor": "workspace:*",
+    "astro": "^5.7.0",
+    "@astrojs/react": "^4.2.0",
+    "@astrojs/sitemap": "^3.3.0",
+    "@astrojs/rss": "^4.0.0",
+    "@astrojs/mdx": "^4.2.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "tailwindcss": "^4.1.18",
     "@tailwindcss/vite": "^4.1.18"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.0",
-    "@types/node": "^22.14.0"
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0"
   }
 }

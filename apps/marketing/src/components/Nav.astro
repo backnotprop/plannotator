@@ -1,0 +1,47 @@
+---
+import ModeToggleIsland from './ModeToggleIsland.tsx';
+
+const currentPath = Astro.url.pathname;
+const isDocsActive = currentPath.startsWith('/docs/');
+const isBlogActive = currentPath.startsWith('/blog/');
+---
+<nav class="fixed top-0 left-0 right-0 h-12 flex items-center justify-between px-6 bg-background/80 backdrop-blur-sm border-b border-border/30 z-50">
+  <div class="flex items-center gap-2">
+    <a href="/" class="text-sm font-semibold tracking-tight hover:text-primary transition-colors">
+      Plannotator
+    </a>
+  </div>
+  <div class="flex items-center gap-3">
+    <div class="flex items-center gap-2 text-xs">
+      <a
+        href="/docs/getting-started/installation/"
+        class:list={[
+          'transition-colors',
+          isDocsActive ? 'text-foreground font-medium' : 'text-muted-foreground hover:text-foreground',
+        ]}
+      >
+        Docs
+      </a>
+      <span class="text-muted-foreground/50">|</span>
+      <a
+        href="/blog/"
+        class:list={[
+          'transition-colors',
+          isBlogActive ? 'text-foreground font-medium' : 'text-muted-foreground hover:text-foreground',
+        ]}
+      >
+        Blog
+      </a>
+      <span class="text-muted-foreground/50">|</span>
+      <a
+        href="https://github.com/backnotprop/plannotator"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="text-muted-foreground hover:text-foreground transition-colors"
+      >
+        GitHub
+      </a>
+    </div>
+    <ModeToggleIsland client:only="react" />
+  </div>
+</nav>

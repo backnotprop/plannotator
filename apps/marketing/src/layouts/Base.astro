@@ -1,0 +1,65 @@
+---
+interface Props {
+  title: string;
+  description?: string;
+  ogImage?: string;
+  canonicalUrl?: string;
+}
+
+const {
+  title,
+  description = 'Interactive Plan Review: Mark up and refine your plans using a UI, easily share for team collaboration, automatically integrates with Claude Code plan mode.',
+  ogImage = 'https://plannotator.ai/og-image.webp',
+  canonicalUrl,
+} = Astro.props;
+
+const canonical = canonicalUrl || Astro.url.href;
+
+import '../styles/global.css';
+---
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={ogImage} />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href={canonical} />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  </head>
+  <body class="min-h-screen antialiased">
+    <slot />
+    <script is:inline>
+      // Read theme cookie and set class before paint to prevent FOUC
+      (function() {
+        var match = document.cookie.match(/(?:^|; )plannotator-theme=([^;]*)/);
+        var theme = match ? decodeURIComponent(match[1]) : 'dark';
+        var root = document.documentElement;
+        root.classList.remove('light');
+        if (theme === 'light') {
+          root.classList.add('light');
+        } else if (theme === 'system') {
+          if (window.matchMedia('(prefers-color-scheme: light)').matches) {
+            root.classList.add('light');
+          }
+        }
+      })();
+    </script>
+  </body>
+</html>
