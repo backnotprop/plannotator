@@ -33,4 +33,4 @@ apps/opencode-plugin/review-editor.html
 opencode.json
 plannotator-local
 # Local research/reference docs (not for repo)
-reference/
+/reference/

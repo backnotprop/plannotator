@@ -44,12 +44,12 @@ async function isWSL(): Promise<boolean> {
  */
 export async function openBrowser(url: string): Promise<boolean> {
   try {
-    const browser = process.env.PLANNOTATOR_BROWSER;
+    const browser = process.env.PLANNOTATOR_BROWSER || process.env.BROWSER;
     const platform = process.platform;
     const wsl = await isWSL();
 
     if (browser) {
-      // Custom browser specified
+      // Custom browser specified (PLANNOTATOR_BROWSER takes priority over BROWSER)
       if (platform === "darwin") {
         await $`open -a ${browser} ${url}`.quiet();
       } else if (platform === "win32" || wsl) {

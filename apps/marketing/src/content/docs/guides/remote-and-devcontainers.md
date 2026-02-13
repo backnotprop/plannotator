@@ -28,7 +28,9 @@ Plannotator also detects `SSH_TTY` and `SSH_CONNECTION` environment variables fo
 
 ## VS Code Remote / devcontainers
 
-VS Code automatically forwards ports from remote hosts. When Plannotator starts on a fixed port, VS Code detects it and makes it accessible on your local machine.
+VS Code sets the `BROWSER` environment variable in devcontainers to a helper script that opens URLs on your local machine. Plannotator respects this — in most cases, the browser opens automatically with no extra configuration.
+
+If the automatic `BROWSER` detection doesn't work for your setup, you can fall back to manual remote mode:
 
 1. Set the environment variables in your devcontainer config:
 
