@@ -506,7 +506,7 @@ const App: React.FC = () => {
 
     document.addEventListener('paste', handlePaste);
     return () => document.removeEventListener('paste', handlePaste);
-  }, []);
+  }, [globalAttachments]);
 
   // Handle paste annotator accept — name comes from ImageAnnotator
   const handlePasteAnnotatorAccept = async (blob: Blob, hasDrawings: boolean, name: string) => {

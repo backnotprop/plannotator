@@ -1,6 +1,6 @@
 # Plannotator
 
-A plan review UI for Claude Code that intercepts `ExitPlanMode` via hooks, letting users approve or request changes with annotated feedback. Also provides code review for git diffs.
+A plan review UI for Claude Code that intercepts `ExitPlanMode` via hooks, letting users approve or request changes with annotated feedback. Also provides code review for git diffs and annotation of arbitrary markdown files.
 
 ## Project Structure
 
@@ -9,13 +9,13 @@ plannotator/
 ├── apps/
 │   ├── hook/                     # Claude Code plugin
 │   │   ├── .claude-plugin/plugin.json
-│   │   ├── commands/             # Slash commands (plannotator-review.md)
+│   │   ├── commands/             # Slash commands (plannotator-review.md, plannotator-annotate.md)
 │   │   ├── hooks/hooks.json      # PermissionRequest hook config
-│   │   ├── server/index.ts       # Entry point (plan + review subcommand)
+│   │   ├── server/index.ts       # Entry point (plan + review + annotate subcommands)
 │   │   └── dist/                 # Built single-file apps (index.html, review.html)
 │   ├── opencode-plugin/          # OpenCode plugin
-│   │   ├── commands/             # Slash commands (plannotator-review.md)
-│   │   ├── index.ts              # Plugin entry with submit_plan tool + review event handler
+│   │   ├── commands/             # Slash commands (plannotator-review.md, plannotator-annotate.md)
+│   │   ├── index.ts              # Plugin entry with submit_plan tool + review/annotate event handlers
 │   │   ├── plannotator.html      # Built plan review app
 │   │   └── review-editor.html    # Built code review app
 │   └── review/                   # Standalone review server (for development)
@@ -26,6 +26,7 @@ plannotator/
 │   ├── server/                   # Shared server implementation
 │   │   ├── index.ts              # startPlannotatorServer(), handleServerReady()
 │   │   ├── review.ts             # startReviewServer(), handleReviewServerReady()
+│   │   ├── annotate.ts           # startAnnotateServer(), handleAnnotateServerReady()
 │   │   ├── storage.ts            # Plan saving to disk (getPlanDir, savePlan, etc.)
 │   │   ├── remote.ts             # isRemoteSession(), getServerPort()
 │   │   ├── browser.ts            # openBrowser()
@@ -112,6 +113,23 @@ Send Feedback → feedback sent to agent session
 Approve → "LGTM" sent to agent session
 ```
 
+## Annotate Flow
+
+```
+User runs /plannotator-annotate <file.md> command
+        ↓
+Claude Code: plannotator annotate subcommand runs
+OpenCode: event handler intercepts command
+        ↓
+Markdown file read from disk
+        ↓
+Annotate server starts (reuses plan editor HTML with mode:"annotate")
+        ↓
+User annotates markdown, provides feedback
+        ↓
+Send Annotations → feedback sent to agent session
+```
+
 ## Server API
 
 ### Plan Server (`packages/server/index.ts`)
@@ -122,7 +140,7 @@ Approve → "LGTM" sent to agent session
 | `/api/approve`        | POST   | Approve plan (body: planSave, agentSwitch, obsidian, bear, feedback) |
 | `/api/deny`           | POST   | Deny plan (body: feedback, planSave)       |
 | `/api/image`          | GET    | Serve image by path query param            |
-| `/api/upload`         | POST   | Upload image, returns temp path            |
+| `/api/upload`         | POST   | Upload image, returns `{ path, originalName }` |
 | `/api/obsidian/vaults`| GET    | Detect available Obsidian vaults           |
 
 ### Review Server (`packages/server/review.ts`)
@@ -132,9 +150,18 @@ Approve → "LGTM" sent to agent session
 | `/api/diff`           | GET    | Returns `{ rawPatch, gitRef, origin }`     |
 | `/api/feedback`       | POST   | Submit review (body: feedback, annotations, agentSwitch) |
 | `/api/image`          | GET    | Serve image by path query param            |
-| `/api/upload`         | POST   | Upload image, returns temp path            |
+| `/api/upload`         | POST   | Upload image, returns `{ path, originalName }` |
 
-Both servers use random ports locally or fixed port (`19432`) in remote mode.
+### Annotate Server (`packages/server/annotate.ts`)
+
+| Endpoint              | Method | Purpose                                    |
+| --------------------- | ------ | ------------------------------------------ |
+| `/api/plan`           | GET    | Returns `{ plan, origin, mode: "annotate", filePath }` |
+| `/api/feedback`       | POST   | Submit annotations (body: feedback, annotations) |
+| `/api/image`          | GET    | Serve image by path query param            |
+| `/api/upload`         | POST   | Upload image, returns `{ path, originalName }` |
+
+All servers use random ports locally or fixed port (`19432`) in remote mode.
 
 ## Data Types
 
@@ -149,6 +176,11 @@ enum AnnotationType {
   GLOBAL_COMMENT = "GLOBAL_COMMENT",
 }
 
+interface ImageAttachment {
+  path: string;   // temp file path
+  name: string;   // human-readable label (e.g., "login-mockup")
+}
+
 interface Annotation {
   id: string;
   blockId: string;
@@ -159,6 +191,7 @@ interface Annotation {
   originalText: string; // The selected text
   createdA: number; // Timestamp
   author?: string; // Tater identity
+  images?: ImageAttachment[]; // Attached images with names
   startMeta?: { parentTagName; parentIndex; textOffset };
   endMeta?: { parentTagName; parentIndex; textOffset };
 }
@@ -187,7 +220,7 @@ interface Block {
 - Horizontal rules (`---`)
 - Paragraphs (default)
 
-`exportDiff(blocks, annotations)` generates human-readable feedback for Claude.
+`exportDiff(blocks, annotations, globalAttachments)` generates human-readable feedback for Claude. Images are referenced by name: `[image-name] /tmp/path...`.
 
 ## Annotation System
 
@@ -205,17 +238,21 @@ Shares full plan + annotations via URL hash using deflate compression.
 **Payload format:**
 
 ```typescript
+// Image in shareable format: plain string (old) or [path, name] tuple (new)
+type ShareableImage = string | [string, string];
+
 interface SharePayload {
   p: string; // Plan markdown
   a: ShareableAnnotation[]; // Compact annotations
+  g?: ShareableImage[]; // Global attachments
 }
 
 type ShareableAnnotation =
-  | ["D", string, string | null] // [type, original, author]
-  | ["R", string, string, string | null] // [type, original, replacement, author]
-  | ["C", string, string, string | null] // [type, original, comment, author]
-  | ["I", string, string, string | null] // [type, context, newText, author]
-  | ["G", string, string | null]; // [type, comment, author] - global comment
+  | ["D", string, string | null, ShareableImage[]?] // [type, original, author, images?]
+  | ["R", string, string, string | null, ShareableImage[]?] // [type, original, replacement, author, images?]
+  | ["C", string, string, string | null, ShareableImage[]?] // [type, original, comment, author, images?]
+  | ["I", string, string, string | null, ShareableImage[]?] // [type, context, newText, author, images?]
+  | ["G", string, string | null, ShareableImage[]?]; // [type, comment, author, images?]
 ```
 
 **Compression pipeline:**
