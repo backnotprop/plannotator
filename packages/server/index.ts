@@ -172,7 +172,7 @@ export async function startPlannotatorServer(
               const tempPath = `${tempDir}/${crypto.randomUUID()}.${ext}`;
 
               await Bun.write(tempPath, file);
-              return Response.json({ path: tempPath });
+              return Response.json({ path: tempPath, originalName: file.name });
             } catch (err) {
               const message =
                 err instanceof Error ? err.message : "Upload failed";

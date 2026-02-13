@@ -2,18 +2,57 @@ import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { ImageThumbnail, getImageSrc } from './ImageThumbnail';
 import { ImageAnnotator } from './ImageAnnotator';
+import type { ImageAttachment } from '../types';
+
+/**
+ * Derive a clean, human-readable name from an original filename.
+ * "Login Mockup.png" → "login-mockup"
+ * "annotated.png" or generic names → "image-N"
+ */
+function deriveImageName(originalName: string, existingNames: string[]): string {
+  const base = originalName.replace(/\.[^.]+$/, '');
+  const generic = ['annotated', 'image', 'screenshot', 'paste', 'clipboard', 'untitled'];
+
+  if (generic.includes(base.toLowerCase())) {
+    let n = 1;
+    while (existingNames.includes(`image-${n}`)) n++;
+    return `image-${n}`;
+  }
+
+  let name = base.toLowerCase()
+    .replace(/[_\s]+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+
+  if (!name) {
+    let n = 1;
+    while (existingNames.includes(`image-${n}`)) n++;
+    return `image-${n}`;
+  }
+
+  if (existingNames.includes(name)) {
+    let n = 2;
+    while (existingNames.includes(`${name}-${n}`)) n++;
+    name = `${name}-${n}`;
+  }
+
+  return name;
+}
 
 interface AttachmentsButtonProps {
-  paths: string[];
-  onAdd: (path: string) => void;
+  images: ImageAttachment[];
+  onAdd: (image: ImageAttachment) => void;
   onRemove: (path: string) => void;
+  onRename?: (path: string, newName: string) => void;
   variant?: 'toolbar' | 'inline';
 }
 
 export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
-  paths,
+  images,
   onAdd,
   onRemove,
+  onRename,
   variant = 'toolbar',
 }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -61,12 +100,14 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
     setUploading(true);
     try {
       const formData = new FormData();
+      let originalFileName = 'annotated.png';
       // Use annotated blob if drawings exist, otherwise original file
       if (annotatorImage) {
         const fileToUpload = hasDrawings
           ? new File([blob], 'annotated.png', { type: 'image/png' })
           : annotatorImage.file;
         formData.append('file', fileToUpload);
+        originalFileName = hasDrawings ? 'annotated.png' : annotatorImage.file.name;
       } else if (editingPath) {
         // Re-editing: always upload the new blob
         formData.append('file', new File([blob], 'annotated.png', { type: 'image/png' }));
@@ -79,7 +120,11 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
         if (editingPath) {
           onRemove(editingPath);
         }
-        onAdd(data.path);
+        const name = deriveImageName(
+          data.originalName || originalFileName,
+          images.map(i => i.name)
+        );
+        onAdd({ path: data.path, name });
       }
     } catch (err) {
       console.error('Upload failed:', err);
@@ -122,15 +167,21 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
   const handleManualAdd = () => {
     const trimmed = manualPath.trim();
     if (trimmed) {
-      onAdd(trimmed);
+      const name = deriveImageName(
+        trimmed.split('/').pop() || 'image',
+        images.map(i => i.name)
+      );
+      onAdd({ path: trimmed, name });
       setManualPath('');
     }
   };
 
   const handleClearAll = (e: React.MouseEvent) => {
     e.stopPropagation();
-    paths.forEach(p => onRemove(p));
+    images.forEach(img => onRemove(img.path));
   };
+
+  const paths = images.map(i => i.path);
 
   return (
     <>
@@ -142,29 +193,29 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
         className="group relative flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
       >
         {/* Show stacked thumbnails if we have images */}
-        {paths.length > 0 ? (
+        {images.length > 0 ? (
           <>
             <div className="relative flex items-center">
-              {paths.slice(0, 3).map((path, idx) => (
+              {images.slice(0, 3).map((img, idx) => (
                 <div
-                  key={path}
+                  key={img.path}
                   className="relative w-5 h-5 rounded border border-background"
                   style={{ marginLeft: idx > 0 ? '-6px' : 0, zIndex: 3 - idx }}
                 >
                   <img
-                    src={getImageSrc(path)}
-                    alt={`Attachment ${idx + 1}`}
+                    src={getImageSrc(img.path)}
+                    alt={img.name}
                     loading="lazy"
                     className="w-5 h-5 rounded object-cover"
                   />
                 </div>
               ))}
-              {paths.length > 3 && (
+              {images.length > 3 && (
                 <div
                   className="relative w-5 h-5 rounded bg-muted border border-background flex items-center justify-center text-[9px] font-medium"
                   style={{ marginLeft: '-6px', zIndex: 0 }}
                 >
-                  +{paths.length - 3}
+                  +{images.length - 3}
                 </div>
               )}
             </div>
@@ -184,7 +235,7 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
           </svg>
         )}
         <span className={variant === 'inline' ? 'sr-only' : ''}>
-          {paths.length > 0 ? `${paths.length}` : 'Images'}
+          {images.length > 0 ? `${images.length}` : 'Images'}
         </span>
       </button>
 
@@ -207,9 +258,9 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
               {/* Header */}
               <div className="flex items-center justify-between">
                 <div className="text-sm font-medium">Attachments</div>
-                {paths.length > 0 && (
+                {images.length > 0 && (
                   <span className="text-[10px] text-muted-foreground">
-                    {paths.length} image{paths.length !== 1 ? 's' : ''}
+                    {images.length} image{images.length !== 1 ? 's' : ''}
                   </span>
                 )}
               </div>
@@ -276,23 +327,31 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
                 </button>
               </div>
 
-              {/* Grid of current attachments */}
-              {paths.length > 0 && (
+              {/* Grid of current attachments with editable names */}
+              {images.length > 0 && (
                 <div className="space-y-2">
                   <div className="text-xs text-muted-foreground">Current</div>
                   <div className="grid grid-cols-4 gap-2">
-                    {paths.map((path) => (
-                      <ImageThumbnail
-                        key={path}
-                        path={path}
-                        size="md"
-                        onClick={() => {
-                          setEditingPath(path);
-                          setIsOpen(false);
-                        }}
-                        onRemove={() => onRemove(path)}
-                        showRemove
-                      />
+                    {images.map((img) => (
+                      <div key={img.path} className="text-center">
+                        <ImageThumbnail
+                          path={img.path}
+                          size="md"
+                          onClick={() => {
+                            setEditingPath(img.path);
+                            setIsOpen(false);
+                          }}
+                          onRemove={() => onRemove(img.path)}
+                          showRemove
+                        />
+                        <input
+                          type="text"
+                          value={img.name}
+                          onChange={(e) => onRename?.(img.path, e.target.value)}
+                          className="w-full text-[9px] text-center text-muted-foreground bg-transparent border-b border-transparent hover:border-border focus:border-primary focus:text-foreground focus:outline-none mt-0.5 truncate"
+                          title={img.name}
+                        />
+                      </div>
                     ))}
                   </div>
                 </div>

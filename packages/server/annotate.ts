@@ -1,8 +1,10 @@
 /**
- * Code Review Server
+ * Annotate Server
  *
- * Provides a server implementation for code review with git diff rendering.
- * Follows the same patterns as the plan server.
+ * Provides a server for annotating arbitrary markdown files.
+ * Follows the same patterns as the review server but serves
+ * markdown content via /api/plan so the plan editor UI can
+ * render it without modifications.
  *
  * Environment variables:
  *   PLANNOTATOR_REMOTE - Set to "1" or "true" for remote/devcontainer mode
@@ -12,44 +14,32 @@
 import { mkdirSync } from "fs";
 import { isRemoteSession, getServerPort } from "./remote";
 import { openBrowser } from "./browser";
-import { type DiffType, type GitContext, runGitDiff } from "./git";
 import { getRepoInfo } from "./repo";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
 export { openBrowser } from "./browser";
-export { type DiffType, type DiffOption, type GitContext } from "./git";
 
 // --- Types ---
 
-export interface ReviewServerOptions {
-  /** Raw git diff patch string */
-  rawPatch: string;
-  /** Git ref used for the diff (e.g., "HEAD", "main..HEAD", "--staged") */
-  gitRef: string;
+export interface AnnotateServerOptions {
+  /** Markdown content of the file to annotate */
+  markdown: string;
+  /** Original file path (for display purposes) */
+  filePath: string;
   /** HTML content to serve for the UI */
   htmlContent: string;
   /** Origin identifier for UI customization */
   origin?: "opencode" | "claude-code";
-  /** Current diff type being displayed */
-  diffType?: DiffType;
-  /** Git context with branch info and available diff options */
-  gitContext?: GitContext;
   /** Whether URL sharing is enabled (default: true) */
   sharingEnabled?: boolean;
-  /** Custom base URL for share links (default: https://share.plannotator.ai) */
+  /** Custom base URL for share links */
   shareBaseUrl?: string;
   /** Called when server starts with the URL, remote status, and port */
   onReady?: (url: string, isRemote: boolean, port: number) => void;
-  /** OpenCode client for querying available agents (OpenCode only) */
-  opencodeClient?: {
-    app: {
-      agents: (options?: object) => Promise<{ data?: Array<{ name: string; description?: string; mode: string; hidden?: boolean }> }>;
-    };
-  };
 }
 
-export interface ReviewServerResult {
+export interface AnnotateServerResult {
   /** The port the server is running on */
   port: number;
   /** The full URL to access the server */
@@ -60,7 +50,6 @@ export interface ReviewServerResult {
   waitForDecision: () => Promise<{
     feedback: string;
     annotations: unknown[];
-    agentSwitch?: string;
   }>;
   /** Stop the server */
   stop: () => void;
@@ -72,22 +61,25 @@ const MAX_RETRIES = 5;
 const RETRY_DELAY_MS = 500;
 
 /**
- * Start the Code Review server
+ * Start the Annotate server
  *
  * Handles:
  * - Remote detection and port configuration
- * - API routes (/api/diff, /api/feedback)
+ * - API routes (/api/plan with mode:"annotate", /api/feedback)
  * - Port conflict retries
  */
-export async function startReviewServer(
-  options: ReviewServerOptions
-): Promise<ReviewServerResult> {
-  const { htmlContent, origin, gitContext, sharingEnabled = true, shareBaseUrl, onReady } = options;
-
-  // Mutable state for diff switching
-  let currentPatch = options.rawPatch;
-  let currentGitRef = options.gitRef;
-  let currentDiffType: DiffType = options.diffType || "uncommitted";
+export async function startAnnotateServer(
+  options: AnnotateServerOptions
+): Promise<AnnotateServerResult> {
+  const {
+    markdown,
+    filePath,
+    htmlContent,
+    origin,
+    sharingEnabled = true,
+    shareBaseUrl,
+    onReady,
+  } = options;
 
   const isRemote = isRemoteSession();
   const configuredPort = getServerPort();
@@ -99,12 +91,10 @@ export async function startReviewServer(
   let resolveDecision: (result: {
     feedback: string;
     annotations: unknown[];
-    agentSwitch?: string;
   }) => void;
   const decisionPromise = new Promise<{
     feedback: string;
     annotations: unknown[];
-    agentSwitch?: string;
   }>((resolve) => {
     resolveDecision = resolve;
   });
@@ -120,52 +110,17 @@ export async function startReviewServer(
         async fetch(req) {
           const url = new URL(req.url);
 
-          // API: Get diff content
-          if (url.pathname === "/api/diff" && req.method === "GET") {
+          // API: Get plan content (reuse /api/plan so the plan editor UI works)
+          if (url.pathname === "/api/plan" && req.method === "GET") {
             return Response.json({
-              rawPatch: currentPatch,
-              gitRef: currentGitRef,
+              plan: markdown,
               origin,
-              diffType: currentDiffType,
-              gitContext,
+              mode: "annotate",
+              filePath,
               sharingEnabled,
               shareBaseUrl,
               repoInfo,
             });
-          }
-
-          // API: Switch diff type
-          if (url.pathname === "/api/diff/switch" && req.method === "POST") {
-            try {
-              const body = (await req.json()) as { diffType: DiffType };
-              const newDiffType = body.diffType;
-
-              if (!newDiffType) {
-                return Response.json(
-                  { error: "Missing diffType" },
-                  { status: 400 }
-                );
-              }
-
-              // Run the new diff
-              const defaultBranch = gitContext?.defaultBranch || "main";
-              const result = await runGitDiff(newDiffType, defaultBranch);
-
-              // Update state
-              currentPatch = result.patch;
-              currentGitRef = result.label;
-              currentDiffType = newDiffType;
-
-              return Response.json({
-                rawPatch: currentPatch,
-                gitRef: currentGitRef,
-                diffType: currentDiffType,
-              });
-            } catch (err) {
-              const message =
-                err instanceof Error ? err.message : "Failed to switch diff";
-              return Response.json({ error: message }, { status: 500 });
-            }
           }
 
           // API: Serve images (local paths or temp uploads)
@@ -208,43 +163,25 @@ export async function startReviewServer(
             }
           }
 
-          // API: Get available agents (OpenCode only)
-          if (url.pathname === "/api/agents") {
-            if (!options.opencodeClient) {
-              return Response.json({ agents: [] });
-            }
-
-            try {
-              const result = await options.opencodeClient.app.agents({});
-              const agents = (result.data ?? [])
-                .filter((a) => a.mode === "primary" && !a.hidden)
-                .map((a) => ({ id: a.name, name: a.name, description: a.description }));
-
-              return Response.json({ agents });
-            } catch {
-              return Response.json({ agents: [], error: "Failed to fetch agents" });
-            }
-          }
-
-          // API: Submit review feedback
+          // API: Submit annotation feedback
           if (url.pathname === "/api/feedback" && req.method === "POST") {
             try {
               const body = (await req.json()) as {
                 feedback: string;
                 annotations: unknown[];
-                agentSwitch?: string;
               };
 
               resolveDecision({
                 feedback: body.feedback || "",
                 annotations: body.annotations || [],
-                agentSwitch: body.agentSwitch,
               });
 
               return Response.json({ ok: true });
             } catch (err) {
               const message =
-                err instanceof Error ? err.message : "Failed to process feedback";
+                err instanceof Error
+                  ? err.message
+                  : "Failed to process feedback";
               return Response.json({ error: message }, { status: 500 });
             }
           }
@@ -267,8 +204,12 @@ export async function startReviewServer(
       }
 
       if (isAddressInUse) {
-        const hint = isRemote ? " (set PLANNOTATOR_PORT to use different port)" : "";
-        throw new Error(`Port ${configuredPort} in use after ${MAX_RETRIES} retries${hint}`);
+        const hint = isRemote
+          ? " (set PLANNOTATOR_PORT to use different port)"
+          : "";
+        throw new Error(
+          `Port ${configuredPort} in use after ${MAX_RETRIES} retries${hint}`
+        );
       }
 
       throw err;
@@ -298,7 +239,7 @@ export async function startReviewServer(
 /**
  * Default behavior: open browser for local sessions
  */
-export async function handleReviewServerReady(
+export async function handleAnnotateServerReady(
   url: string,
   isRemote: boolean,
   _port: number

@@ -2,7 +2,7 @@ import React, { useRef, useState, useEffect, forwardRef, useImperativeHandle, us
 import Highlighter from '@plannotator/web-highlighter';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
-import { Block, Annotation, AnnotationType, EditorMode } from '../types';
+import { Block, Annotation, AnnotationType, EditorMode, type ImageAttachment } from '../types';
 import { Frontmatter } from '../utils/parser';
 import { AnnotationToolbar } from './AnnotationToolbar';
 import { TaterSpriteSitting } from './TaterSpriteSitting';
@@ -20,9 +20,10 @@ interface ViewerProps {
   selectedAnnotationId: string | null;
   mode: EditorMode;
   taterMode: boolean;
-  globalAttachments?: string[];
-  onAddGlobalAttachment?: (path: string) => void;
+  globalAttachments?: ImageAttachment[];
+  onAddGlobalAttachment?: (image: ImageAttachment) => void;
   onRemoveGlobalAttachment?: (path: string) => void;
+  onRenameGlobalAttachment?: (path: string, newName: string) => void;
   repoInfo?: { display: string; branch?: string } | null;
   stickyActions?: boolean;
 }
@@ -79,6 +80,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   globalAttachments = [],
   onAddGlobalAttachment,
   onRemoveGlobalAttachment,
+  onRenameGlobalAttachment,
   repoInfo,
   stickyActions = true,
 }, ref) => {
@@ -194,7 +196,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     source: any,
     type: AnnotationType,
     text?: string,
-    imagePaths?: string[]
+    images?: ImageAttachment[]
   ) => {
     const doms = highlighter.getDoms(source.id);
     let blockId = '';
@@ -226,7 +228,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       author: getIdentity(),
       startMeta: source.startMeta,
       endMeta: source.endMeta,
-      imagePaths,
+      images,
     };
 
     if (type === AnnotationType.DELETION) {
@@ -548,11 +550,11 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     });
   }, [annotations]);
 
-  const handleAnnotate = (type: AnnotationType, text?: string, imagePaths?: string[]) => {
+  const handleAnnotate = (type: AnnotationType, text?: string, images?: ImageAttachment[]) => {
     const highlighter = highlighterRef.current;
     if (!toolbarState || !highlighter) return;
 
-    createAnnotationFromSource(highlighter, toolbarState.source, type, text, imagePaths);
+    createAnnotationFromSource(highlighter, toolbarState.source, type, text, images);
     pendingSourceRef.current = null;
     setToolbarState(null);
     window.getSelection()?.removeAllRanges();
@@ -567,7 +569,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     window.getSelection()?.removeAllRanges();
   };
 
-  const handleCodeBlockAnnotate = (type: AnnotationType, text?: string, imagePaths?: string[]) => {
+  const handleCodeBlockAnnotate = (type: AnnotationType, text?: string, images?: ImageAttachment[]) => {
     const highlighter = highlighterRef.current;
     if (!hoveredCodeBlock || !highlighter) return;
 
@@ -609,7 +611,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       originalText: codeText,
       createdA: Date.now(),
       author: getIdentity(),
-      imagePaths,
+      images,
     };
 
     onAddAnnotationRef.current(newAnnotation);
@@ -657,9 +659,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           {/* Attachments button */}
           {onAddGlobalAttachment && onRemoveGlobalAttachment && (
             <AttachmentsButton
-              paths={globalAttachments}
+              images={globalAttachments}
               onAdd={onAddGlobalAttachment}
               onRemove={onRemoveGlobalAttachment}
+              onRename={onRenameGlobalAttachment}
               variant="toolbar"
             />
           )}

@@ -1,7 +1,7 @@
 /**
  * Plannotator CLI for Claude Code
  *
- * Supports two modes:
+ * Supports three modes:
  *
  * 1. Plan Review (default, no args):
  *    - Spawned by ExitPlanMode hook
@@ -12,6 +12,11 @@
  *    - Triggered by /review slash command
  *    - Runs git diff, opens review UI
  *    - Outputs feedback to stdout (captured by slash command)
+ *
+ * 3. Annotate (`plannotator annotate <file.md>`):
+ *    - Triggered by /plannotator-annotate slash command
+ *    - Opens any markdown file in the annotation UI
+ *    - Outputs structured feedback to stdout
  *
  * Environment variables:
  *   PLANNOTATOR_REMOTE - Set to "1" or "true" for remote mode (preferred)
@@ -26,6 +31,10 @@ import {
   startReviewServer,
   handleReviewServerReady,
 } from "@plannotator/server/review";
+import {
+  startAnnotateServer,
+  handleAnnotateServerReady,
+} from "@plannotator/server/annotate";
 import { getGitContext, runGitDiff } from "@plannotator/server/git";
 
 // Embed the built HTML at compile time
@@ -71,6 +80,53 @@ if (args[0] === "review") {
     shareBaseUrl,
     htmlContent: reviewHtmlContent,
     onReady: handleReviewServerReady,
+  });
+
+  // Wait for user feedback
+  const result = await server.waitForDecision();
+
+  // Give browser time to receive response and update UI
+  await Bun.sleep(1500);
+
+  // Cleanup
+  server.stop();
+
+  // Output feedback (captured by slash command)
+  console.log(result.feedback || "No feedback provided.");
+  process.exit(0);
+
+} else if (args[0] === "annotate") {
+  // ============================================
+  // ANNOTATE MODE
+  // ============================================
+
+  const filePath = args[1];
+  if (!filePath) {
+    console.error("Usage: plannotator annotate <file.md>");
+    process.exit(1);
+  }
+
+  // Resolve to absolute path
+  const path = await import("path");
+  const absolutePath = path.resolve(filePath);
+
+  // Read the markdown file
+  const file = Bun.file(absolutePath);
+  if (!(await file.exists())) {
+    console.error(`File not found: ${absolutePath}`);
+    process.exit(1);
+  }
+  const markdown = await file.text();
+
+  // Start the annotate server (reuses plan editor HTML)
+  const server = await startAnnotateServer({
+    markdown,
+    filePath: absolutePath,
+    origin: "claude-code",
+    sharingEnabled,
+    shareBaseUrl,
+    htmlContent: planHtmlContent,
+    onReady: handleAnnotateServerReady,
   });
 
   // Wait for user feedback

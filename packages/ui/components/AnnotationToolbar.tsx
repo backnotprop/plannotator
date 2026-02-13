@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { AnnotationType } from "../types";
+import { AnnotationType, type ImageAttachment } from "../types";
 import { createPortal } from "react-dom";
 import { AttachmentsButton } from "./AttachmentsButton";
 
@@ -8,7 +8,7 @@ type PositionMode = 'center-above' | 'top-right';
 interface AnnotationToolbarProps {
   element: HTMLElement;
   positionMode: PositionMode;
-  onAnnotate: (type: AnnotationType, text?: string, imagePaths?: string[]) => void;
+  onAnnotate: (type: AnnotationType, text?: string, images?: ImageAttachment[]) => void;
   onClose: () => void;
   /** Text to copy (for text selection, pass source.text) */
   copyText?: string;
@@ -43,7 +43,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   const [step, setStep] = useState<"menu" | "input">(initialStep);
   const [activeType, setActiveType] = useState<AnnotationType | null>(initialType ?? null);
   const [inputValue, setInputValue] = useState("");
-  const [imagePaths, setImagePaths] = useState<string[]>([]);
+  const [images, setImages] = useState<ImageAttachment[]>([]);
   const [position, setPosition] = useState<{ top: number; left?: number; right?: number } | null>(null);
   const [copied, setCopied] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -81,7 +81,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     setStep(initialStep);
     setActiveType(initialType ?? null);
     setInputValue("");
-    setImagePaths([]);
+    setImages([]);
     setCopied(false);
   }, [element, initialStep, initialType]);
 
@@ -159,8 +159,8 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (activeType && (inputValue.trim() || imagePaths.length > 0)) {
-      onAnnotate(activeType, inputValue || undefined, imagePaths.length > 0 ? imagePaths : undefined);
+    if (activeType && (inputValue.trim() || images.length > 0)) {
+      onAnnotate(activeType, inputValue || undefined, images.length > 0 ? images : undefined);
     }
   };
 
@@ -238,21 +238,22 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
               if (e.key === "Escape") setStep("menu");
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                if (inputValue.trim() || imagePaths.length > 0) {
-                  onAnnotate(activeType!, inputValue || undefined, imagePaths.length > 0 ? imagePaths : undefined);
+                if (inputValue.trim() || images.length > 0) {
+                  onAnnotate(activeType!, inputValue || undefined, images.length > 0 ? images : undefined);
                 }
               }
             }}
           />
           <AttachmentsButton
-            paths={imagePaths}
-            onAdd={(path) => setImagePaths((prev) => [...prev, path])}
-            onRemove={(path) => setImagePaths((prev) => prev.filter((p) => p !== path))}
+            images={images}
+            onAdd={(img) => setImages((prev) => [...prev, img])}
+            onRemove={(path) => setImages((prev) => prev.filter((i) => i.path !== path))}
+            onRename={(path, newName) => setImages((prev) => prev.map((i) => i.path === path ? { ...i, name: newName } : i))}
             variant="inline"
           />
           <button
             type="submit"
-            disabled={!inputValue.trim() && imagePaths.length === 0}
+            disabled={!inputValue.trim() && images.length === 0}
             className="px-[15px] py-1 text-xs font-medium rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-opacity self-stretch"
           >
             Save

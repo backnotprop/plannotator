@@ -21,6 +21,10 @@ import {
   startReviewServer,
   handleReviewServerReady,
 } from "@plannotator/server/review";
+import {
+  startAnnotateServer,
+  handleAnnotateServerReady,
+} from "@plannotator/server/annotate";
 import { getGitContext, runGitDiff } from "@plannotator/server/git";
 
 // @ts-ignore - Bun import attribute for text
@@ -199,6 +203,81 @@ Do NOT proceed with implementation until your plan is approved.
                     {
                       type: "text",
                       text: `# Code Review Feedback\n\n${result.feedback}\n\nPlease address this feedback.`,
+                    },
+                  ],
+                },
+              });
+            } catch {
+              // Session may not be available
+            }
+          }
+        }
+      }
+
+      // Handle /plannotator-annotate command
+      const isAnnotateCommand = commandName === "plannotator-annotate";
+
+      if (isCommandEvent && isAnnotateCommand) {
+        // @ts-ignore - Event properties contain arguments
+        const filePath = event.properties?.arguments || event.arguments || "";
+
+        if (!filePath) {
+          ctx.client.app.log({
+            level: "error",
+            message: "Usage: /plannotator-annotate <file.md>",
+          });
+          return;
+        }
+
+        ctx.client.app.log({
+          level: "info",
+          message: `Opening annotation UI for ${filePath}...`,
+        });
+
+        // Resolve to absolute path
+        const path = await import("path");
+        const absolutePath = path.resolve(filePath);
+
+        // Read the markdown file
+        const file = Bun.file(absolutePath);
+        if (!(await file.exists())) {
+          ctx.client.app.log({
+            level: "error",
+            message: `File not found: ${absolutePath}`,
+          });
+          return;
+        }
+        const markdown = await file.text();
+
+        // Start annotate server (reuses plan editor HTML)
+        const server = await startAnnotateServer({
+          markdown,
+          filePath: absolutePath,
+          origin: "opencode",
+          sharingEnabled: await getSharingEnabled(),
+          shareBaseUrl: getShareBaseUrl(),
+          htmlContent: htmlContent,
+          onReady: handleAnnotateServerReady,
+        });
+
+        const result = await server.waitForDecision();
+        await Bun.sleep(1500);
+        server.stop();
+
+        // Send feedback back to the session if provided
+        if (result.feedback) {
+          // @ts-ignore - Event properties contain sessionID for command.executed events
+          const sessionId = event.properties?.sessionID;
+
+          if (sessionId) {
+            try {
+              await ctx.client.session.prompt({
+                path: { id: sessionId },
+                body: {
+                  parts: [
+                    {
+                      type: "text",
+                      text: `# Markdown Annotations\n\nFile: ${absolutePath}\n\n${result.feedback}\n\nPlease address the annotation feedback above.`,
                     },
                   ],
                 },

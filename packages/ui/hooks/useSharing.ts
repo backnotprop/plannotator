@@ -8,7 +8,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { Annotation } from '../types';
+import { Annotation, type ImageAttachment } from '../types';
 import {
   parseShareHash,
   generateShareUrl,
@@ -41,7 +41,7 @@ interface UseSharingResult {
   pendingSharedAnnotations: Annotation[] | null;
 
   /** Global attachments loaded from share */
-  sharedGlobalAttachments: string[] | null;
+  sharedGlobalAttachments: ImageAttachment[] | null;
 
   /** Call after applying shared annotations to clear the pending state */
   clearPendingSharedAnnotations: () => void;
@@ -53,13 +53,30 @@ interface UseSharingResult {
   importFromShareUrl: (url: string) => Promise<ImportResult>;
 }
 
+/**
+ * Parse SharePayload.g (which can be old string[] or new [path,name][] format) into ImageAttachment[]
+ */
+function parseGlobalAttachments(g: unknown[] | undefined): ImageAttachment[] {
+  if (!g?.length) return [];
+  return g.map((item, idx) => {
+    if (typeof item === 'string') {
+      const name = item.split('/').pop()?.replace(/\.[^.]+$/, '') || `image-${idx + 1}`;
+      return { path: item, name };
+    }
+    if (Array.isArray(item) && item.length >= 2) {
+      return { path: item[0] as string, name: item[1] as string };
+    }
+    return { path: String(item), name: `image-${idx + 1}` };
+  });
+}
+
 export function useSharing(
   markdown: string,
   annotations: Annotation[],
-  globalAttachments: string[],
+  globalAttachments: ImageAttachment[],
   setMarkdown: (m: string) => void,
   setAnnotations: (a: Annotation[]) => void,
-  setGlobalAttachments: (g: string[]) => void,
+  setGlobalAttachments: (g: ImageAttachment[]) => void,
   onSharedLoad?: () => void,
   shareBaseUrl?: string
 ): UseSharingResult {
@@ -68,7 +85,7 @@ export function useSharing(
   const [shareUrl, setShareUrl] = useState('');
   const [shareUrlSize, setShareUrlSize] = useState('');
   const [pendingSharedAnnotations, setPendingSharedAnnotations] = useState<Annotation[] | null>(null);
-  const [sharedGlobalAttachments, setSharedGlobalAttachments] = useState<string[] | null>(null);
+  const [sharedGlobalAttachments, setSharedGlobalAttachments] = useState<ImageAttachment[] | null>(null);
 
   const clearPendingSharedAnnotations = useCallback(() => {
     setPendingSharedAnnotations(null);
@@ -90,8 +107,9 @@ export function useSharing(
 
         // Restore global attachments if present
         if (payload.g?.length) {
-          setGlobalAttachments(payload.g);
-          setSharedGlobalAttachments(payload.g);
+          const parsed = parseGlobalAttachments(payload.g);
+          setGlobalAttachments(parsed);
+          setSharedGlobalAttachments(parsed);
         }
 
         // Store for later application to DOM
@@ -200,11 +218,13 @@ export function useSharing(
 
         // Handle global attachments (deduplicate by path)
         if (payload.g?.length) {
-          const newPaths = payload.g.filter(p => !globalAttachments.includes(p));
-          if (newPaths.length > 0) {
-            setGlobalAttachments([...globalAttachments, ...newPaths]);
+          const parsed = parseGlobalAttachments(payload.g);
+          const existingPaths = new Set(globalAttachments.map(g => g.path));
+          const newAttachments = parsed.filter(p => !existingPaths.has(p.path));
+          if (newAttachments.length > 0) {
+            setGlobalAttachments([...globalAttachments, ...newAttachments]);
           }
-          setSharedGlobalAttachments(payload.g);
+          setSharedGlobalAttachments(parsed);
         }
       }
 

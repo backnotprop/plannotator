@@ -8,6 +8,7 @@
   "exports": {
     ".": "./index.ts",
     "./review": "./review.ts",
+    "./annotate": "./annotate.ts",
     "./remote": "./remote.ts",
     "./browser": "./browser.ts",
     "./storage": "./storage.ts",

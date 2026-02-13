@@ -1,4 +1,4 @@
-import { Block } from '../types';
+import { Block, type ImageAttachment } from '../types';
 
 /**
  * Parsed YAML frontmatter as key-value pairs.
@@ -243,7 +243,7 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
   return blocks;
 };
 
-export const exportDiff = (blocks: Block[], annotations: any[], globalAttachments: string[] = []): string => {
+export const exportDiff = (blocks: Block[], annotations: any[], globalAttachments: ImageAttachment[] = []): string => {
   if (annotations.length === 0 && globalAttachments.length === 0) {
     return 'No changes detected.';
   }
@@ -262,8 +262,8 @@ export const exportDiff = (blocks: Block[], annotations: any[], globalAttachment
   if (globalAttachments.length > 0) {
     output += `## Reference Images\n`;
     output += `Please review these reference images (use the Read tool to view):\n`;
-    globalAttachments.forEach((path, idx) => {
-      output += `${idx + 1}. \`${path}\`\n`;
+    globalAttachments.forEach((img, idx) => {
+      output += `${idx + 1}. [${img.name}] \`${img.path}\`\n`;
     });
     output += `\n`;
   }
@@ -307,10 +307,10 @@ export const exportDiff = (blocks: Block[], annotations: any[], globalAttachment
     }
 
     // Add attached images for this annotation
-    if (ann.imagePaths && ann.imagePaths.length > 0) {
+    if (ann.images && ann.images.length > 0) {
       output += `**Attached images:**\n`;
-      ann.imagePaths.forEach((path: string) => {
-        output += `- \`${path}\`\n`;
+      ann.images.forEach((img: ImageAttachment) => {
+        output += `- [${img.name}] \`${img.path}\`\n`;
       });
     }
 

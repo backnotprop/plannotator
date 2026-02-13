@@ -8,20 +8,46 @@
  * Inspired by textarea.my's approach.
  */
 
-import { Annotation, AnnotationType } from '../types';
+import { Annotation, AnnotationType, type ImageAttachment } from '../types';
 
-// Minimal shareable annotation format: [type, originalText, text?, author?, imagePaths?]
+// Image in shareable format: plain string (old) or [path, name] tuple (new)
+type ShareableImage = string | [string, string];
+
+// Minimal shareable annotation format: [type, originalText, text?, author?, images?]
 export type ShareableAnnotation =
-  | ['D', string, string | null, string[]?]                    // Deletion: type, original, author, images
-  | ['R', string, string, string | null, string[]?]            // Replacement: type, original, replacement, author, images
-  | ['C', string, string, string | null, string[]?]            // Comment: type, original, comment, author, images
-  | ['I', string, string, string | null, string[]?]            // Insertion: type, context, new text, author, images
-  | ['G', string, string | null, string[]?];                   // Global Comment: type, comment, author, images
+  | ['D', string, string | null, ShareableImage[]?]             // Deletion: type, original, author, images
+  | ['R', string, string, string | null, ShareableImage[]?]     // Replacement: type, original, replacement, author, images
+  | ['C', string, string, string | null, ShareableImage[]?]     // Comment: type, original, comment, author, images
+  | ['I', string, string, string | null, ShareableImage[]?]     // Insertion: type, context, new text, author, images
+  | ['G', string, string | null, ShareableImage[]?];            // Global Comment: type, comment, author, images
 
 export interface SharePayload {
   p: string;  // plan markdown
   a: ShareableAnnotation[];
-  g?: string[];  // global attachments (image paths)
+  g?: ShareableImage[];  // global attachments (path strings or [path, name] tuples)
+}
+
+/**
+ * Convert ShareableImage[] to ImageAttachment[] (handles old plain-string format)
+ */
+function parseShareableImages(raw: ShareableImage[] | undefined): ImageAttachment[] | undefined {
+  if (!raw?.length) return undefined;
+  return raw.map(img => {
+    if (typeof img === 'string') {
+      // Old format: plain path string — derive name from filename
+      const name = img.split('/').pop()?.replace(/\.[^.]+$/, '') || 'image';
+      return { path: img, name };
+    }
+    return { path: img[0], name: img[1] };
+  });
+}
+
+/**
+ * Convert ImageAttachment[] to ShareableImage[] for compact serialization
+ */
+function toShareableImages(images: ImageAttachment[] | undefined): ShareableImage[] | undefined {
+  if (!images?.length) return undefined;
+  return images.map(img => [img.path, img.name]);
 }
 
 /**
@@ -76,7 +102,7 @@ export async function decompress(b64: string): Promise<SharePayload> {
 export function toShareable(annotations: Annotation[]): ShareableAnnotation[] {
   return annotations.map(ann => {
     const author = ann.author || null;
-    const images = ann.imagePaths?.length ? ann.imagePaths : undefined;
+    const images = toShareableImages(ann.images);
 
     // Handle GLOBAL_COMMENT specially - it starts with 'G' (from GLOBAL_COMMENT)
     if (ann.type === AnnotationType.GLOBAL_COMMENT) {
@@ -115,7 +141,7 @@ export function fromShareable(data: ShareableAnnotation[]): Annotation[] {
     if (type === 'G') {
       const text = item[1] as string;
       const author = item[2] as string | null;
-      const imagePaths = item[3] as string[] | undefined;
+      const rawImages = item[3] as ShareableImage[] | undefined;
 
       return {
         id: `shared-${index}-${Date.now()}`,
@@ -127,7 +153,7 @@ export function fromShareable(data: ShareableAnnotation[]): Annotation[] {
         originalText: '',
         createdA: Date.now() + index,
         author: author || undefined,
-        imagePaths: imagePaths?.length ? imagePaths : undefined,
+        images: parseShareableImages(rawImages),
       };
     }
 
@@ -136,7 +162,7 @@ export function fromShareable(data: ShareableAnnotation[]): Annotation[] {
     // For others: [type, original, text, author, images?]
     const text = type === 'D' ? undefined : item[2] as string;
     const author = type === 'D' ? item[2] as string | null : item[3] as string | null;
-    const imagePaths = type === 'D' ? item[3] as string[] | undefined : item[4] as string[] | undefined;
+    const rawImages = type === 'D' ? item[3] as ShareableImage[] | undefined : item[4] as ShareableImage[] | undefined;
 
     return {
       id: `shared-${index}-${Date.now()}`,
@@ -148,7 +174,7 @@ export function fromShareable(data: ShareableAnnotation[]): Annotation[] {
       originalText,
       createdA: Date.now() + index,  // Preserve order
       author: author || undefined,
-      imagePaths: imagePaths?.length ? imagePaths : undefined,
+      images: parseShareableImages(rawImages),
       // startMeta/endMeta will be set by web-highlighter
     };
   });
@@ -160,13 +186,13 @@ export function fromShareable(data: ShareableAnnotation[]): Annotation[] {
 export async function generateShareUrl(
   markdown: string,
   annotations: Annotation[],
-  globalAttachments?: string[],
+  globalAttachments?: ImageAttachment[],
   baseUrl: string = 'https://share.plannotator.ai'
 ): Promise<string> {
   const payload: SharePayload = {
     p: markdown,
     a: toShareable(annotations),
-    g: globalAttachments?.length ? globalAttachments : undefined,
+    g: globalAttachments?.length ? toShareableImages(globalAttachments) : undefined,
   };
 
   const hash = await compress(payload);

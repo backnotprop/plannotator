@@ -394,15 +394,17 @@ const AnnotationCard: React.FC<{
       )}
 
       {/* Attached Images */}
-      {annotation.imagePaths && annotation.imagePaths.length > 0 && (
+      {annotation.images && annotation.images.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
-          {annotation.imagePaths.map((path, idx) => (
-            <ImageThumbnail
-              key={idx}
-              path={path}
-              size="sm"
-              showRemove={false}
-            />
+          {annotation.images.map((img, idx) => (
+            <div key={idx} className="text-center">
+              <ImageThumbnail
+                path={img.path}
+                size="sm"
+                showRemove={false}
+              />
+              <div className="text-[9px] text-muted-foreground truncate max-w-[3rem]" title={img.name}>{img.name}</div>
+            </div>
           ))}
         </div>
       )}

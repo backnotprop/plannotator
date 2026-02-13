@@ -8,6 +8,11 @@ export enum AnnotationType {
 
 export type EditorMode = 'selection' | 'comment' | 'redline';
 
+export interface ImageAttachment {
+  path: string;
+  name: string;
+}
+
 export interface Annotation {
   id: string;
   blockId: string; // Legacy - not used with web-highlighter
@@ -18,7 +23,7 @@ export interface Annotation {
   originalText: string; // The text that was selected
   createdA: number;
   author?: string; // Tater identity for collaborative sharing
-  imagePaths?: string[]; // Attached images (local paths or URLs)
+  images?: ImageAttachment[]; // Attached images with human-readable names
   // web-highlighter metadata for cross-element selections
   startMeta?: {
     parentTagName: string;
