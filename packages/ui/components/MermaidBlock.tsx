@@ -96,8 +96,9 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
         const id = `mermaid-${block.id}`;
         const { svg: renderedSvg } = await mermaid.render(id, block.content);
         const cleaned = renderedSvg
-          .replace(/ width="[^"]*"/, '')
-          .replace(/ height="[^"]*"/, '');
+          .replace(/ width="[^"]*"/, ' width="100%"')
+          .replace(/ height="[^"]*"/, ' height="100%"')
+          .replace(/ style="[^"]*"/, '');
         setSvg(cleaned);
         setError(null);
       } catch (err) {
