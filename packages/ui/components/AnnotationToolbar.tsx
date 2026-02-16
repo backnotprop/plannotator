@@ -5,6 +5,13 @@ import { AttachmentsButton } from "./AttachmentsButton";
 
 type PositionMode = 'center-above' | 'top-right';
 
+const isEditableElement = (node: EventTarget | Element | null): boolean => {
+  if (!(node instanceof Element)) return false;
+  if (node.matches('input, textarea, select, [role="textbox"]')) return true;
+  if (node.closest('[contenteditable]:not([contenteditable="false"])')) return true;
+  return (node as HTMLElement).isContentEditable;
+};
+
 interface AnnotationToolbarProps {
   element: HTMLElement;
   positionMode: PositionMode;
@@ -129,6 +136,9 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     if (step !== "menu") return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Protect global comment and any editable field focus from type-to-comment capture.
+      if (e.isComposing) return;
+      if (isEditableElement(e.target) || isEditableElement(document.activeElement)) return;
       // Escape closes the toolbar
       if (e.key === "Escape") { onClose(); return; }
       // Ignore if modifier keys are held (except shift for capitals)
@@ -146,7 +156,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [step]);
+  }, [step, onClose]);
 
   if (!position) return null;
 
