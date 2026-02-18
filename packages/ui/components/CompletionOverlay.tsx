@@ -63,6 +63,15 @@ export function CompletionOverlay({ submitted, title, subtitle, agentLabel }: Co
               </p>
               <p className="text-xs text-muted-foreground/60">You can change this in Settings.</p>
             </>
+          ) : state.phase === 'closeFailed' ? (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Could not close this tab automatically. Please close it manually.
+              </p>
+              <p className="text-xs text-muted-foreground/60">
+                Auto-close works when the tab is opened by {agentLabel}.
+              </p>
+            </>
           ) : (
             <>
               <p className="text-sm text-muted-foreground">
