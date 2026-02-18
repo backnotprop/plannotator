@@ -49,9 +49,9 @@ export async function openBrowser(url: string): Promise<boolean> {
     const wsl = await isWSL();
 
     if (browser) {
-      // Custom browser specified (PLANNOTATOR_BROWSER takes priority over BROWSER)
-      if (platform === "darwin") {
-        await $`open -a ${browser} ${url}`.quiet();
+      const plannotatorBrowser = process.env.PLANNOTATOR_BROWSER;
+      if (plannotatorBrowser && platform === "darwin") {
+        await $`open -a ${plannotatorBrowser} ${url}`.quiet();
       } else if (platform === "win32" || wsl) {
         await $`cmd.exe /c start "" ${browser} ${url}`.quiet();
       } else {
