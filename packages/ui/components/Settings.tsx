@@ -35,7 +35,7 @@ import {
   PERMISSION_MODE_OPTIONS,
   type PermissionMode,
 } from '../utils/permissionMode';
-import { getAutoCloseDelay, setAutoCloseDelay, type AutoCloseDelay } from '../utils/storage';
+import { getAutoCloseDelay, setAutoCloseDelay, AUTO_CLOSE_OPTIONS, type AutoCloseDelay } from '../utils/storage';
 import {
   getDefaultNotesApp,
   saveDefaultNotesApp,
@@ -384,17 +384,14 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                         }}
                         className="w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer"
                       >
-                        <option value="off">Off</option>
-                        <option value="0">Immediately</option>
-                        <option value="3">After 3 seconds</option>
-                        <option value="5">After 5 seconds</option>
+                        {AUTO_CLOSE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
                       </select>
                       <div className="text-[10px] text-muted-foreground/70">
-                        {autoCloseDelay === 'off'
-                          ? 'Tab stays open after submitting'
-                          : autoCloseDelay === '0'
-                            ? 'Tab closes immediately after submitting'
-                            : `Tab closes ${autoCloseDelay} seconds after submitting`}
+                        {AUTO_CLOSE_OPTIONS.find(o => o.value === autoCloseDelay)?.description}
                       </div>
                     </div>
                   </>

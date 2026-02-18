@@ -60,6 +60,13 @@ const AUTO_CLOSE_KEY = 'plannotator-auto-close';
 
 export type AutoCloseDelay = 'off' | '0' | '3' | '5';
 
+export const AUTO_CLOSE_OPTIONS: { value: AutoCloseDelay; label: string; description: string }[] = [
+  { value: 'off', label: 'Off', description: 'Tab stays open after submitting' },
+  { value: '0', label: 'Immediately', description: 'Tab closes immediately after submitting' },
+  { value: '3', label: 'After 3 seconds', description: 'Tab closes 3 seconds after submitting' },
+  { value: '5', label: 'After 5 seconds', description: 'Tab closes 5 seconds after submitting' },
+];
+
 export function getAutoCloseDelay(): AutoCloseDelay {
   const val = getItem(AUTO_CLOSE_KEY);
   if (val === '0' || val === '3' || val === '5') return val;
@@ -69,14 +76,6 @@ export function getAutoCloseDelay(): AutoCloseDelay {
 
 export function setAutoCloseDelay(delay: AutoCloseDelay): void {
   setItem(AUTO_CLOSE_KEY, delay);
-}
-
-export function getAutoClose(): boolean {
-  return getAutoCloseDelay() !== 'off';
-}
-
-export function setAutoClose(enabled: boolean): void {
-  setAutoCloseDelay(enabled ? '0' : 'off');
 }
 
 /**
