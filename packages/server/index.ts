@@ -244,7 +244,6 @@ export async function startPlannotatorServer(
             // Check for note integrations and optional feedback
             let feedback: string | undefined;
             let agentSwitch: string | undefined;
-            let requestedPermissionMode: string | undefined;
             let planSaveEnabled = true; // default to enabled for backwards compat
             let planSaveCustomPath: string | undefined;
             try {
@@ -254,7 +253,6 @@ export async function startPlannotatorServer(
                 feedback?: string;
                 agentSwitch?: string;
                 planSave?: { enabled: boolean; customPath?: string };
-                permissionMode?: string;
               };
 
               // Capture feedback if provided (for "approve with notes")
@@ -265,11 +263,6 @@ export async function startPlannotatorServer(
               // Capture agent switch setting for OpenCode
               if (body.agentSwitch) {
                 agentSwitch = body.agentSwitch;
-              }
-
-              // Capture permission mode from client request (Claude Code)
-              if (body.permissionMode) {
-                requestedPermissionMode = body.permissionMode;
               }
 
               // Capture plan save settings
@@ -312,9 +305,8 @@ export async function startPlannotatorServer(
               savedPath = saveFinalSnapshot(slug, "approved", plan, diff, planSaveCustomPath);
             }
 
-            // Use permission mode from client request if provided, otherwise fall back to hook input
-            const effectivePermissionMode = requestedPermissionMode || permissionMode;
-            resolveDecision({ approved: true, feedback, savedPath, agentSwitch, permissionMode: effectivePermissionMode });
+            // Always use the permission mode from the hook event (stdin), never from the browser
+            resolveDecision({ approved: true, feedback, savedPath, agentSwitch, permissionMode });
             return Response.json({ ok: true, savedPath });
           }
 
