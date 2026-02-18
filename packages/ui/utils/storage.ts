@@ -53,15 +53,30 @@ function escapeRegex(str: string): string {
 
 /**
  * Auto-close tab setting
+ * Values: 'off' | '0' (immediate) | '3' | '5' (seconds)
+ * Legacy 'true' maps to '0' for backward compatibility.
  */
 const AUTO_CLOSE_KEY = 'plannotator-auto-close';
 
+export type AutoCloseDelay = 'off' | '0' | '3' | '5';
+
+export function getAutoCloseDelay(): AutoCloseDelay {
+  const val = getItem(AUTO_CLOSE_KEY);
+  if (val === '0' || val === '3' || val === '5') return val;
+  if (val === 'true') return '0'; // backward compat
+  return 'off';
+}
+
+export function setAutoCloseDelay(delay: AutoCloseDelay): void {
+  setItem(AUTO_CLOSE_KEY, delay);
+}
+
 export function getAutoClose(): boolean {
-  return getItem(AUTO_CLOSE_KEY) === 'true';
+  return getAutoCloseDelay() !== 'off';
 }
 
 export function setAutoClose(enabled: boolean): void {
-  setItem(AUTO_CLOSE_KEY, String(enabled));
+  setAutoCloseDelay(enabled ? '0' : 'off');
 }
 
 /**
