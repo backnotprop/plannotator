@@ -14,6 +14,7 @@ import { isRemoteSession, getServerPort } from "./remote";
 import { openBrowser } from "./browser";
 import { type DiffType, type GitContext, runGitDiff } from "./git";
 import { getRepoInfo } from "./repo";
+import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -174,8 +175,12 @@ export async function startReviewServer(
             if (!imagePath) {
               return new Response("Missing path parameter", { status: 400 });
             }
+            const validation = validateImagePath(imagePath);
+            if (!validation.valid) {
+              return new Response(validation.error!, { status: 403 });
+            }
             try {
-              const file = Bun.file(imagePath);
+              const file = Bun.file(validation.resolved);
               if (!(await file.exists())) {
                 return new Response("File not found", { status: 404 });
               }
@@ -194,10 +199,12 @@ export async function startReviewServer(
                 return new Response("No file provided", { status: 400 });
               }
 
-              const ext = file.name.split(".").pop() || "png";
-              const tempDir = "/tmp/plannotator";
-              mkdirSync(tempDir, { recursive: true });
-              const tempPath = `${tempDir}/${crypto.randomUUID()}.${ext}`;
+              const extResult = validateUploadExtension(file.name);
+              if (!extResult.valid) {
+                return Response.json({ error: extResult.error }, { status: 400 });
+              }
+              mkdirSync(UPLOAD_DIR, { recursive: true });
+              const tempPath = `${UPLOAD_DIR}/${crypto.randomUUID()}.${extResult.ext}`;
 
               await Bun.write(tempPath, file);
               return Response.json({ path: tempPath, originalName: file.name });
