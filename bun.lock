@@ -1,6 +1,5 @@
 {
   "lockfileVersion": 1,
-  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "plannotator",
@@ -53,7 +52,7 @@
     },
     "apps/opencode-plugin": {
       "name": "@plannotator/opencode",
-      "version": "0.8.1",
+      "version": "0.8.2",
       "dependencies": {
         "@opencode-ai/plugin": "^1.1.10",
         "@plannotator/server": "workspace:*",
@@ -124,7 +123,7 @@
     },
     "packages/server": {
       "name": "@plannotator/server",
-      "version": "0.8.1",
+      "version": "0.8.2",
       "peerDependencies": {
         "bun": ">=1.0.0",
       },

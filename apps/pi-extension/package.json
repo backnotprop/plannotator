@@ -1,0 +1,15 @@
+{
+  "name": "@plannotator/pi-extension",
+  "version": "0.8.2",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./"]
+  },
+  "scripts": {
+    "build": "cp ../hook/dist/index.html plannotator.html && cp ../hook/dist/review.html review-editor.html"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.53.0"
+  }
+}
