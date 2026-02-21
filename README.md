@@ -26,11 +26,11 @@ Interactive Plan Review for AI Coding Agents. Mark up and refine your plans usin
 </table>
 
 
-**New:**
-
- - **Code Review** *(Jan 2026)* — Run `/plannotator-review` to review git diffs with inline annotations (select line numbers to annotate), switch between diff views, and send feedback to your agent
- - Attach and annotate images with your feedback (pen, arrow, circle tools)
- - Auto-save approved plans to [Obsidian](https://obsidian.md/) and [Bear Notes](https://bear.app/)
+| | |
+|---|---|
+| **Visual Plan Review** | Approve or deny agent plans with inline annotations |
+| **Code Review** | Review git diffs with line-level annotations |
+| **Annotate Any File** | Annotate any markdown file and send feedback to your agent |
 
 ## Install
 
