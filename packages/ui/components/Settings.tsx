@@ -35,7 +35,7 @@ import {
   PERMISSION_MODE_OPTIONS,
   type PermissionMode,
 } from '../utils/permissionMode';
-import { getAutoClose, setAutoClose } from '../utils/storage';
+import { getAutoCloseDelay, setAutoCloseDelay, AUTO_CLOSE_OPTIONS, type AutoCloseDelay } from '../utils/storage';
 import {
   getDefaultNotesApp,
   saveDefaultNotesApp,
@@ -72,7 +72,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const [uiPrefs, setUiPrefs] = useState<UIPreferences>({ tocEnabled: true, stickyActionsEnabled: true });
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
   const [agentWarning, setAgentWarning] = useState<string | null>(null);
-  const [autoClose, setAutoCloseState] = useState(false);
+  const [autoCloseDelay, setAutoCloseDelayState] = useState<AutoCloseDelay>('off');
   const [defaultNotesApp, setDefaultNotesApp] = useState<DefaultNotesApp>('ask');
 
   // Fetch available agents for OpenCode
@@ -96,7 +96,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       setPlanSave(getPlanSaveSettings());
       setUiPrefs(getUIPreferences());
       setPermissionMode(getPermissionModeSettings().mode);
-      setAutoCloseState(getAutoClose());
+      setAutoCloseDelayState(getAutoCloseDelay());
       setDefaultNotesApp(getDefaultNotesApp());
 
       // Validate agent setting when dialog opens
@@ -373,31 +373,26 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                     <div className="border-t border-border" />
 
                     {/* Auto-close Tab */}
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="text-sm font-medium">Auto-close Tab</div>
-                        <div className="text-xs text-muted-foreground">
-                          Close browser tab after submitting
-                        </div>
-                      </div>
-                      <button
-                        role="switch"
-                        aria-checked={autoClose}
-                        onClick={() => {
-                          const next = !autoClose;
-                          setAutoCloseState(next);
-                          setAutoClose(next);
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">Auto-close Tab</div>
+                      <select
+                        value={autoCloseDelay}
+                        onChange={(e) => {
+                          const next = e.target.value as AutoCloseDelay;
+                          setAutoCloseDelayState(next);
+                          setAutoCloseDelay(next);
                         }}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                          autoClose ? 'bg-primary' : 'bg-muted'
-                        }`}
+                        className="w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer"
                       >
-                        <span
-                          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
-                            autoClose ? 'translate-x-6' : 'translate-x-1'
-                          }`}
-                        />
-                      </button>
+                        {AUTO_CLOSE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="text-[10px] text-muted-foreground/70">
+                        {AUTO_CLOSE_OPTIONS.find(o => o.value === autoCloseDelay)?.description}
+                      </div>
                     </div>
                   </>
                 )}

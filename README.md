@@ -4,7 +4,7 @@
 
 # Plannotator
 
-Interactive Plan Review for AI Coding Agents. Mark up and refine your plans using a visual UI, share for team collaboration, and seamlessly integrate with **Claude Code** and **OpenCode**.
+Interactive Plan Review for AI Coding Agents. Mark up and refine your plans using a visual UI, share for team collaboration, and seamlessly integrate with **Claude Code**, **OpenCode**, and **Pi**.
 
 <table>
 <tr>
@@ -26,11 +26,19 @@ Interactive Plan Review for AI Coding Agents. Mark up and refine your plans usin
 </table>
 
 
-**New:**
+### Features
 
- - **Code Review** *(Jan 2026)* — Run `/plannotator-review` to review git diffs with inline annotations (select line numbers to annotate), switch between diff views, and send feedback to your agent
- - Attach and annotate images with your feedback (pen, arrow, circle tools)
- - Auto-save approved plans to [Obsidian](https://obsidian.md/) and [Bear Notes](https://bear.app/)
+<table>
+<tr><td nowrap><strong>Visual Plan Review</strong></td><td nowrap>Built-in hook</td><td>Approve or deny agent plans with inline annotations</td></tr>
+<tr><td nowrap><strong>Code Review</strong></td><td nowrap><code>/plannotator-review</code></td><td>Review git diffs with line-level annotations</td></tr>
+<tr><td nowrap><strong>Annotate Any File</strong></td><td nowrap><code>/plannotator-annotate &lt;file&gt;</code></td><td>Annotate any markdown file and send feedback to your agent</td></tr>
+</table>
+
+## Install
+
+- [Claude Code](#install-for-claude-code)
+- [OpenCode](#install-for-opencode)
+- [Pi](#install-for-pi)
 
 ## Install for Claude Code
 
@@ -83,6 +91,18 @@ irm https://plannotator.ai/install.ps1 | iex
 ```
 
 This also clears any cached plugin versions. Then restart OpenCode.
+
+---
+
+## Install for Pi
+
+```bash
+pi install npm:@plannotator/pi-extension
+```
+
+Then start Pi with `--plan` to enter plan mode, or toggle it during a session with `/plannotator`.
+
+See [apps/pi-extension/README.md](apps/pi-extension/README.md) for full usage details, commands, and flags.
 
 ---
 

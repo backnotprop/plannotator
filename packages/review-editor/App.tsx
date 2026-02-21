@@ -4,7 +4,8 @@ import { ModeToggle } from '@plannotator/ui/components/ModeToggle';
 import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
 import { Settings } from '@plannotator/ui/components/Settings';
 import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
-import { storage, getAutoClose } from '@plannotator/ui/utils/storage';
+import { storage } from '@plannotator/ui/utils/storage';
+import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { getIdentity } from '@plannotator/ui/utils/identity';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata } from '@plannotator/ui/types';
@@ -425,9 +426,6 @@ const ReviewApp: React.FC = () => {
         }),
       });
       if (res.ok) {
-        if (getAutoClose()) {
-          window.close();
-        }
         setSubmitted('feedback');
       } else {
         throw new Error('Failed to send');
@@ -453,9 +451,6 @@ const ReviewApp: React.FC = () => {
         }),
       });
       if (res.ok) {
-        if (getAutoClose()) {
-          window.close();
-        }
         setSubmitted('approved');
       } else {
         throw new Error('Failed to send');
@@ -874,47 +869,16 @@ const ReviewApp: React.FC = () => {
         />
 
         {/* Completion overlay - shown after approve/feedback */}
-        {submitted && (
-          <div className="fixed inset-0 z-[100] bg-background flex items-center justify-center">
-            <div className="text-center space-y-6 max-w-md px-8">
-              <div className={`mx-auto w-16 h-16 rounded-full flex items-center justify-center ${
-                submitted === 'approved'
-                  ? 'bg-success/20 text-success'
-                  : 'bg-accent/20 text-accent'
-              }`}>
-                {submitted === 'approved' ? (
-                  <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                ) : (
-                  <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                  </svg>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <h2 className="text-xl font-semibold text-foreground">
-                  {submitted === 'approved' ? 'Changes Approved' : 'Feedback Sent'}
-                </h2>
-                <p className="text-muted-foreground">
-                  {submitted === 'approved'
-                    ? `${origin === 'claude-code' ? 'Claude Code' : 'OpenCode'} will proceed with the changes.`
-                    : `${origin === 'claude-code' ? 'Claude Code' : 'OpenCode'} will address your review feedback.`}
-                </p>
-              </div>
-
-              <div className="pt-4 border-t border-border space-y-2">
-                <p className="text-sm text-muted-foreground">
-                  You can close this tab and return to <span className="text-foreground font-medium">{origin === 'claude-code' ? 'Claude Code' : 'OpenCode'}</span>.
-                </p>
-                <p className="text-xs text-muted-foreground/60">
-                  Your response has been sent.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
+        <CompletionOverlay
+          submitted={submitted}
+          title={submitted === 'approved' ? 'Changes Approved' : 'Feedback Sent'}
+          subtitle={
+            submitted === 'approved'
+              ? `${origin === 'claude-code' ? 'Claude Code' : 'OpenCode'} will proceed with the changes.`
+              : `${origin === 'claude-code' ? 'Claude Code' : 'OpenCode'} will address your review feedback.`
+          }
+          agentLabel={origin === 'claude-code' ? 'Claude Code' : 'OpenCode'}
+        />
 
         {/* Update notification */}
         <UpdateBanner origin={origin} />

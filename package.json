@@ -1,6 +1,6 @@
 {
   "name": "plannotator",
-  "version": "0.8.2",
+  "version": "0.8.5",
   "private": true,
   "description": "Interactive Plan Review for Claude Code - annotate plans visually, share with team, automatically send feedback",
   "author": "backnotprop",
@@ -24,6 +24,7 @@
     "build:marketing": "bun run --cwd apps/marketing build",
     "build:opencode": "bun run --cwd apps/opencode-plugin build",
     "build:review": "bun run --cwd apps/review build",
+    "build:pi": "bun run build:review && bun run build:hook && bun run --cwd apps/pi-extension build",
     "build": "bun run build:hook && bun run build:opencode",
     "test": "bun test"
   },
