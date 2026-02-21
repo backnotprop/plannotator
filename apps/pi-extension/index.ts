@@ -52,7 +52,7 @@ try {
 }
 
 // Tool sets by phase
-const PLANNING_TOOLS = ["read", "bash", "grep", "find", "ls", "write", "exit_plan_mode"];
+const PLANNING_TOOLS = ["read", "bash", "grep", "find", "ls", "write", "edit", "exit_plan_mode"];
 const EXECUTION_TOOLS = ["read", "bash", "edit", "write"];
 const NORMAL_TOOLS = ["read", "bash", "edit", "write"];
 
@@ -265,9 +265,10 @@ export default function plannotator(pi: ExtensionAPI): void {
     name: "exit_plan_mode",
     label: "Exit Plan Mode",
     description:
-      "Request approval to exit plan mode and begin execution. " +
-      "Call this after writing your plan to PLAN.md. " +
-      "The user will review the plan in a visual browser UI and can approve, deny with feedback, or annotate it.",
+      "Submit your plan for user review. " +
+      "Call this after drafting or revising your plan in PLAN.md. " +
+      "The user will review the plan in a visual browser UI and can approve, deny with feedback, or annotate it. " +
+      "If denied, use the edit tool to make targeted revisions (not write), then call this again.",
     parameters: Type.Object({
       summary: Type.Optional(
         Type.String({ description: "Brief summary of the plan for the user's review" }),
@@ -387,7 +388,7 @@ export default function plannotator(pi: ExtensionAPI): void {
         content: [
           {
             type: "text",
-            text: `Plan not approved.\n\nUser feedback: ${feedbackText}\n\nPlease revise ${planFilePath} and call exit_plan_mode again when ready.`,
+            text: `Plan not approved.\n\nUser feedback: ${feedbackText}\n\nRevise the plan:\n1. Read ${planFilePath} to see the current plan.\n2. Use the edit tool to make targeted changes addressing the feedback above — do not rewrite the entire file.\n3. Call exit_plan_mode again when ready.`,
           },
         ],
         details: { approved: false, feedback: feedbackText },
@@ -423,10 +424,14 @@ export default function plannotator(pi: ExtensionAPI): void {
     }
 
     if (event.toolName === "edit") {
-      return {
-        block: true,
-        reason: "Plannotator: edit is not available during planning. Use write to update your plan file.",
-      };
+      const targetPath = resolve(ctx.cwd, event.input.path as string);
+      const allowedPath = resolvePlanPath(ctx.cwd);
+      if (targetPath !== allowedPath) {
+        return {
+          block: true,
+          reason: `Plannotator: edits are restricted to ${planFilePath} during planning. Blocked: ${event.input.path}`,
+        };
+      }
     }
   });
 
@@ -437,21 +442,25 @@ export default function plannotator(pi: ExtensionAPI): void {
         message: {
           customType: "plannotator-context",
           content: `[PLANNOTATOR - PLANNING PHASE]
-You are in plan mode — a read-only exploration mode for safe code analysis.
+You are in plan mode — a read-only exploration phase for understanding the codebase before proposing changes.
 
-Available tools: read, bash (read-only commands only), grep, find, ls, write (${planFilePath} only), exit_plan_mode
-Restricted: edit is disabled, write only works for ${planFilePath}, bash only allows read-only commands.
+Available tools: read, bash (read-only commands only), grep, find, ls, write (${planFilePath} only), edit (${planFilePath} only), exit_plan_mode
+Restricted: write and edit only work on ${planFilePath}, bash only allows read-only commands. Source files cannot be modified.
 
-Workflow:
-1. Explore the codebase thoroughly using read, grep, find, ls, and bash.
-2. Write your plan to ${planFilePath} using markdown checklist format:
+## Drafting a new plan
+1. Explore the codebase using read, grep, find, ls, and bash.
+2. Draft your plan to ${planFilePath} using the write tool with markdown checklist format:
    - [ ] Step 1 description
    - [ ] Step 2 description
-   ...
-3. When your plan is complete, call exit_plan_mode to request approval.
-4. If denied, revise ${planFilePath} based on the feedback and call exit_plan_mode again.
+3. Call exit_plan_mode to submit the plan for review.
 
-Do NOT attempt to modify source files. Focus only on exploration and planning.`,
+## Revising after feedback
+When the user denies a plan with feedback:
+1. Read ${planFilePath} to see the current plan.
+2. Use the edit tool to make targeted changes based on the feedback — do NOT rewrite the entire file.
+3. Call exit_plan_mode again to resubmit.
+
+Only use write for the initial draft. For all subsequent revisions, use edit to make precise, incremental changes.`,
           display: false,
         },
       };
