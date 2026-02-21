@@ -2,12 +2,33 @@
   "name": "@plannotator/pi-extension",
   "version": "0.8.2",
   "type": "module",
-  "keywords": ["pi-package"],
+  "description": "Plannotator extension for Pi coding agent - interactive plan review with visual annotation",
+  "author": "backnotprop",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/backnotprop/plannotator.git",
+    "directory": "apps/pi-extension"
+  },
+  "homepage": "https://github.com/backnotprop/plannotator",
+  "bugs": {
+    "url": "https://github.com/backnotprop/plannotator/issues"
+  },
+  "keywords": ["pi-package", "plannotator", "plan-review", "ai-agent", "coding-agent"],
   "pi": {
     "extensions": ["./"]
   },
+  "files": [
+    "index.ts",
+    "server.ts",
+    "utils.ts",
+    "README.md",
+    "plannotator.html",
+    "review-editor.html"
+  ],
   "scripts": {
-    "build": "cp ../hook/dist/index.html plannotator.html && cp ../hook/dist/review.html review-editor.html"
+    "build": "cp ../hook/dist/index.html plannotator.html && cp ../hook/dist/review.html review-editor.html",
+    "prepublishOnly": "cd ../.. && bun run build:pi"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": ">=0.53.0"

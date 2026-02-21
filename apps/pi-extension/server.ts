@@ -42,14 +42,28 @@ function listenOnRandomPort(server: Server): number {
   return addr.port;
 }
 
-/** Open URL in system browser (Node-compatible, no Bun $ dependency). */
+/**
+ * Open URL in system browser (Node-compatible, no Bun $ dependency).
+ * Honors PLANNOTATOR_BROWSER and BROWSER env vars, matching packages/server/browser.ts.
+ */
 export function openBrowser(url: string): void {
   try {
+    const browser = process.env.PLANNOTATOR_BROWSER || process.env.BROWSER;
     const platform = process.platform;
-    if (platform === "darwin") {
-      execSync(`open ${JSON.stringify(url)}`, { stdio: "ignore" });
-    } else if (platform === "win32" || os.release().toLowerCase().includes("microsoft")) {
+    const wsl = platform === "linux" && os.release().toLowerCase().includes("microsoft");
+
+    if (browser) {
+      if (process.env.PLANNOTATOR_BROWSER && platform === "darwin") {
+        execSync(`open -a ${JSON.stringify(browser)} ${JSON.stringify(url)}`, { stdio: "ignore" });
+      } else if (platform === "win32" || wsl) {
+        execSync(`cmd.exe /c start "" ${JSON.stringify(browser)} ${JSON.stringify(url)}`, { stdio: "ignore" });
+      } else {
+        execSync(`${JSON.stringify(browser)} ${JSON.stringify(url)}`, { stdio: "ignore" });
+      }
+    } else if (platform === "win32" || wsl) {
       execSync(`cmd.exe /c start "" ${JSON.stringify(url)}`, { stdio: "ignore" });
+    } else if (platform === "darwin") {
+      execSync(`open ${JSON.stringify(url)}`, { stdio: "ignore" });
     } else {
       execSync(`xdg-open ${JSON.stringify(url)}`, { stdio: "ignore" });
     }
