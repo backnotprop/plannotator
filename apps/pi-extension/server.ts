@@ -9,6 +9,8 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { execSync } from "node:child_process";
 import os from "node:os";
+import { mkdirSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
+import { join, basename } from "node:path";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -72,6 +74,123 @@ export function openBrowser(url: string): void {
   }
 }
 
+// ── Version History (Node-compatible, duplicated from packages/server) ──
+
+function sanitizeTag(name: string): string | null {
+  if (!name || typeof name !== "string") return null;
+  const sanitized = name
+    .toLowerCase()
+    .trim()
+    .replace(/[\s_]+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 30);
+  return sanitized.length >= 2 ? sanitized : null;
+}
+
+function extractFirstHeading(markdown: string): string | null {
+  const match = markdown.match(/^#\s+(.+)$/m);
+  if (!match) return null;
+  return match[1].trim();
+}
+
+function generateSlug(plan: string): string {
+  const date = new Date().toISOString().split("T")[0];
+  const heading = extractFirstHeading(plan);
+  const slug = heading ? sanitizeTag(heading) : null;
+  return slug ? `${date}-${slug}` : `${date}-plan`;
+}
+
+function detectProjectName(): string {
+  try {
+    const toplevel = execSync("git rev-parse --show-toplevel", {
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    }).trim();
+    const name = basename(toplevel);
+    return sanitizeTag(name) ?? "_unknown";
+  } catch {
+    // Not a git repo — fall back to cwd
+  }
+  try {
+    const name = basename(process.cwd());
+    return sanitizeTag(name) ?? "_unknown";
+  } catch {
+    return "_unknown";
+  }
+}
+
+function getHistoryDir(project: string, slug: string): string {
+  const historyDir = join(os.homedir(), ".plannotator", "history", project, slug);
+  mkdirSync(historyDir, { recursive: true });
+  return historyDir;
+}
+
+function getNextVersionNumber(historyDir: string): number {
+  try {
+    const entries = readdirSync(historyDir);
+    let max = 0;
+    for (const entry of entries) {
+      const match = entry.match(/^(\d+)\.md$/);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (num > max) max = num;
+      }
+    }
+    return max + 1;
+  } catch {
+    return 1;
+  }
+}
+
+function saveToHistory(
+  project: string,
+  slug: string,
+  plan: string,
+): { version: number; path: string; isNew: boolean } {
+  const historyDir = getHistoryDir(project, slug);
+  const nextVersion = getNextVersionNumber(historyDir);
+  if (nextVersion > 1) {
+    const latestPath = join(historyDir, `${String(nextVersion - 1).padStart(3, "0")}.md`);
+    try {
+      const existing = readFileSync(latestPath, "utf-8");
+      if (existing === plan) {
+        return { version: nextVersion - 1, path: latestPath, isNew: false };
+      }
+    } catch { /* proceed with saving */ }
+  }
+  const fileName = `${String(nextVersion).padStart(3, "0")}.md`;
+  const filePath = join(historyDir, fileName);
+  writeFileSync(filePath, plan, "utf-8");
+  return { version: nextVersion, path: filePath, isNew: true };
+}
+
+function getPlanVersion(
+  project: string,
+  slug: string,
+  version: number,
+): string | null {
+  const historyDir = join(os.homedir(), ".plannotator", "history", project, slug);
+  const fileName = `${String(version).padStart(3, "0")}.md`;
+  const filePath = join(historyDir, fileName);
+  try {
+    return readFileSync(filePath, "utf-8");
+  } catch {
+    return null;
+  }
+}
+
+function getVersionCount(project: string, slug: string): number {
+  const historyDir = join(os.homedir(), ".plannotator", "history", project, slug);
+  try {
+    const entries = readdirSync(historyDir);
+    return entries.filter((e) => /^\d+\.md$/.test(e)).length;
+  } catch {
+    return 0;
+  }
+}
+
 // ── Plan Review Server ──────────────────────────────────────────────────
 
 export interface PlanServerResult {
@@ -86,6 +205,20 @@ export function startPlanReviewServer(options: {
   htmlContent: string;
   origin?: string;
 }): PlanServerResult {
+  // Version history
+  const slug = generateSlug(options.plan);
+  const project = detectProjectName();
+  const historyResult = saveToHistory(project, slug, options.plan);
+  const previousPlan =
+    historyResult.version > 1
+      ? getPlanVersion(project, slug, historyResult.version - 1)
+      : null;
+  const versionInfo = {
+    version: historyResult.version,
+    totalVersions: getVersionCount(project, slug),
+    project,
+  };
+
   let resolveDecision!: (result: { approved: boolean; feedback?: string }) => void;
   const decisionPromise = new Promise<{ approved: boolean; feedback?: string }>((r) => {
     resolveDecision = r;
@@ -94,8 +227,25 @@ export function startPlanReviewServer(options: {
   const server = createServer(async (req, res) => {
     const url = new URL(req.url!, `http://localhost`);
 
-    if (url.pathname === "/api/plan") {
-      json(res, { plan: options.plan, origin: options.origin ?? "pi" });
+    if (url.pathname === "/api/plan/version") {
+      const vParam = url.searchParams.get("v");
+      if (!vParam) {
+        json(res, { error: "Missing v parameter" }, 400);
+        return;
+      }
+      const v = parseInt(vParam, 10);
+      if (isNaN(v) || v < 1) {
+        json(res, { error: "Invalid version number" }, 400);
+        return;
+      }
+      const content = getPlanVersion(project, slug, v);
+      if (content === null) {
+        json(res, { error: "Version not found" }, 404);
+        return;
+      }
+      json(res, { plan: content, version: v });
+    } else if (url.pathname === "/api/plan") {
+      json(res, { plan: options.plan, origin: options.origin ?? "pi", previousPlan, versionInfo });
     } else if (url.pathname === "/api/approve" && req.method === "POST") {
       const body = await parseBody(req);
       resolveDecision({ approved: true, feedback: body.feedback as string | undefined });

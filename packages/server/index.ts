@@ -26,8 +26,12 @@ import {
   savePlan,
   saveAnnotations,
   saveFinalSnapshot,
+  saveToHistory,
+  getPlanVersion,
+  getVersionCount,
 } from "./storage";
 import { getRepoInfo } from "./repo";
+import { detectProjectName } from "./project";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -107,6 +111,29 @@ export async function startPlannotatorServer(
   // Detect repo info (cached for this session)
   const repoInfo = await getRepoInfo();
 
+  // Version history: save plan and detect previous version
+  const project = (await detectProjectName()) ?? "_unknown";
+  const historyResult = saveToHistory(project, slug, plan);
+  const previousPlan =
+    historyResult.version > 1
+      ? getPlanVersion(project, slug, historyResult.version - 1)
+      : null;
+  const versionInfo = {
+    version: historyResult.version,
+    totalVersions: getVersionCount(project, slug),
+    project,
+  };
+
+  if (historyResult.isNew) {
+    console.error(
+      `[History] Saved v${historyResult.version} for ${project}/${slug}`
+    );
+  } else {
+    console.error(
+      `[History] v${historyResult.version} unchanged for ${project}/${slug}`
+    );
+  }
+
   // Decision promise
   let resolveDecision: (result: {
     approved: boolean;
@@ -136,9 +163,26 @@ export async function startPlannotatorServer(
         async fetch(req) {
           const url = new URL(req.url);
 
+          // API: Get a specific plan version from history
+          if (url.pathname === "/api/plan/version") {
+            const vParam = url.searchParams.get("v");
+            if (!vParam) {
+              return new Response("Missing v parameter", { status: 400 });
+            }
+            const v = parseInt(vParam, 10);
+            if (isNaN(v) || v < 1) {
+              return new Response("Invalid version number", { status: 400 });
+            }
+            const content = getPlanVersion(project, slug, v);
+            if (content === null) {
+              return Response.json({ error: "Version not found" }, { status: 404 });
+            }
+            return Response.json({ plan: content, version: v });
+          }
+
           // API: Get plan content
           if (url.pathname === "/api/plan") {
-            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, repoInfo });
+            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, repoInfo, previousPlan, versionInfo });
           }
 
           // API: Serve images (local paths or temp uploads)

@@ -7,7 +7,7 @@
 
 import { homedir } from "os";
 import { join } from "path";
-import { mkdirSync, writeFileSync } from "fs";
+import { mkdirSync, writeFileSync, readFileSync, readdirSync } from "fs";
 import { sanitizeTag } from "./project";
 
 /**
@@ -98,4 +98,104 @@ export function saveFinalSnapshot(
 
   writeFileSync(filePath, content, "utf-8");
   return filePath;
+}
+
+// --- Version History ---
+
+/**
+ * Get the history directory for a project/slug combination, creating it if needed.
+ * History is always stored in ~/.plannotator/history/{project}/{slug}/.
+ * Not affected by the customPath setting (that only affects decision saves).
+ */
+export function getHistoryDir(project: string, slug: string): string {
+  const historyDir = join(homedir(), ".plannotator", "history", project, slug);
+  mkdirSync(historyDir, { recursive: true });
+  return historyDir;
+}
+
+/**
+ * Determine the next version number by scanning existing files.
+ * Returns 1 if no versions exist, otherwise max + 1.
+ */
+function getNextVersionNumber(historyDir: string): number {
+  try {
+    const entries = readdirSync(historyDir);
+    let max = 0;
+    for (const entry of entries) {
+      const match = entry.match(/^(\d+)\.md$/);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (num > max) max = num;
+      }
+    }
+    return max + 1;
+  } catch {
+    return 1;
+  }
+}
+
+/**
+ * Save a plan version to the history directory.
+ * Deduplication: if the latest version has identical content, skip saving.
+ * Returns the version number, file path, and whether a new file was created.
+ */
+export function saveToHistory(
+  project: string,
+  slug: string,
+  plan: string
+): { version: number; path: string; isNew: boolean } {
+  const historyDir = getHistoryDir(project, slug);
+  const nextVersion = getNextVersionNumber(historyDir);
+
+  // Deduplicate: check if latest version has identical content
+  if (nextVersion > 1) {
+    const latestPath = join(historyDir, `${String(nextVersion - 1).padStart(3, "0")}.md`);
+    try {
+      const existing = readFileSync(latestPath, "utf-8");
+      if (existing === plan) {
+        return { version: nextVersion - 1, path: latestPath, isNew: false };
+      }
+    } catch {
+      // File read failed, proceed with saving
+    }
+  }
+
+  const fileName = `${String(nextVersion).padStart(3, "0")}.md`;
+  const filePath = join(historyDir, fileName);
+  writeFileSync(filePath, plan, "utf-8");
+  return { version: nextVersion, path: filePath, isNew: true };
+}
+
+/**
+ * Read a specific version's content from history.
+ * Returns null if the version doesn't exist or on read error.
+ */
+export function getPlanVersion(
+  project: string,
+  slug: string,
+  version: number
+): string | null {
+  const historyDir = join(homedir(), ".plannotator", "history", project, slug);
+  const fileName = `${String(version).padStart(3, "0")}.md`;
+  const filePath = join(historyDir, fileName);
+
+  try {
+    return readFileSync(filePath, "utf-8");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Get the number of versions stored for a project/slug.
+ * Returns 0 if the directory doesn't exist.
+ */
+export function getVersionCount(project: string, slug: string): number {
+  const historyDir = join(homedir(), ".plannotator", "history", project, slug);
+  try {
+    const entries = readdirSync(historyDir);
+    return entries.filter((e) => /^\d+\.md$/.test(e)).length;
+  } catch {
+    return 0;
+  }
 }
