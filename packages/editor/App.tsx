@@ -365,7 +365,7 @@ const App: React.FC = () => {
   const [shareBaseUrl, setShareBaseUrl] = useState<string | undefined>(undefined);
   const [repoInfo, setRepoInfo] = useState<{ display: string; branch?: string } | null>(null);
   const [showExportDropdown, setShowExportDropdown] = useState(false);
-  const [initialExportTab, setInitialExportTab] = useState<'share' | 'diff' | 'notes'>();
+  const [initialExportTab, setInitialExportTab] = useState<'share' | 'annotations' | 'notes'>();
   const [noteSaveToast, setNoteSaveToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const viewerRef = useRef<ViewerHandle>(null);
   const containerRef = useRef<HTMLElement>(null);
@@ -1015,7 +1015,7 @@ const App: React.FC = () => {
                     <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                     </svg>
-                    Download Diff
+                    Download Annotations
                   </button>
                   {isApiMode && isObsidianConfigured() && (
                     <button
