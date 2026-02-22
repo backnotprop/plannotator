@@ -46,9 +46,9 @@ export const SidebarTabs: React.FC<SidebarTabsProps> = ({
         </svg>
       </button>
 
-      {/* Diff tab */}
+      {/* Versions tab */}
       <button
-        onClick={() => onToggleTab("diff")}
+        onClick={() => onToggleTab("versions")}
         className="sidebar-tab-flag group relative flex items-center justify-center w-7 h-9 rounded-r-md border border-l-0 border-border/50 bg-card/80 backdrop-blur-sm text-muted-foreground hover:text-foreground hover:bg-card transition-colors"
         title="Plan Versions"
       >

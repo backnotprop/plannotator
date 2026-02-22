@@ -290,7 +290,10 @@ pre code.hljs {
   background: oklch(0.50 0.25 25 / 0.12);
 }
 
-/* Sidebar tab flags */
+/* ========================================
+   Sidebar
+   ======================================== */
+
 .sidebar-tab-flag {
   transition: transform 200ms ease, opacity 200ms ease;
 }

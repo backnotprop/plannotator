@@ -83,8 +83,8 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
           label="Contents"
         />
         <TabButton
-          active={activeTab === "diff"}
-          onClick={() => onTabChange("diff")}
+          active={activeTab === "versions"}
+          onClick={() => onTabChange("versions")}
           icon={
             <svg
               className="w-3 h-3"
@@ -134,7 +134,7 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
             onNavigate={onTocNavigate}
           />
         )}
-        {activeTab === "diff" && (
+        {activeTab === "versions" && (
           <VersionBrowser
             versionInfo={versionInfo}
             versions={versions}

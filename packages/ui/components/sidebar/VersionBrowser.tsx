@@ -51,12 +51,12 @@ export const VersionBrowser: React.FC<VersionBrowserProps> = ({
 }) => {
   const [showOtherPlans, setShowOtherPlans] = useState(false);
 
-  // Fetch version list on mount
+  // Fetch version list once versionInfo is available
   useEffect(() => {
-    if (versions.length === 0) {
+    if (versionInfo && versions.length === 0) {
       onFetchVersions();
     }
-  }, [versions.length, onFetchVersions]);
+  }, [versionInfo, versions.length, onFetchVersions]);
 
   if (!versionInfo) {
     return (

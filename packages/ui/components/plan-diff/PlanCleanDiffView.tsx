@@ -77,7 +77,7 @@ const RemovedBlock: React.FC<{ content: string }> = ({ content }) => {
 };
 
 /**
- * Modified content — shows old content (red, struck through) above new content (amber border).
+ * Modified content — shows old content (red, struck through) above new content (green border).
  */
 const ModifiedBlock: React.FC<{
   content: string;
