@@ -534,7 +534,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                         className="w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer"
                       >
                         <option value="ask">Ask each time</option>
-                        <option value="download">Download Diff</option>
+                        <option value="download">Download Annotations</option>
                         {obsidian.enabled && <option value="obsidian">Obsidian</option>}
                         {bear.enabled && <option value="bear">Bear</option>}
                       </select>
@@ -542,7 +542,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                         {defaultNotesApp === 'ask'
                           ? 'Opens Export dialog with Notes tab'
                           : defaultNotesApp === 'download'
-                            ? `${navigator.platform?.includes('Mac') ? 'Cmd' : 'Ctrl'}+S downloads the diff file`
+                            ? `${navigator.platform?.includes('Mac') ? 'Cmd' : 'Ctrl'}+S downloads the annotations file`
                             : `${navigator.platform?.includes('Mac') ? 'Cmd' : 'Ctrl'}+S saves directly to ${defaultNotesApp === 'obsidian' ? 'Obsidian' : 'Bear'}`}
                       </div>
                     </div>

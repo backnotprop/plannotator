@@ -103,7 +103,7 @@ The TOC sidebar provides navigation for long documents.
 
 **Export & Formatting:**
 
-- [ ] Export diff shows annotations in readable format
+- [ ] Export shows annotations in readable format
 - [ ] Format follows: "- **DELETION** (line X): [original text]"
 - [ ] Global comments appear at top of export
 - [ ] All annotation types exported correctly

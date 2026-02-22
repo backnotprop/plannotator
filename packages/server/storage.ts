@@ -65,35 +65,35 @@ export function savePlan(slug: string, content: string, customPath?: string | nu
 }
 
 /**
- * Save annotations (diff) to disk.
+ * Save annotations to disk.
  * Returns the full path to the saved file.
  */
-export function saveAnnotations(slug: string, diffContent: string, customPath?: string | null): string {
+export function saveAnnotations(slug: string, annotationsContent: string, customPath?: string | null): string {
   const planDir = getPlanDir(customPath);
-  const filePath = join(planDir, `${slug}.diff.md`);
-  writeFileSync(filePath, diffContent, "utf-8");
+  const filePath = join(planDir, `${slug}.annotations.md`);
+  writeFileSync(filePath, annotationsContent, "utf-8");
   return filePath;
 }
 
 /**
  * Save the final snapshot on approve/deny.
- * Combines plan and diff into a single file with status suffix.
+ * Combines plan and annotations into a single file with status suffix.
  * Returns the full path to the saved file.
  */
 export function saveFinalSnapshot(
   slug: string,
   status: "approved" | "denied",
   plan: string,
-  diff: string,
+  annotations: string,
   customPath?: string | null
 ): string {
   const planDir = getPlanDir(customPath);
   const filePath = join(planDir, `${slug}-${status}.md`);
 
-  // Combine plan with diff appended
+  // Combine plan with annotations appended
   let content = plan;
-  if (diff && diff !== "No changes detected.") {
-    content += "\n\n---\n\n" + diff;
+  if (annotations && annotations !== "No changes detected.") {
+    content += "\n\n---\n\n" + annotations;
   }
 
   writeFileSync(filePath, content, "utf-8");

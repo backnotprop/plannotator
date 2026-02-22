@@ -222,7 +222,7 @@ interface Block {
 - Horizontal rules (`---`)
 - Paragraphs (default)
 
-`exportDiff(blocks, annotations, globalAttachments)` generates human-readable feedback for Claude. Images are referenced by name: `[image-name] /tmp/path...`.
+`exportAnnotations(blocks, annotations, globalAttachments)` generates human-readable feedback for Claude. Images are referenced by name: `[image-name] /tmp/path...`.
 
 ## Annotation System
 

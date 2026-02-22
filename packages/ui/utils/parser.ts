@@ -243,7 +243,7 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
   return blocks;
 };
 
-export const exportDiff = (blocks: Block[], annotations: any[], globalAttachments: ImageAttachment[] = []): string => {
+export const exportAnnotations = (blocks: Block[], annotations: any[], globalAttachments: ImageAttachment[] = []): string => {
   if (annotations.length === 0 && globalAttachments.length === 0) {
     return 'No changes detected.';
   }

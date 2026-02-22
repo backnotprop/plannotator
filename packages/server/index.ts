@@ -312,11 +312,11 @@ export async function startPlannotatorServer(
             // Save annotations and final snapshot (if enabled)
             let savedPath: string | undefined;
             if (planSaveEnabled) {
-              const diff = feedback || "";
-              if (diff) {
-                saveAnnotations(slug, diff, planSaveCustomPath);
+              const annotations = feedback || "";
+              if (annotations) {
+                saveAnnotations(slug, annotations, planSaveCustomPath);
               }
-              savedPath = saveFinalSnapshot(slug, "approved", plan, diff, planSaveCustomPath);
+              savedPath = saveFinalSnapshot(slug, "approved", plan, annotations, planSaveCustomPath);
             }
 
             // Use permission mode from client request if provided, otherwise fall back to hook input
