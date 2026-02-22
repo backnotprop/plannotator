@@ -1,8 +1,8 @@
 /**
- * Export Modal with tabs for Share, Raw Diff, and Notes
+ * Export Modal with tabs for Share, Annotations, and Notes
  *
  * Share tab (default): Shows shareable URL with copy button
- * Raw Diff tab: Shows human-readable diff output with copy/download
+ * Annotations tab: Shows human-readable annotations output with copy/download
  * Notes tab: Save plan to Obsidian/Bear without approving
  */
 
@@ -15,7 +15,7 @@ interface ExportModalProps {
   onClose: () => void;
   shareUrl: string;
   shareUrlSize: string;
-  diffOutput: string;
+  annotationsOutput: string;
   annotationCount: number;
   taterSprite?: React.ReactNode;
   sharingEnabled?: boolean;
@@ -24,7 +24,7 @@ interface ExportModalProps {
   initialTab?: Tab;
 }
 
-type Tab = 'share' | 'diff' | 'notes';
+type Tab = 'share' | 'annotations' | 'notes';
 
 type SaveTarget = 'obsidian' | 'bear';
 type SaveStatus = 'idle' | 'saving' | 'success' | 'error';
@@ -34,7 +34,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   onClose,
   shareUrl,
   shareUrlSize,
-  diffOutput,
+  annotationsOutput,
   annotationCount,
   taterSprite,
   sharingEnabled = true,
@@ -42,7 +42,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   isApiMode = false,
   initialTab,
 }) => {
-  const defaultTab = initialTab || (sharingEnabled ? 'share' : 'diff');
+  const defaultTab = initialTab || (sharingEnabled ? 'share' : 'annotations');
   const [activeTab, setActiveTab] = useState<Tab>(defaultTab);
   const [copied, setCopied] = useState(false);
   const [saveStatus, setSaveStatus] = useState<Record<SaveTarget, SaveStatus>>({ obsidian: 'idle', bear: 'idle' });
@@ -51,7 +51,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   // Reset tab when modal opens
   useEffect(() => {
     if (isOpen) {
-      setActiveTab(initialTab || (sharingEnabled ? 'share' : 'diff'));
+      setActiveTab(initialTab || (sharingEnabled ? 'share' : 'annotations'));
     }
   }, [isOpen, initialTab, sharingEnabled]);
 
@@ -82,9 +82,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     }
   };
 
-  const handleCopyDiff = async () => {
+  const handleCopyAnnotations = async () => {
     try {
-      await navigator.clipboard.writeText(diffOutput);
+      await navigator.clipboard.writeText(annotationsOutput);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (e) {
@@ -92,12 +92,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     }
   };
 
-  const handleDownloadDiff = () => {
-    const blob = new Blob([diffOutput], { type: 'text/plain' });
+  const handleDownloadAnnotations = () => {
+    const blob = new Blob([annotationsOutput], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'annotations.diff';
+    a.download = 'annotations.md';
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -198,14 +198,14 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 </button>
               )}
               <button
-                onClick={() => setActiveTab('diff')}
+                onClick={() => setActiveTab('annotations')}
                 className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                  activeTab === 'diff'
+                  activeTab === 'annotations'
                     ? 'bg-background text-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
-                Raw Diff
+                Annotations
               </button>
               {showNotesTab && (
                 <button
@@ -372,25 +372,25 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
           ) : (
             <pre className="bg-muted rounded-lg p-4 text-xs font-mono leading-relaxed overflow-x-auto whitespace-pre-wrap">
-              {diffOutput}
+              {annotationsOutput}
             </pre>
           )}
         </div>
 
-        {/* Footer actions - only show for Raw Diff tab */}
-        {activeTab === 'diff' && (
+        {/* Footer actions - only show for Annotations tab */}
+        {activeTab === 'annotations' && (
           <div className="p-4 border-t border-border flex justify-end gap-2">
             <button
-              onClick={handleCopyDiff}
+              onClick={handleCopyAnnotations}
               className="px-3 py-1.5 rounded-md text-xs font-medium bg-muted hover:bg-muted/80 transition-colors"
             >
               {copied ? 'Copied!' : 'Copy'}
             </button>
             <button
-              onClick={handleDownloadDiff}
+              onClick={handleDownloadAnnotations}
               className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
             >
-              Download .diff
+              Download Annotations
             </button>
           </div>
         )}

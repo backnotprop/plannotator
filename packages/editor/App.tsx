@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { parseMarkdownToBlocks, exportDiff, extractFrontmatter, Frontmatter } from '@plannotator/ui/utils/parser';
+import { parseMarkdownToBlocks, exportAnnotations, extractFrontmatter, Frontmatter } from '@plannotator/ui/utils/parser';
 import { Viewer, ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { ExportModal } from '@plannotator/ui/components/ExportModal';
@@ -365,7 +365,7 @@ const App: React.FC = () => {
   const [shareBaseUrl, setShareBaseUrl] = useState<string | undefined>(undefined);
   const [repoInfo, setRepoInfo] = useState<{ display: string; branch?: string } | null>(null);
   const [showExportDropdown, setShowExportDropdown] = useState(false);
-  const [initialExportTab, setInitialExportTab] = useState<'share' | 'diff' | 'notes'>();
+  const [initialExportTab, setInitialExportTab] = useState<'share' | 'annotations' | 'notes'>();
   const [noteSaveToast, setNoteSaveToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const viewerRef = useRef<ViewerHandle>(null);
   const containerRef = useRef<HTMLElement>(null);
@@ -584,7 +584,7 @@ const App: React.FC = () => {
 
       // Include annotations as feedback if any exist (for OpenCode "approve with notes")
       if (annotations.length > 0 || globalAttachments.length > 0) {
-        body.feedback = diffOutput;
+        body.feedback = annotationsOutput;
       }
 
       await fetch('/api/approve', {
@@ -606,7 +606,7 @@ const App: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          feedback: diffOutput,
+          feedback: annotationsOutput,
           planSave: {
             enabled: planSaveSettings.enabled,
             ...(planSaveSettings.customPath && { customPath: planSaveSettings.customPath }),
@@ -627,7 +627,7 @@ const App: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          feedback: diffOutput,
+          feedback: annotationsOutput,
           annotations,
         }),
       });
@@ -733,19 +733,19 @@ const App: React.FC = () => {
     // This is just a placeholder for future custom logic
   };
 
-  const diffOutput = useMemo(() => exportDiff(blocks, annotations, globalAttachments), [blocks, annotations, globalAttachments]);
+  const annotationsOutput = useMemo(() => exportAnnotations(blocks, annotations, globalAttachments), [blocks, annotations, globalAttachments]);
 
   // Quick-save handlers for export dropdown and keyboard shortcut
-  const handleDownloadDiff = () => {
+  const handleDownloadAnnotations = () => {
     setShowExportDropdown(false);
-    const blob = new Blob([diffOutput], { type: 'text/plain' });
+    const blob = new Blob([annotationsOutput], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'annotations.diff';
+    a.download = 'annotations.md';
     a.click();
     URL.revokeObjectURL(url);
-    setNoteSaveToast({ type: 'success', message: 'Downloaded diff' });
+    setNoteSaveToast({ type: 'success', message: 'Downloaded annotations' });
     setTimeout(() => setNoteSaveToast(null), 3000);
   };
 
@@ -803,7 +803,7 @@ const App: React.FC = () => {
       const bearOk = getBearSettings().enabled;
 
       if (defaultApp === 'download') {
-        handleDownloadDiff();
+        handleDownloadAnnotations();
       } else if (defaultApp === 'obsidian' && obsOk) {
         handleQuickSaveToNotes('obsidian');
       } else if (defaultApp === 'bear' && bearOk) {
@@ -819,7 +819,7 @@ const App: React.FC = () => {
   }, [
     showExport, showFeedbackPrompt, showClaudeCodeWarning, showAgentWarning,
     showPermissionModeSetup, showUIFeaturesSetup, pendingPasteImage,
-    submitted, isApiMode, markdown, diffOutput,
+    submitted, isApiMode, markdown, annotationsOutput,
   ]);
 
   // Close export dropdown on click outside
@@ -1009,13 +1009,13 @@ const App: React.FC = () => {
                     </button>
                   )}
                   <button
-                    onClick={handleDownloadDiff}
+                    onClick={handleDownloadAnnotations}
                     className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors flex items-center gap-2"
                   >
                     <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                     </svg>
-                    Download Diff
+                    Download Annotations
                   </button>
                   {isApiMode && isObsidianConfigured() && (
                     <button
@@ -1136,7 +1136,7 @@ const App: React.FC = () => {
           onClose={() => { setShowExport(false); setInitialExportTab(undefined); }}
           shareUrl={shareUrl}
           shareUrlSize={shareUrlSize}
-          diffOutput={diffOutput}
+          annotationsOutput={annotationsOutput}
           annotationCount={annotations.length}
           taterSprite={taterMode ? <TaterSpritePullup /> : undefined}
           sharingEnabled={sharingEnabled}

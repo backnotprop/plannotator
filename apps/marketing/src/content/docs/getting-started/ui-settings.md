@@ -92,7 +92,7 @@ Controls what the **Cmd/Ctrl+S** keyboard shortcut does.
 | Option | Behavior |
 |--------|----------|
 | **Ask each time** (default) | Opens the Export dialog |
-| **Download Diff** | Downloads the diff file directly |
+| **Download Annotations** | Downloads the annotations file directly |
 | **Obsidian** | Saves directly to your Obsidian vault (only shown if Obsidian is enabled) |
 | **Bear** | Saves directly to Bear (only shown if Bear is enabled) |
 

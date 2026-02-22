@@ -85,7 +85,7 @@ Users can also paste or upload images and attach them to annotations.
 
 When the user clicks "Send Annotations" (or presses `Cmd+Enter`), the frontend:
 
-1. Calls `exportDiff(blocks, annotations, globalAttachments)` from `packages/ui/utils/parser.ts` to generate a structured markdown summary
+1. Calls `exportAnnotations(blocks, annotations, globalAttachments)` from `packages/ui/utils/parser.ts` to generate a structured markdown summary
 2. POSTs the result to `/api/feedback`
 
 The export format looks like:
@@ -165,7 +165,7 @@ Agent receives structured feedback, acts on it
 | `packages/server/annotate.ts` | Annotate server implementation |
 | `packages/editor/App.tsx` | Frontend — detects `annotateMode`, adjusts UI |
 | `packages/ui/components/Viewer.tsx` | Markdown renderer + web-highlighter annotation |
-| `packages/ui/utils/parser.ts` | `parseMarkdownToBlocks()` and `exportDiff()` |
+| `packages/ui/utils/parser.ts` | `parseMarkdownToBlocks()` and `exportAnnotations()` |
 | `apps/hook/commands/plannotator-annotate.md` | Claude Code slash command definition |
 | `apps/opencode-plugin/commands/plannotator-annotate.md` | OpenCode slash command definition |
 
