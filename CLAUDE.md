@@ -138,7 +138,10 @@ Send Annotations → feedback sent to agent session
 
 | Endpoint              | Method | Purpose                                    |
 | --------------------- | ------ | ------------------------------------------ |
-| `/api/plan`           | GET    | Returns `{ plan, origin }`                 |
+| `/api/plan`           | GET    | Returns `{ plan, origin, previousPlan, versionInfo }` |
+| `/api/plan/version`   | GET    | Fetch specific version (`?v=N`)            |
+| `/api/plan/versions`  | GET    | List all versions of current plan          |
+| `/api/plan/history`   | GET    | List all plans in current project          |
 | `/api/approve`        | POST   | Approve plan (body: planSave, agentSwitch, obsidian, bear, feedback) |
 | `/api/deny`           | POST   | Deny plan (body: feedback, planSave)       |
 | `/api/image`          | GET    | Serve image by path query param            |
@@ -164,6 +167,14 @@ Send Annotations → feedback sent to agent session
 | `/api/upload`         | POST   | Upload image, returns `{ path, originalName }` |
 
 All servers use random ports locally or fixed port (`19432`) in remote mode.
+
+## Plan Version History
+
+Every plan is automatically saved to `~/.plannotator/history/{project}/{slug}/` on arrival, before the user sees the UI. Versions are numbered sequentially (`001.md`, `002.md`, etc.). The slug is derived from the plan's first `# Heading` + today's date via `generateSlug()`, scoped by project name (git repo or cwd). Same heading on the same day = same slug = same plan being iterated on. Identical resubmissions are deduplicated (no new file if content matches the latest version).
+
+This powers the version history API (`/api/plan/version`, `/api/plan/versions`, `/api/plan/history`) and will be used for plan diffing — showing users what changed between iterations when they deny and Claude revises.
+
+History saves independently of the `planSave` user setting (which controls decision snapshots in `~/.plannotator/plans/`). Storage functions live in `packages/server/storage.ts`, with Node-compatible duplicates in `apps/pi-extension/server.ts`.
 
 ## Data Types
 
