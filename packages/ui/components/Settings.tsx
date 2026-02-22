@@ -400,12 +400,12 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                 {/* === DISPLAY TAB === */}
                 {activeTab === 'display' && (
                   <>
-                    {/* Table of Contents */}
+                    {/* Auto-open Sidebar */}
                     <div className="flex items-center justify-between">
                       <div>
-                        <div className="text-sm font-medium">Table of Contents</div>
+                        <div className="text-sm font-medium">Auto-open Sidebar</div>
                         <div className="text-xs text-muted-foreground">
-                          Show sidebar navigation on desktop
+                          Open sidebar with Table of Contents on load
                         </div>
                       </div>
                       <button

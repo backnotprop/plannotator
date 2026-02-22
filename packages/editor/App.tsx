@@ -12,7 +12,6 @@ import { ModeSwitcher } from '@plannotator/ui/components/ModeSwitcher';
 import { TaterSpriteRunning } from '@plannotator/ui/components/TaterSpriteRunning';
 import { TaterSpritePullup } from '@plannotator/ui/components/TaterSpritePullup';
 import { Settings } from '@plannotator/ui/components/Settings';
-import { TableOfContents } from '@plannotator/ui/components/TableOfContents';
 import { useSharing } from '@plannotator/ui/hooks/useSharing';
 import { useAgents } from '@plannotator/ui/hooks/useAgents';
 import { useActiveSection } from '@plannotator/ui/hooks/useActiveSection';
@@ -37,6 +36,12 @@ import { PermissionModeSetup } from '@plannotator/ui/components/PermissionModeSe
 import { UIFeaturesSetup } from '@plannotator/ui/components/UIFeaturesSetup';
 import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
 import { deriveImageName } from '@plannotator/ui/components/AttachmentsButton';
+import { useSidebar } from '@plannotator/ui/hooks/useSidebar';
+import { usePlanDiff, type VersionInfo } from '@plannotator/ui/hooks/usePlanDiff';
+import { SidebarTabs } from '@plannotator/ui/components/sidebar/SidebarTabs';
+import { SidebarContainer } from '@plannotator/ui/components/sidebar/SidebarContainer';
+import { PlanDiffViewer } from '@plannotator/ui/components/plan-diff/PlanDiffViewer';
+import type { PlanDiffMode } from '@plannotator/ui/components/plan-diff/PlanDiffModeSwitcher';
 
 const PLAN_CONTENT = `# Implementation Plan: Real-time Collaboration
 
@@ -367,6 +372,12 @@ const App: React.FC = () => {
   const [showExportDropdown, setShowExportDropdown] = useState(false);
   const [initialExportTab, setInitialExportTab] = useState<'share' | 'annotations' | 'notes'>();
   const [noteSaveToast, setNoteSaveToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  // Plan diff state
+  const [isPlanDiffActive, setIsPlanDiffActive] = useState(false);
+  const [planDiffMode, setPlanDiffMode] = useState<PlanDiffMode>('clean');
+  const [previousPlan, setPreviousPlan] = useState<string | null>(null);
+  const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
+
   const viewerRef = useRef<ViewerHandle>(null);
   const containerRef = useRef<HTMLElement>(null);
 
@@ -377,6 +388,12 @@ const App: React.FC = () => {
     defaultWidth: 240, minWidth: 160, maxWidth: 400, side: 'left',
   });
   const isResizing = panelResize.isDragging || tocResize.isDragging;
+
+  // Sidebar (shared TOC + Version Browser)
+  const sidebar = useSidebar(getUIPreferences().tocEnabled);
+
+  // Plan diff computation
+  const planDiff = usePlanDiff(markdown, previousPlan, versionInfo);
 
   // Track active section for TOC highlighting
   const headingCount = useMemo(() => blocks.filter(b => b.type === 'heading').length, [blocks]);
@@ -444,7 +461,7 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: 'claude-code' | 'opencode'; mode?: 'annotate'; sharingEnabled?: boolean; shareBaseUrl?: string; repoInfo?: { display: string; branch?: string } }) => {
+      .then((data: { plan: string; origin?: 'claude-code' | 'opencode'; mode?: 'annotate'; sharingEnabled?: boolean; shareBaseUrl?: string; repoInfo?: { display: string; branch?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string } }) => {
         setMarkdown(data.plan);
         setIsApiMode(true);
         if (data.mode === 'annotate') {
@@ -458,6 +475,13 @@ const App: React.FC = () => {
         }
         if (data.repoInfo) {
           setRepoInfo(data.repoInfo);
+        }
+        // Capture plan version history data
+        if (data.previousPlan !== undefined) {
+          setPreviousPlan(data.previousPlan);
+        }
+        if (data.versionInfo) {
+          setVersionInfo(data.versionInfo);
         }
         if (data.origin) {
           setOrigin(data.origin);
@@ -1069,16 +1093,38 @@ const App: React.FC = () => {
 
         {/* Main Content */}
         <div className={`flex-1 flex overflow-hidden ${isResizing ? 'select-none' : ''}`}>
-          {/* Table of Contents */}
-          {uiPrefs.tocEnabled && (
+          {/* Left Sidebar: collapsed tab flags (when sidebar is closed) */}
+          {!sidebar.isOpen && (
+            <SidebarTabs
+              activeTab={sidebar.activeTab}
+              onToggleTab={sidebar.toggleTab}
+              hasDiff={planDiff.hasPreviousVersion}
+              className="hidden lg:flex"
+            />
+          )}
+
+          {/* Left Sidebar: open state (TOC or Version Browser) */}
+          {sidebar.isOpen && (
             <>
-              <TableOfContents
+              <SidebarContainer
+                activeTab={sidebar.activeTab}
+                onTabChange={sidebar.toggleTab}
+                onClose={sidebar.close}
+                width={tocResize.width}
                 blocks={blocks}
                 annotations={annotations}
-                activeId={activeSection}
-                onNavigate={handleTocNavigate}
-                className="hidden lg:block sticky top-12 h-[calc(100vh-3rem)] flex-shrink-0"
-                style={{ width: tocResize.width }}
+                activeSection={activeSection}
+                onTocNavigate={handleTocNavigate}
+                versionInfo={versionInfo}
+                versions={planDiff.versions}
+                projectPlans={planDiff.projectPlans}
+                selectedBaseVersion={planDiff.diffBaseVersion}
+                onSelectBaseVersion={planDiff.selectBaseVersion}
+                isPlanDiffActive={isPlanDiffActive}
+                onActivatePlanDiff={() => setIsPlanDiffActive(true)}
+                isLoadingVersions={planDiff.isLoadingVersions}
+                onFetchVersions={planDiff.fetchVersions}
+                onFetchProjectPlans={planDiff.fetchProjectPlans}
               />
               <ResizeHandle {...tocResize.handleProps} className="hidden lg:block" />
             </>
@@ -1087,28 +1133,47 @@ const App: React.FC = () => {
           {/* Document Area */}
           <main ref={containerRef} className="flex-1 min-w-0 overflow-y-auto bg-grid">
             <div className="min-h-full flex flex-col items-center px-4 py-3 md:px-10 md:py-8 xl:px-16">
-              {/* Mode Switcher */}
-              <div className="w-full max-w-[832px] 2xl:max-w-5xl mb-3 md:mb-4 flex justify-start">
-                <ModeSwitcher mode={editorMode} onChange={handleEditorModeChange} taterMode={taterMode} />
-              </div>
+              {/* Mode Switcher (hidden during plan diff) */}
+              {!isPlanDiffActive && (
+                <div className="w-full max-w-[832px] 2xl:max-w-5xl mb-3 md:mb-4 flex justify-start">
+                  <ModeSwitcher mode={editorMode} onChange={handleEditorModeChange} taterMode={taterMode} />
+                </div>
+              )}
 
-              <Viewer
-                ref={viewerRef}
-                blocks={blocks}
-                markdown={markdown}
-                frontmatter={frontmatter}
-                annotations={annotations}
-                onAddAnnotation={handleAddAnnotation}
-                onSelectAnnotation={setSelectedAnnotationId}
-                selectedAnnotationId={selectedAnnotationId}
-                mode={editorMode}
-                taterMode={taterMode}
-                globalAttachments={globalAttachments}
-                onAddGlobalAttachment={handleAddGlobalAttachment}
-                onRemoveGlobalAttachment={handleRemoveGlobalAttachment}
-                repoInfo={repoInfo}
-                stickyActions={uiPrefs.stickyActionsEnabled}
-              />
+              {/* Plan Diff View or Normal Plan View */}
+              {isPlanDiffActive && planDiff.diffBlocks && planDiff.diffStats ? (
+                <PlanDiffViewer
+                  diffBlocks={planDiff.diffBlocks}
+                  diffStats={planDiff.diffStats}
+                  diffMode={planDiffMode}
+                  onDiffModeChange={setPlanDiffMode}
+                  onPlanDiffToggle={() => setIsPlanDiffActive(false)}
+                  repoInfo={repoInfo}
+                  baseVersionLabel={planDiff.diffBaseVersion != null ? `v${planDiff.diffBaseVersion}` : undefined}
+                />
+              ) : (
+                <Viewer
+                  ref={viewerRef}
+                  blocks={blocks}
+                  markdown={markdown}
+                  frontmatter={frontmatter}
+                  annotations={annotations}
+                  onAddAnnotation={handleAddAnnotation}
+                  onSelectAnnotation={setSelectedAnnotationId}
+                  selectedAnnotationId={selectedAnnotationId}
+                  mode={editorMode}
+                  taterMode={taterMode}
+                  globalAttachments={globalAttachments}
+                  onAddGlobalAttachment={handleAddGlobalAttachment}
+                  onRemoveGlobalAttachment={handleRemoveGlobalAttachment}
+                  repoInfo={repoInfo}
+                  stickyActions={uiPrefs.stickyActionsEnabled}
+                  planDiffStats={planDiff.diffStats}
+                  isPlanDiffActive={isPlanDiffActive}
+                  onPlanDiffToggle={() => setIsPlanDiffActive(!isPlanDiffActive)}
+                  hasPreviousVersion={planDiff.hasPreviousVersion}
+                />
+              )}
             </div>
           </main>
 

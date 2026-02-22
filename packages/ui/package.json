@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@plannotator/web-highlighter": "^0.8.1",
+    "diff": "^8.0.3",
     "highlight.js": "^11.11.1",
     "mermaid": "^11.12.2",
     "perfect-freehand": "^1.2.2",
