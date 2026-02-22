@@ -67,8 +67,8 @@ export const UIFeaturesSetup: React.FC<UIFeaturesSetupProps> = ({
               className="mt-0.5 accent-primary"
             />
             <div className="flex-1">
-              <div className="text-sm font-medium">Table of Contents</div>
-              <div className="text-xs text-muted-foreground">Show sidebar navigation on desktop</div>
+              <div className="text-sm font-medium">Auto-open Sidebar</div>
+              <div className="text-xs text-muted-foreground">Open sidebar with Table of Contents on load</div>
             </div>
           </label>
 

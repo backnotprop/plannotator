@@ -36,8 +36,10 @@ plannotator/
 │   │   └── project.ts            # Project name detection for tags
 │   ├── ui/                       # Shared React components
 │   │   ├── components/           # Viewer, Toolbar, Settings, etc.
-│   │   ├── utils/                # parser.ts, sharing.ts, storage.ts, planSave.ts, agentSwitch.ts
-│   │   ├── hooks/                # useSharing.ts
+│   │   │   ├── plan-diff/        # PlanDiffBadge, PlanDiffViewer, clean/raw diff views
+│   │   │   └── sidebar/          # SidebarContainer, SidebarTabs, VersionBrowser
+│   │   ├── utils/                # parser.ts, sharing.ts, storage.ts, planSave.ts, agentSwitch.ts, planDiffEngine.ts
+│   │   ├── hooks/                # useSharing.ts, usePlanDiff.ts, useSidebar.ts
 │   │   └── types.ts
 │   ├── editor/                   # Plan review App.tsx
 │   └── review-editor/            # Code review UI
