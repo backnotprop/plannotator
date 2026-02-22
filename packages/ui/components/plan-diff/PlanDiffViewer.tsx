@@ -38,10 +38,10 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
   return (
     <div className="relative z-50 w-full max-w-[832px] 2xl:max-w-5xl">
       <article className="w-full max-w-[832px] 2xl:max-w-5xl bg-card border border-border/50 rounded-xl shadow-xl p-5 md:p-8 lg:p-10 xl:p-12 relative">
-        {/* Top-left: repo info + diff badge */}
-        <div className="absolute top-3 left-3 md:top-4 md:left-5 flex items-center gap-1.5 text-[9px] text-muted-foreground/50 font-mono">
+        {/* Top-left: repo info + diff badge — matches Viewer layout (flex-col) so badge doesn't jump position */}
+        <div className="absolute top-3 left-3 md:top-4 md:left-5 flex flex-col items-start gap-1 text-[9px] text-muted-foreground/50 font-mono">
           {repoInfo && (
-            <>
+            <div className="flex items-center gap-1.5">
               <span
                 className="px-1.5 py-0.5 bg-muted/50 rounded truncate max-w-[140px]"
                 title={repoInfo.display}
@@ -63,7 +63,7 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
                   <span className="truncate">{repoInfo.branch}</span>
                 </span>
               )}
-            </>
+            </div>
           )}
           <PlanDiffBadge
             stats={diffStats}
@@ -77,11 +77,12 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
         <div className="float-right -mr-4 -mt-4 md:-mr-5 md:-mt-5 lg:-mr-7 lg:-mt-7 xl:-mr-9 xl:-mt-9 p-2">
           <button
             onClick={onPlanDiffToggle}
-            className="p-1.5 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            className="flex items-center gap-1 px-2 py-1.5 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             title="Back to plan view"
           >
+            <span className="hidden md:inline text-[10px] font-medium">Exit Diff</span>
             <svg
-              className="w-4 h-4"
+              className="w-3.5 h-3.5"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"

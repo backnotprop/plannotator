@@ -4,8 +4,8 @@
  * Shows the new plan content rendered as markdown, with colored left borders
  * indicating what changed:
  * - Green: added content
- * - Amber: modified content (with expandable "Show Previous")
- * - Red: removed content (collapsed by default, expandable)
+ * - Red: removed content (with strikethrough)
+ * - Modified: old content (red, struck through) above new content (green)
  * - Unchanged: normal rendering, slightly dimmed
  *
  * Reuses parseMarkdownToBlocks() for rendering consistency with the plan view.
@@ -50,7 +50,7 @@ const DiffBlockRenderer: React.FC<{ block: PlanDiffBlock }> = ({ block }) => {
       );
 
     case "removed":
-      return <RemovedBlock content={block.content} lines={block.lines} />;
+      return <RemovedBlock content={block.content} />;
 
     case "modified":
       return (
@@ -68,9 +68,7 @@ const DiffBlockRenderer: React.FC<{ block: PlanDiffBlock }> = ({ block }) => {
 /**
  * Removed content — always visible with red styling and strikethrough.
  */
-const RemovedBlock: React.FC<{ content: string; lines: number }> = ({
-  content,
-}) => {
+const RemovedBlock: React.FC<{ content: string }> = ({ content }) => {
   return (
     <div className="plan-diff-removed line-through decoration-destructive/30 opacity-70">
       <MarkdownChunk content={content} />

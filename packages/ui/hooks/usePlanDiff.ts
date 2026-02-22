@@ -84,7 +84,7 @@ export function usePlanDiff(
   }, [versionInfo]);
 
   const hasPreviousVersion =
-    versionInfo !== null && versionInfo.totalVersions > 1;
+    versionInfo !== null && versionInfo.totalVersions > 1 && diffBasePlan !== null;
 
   // Compute diff whenever currentPlan or diffBasePlan changes
   const diffResult = useMemo(() => {

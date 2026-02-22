@@ -392,6 +392,15 @@ const App: React.FC = () => {
   // Sidebar (shared TOC + Version Browser)
   const sidebar = useSidebar(getUIPreferences().tocEnabled);
 
+  // Sync sidebar open state when preference changes in Settings
+  useEffect(() => {
+    if (uiPrefs.tocEnabled) {
+      sidebar.open('toc');
+    } else {
+      sidebar.close();
+    }
+  }, [uiPrefs.tocEnabled]);
+
   // Plan diff computation
   const planDiff = usePlanDiff(markdown, previousPlan, versionInfo);
 
@@ -1121,7 +1130,7 @@ const App: React.FC = () => {
                 selectedBaseVersion={planDiff.diffBaseVersion}
                 onSelectBaseVersion={planDiff.selectBaseVersion}
                 isPlanDiffActive={isPlanDiffActive}
-                onActivatePlanDiff={() => setIsPlanDiffActive(true)}
+                onActivatePlanDiff={() => { if (planDiff.diffStats) setIsPlanDiffActive(true); }}
                 isLoadingVersions={planDiff.isLoadingVersions}
                 onFetchVersions={planDiff.fetchVersions}
                 onFetchProjectPlans={planDiff.fetchProjectPlans}

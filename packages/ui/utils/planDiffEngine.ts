@@ -66,6 +66,8 @@ export function computePlanDiff(
         lines: countLines(next.value),
       });
       stats.modifications++;
+      stats.additions += countLines(next.value);
+      stats.deletions += countLines(change.value);
       i++; // skip the next (add) since we consumed it
     } else if (change.added) {
       blocks.push({

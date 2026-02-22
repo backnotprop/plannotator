@@ -37,11 +37,11 @@ export const PlanDiffBadge: React.FC<PlanDiffBadgeProps> = ({
       title={isActive ? "Exit plan diff view" : "Show what changed from previous version"}
     >
       <span className={isActive ? "text-success" : "text-success/70"}>
-        +{stats.additions + stats.modifications}
+        +{stats.additions}
       </span>
       <span className="text-muted-foreground/50 mx-0.5">/</span>
       <span className={isActive ? "text-destructive" : "text-destructive/70"}>
-        -{stats.deletions + stats.modifications}
+        -{stats.deletions}
       </span>
     </button>
   );
