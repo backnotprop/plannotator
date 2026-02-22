@@ -9,7 +9,7 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { execSync } from "node:child_process";
 import os from "node:os";
-import { mkdirSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, basename } from "node:path";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -191,6 +191,64 @@ function getVersionCount(project: string, slug: string): number {
   }
 }
 
+function listVersions(
+  project: string,
+  slug: string,
+): Array<{ version: number; timestamp: string }> {
+  const historyDir = join(os.homedir(), ".plannotator", "history", project, slug);
+  try {
+    const entries = readdirSync(historyDir);
+    const versions: Array<{ version: number; timestamp: string }> = [];
+    for (const entry of entries) {
+      const match = entry.match(/^(\d+)\.md$/);
+      if (match) {
+        const version = parseInt(match[1], 10);
+        const filePath = join(historyDir, entry);
+        try {
+          const stat = statSync(filePath);
+          versions.push({ version, timestamp: stat.mtime.toISOString() });
+        } catch {
+          versions.push({ version, timestamp: "" });
+        }
+      }
+    }
+    return versions.sort((a, b) => a.version - b.version);
+  } catch {
+    return [];
+  }
+}
+
+function listProjectPlans(
+  project: string,
+): Array<{ slug: string; versions: number; lastModified: string }> {
+  const projectDir = join(os.homedir(), ".plannotator", "history", project);
+  try {
+    const entries = readdirSync(projectDir, { withFileTypes: true });
+    const plans: Array<{ slug: string; versions: number; lastModified: string }> = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const slugDir = join(projectDir, entry.name);
+      const files = readdirSync(slugDir).filter((f) => /^\d+\.md$/.test(f));
+      if (files.length === 0) continue;
+      let latest = 0;
+      for (const file of files) {
+        try {
+          const mtime = statSync(join(slugDir, file)).mtime.getTime();
+          if (mtime > latest) latest = mtime;
+        } catch { /* skip */ }
+      }
+      plans.push({
+        slug: entry.name,
+        versions: files.length,
+        lastModified: latest ? new Date(latest).toISOString() : "",
+      });
+    }
+    return plans.sort((a, b) => b.lastModified.localeCompare(a.lastModified));
+  } catch {
+    return [];
+  }
+}
+
 // ── Plan Review Server ──────────────────────────────────────────────────
 
 export interface PlanServerResult {
@@ -244,6 +302,10 @@ export function startPlanReviewServer(options: {
         return;
       }
       json(res, { plan: content, version: v });
+    } else if (url.pathname === "/api/plan/versions") {
+      json(res, { project, slug, versions: listVersions(project, slug) });
+    } else if (url.pathname === "/api/plan/history") {
+      json(res, { project, plans: listProjectPlans(project) });
     } else if (url.pathname === "/api/plan") {
       json(res, { plan: options.plan, origin: options.origin ?? "pi", previousPlan, versionInfo });
     } else if (url.pathname === "/api/approve" && req.method === "POST") {

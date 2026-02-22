@@ -29,6 +29,8 @@ import {
   saveToHistory,
   getPlanVersion,
   getVersionCount,
+  listVersions,
+  listProjectPlans,
 } from "./storage";
 import { getRepoInfo } from "./repo";
 import { detectProjectName } from "./project";
@@ -178,6 +180,23 @@ export async function startPlannotatorServer(
               return Response.json({ error: "Version not found" }, { status: 404 });
             }
             return Response.json({ plan: content, version: v });
+          }
+
+          // API: List all versions for the current plan
+          if (url.pathname === "/api/plan/versions") {
+            return Response.json({
+              project,
+              slug,
+              versions: listVersions(project, slug),
+            });
+          }
+
+          // API: List all plans in the current project
+          if (url.pathname === "/api/plan/history") {
+            return Response.json({
+              project,
+              plans: listProjectPlans(project),
+            });
           }
 
           // API: Get plan content

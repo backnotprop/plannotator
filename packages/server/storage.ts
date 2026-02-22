@@ -7,7 +7,7 @@
 
 import { homedir } from "os";
 import { join } from "path";
-import { mkdirSync, writeFileSync, readFileSync, readdirSync } from "fs";
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, statSync } from "fs";
 import { sanitizeTag } from "./project";
 
 /**
@@ -197,5 +197,74 @@ export function getVersionCount(project: string, slug: string): number {
     return entries.filter((e) => /^\d+\.md$/.test(e)).length;
   } catch {
     return 0;
+  }
+}
+
+/**
+ * List all versions for a project/slug with metadata.
+ * Returns versions sorted ascending by version number.
+ */
+export function listVersions(
+  project: string,
+  slug: string
+): Array<{ version: number; timestamp: string }> {
+  const historyDir = join(homedir(), ".plannotator", "history", project, slug);
+  try {
+    const entries = readdirSync(historyDir);
+    const versions: Array<{ version: number; timestamp: string }> = [];
+    for (const entry of entries) {
+      const match = entry.match(/^(\d+)\.md$/);
+      if (match) {
+        const version = parseInt(match[1], 10);
+        const filePath = join(historyDir, entry);
+        try {
+          const stat = statSync(filePath);
+          versions.push({ version, timestamp: stat.mtime.toISOString() });
+        } catch {
+          versions.push({ version, timestamp: "" });
+        }
+      }
+    }
+    return versions.sort((a, b) => a.version - b.version);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * List all plan slugs stored for a project.
+ * Returns slugs sorted by most recently modified first.
+ */
+export function listProjectPlans(
+  project: string
+): Array<{ slug: string; versions: number; lastModified: string }> {
+  const projectDir = join(homedir(), ".plannotator", "history", project);
+  try {
+    const entries = readdirSync(projectDir, { withFileTypes: true });
+    const plans: Array<{ slug: string; versions: number; lastModified: string }> = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const slugDir = join(projectDir, entry.name);
+      const files = readdirSync(slugDir).filter((f) => /^\d+\.md$/.test(f));
+      if (files.length === 0) continue;
+
+      // Find most recent file modification time
+      let latest = 0;
+      for (const file of files) {
+        try {
+          const mtime = statSync(join(slugDir, file)).mtime.getTime();
+          if (mtime > latest) latest = mtime;
+        } catch { /* skip */ }
+      }
+
+      plans.push({
+        slug: entry.name,
+        versions: files.length,
+        lastModified: latest ? new Date(latest).toISOString() : "",
+      });
+    }
+    return plans.sort((a, b) => b.lastModified.localeCompare(a.lastModified));
+  } catch {
+    return [];
   }
 }
