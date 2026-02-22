@@ -95,6 +95,14 @@ curl -fsSL https://plannotator.ai/install.sh | bash
 
 This also clears any cached plugin versions.
 
+## pi
+
+Install the Plannotator plugin for [pi](https://shittycodingagent.ai):
+
+```bash
+pi plugin add plannotator
+```
+
 ## Kilo Code
 
 Coming soon.
