@@ -10,8 +10,7 @@ tags: ["plan-diff", "plan-mode", "version-history"]
 
 ## Watch the Demo
 
-<!-- TODO: Replace with actual YouTube embed -->
-<iframe width="100%" style="aspect-ratio: 16/9;" src="https://www.youtube.com/embed/PLACEHOLDER" title="Plan Diff Demo" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+<iframe width="100%" style="aspect-ratio: 16/9;" src="https://www.youtube.com/embed/uIWkFCg60Lk" title="Plan Diff Demo" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
 
 ## The problem
 

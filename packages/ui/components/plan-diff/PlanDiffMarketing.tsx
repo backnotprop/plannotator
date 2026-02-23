@@ -6,11 +6,11 @@ const PREVIEW_IMAGE_URL = 'https://plannotator.ai/assets/plan-diff-preview.png';
 const FEEDBACK_URL = 'https://github.com/backnotprop/plannotator/issues';
 
 const VIDEO_URLS: Record<string, string> = {
-  'claude-code': 'https://plannotator.ai/demos/plan-diff-claude-code',
-  'opencode': 'https://plannotator.ai/demos/plan-diff-opencode',
-  'pi': 'https://plannotator.ai/demos/plan-diff-pi',
+  'claude-code': 'https://youtu.be/uIWkFCg60Lk',
+  'opencode': 'https://youtu.be/uIWkFCg60Lk',
+  'pi': 'https://youtu.be/uIWkFCg60Lk',
 };
-const DEFAULT_VIDEO_URL = 'https://plannotator.ai/demos/plan-diff';
+const DEFAULT_VIDEO_URL = 'https://youtu.be/uIWkFCg60Lk';
 
 interface PlanDiffMarketingProps {
   isOpen: boolean;
