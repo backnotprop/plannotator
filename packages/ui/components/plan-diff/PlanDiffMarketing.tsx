@@ -35,7 +35,7 @@ export const PlanDiffMarketing: React.FC<PlanDiffMarketingProps> = ({
 
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/90 backdrop-blur-sm p-4">
-      <div className="bg-card border border-border rounded-xl w-full max-w-2xl shadow-2xl">
+      <div className="bg-card border border-border rounded-xl w-full max-w-2xl shadow-2xl max-h-full flex flex-col">
         {/* Header */}
         <div className="p-5 border-b border-border">
           <div className="flex items-center gap-2 mb-2">
@@ -52,7 +52,7 @@ export const PlanDiffMarketing: React.FC<PlanDiffMarketingProps> = ({
         </div>
 
         {/* Content */}
-        <div className="p-4 space-y-4">
+        <div className="p-4 space-y-4 overflow-y-auto min-h-0">
           {/* Banner image */}
           {imageError ? (
             <div className="w-full aspect-[16/7] rounded-lg border border-border bg-muted/50 flex items-center justify-center">
@@ -90,15 +90,6 @@ export const PlanDiffMarketing: React.FC<PlanDiffMarketingProps> = ({
               <p>
                 <span className="font-medium">Version history</span>{' '}
                 <span className="text-muted-foreground">— compare against any previous version from the sidebar. Plans are automatically versioned as your agent iterates.</span>
-              </p>
-            </div>
-            <div className="flex gap-2.5">
-              <div className="shrink-0 mt-0.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 mt-1.5" />
-              </div>
-              <p>
-                <span className="font-medium text-muted-foreground">Coming soon</span>{' '}
-                <span className="text-muted-foreground">— cross-plan comparison across different plans in the same project.</span>
               </p>
             </div>
           </div>
