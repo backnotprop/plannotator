@@ -175,6 +175,9 @@ export const VersionBrowser: React.FC<VersionBrowserProps> = ({
 
         {showOtherPlans && (
           <div className="mt-2 space-y-1">
+            <div className="text-[10px] text-muted-foreground italic px-2 py-1.5 leading-relaxed">
+              Viewing and comparing against other plans in this project is coming soon.
+            </div>
             {projectPlans.length === 0 ? (
               <div className="text-xs text-muted-foreground py-1">
                 No other plans found.
@@ -183,16 +186,14 @@ export const VersionBrowser: React.FC<VersionBrowserProps> = ({
               projectPlans.map((plan) => (
                 <div
                   key={plan.slug}
-                  className="px-2 py-1.5 rounded text-xs opacity-60 cursor-not-allowed"
-                  title="Coming soon"
+                  className="px-2 py-1.5 rounded text-xs opacity-60"
                 >
                   <div className="font-medium text-foreground truncate" title={plan.slug}>
-                    {plan.slug}
+                    {plan.slug.replace(/-\d{4}-\d{2}-\d{2}$/, "")}
                   </div>
                   <div className="flex items-center gap-2 text-[10px] text-muted-foreground mt-0.5">
                     <span>{plan.versions} version{plan.versions !== 1 ? "s" : ""}</span>
                     <span>{relativeTime(plan.lastModified)}</span>
-                    <span className="italic text-muted-foreground/50">(coming soon)</span>
                   </div>
                 </div>
               ))

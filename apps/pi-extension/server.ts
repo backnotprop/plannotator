@@ -99,7 +99,7 @@ function generateSlug(plan: string): string {
   const date = new Date().toISOString().split("T")[0];
   const heading = extractFirstHeading(plan);
   const slug = heading ? sanitizeTag(heading) : null;
-  return slug ? `${date}-${slug}` : `${date}-plan`;
+  return slug ? `${slug}-${date}` : `plan-${date}`;
 }
 
 function detectProjectName(): string {

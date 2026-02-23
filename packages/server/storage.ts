@@ -42,7 +42,7 @@ function extractFirstHeading(markdown: string): string | null {
 
 /**
  * Generate a slug from plan content.
- * Format: YYYY-MM-DD-{sanitized-heading}
+ * Format: {sanitized-heading}-YYYY-MM-DD
  */
 export function generateSlug(plan: string): string {
   const date = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
@@ -50,7 +50,7 @@ export function generateSlug(plan: string): string {
   const heading = extractFirstHeading(plan);
   const slug = heading ? sanitizeTag(heading) : null;
 
-  return slug ? `${date}-${slug}` : `${date}-plan`;
+  return slug ? `${slug}-${date}` : `plan-${date}`;
 }
 
 /**
