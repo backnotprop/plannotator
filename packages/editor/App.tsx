@@ -1132,6 +1132,7 @@ const App: React.FC = () => {
                 isPlanDiffActive={isPlanDiffActive}
                 onActivatePlanDiff={() => { if (planDiff.diffStats) setIsPlanDiffActive(true); }}
                 isLoadingVersions={planDiff.isLoadingVersions}
+                isSelectingVersion={planDiff.isSelectingVersion}
                 onFetchVersions={planDiff.fetchVersions}
                 onFetchProjectPlans={planDiff.fetchProjectPlans}
               />

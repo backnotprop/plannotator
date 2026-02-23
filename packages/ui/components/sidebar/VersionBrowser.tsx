@@ -17,6 +17,7 @@ interface VersionBrowserProps {
   isPlanDiffActive: boolean;
   onActivatePlanDiff: () => void;
   isLoading: boolean;
+  isSelectingVersion: boolean;
   onFetchVersions: () => void;
   onFetchProjectPlans: () => void;
 }
@@ -46,6 +47,7 @@ export const VersionBrowser: React.FC<VersionBrowserProps> = ({
   isPlanDiffActive,
   onActivatePlanDiff,
   isLoading,
+  isSelectingVersion,
   onFetchVersions,
   onFetchProjectPlans,
 }) => {
@@ -129,7 +131,7 @@ export const VersionBrowser: React.FC<VersionBrowserProps> = ({
                           )}
                         </span>
                         <span className="text-[10px] text-muted-foreground">
-                          {relativeTime(v.timestamp)}
+                          {isSelected && isSelectingVersion ? "Loading..." : relativeTime(v.timestamp)}
                         </span>
                       </div>
                     </button>

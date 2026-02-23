@@ -31,6 +31,7 @@ interface SidebarContainerProps {
   isPlanDiffActive: boolean;
   onActivatePlanDiff: () => void;
   isLoadingVersions: boolean;
+  isSelectingVersion: boolean;
   onFetchVersions: () => void;
   onFetchProjectPlans: () => void;
 }
@@ -52,6 +53,7 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
   isPlanDiffActive,
   onActivatePlanDiff,
   isLoadingVersions,
+  isSelectingVersion,
   onFetchVersions,
   onFetchProjectPlans,
 }) => {
@@ -144,6 +146,7 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
             isPlanDiffActive={isPlanDiffActive}
             onActivatePlanDiff={onActivatePlanDiff}
             isLoading={isLoadingVersions}
+            isSelectingVersion={isSelectingVersion}
             onFetchVersions={onFetchVersions}
             onFetchProjectPlans={onFetchProjectPlans}
           />
