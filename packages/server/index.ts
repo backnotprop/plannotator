@@ -126,15 +126,6 @@ export async function startPlannotatorServer(
     project,
   };
 
-  if (historyResult.isNew) {
-    console.error(
-      `[History] Saved v${historyResult.version} for ${project}/${slug}`
-    );
-  } else {
-    console.error(
-      `[History] v${historyResult.version} unchanged for ${project}/${slug}`
-    );
-  }
 
   // Decision promise
   let resolveDecision: (result: {
