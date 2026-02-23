@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { markPlanDiffMarketingSeen } from '../utils/planDiffMarketing';
+import { markPlanDiffMarketingSeen } from '../../utils/planDiffMarketing';
 
 const PREVIEW_IMAGE_URL = 'https://plannotator.ai/assets/plan-diff-preview.png';
 const FEEDBACK_URL = 'https://github.com/backnotprop/plannotator/issues';

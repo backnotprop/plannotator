@@ -34,7 +34,7 @@ import {
 } from '@plannotator/ui/utils/permissionMode';
 import { PermissionModeSetup } from '@plannotator/ui/components/PermissionModeSetup';
 import { UIFeaturesSetup } from '@plannotator/ui/components/UIFeaturesSetup';
-import { PlanDiffMarketing } from '@plannotator/ui/components/PlanDiffMarketing';
+import { PlanDiffMarketing } from '@plannotator/ui/components/plan-diff/PlanDiffMarketing';
 import { needsPlanDiffMarketingDialog } from '@plannotator/ui/utils/planDiffMarketing';
 import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
 import { deriveImageName } from '@plannotator/ui/components/AttachmentsButton';
@@ -728,7 +728,7 @@ const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
     showExport, showImport, showFeedbackPrompt, showClaudeCodeWarning, showAgentWarning,
-    showPermissionModeSetup, showUIFeaturesSetup, pendingPasteImage,
+    showPermissionModeSetup, showUIFeaturesSetup, showPlanDiffMarketing, pendingPasteImage,
     submitted, isSubmitting, isApiMode, annotations.length, annotateMode,
     origin, getAgentWarning,
   ]);
@@ -856,7 +856,7 @@ const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleSaveShortcut);
   }, [
     showExport, showFeedbackPrompt, showClaudeCodeWarning, showAgentWarning,
-    showPermissionModeSetup, showUIFeaturesSetup, pendingPasteImage,
+    showPermissionModeSetup, showUIFeaturesSetup, showPlanDiffMarketing, pendingPasteImage,
     submitted, isApiMode, markdown, annotationsOutput,
   ]);
 
