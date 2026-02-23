@@ -203,6 +203,46 @@ const SimpleBlockRenderer: React.FC<{ block: Block }> = ({ block }) => {
     case "hr":
       return <hr className="border-border/30 my-8" />;
 
+    case "table": {
+      const lines = block.content.split('\n').filter(line => line.trim());
+      if (lines.length === 0) return null;
+      const parseRow = (line: string): string[] =>
+        line.replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim());
+      const headers = parseRow(lines[0]);
+      const rows: string[][] = [];
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (/^[\|\-:\s]+$/.test(line)) continue;
+        rows.push(parseRow(line));
+      }
+      return (
+        <div className="my-4 overflow-x-auto">
+          <table className="min-w-full border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-border">
+                {headers.map((header, i) => (
+                  <th key={i} className="px-3 py-2 text-left font-semibold text-foreground/90 bg-muted/30">
+                    <InlineMarkdown text={header} />
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, rowIdx) => (
+                <tr key={rowIdx} className="border-b border-border/50">
+                  {row.map((cell, cellIdx) => (
+                    <td key={cellIdx} className="px-3 py-2 text-foreground/80">
+                      <InlineMarkdown text={cell} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
     default:
       return (
         <p className="mb-4 leading-relaxed text-foreground/90 text-[15px]">
