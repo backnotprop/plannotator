@@ -24,7 +24,7 @@ export interface UseAgentsResult {
  * Fetch available agents from OpenCode API
  * Only fetches when origin is 'opencode'
  */
-export function useAgents(origin: 'claude-code' | 'opencode' | null): UseAgentsResult {
+export function useAgents(origin: 'claude-code' | 'opencode' | 'pi' | null): UseAgentsResult {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 

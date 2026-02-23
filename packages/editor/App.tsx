@@ -34,6 +34,8 @@ import {
 } from '@plannotator/ui/utils/permissionMode';
 import { PermissionModeSetup } from '@plannotator/ui/components/PermissionModeSetup';
 import { UIFeaturesSetup } from '@plannotator/ui/components/UIFeaturesSetup';
+import { PlanDiffMarketing } from '@plannotator/ui/components/PlanDiffMarketing';
+import { needsPlanDiffMarketingDialog } from '@plannotator/ui/utils/planDiffMarketing';
 import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
 import { deriveImageName } from '@plannotator/ui/components/AttachmentsButton';
 import { useSidebar } from '@plannotator/ui/hooks/useSidebar';
@@ -356,7 +358,7 @@ const App: React.FC = () => {
   });
   const [uiPrefs, setUiPrefs] = useState(() => getUIPreferences());
   const [isApiMode, setIsApiMode] = useState(false);
-  const [origin, setOrigin] = useState<'claude-code' | 'opencode' | null>(null);
+  const [origin, setOrigin] = useState<'claude-code' | 'opencode' | 'pi' | null>(null);
   const [globalAttachments, setGlobalAttachments] = useState<ImageAttachment[]>([]);
   const [annotateMode, setAnnotateMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -365,6 +367,7 @@ const App: React.FC = () => {
   const [pendingPasteImage, setPendingPasteImage] = useState<{ file: File; blobUrl: string; initialName: string } | null>(null);
   const [showPermissionModeSetup, setShowPermissionModeSetup] = useState(false);
   const [showUIFeaturesSetup, setShowUIFeaturesSetup] = useState(false);
+  const [showPlanDiffMarketing, setShowPlanDiffMarketing] = useState(false);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
   const [sharingEnabled, setSharingEnabled] = useState(true);
   const [shareBaseUrl, setShareBaseUrl] = useState<string | undefined>(undefined);
@@ -470,7 +473,7 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: 'claude-code' | 'opencode'; mode?: 'annotate'; sharingEnabled?: boolean; shareBaseUrl?: string; repoInfo?: { display: string; branch?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string } }) => {
+      .then((data: { plan: string; origin?: 'claude-code' | 'opencode' | 'pi'; mode?: 'annotate'; sharingEnabled?: boolean; shareBaseUrl?: string; repoInfo?: { display: string; branch?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string } }) => {
         setMarkdown(data.plan);
         setIsApiMode(true);
         if (data.mode === 'annotate') {
@@ -499,6 +502,8 @@ const App: React.FC = () => {
             setShowPermissionModeSetup(true);
           } else if (needsUIFeaturesSetup()) {
             setShowUIFeaturesSetup(true);
+          } else if (needsPlanDiffMarketingDialog()) {
+            setShowPlanDiffMarketing(true);
           }
           // Load saved permission mode preference
           setPermissionMode(getPermissionModeSettings().mode);
@@ -682,7 +687,7 @@ const App: React.FC = () => {
 
       // Don't intercept if any modal is open
       if (showExport || showImport || showFeedbackPrompt || showClaudeCodeWarning ||
-          showAgentWarning || showPermissionModeSetup || showUIFeaturesSetup || pendingPasteImage) return;
+          showAgentWarning || showPermissionModeSetup || showUIFeaturesSetup || showPlanDiffMarketing || pendingPasteImage) return;
 
       // Don't intercept if already submitted or submitting
       if (submitted || isSubmitting) return;
@@ -825,7 +830,7 @@ const App: React.FC = () => {
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
       if (showExport || showFeedbackPrompt || showClaudeCodeWarning ||
-          showAgentWarning || showPermissionModeSetup || showUIFeaturesSetup || pendingPasteImage) return;
+          showAgentWarning || showPermissionModeSetup || showUIFeaturesSetup || showPlanDiffMarketing || pendingPasteImage) return;
 
       if (submitted || !isApiMode) return;
 
@@ -871,6 +876,7 @@ const App: React.FC = () => {
   const agentName = useMemo(() => {
     if (origin === 'opencode') return 'OpenCode';
     if (origin === 'claude-code') return 'Claude Code';
+    if (origin === 'pi') return 'Pi';
     return 'Coding Agent';
   }, [origin]);
 
@@ -902,7 +908,9 @@ const App: React.FC = () => {
               <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium hidden md:inline ${
                 origin === 'claude-code'
                   ? 'bg-orange-500/15 text-orange-400'
-                  : 'bg-zinc-500/20 text-zinc-400'
+                  : origin === 'pi'
+                    ? 'bg-violet-500/15 text-violet-400'
+                    : 'bg-zinc-500/20 text-zinc-400'
               }`}>
                 {agentName}
               </span>
@@ -1332,6 +1340,8 @@ const App: React.FC = () => {
             setShowPermissionModeSetup(false);
             if (needsUIFeaturesSetup()) {
               setShowUIFeaturesSetup(true);
+            } else if (needsPlanDiffMarketingDialog()) {
+              setShowPlanDiffMarketing(true);
             }
           }}
         />
@@ -1342,6 +1352,18 @@ const App: React.FC = () => {
           onComplete={(prefs) => {
             setUiPrefs(prefs);
             setShowUIFeaturesSetup(false);
+            if (needsPlanDiffMarketingDialog()) {
+              setShowPlanDiffMarketing(true);
+            }
+          }}
+        />
+
+        {/* Plan Diff Marketing (feature announcement) */}
+        <PlanDiffMarketing
+          isOpen={showPlanDiffMarketing}
+          origin={origin}
+          onComplete={() => {
+            setShowPlanDiffMarketing(false);
           }}
         />
       </div>

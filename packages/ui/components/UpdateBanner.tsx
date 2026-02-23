@@ -4,7 +4,7 @@ import { useUpdateCheck } from '../hooks/useUpdateCheck';
 const INSTALL_COMMAND = 'curl -fsSL https://plannotator.ai/install.sh | bash';
 
 interface UpdateBannerProps {
-  origin?: 'claude-code' | 'opencode' | null;
+  origin?: 'claude-code' | 'opencode' | 'pi' | null;
 }
 
 export const UpdateBanner: React.FC<UpdateBannerProps> = ({ origin }) => {

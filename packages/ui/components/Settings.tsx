@@ -49,7 +49,7 @@ interface SettingsProps {
   taterMode: boolean;
   onTaterModeChange: (enabled: boolean) => void;
   onIdentityChange?: (oldIdentity: string, newIdentity: string) => void;
-  origin?: 'claude-code' | 'opencode' | null;
+  origin?: 'claude-code' | 'opencode' | 'pi' | null;
   /** Mode determines which settings are shown. 'plan' shows all, 'review' shows only identity + agent switching */
   mode?: 'plan' | 'review';
   onUIPreferencesChange?: (prefs: UIPreferences) => void;

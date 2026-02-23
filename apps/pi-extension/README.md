@@ -61,7 +61,7 @@ When the agent calls `exit_plan_mode`, the Plannotator UI opens in your browser.
 - **Deny with annotations** to send structured feedback back to the agent
 - **Approve with notes** to proceed but include implementation guidance
 
-The agent iterates on the plan until you approve, then executes with full tool access.
+The agent iterates on the plan until you approve, then executes with full tool access. On resubmission, Plan Diff highlights what changed since the previous version.
 
 ### Code review
 

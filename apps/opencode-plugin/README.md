@@ -48,6 +48,7 @@ Restart OpenCode. The `submit_plan` tool is now available.
 - **Visual annotations**: Select text, choose an action, see feedback in the sidebar
 - **Runs locally**: No network requests. Plans never leave your machine.
 - **Private sharing**: Plans and annotations compress into the URL itself—share a link, no accounts or backend required
+- **Plan Diff**: See what changed when the agent revises a plan after feedback
 - **Obsidian integration**: Auto-save approved plans to your vault with frontmatter and tags
 
 ## Environment Variables

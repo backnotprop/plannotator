@@ -23,6 +23,8 @@ User reviews plan, optionally adds annotations
         ↓
 Approve → agent proceeds with implementation
 Deny    → annotations sent as structured feedback
+        ↓
+Agent resubmits → Plan Diff shows what changed
 ```
 
 The hook configuration lives at `apps/hook/hooks/hooks.json` and matches the `ExitPlanMode` tool name.

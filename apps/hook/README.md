@@ -69,6 +69,7 @@ When Claude Code calls `ExitPlanMode`, this hook intercepts and:
 2. Lets you annotate the plan visually
 3. Approve → Claude proceeds with implementation
 4. Request changes → Your annotations are sent back to Claude
+5. On resubmission → Plan Diff shows what changed since the last version
 
 ## Environment Variables
 

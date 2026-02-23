@@ -120,6 +120,10 @@ The mode switcher below the header in the plan review UI controls how text selec
 | **Comment** | Select text to immediately create a comment annotation |
 | **Redline** | Select text to immediately create a deletion annotation |
 
+## Plan Diff
+
+When the agent resubmits a revised plan, a `+N/-M` badge appears showing what changed. Click it to toggle between normal view and diff view. Two diff modes are available — **Rendered** (color-coded borders on the formatted plan) and **Raw** (monospace git-style `+/-` lines). You can also compare against any previous version from the sidebar's Version Browser tab.
+
 ## Diff style
 
 In the code review UI, a toggle in the header switches between **Split** (side-by-side) and **Unified** (single-pane) diff views. Split is the default.

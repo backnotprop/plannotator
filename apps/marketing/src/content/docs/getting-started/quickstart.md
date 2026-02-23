@@ -54,4 +54,4 @@ Your annotations are exported as structured feedback that Claude can act on dire
 
 ## 5. Claude continues
 
-After approval, Claude implements the plan. After feedback, Claude revises the plan and presents it again for review. The cycle continues until you approve.
+After approval, Claude implements the plan. After feedback, Claude revises the plan and presents it again for review. When the revised plan arrives, a diff badge shows what changed — click it to toggle between normal and diff view. The cycle continues until you approve.
