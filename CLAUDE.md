@@ -174,9 +174,23 @@ All servers use random ports locally or fixed port (`19432`) in remote mode.
 
 Every plan is automatically saved to `~/.plannotator/history/{project}/{slug}/` on arrival, before the user sees the UI. Versions are numbered sequentially (`001.md`, `002.md`, etc.). The slug is derived from the plan's first `# Heading` + today's date via `generateSlug()`, scoped by project name (git repo or cwd). Same heading on the same day = same slug = same plan being iterated on. Identical resubmissions are deduplicated (no new file if content matches the latest version).
 
-This powers the version history API (`/api/plan/version`, `/api/plan/versions`, `/api/plan/history`) and will be used for plan diffing — showing users what changed between iterations when they deny and Claude revises.
+This powers the version history API (`/api/plan/version`, `/api/plan/versions`, `/api/plan/history`) and the plan diff system.
 
-History saves independently of the `planSave` user setting (which controls decision snapshots in `~/.plannotator/plans/`). Storage functions live in `packages/server/storage.ts`, with Node-compatible duplicates in `apps/pi-extension/server.ts`.
+History saves independently of the `planSave` user setting (which controls decision snapshots in `~/.plannotator/plans/`). Storage functions live in `packages/server/storage.ts`, with Node-compatible duplicates in `apps/pi-extension/server.ts`. Slug format: `{sanitized-heading}-YYYY-MM-DD` (heading first for readability).
+
+## Plan Diff
+
+When a user denies a plan and Claude resubmits, the UI shows what changed between versions. A `+N/-M` badge appears below the document card; clicking it toggles between normal view and diff view.
+
+**Diff engine** (`packages/ui/utils/planDiffEngine.ts`): Uses the `diff` npm package (`diffLines()`) to compute line-level diffs. Groups consecutive remove+add into "modified" blocks. Returns `PlanDiffBlock[]` and `PlanDiffStats`.
+
+**Two view modes** (toggle via `PlanDiffModeSwitcher`):
+- **Rendered** (`PlanCleanDiffView`): Color-coded left borders — green (added), red (removed/strikethrough), yellow (modified)
+- **Raw** (`PlanRawDiffView`): Monospace `+/-` lines, git-style
+
+**State** (`packages/ui/hooks/usePlanDiff.ts`): Manages base version selection, diff computation, and version fetching. The server sends `previousPlan` with the initial `/api/plan` response; the hook auto-diffs against it. Users can select any prior version from the sidebar Version Browser.
+
+**Sidebar** (`packages/ui/hooks/useSidebar.ts`): Shared left sidebar with two tabs — Table of Contents and Version Browser. The "Auto-open Sidebar" setting controls whether it opens on load (TOC tab only).
 
 ## Data Types
 

@@ -107,12 +107,15 @@ export function usePlanDiff(
       setFetchingVersion(version);
       try {
         const res = await fetch(`/api/plan/version?v=${version}`);
-        if (!res.ok) return;
+        if (!res.ok) {
+          alert(`Failed to load version ${version}.`);
+          return;
+        }
         const data = (await res.json()) as { plan: string; version: number };
         setDiffBasePlan(data.plan);
         setDiffBaseVersion(version);
       } catch {
-        // Failed to fetch version
+        alert(`Failed to load version ${version}.`);
       } finally {
         setIsSelectingVersion(false);
         setFetchingVersion(null);
