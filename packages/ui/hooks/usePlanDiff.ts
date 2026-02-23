@@ -50,6 +50,8 @@ export interface UsePlanDiffReturn {
   isLoadingVersions: boolean;
   /** Whether a version selection fetch is in progress */
   isSelectingVersion: boolean;
+  /** Which version is currently being fetched (null if none) */
+  fetchingVersion: number | null;
   /** Fetch the version list for the sidebar */
   fetchVersions: () => Promise<void>;
   /** Fetch the project plan list for the sidebar */
@@ -71,6 +73,7 @@ export function usePlanDiff(
   const [projectPlans, setProjectPlans] = useState<ProjectPlan[]>([]);
   const [isLoadingVersions, setIsLoadingVersions] = useState(false);
   const [isSelectingVersion, setIsSelectingVersion] = useState(false);
+  const [fetchingVersion, setFetchingVersion] = useState<number | null>(null);
 
   // Sync diffBasePlan when initialPreviousPlan arrives after mount (API response)
   useEffect(() => {
@@ -101,6 +104,7 @@ export function usePlanDiff(
   const selectBaseVersion = useCallback(
     async (version: number) => {
       setIsSelectingVersion(true);
+      setFetchingVersion(version);
       try {
         const res = await fetch(`/api/plan/version?v=${version}`);
         if (!res.ok) return;
@@ -111,6 +115,7 @@ export function usePlanDiff(
         // Failed to fetch version
       } finally {
         setIsSelectingVersion(false);
+        setFetchingVersion(null);
       }
     },
     []
@@ -159,6 +164,7 @@ export function usePlanDiff(
     projectPlans,
     isLoadingVersions,
     isSelectingVersion,
+    fetchingVersion,
     fetchVersions,
     fetchProjectPlans,
   };

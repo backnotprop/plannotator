@@ -15,9 +15,11 @@ interface VersionBrowserProps {
   selectedBaseVersion: number | null;
   onSelectBaseVersion: (version: number) => void;
   isPlanDiffActive: boolean;
+  hasPreviousVersion: boolean;
   onActivatePlanDiff: () => void;
   isLoading: boolean;
   isSelectingVersion: boolean;
+  fetchingVersion: number | null;
   onFetchVersions: () => void;
   onFetchProjectPlans: () => void;
 }
@@ -45,9 +47,11 @@ export const VersionBrowser: React.FC<VersionBrowserProps> = ({
   selectedBaseVersion,
   onSelectBaseVersion,
   isPlanDiffActive,
+  hasPreviousVersion,
   onActivatePlanDiff,
   isLoading,
   isSelectingVersion,
+  fetchingVersion,
   onFetchVersions,
   onFetchProjectPlans,
 }) => {
@@ -84,7 +88,7 @@ export const VersionBrowser: React.FC<VersionBrowserProps> = ({
       </div>
 
       {/* Show Diff button if not active */}
-      {totalVersions > 1 && !isPlanDiffActive && (
+      {hasPreviousVersion && !isPlanDiffActive && (
         <button
           onClick={onActivatePlanDiff}
           className="w-full mb-3 px-3 py-1.5 text-xs font-medium rounded-md bg-primary/10 text-primary hover:bg-primary/20 transition-colors border border-primary/20"
@@ -131,7 +135,7 @@ export const VersionBrowser: React.FC<VersionBrowserProps> = ({
                           )}
                         </span>
                         <span className="text-[10px] text-muted-foreground">
-                          {isSelected && isSelectingVersion ? "Loading..." : relativeTime(v.timestamp)}
+                          {fetchingVersion === v.version ? "Loading..." : relativeTime(v.timestamp)}
                         </span>
                       </div>
                     </button>

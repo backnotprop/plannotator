@@ -192,7 +192,7 @@ export function TableOfContents({
 
   return (
     <nav
-      className={`bg-card/50 backdrop-blur-sm border-r border-border overflow-y-auto ${className}`}
+      className={className || "bg-card/50 backdrop-blur-sm border-r border-border overflow-y-auto"}
       aria-label="Table of contents"
       style={style}
     >

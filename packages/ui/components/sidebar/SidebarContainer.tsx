@@ -29,9 +29,11 @@ interface SidebarContainerProps {
   selectedBaseVersion: number | null;
   onSelectBaseVersion: (version: number) => void;
   isPlanDiffActive: boolean;
+  hasPreviousVersion: boolean;
   onActivatePlanDiff: () => void;
   isLoadingVersions: boolean;
   isSelectingVersion: boolean;
+  fetchingVersion: number | null;
   onFetchVersions: () => void;
   onFetchProjectPlans: () => void;
 }
@@ -51,9 +53,11 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
   selectedBaseVersion,
   onSelectBaseVersion,
   isPlanDiffActive,
+  hasPreviousVersion,
   onActivatePlanDiff,
   isLoadingVersions,
   isSelectingVersion,
+  fetchingVersion,
   onFetchVersions,
   onFetchProjectPlans,
 }) => {
@@ -134,6 +138,7 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
             annotations={annotations}
             activeId={activeSection}
             onNavigate={onTocNavigate}
+            className="overflow-y-auto"
           />
         )}
         {activeTab === "versions" && (
@@ -144,9 +149,11 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
             selectedBaseVersion={selectedBaseVersion}
             onSelectBaseVersion={onSelectBaseVersion}
             isPlanDiffActive={isPlanDiffActive}
+            hasPreviousVersion={hasPreviousVersion}
             onActivatePlanDiff={onActivatePlanDiff}
             isLoading={isLoadingVersions}
             isSelectingVersion={isSelectingVersion}
+            fetchingVersion={fetchingVersion}
             onFetchVersions={onFetchVersions}
             onFetchProjectPlans={onFetchProjectPlans}
           />
