@@ -35,6 +35,19 @@ Interactive Plan Review for AI Coding Agents. Mark up and refine your plans usin
 <tr><td><strong>Annotate Any File</strong></td><td><code>/plannotator-annotate</code></td><td>Annotate any markdown file and send feedback to your agent</td></tr>
 </table>
 
+#### Sharing Plans
+
+Plannotator lets you privately share plans, annotations, and feedback with colleagues. For example, a colleague can annotate a shared plan, and you can import their feedback to send directly back to the coding agent.
+
+Plans are shared via compressed URL through a static site: **share.plannotator.ai**
+
+- No backend or database; nothing is stored
+- The site's deployment is open source
+- You can self-host your own share site and point Plannotator to it via an environment variable ([see docs](https://plannotator.ai/docs/guides/sharing-and-collaboration/))
+
+> [!NOTE]
+> [share.plannotator.ai](https://share.plannotator.ai) uses a default fallback (demo) plan that is hard-coded into the site. This isn't a leaked plan—the site has no storage layer.
+
 ## Install
 
 - [Claude Code](#install-for-claude-code)
