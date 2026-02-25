@@ -13,6 +13,7 @@ import { mkdirSync } from "fs";
 import { isRemoteSession, getServerPort } from "./remote";
 import { openBrowser } from "./browser";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
+import { openEditorDiff } from "./editor";
 import {
   detectObsidianVaults,
   saveToObsidian,
@@ -244,9 +245,7 @@ export async function startPlannotatorServer(
           // API: Open plan diff in VS Code
           if (url.pathname === "/api/plan/vscode-diff" && req.method === "POST") {
             try {
-              const body = (await req.json()) as {
-                baseVersion: number;
-              };
+              const body = (await req.json()) as { baseVersion: number };
 
               if (!body.baseVersion) {
                 return Response.json({ error: "Missing baseVersion" }, { status: 400 });
@@ -257,41 +256,14 @@ export async function startPlannotatorServer(
                 return Response.json({ error: `Version ${body.baseVersion} not found` }, { status: 404 });
               }
 
-              mkdirSync(UPLOAD_DIR, { recursive: true });
-              const oldPath = `${UPLOAD_DIR}/plan-v${body.baseVersion}.md`;
-              const newPath = `${UPLOAD_DIR}/plan-current.md`;
-
-              await Bun.write(oldPath, basePlan);
-              await Bun.write(newPath, plan);
-
-              const proc = Bun.spawn(["code", "--diff", oldPath, newPath], {
-                stdout: "ignore",
-                stderr: "pipe",
-              });
-              const exitCode = await proc.exited;
-
-              if (exitCode !== 0) {
-                const stderr = await new Response(proc.stderr).text();
-                const isNotFound = stderr.includes("not found") || stderr.includes("ENOENT");
-                if (isNotFound) {
-                  return Response.json(
-                    { error: "VS Code CLI not found. Run 'Shell Command: Install code command in PATH' from the VS Code command palette." },
-                    { status: 400 }
-                  );
-                }
-                return Response.json({ error: `code --diff exited with ${exitCode}: ${stderr}` }, { status: 500 });
+              const result = await openEditorDiff(basePlan, plan, { baseVersion: body.baseVersion });
+              if ("error" in result) {
+                const status = result.error.includes("not found") ? 400 : 500;
+                return Response.json({ error: result.error }, { status });
               }
-
               return Response.json({ ok: true });
             } catch (err) {
               const message = err instanceof Error ? err.message : "Failed to open VS Code diff";
-              const isNotFound = message.includes("ENOENT") || message.includes("not found");
-              if (isNotFound) {
-                return Response.json(
-                  { error: "VS Code CLI not found. Run 'Shell Command: Install code command in PATH' from the VS Code command palette." },
-                  { status: 400 }
-                );
-              }
               return Response.json({ error: message }, { status: 500 });
             }
           }
