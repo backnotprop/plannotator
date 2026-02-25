@@ -10,6 +10,7 @@
  */
 
 import { mkdirSync } from "fs";
+import { resolve } from "path";
 import { isRemoteSession, getServerPort } from "./remote";
 import { openBrowser } from "./browser";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
@@ -193,6 +194,72 @@ export async function startPlannotatorServer(
           // API: Get plan content
           if (url.pathname === "/api/plan") {
             return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, repoInfo, previousPlan, versionInfo });
+          }
+
+          // API: Serve a linked markdown document in read-only mode
+          if (url.pathname === "/api/doc" && req.method === "GET") {
+            const requestedPath = url.searchParams.get("path");
+            if (!requestedPath) {
+              return Response.json({ error: "Missing path parameter" }, { status: 400 });
+            }
+
+            const projectRoot = process.cwd();
+
+            // Path resolution: 4 strategies in order
+            let resolvedPath: string | null = null;
+
+            if (requestedPath.startsWith("/")) {
+              // 1. Absolute path
+              resolvedPath = requestedPath;
+            } else {
+              // 2. Relative to project root
+              const fromRoot = resolve(projectRoot, requestedPath);
+              if (await Bun.file(fromRoot).exists()) {
+                resolvedPath = fromRoot;
+              }
+
+              // 3. Bare filename — search entire project for unique match
+              if (!resolvedPath && !requestedPath.includes("/")) {
+                const glob = new Bun.Glob(`**/${requestedPath}`);
+                const matches: string[] = [];
+                for await (const match of glob.scan({ cwd: projectRoot, onlyFiles: true })) {
+                  if (match.split("/").pop() === requestedPath) {
+                    matches.push(resolve(projectRoot, match));
+                  }
+                }
+                if (matches.length === 1) {
+                  resolvedPath = matches[0];
+                } else if (matches.length > 1) {
+                  const relativePaths = matches.map((m) => m.replace(projectRoot + "/", ""));
+                  return Response.json(
+                    { error: `Ambiguous filename '${requestedPath}': found ${matches.length} matches`, matches: relativePaths },
+                    { status: 400 }
+                  );
+                }
+              }
+            }
+
+            if (!resolvedPath) {
+              return Response.json({ error: `File not found: ${requestedPath}` }, { status: 404 });
+            }
+
+            // Security: path must stay within projectRoot
+            const normalised = resolve(resolvedPath);
+            if (!normalised.startsWith(projectRoot + "/") && normalised !== projectRoot) {
+              return Response.json({ error: "Access denied: path is outside project root" }, { status: 403 });
+            }
+
+            const file = Bun.file(normalised);
+            if (!(await file.exists())) {
+              return Response.json({ error: `File not found: ${requestedPath}` }, { status: 404 });
+            }
+
+            try {
+              const markdown = await file.text();
+              return Response.json({ markdown, filepath: normalised });
+            } catch {
+              return Response.json({ error: "Failed to read file" }, { status: 500 });
+            }
           }
 
           // API: Serve images (local paths or temp uploads)

@@ -26,6 +26,7 @@ interface ViewerProps {
   onRemoveGlobalAttachment?: (path: string) => void;
   repoInfo?: { display: string; branch?: string } | null;
   stickyActions?: boolean;
+  isReadOnly?: boolean;
   // Plan diff props
   planDiffStats?: { additions: number; deletions: number; modifications: number } | null;
   isPlanDiffActive?: boolean;
@@ -91,6 +92,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   isPlanDiffActive,
   onPlanDiffToggle,
   hasPreviousVersion,
+  isReadOnly = false,
 }, ref) => {
   const [copied, setCopied] = useState(false);
   const [showGlobalCommentInput, setShowGlobalCommentInput] = useState(false);
@@ -484,6 +486,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 
   useEffect(() => {
     if (!containerRef.current) return;
+    if (isReadOnly) return;
 
     const highlighter = new Highlighter({
       $root: containerRef.current,
@@ -813,7 +816,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         ))}
 
         {/* Text selection toolbar */}
-        {toolbarState && (
+        {toolbarState && !isReadOnly && (
           <AnnotationToolbar
             element={toolbarState.element}
             positionMode="center-above"
@@ -827,7 +830,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         )}
 
         {/* Code block hover toolbar */}
-        {hoveredCodeBlock && !toolbarState && (
+        {hoveredCodeBlock && !toolbarState && !isReadOnly && (
           <AnnotationToolbar
             element={hoveredCodeBlock.element}
             positionMode="top-right"
@@ -900,17 +903,41 @@ const InlineMarkdown: React.FC<{ text: string }> = ({ text }) => {
     // Links: [text](url)
     match = remaining.match(/^\[([^\]]+)\]\(([^)]+)\)/);
     if (match) {
-      parts.push(
-        <a
-          key={key++}
-          href={match[2]}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-primary underline underline-offset-2 hover:text-primary/80"
-        >
-          {match[1]}
-        </a>
-      );
+      const linkText = match[1];
+      const linkUrl = match[2];
+      const isLocalMd = /\.md(x?)$/i.test(linkUrl) &&
+        !linkUrl.startsWith('http://') &&
+        !linkUrl.startsWith('https://');
+
+      if (isLocalMd) {
+        parts.push(
+          <a
+            key={key++}
+            href={`/?doc=${encodeURIComponent(linkUrl)}&readonly=true`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1"
+            title={`Open: ${linkUrl}`}
+          >
+            {linkText}
+            <svg className="w-3 h-3 opacity-50 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+            </svg>
+          </a>
+        );
+      } else {
+        parts.push(
+          <a
+            key={key++}
+            href={linkUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary underline underline-offset-2 hover:text-primary/80"
+          >
+            {linkText}
+          </a>
+        );
+      }
       remaining = remaining.slice(match[0].length);
       continue;
     }

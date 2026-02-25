@@ -361,6 +361,9 @@ const App: React.FC = () => {
   const [origin, setOrigin] = useState<'claude-code' | 'opencode' | 'pi' | null>(null);
   const [globalAttachments, setGlobalAttachments] = useState<ImageAttachment[]>([]);
   const [annotateMode, setAnnotateMode] = useState(false);
+  const [isReadOnly, setIsReadOnly] = useState(false);
+  const [docFilepath, setDocFilepath] = useState<string | null>(null);
+  const [docError, setDocError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState<'approved' | 'denied' | null>(null);
@@ -467,6 +470,33 @@ const App: React.FC = () => {
   useEffect(() => {
     if (isLoadingShared) return; // Wait for share check to complete
     if (isSharedSession) return; // Already loaded from share
+
+    // Linked document mode: ?doc=<path>&readonly=true
+    const urlParams = new URLSearchParams(window.location.search);
+    const docPath = urlParams.get('doc');
+    if (docPath) {
+      fetch(`/api/doc?path=${encodeURIComponent(docPath)}`)
+        .then(res => {
+          if (!res.ok) {
+            return res.json().then(data => {
+              throw new Error(data.error || 'Failed to load document');
+            });
+          }
+          return res.json();
+        })
+        .then((data: { markdown: string; filepath: string }) => {
+          setMarkdown(data.markdown);
+          setIsApiMode(true);
+          setIsReadOnly(true);
+          setDocFilepath(data.filepath);
+          sidebar.open('toc');
+        })
+        .catch(err => {
+          setDocError(err.message);
+        })
+        .finally(() => setIsLoading(false));
+      return; // Don't fall through to /api/plan
+    }
 
     fetch('/api/plan')
       .then(res => {
@@ -918,7 +948,7 @@ const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-1 md:gap-2">
-            {isApiMode && (
+            {isApiMode && !isReadOnly && (
               <>
                 <button
                   onClick={() => {
@@ -990,10 +1020,10 @@ const App: React.FC = () => {
               </>
             )}
 
-            <ModeToggle />
-            <Settings taterMode={taterMode} onTaterModeChange={handleTaterModeChange} onIdentityChange={handleIdentityChange} origin={origin} onUIPreferencesChange={setUiPrefs} />
+            {!isReadOnly && <ModeToggle />}
+            {!isReadOnly && <Settings taterMode={taterMode} onTaterModeChange={handleTaterModeChange} onIdentityChange={handleIdentityChange} origin={origin} onUIPreferencesChange={setUiPrefs} />}
 
-            <button
+            {!isReadOnly && <button
               onClick={() => setIsPanelOpen(!isPanelOpen)}
               className={`p-1.5 rounded-md text-xs font-medium transition-all ${
                 isPanelOpen
@@ -1004,7 +1034,7 @@ const App: React.FC = () => {
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
               </svg>
-            </button>
+            </button>}
 
             <div className="relative flex" data-export-dropdown>
               <button
@@ -1108,8 +1138,34 @@ const App: React.FC = () => {
           </div>
         </header>
 
+        {/* Read-only banner for linked documents */}
+        {isReadOnly && !docError && (
+          <div className="bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-700/50 px-4 py-2 flex items-center gap-2 flex-shrink-0">
+            <svg className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+            <span className="text-xs font-medium text-amber-800 dark:text-amber-200">Read-Only Preview</span>
+            {docFilepath && (
+              <span className="text-xs text-amber-600 dark:text-amber-400 font-mono truncate">{docFilepath}</span>
+            )}
+          </div>
+        )}
+
+        {/* Linked document error view */}
+        {docError && (
+          <div className="flex-1 flex items-center justify-center p-8">
+            <div className="max-w-md w-full bg-card border border-border rounded-lg p-6 text-center space-y-3">
+              <svg className="w-10 h-10 text-muted-foreground mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <h2 className="text-sm font-semibold text-foreground">Could not open document</h2>
+              <p className="text-xs text-muted-foreground font-mono bg-muted/50 rounded px-3 py-2 text-left whitespace-pre-wrap">{docError}</p>
+            </div>
+          </div>
+        )}
+
         {/* Main Content */}
-        <div className={`flex-1 flex overflow-hidden ${isResizing ? 'select-none' : ''}`}>
+        {!docError && <div className={`flex-1 flex overflow-hidden ${isResizing ? 'select-none' : ''}`}>
           {/* Left Sidebar: collapsed tab flags (when sidebar is closed) */}
           {!sidebar.isOpen && (
             <SidebarTabs
@@ -1153,8 +1209,8 @@ const App: React.FC = () => {
           {/* Document Area */}
           <main ref={containerRef} className="flex-1 min-w-0 overflow-y-auto bg-grid">
             <div className="min-h-full flex flex-col items-center px-4 py-3 md:px-10 md:py-8 xl:px-16">
-              {/* Mode Switcher (hidden during plan diff) */}
-              {!isPlanDiffActive && (
+              {/* Mode Switcher (hidden during plan diff or in read-only mode) */}
+              {!isPlanDiffActive && !isReadOnly && (
                 <div className="w-full max-w-[832px] 2xl:max-w-5xl mb-3 md:mb-4 flex justify-start">
                   <ModeSwitcher mode={editorMode} onChange={handleEditorModeChange} taterMode={taterMode} />
                 </div>
@@ -1192,17 +1248,18 @@ const App: React.FC = () => {
                   isPlanDiffActive={isPlanDiffActive}
                   onPlanDiffToggle={() => setIsPlanDiffActive(!isPlanDiffActive)}
                   hasPreviousVersion={planDiff.hasPreviousVersion}
+                  isReadOnly={isReadOnly}
                 />
               )}
             </div>
           </main>
 
           {/* Resize Handle */}
-          {isPanelOpen && <ResizeHandle {...panelResize.handleProps} />}
+          {isPanelOpen && !isReadOnly && <ResizeHandle {...panelResize.handleProps} />}
 
           {/* Annotation Panel */}
           <AnnotationPanel
-            isOpen={isPanelOpen}
+            isOpen={isPanelOpen && !isReadOnly}
             blocks={blocks}
             annotations={annotations}
             selectedId={selectedAnnotationId}
@@ -1213,7 +1270,7 @@ const App: React.FC = () => {
             sharingEnabled={sharingEnabled}
             width={panelResize.width}
           />
-        </div>
+        </div>}
 
         {/* Export Modal */}
         <ExportModal
