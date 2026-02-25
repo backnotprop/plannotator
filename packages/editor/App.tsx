@@ -1170,8 +1170,6 @@ const App: React.FC = () => {
                   onPlanDiffToggle={() => setIsPlanDiffActive(false)}
                   repoInfo={repoInfo}
                   baseVersionLabel={planDiff.diffBaseVersion != null ? `v${planDiff.diffBaseVersion}` : undefined}
-                  currentPlan={markdown}
-                  basePlan={planDiff.diffBasePlan ?? undefined}
                   baseVersion={planDiff.diffBaseVersion ?? undefined}
                 />
               ) : (

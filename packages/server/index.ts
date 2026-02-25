@@ -245,21 +245,24 @@ export async function startPlannotatorServer(
           if (url.pathname === "/api/plan/vscode-diff" && req.method === "POST") {
             try {
               const body = (await req.json()) as {
-                basePlan: string;
-                currentPlan: string;
                 baseVersion: number;
               };
 
-              if (!body.basePlan || !body.currentPlan) {
-                return Response.json({ error: "Missing basePlan or currentPlan" }, { status: 400 });
+              if (!body.baseVersion) {
+                return Response.json({ error: "Missing baseVersion" }, { status: 400 });
+              }
+
+              const basePlan = getPlanVersion(project, slug, body.baseVersion);
+              if (!basePlan) {
+                return Response.json({ error: `Version ${body.baseVersion} not found` }, { status: 404 });
               }
 
               mkdirSync(UPLOAD_DIR, { recursive: true });
               const oldPath = `${UPLOAD_DIR}/plan-v${body.baseVersion}.md`;
               const newPath = `${UPLOAD_DIR}/plan-current.md`;
 
-              await Bun.write(oldPath, body.basePlan);
-              await Bun.write(newPath, body.currentPlan);
+              await Bun.write(oldPath, basePlan);
+              await Bun.write(newPath, plan);
 
               const proc = Bun.spawn(["code", "--diff", oldPath, newPath], {
                 stdout: "ignore",

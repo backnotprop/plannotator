@@ -24,8 +24,6 @@ interface PlanDiffViewerProps {
   onPlanDiffToggle: () => void;
   repoInfo?: { display: string; branch?: string } | null;
   baseVersionLabel?: string;
-  currentPlan?: string;
-  basePlan?: string;
   baseVersion?: number;
 }
 
@@ -37,14 +35,12 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
   onPlanDiffToggle,
   repoInfo,
   baseVersionLabel,
-  currentPlan,
-  basePlan,
   baseVersion,
 }) => {
   const [vscodeDiffLoading, setVscodeDiffLoading] = useState(false);
   const [vscodeDiffError, setVscodeDiffError] = useState<string | null>(null);
 
-  const canOpenVscodeDiff = !!(currentPlan && basePlan && baseVersion != null);
+  const canOpenVscodeDiff = baseVersion != null;
 
   const handleOpenVscodeDiff = async () => {
     if (!canOpenVscodeDiff) return;
@@ -54,7 +50,7 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
       const res = await fetch("/api/plan/vscode-diff", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ basePlan, currentPlan, baseVersion }),
+        body: JSON.stringify({ baseVersion }),
       });
       const data = await res.json() as { ok?: boolean; error?: string };
       if (!res.ok || data.error) {
