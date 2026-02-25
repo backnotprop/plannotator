@@ -39,6 +39,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 }) => {
   const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
   const [toolbarState, setToolbarState] = useState<ToolbarState | null>(null);
   const [commentText, setCommentText] = useState('');
   const [suggestedCode, setSuggestedCode] = useState('');
@@ -139,6 +140,41 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     setShowSuggestedCode(false);
     onLineSelection(null);
   }, [onLineSelection]);
+
+  // Close toolbar when clicking outside
+  useEffect(() => {
+    if (!toolbarState) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (toolbarRef.current && toolbarRef.current.contains(target)) {
+        return;
+      }
+      handleCancel();
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+    };
+  }, [toolbarState, handleCancel]);
+
+  // Close toolbar on Escape even if textarea isn't focused
+  useEffect(() => {
+    if (!toolbarState) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        handleCancel();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [toolbarState, handleCancel]);
 
   // Render annotation in diff - returns React element
   const renderAnnotation = useCallback((annotation: { side: string; lineNumber: number; metadata?: DiffAnnotationMetadata }) => {
@@ -294,6 +330,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       {/* Annotation toolbar - single-step comment input */}
       {toolbarState && (
         <div
+          ref={toolbarRef}
           className="review-toolbar"
           style={{
             position: 'fixed',

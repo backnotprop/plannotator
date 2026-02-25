@@ -54,6 +54,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   const [position, setPosition] = useState<{ top: number; left?: number; right?: number } | null>(null);
   const [copied, setCopied] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
 
   const handleCopy = async () => {
     // Use provided copyText, or fall back to code element / element text
@@ -158,6 +159,21 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [step, onClose]);
 
+  // Close toolbar when clicking outside
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (toolbarRef.current && toolbarRef.current.contains(target)) {
+        return;
+      }
+      onClose();
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () => document.removeEventListener("pointerdown", handlePointerDown, true);
+  }, [onClose]);
+
   if (!position) return null;
 
   const handleTypeSelect = (type: AnnotationType) => {
@@ -191,6 +207,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
 
   return createPortal(
     <div
+      ref={toolbarRef}
       className="annotation-toolbar fixed z-[100] bg-popover border border-border rounded-lg shadow-2xl"
       style={style}
       onMouseDown={(e) => e.stopPropagation()}
