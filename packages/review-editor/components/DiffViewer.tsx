@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { PatchDiff } from '@pierre/diffs/react';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata } from '@plannotator/ui/types';
+import { useDismissOnOutsideAndEscape } from '@plannotator/ui/hooks/useDismissOnOutsideAndEscape';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 
 interface DiffViewerProps {
@@ -141,40 +142,11 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     onLineSelection(null);
   }, [onLineSelection]);
 
-  // Close toolbar when clicking outside
-  useEffect(() => {
-    if (!toolbarState) return;
-
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target as Node | null;
-      if (!target) return;
-      if (toolbarRef.current && toolbarRef.current.contains(target)) {
-        return;
-      }
-      handleCancel();
-    };
-
-    document.addEventListener('pointerdown', handlePointerDown, true);
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown, true);
-    };
-  }, [toolbarState, handleCancel]);
-
-  // Close toolbar on Escape even if textarea isn't focused
-  useEffect(() => {
-    if (!toolbarState) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        handleCancel();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [toolbarState, handleCancel]);
+  useDismissOnOutsideAndEscape({
+    enabled: !!toolbarState,
+    ref: toolbarRef,
+    onDismiss: handleCancel,
+  });
 
   // Render annotation in diff - returns React element
   const renderAnnotation = useCallback((annotation: { side: string; lineNumber: number; metadata?: DiffAnnotationMetadata }) => {

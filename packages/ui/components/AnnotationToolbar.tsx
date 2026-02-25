@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { AnnotationType, type ImageAttachment } from "../types";
 import { createPortal } from "react-dom";
 import { AttachmentsButton } from "./AttachmentsButton";
+import { useDismissOnOutsideAndEscape } from "../hooks/useDismissOnOutsideAndEscape";
 
 type PositionMode = 'center-above' | 'top-right';
 
@@ -159,20 +160,11 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [step, onClose]);
 
-  // Close toolbar when clicking outside
-  useEffect(() => {
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target as Node | null;
-      if (!target) return;
-      if (toolbarRef.current && toolbarRef.current.contains(target)) {
-        return;
-      }
-      onClose();
-    };
-
-    document.addEventListener("pointerdown", handlePointerDown, true);
-    return () => document.removeEventListener("pointerdown", handlePointerDown, true);
-  }, [onClose]);
+  useDismissOnOutsideAndEscape({
+    enabled: true,
+    ref: toolbarRef,
+    onDismiss: onClose,
+  });
 
   if (!position) return null;
 
