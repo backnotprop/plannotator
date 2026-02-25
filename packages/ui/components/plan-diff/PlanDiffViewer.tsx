@@ -6,7 +6,7 @@
  * diff content instead of the annotatable plan.
  */
 
-import React from "react";
+import React, { useState } from "react";
 import type { PlanDiffBlock, PlanDiffStats } from "../../utils/planDiffEngine";
 import {
   PlanDiffModeSwitcher,
@@ -24,6 +24,9 @@ interface PlanDiffViewerProps {
   onPlanDiffToggle: () => void;
   repoInfo?: { display: string; branch?: string } | null;
   baseVersionLabel?: string;
+  currentPlan?: string;
+  basePlan?: string;
+  baseVersion?: number;
 }
 
 export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
@@ -34,7 +37,36 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
   onPlanDiffToggle,
   repoInfo,
   baseVersionLabel,
+  currentPlan,
+  basePlan,
+  baseVersion,
 }) => {
+  const [vscodeDiffLoading, setVscodeDiffLoading] = useState(false);
+  const [vscodeDiffError, setVscodeDiffError] = useState<string | null>(null);
+
+  const canOpenVscodeDiff = !!(currentPlan && basePlan && baseVersion != null);
+
+  const handleOpenVscodeDiff = async () => {
+    if (!canOpenVscodeDiff) return;
+    setVscodeDiffLoading(true);
+    setVscodeDiffError(null);
+    try {
+      const res = await fetch("/api/plan/vscode-diff", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ basePlan, currentPlan, baseVersion }),
+      });
+      const data = await res.json() as { ok?: boolean; error?: string };
+      if (!res.ok || data.error) {
+        setVscodeDiffError(data.error || "Failed to open VS Code diff");
+      }
+    } catch {
+      setVscodeDiffError("Failed to connect to server");
+    } finally {
+      setVscodeDiffLoading(false);
+    }
+  };
+
   return (
     <div className="relative z-50 w-full max-w-[832px] 2xl:max-w-5xl">
       <article className="w-full max-w-[832px] 2xl:max-w-5xl bg-card border border-border/50 rounded-xl shadow-xl p-5 md:p-8 lg:p-10 xl:p-12 relative">
@@ -97,7 +129,7 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
           </button>
         </div>
 
-        {/* Diff mode switcher + version label */}
+        {/* Diff mode switcher + version label + VS Code button */}
         <div className="mt-6 mb-6 flex items-center gap-3">
           <PlanDiffModeSwitcher mode={diffMode} onChange={onDiffModeChange} />
           {baseVersionLabel && (
@@ -105,7 +137,35 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
               vs {baseVersionLabel}
             </span>
           )}
+          {canOpenVscodeDiff && (
+            <button
+              onClick={handleOpenVscodeDiff}
+              disabled={vscodeDiffLoading}
+              className="ml-auto flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 border border-border/30 transition-colors disabled:opacity-50"
+              title="Open diff in VS Code"
+            >
+              <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M17.583 2.213a1.087 1.087 0 0 1 1.242.058l3.04 2.313a1.089 1.089 0 0 1 .134 1.6L15.537 12l6.462 5.816a1.089 1.089 0 0 1-.134 1.6l-3.04 2.313a1.087 1.087 0 0 1-1.355-.02L9.884 15.3l-3.59 3.236a.726.726 0 0 1-1.014-.02L3.27 16.505a.727.727 0 0 1 .013-1.014l3.29-3.132L3.283 9.51a.727.727 0 0 1-.013-1.014L5.28 6.484a.726.726 0 0 1 1.014-.02l3.59 3.236 7.586-6.31a1.09 1.09 0 0 1 .113-.077ZM15.537 12l-5.653-4.691L6.04 11.64a.5.5 0 0 0 0 .72l3.844 4.331L15.537 12Z" />
+              </svg>
+              <span className="hidden md:inline">
+                {vscodeDiffLoading ? "Opening..." : "VS Code"}
+              </span>
+            </button>
+          )}
         </div>
+
+        {/* VS Code diff error message */}
+        {vscodeDiffError && (
+          <div className="mb-4 px-3 py-2 rounded-md bg-destructive/10 border border-destructive/20 text-xs text-destructive">
+            {vscodeDiffError}
+            <button
+              onClick={() => setVscodeDiffError(null)}
+              className="ml-2 text-destructive/60 hover:text-destructive"
+            >
+              dismiss
+            </button>
+          </div>
+        )}
 
         {/* Diff content */}
         {diffMode === "clean" ? (
