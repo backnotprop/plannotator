@@ -29,7 +29,8 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@pierre/diffs": "^1.0.4"
+    "@pierre/diffs": "^1.0.4",
+    "diff": "^8.0.3"
   },
   "devDependencies": {
     "happy-dom": "^20.5.0"

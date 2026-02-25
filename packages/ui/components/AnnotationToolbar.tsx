@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { AnnotationType, type ImageAttachment } from "../types";
 import { createPortal } from "react-dom";
 import { AttachmentsButton } from "./AttachmentsButton";
+import { useDismissOnOutsideAndEscape } from "../hooks/useDismissOnOutsideAndEscape";
 
 type PositionMode = 'center-above' | 'top-right';
 
@@ -54,6 +55,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   const [position, setPosition] = useState<{ top: number; left?: number; right?: number } | null>(null);
   const [copied, setCopied] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
 
   const handleCopy = async () => {
     // Use provided copyText, or fall back to code element / element text
@@ -158,6 +160,12 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [step, onClose]);
 
+  useDismissOnOutsideAndEscape({
+    enabled: true,
+    ref: toolbarRef,
+    onDismiss: onClose,
+  });
+
   if (!position) return null;
 
   const handleTypeSelect = (type: AnnotationType) => {
@@ -191,6 +199,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
 
   return createPortal(
     <div
+      ref={toolbarRef}
       className="annotation-toolbar fixed z-[100] bg-popover border border-border rounded-lg shadow-2xl"
       style={style}
       onMouseDown={(e) => e.stopPropagation()}
