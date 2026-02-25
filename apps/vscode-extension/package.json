@@ -22,22 +22,29 @@
       {
         "command": "plannotator.addAnnotation",
         "title": "Plannotator: Add Annotation"
+      },
+      {
+        "command": "plannotator.exportAnnotations",
+        "title": "Plannotator: Export Annotations"
       }
     ],
     "menus": {
       "editor/context": [
         {
           "command": "plannotator.addAnnotation",
-          "group": "1_modification@99",
-          "when": "editorHasSelection"
+          "group": "1_modification@99"
+        },
+        {
+          "command": "plannotator.exportAnnotations",
+          "group": "1_modification@100"
         }
       ]
     },
     "keybindings": [
       {
         "command": "plannotator.addAnnotation",
-        "key": "ctrl+alt+a",
-        "mac": "cmd+alt+a",
+        "key": "ctrl+alt+p",
+        "mac": "cmd+alt+p",
         "when": "editorTextFocus"
       }
     ],
