@@ -10,6 +10,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Annotation, type ImageAttachment } from '../types';
 import {
+  type SharePayload,
   parseShareHash,
   generateShareUrl,
   decompress,
@@ -110,10 +111,10 @@ export function useSharing(
   const loadFromHash = useCallback(async () => {
     try {
       // Check for short URL path pattern: /p/<id>
-      const pathMatch = window.location.pathname.match(/\/p\/([A-Za-z0-9]{6,16})$/);
+      const pathMatch = window.location.pathname.match(/^\/p\/([A-Za-z0-9]{6,16})$/);
       if (pathMatch) {
         const pasteId = pathMatch[1];
-        const payload = await loadFromPasteId(pasteId);
+        const payload = await loadFromPasteId(pasteId, shareBaseUrl);
         if (payload) {
           setMarkdown(payload.p);
 
@@ -132,7 +133,8 @@ export function useSharing(
 
           // Remove the /p/<id> path from browser history so a refresh doesn't
           // attempt a network fetch. The plan is now held in memory.
-          window.history.replaceState({}, '', '/');
+          const basePath = window.location.pathname.replace(/\/p\/[A-Za-z0-9]+$/, '') || '/';
+          window.history.replaceState({}, '', basePath);
 
           return true;
         }
@@ -179,7 +181,7 @@ export function useSharing(
       console.error('Failed to load from share hash:', e);
       return false;
     }
-  }, [setMarkdown, setAnnotations, setGlobalAttachments, onSharedLoad]);
+  }, [setMarkdown, setAnnotations, setGlobalAttachments, onSharedLoad, shareBaseUrl]);
 
   // Load from hash on mount
   useEffect(() => {
@@ -252,28 +254,42 @@ export function useSharing(
   // Auto-generate short URL with a 1-second debounce whenever the plan or
   // annotations change. A debounce avoids hammering the paste service on
   // every keystroke during active editing.
+  // Clear the stale short URL immediately so the UI doesn't show an outdated link.
   useEffect(() => {
+    setShortShareUrl('');
     const timer = setTimeout(() => {
       generateShortUrl();
     }, 1_000);
     return () => clearTimeout(timer);
   }, [generateShortUrl]);
 
-  // Import annotations from a teammate's share URL
+  // Import annotations from a teammate's share URL (supports both hash-based and short /p/<id> URLs)
   const importFromShareUrl = useCallback(async (url: string): Promise<ImportResult> => {
     try {
-      // Extract hash from URL
-      const hashIndex = url.indexOf('#');
-      if (hashIndex === -1) {
-        return { success: false, count: 0, planTitle: '', error: 'Invalid share URL: no hash fragment found' };
-      }
-      const hash = url.slice(hashIndex + 1);
-      if (!hash) {
-        return { success: false, count: 0, planTitle: '', error: 'Invalid share URL: empty hash' };
-      }
+      let payload: SharePayload | undefined;
 
-      // Decompress payload
-      const payload = await decompress(hash);
+      // Check for short URL pattern: /p/<id>
+      const shortMatch = url.match(/\/p\/([A-Za-z0-9]{6,16})(?:\?|$)/);
+      if (shortMatch) {
+        const pasteId = shortMatch[1];
+        const loaded = await loadFromPasteId(pasteId, shareBaseUrl);
+        if (!loaded) {
+          return { success: false, count: 0, planTitle: '', error: 'Failed to load from short URL — paste may have expired' };
+        }
+        payload = loaded;
+      } else {
+        // Fall back to hash-based URL
+        const hashIndex = url.indexOf('#');
+        if (hashIndex === -1) {
+          return { success: false, count: 0, planTitle: '', error: 'Invalid share URL: no hash fragment or short link found' };
+        }
+        const hash = url.slice(hashIndex + 1);
+        if (!hash) {
+          return { success: false, count: 0, planTitle: '', error: 'Invalid share URL: empty hash' };
+        }
+
+        payload = await decompress(hash);
+      }
 
       // Extract plan title from embedded plan text
       const lines = (payload.p || '').trim().split('\n');
@@ -320,7 +336,7 @@ export function useSharing(
       const errorMessage = e instanceof Error ? e.message : 'Failed to decompress share URL';
       return { success: false, count: 0, planTitle: '', error: errorMessage };
     }
-  }, [annotations, globalAttachments, setAnnotations, setGlobalAttachments]);
+  }, [annotations, globalAttachments, setAnnotations, setGlobalAttachments, shareBaseUrl]);
 
   return {
     isSharedSession,

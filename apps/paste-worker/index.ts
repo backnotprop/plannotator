@@ -91,8 +91,10 @@ export default {
           expirationTtl: 90 * 24 * 60 * 60,
         });
 
+        // Return only the id — the client constructs the full URL using its own
+        // shareBaseUrl, so self-hosted deployments work without reconfiguration.
         return Response.json(
-          { id, url: `https://share.plannotator.ai/p/${id}` },
+          { id },
           { status: 201, headers: cors }
         );
       } catch {

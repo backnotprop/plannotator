@@ -279,8 +279,8 @@ export async function createShortShareUrl(
       return null;
     }
 
-    const result = (await response.json()) as { id: string; url?: string };
-    const shortUrl = result.url ?? `${shareBase}/p/${result.id}`;
+    const result = (await response.json()) as { id: string };
+    const shortUrl = `${shareBase}/p/${result.id}`;
 
     return { shortUrl, id: result.id };
   } catch (e) {
