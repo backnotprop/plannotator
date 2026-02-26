@@ -124,7 +124,7 @@ export const PlannotatorPlugin: Plugin = async (ctx) => {
       output.system.push(`
 ## Plan Submission
 
-When you have completed your plan, you MUST call the \`submit_plan\` tool to submit it for user review.
+When you have completed your plan and have asked the user about any key decisions or trade-offs using the \`question\` tool, you MUST call the \`submit_plan\` tool to submit it for user review.
 The user will be able to:
 - Review your plan visually in a dedicated UI
 - Annotate specific sections with feedback
@@ -293,7 +293,7 @@ Do NOT proceed with implementation until your plan is approved.
     tool: {
       submit_plan: tool({
         description:
-          "Submit your completed plan for interactive user review. The user can annotate, approve, or request changes. Call this when you have finished creating your implementation plan.",
+          "Submit your completed plan for interactive user review. The user can annotate, approve, or request changes. Before calling this tool, ensure you have asked the user about key decisions and trade-offs using the question tool. Call this when your plan is ready for review.",
         args: {
           plan: tool.schema
             .string()
