@@ -2,26 +2,15 @@
  * Editor diff utility — opens plan diffs in external editors
  */
 
-import { mkdirSync, writeFileSync } from "fs";
-import { UPLOAD_DIR } from "./image";
-
 /**
- * Write two plan versions to temp files and open them in VS Code's diff viewer.
+ * Open two files in VS Code's diff viewer.
  *
  * Returns `{ ok: true }` on success or `{ error: string }` on failure.
  */
 export async function openEditorDiff(
-  oldContent: string,
-  newContent: string,
-  opts: { baseVersion: number }
+  oldPath: string,
+  newPath: string
 ): Promise<{ ok: true } | { error: string }> {
-  mkdirSync(UPLOAD_DIR, { recursive: true });
-  const oldPath = `${UPLOAD_DIR}/plan-v${opts.baseVersion}.md`;
-  const newPath = `${UPLOAD_DIR}/plan-current.md`;
-
-  writeFileSync(oldPath, oldContent);
-  writeFileSync(newPath, newContent);
-
   try {
     const proc = Bun.spawn(["code", "--diff", oldPath, newPath], {
       stdout: "ignore",

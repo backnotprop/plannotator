@@ -29,6 +29,7 @@ import {
   saveFinalSnapshot,
   saveToHistory,
   getPlanVersion,
+  getPlanVersionPath,
   getVersionCount,
   listVersions,
   listProjectPlans,
@@ -117,6 +118,7 @@ export async function startPlannotatorServer(
   // Version history: save plan and detect previous version
   const project = (await detectProjectName()) ?? "_unknown";
   const historyResult = saveToHistory(project, slug, plan);
+  const currentPlanPath = historyResult.path;
   const previousPlan =
     historyResult.version > 1
       ? getPlanVersion(project, slug, historyResult.version - 1)
@@ -251,15 +253,14 @@ export async function startPlannotatorServer(
                 return Response.json({ error: "Missing baseVersion" }, { status: 400 });
               }
 
-              const basePlan = getPlanVersion(project, slug, body.baseVersion);
-              if (!basePlan) {
+              const basePath = getPlanVersionPath(project, slug, body.baseVersion);
+              if (!basePath) {
                 return Response.json({ error: `Version ${body.baseVersion} not found` }, { status: 404 });
               }
 
-              const result = await openEditorDiff(basePlan, plan, { baseVersion: body.baseVersion });
+              const result = await openEditorDiff(basePath, currentPlanPath);
               if ("error" in result) {
-                const status = result.error.includes("not found") ? 400 : 500;
-                return Response.json({ error: result.error }, { status });
+                return Response.json({ error: result.error }, { status: 500 });
               }
               return Response.json({ ok: true });
             } catch (err) {
