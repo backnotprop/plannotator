@@ -33,6 +33,7 @@ plannotator/
 │   │   ├── remote.ts             # isRemoteSession(), getServerPort()
 │   │   ├── browser.ts            # openBrowser()
 │   │   ├── integrations.ts       # Obsidian, Bear integrations
+│   │   ├── ide.ts                # VS Code diff integration (openEditorDiff)
 │   │   └── project.ts            # Project name detection for tags
 │   ├── ui/                       # Shared React components
 │   │   ├── components/           # Viewer, Toolbar, Settings, etc.
@@ -149,6 +150,7 @@ Send Annotations → feedback sent to agent session
 | `/api/image`          | GET    | Serve image by path query param            |
 | `/api/upload`         | POST   | Upload image, returns `{ path, originalName }` |
 | `/api/obsidian/vaults`| GET    | Detect available Obsidian vaults           |
+| `/api/plan/vscode-diff` | POST   | Open diff in VS Code (body: baseVersion)   |
 
 ### Review Server (`packages/server/review.ts`)
 
