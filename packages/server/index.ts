@@ -13,7 +13,7 @@ import { mkdirSync } from "fs";
 import { isRemoteSession, getServerPort } from "./remote";
 import { openBrowser } from "./browser";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
-import { openEditorDiff } from "./editor";
+import { openEditorDiff } from "./ide";
 import {
   detectObsidianVaults,
   saveToObsidian,

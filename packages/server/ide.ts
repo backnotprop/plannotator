@@ -1,5 +1,5 @@
 /**
- * Editor diff utility — opens plan diffs in external editors
+ * IDE integration — opens plan diffs in external IDEs
  */
 
 /**
