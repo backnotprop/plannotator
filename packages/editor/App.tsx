@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { parseMarkdownToBlocks, exportAnnotations, extractFrontmatter, Frontmatter } from '@plannotator/ui/utils/parser';
+import { parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, extractFrontmatter, Frontmatter } from '@plannotator/ui/utils/parser';
 import { Viewer, ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { ExportModal } from '@plannotator/ui/components/ExportModal';
@@ -40,6 +40,7 @@ import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
 import { deriveImageName } from '@plannotator/ui/components/AttachmentsButton';
 import { useSidebar } from '@plannotator/ui/hooks/useSidebar';
 import { usePlanDiff, type VersionInfo } from '@plannotator/ui/hooks/usePlanDiff';
+import { useLinkedDoc } from '@plannotator/ui/hooks/useLinkedDoc';
 import { SidebarTabs } from '@plannotator/ui/components/sidebar/SidebarTabs';
 import { SidebarContainer } from '@plannotator/ui/components/sidebar/SidebarContainer';
 import { PlanDiffViewer } from '@plannotator/ui/components/plan-diff/PlanDiffViewer';
@@ -361,9 +362,6 @@ const App: React.FC = () => {
   const [origin, setOrigin] = useState<'claude-code' | 'opencode' | 'pi' | null>(null);
   const [globalAttachments, setGlobalAttachments] = useState<ImageAttachment[]>([]);
   const [annotateMode, setAnnotateMode] = useState(false);
-  const [isReadOnly, setIsReadOnly] = useState(false);
-  const [docFilepath, setDocFilepath] = useState<string | null>(null);
-  const [docError, setDocError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState<'approved' | 'denied' | null>(null);
@@ -409,6 +407,13 @@ const App: React.FC = () => {
 
   // Plan diff computation
   const planDiff = usePlanDiff(markdown, previousPlan, versionInfo);
+
+  // Linked document navigation
+  const linkedDocHook = useLinkedDoc({
+    markdown, annotations, selectedAnnotationId, globalAttachments,
+    setMarkdown, setAnnotations, setSelectedAnnotationId, setGlobalAttachments,
+    viewerRef, sidebar,
+  });
 
   // Track active section for TOC highlighting
   const headingCount = useMemo(() => blocks.filter(b => b.type === 'heading').length, [blocks]);
@@ -470,33 +475,6 @@ const App: React.FC = () => {
   useEffect(() => {
     if (isLoadingShared) return; // Wait for share check to complete
     if (isSharedSession) return; // Already loaded from share
-
-    // Linked document mode: ?doc=<path>&readonly=true
-    const urlParams = new URLSearchParams(window.location.search);
-    const docPath = urlParams.get('doc');
-    if (docPath) {
-      fetch(`/api/doc?path=${encodeURIComponent(docPath)}`)
-        .then(res => {
-          if (!res.ok) {
-            return res.json().then(data => {
-              throw new Error(data.error || 'Failed to load document');
-            });
-          }
-          return res.json();
-        })
-        .then((data: { markdown: string; filepath: string }) => {
-          setMarkdown(data.markdown);
-          setIsApiMode(true);
-          setIsReadOnly(true);
-          setDocFilepath(data.filepath);
-          sidebar.open('toc');
-        })
-        .catch(err => {
-          setDocError(err.message);
-        })
-        .finally(() => setIsLoading(false));
-      return; // Don't fall through to /api/plan
-    }
 
     fetch('/api/plan')
       .then(res => {
@@ -801,7 +779,27 @@ const App: React.FC = () => {
     // This is just a placeholder for future custom logic
   };
 
-  const annotationsOutput = useMemo(() => exportAnnotations(blocks, annotations, globalAttachments), [blocks, annotations, globalAttachments]);
+  const annotationsOutput = useMemo(() => {
+    const docAnnotations = linkedDocHook.getDocAnnotations();
+    const hasDocAnnotations = Array.from(docAnnotations.values()).some(
+      (d) => d.annotations.length > 0 || d.globalAttachments.length > 0
+    );
+    const hasPlanAnnotations = annotations.length > 0 || globalAttachments.length > 0;
+
+    if (!hasPlanAnnotations && !hasDocAnnotations) {
+      return 'No changes detected.';
+    }
+
+    let output = hasPlanAnnotations
+      ? exportAnnotations(blocks, annotations, globalAttachments)
+      : '';
+
+    if (hasDocAnnotations) {
+      output += exportLinkedDocAnnotations(docAnnotations);
+    }
+
+    return output;
+  }, [blocks, annotations, globalAttachments, linkedDocHook]);
 
   // Quick-save handlers for export dropdown and keyboard shortcut
   const handleDownloadAnnotations = () => {
@@ -948,7 +946,7 @@ const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-1 md:gap-2">
-            {isApiMode && !isReadOnly && (
+            {isApiMode && !linkedDocHook.isActive && (
               <>
                 <button
                   onClick={() => {
@@ -1020,10 +1018,10 @@ const App: React.FC = () => {
               </>
             )}
 
-            {!isReadOnly && <ModeToggle />}
-            {!isReadOnly && <Settings taterMode={taterMode} onTaterModeChange={handleTaterModeChange} onIdentityChange={handleIdentityChange} origin={origin} onUIPreferencesChange={setUiPrefs} />}
+            <ModeToggle />
+            {!linkedDocHook.isActive && <Settings taterMode={taterMode} onTaterModeChange={handleTaterModeChange} onIdentityChange={handleIdentityChange} origin={origin} onUIPreferencesChange={setUiPrefs} />}
 
-            {!isReadOnly && <button
+            <button
               onClick={() => setIsPanelOpen(!isPanelOpen)}
               className={`p-1.5 rounded-md text-xs font-medium transition-all ${
                 isPanelOpen
@@ -1034,7 +1032,7 @@ const App: React.FC = () => {
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
               </svg>
-            </button>}
+            </button>
 
             <div className="relative flex" data-export-dropdown>
               <button
@@ -1138,34 +1136,21 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        {/* Read-only banner for linked documents */}
-        {isReadOnly && !docError && (
-          <div className="bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-700/50 px-4 py-2 flex items-center gap-2 flex-shrink-0">
-            <svg className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-            </svg>
-            <span className="text-xs font-medium text-amber-800 dark:text-amber-200">Read-Only Preview</span>
-            {docFilepath && (
-              <span className="text-xs text-amber-600 dark:text-amber-400 font-mono truncate">{docFilepath}</span>
-            )}
-          </div>
-        )}
-
-        {/* Linked document error view */}
-        {docError && (
-          <div className="flex-1 flex items-center justify-center p-8">
-            <div className="max-w-md w-full bg-card border border-border rounded-lg p-6 text-center space-y-3">
-              <svg className="w-10 h-10 text-muted-foreground mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              <h2 className="text-sm font-semibold text-foreground">Could not open document</h2>
-              <p className="text-xs text-muted-foreground font-mono bg-muted/50 rounded px-3 py-2 text-left whitespace-pre-wrap">{docError}</p>
-            </div>
+        {/* Linked document error banner */}
+        {linkedDocHook.error && (
+          <div className="bg-destructive/10 border-b border-destructive/20 px-4 py-2 flex items-center gap-2 flex-shrink-0">
+            <span className="text-xs text-destructive">{linkedDocHook.error}</span>
+            <button
+              onClick={linkedDocHook.dismissError}
+              className="ml-auto text-xs text-destructive/60 hover:text-destructive"
+            >
+              dismiss
+            </button>
           </div>
         )}
 
         {/* Main Content */}
-        {!docError && <div className={`flex-1 flex overflow-hidden ${isResizing ? 'select-none' : ''}`}>
+        <div className={`flex-1 flex overflow-hidden ${isResizing ? 'select-none' : ''}`}>
           {/* Left Sidebar: collapsed tab flags (when sidebar is closed) */}
           {!sidebar.isOpen && (
             <SidebarTabs
@@ -1188,6 +1173,8 @@ const App: React.FC = () => {
                 annotations={annotations}
                 activeSection={activeSection}
                 onTocNavigate={handleTocNavigate}
+                linkedDocFilepath={linkedDocHook.filepath}
+                onLinkedDocBack={linkedDocHook.isActive ? linkedDocHook.back : undefined}
                 versionInfo={versionInfo}
                 versions={planDiff.versions}
                 projectPlans={planDiff.projectPlans}
@@ -1209,8 +1196,8 @@ const App: React.FC = () => {
           {/* Document Area */}
           <main ref={containerRef} className="flex-1 min-w-0 overflow-y-auto bg-grid">
             <div className="min-h-full flex flex-col items-center px-4 py-3 md:px-10 md:py-8 xl:px-16">
-              {/* Mode Switcher (hidden during plan diff or in read-only mode) */}
-              {!isPlanDiffActive && !isReadOnly && (
+              {/* Mode Switcher (hidden during plan diff) */}
+              {!isPlanDiffActive && (
                 <div className="w-full max-w-[832px] 2xl:max-w-5xl mb-3 md:mb-4 flex justify-start">
                   <ModeSwitcher mode={editorMode} onChange={handleEditorModeChange} taterMode={taterMode} />
                 </div>
@@ -1230,6 +1217,7 @@ const App: React.FC = () => {
                 />
               ) : (
                 <Viewer
+                  key={linkedDocHook.isActive ? `doc:${linkedDocHook.filepath}` : 'plan'}
                   ref={viewerRef}
                   blocks={blocks}
                   markdown={markdown}
@@ -1245,22 +1233,23 @@ const App: React.FC = () => {
                   onRemoveGlobalAttachment={handleRemoveGlobalAttachment}
                   repoInfo={repoInfo}
                   stickyActions={uiPrefs.stickyActionsEnabled}
-                  planDiffStats={planDiff.diffStats}
+                  planDiffStats={linkedDocHook.isActive ? null : planDiff.diffStats}
                   isPlanDiffActive={isPlanDiffActive}
                   onPlanDiffToggle={() => setIsPlanDiffActive(!isPlanDiffActive)}
-                  hasPreviousVersion={planDiff.hasPreviousVersion}
-                  isReadOnly={isReadOnly}
+                  hasPreviousVersion={!linkedDocHook.isActive && planDiff.hasPreviousVersion}
+                  onOpenLinkedDoc={linkedDocHook.open}
+                  linkedDocInfo={linkedDocHook.isActive ? { filepath: linkedDocHook.filepath!, onBack: linkedDocHook.back } : null}
                 />
               )}
             </div>
           </main>
 
           {/* Resize Handle */}
-          {isPanelOpen && !isReadOnly && <ResizeHandle {...panelResize.handleProps} />}
+          {isPanelOpen && <ResizeHandle {...panelResize.handleProps} />}
 
           {/* Annotation Panel */}
           <AnnotationPanel
-            isOpen={isPanelOpen && !isReadOnly}
+            isOpen={isPanelOpen}
             blocks={blocks}
             annotations={annotations}
             selectedId={selectedAnnotationId}
@@ -1271,7 +1260,7 @@ const App: React.FC = () => {
             sharingEnabled={sharingEnabled}
             width={panelResize.width}
           />
-        </div>}
+        </div>
 
         {/* Export Modal */}
         <ExportModal

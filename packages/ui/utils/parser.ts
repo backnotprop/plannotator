@@ -1,4 +1,4 @@
-import { Block, type ImageAttachment } from '../types';
+import { Block, type Annotation, type ImageAttachment } from '../types';
 
 /**
  * Parsed YAML frontmatter as key-value pairs.
@@ -319,5 +319,72 @@ export const exportAnnotations = (blocks: Block[], annotations: any[], globalAtt
 
   output += `---\n`;
 
+  return output;
+};
+
+export const exportLinkedDocAnnotations = (
+  docAnnotations: Map<string, { annotations: Annotation[]; globalAttachments: ImageAttachment[] }>
+): string => {
+  let output = `\n# Linked Document Feedback\n\n`;
+
+  for (const [filepath, { annotations, globalAttachments }] of docAnnotations) {
+    if (annotations.length === 0 && globalAttachments.length === 0) continue;
+
+    output += `## ${filepath}\n\n`;
+
+    if (globalAttachments.length > 0) {
+      output += `**Reference Images:**\n`;
+      globalAttachments.forEach((img, idx) => {
+        output += `${idx + 1}. [${img.name}] \`${img.path}\`\n`;
+      });
+      output += `\n`;
+    }
+
+    output += `${annotations.length} annotation${annotations.length !== 1 ? 's' : ''}:\n\n`;
+
+    annotations.forEach((ann, index) => {
+      output += `### ${index + 1}. `;
+
+      switch (ann.type) {
+        case 'DELETION':
+          output += `Remove this\n`;
+          output += `\`\`\`\n${ann.originalText}\n\`\`\`\n`;
+          output += `> I don't want this in the plan.\n`;
+          break;
+
+        case 'INSERTION':
+          output += `Add this\n`;
+          output += `\`\`\`\n${ann.text}\n\`\`\`\n`;
+          break;
+
+        case 'REPLACEMENT':
+          output += `Change this\n`;
+          output += `**From:**\n\`\`\`\n${ann.originalText}\n\`\`\`\n`;
+          output += `**To:**\n\`\`\`\n${ann.text}\n\`\`\`\n`;
+          break;
+
+        case 'COMMENT':
+          output += `Feedback on: "${ann.originalText}"\n`;
+          output += `> ${ann.text}\n`;
+          break;
+
+        case 'GLOBAL_COMMENT':
+          output += `General feedback\n`;
+          output += `> ${ann.text}\n`;
+          break;
+      }
+
+      if (ann.images && ann.images.length > 0) {
+        output += `**Attached images:**\n`;
+        ann.images.forEach((img: ImageAttachment) => {
+          output += `- [${img.name}] \`${img.path}\`\n`;
+        });
+      }
+
+      output += '\n';
+    });
+  }
+
+  output += `---\n`;
   return output;
 };

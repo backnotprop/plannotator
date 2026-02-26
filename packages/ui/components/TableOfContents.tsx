@@ -13,6 +13,8 @@ interface TableOfContentsProps {
   onNavigate: (blockId: string) => void;
   className?: string;
   style?: React.CSSProperties;
+  linkedDocFilepath?: string | null;
+  onLinkedDocBack?: () => void;
 }
 
 interface TocItemProps {
@@ -45,7 +47,7 @@ function TocItemComponent({
               e.stopPropagation();
               onToggle();
             }}
-            className="flex-shrink-0 w-5 h-5 mr-1 mt-0.5 flex items-center justify-center hover:bg-muted rounded transition-colors"
+            className="flex-shrink-0 w-4 h-4 mr-0.5 mt-0.5 flex items-center justify-center hover:bg-muted rounded transition-colors"
             aria-label={isExpanded ? 'Collapse section' : 'Expand section'}
           >
             <svg
@@ -70,9 +72,9 @@ function TocItemComponent({
           type="button"
           onClick={() => onNavigate(item.id)}
           className={`
-            flex-1 text-left text-xs py-1 px-1.5 rounded transition-colors
+            flex-1 text-left text-xs py-0.5 px-1.5 rounded transition-colors
             ${indent}
-            ${hasChildren ? '' : 'ml-6'}
+            ${hasChildren ? '' : 'ml-5'}
             ${
               isActive
                 ? 'text-primary bg-primary/10'
@@ -82,7 +84,7 @@ function TocItemComponent({
           aria-current={isActive ? 'location' : undefined}
         >
           <span className="flex items-center justify-between gap-2">
-            <span className="flex-1 line-clamp-2 leading-relaxed">
+            <span className="flex-1 line-clamp-2 leading-normal">
               {item.content}
             </span>
             {item.annotationCount > 0 && (
@@ -98,7 +100,7 @@ function TocItemComponent({
       </div>
 
       {hasChildren && isExpanded && (
-        <ul className="mt-1 space-y-1">
+        <ul className="mt-0.5 space-y-0.5">
           {item.children.map((child) => (
             <TocItemWithState
               key={child.id}
@@ -144,6 +146,8 @@ export function TableOfContents({
   onNavigate,
   className = '',
   style,
+  linkedDocFilepath,
+  onLinkedDocBack,
 }: TableOfContentsProps) {
   // Calculate annotation counts per section
   const annotationCounts = useMemo(
@@ -196,11 +200,32 @@ export function TableOfContents({
       aria-label="Table of contents"
       style={style}
     >
-      <div className="p-4">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+      <div className="px-3 py-2">
+        {linkedDocFilepath && (
+          <div className="mb-2 pb-1.5 border-b border-border/50">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-medium text-primary/80">Viewing</span>
+              {onLinkedDocBack && (
+                <button
+                  onClick={onLinkedDocBack}
+                  className="flex items-center gap-0.5 text-[10px] font-medium text-primary hover:text-primary/80 transition-colors"
+                >
+                  <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+                  </svg>
+                  Back to plan
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] text-foreground/70 truncate mt-0.5" title={linkedDocFilepath}>
+              {linkedDocFilepath.split('/').pop()}
+            </p>
+          </div>
+        )}
+        <h2 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
           Contents
         </h2>
-        <ul className="space-y-1">
+        <ul className="space-y-0.5">
           {tocItems.map((item) => (
             <TocItemWithState
               key={item.id}

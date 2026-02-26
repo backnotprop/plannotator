@@ -22,6 +22,8 @@ interface SidebarContainerProps {
   annotations: Annotation[];
   activeSection: string | null;
   onTocNavigate: (blockId: string) => void;
+  linkedDocFilepath?: string | null;
+  onLinkedDocBack?: () => void;
   // Version Browser props
   versionInfo: VersionInfo | null;
   versions: VersionEntry[];
@@ -47,6 +49,8 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
   annotations,
   activeSection,
   onTocNavigate,
+  linkedDocFilepath,
+  onLinkedDocBack,
   versionInfo,
   versions,
   projectPlans,
@@ -139,6 +143,8 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
             activeId={activeSection}
             onNavigate={onTocNavigate}
             className="overflow-y-auto"
+            linkedDocFilepath={linkedDocFilepath}
+            onLinkedDocBack={onLinkedDocBack}
           />
         )}
         {activeTab === "versions" && (

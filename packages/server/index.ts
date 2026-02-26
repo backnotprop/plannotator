@@ -199,7 +199,7 @@ export async function startPlannotatorServer(
             return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, repoInfo, previousPlan, versionInfo });
           }
 
-          // API: Serve a linked markdown document in read-only mode
+          // API: Serve a linked markdown document
           if (url.pathname === "/api/doc" && req.method === "GET") {
             const requestedPath = url.searchParams.get("path");
             if (!requestedPath) {
@@ -226,6 +226,7 @@ export async function startPlannotatorServer(
                 const glob = new Bun.Glob(`**/${requestedPath}`);
                 const matches: string[] = [];
                 for await (const match of glob.scan({ cwd: projectRoot, onlyFiles: true })) {
+                  if (match.includes("node_modules/") || match.includes(".git/")) continue;
                   if (match.split("/").pop() === requestedPath) {
                     matches.push(resolve(projectRoot, match));
                   }
