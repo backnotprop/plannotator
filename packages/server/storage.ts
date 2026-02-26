@@ -7,7 +7,7 @@
 
 import { homedir } from "os";
 import { join } from "path";
-import { mkdirSync, writeFileSync, readFileSync, readdirSync, statSync } from "fs";
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, existsSync } from "fs";
 import { sanitizeTag } from "./project";
 
 /**
@@ -184,6 +184,21 @@ export function getPlanVersion(
   } catch {
     return null;
   }
+}
+
+/**
+ * Get the file path for a specific version in history.
+ * Returns null if the version file doesn't exist.
+ */
+export function getPlanVersionPath(
+  project: string,
+  slug: string,
+  version: number
+): string | null {
+  const historyDir = join(homedir(), ".plannotator", "history", project, slug);
+  const fileName = `${String(version).padStart(3, "0")}.md`;
+  const filePath = join(historyDir, fileName);
+  return existsSync(filePath) ? filePath : null;
 }
 
 /**

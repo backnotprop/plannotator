@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { PatchDiff } from '@pierre/diffs/react';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata } from '@plannotator/ui/types';
+import { useDismissOnOutsideAndEscape } from '@plannotator/ui/hooks/useDismissOnOutsideAndEscape';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 
 interface DiffViewerProps {
@@ -39,6 +40,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 }) => {
   const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
   const [toolbarState, setToolbarState] = useState<ToolbarState | null>(null);
   const [commentText, setCommentText] = useState('');
   const [suggestedCode, setSuggestedCode] = useState('');
@@ -139,6 +141,12 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     setShowSuggestedCode(false);
     onLineSelection(null);
   }, [onLineSelection]);
+
+  useDismissOnOutsideAndEscape({
+    enabled: !!toolbarState,
+    ref: toolbarRef,
+    onDismiss: handleCancel,
+  });
 
   // Render annotation in diff - returns React element
   const renderAnnotation = useCallback((annotation: { side: string; lineNumber: number; metadata?: DiffAnnotationMetadata }) => {
@@ -294,6 +302,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       {/* Annotation toolbar - single-step comment input */}
       {toolbarState && (
         <div
+          ref={toolbarRef}
           className="review-toolbar"
           style={{
             position: 'fixed',
