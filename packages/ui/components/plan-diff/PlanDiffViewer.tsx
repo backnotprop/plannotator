@@ -15,6 +15,7 @@ import {
 import { PlanCleanDiffView } from "./PlanCleanDiffView";
 import { PlanRawDiffView } from "./PlanRawDiffView";
 import { PlanDiffBadge } from "./PlanDiffBadge";
+import { VSCodeIcon } from "./VSCodeIcon";
 
 interface PlanDiffViewerProps {
   diffBlocks: PlanDiffBlock[];
@@ -140,9 +141,7 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
               className="ml-auto flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 border border-border/30 transition-colors disabled:opacity-50"
               title="Open diff in VS Code"
             >
-              <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M17.583 2.213a1.087 1.087 0 0 1 1.242.058l3.04 2.313a1.089 1.089 0 0 1 .134 1.6L15.537 12l6.462 5.816a1.089 1.089 0 0 1-.134 1.6l-3.04 2.313a1.087 1.087 0 0 1-1.355-.02L9.884 15.3l-3.59 3.236a.726.726 0 0 1-1.014-.02L3.27 16.505a.727.727 0 0 1 .013-1.014l3.29-3.132L3.283 9.51a.727.727 0 0 1-.013-1.014L5.28 6.484a.726.726 0 0 1 1.014-.02l3.59 3.236 7.586-6.31a1.09 1.09 0 0 1 .113-.077ZM15.537 12l-5.653-4.691L6.04 11.64a.5.5 0 0 0 0 .72l3.844 4.331L15.537 12Z" />
-              </svg>
+              <VSCodeIcon className="w-3.5 h-3.5 flex-shrink-0" />
               <span className="hidden md:inline">
                 {vscodeDiffLoading ? "Opening..." : "VS Code"}
               </span>
