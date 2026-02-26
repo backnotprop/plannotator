@@ -417,6 +417,9 @@ const App: React.FC = () => {
     isLoadingShared,
     shareUrl,
     shareUrlSize,
+    shortShareUrl,
+    isGeneratingShortUrl,
+    shortUrlError,
     pendingSharedAnnotations,
     sharedGlobalAttachments,
     clearPendingSharedAnnotations,
@@ -1221,6 +1224,9 @@ const App: React.FC = () => {
           onClose={() => { setShowExport(false); setInitialExportTab(undefined); }}
           shareUrl={shareUrl}
           shareUrlSize={shareUrlSize}
+          shortShareUrl={shortShareUrl}
+          isGeneratingShortUrl={isGeneratingShortUrl}
+          shortUrlError={shortUrlError}
           annotationsOutput={annotationsOutput}
           annotationCount={annotations.length}
           taterSprite={taterMode ? <TaterSpritePullup /> : undefined}

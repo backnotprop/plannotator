@@ -15,6 +15,8 @@ import {
   decompress,
   fromShareable,
   formatUrlSize,
+  createShortShareUrl,
+  loadFromPasteId,
 } from '../utils/sharing';
 
 export interface ImportResult {
@@ -36,6 +38,15 @@ interface UseSharingResult {
 
   /** Human-readable size of the share URL */
   shareUrlSize: string;
+
+  /** Short share URL backed by the paste service (empty string when unavailable) */
+  shortShareUrl: string;
+
+  /** Whether the short URL is currently being generated */
+  isGeneratingShortUrl: boolean;
+
+  /** Error message from the last short URL generation attempt, or empty string */
+  shortUrlError: string;
 
   /** Annotations loaded from share that need to be applied to DOM */
   pendingSharedAnnotations: Annotation[] | null;
@@ -84,6 +95,9 @@ export function useSharing(
   const [isLoadingShared, setIsLoadingShared] = useState(true);
   const [shareUrl, setShareUrl] = useState('');
   const [shareUrlSize, setShareUrlSize] = useState('');
+  const [shortShareUrl, setShortShareUrl] = useState('');
+  const [isGeneratingShortUrl, setIsGeneratingShortUrl] = useState(false);
+  const [shortUrlError, setShortUrlError] = useState('');
   const [pendingSharedAnnotations, setPendingSharedAnnotations] = useState<Annotation[] | null>(null);
   const [sharedGlobalAttachments, setSharedGlobalAttachments] = useState<ImageAttachment[] | null>(null);
 
@@ -92,9 +106,39 @@ export function useSharing(
     setSharedGlobalAttachments(null);
   }, []);
 
-  // Load shared state from URL hash
+  // Load shared state from URL hash (or paste-service short URL)
   const loadFromHash = useCallback(async () => {
     try {
+      // Check for short URL path pattern: /p/<id>
+      const pathMatch = window.location.pathname.match(/\/p\/([A-Za-z0-9]{6,16})$/);
+      if (pathMatch) {
+        const pasteId = pathMatch[1];
+        const payload = await loadFromPasteId(pasteId);
+        if (payload) {
+          setMarkdown(payload.p);
+
+          const restoredAnnotations = fromShareable(payload.a);
+          setAnnotations(restoredAnnotations);
+
+          if (payload.g?.length) {
+            const parsed = parseGlobalAttachments(payload.g);
+            setGlobalAttachments(parsed);
+            setSharedGlobalAttachments(parsed);
+          }
+
+          setPendingSharedAnnotations(restoredAnnotations);
+          setIsSharedSession(true);
+          onSharedLoad?.();
+
+          // Remove the /p/<id> path from browser history so a refresh doesn't
+          // attempt a network fetch. The plan is now held in memory.
+          window.history.replaceState({}, '', '/');
+
+          return true;
+        }
+        // Paste fetch failed — fall through to try the hash fragment instead.
+      }
+
       const payload = await parseShareHash();
 
       if (payload) {
@@ -172,6 +216,49 @@ export function useSharing(
     refreshShareUrl();
   }, [refreshShareUrl]);
 
+  /**
+   * Generate a short URL via the paste service.
+   * Silently clears the short URL if the service is unavailable — the full
+   * hash-based URL remains usable as a fallback.
+   */
+  const generateShortUrl = useCallback(async () => {
+    if (!markdown) return;
+
+    setIsGeneratingShortUrl(true);
+    setShortUrlError('');
+
+    try {
+      const result = await createShortShareUrl(
+        markdown,
+        annotations,
+        globalAttachments,
+        { shareBaseUrl }
+      );
+
+      if (result) {
+        setShortShareUrl(result.shortUrl);
+      } else {
+        setShortShareUrl('');
+        setShortUrlError('Short URL service unavailable');
+      }
+    } catch {
+      setShortShareUrl('');
+      setShortUrlError('Failed to generate short URL');
+    } finally {
+      setIsGeneratingShortUrl(false);
+    }
+  }, [markdown, annotations, globalAttachments, shareBaseUrl]);
+
+  // Auto-generate short URL with a 1-second debounce whenever the plan or
+  // annotations change. A debounce avoids hammering the paste service on
+  // every keystroke during active editing.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      generateShortUrl();
+    }, 1_000);
+    return () => clearTimeout(timer);
+  }, [generateShortUrl]);
+
   // Import annotations from a teammate's share URL
   const importFromShareUrl = useCallback(async (url: string): Promise<ImportResult> => {
     try {
@@ -240,6 +327,9 @@ export function useSharing(
     isLoadingShared,
     shareUrl,
     shareUrlSize,
+    shortShareUrl,
+    isGeneratingShortUrl,
+    shortUrlError,
     pendingSharedAnnotations,
     sharedGlobalAttachments,
     clearPendingSharedAnnotations,

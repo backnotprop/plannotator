@@ -45,7 +45,7 @@ function parseShareableImages(raw: ShareableImage[] | undefined): ImageAttachmen
 /**
  * Convert ImageAttachment[] to ShareableImage[] for compact serialization
  */
-function toShareableImages(images: ImageAttachment[] | undefined): ShareableImage[] | undefined {
+export function toShareableImages(images: ImageAttachment[] | undefined): ShareableImage[] | undefined {
   if (!images?.length) return undefined;
   return images.map(img => [img.path, img.name]);
 }
@@ -227,4 +227,94 @@ export function formatUrlSize(url: string): string {
     return `${bytes} B`;
   }
   return `${(bytes / 1024).toFixed(1)} KB`;
+}
+
+// ---------------------------------------------------------------------------
+// Short URL support (paste-service backed)
+// ---------------------------------------------------------------------------
+
+const DEFAULT_PASTE_API = 'https://paste.plannotator.ai';
+
+/**
+ * Create a short share URL by posting compressed plan data to the paste service.
+ *
+ * Returns `{ shortUrl, id }` on success, or `null` when the paste service is
+ * unavailable (e.g. self-hosted environments without a paste backend). Callers
+ * should fall back to the hash-based URL in that case.
+ *
+ * The request has a 5-second timeout so UI responsiveness is not affected.
+ */
+export async function createShortShareUrl(
+  markdown: string,
+  annotations: Annotation[],
+  globalAttachments?: ImageAttachment[],
+  options?: {
+    /** Override the paste API base URL (default: https://paste.plannotator.ai) */
+    pasteApiUrl?: string;
+    /** Override the share site base URL used in the returned short link */
+    shareBaseUrl?: string;
+  }
+): Promise<{ shortUrl: string; id: string } | null> {
+  const pasteApi = options?.pasteApiUrl ?? DEFAULT_PASTE_API;
+  const shareBase = options?.shareBaseUrl ?? 'https://share.plannotator.ai';
+
+  try {
+    const payload: SharePayload = {
+      p: markdown,
+      a: toShareable(annotations),
+      g: globalAttachments?.length ? toShareableImages(globalAttachments) : undefined,
+    };
+
+    const compressed = await compress(payload);
+
+    const response = await fetch(`${pasteApi}/api/paste`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: compressed }),
+      signal: AbortSignal.timeout(5_000),
+    });
+
+    if (!response.ok) {
+      console.warn(`[sharing] Paste service returned ${response.status}`);
+      return null;
+    }
+
+    const result = (await response.json()) as { id: string; url?: string };
+    const shortUrl = result.url ?? `${shareBase}/p/${result.id}`;
+
+    return { shortUrl, id: result.id };
+  } catch (e) {
+    // Service unavailable — expected for self-hosted setups without a paste backend.
+    // The caller is responsible for falling back to hash-based sharing silently.
+    console.debug('[sharing] Short URL service unavailable, using hash-based sharing:', e);
+    return null;
+  }
+}
+
+/**
+ * Load plan data from a paste service using the paste ID embedded in a short URL.
+ *
+ * Fetches the compressed payload from `<pasteApiUrl>/api/paste/<pasteId>` and
+ * decompresses it into a `SharePayload`. Returns `null` on any failure.
+ */
+export async function loadFromPasteId(
+  pasteId: string,
+  pasteApiUrl: string = DEFAULT_PASTE_API
+): Promise<SharePayload | null> {
+  try {
+    const response = await fetch(`${pasteApiUrl}/api/paste/${pasteId}`, {
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    if (!response.ok) {
+      console.warn(`[sharing] Paste fetch returned ${response.status} for id ${pasteId}`);
+      return null;
+    }
+
+    const result = (await response.json()) as { data: string };
+    return await decompress(result.data);
+  } catch (e) {
+    console.warn('[sharing] Failed to load from paste ID:', e);
+    return null;
+  }
 }
