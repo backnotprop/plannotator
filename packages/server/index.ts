@@ -208,7 +208,12 @@ export async function startPlannotatorServer(
 
             const projectRoot = process.cwd();
 
-            // Path resolution: 4 strategies in order
+            // Restrict to markdown files only
+            if (!/\.mdx?$/i.test(requestedPath)) {
+              return Response.json({ error: "Only .md and .mdx files are supported" }, { status: 400 });
+            }
+
+            // Path resolution: 3 strategies in order
             let resolvedPath: string | null = null;
 
             if (requestedPath.startsWith("/")) {

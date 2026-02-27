@@ -40,7 +40,7 @@ plannotator/
 │   │   │   ├── plan-diff/        # PlanDiffBadge, PlanDiffViewer, clean/raw diff views
 │   │   │   └── sidebar/          # SidebarContainer, SidebarTabs, VersionBrowser
 │   │   ├── utils/                # parser.ts, sharing.ts, storage.ts, planSave.ts, agentSwitch.ts, planDiffEngine.ts
-│   │   ├── hooks/                # useSharing.ts, usePlanDiff.ts, useSidebar.ts
+│   │   ├── hooks/                # useSharing.ts, usePlanDiff.ts, useSidebar.ts, useLinkedDoc.ts
 │   │   └── types.ts
 │   ├── editor/                   # Plan review App.tsx
 │   └── review-editor/            # Code review UI
@@ -151,6 +151,7 @@ Send Annotations → feedback sent to agent session
 | `/api/upload`         | POST   | Upload image, returns `{ path, originalName }` |
 | `/api/obsidian/vaults`| GET    | Detect available Obsidian vaults           |
 | `/api/plan/vscode-diff` | POST   | Open diff in VS Code (body: baseVersion)   |
+| `/api/doc`              | GET    | Serve linked .md/.mdx file (`?path=<path>`) |
 
 ### Review Server (`packages/server/review.ts`)
 
