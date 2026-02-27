@@ -26,6 +26,8 @@
     "build:review": "bun run --cwd apps/review build",
     "build:pi": "bun run build:review && bun run build:hook && bun run --cwd apps/pi-extension build",
     "build": "bun run build:hook && bun run build:opencode",
+    "dev:vscode": "bun run --cwd apps/vscode-extension watch",
+    "build:vscode": "bun run --cwd apps/vscode-extension build",
     "test": "bun test"
   },
   "dependencies": {

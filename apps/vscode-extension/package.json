@@ -1,0 +1,72 @@
+{
+  "name": "plannotator",
+  "displayName": "Plannotator",
+  "description": "Add inline annotation markers to any file for plan review and code feedback",
+  "version": "0.0.1",
+  "publisher": "backnotprop",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/backnotprop/plannotator.git",
+    "directory": "apps/vscode-extension"
+  },
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": ["Other"],
+  "keywords": ["annotation", "code-review", "plannotator"],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "plannotator.addAnnotation",
+        "title": "Plannotator: Add Annotation"
+      },
+      {
+        "command": "plannotator.exportAnnotations",
+        "title": "Plannotator: Export Annotations"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "plannotator.addAnnotation",
+          "group": "1_modification@99"
+        },
+        {
+          "command": "plannotator.exportAnnotations",
+          "group": "1_modification@100"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "plannotator.addAnnotation",
+        "key": "ctrl+alt+p",
+        "mac": "cmd+alt+p",
+        "when": "editorTextFocus"
+      }
+    ],
+    "configuration": {
+      "title": "Plannotator",
+      "properties": {
+        "plannotator.annotationPrefix": {
+          "type": "string",
+          "default": "@plannotator",
+          "description": "Marker prefix for annotation comments"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "watch": "node esbuild.config.mjs --watch",
+    "package": "npx @vscode/vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.80.0",
+    "esbuild": "^0.20.0",
+    "typescript": "~5.8.2"
+  }
+}

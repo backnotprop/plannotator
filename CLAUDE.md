@@ -20,6 +20,9 @@ plannotator/
 │   │   └── review-editor.html    # Built code review app
 │   ├── marketing/                # Marketing site, docs, and blog (plannotator.ai)
 │   │   └── astro.config.mjs      # Astro 5 static site with content collections
+│   ├── vscode-extension/          # VS Code extension for inline annotations
+│   │   ├── src/extension.ts       # Add/export annotation commands
+│   │   └── package.json           # Extension manifest
 │   └── review/                   # Standalone review server (for development)
 │       ├── index.html
 │       ├── index.tsx
@@ -326,6 +329,7 @@ bun run dev:hook       # Hook server (plan review)
 bun run dev:review     # Review editor (code review)
 bun run dev:portal     # Portal editor
 bun run dev:marketing  # Marketing site
+bun run dev:vscode     # VS Code extension (watch mode)
 ```
 
 ## Build
@@ -336,6 +340,7 @@ bun run build:review     # Code review editor
 bun run build:opencode   # OpenCode plugin (copies HTML from hook + review)
 bun run build:portal     # Static build for share.plannotator.ai
 bun run build:marketing  # Static build for plannotator.ai
+bun run build:vscode     # VS Code extension
 bun run build            # Build hook + opencode (main targets)
 ```
 
