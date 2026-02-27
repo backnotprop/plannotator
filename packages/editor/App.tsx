@@ -413,6 +413,18 @@ const App: React.FC = () => {
     }
   }, [sidebar.activeTab]);
 
+  // Clear diff view on Escape key
+  useEffect(() => {
+    if (!isPlanDiffActive) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsPlanDiffActive(false);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isPlanDiffActive]);
+
   // Plan diff computation
   const planDiff = usePlanDiff(markdown, previousPlan, versionInfo);
 
@@ -495,7 +507,7 @@ const App: React.FC = () => {
         return res.json();
       })
       .then((data: { plan: string; origin?: 'claude-code' | 'opencode' | 'pi'; mode?: 'annotate'; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string } }) => {
-        setMarkdown(data.plan);
+        if (data.plan) setMarkdown(data.plan);
         setIsApiMode(true);
         if (data.mode === 'annotate') {
           setAnnotateMode(true);

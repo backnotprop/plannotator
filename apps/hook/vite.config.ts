@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 import tailwindcss from '@tailwindcss/vite';
 import pkg from '../../package.json';
+import { devMockApi } from './dev-mock-api';
 
 export default defineConfig({
   server: {
@@ -13,7 +14,7 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
-  plugins: [react(), tailwindcss(), viteSingleFile()],
+  plugins: [react(), tailwindcss(), devMockApi(), viteSingleFile()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, '.'),
