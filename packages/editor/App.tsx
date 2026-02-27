@@ -406,6 +406,13 @@ const App: React.FC = () => {
     }
   }, [uiPrefs.tocEnabled]);
 
+  // Clear diff view when switching away from versions tab
+  useEffect(() => {
+    if (sidebar.activeTab === 'toc' && isPlanDiffActive) {
+      setIsPlanDiffActive(false);
+    }
+  }, [sidebar.activeTab]);
+
   // Plan diff computation
   const planDiff = usePlanDiff(markdown, previousPlan, versionInfo);
 
