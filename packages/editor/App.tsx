@@ -805,7 +805,7 @@ const App: React.FC = () => {
     }
 
     return output;
-  }, [blocks, annotations, globalAttachments]);
+  }, [blocks, annotations, globalAttachments, linkedDocHook.getDocAnnotations]);
 
   // Quick-save handlers for export dropdown and keyboard shortcut
   const handleDownloadAnnotations = () => {
