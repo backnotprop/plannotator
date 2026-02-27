@@ -50,7 +50,7 @@ export interface UseLinkedDocReturn {
   back: () => void;
   /** Dismiss the current error */
   dismissError: () => void;
-  /** Snapshot of all cached linked doc annotations (keyed by filepath) */
+  /** All linked doc annotations including the active doc's live state (keyed by filepath) */
   getDocAnnotations: () => Map<string, CachedDocState>;
 }
 
@@ -204,8 +204,15 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
   const dismissError = useCallback(() => setError(null), []);
 
   const getDocAnnotations = useCallback((): Map<string, CachedDocState> => {
-    return new Map(docCache.current);
-  }, []);
+    const result = new Map(docCache.current);
+    if (linkedDoc) {
+      result.set(linkedDoc.filepath, {
+        annotations: [...annotations],
+        globalAttachments: [...globalAttachments],
+      });
+    }
+    return result;
+  }, [linkedDoc, annotations, globalAttachments]);
 
   return {
     isActive: linkedDoc !== null,

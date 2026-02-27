@@ -703,6 +703,9 @@ const App: React.FC = () => {
       // Don't intercept in demo/share mode (no API)
       if (!isApiMode) return;
 
+      // Don't submit while viewing a linked doc
+      if (linkedDocHook.isActive) return;
+
       e.preventDefault();
 
       // Annotate mode: always send feedback
@@ -737,7 +740,7 @@ const App: React.FC = () => {
   }, [
     showExport, showImport, showFeedbackPrompt, showClaudeCodeWarning, showAgentWarning,
     showPermissionModeSetup, showUIFeaturesSetup, showPlanDiffMarketing, pendingPasteImage,
-    submitted, isSubmitting, isApiMode, annotations.length, annotateMode,
+    submitted, isSubmitting, isApiMode, linkedDocHook.isActive, annotations.length, annotateMode,
     origin, getAgentWarning,
   ]);
 
@@ -799,7 +802,7 @@ const App: React.FC = () => {
     }
 
     return output;
-  }, [blocks, annotations, globalAttachments, linkedDocHook]);
+  }, [blocks, annotations, globalAttachments]);
 
   // Quick-save handlers for export dropdown and keyboard shortcut
   const handleDownloadAnnotations = () => {
