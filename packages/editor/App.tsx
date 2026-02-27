@@ -629,7 +629,10 @@ const App: React.FC = () => {
       }
 
       // Include annotations as feedback if any exist (for OpenCode "approve with notes")
-      if (annotations.length > 0 || globalAttachments.length > 0) {
+      const hasDocAnnotations = Array.from(linkedDocHook.getDocAnnotations().values()).some(
+        (d) => d.annotations.length > 0 || d.globalAttachments.length > 0
+      );
+      if (annotations.length > 0 || globalAttachments.length > 0 || hasDocAnnotations) {
         body.feedback = annotationsOutput;
       }
 
