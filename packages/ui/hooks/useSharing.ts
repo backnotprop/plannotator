@@ -90,7 +90,8 @@ export function useSharing(
   setAnnotations: (a: Annotation[]) => void,
   setGlobalAttachments: (g: ImageAttachment[]) => void,
   onSharedLoad?: () => void,
-  shareBaseUrl?: string
+  shareBaseUrl?: string,
+  pasteApiUrl?: string
 ): UseSharingResult {
   const [isSharedSession, setIsSharedSession] = useState(false);
   const [isLoadingShared, setIsLoadingShared] = useState(true);
@@ -114,7 +115,7 @@ export function useSharing(
       const pathMatch = window.location.pathname.match(/^\/p\/([A-Za-z0-9]{6,16})$/);
       if (pathMatch) {
         const pasteId = pathMatch[1];
-        const payload = await loadFromPasteId(pasteId, shareBaseUrl);
+        const payload = await loadFromPasteId(pasteId, pasteApiUrl);
         if (payload) {
           setMarkdown(payload.p);
 
@@ -181,7 +182,7 @@ export function useSharing(
       console.error('Failed to load from share hash:', e);
       return false;
     }
-  }, [setMarkdown, setAnnotations, setGlobalAttachments, onSharedLoad, shareBaseUrl]);
+  }, [setMarkdown, setAnnotations, setGlobalAttachments, onSharedLoad, shareBaseUrl, pasteApiUrl]);
 
   // Load from hash on mount
   useEffect(() => {
@@ -234,7 +235,7 @@ export function useSharing(
         markdown,
         annotations,
         globalAttachments,
-        { shareBaseUrl }
+        { pasteApiUrl, shareBaseUrl }
       );
 
       if (result) {
@@ -249,7 +250,7 @@ export function useSharing(
     } finally {
       setIsGeneratingShortUrl(false);
     }
-  }, [markdown, annotations, globalAttachments, shareBaseUrl]);
+  }, [markdown, annotations, globalAttachments, shareBaseUrl, pasteApiUrl]);
 
   // Auto-generate short URL with a 1-second debounce whenever the plan or
   // annotations change. A debounce avoids hammering the paste service on
@@ -272,7 +273,7 @@ export function useSharing(
       const shortMatch = url.match(/\/p\/([A-Za-z0-9]{6,16})(?:\?|$)/);
       if (shortMatch) {
         const pasteId = shortMatch[1];
-        const loaded = await loadFromPasteId(pasteId, shareBaseUrl);
+        const loaded = await loadFromPasteId(pasteId, pasteApiUrl);
         if (!loaded) {
           return { success: false, count: 0, planTitle: '', error: 'Failed to load from short URL — paste may have expired' };
         }
@@ -336,7 +337,7 @@ export function useSharing(
       const errorMessage = e instanceof Error ? e.message : 'Failed to decompress share URL';
       return { success: false, count: 0, planTitle: '', error: errorMessage };
     }
-  }, [annotations, globalAttachments, setAnnotations, setGlobalAttachments, shareBaseUrl]);
+  }, [annotations, globalAttachments, setAnnotations, setGlobalAttachments, pasteApiUrl]);
 
   return {
     isSharedSession,

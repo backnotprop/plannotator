@@ -13,7 +13,8 @@
     "./browser": "./browser.ts",
     "./storage": "./storage.ts",
     "./git": "./git.ts",
-    "./repo": "./repo.ts"
+    "./repo": "./repo.ts",
+    "./share-url": "./share-url.ts"
   },
   "files": [
     "*.ts"

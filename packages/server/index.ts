@@ -35,6 +35,8 @@ import {
 import { getRepoInfo } from "./repo";
 import { detectProjectName } from "./project";
 
+import { generateRemoteShareUrl, formatSize } from "./share-url";
+
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
 export { openBrowser } from "./browser";
