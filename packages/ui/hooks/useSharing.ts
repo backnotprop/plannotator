@@ -182,7 +182,7 @@ export function useSharing(
       console.error('Failed to load from share hash:', e);
       return false;
     }
-  }, [setMarkdown, setAnnotations, setGlobalAttachments, onSharedLoad, shareBaseUrl, pasteApiUrl]);
+  }, [setMarkdown, setAnnotations, setGlobalAttachments, onSharedLoad, pasteApiUrl]);
 
   // Load from hash on mount
   useEffect(() => {

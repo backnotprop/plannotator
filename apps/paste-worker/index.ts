@@ -34,13 +34,17 @@ function getAllowedOrigins(env: Env): string[] {
 function corsHeaders(request: Request, env: Env): Record<string, string> {
   const origin = request.headers.get('Origin') ?? '';
   const allowed = getAllowedOrigins(env);
-  const headers: Record<string, string> = { ...BASE_CORS_HEADERS };
 
   if (allowed.includes(origin) || allowed.includes('*')) {
-    headers['Access-Control-Allow-Origin'] = origin;
+    return {
+      ...BASE_CORS_HEADERS,
+      'Access-Control-Allow-Origin': origin,
+    };
   }
 
-  return headers;
+  // Don't send CORS headers for disallowed origins — the browser will
+  // block the response anyway, and partial headers are misleading.
+  return {};
 }
 
 /**

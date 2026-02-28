@@ -10,10 +10,11 @@
 
 const DEFAULT_SHARE_BASE = "https://share.plannotator.ai";
 
+// Intentional subset of the canonical SharePayload in @plannotator/ui/utils/sharing.ts.
+// Only `p` (plan) is populated server-side; annotations are added in the browser.
+// If the canonical format changes, this must be updated to match.
 interface SharePayload {
-  /** Plan markdown */
   p: string;
-  /** Annotations (empty at server startup) */
   a: [];
 }
 
@@ -43,8 +44,13 @@ export async function generateRemoteShareUrl(
   const buffer = await new Response(stream.readable).arrayBuffer();
   const compressed = new Uint8Array(buffer);
 
-  // Convert to base64url
-  const base64 = btoa(String.fromCharCode(...compressed));
+  // Convert to base64url — use a loop instead of spread to avoid
+  // RangeError on large plans (spread has a ~65K argument limit).
+  let binary = "";
+  for (let i = 0; i < compressed.length; i++) {
+    binary += String.fromCharCode(compressed[i]);
+  }
+  const base64 = btoa(binary);
   const hash = base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 
   return `${base}/#${hash}`;
