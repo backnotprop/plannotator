@@ -1,0 +1,12 @@
+name = "plannotator-paste"
+main = "targets/cloudflare.ts"
+compatibility_date = "2024-12-01"
+
+[[kv_namespaces]]
+binding = "PASTE_KV"
+# Run `wrangler kv:namespace create PASTE_KV` to get your IDs and fill them in.
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+preview_id = "REPLACE_WITH_PREVIEW_KV_NAMESPACE_ID"
+
+[vars]
+ALLOWED_ORIGINS = "https://share.plannotator.ai,http://localhost:3001"

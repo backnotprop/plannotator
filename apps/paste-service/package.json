@@ -1,0 +1,14 @@
+{
+  "name": "@plannotator/paste-service",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "bun run targets/bun.ts",
+    "dev:cf": "wrangler dev",
+    "deploy:cf": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241218.0",
+    "wrangler": "^3.99.0"
+  }
+}

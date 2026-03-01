@@ -9,6 +9,7 @@
     "./types": "./types.ts"
   },
   "dependencies": {
+    "@plannotator/shared": "workspace:*",
     "@plannotator/web-highlighter": "^0.8.1",
     "diff": "^8.0.3",
     "highlight.js": "^11.11.1",

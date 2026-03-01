@@ -13,11 +13,15 @@
     "./browser": "./browser.ts",
     "./storage": "./storage.ts",
     "./git": "./git.ts",
-    "./repo": "./repo.ts"
+    "./repo": "./repo.ts",
+    "./share-url": "./share-url.ts"
   },
   "files": [
     "*.ts"
   ],
+  "dependencies": {
+    "@plannotator/shared": "workspace:*"
+  },
   "peerDependencies": {
     "bun": ">=1.0.0"
   }

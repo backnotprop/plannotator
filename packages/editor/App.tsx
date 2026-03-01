@@ -372,6 +372,7 @@ const App: React.FC = () => {
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
   const [sharingEnabled, setSharingEnabled] = useState(true);
   const [shareBaseUrl, setShareBaseUrl] = useState<string | undefined>(undefined);
+  const [pasteApiUrl, setPasteApiUrl] = useState<string | undefined>(undefined);
   const [repoInfo, setRepoInfo] = useState<{ display: string; branch?: string } | null>(null);
   const [showExportDropdown, setShowExportDropdown] = useState(false);
   const [initialExportTab, setInitialExportTab] = useState<'share' | 'annotations' | 'notes'>();
@@ -425,9 +426,13 @@ const App: React.FC = () => {
     isLoadingShared,
     shareUrl,
     shareUrlSize,
+    shortShareUrl,
+    isGeneratingShortUrl,
+    shortUrlError,
     pendingSharedAnnotations,
     sharedGlobalAttachments,
     clearPendingSharedAnnotations,
+    generateShortUrl,
     importFromShareUrl,
   } = useSharing(
     markdown,
@@ -440,7 +445,8 @@ const App: React.FC = () => {
       // When loaded from share, mark as loaded
       setIsLoading(false);
     },
-    shareBaseUrl
+    shareBaseUrl,
+    pasteApiUrl
   );
 
   // Fetch available agents for OpenCode (for validation on approve)
@@ -481,7 +487,7 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: 'claude-code' | 'opencode' | 'pi'; mode?: 'annotate'; sharingEnabled?: boolean; shareBaseUrl?: string; repoInfo?: { display: string; branch?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string } }) => {
+      .then((data: { plan: string; origin?: 'claude-code' | 'opencode' | 'pi'; mode?: 'annotate'; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string } }) => {
         setMarkdown(data.plan);
         setIsApiMode(true);
         if (data.mode === 'annotate') {
@@ -492,6 +498,9 @@ const App: React.FC = () => {
         }
         if (data.shareBaseUrl) {
           setShareBaseUrl(data.shareBaseUrl);
+        }
+        if (data.pasteApiUrl) {
+          setPasteApiUrl(data.pasteApiUrl);
         }
         if (data.repoInfo) {
           setRepoInfo(data.repoInfo);
@@ -1274,6 +1283,10 @@ const App: React.FC = () => {
           onClose={() => { setShowExport(false); setInitialExportTab(undefined); }}
           shareUrl={shareUrl}
           shareUrlSize={shareUrlSize}
+          shortShareUrl={shortShareUrl}
+          isGeneratingShortUrl={isGeneratingShortUrl}
+          shortUrlError={shortUrlError}
+          onGenerateShortUrl={generateShortUrl}
           annotationsOutput={annotationsOutput}
           annotationCount={annotations.length}
           taterSprite={taterMode ? <TaterSpritePullup /> : undefined}

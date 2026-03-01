@@ -3,18 +3,23 @@
  *
  * Handles:
  * - Loading shared state from URL hash on mount
- * - Generating shareable URLs
+ * - Loading from paste-service short URLs (/p/<id>)
+ * - Generating shareable URLs (hash-based and short)
  * - Tracking whether current session is from a shared link
  */
 
 import { useState, useEffect, useCallback } from 'react';
 import { Annotation, type ImageAttachment } from '../types';
 import {
+  type SharePayload,
   parseShareHash,
   generateShareUrl,
   decompress,
   fromShareable,
+  parseShareableImages,
   formatUrlSize,
+  createShortShareUrl,
+  loadFromPasteId,
 } from '../utils/sharing';
 
 export interface ImportResult {
@@ -37,6 +42,15 @@ interface UseSharingResult {
   /** Human-readable size of the share URL */
   shareUrlSize: string;
 
+  /** Short share URL backed by the paste service (empty string when unavailable) */
+  shortShareUrl: string;
+
+  /** Whether the short URL is currently being generated */
+  isGeneratingShortUrl: boolean;
+
+  /** Error message from the last short URL generation attempt, or empty string */
+  shortUrlError: string;
+
   /** Annotations loaded from share that need to be applied to DOM */
   pendingSharedAnnotations: Annotation[] | null;
 
@@ -49,26 +63,13 @@ interface UseSharingResult {
   /** Manually trigger share URL generation */
   refreshShareUrl: () => Promise<void>;
 
+  /** Generate a short URL via the paste service (user must explicitly trigger this) */
+  generateShortUrl: () => Promise<void>;
+
   /** Import annotations from a teammate's share URL */
   importFromShareUrl: (url: string) => Promise<ImportResult>;
 }
 
-/**
- * Parse SharePayload.g (which can be old string[] or new [path,name][] format) into ImageAttachment[]
- */
-function parseGlobalAttachments(g: unknown[] | undefined): ImageAttachment[] {
-  if (!g?.length) return [];
-  return g.map((item, idx) => {
-    if (typeof item === 'string') {
-      const name = item.split('/').pop()?.replace(/\.[^.]+$/, '') || `image-${idx + 1}`;
-      return { path: item, name };
-    }
-    if (Array.isArray(item) && item.length >= 2) {
-      return { path: item[0] as string, name: item[1] as string };
-    }
-    return { path: String(item), name: `image-${idx + 1}` };
-  });
-}
 
 export function useSharing(
   markdown: string,
@@ -78,12 +79,16 @@ export function useSharing(
   setAnnotations: (a: Annotation[]) => void,
   setGlobalAttachments: (g: ImageAttachment[]) => void,
   onSharedLoad?: () => void,
-  shareBaseUrl?: string
+  shareBaseUrl?: string,
+  pasteApiUrl?: string
 ): UseSharingResult {
   const [isSharedSession, setIsSharedSession] = useState(false);
   const [isLoadingShared, setIsLoadingShared] = useState(true);
   const [shareUrl, setShareUrl] = useState('');
   const [shareUrlSize, setShareUrlSize] = useState('');
+  const [shortShareUrl, setShortShareUrl] = useState('');
+  const [isGeneratingShortUrl, setIsGeneratingShortUrl] = useState(false);
+  const [shortUrlError, setShortUrlError] = useState('');
   const [pendingSharedAnnotations, setPendingSharedAnnotations] = useState<Annotation[] | null>(null);
   const [sharedGlobalAttachments, setSharedGlobalAttachments] = useState<ImageAttachment[] | null>(null);
 
@@ -92,9 +97,40 @@ export function useSharing(
     setSharedGlobalAttachments(null);
   }, []);
 
-  // Load shared state from URL hash
+  // Load shared state from URL hash (or paste-service short URL)
   const loadFromHash = useCallback(async () => {
     try {
+      // Check for short URL path pattern: /p/<id>
+      const pathMatch = window.location.pathname.match(/^\/p\/([A-Za-z0-9]{6,16})$/);
+      if (pathMatch) {
+        const pasteId = pathMatch[1];
+        const payload = await loadFromPasteId(pasteId, pasteApiUrl);
+        if (payload) {
+          setMarkdown(payload.p);
+
+          const restoredAnnotations = fromShareable(payload.a);
+          setAnnotations(restoredAnnotations);
+
+          if (payload.g?.length) {
+            const parsed = parseShareableImages(payload.g) ?? [];
+            setGlobalAttachments(parsed);
+            setSharedGlobalAttachments(parsed);
+          }
+
+          setPendingSharedAnnotations(restoredAnnotations);
+          setIsSharedSession(true);
+          onSharedLoad?.();
+
+          // Remove the /p/<id> path from browser history so a refresh doesn't
+          // attempt a network fetch. The plan is now held in memory.
+          const basePath = window.location.pathname.replace(/\/p\/[A-Za-z0-9]+$/, '') || '/';
+          window.history.replaceState({}, '', basePath);
+
+          return true;
+        }
+        // Paste fetch failed — fall through to try the hash fragment instead.
+      }
+
       const payload = await parseShareHash();
 
       if (payload) {
@@ -107,7 +143,7 @@ export function useSharing(
 
         // Restore global attachments if present
         if (payload.g?.length) {
-          const parsed = parseGlobalAttachments(payload.g);
+          const parsed = parseShareableImages(payload.g) ?? [];
           setGlobalAttachments(parsed);
           setSharedGlobalAttachments(parsed);
         }
@@ -135,7 +171,7 @@ export function useSharing(
       console.error('Failed to load from share hash:', e);
       return false;
     }
-  }, [setMarkdown, setAnnotations, setGlobalAttachments, onSharedLoad]);
+  }, [setMarkdown, setAnnotations, setGlobalAttachments, onSharedLoad, pasteApiUrl]);
 
   // Load from hash on mount
   useEffect(() => {
@@ -172,21 +208,74 @@ export function useSharing(
     refreshShareUrl();
   }, [refreshShareUrl]);
 
-  // Import annotations from a teammate's share URL
+  // Clear stale short URL when content changes (does NOT auto-regenerate —
+  // the user must explicitly click "Create short link" again)
+  useEffect(() => {
+    setShortShareUrl('');
+    setShortUrlError('');
+  }, [markdown, annotations]);
+
+  /**
+   * Generate a short URL via the paste service.
+   * Only called when the user explicitly clicks "Create short link".
+   * Clears the short URL if the service is unavailable — the full
+   * hash-based URL remains usable as a fallback.
+   */
+  const generateShortUrl = useCallback(async () => {
+    if (!markdown) return;
+
+    setIsGeneratingShortUrl(true);
+    setShortUrlError('');
+
+    try {
+      const result = await createShortShareUrl(
+        markdown,
+        annotations,
+        globalAttachments,
+        { pasteApiUrl, shareBaseUrl }
+      );
+
+      if (result) {
+        setShortShareUrl(result.shortUrl);
+      } else {
+        setShortShareUrl('');
+        setShortUrlError('Short URL service unavailable');
+      }
+    } catch {
+      setShortShareUrl('');
+      setShortUrlError('Failed to generate short URL');
+    } finally {
+      setIsGeneratingShortUrl(false);
+    }
+  }, [markdown, annotations, globalAttachments, shareBaseUrl, pasteApiUrl]);
+
+  // Import annotations from a teammate's share URL (supports both hash-based and short /p/<id> URLs)
   const importFromShareUrl = useCallback(async (url: string): Promise<ImportResult> => {
     try {
-      // Extract hash from URL
-      const hashIndex = url.indexOf('#');
-      if (hashIndex === -1) {
-        return { success: false, count: 0, planTitle: '', error: 'Invalid share URL: no hash fragment found' };
-      }
-      const hash = url.slice(hashIndex + 1);
-      if (!hash) {
-        return { success: false, count: 0, planTitle: '', error: 'Invalid share URL: empty hash' };
-      }
+      let payload: SharePayload | undefined;
 
-      // Decompress payload
-      const payload = await decompress(hash);
+      // Check for short URL pattern: /p/<id>
+      const shortMatch = url.match(/\/p\/([A-Za-z0-9]{6,16})(?:\?|$)/);
+      if (shortMatch) {
+        const pasteId = shortMatch[1];
+        const loaded = await loadFromPasteId(pasteId, pasteApiUrl);
+        if (!loaded) {
+          return { success: false, count: 0, planTitle: '', error: 'Failed to load from short URL — paste may have expired' };
+        }
+        payload = loaded;
+      } else {
+        // Fall back to hash-based URL
+        const hashIndex = url.indexOf('#');
+        if (hashIndex === -1) {
+          return { success: false, count: 0, planTitle: '', error: 'Invalid share URL: no hash fragment or short link found' };
+        }
+        const hash = url.slice(hashIndex + 1);
+        if (!hash) {
+          return { success: false, count: 0, planTitle: '', error: 'Invalid share URL: empty hash' };
+        }
+
+        payload = await decompress(hash);
+      }
 
       // Extract plan title from embedded plan text
       const lines = (payload.p || '').trim().split('\n');
@@ -218,7 +307,7 @@ export function useSharing(
 
         // Handle global attachments (deduplicate by path)
         if (payload.g?.length) {
-          const parsed = parseGlobalAttachments(payload.g);
+          const parsed = parseShareableImages(payload.g) ?? [];
           const existingPaths = new Set(globalAttachments.map(g => g.path));
           const newAttachments = parsed.filter(p => !existingPaths.has(p.path));
           if (newAttachments.length > 0) {
@@ -233,17 +322,21 @@ export function useSharing(
       const errorMessage = e instanceof Error ? e.message : 'Failed to decompress share URL';
       return { success: false, count: 0, planTitle: '', error: errorMessage };
     }
-  }, [annotations, globalAttachments, setAnnotations, setGlobalAttachments]);
+  }, [annotations, globalAttachments, setAnnotations, setGlobalAttachments, pasteApiUrl]);
 
   return {
     isSharedSession,
     isLoadingShared,
     shareUrl,
     shareUrlSize,
+    shortShareUrl,
+    isGeneratingShortUrl,
+    shortUrlError,
     pendingSharedAnnotations,
     sharedGlobalAttachments,
     clearPendingSharedAnnotations,
     refreshShareUrl,
+    generateShortUrl,
     importFromShareUrl,
   };
 }

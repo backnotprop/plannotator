@@ -59,6 +59,8 @@ export interface ServerOptions {
   sharingEnabled?: boolean;
   /** Custom base URL for share links (default: https://share.plannotator.ai) */
   shareBaseUrl?: string;
+  /** Base URL of the paste service API for short URL sharing */
+  pasteApiUrl?: string;
   /** Called when server starts with the URL, remote status, and port */
   onReady?: (url: string, isRemote: boolean, port: number) => void;
   /** OpenCode client for querying available agents (OpenCode only) */
@@ -105,7 +107,7 @@ const RETRY_DELAY_MS = 500;
 export async function startPlannotatorServer(
   options: ServerOptions
 ): Promise<ServerResult> {
-  const { plan, origin, htmlContent, permissionMode, sharingEnabled = true, shareBaseUrl, onReady } = options;
+  const { plan, origin, htmlContent, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, onReady } = options;
 
   const isRemote = isRemoteSession();
   const configuredPort = getServerPort();
@@ -196,7 +198,7 @@ export async function startPlannotatorServer(
 
           // API: Get plan content
           if (url.pathname === "/api/plan") {
-            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, repoInfo, previousPlan, versionInfo });
+            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo });
           }
 
           // API: Serve a linked markdown document

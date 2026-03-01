@@ -36,6 +36,7 @@ import {
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
 import { getGitContext, runGitDiff } from "@plannotator/server/git";
+import { writeRemoteShareLink } from "@plannotator/server/share-url";
 
 // Embed the built HTML at compile time
 // @ts-ignore - Bun import attribute for text
@@ -54,6 +55,9 @@ const sharingEnabled = process.env.PLANNOTATOR_SHARE !== "disabled";
 
 // Custom share portal URL for self-hosting
 const shareBaseUrl = process.env.PLANNOTATOR_SHARE_URL || undefined;
+
+// Paste service URL for short URL sharing
+const pasteApiUrl = process.env.PLANNOTATOR_PASTE_URL || undefined;
 
 if (args[0] === "review") {
   // ============================================
@@ -79,7 +83,13 @@ if (args[0] === "review") {
     sharingEnabled,
     shareBaseUrl,
     htmlContent: reviewHtmlContent,
-    onReady: handleReviewServerReady,
+    onReady: async (url, isRemote, port) => {
+      handleReviewServerReady(url, isRemote, port);
+
+      if (isRemote && sharingEnabled && rawPatch) {
+        await writeRemoteShareLink(rawPatch, shareBaseUrl, "review changes", "diff only").catch(() => {});
+      }
+    },
   });
 
   // Wait for user feedback
@@ -126,7 +136,13 @@ if (args[0] === "review") {
     sharingEnabled,
     shareBaseUrl,
     htmlContent: planHtmlContent,
-    onReady: handleAnnotateServerReady,
+    onReady: async (url, isRemote, port) => {
+      handleAnnotateServerReady(url, isRemote, port);
+
+      if (isRemote && sharingEnabled) {
+        await writeRemoteShareLink(markdown, shareBaseUrl, "annotate", "document only").catch(() => {});
+      }
+    },
   });
 
   // Wait for user feedback
@@ -173,9 +189,14 @@ if (args[0] === "review") {
     permissionMode,
     sharingEnabled,
     shareBaseUrl,
+    pasteApiUrl,
     htmlContent: planHtmlContent,
-    onReady: (url, isRemote, port) => {
+    onReady: async (url, isRemote, port) => {
       handleServerReady(url, isRemote, port);
+
+      if (isRemote && sharingEnabled) {
+        await writeRemoteShareLink(planContent, shareBaseUrl, "review the plan", "plan only").catch(() => {});
+      }
     },
   });
 

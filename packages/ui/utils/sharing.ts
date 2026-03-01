@@ -9,6 +9,7 @@
  */
 
 import { Annotation, AnnotationType, type ImageAttachment } from '../types';
+import { compress, decompress } from '@plannotator/shared/compress';
 
 // Image in shareable format: plain string (old) or [path, name] tuple (new)
 type ShareableImage = string | [string, string];
@@ -30,7 +31,7 @@ export interface SharePayload {
 /**
  * Convert ShareableImage[] to ImageAttachment[] (handles old plain-string format)
  */
-function parseShareableImages(raw: ShareableImage[] | undefined): ImageAttachment[] | undefined {
+export function parseShareableImages(raw: ShareableImage[] | undefined): ImageAttachment[] | undefined {
   if (!raw?.length) return undefined;
   return raw.map(img => {
     if (typeof img === 'string') {
@@ -45,56 +46,13 @@ function parseShareableImages(raw: ShareableImage[] | undefined): ImageAttachmen
 /**
  * Convert ImageAttachment[] to ShareableImage[] for compact serialization
  */
-function toShareableImages(images: ImageAttachment[] | undefined): ShareableImage[] | undefined {
+export function toShareableImages(images: ImageAttachment[] | undefined): ShareableImage[] | undefined {
   if (!images?.length) return undefined;
   return images.map(img => [img.path, img.name]);
 }
 
-/**
- * Compress a SharePayload to a base64url string
- */
-export async function compress(payload: SharePayload): Promise<string> {
-  const json = JSON.stringify(payload);
-  const byteArray = new TextEncoder().encode(json);
-
-  const stream = new CompressionStream('deflate-raw');
-  const writer = stream.writable.getWriter();
-  writer.write(byteArray);
-  writer.close();
-
-  const buffer = await new Response(stream.readable).arrayBuffer();
-  const compressed = new Uint8Array(buffer);
-
-  // Convert to base64url (URL-safe base64)
-  const base64 = btoa(String.fromCharCode(...compressed));
-  return base64
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=/g, '');
-}
-
-/**
- * Decompress a base64url string back to SharePayload
- */
-export async function decompress(b64: string): Promise<SharePayload> {
-  // Restore standard base64
-  const base64 = b64
-    .replace(/-/g, '+')
-    .replace(/_/g, '/');
-
-  const binary = atob(base64);
-  const byteArray = Uint8Array.from(binary, c => c.charCodeAt(0));
-
-  const stream = new DecompressionStream('deflate-raw');
-  const writer = stream.writable.getWriter();
-  writer.write(byteArray);
-  writer.close();
-
-  const buffer = await new Response(stream.readable).arrayBuffer();
-  const json = new TextDecoder().decode(buffer);
-
-  return JSON.parse(json) as SharePayload;
-}
+// Re-export compress/decompress from shared package (single source of truth)
+export { compress, decompress };
 
 /**
  * Convert full Annotation objects to minimal shareable format
@@ -187,7 +145,7 @@ export async function generateShareUrl(
   markdown: string,
   annotations: Annotation[],
   globalAttachments?: ImageAttachment[],
-  baseUrl: string = 'https://share.plannotator.ai'
+  baseUrl: string = DEFAULT_SHARE_BASE
 ): Promise<string> {
   const payload: SharePayload = {
     p: markdown,
@@ -227,4 +185,95 @@ export function formatUrlSize(url: string): string {
     return `${bytes} B`;
   }
   return `${(bytes / 1024).toFixed(1)} KB`;
+}
+
+// ---------------------------------------------------------------------------
+// Short URL support (paste-service backed)
+// ---------------------------------------------------------------------------
+
+const DEFAULT_PASTE_API = 'https://paste.plannotator.ai';
+const DEFAULT_SHARE_BASE = 'https://share.plannotator.ai';
+
+/**
+ * Create a short share URL by posting compressed plan data to the paste service.
+ *
+ * Returns `{ shortUrl, id }` on success, or `null` when the paste service is
+ * unavailable (e.g. self-hosted environments without a paste backend). Callers
+ * should fall back to the hash-based URL in that case.
+ *
+ * The request has a 5-second timeout so UI responsiveness is not affected.
+ */
+export async function createShortShareUrl(
+  markdown: string,
+  annotations: Annotation[],
+  globalAttachments?: ImageAttachment[],
+  options?: {
+    /** Override the paste API base URL (default: https://paste.plannotator.ai) */
+    pasteApiUrl?: string;
+    /** Override the share site base URL used in the returned short link */
+    shareBaseUrl?: string;
+  }
+): Promise<{ shortUrl: string; id: string } | null> {
+  const pasteApi = options?.pasteApiUrl ?? DEFAULT_PASTE_API;
+  const shareBase = options?.shareBaseUrl ?? DEFAULT_SHARE_BASE;
+
+  try {
+    const payload: SharePayload = {
+      p: markdown,
+      a: toShareable(annotations),
+      g: globalAttachments?.length ? toShareableImages(globalAttachments) : undefined,
+    };
+
+    const compressed = await compress(payload);
+
+    const response = await fetch(`${pasteApi}/api/paste`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: compressed }),
+      signal: AbortSignal.timeout(5_000),
+    });
+
+    if (!response.ok) {
+      console.warn(`[sharing] Paste service returned ${response.status}`);
+      return null;
+    }
+
+    const result = (await response.json()) as { id: string };
+    const shortUrl = `${shareBase}/p/${result.id}`;
+
+    return { shortUrl, id: result.id };
+  } catch (e) {
+    // Service unavailable — expected for self-hosted setups without a paste backend.
+    // The caller is responsible for falling back to hash-based sharing silently.
+    console.debug('[sharing] Short URL service unavailable, using hash-based sharing:', e);
+    return null;
+  }
+}
+
+/**
+ * Load plan data from a paste service using the paste ID embedded in a short URL.
+ *
+ * Fetches the compressed payload from `<pasteApiUrl>/api/paste/<pasteId>` and
+ * decompresses it into a `SharePayload`. Returns `null` on any failure.
+ */
+export async function loadFromPasteId(
+  pasteId: string,
+  pasteApiUrl: string = DEFAULT_PASTE_API
+): Promise<SharePayload | null> {
+  try {
+    const response = await fetch(`${pasteApiUrl}/api/paste/${pasteId}`, {
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    if (!response.ok) {
+      console.warn(`[sharing] Paste fetch returned ${response.status} for id ${pasteId}`);
+      return null;
+    }
+
+    const result = (await response.json()) as { data: string };
+    return await decompress(result.data);
+  } catch (e) {
+    console.warn('[sharing] Failed to load from paste ID:', e);
+    return null;
+  }
 }
