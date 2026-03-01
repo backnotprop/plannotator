@@ -8,7 +8,7 @@ import { storage } from '@plannotator/ui/utils/storage';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { getIdentity } from '@plannotator/ui/utils/identity';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
-import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata } from '@plannotator/ui/types';
+import { CodeAnnotation, CodeAnnotationType, SelectedLineRange } from '@plannotator/ui/types';
 import { useResizablePanel } from '@plannotator/ui/hooks/useResizablePanel';
 import { ResizeHandle } from '@plannotator/ui/components/ResizeHandle';
 import { DiffViewer } from './components/DiffViewer';
@@ -255,7 +255,8 @@ const ReviewApp: React.FC = () => {
   const handleAddAnnotation = useCallback((
     type: CodeAnnotationType,
     text?: string,
-    suggestedCode?: string
+    suggestedCode?: string,
+    originalCode?: string
   ) => {
     if (!pendingSelection || !files[activeFileIndex]) return;
 
@@ -272,6 +273,7 @@ const ReviewApp: React.FC = () => {
       side: pendingSelection.side === 'additions' ? 'new' : 'old',
       text,
       suggestedCode,
+      originalCode,
       createdAt: Date.now(),
       author: identity,
     };
@@ -279,6 +281,18 @@ const ReviewApp: React.FC = () => {
     setAnnotations(prev => [...prev, newAnnotation]);
     setPendingSelection(null);
   }, [pendingSelection, files, activeFileIndex, identity]);
+
+  // Edit annotation
+  const handleEditAnnotation = useCallback((
+    id: string,
+    text?: string,
+    suggestedCode?: string,
+    originalCode?: string
+  ) => {
+    setAnnotations(prev => prev.map(ann =>
+      ann.id === id ? { ...ann, text, suggestedCode, originalCode } : ann
+    ));
+  }, []);
 
   // Delete annotation
   const handleDeleteAnnotation = useCallback((id: string) => {
@@ -755,6 +769,7 @@ const ReviewApp: React.FC = () => {
                 pendingSelection={pendingSelection}
                 onLineSelection={handleLineSelection}
                 onAddAnnotation={handleAddAnnotation}
+                onEditAnnotation={handleEditAnnotation}
                 onSelectAnnotation={handleSelectAnnotation}
                 onDeleteAnnotation={handleDeleteAnnotation}
                 isViewed={viewedFiles.has(activeFile.path)}
