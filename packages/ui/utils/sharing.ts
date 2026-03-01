@@ -193,7 +193,7 @@ export async function generateShareUrl(
   markdown: string,
   annotations: Annotation[],
   globalAttachments?: ImageAttachment[],
-  baseUrl: string = 'https://share.plannotator.ai'
+  baseUrl: string = DEFAULT_SHARE_BASE
 ): Promise<string> {
   const payload: SharePayload = {
     p: markdown,
@@ -240,6 +240,7 @@ export function formatUrlSize(url: string): string {
 // ---------------------------------------------------------------------------
 
 const DEFAULT_PASTE_API = 'https://paste.plannotator.ai';
+const DEFAULT_SHARE_BASE = 'https://share.plannotator.ai';
 
 /**
  * Create a short share URL by posting compressed plan data to the paste service.
@@ -262,7 +263,7 @@ export async function createShortShareUrl(
   }
 ): Promise<{ shortUrl: string; id: string } | null> {
   const pasteApi = options?.pasteApiUrl ?? DEFAULT_PASTE_API;
-  const shareBase = options?.shareBaseUrl ?? 'https://share.plannotator.ai';
+  const shareBase = options?.shareBaseUrl ?? DEFAULT_SHARE_BASE;
 
   try {
     const payload: SharePayload = {

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from "fs";
+import { mkdirSync, readdirSync, readFileSync, unlinkSync } from "fs";
 import { join, resolve } from "path";
 import type { PasteStore } from "../core/storage";
 
@@ -11,9 +11,7 @@ export class FsPasteStore implements PasteStore {
   private resolvedDir: string;
 
   constructor(private dataDir: string) {
-    if (!existsSync(dataDir)) {
-      mkdirSync(dataDir, { recursive: true });
-    }
+    mkdirSync(dataDir, { recursive: true });
     this.resolvedDir = resolve(dataDir);
     this.sweep();
   }
@@ -36,11 +34,8 @@ export class FsPasteStore implements PasteStore {
 
   async get(id: string): Promise<string | null> {
     const path = this.safePath(id);
-    const file = Bun.file(path);
-    if (!(await file.exists())) return null;
-
     try {
-      const entry: PasteFile = await file.json();
+      const entry: PasteFile = await Bun.file(path).json();
       if (Date.now() > entry.expiresAt) {
         unlinkSync(path);
         return null;
