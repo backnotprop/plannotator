@@ -2,7 +2,7 @@
 set -e
 
 REPO="backnotprop/plannotator"
-INSTALL_DIR="${XDG_DATA_HOME:-$HOME/.local}/bin"
+INSTALL_DIR="$HOME/.local/bin"
 
 case "$(uname -s)" in
     Darwin) os="darwin" ;;
