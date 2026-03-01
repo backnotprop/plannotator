@@ -1,0 +1,8 @@
+{
+  "name": "@plannotator/shared",
+  "version": "0.0.1",
+  "private": true,
+  "exports": {
+    "./compress": "./compress.ts"
+  }
+}

@@ -36,7 +36,7 @@ import {
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
 import { getGitContext, runGitDiff } from "@plannotator/server/git";
-import { generateRemoteShareUrl, formatSize } from "@plannotator/server/share-url";
+import { writeRemoteShareLink } from "@plannotator/server/share-url";
 
 // Embed the built HTML at compile time
 // @ts-ignore - Bun import attribute for text
@@ -87,17 +87,7 @@ if (args[0] === "review") {
       handleReviewServerReady(url, isRemote, port);
 
       if (isRemote && sharingEnabled && rawPatch) {
-        try {
-          const shareUrl = await generateRemoteShareUrl(rawPatch, shareBaseUrl);
-          const size = formatSize(new TextEncoder().encode(shareUrl).length);
-          process.stderr.write(
-            `\n  Open this link on your local machine to review changes:\n` +
-            `  ${shareUrl}\n\n` +
-            `  (${size} — diff only, annotations added in browser)\n\n`
-          );
-        } catch {
-          // Share URL generation failed silently
-        }
+        await writeRemoteShareLink(rawPatch, shareBaseUrl, "review changes", "diff only").catch(() => {});
       }
     },
   });
@@ -150,17 +140,7 @@ if (args[0] === "review") {
       handleAnnotateServerReady(url, isRemote, port);
 
       if (isRemote && sharingEnabled) {
-        try {
-          const shareUrl = await generateRemoteShareUrl(markdown, shareBaseUrl);
-          const size = formatSize(new TextEncoder().encode(shareUrl).length);
-          process.stderr.write(
-            `\n  Open this link on your local machine to annotate:\n` +
-            `  ${shareUrl}\n\n` +
-            `  (${size} — document only, annotations added in browser)\n\n`
-          );
-        } catch {
-          // Share URL generation failed silently
-        }
+        await writeRemoteShareLink(markdown, shareBaseUrl, "annotate", "document only").catch(() => {});
       }
     },
   });
@@ -215,18 +195,7 @@ if (args[0] === "review") {
       handleServerReady(url, isRemote, port);
 
       if (isRemote && sharingEnabled) {
-        try {
-          const shareUrl = await generateRemoteShareUrl(planContent, shareBaseUrl);
-          const size = formatSize(new TextEncoder().encode(shareUrl).length);
-          process.stderr.write(
-            `\n  Open this link on your local machine to review the plan:\n` +
-            `  ${shareUrl}\n\n` +
-            `  (${size} — plan only, annotations added in browser)\n\n`
-          );
-        } catch {
-          // Share URL generation failed — the local server is still usable
-          // via port forwarding as a fallback.
-        }
+        await writeRemoteShareLink(planContent, shareBaseUrl, "review the plan", "plan only").catch(() => {});
       }
     },
   });

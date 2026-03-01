@@ -9,6 +9,7 @@
  */
 
 import { Annotation, AnnotationType, type ImageAttachment } from '../types';
+import { compress, decompress } from '@plannotator/shared/compress';
 
 // Image in shareable format: plain string (old) or [path, name] tuple (new)
 type ShareableImage = string | [string, string];
@@ -30,7 +31,7 @@ export interface SharePayload {
 /**
  * Convert ShareableImage[] to ImageAttachment[] (handles old plain-string format)
  */
-function parseShareableImages(raw: ShareableImage[] | undefined): ImageAttachment[] | undefined {
+export function parseShareableImages(raw: ShareableImage[] | undefined): ImageAttachment[] | undefined {
   if (!raw?.length) return undefined;
   return raw.map(img => {
     if (typeof img === 'string') {
@@ -50,57 +51,8 @@ export function toShareableImages(images: ImageAttachment[] | undefined): Sharea
   return images.map(img => [img.path, img.name]);
 }
 
-/**
- * Compress a SharePayload to a base64url string
- */
-export async function compress(payload: SharePayload): Promise<string> {
-  const json = JSON.stringify(payload);
-  const byteArray = new TextEncoder().encode(json);
-
-  const stream = new CompressionStream('deflate-raw');
-  const writer = stream.writable.getWriter();
-  writer.write(byteArray);
-  writer.close();
-
-  const buffer = await new Response(stream.readable).arrayBuffer();
-  const compressed = new Uint8Array(buffer);
-
-  // Convert to base64url (URL-safe base64)
-  // Use a loop instead of spread to avoid RangeError on large plans
-  // (spread has a ~65K argument limit)
-  let binary = '';
-  for (let i = 0; i < compressed.length; i++) {
-    binary += String.fromCharCode(compressed[i]);
-  }
-  const base64 = btoa(binary);
-  return base64
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=/g, '');
-}
-
-/**
- * Decompress a base64url string back to SharePayload
- */
-export async function decompress(b64: string): Promise<SharePayload> {
-  // Restore standard base64
-  const base64 = b64
-    .replace(/-/g, '+')
-    .replace(/_/g, '/');
-
-  const binary = atob(base64);
-  const byteArray = Uint8Array.from(binary, c => c.charCodeAt(0));
-
-  const stream = new DecompressionStream('deflate-raw');
-  const writer = stream.writable.getWriter();
-  writer.write(byteArray);
-  writer.close();
-
-  const buffer = await new Response(stream.readable).arrayBuffer();
-  const json = new TextDecoder().decode(buffer);
-
-  return JSON.parse(json) as SharePayload;
-}
+// Re-export compress/decompress from shared package (single source of truth)
+export { compress, decompress };
 
 /**
  * Convert full Annotation objects to minimal shareable format

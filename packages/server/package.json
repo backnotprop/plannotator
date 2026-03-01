@@ -19,6 +19,9 @@
   "files": [
     "*.ts"
   ],
+  "dependencies": {
+    "@plannotator/shared": "workspace:*"
+  },
   "peerDependencies": {
     "bun": ">=1.0.0"
   }

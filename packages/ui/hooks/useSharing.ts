@@ -16,6 +16,7 @@ import {
   generateShareUrl,
   decompress,
   fromShareable,
+  parseShareableImages,
   formatUrlSize,
   createShortShareUrl,
   loadFromPasteId,
@@ -69,22 +70,6 @@ interface UseSharingResult {
   importFromShareUrl: (url: string) => Promise<ImportResult>;
 }
 
-/**
- * Parse SharePayload.g (which can be old string[] or new [path,name][] format) into ImageAttachment[]
- */
-function parseGlobalAttachments(g: unknown[] | undefined): ImageAttachment[] {
-  if (!g?.length) return [];
-  return g.map((item, idx) => {
-    if (typeof item === 'string') {
-      const name = item.split('/').pop()?.replace(/\.[^.]+$/, '') || `image-${idx + 1}`;
-      return { path: item, name };
-    }
-    if (Array.isArray(item) && item.length >= 2) {
-      return { path: item[0] as string, name: item[1] as string };
-    }
-    return { path: String(item), name: `image-${idx + 1}` };
-  });
-}
 
 export function useSharing(
   markdown: string,
@@ -127,7 +112,7 @@ export function useSharing(
           setAnnotations(restoredAnnotations);
 
           if (payload.g?.length) {
-            const parsed = parseGlobalAttachments(payload.g);
+            const parsed = parseShareableImages(payload.g) ?? [];
             setGlobalAttachments(parsed);
             setSharedGlobalAttachments(parsed);
           }
@@ -158,7 +143,7 @@ export function useSharing(
 
         // Restore global attachments if present
         if (payload.g?.length) {
-          const parsed = parseGlobalAttachments(payload.g);
+          const parsed = parseShareableImages(payload.g) ?? [];
           setGlobalAttachments(parsed);
           setSharedGlobalAttachments(parsed);
         }
@@ -322,7 +307,7 @@ export function useSharing(
 
         // Handle global attachments (deduplicate by path)
         if (payload.g?.length) {
-          const parsed = parseGlobalAttachments(payload.g);
+          const parsed = parseShareableImages(payload.g) ?? [];
           const existingPaths = new Set(globalAttachments.map(g => g.path));
           const newAttachments = parsed.filter(p => !existingPaths.has(p.path));
           if (newAttachments.length > 0) {
