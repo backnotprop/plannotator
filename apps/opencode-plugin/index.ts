@@ -26,7 +26,7 @@ import {
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
 import { getGitContext, runGitDiff } from "@plannotator/server/git";
-import os from "node:os";
+import { writeRemoteShareLink } from "@plannotator/server/share-url";
 
 // @ts-ignore - Bun import attribute for text
 import indexHtml from "./plannotator.html" with { type: "text" };
@@ -312,27 +312,24 @@ Do NOT proceed with implementation until your plan is approved.
             shareBaseUrl: getShareBaseUrl(),
             htmlContent,
             opencodeClient: ctx.client,
-            onReady: (url, isRemote, port) => {
+            onReady: async (url, isRemote, port) => {
               handleServerReady(url, isRemote, port);
-              if (isRemote) {
-                const hostname = os.hostname();
-                ctx.client.app.log({
-                  level: "info",
-                  message: `[Plannotator] UI ready — open in browser: http://localhost:${port} (or http://${hostname}:${port} if remote)`,
-                }).catch(() => {});
+              if (isRemote && await getSharingEnabled()) {
+                await writeRemoteShareLink(args.plan, getShareBaseUrl(), "review the plan", "plan only").catch(() => {});
               }
             },
           });
 
           const PLANNOTATOR_TIMEOUT_MS = 10 * 60 * 1000; // 10min timeout
+          let timeoutId: ReturnType<typeof setTimeout>;
           const result = await Promise.race([
-            server.waitForDecision(),
-            new Promise<{ approved: boolean; feedback?: string }>((resolve) =>
-              setTimeout(
+            server.waitForDecision().then((r) => { clearTimeout(timeoutId); return r; }),
+            new Promise<{ approved: boolean; feedback?: string }>((resolve) => {
+              timeoutId = setTimeout(
                 () => resolve({ approved: false, feedback: "[Plannotator] No response within 10 minutes. Port released automatically. Please call submit_plan again." }),
                 PLANNOTATOR_TIMEOUT_MS
-              )
-            ),
+              );
+            }),
           ]);
           await Bun.sleep(1500);
           server.stop();
