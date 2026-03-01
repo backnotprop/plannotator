@@ -14,15 +14,25 @@ const DEFAULT_OPTIONS: PasteOptions = {
 const ID_PATTERN = /^\/api\/paste\/([A-Za-z0-9]{6,16})$/;
 
 /**
- * Generate a short URL-safe ID (8 chars, ~48 bits of entropy).
- * Uses Web Crypto — works in both Bun and edge runtimes.
+ * Generate a short URL-safe ID (8 chars, ~47.6 bits of entropy).
+ * Uses Web Crypto with rejection sampling to avoid modulo bias.
  */
 function generateId(): string {
   const chars =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  const bytes = new Uint8Array(8);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => chars[b % chars.length]).join("");
+  const limit = 256 - (256 % chars.length); // 248 — largest multiple of 62 that fits in a byte
+  const id: string[] = [];
+  while (id.length < 8) {
+    const bytes = new Uint8Array(16); // oversample to minimize rounds
+    crypto.getRandomValues(bytes);
+    for (const b of bytes) {
+      if (b < limit) {
+        id.push(chars[b % chars.length]);
+        if (id.length === 8) break;
+      }
+    }
+  }
+  return id.join("");
 }
 
 export async function createPaste(

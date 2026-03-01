@@ -78,30 +78,16 @@ The paste service accepts compressed plan data and returns a short ID. A compres
 
 The paste service is fully open source — the same codebase you're looking at.
 
-### Option A: Run the binary
+### Run the binary
 
-Download the paste service binary from [GitHub Releases](https://github.com/backnotprop/plannotator/releases):
-
-```bash
-curl -fsSL https://plannotator.ai/install-paste.sh | bash
-```
-
-Or download directly from [GitHub Releases](https://github.com/backnotprop/plannotator/releases).
-
-Start it:
+Download the paste service binary for your platform from [GitHub Releases](https://github.com/backnotprop/plannotator/releases). Binaries are available for macOS (ARM64, x64), Linux (x64, ARM64), and Windows (x64).
 
 ```bash
-plannotator-paste
+chmod +x plannotator-paste-*
+./plannotator-paste-darwin-arm64   # or whichever matches your platform
 ```
 
 Pastes stored to `~/.plannotator/pastes/` by default.
-
-### Option B: Docker
-
-```bash
-docker run -d -p 19433:19433 -v plannotator-pastes:/data \
-  ghcr.io/backnotprop/plannotator-paste:latest
-```
 
 ### Configuration
 
