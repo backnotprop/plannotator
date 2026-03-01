@@ -19,6 +19,24 @@ All Plannotator environment variables and their defaults.
 | `PLANNOTATOR_SHARE` | enabled | Set to `disabled` to turn off sharing. Hides share UI and import options. |
 | `PLANNOTATOR_SHARE_URL` | `https://share.plannotator.ai` | Base URL for share links. Set this when self-hosting the share portal. |
 
+## Paste service variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PLANNOTATOR_PASTE_URL` | `https://paste.plannotator.ai` | Base URL of the paste service API. Set this when self-hosting the paste service. |
+
+### Self-hosted paste service
+
+When running your own paste service binary, these variables configure it:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PASTE_PORT` | `19433` | Server port |
+| `PASTE_DATA_DIR` | `~/.plannotator/pastes` | Filesystem storage directory |
+| `PASTE_TTL_DAYS` | `7` | Paste expiration in days |
+| `PASTE_MAX_SIZE` | `524288` | Max payload size in bytes (512KB) |
+| `PASTE_ALLOWED_ORIGINS` | `https://share.plannotator.ai,http://localhost:3001` | CORS allowed origins (comma-separated) |
+
 ## Install script variables
 
 | Variable | Default | Description |

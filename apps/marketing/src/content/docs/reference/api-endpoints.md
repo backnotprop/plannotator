@@ -133,3 +133,42 @@ Body:
   "annotations": []
 }
 ```
+
+## Paste service
+
+Stores compressed plan data for short URL sharing. Runs as a separate service from the plan/review/annotate servers.
+
+Default: `https://paste.plannotator.ai` (or self-hosted)
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/paste` | POST | Store compressed plan data, returns `{ id }` |
+| `/api/paste/:id` | GET | Retrieve stored compressed data |
+
+### POST `/api/paste`
+
+Body:
+
+```json
+{
+  "data": "<compressed base64 string>"
+}
+```
+
+Returns: `{ "id": "aBcDeFgH" }` (201 Created)
+
+Limits: 512KB max payload. Auto-deleted after configured TTL (default: 7 days).
+
+### GET `/api/paste/:id`
+
+Returns:
+
+```json
+{
+  "data": "<compressed base64 string>"
+}
+```
+
+Or: `{ "error": "Paste not found or expired" }` (404)
+
+Cached for 1 hour (`Cache-Control: public, max-age=3600`).

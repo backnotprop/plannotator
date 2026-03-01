@@ -20,6 +20,10 @@ plannotator/
 │   │   └── review-editor.html    # Built code review app
 │   ├── marketing/                # Marketing site, docs, and blog (plannotator.ai)
 │   │   └── astro.config.mjs      # Astro 5 static site with content collections
+│   ├── paste-service/            # Paste service for short URL sharing
+│   │   ├── core/                 # Platform-agnostic logic (handler, storage interface, cors)
+│   │   ├── stores/               # Storage backends (fs, kv, s3)
+│   │   └── targets/              # Deployment entries (bun.ts, cloudflare.ts)
 │   └── review/                   # Standalone review server (for development)
 │       ├── index.html
 │       ├── index.tsx
@@ -30,6 +34,7 @@ plannotator/
 │   │   ├── review.ts             # startReviewServer(), handleReviewServerReady()
 │   │   ├── annotate.ts           # startAnnotateServer(), handleAnnotateServerReady()
 │   │   ├── storage.ts            # Plan saving to disk (getPlanDir, savePlan, etc.)
+│   │   ├── share-url.ts          # Server-side share URL generation for remote sessions
 │   │   ├── remote.ts             # isRemoteSession(), getServerPort()
 │   │   ├── browser.ts            # openBrowser()
 │   │   ├── integrations.ts       # Obsidian, Bear integrations
@@ -73,6 +78,7 @@ claude --plugin-dir ./apps/hook
 | `PLANNOTATOR_PORT` | Fixed port to use. Default: random locally, `19432` for remote sessions. |
 | `PLANNOTATOR_BROWSER` | Custom browser to open plans in. macOS: app name or path. Linux/Windows: executable path. |
 | `PLANNOTATOR_SHARE_URL` | Custom base URL for share links (self-hosted portal). Default: `https://share.plannotator.ai`. |
+| `PLANNOTATOR_PASTE_URL` | Base URL of the paste service API for short URL sharing. Default: `https://paste.plannotator.ai`. |
 
 **Legacy:** `SSH_TTY` and `SSH_CONNECTION` are still detected. Prefer `PLANNOTATOR_REMOTE=1` for explicit control.
 
@@ -170,6 +176,15 @@ Send Annotations → feedback sent to agent session
 
 All servers use random ports locally or fixed port (`19432`) in remote mode.
 
+### Paste Service (`apps/paste-service/`)
+
+| Endpoint              | Method | Purpose                                    |
+| --------------------- | ------ | ------------------------------------------ |
+| `/api/paste`          | POST   | Store compressed plan data, returns `{ id }` |
+| `/api/paste/:id`      | GET    | Retrieve stored compressed data            |
+
+Runs as a separate service on port `19433` (self-hosted) or as a Cloudflare Worker (hosted).
+
 ## Plan Version History
 
 Every plan is automatically saved to `~/.plannotator/history/{project}/{slug}/` on arrival, before the user sees the UI. Versions are numbered sequentially (`001.md`, `002.md`, etc.). The slug is derived from the plan's first `# Heading` + today's date via `generateSlug()`, scoped by project name (git repo or cwd). Same heading on the same day = same slug = same plan being iterated on. Identical resubmissions are deduplicated (no new file if content matches the latest version).
@@ -262,7 +277,7 @@ Text highlighting uses `web-highlighter` library. Code blocks use manual `<mark>
 
 **Location:** `packages/ui/utils/sharing.ts`, `packages/ui/hooks/useSharing.ts`
 
-Shares full plan + annotations via URL hash using deflate compression.
+Shares full plan + annotations via URL hash using deflate compression. For large plans, short URLs are created via the paste service (user must explicitly confirm).
 
 **Payload format:**
 

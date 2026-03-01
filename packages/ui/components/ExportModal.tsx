@@ -21,6 +21,8 @@ interface ExportModalProps {
   isGeneratingShortUrl?: boolean;
   /** Error from the last short URL generation attempt (empty string = no error) */
   shortUrlError?: string;
+  /** Generate a short URL on demand (user clicks "Create short link") */
+  onGenerateShortUrl?: () => void;
   annotationsOutput: string;
   annotationCount: number;
   taterSprite?: React.ReactNode;
@@ -43,6 +45,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   shortShareUrl = '',
   isGeneratingShortUrl = false,
   shortUrlError = '',
+  onGenerateShortUrl,
   annotationsOutput,
   annotationCount,
   taterSprite,
@@ -94,6 +97,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const handleCopyAnnotations = async () => {
     await handleCopy(annotationsOutput, 'annotations');
   };
+
+  // Whether the hash URL is large enough to warrant a short URL option
+  const urlIsLarge = shareUrl.length > 2048;
 
   const handleDownloadAnnotations = () => {
     const blob = new Blob([annotationsOutput], { type: 'text/plain' });
@@ -263,7 +269,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                     </button>
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-1">
-                    Short link — safe for Slack, email, and messaging apps. Expires in 90 days.
+                    Short link — safe for Slack, email, and messaging apps.
                   </p>
                 </div>
               ) : isGeneratingShortUrl ? (
@@ -273,9 +279,24 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   </svg>
                   Generating short link...
                 </div>
+              ) : urlIsLarge && onGenerateShortUrl ? (
+                <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                  <p className="text-xs text-amber-600 dark:text-amber-400 mb-2">
+                    This URL may be too long for some messaging apps.
+                  </p>
+                  <button
+                    onClick={onGenerateShortUrl}
+                    className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+                  >
+                    Create short link
+                  </button>
+                  {shortUrlError && (
+                    <p className="text-[10px] text-amber-500 mt-1">({shortUrlError})</p>
+                  )}
+                </div>
               ) : null}
 
-              {/* Full hash URL — always available as fallback */}
+              {/* Full hash URL — always available */}
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-2">
                   {shortShareUrl ? 'Full URL (backup)' : 'Shareable URL'}
@@ -311,12 +332,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                     {shareUrlSize}
                   </div>
                 </div>
-                {!shortShareUrl && !isGeneratingShortUrl && (
+                {!shortShareUrl && !isGeneratingShortUrl && !urlIsLarge && (
                   <p className="text-[10px] text-muted-foreground mt-1">
                     This URL contains the full plan and annotations.
-                    {shortUrlError && (
-                      <span className="text-amber-500"> ({shortUrlError})</span>
-                    )}
                   </p>
                 )}
               </div>

@@ -1,12 +1,12 @@
 ---
 title: "Sharing & Collaboration"
-description: "Share plans and annotations via URL — no backend required."
+description: "Share plans and annotations via URL with optional short links for large plans."
 sidebar:
   order: 21
 section: "Guides"
 ---
 
-Plannotator lets you share plans and annotations with teammates via URL. All data is encoded in the URL hash — no backend, no accounts, no server stores anything.
+Plannotator lets you share plans and annotations with teammates via URL. Small plans are encoded entirely in the URL hash — no backend, no accounts, no server stores anything. Large plans can optionally use short URLs via the [paste service](/docs/guides/self-hosting/#3-deploy-the-paste-service).
 
 ## How sharing works
 
@@ -57,13 +57,34 @@ When sharing is disabled:
 - The "Copy Share Link" quick action is removed
 - The Import Review option is hidden
 
+## Short URLs for large plans
+
+When a plan is too large for a URL (~2KB+ compressed), messaging apps like Slack and WhatsApp may truncate it. Plannotator can create a short link by temporarily storing the compressed plan in a paste service.
+
+### How it works
+
+1. Click **Export** → **Share**
+2. If the URL is large, you'll see a notice: "This plan is too large for a URL"
+3. Click **Create short link** to confirm
+4. The compressed plan is temporarily stored, then automatically deleted after the configured TTL
+5. A short URL like `share.plannotator.ai/p/aBcDeFgH` is generated
+6. Both the short URL and the full hash URL are shown — the short URL is safe for messaging apps
+
+### Privacy
+
+- Plans are only uploaded when you explicitly click "Create short link" — no data leaves your machine until you confirm
+- Pastes auto-expire and are permanently deleted (hosted: a few days, self-hosted: configurable via `PASTE_TTL_DAYS`)
+- The paste service is fully open source — you can audit exactly what it does
+- Self-hosters can run their own paste service for complete control — see the [self-hosting guide](/docs/guides/self-hosting/)
+- If the paste service is unavailable, the full hash URL is always available as fallback
+
 ## Self-hosting the share portal
 
 By default, share URLs point to `https://share.plannotator.ai`. You can self-host the portal and point Plannotator at your instance. See the [self-hosting guide](/docs/guides/self-hosting/) for details.
 
 ## Privacy model
 
-- Plans and annotations are never sent to any server
-- The share portal is a static page — it only reads the URL hash client-side
+- Plans and annotations are never sent to any server — the data lives entirely in the URL hash
+- The share portal is a static page — it only reads the hash and renders client-side
 - No analytics, no tracking, no cookies on the share portal
-- If you self-host, you have complete control over the infrastructure
+- Short URLs are opt-in — data is only uploaded when you explicitly click "Create short link" (see [Short URLs for large plans](#short-urls-for-large-plans) for details)

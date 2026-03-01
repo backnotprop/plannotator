@@ -66,7 +66,13 @@ export async function compress(payload: SharePayload): Promise<string> {
   const compressed = new Uint8Array(buffer);
 
   // Convert to base64url (URL-safe base64)
-  const base64 = btoa(String.fromCharCode(...compressed));
+  // Use a loop instead of spread to avoid RangeError on large plans
+  // (spread has a ~65K argument limit)
+  let binary = '';
+  for (let i = 0; i < compressed.length; i++) {
+    binary += String.fromCharCode(compressed[i]);
+  }
+  const base64 = btoa(binary);
   return base64
     .replace(/\+/g, '-')
     .replace(/\//g, '_')

@@ -56,6 +56,9 @@ const sharingEnabled = process.env.PLANNOTATOR_SHARE !== "disabled";
 // Custom share portal URL for self-hosting
 const shareBaseUrl = process.env.PLANNOTATOR_SHARE_URL || undefined;
 
+// Paste service URL for short URL sharing
+const pasteApiUrl = process.env.PLANNOTATOR_PASTE_URL || undefined;
+
 if (args[0] === "review") {
   // ============================================
   // CODE REVIEW MODE
@@ -206,6 +209,7 @@ if (args[0] === "review") {
     permissionMode,
     sharingEnabled,
     shareBaseUrl,
+    pasteApiUrl,
     htmlContent: planHtmlContent,
     onReady: async (url, isRemote, port) => {
       handleServerReady(url, isRemote, port);
