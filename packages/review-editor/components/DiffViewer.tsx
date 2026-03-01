@@ -1,8 +1,13 @@
-import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import React, { useMemo, useRef, useEffect, useCallback } from 'react';
 import { PatchDiff } from '@pierre/diffs/react';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata } from '@plannotator/ui/types';
-import { useDismissOnOutsideAndEscape } from '@plannotator/ui/hooks/useDismissOnOutsideAndEscape';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
+import { detectLanguage } from '../utils/detectLanguage';
+import { useAnnotationToolbar } from '../hooks/useAnnotationToolbar';
+import { FileHeader } from './FileHeader';
+import { InlineAnnotation } from './InlineAnnotation';
+import { AnnotationToolbar } from './AnnotationToolbar';
+import { SuggestionModal } from './SuggestionModal';
 
 interface DiffViewerProps {
   patch: string;
@@ -12,16 +17,12 @@ interface DiffViewerProps {
   selectedAnnotationId: string | null;
   pendingSelection: SelectedLineRange | null;
   onLineSelection: (range: SelectedLineRange | null) => void;
-  onAddAnnotation: (type: CodeAnnotationType, text?: string, suggestedCode?: string) => void;
+  onAddAnnotation: (type: CodeAnnotationType, text?: string, suggestedCode?: string, originalCode?: string) => void;
+  onEditAnnotation: (id: string, text?: string, suggestedCode?: string, originalCode?: string) => void;
   onSelectAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
   isViewed?: boolean;
   onToggleViewed?: () => void;
-}
-
-interface ToolbarState {
-  position: { top: number; left: number };
-  range: SelectedLineRange;
 }
 
 export const DiffViewer: React.FC<DiffViewerProps> = ({
@@ -33,6 +34,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   pendingSelection,
   onLineSelection,
   onAddAnnotation,
+  onEditAnnotation,
   onSelectAnnotation,
   onDeleteAnnotation,
   isViewed = false,
@@ -40,25 +42,15 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 }) => {
   const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
-  const toolbarRef = useRef<HTMLDivElement>(null);
-  const [toolbarState, setToolbarState] = useState<ToolbarState | null>(null);
-  const [commentText, setCommentText] = useState('');
-  const [suggestedCode, setSuggestedCode] = useState('');
-  const [showSuggestedCode, setShowSuggestedCode] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const lastMousePosition = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  // Track mouse position continuously for toolbar placement
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    lastMousePosition.current = { x: e.clientX, y: e.clientY };
-  }, []);
+  const toolbar = useAnnotationToolbar({ patch, filePath, onLineSelection, onAddAnnotation, onEditAnnotation });
 
   // Clear pending selection when file changes
   const prevFilePathRef = useRef(filePath);
   useEffect(() => {
     if (prevFilePathRef.current !== filePath) {
       prevFilePathRef.current = filePath;
-      onLineSelection(null); // Clear selection when switching files
+      onLineSelection(null);
     }
   }, [filePath, onLineSelection]);
 
@@ -66,7 +58,6 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   useEffect(() => {
     if (!selectedAnnotationId || !containerRef.current) return;
 
-    // Small delay to allow render after file switch
     const timeoutId = setTimeout(() => {
       const annotationEl = containerRef.current?.querySelector(
         `[data-annotation-id="${selectedAnnotationId}"]`
@@ -80,115 +71,43 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   }, [selectedAnnotationId]);
 
   // Map annotations to @pierre/diffs format
-  // Place annotation under the last line of the range (GitHub-style)
   const lineAnnotations = useMemo(() => {
     return annotations.map(ann => ({
-      side: ann.side === 'new' ? 'additions' : 'deletions' as const,
+      side: ann.side === 'new' ? 'additions' as const : 'deletions' as const,
       lineNumber: ann.lineEnd,
       metadata: {
         annotationId: ann.id,
         type: ann.type,
         text: ann.text,
         suggestedCode: ann.suggestedCode,
+        originalCode: ann.originalCode,
         author: ann.author,
       } as DiffAnnotationMetadata,
     }));
   }, [annotations]);
 
-  // Handle line selection end
-  const handleLineSelectionEnd = useCallback((range: SelectedLineRange | null) => {
-    if (!range || !containerRef.current) {
-      setToolbarState(null);
-      onLineSelection(null);
-      return;
-    }
+  // Handle edit: find annotation and start editing in toolbar
+  const handleEdit = useCallback((id: string) => {
+    const ann = annotations.find(a => a.id === id);
+    if (ann) toolbar.startEdit(ann);
+  }, [annotations, toolbar.startEdit]);
 
-    // Position toolbar near where user clicked/released
-    const mousePos = lastMousePosition.current;
-
-    setToolbarState({
-      position: {
-        top: mousePos.y + 10, // Just below the click
-        left: mousePos.x,
-      },
-      range,
-    });
-    onLineSelection(range);
-  }, [onLineSelection]);
-
-  // Handle annotation submission
-  const handleSubmitAnnotation = useCallback(() => {
-    if (!toolbarState || !commentText.trim()) return;
-
-    onAddAnnotation(
-      'comment',
-      commentText,
-      suggestedCode.trim() || undefined
-    );
-
-    // Reset state
-    setToolbarState(null);
-    setCommentText('');
-    setSuggestedCode('');
-    setShowSuggestedCode(false);
-  }, [toolbarState, commentText, suggestedCode, onAddAnnotation]);
-
-  // Handle cancel
-  const handleCancel = useCallback(() => {
-    setToolbarState(null);
-    setCommentText('');
-    setSuggestedCode('');
-    setShowSuggestedCode(false);
-    onLineSelection(null);
-  }, [onLineSelection]);
-
-  useDismissOnOutsideAndEscape({
-    enabled: !!toolbarState,
-    ref: toolbarRef,
-    onDismiss: handleCancel,
-  });
-
-  // Render annotation in diff - returns React element
+  // Render annotation in diff
   const renderAnnotation = useCallback((annotation: { side: string; lineNumber: number; metadata?: DiffAnnotationMetadata }) => {
     if (!annotation.metadata) return null;
 
-    const meta = annotation.metadata;
-
     return (
-      <div
-        className="review-comment"
-        data-annotation-id={meta.annotationId}
-        onClick={() => onSelectAnnotation(meta.annotationId)}
-      >
-        <div className="review-comment-header">
-          {meta.author && <span className="text-xs text-muted-foreground">{meta.author}</span>}
-          <button
-            className="review-comment-delete"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDeleteAnnotation(meta.annotationId);
-            }}
-            title="Delete"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-        {meta.text && (
-          <div className="review-comment-body">{meta.text}</div>
-        )}
-        {meta.suggestedCode && (
-          <div className="mt-2">
-            <div className="text-[10px] text-muted-foreground mb-1">Suggested:</div>
-            <pre className="export-code-block text-xs">{meta.suggestedCode}</pre>
-          </div>
-        )}
-      </div>
+      <InlineAnnotation
+        metadata={annotation.metadata}
+        language={detectLanguage(filePath)}
+        onSelect={onSelectAnnotation}
+        onEdit={handleEdit}
+        onDelete={onDeleteAnnotation}
+      />
     );
-  }, [onSelectAnnotation, onDeleteAnnotation]);
+  }, [filePath, onSelectAnnotation, handleEdit, onDeleteAnnotation]);
 
-  // Render hover utility (+ button) - returns React element
+  // Render hover utility (+ button)
   const renderHoverUtility = useCallback((getHoveredLine: () => { lineNumber: number; side: 'deletions' | 'additions' } | undefined) => {
     const line = getHoveredLine();
     if (!line) return null;
@@ -198,7 +117,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         className="hover-add-comment"
         onClick={(e) => {
           e.stopPropagation();
-          handleLineSelectionEnd({
+          toolbar.handleLineSelectionEnd({
             start: line.lineNumber,
             end: line.lineNumber,
             side: line.side,
@@ -208,7 +127,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         +
       </button>
     );
-  }, [handleLineSelectionEnd]);
+  }, [toolbar.handleLineSelectionEnd]);
 
   // Determine theme for @pierre/diffs
   const pierreTheme = useMemo(() => {
@@ -219,69 +138,17 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   }, [theme]);
 
   return (
-    <div ref={containerRef} className="h-full overflow-auto relative" onMouseMove={handleMouseMove}>
-      {/* File header */}
-      <div className="sticky top-0 z-10 px-4 py-2 bg-card/95 backdrop-blur border-b border-border flex items-center justify-between">
-        <span className="font-mono text-sm text-foreground">{filePath}</span>
-        <div className="flex items-center gap-2">
-          {onToggleViewed && (
-            <button
-              onClick={onToggleViewed}
-              className={`text-xs px-2 py-1 rounded transition-colors flex items-center gap-1 ${
-                isViewed
-                  ? 'bg-success/15 text-success'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-              }`}
-              title={isViewed ? "Mark as not viewed" : "Mark as viewed"}
-            >
-              {isViewed ? (
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              ) : (
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <circle cx="12" cy="12" r="9" />
-                </svg>
-              )}
-              Viewed
-            </button>
-          )}
-          <button
-            onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(patch);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 2000);
-              } catch (err) {
-                console.error('Failed to copy:', err);
-              }
-            }}
-            className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-muted transition-colors flex items-center gap-1"
-            title="Copy this file's diff"
-          >
-            {copied ? (
-              <>
-                <svg className="w-3.5 h-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-                Copied!
-              </>
-            ) : (
-              <>
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-                Copy Diff
-              </>
-            )}
-          </button>
-        </div>
-      </div>
+    <div ref={containerRef} className="h-full overflow-auto relative" onMouseMove={toolbar.handleMouseMove}>
+      <FileHeader
+        filePath={filePath}
+        patch={patch}
+        isViewed={isViewed}
+        onToggleViewed={onToggleViewed}
+      />
 
-      {/* Diff content */}
       <div className="p-4">
         <PatchDiff
-          key={filePath} // Force remount on file change to reset internal state
+          key={filePath}
           patch={patch}
           options={{
             theme: pierreTheme,
@@ -290,7 +157,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
             diffIndicators: 'bars',
             enableLineSelection: true,
             enableHoverUtility: true,
-            onLineSelectionEnd: handleLineSelectionEnd,
+            onLineSelectionEnd: toolbar.handleLineSelectionEnd,
           }}
           lineAnnotations={lineAnnotations}
           selectedLines={pendingSelection || undefined}
@@ -299,86 +166,35 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         />
       </div>
 
-      {/* Annotation toolbar - single-step comment input */}
-      {toolbarState && (
-        <div
-          ref={toolbarRef}
-          className="review-toolbar"
-          style={{
-            position: 'fixed',
-            top: Math.min(toolbarState.position.top, window.innerHeight - 200),
-            left: Math.max(150, Math.min(toolbarState.position.left, window.innerWidth - 150)),
-            transform: 'translateX(-50%)',
-            zIndex: 1000,
-          }}
-        >
-          <div className="w-80">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-muted-foreground">
-                {toolbarState.range.start === toolbarState.range.end
-                  ? `Line ${toolbarState.range.start}`
-                  : `Lines ${Math.min(toolbarState.range.start, toolbarState.range.end)}-${Math.max(toolbarState.range.start, toolbarState.range.end)}`}
-              </span>
-              <button
-                onClick={handleCancel}
-                className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                title="Cancel"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
+      {toolbar.toolbarState && (
+        <AnnotationToolbar
+          toolbarState={toolbar.toolbarState}
+          toolbarRef={toolbar.toolbarRef}
+          commentText={toolbar.commentText}
+          setCommentText={toolbar.setCommentText}
+          suggestedCode={toolbar.suggestedCode}
+          setSuggestedCode={toolbar.setSuggestedCode}
+          showSuggestedCode={toolbar.showSuggestedCode}
+          setShowSuggestedCode={toolbar.setShowSuggestedCode}
+          setShowCodeModal={toolbar.setShowCodeModal}
+          isEditing={!!toolbar.editingAnnotationId}
+          onSubmit={toolbar.handleSubmitAnnotation}
+          onDismiss={toolbar.handleDismiss}
+          onCancel={toolbar.handleCancel}
+        />
+      )}
 
-            <textarea
-              value={commentText}
-              onChange={(e) => setCommentText(e.target.value)}
-              placeholder="Leave feedback..."
-              className="w-full px-3 py-2 bg-muted rounded-lg text-xs resize-none focus:outline-none focus:ring-1 focus:ring-primary/50"
-              rows={3}
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  handleCancel();
-                } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                  handleSubmitAnnotation();
-                }
-              }}
-            />
-
-            {/* Optional suggested code section */}
-            {showSuggestedCode ? (
-              <textarea
-                value={suggestedCode}
-                onChange={(e) => setSuggestedCode(e.target.value)}
-                placeholder="Suggested code..."
-                className="w-full px-3 py-2 mt-2 bg-muted rounded-lg text-xs font-mono resize-none focus:outline-none focus:ring-1 focus:ring-primary/50"
-                rows={3}
-                autoFocus
-              />
-            ) : (
-              <button
-                onClick={() => setShowSuggestedCode(true)}
-                className="mt-2 text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
-              >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                </svg>
-                Add suggested code
-              </button>
-            )}
-
-            <div className="flex justify-end gap-2 mt-3">
-              <button
-                onClick={handleSubmitAnnotation}
-                disabled={!commentText.trim()}
-                className="review-toolbar-btn primary disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Add Comment
-              </button>
-            </div>
-          </div>
-        </div>
+      {toolbar.showCodeModal && (
+        <SuggestionModal
+          filePath={filePath}
+          toolbarState={toolbar.toolbarState}
+          selectedOriginalCode={toolbar.selectedOriginalCode}
+          suggestedCode={toolbar.suggestedCode}
+          setSuggestedCode={toolbar.setSuggestedCode}
+          modalLayout={toolbar.modalLayout}
+          setModalLayout={toolbar.setModalLayout}
+          onClose={() => toolbar.setShowCodeModal(false)}
+        />
       )}
     </div>
   );

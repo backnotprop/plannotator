@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { CodeAnnotation } from '@plannotator/ui/types';
 import { isCurrentUser } from '@plannotator/ui/utils/identity';
+import { HighlightedCode } from './HighlightedCode';
+import { detectLanguage } from '../utils/detectLanguage';
+import { renderInlineMarkdown } from '../utils/renderInlineMarkdown';
 
 interface DiffFile {
   path: string;
@@ -20,6 +23,32 @@ interface ReviewPanelProps {
   width?: number;
 }
 
+const SuggestionPreview: React.FC<{ code: string; originalCode?: string; language?: string }> = ({ code, originalCode, language }) => {
+  const diffStats = originalCode ? {
+    removed: originalCode.split('\n').length,
+    added: code.split('\n').length,
+  } : null;
+
+  return (
+    <div className="suggestion-block compact">
+      <div className="suggestion-block-header">
+        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16m-7 6h7" />
+        </svg>
+        Suggestion
+        {diffStats && (
+          <span className="ml-auto text-[9px] font-mono">
+            <span style={{ color: 'var(--success)' }}>+{diffStats.added}</span>
+            {' '}
+            <span style={{ color: 'var(--destructive)' }}>-{diffStats.removed}</span>
+          </span>
+        )}
+      </div>
+      <pre className="suggestion-block-code"><HighlightedCode code={code} language={language} /></pre>
+    </div>
+  );
+};
+
 function formatTimestamp(ts: number): string {
   const now = Date.now();
   const diff = now - ts;
@@ -35,7 +64,6 @@ function formatTimestamp(ts: number): string {
 
   return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
-
 
 export const ReviewPanel: React.FC<ReviewPanelProps> = ({
   isOpen,
@@ -148,14 +176,14 @@ export const ReviewPanel: React.FC<ReviewPanelProps> = ({
 
                           {/* Content */}
                           {annotation.text && (
-                            <div className="text-xs text-foreground/80 line-clamp-2">
-                              {annotation.text}
+                            <div className="text-xs text-foreground/80 line-clamp-2 review-comment-markdown">
+                              {renderInlineMarkdown(annotation.text)}
                             </div>
                           )}
 
                           {annotation.suggestedCode && (
-                            <div className="mt-1 text-[10px] font-mono text-muted-foreground bg-muted/50 px-2 py-1 rounded truncate">
-                              {annotation.suggestedCode.split('\n')[0]}...
+                            <div className="mt-1.5">
+                              <SuggestionPreview code={annotation.suggestedCode} originalCode={annotation.originalCode} language={detectLanguage(annotation.filePath)} />
                             </div>
                           )}
 

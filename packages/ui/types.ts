@@ -66,6 +66,7 @@ export interface CodeAnnotation {
   side: 'old' | 'new'; // Maps to 'deletions' | 'additions' in @pierre/diffs
   text?: string;
   suggestedCode?: string;
+  originalCode?: string; // Original selected lines for suggestion diff
   createdAt: number;
   author?: string;
 }
@@ -76,6 +77,7 @@ export interface DiffAnnotationMetadata {
   type: CodeAnnotationType;
   text?: string;
   suggestedCode?: string;
+  originalCode?: string;
   author?: string;
 }
 
