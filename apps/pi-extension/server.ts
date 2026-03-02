@@ -389,15 +389,15 @@ export function getGitContext(): GitContext {
 export function runGitDiff(diffType: DiffType, defaultBranch = "main"): { patch: string; label: string } {
   switch (diffType) {
     case "uncommitted":
-      return { patch: git("diff HEAD"), label: "Uncommitted changes" };
+      return { patch: git("diff HEAD --src-prefix=a/ --dst-prefix=b/"), label: "Uncommitted changes" };
     case "staged":
-      return { patch: git("diff --staged"), label: "Staged changes" };
+      return { patch: git("diff --staged --src-prefix=a/ --dst-prefix=b/"), label: "Staged changes" };
     case "unstaged":
-      return { patch: git("diff"), label: "Unstaged changes" };
+      return { patch: git("diff --src-prefix=a/ --dst-prefix=b/"), label: "Unstaged changes" };
     case "last-commit":
-      return { patch: git("diff HEAD~1..HEAD"), label: "Last commit" };
+      return { patch: git("diff HEAD~1..HEAD --src-prefix=a/ --dst-prefix=b/"), label: "Last commit" };
     case "branch":
-      return { patch: git(`diff ${defaultBranch}..HEAD`), label: `Changes vs ${defaultBranch}` };
+      return { patch: git(`diff ${defaultBranch}..HEAD --src-prefix=a/ --dst-prefix=b/`), label: `Changes vs ${defaultBranch}` };
     default:
       return { patch: "", label: "Unknown diff type" };
   }
