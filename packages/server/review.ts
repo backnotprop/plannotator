@@ -28,6 +28,8 @@ export interface ReviewServerOptions {
   rawPatch: string;
   /** Git ref used for the diff (e.g., "HEAD", "main..HEAD", "--staged") */
   gitRef: string;
+  /** Error message if git diff failed */
+  error?: string;
   /** HTML content to serve for the UI */
   htmlContent: string;
   /** Origin identifier for UI customization */
@@ -89,6 +91,7 @@ export async function startReviewServer(
   let currentPatch = options.rawPatch;
   let currentGitRef = options.gitRef;
   let currentDiffType: DiffType = options.diffType || "uncommitted";
+  let currentError = options.error;
 
   const isRemote = isRemoteSession();
   const configuredPort = getServerPort();
@@ -132,6 +135,7 @@ export async function startReviewServer(
               sharingEnabled,
               shareBaseUrl,
               repoInfo,
+              ...(currentError && { error: currentError }),
             });
           }
 
@@ -156,11 +160,13 @@ export async function startReviewServer(
               currentPatch = result.patch;
               currentGitRef = result.label;
               currentDiffType = newDiffType;
+              currentError = result.error;
 
               return Response.json({
                 rawPatch: currentPatch,
                 gitRef: currentGitRef,
                 diffType: currentDiffType,
+                ...(currentError && { error: currentError }),
               });
             } catch (err) {
               const message =

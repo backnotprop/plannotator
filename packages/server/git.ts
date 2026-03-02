@@ -28,6 +28,7 @@ export interface GitContext {
 export interface DiffResult {
   patch: string;
   label: string;
+  error?: string;
 }
 
 /**
@@ -139,8 +140,10 @@ export async function runGitDiff(
   } catch (error) {
     // Handle errors gracefully (e.g., no commits yet, invalid ref)
     console.error(`Git diff error for ${diffType}:`, error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
     patch = "";
     label = `Error: ${diffType}`;
+    return { patch, label, error: errorMessage };
   }
 
   return { patch, label };

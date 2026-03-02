@@ -149,6 +149,7 @@ const ReviewApp: React.FC = () => {
   const [diffType, setDiffType] = useState<string>('uncommitted');
   const [gitContext, setGitContext] = useState<GitContext | null>(null);
   const [isLoadingDiff, setIsLoadingDiff] = useState(false);
+  const [diffError, setDiffError] = useState<string | null>(null);
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [submitted, setSubmitted] = useState<'approved' | 'feedback' | false>(false);
@@ -209,6 +210,7 @@ const ReviewApp: React.FC = () => {
         gitContext?: GitContext;
         sharingEnabled?: boolean;
         repoInfo?: { display: string; branch?: string };
+        error?: string;
       }) => {
         const apiFiles = parseDiffToFiles(data.rawPatch);
         setDiffData({
@@ -226,6 +228,7 @@ const ReviewApp: React.FC = () => {
         if (data.gitContext) setGitContext(data.gitContext);
         if (data.sharingEnabled !== undefined) setSharingEnabled(data.sharingEnabled);
         if (data.repoInfo) setRepoInfo(data.repoInfo);
+        if (data.error) setDiffError(data.error);
       })
       .catch(() => {
         // Not in API mode - use demo content
@@ -340,10 +343,12 @@ const ReviewApp: React.FC = () => {
       setDiffType(data.diffType);
       setActiveFileIndex(0);
       setPendingSelection(null);
+      setDiffError((data as { error?: string }).error || null);
       // Note: We keep existing annotations - they may still be relevant
       // or user can clear them manually
     } catch (err) {
       console.error('Failed to switch diff:', err);
+      setDiffError(err instanceof Error ? err.message : 'Failed to switch diff');
     } finally {
       setIsLoadingDiff(false);
     }
@@ -763,20 +768,35 @@ const ReviewApp: React.FC = () => {
             ) : (
               <div className="h-full flex items-center justify-center">
                 <div className="text-center space-y-3 max-w-md px-8">
-                  <div className="mx-auto w-12 h-12 rounded-full bg-muted/50 flex items-center justify-center">
-                    <svg className="w-6 h-6 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-                    </svg>
+                  <div className={`mx-auto w-12 h-12 rounded-full flex items-center justify-center ${diffError ? 'bg-destructive/10' : 'bg-muted/50'}`}>
+                    {diffError ? (
+                      <svg className="w-6 h-6 text-destructive" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                      </svg>
+                    ) : (
+                      <svg className="w-6 h-6 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                      </svg>
+                    )}
                   </div>
                   <div>
-                    <h3 className="text-sm font-medium text-foreground">No changes</h3>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {diffType === 'uncommitted' && "No uncommitted changes to review."}
-                      {diffType === 'staged' && "No staged changes. Stage some files with git add."}
-                      {diffType === 'unstaged' && "No unstaged changes. All changes are staged."}
-                      {diffType === 'last-commit' && "No changes in the last commit."}
-                      {diffType === 'branch' && `No changes between this branch and ${gitContext?.defaultBranch || 'main'}.`}
-                    </p>
+                    {diffError ? (
+                      <>
+                        <h3 className="text-sm font-medium text-destructive">Failed to load diff</h3>
+                        <p className="text-xs text-muted-foreground mt-1">{diffError}</p>
+                      </>
+                    ) : (
+                      <>
+                        <h3 className="text-sm font-medium text-foreground">No changes</h3>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {diffType === 'uncommitted' && "No uncommitted changes to review."}
+                          {diffType === 'staged' && "No staged changes. Stage some files with git add."}
+                          {diffType === 'unstaged' && "No unstaged changes. All changes are staged."}
+                          {diffType === 'last-commit' && "No changes in the last commit."}
+                          {diffType === 'branch' && `No changes between this branch and ${gitContext?.defaultBranch || 'main'}.`}
+                        </p>
+                      </>
+                    )}
                   </div>
                   {gitContext?.diffOptions && gitContext.diffOptions.length > 1 && (
                     <p className="text-xs text-muted-foreground/60">

@@ -68,7 +68,7 @@ if (args[0] === "review") {
   const gitContext = await getGitContext();
 
   // Run git diff HEAD (uncommitted changes - default)
-  const { patch: rawPatch, label: gitRef } = await runGitDiff(
+  const { patch: rawPatch, label: gitRef, error: diffError } = await runGitDiff(
     "uncommitted",
     gitContext.defaultBranch
   );
@@ -77,6 +77,7 @@ if (args[0] === "review") {
   const server = await startReviewServer({
     rawPatch,
     gitRef,
+    error: diffError,
     origin: "claude-code",
     diffType: "uncommitted",
     gitContext,
