@@ -108,27 +108,27 @@ export async function runGitDiff(
   try {
     switch (diffType) {
       case "uncommitted":
-        patch = (await $`git diff HEAD`.quiet()).text();
+        patch = (await $`git diff HEAD --src-prefix=a/ --dst-prefix=b/`.quiet()).text();
         label = "Uncommitted changes";
         break;
 
       case "staged":
-        patch = (await $`git diff --staged`.quiet()).text();
+        patch = (await $`git diff --staged --src-prefix=a/ --dst-prefix=b/`.quiet()).text();
         label = "Staged changes";
         break;
 
       case "unstaged":
-        patch = (await $`git diff`.quiet()).text();
+        patch = (await $`git diff --src-prefix=a/ --dst-prefix=b/`.quiet()).text();
         label = "Unstaged changes";
         break;
 
       case "last-commit":
-        patch = (await $`git diff HEAD~1..HEAD`.quiet()).text();
+        patch = (await $`git diff HEAD~1..HEAD --src-prefix=a/ --dst-prefix=b/`.quiet()).text();
         label = "Last commit";
         break;
 
       case "branch":
-        patch = (await $`git diff ${defaultBranch}..HEAD`.quiet()).text();
+        patch = (await $`git diff ${defaultBranch}..HEAD --src-prefix=a/ --dst-prefix=b/`.quiet()).text();
         label = `Changes vs ${defaultBranch}`;
         break;
 
