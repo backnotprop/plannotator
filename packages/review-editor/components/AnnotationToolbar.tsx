@@ -75,7 +75,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           onKeyDown={(e) => {
             if (e.key === 'Escape') {
               onDismiss();
-            } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+            } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
               onSubmit();
             }
           }}
@@ -107,7 +107,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
               onKeyDown={(e) => {
                 if (e.key === 'Tab') {
                   handleTabIndent(e);
-                } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
                   onSubmit();
                 }
               }}

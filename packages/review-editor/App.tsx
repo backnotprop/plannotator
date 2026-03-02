@@ -290,7 +290,12 @@ const ReviewApp: React.FC = () => {
     originalCode?: string
   ) => {
     setAnnotations(prev => prev.map(ann =>
-      ann.id === id ? { ...ann, text, suggestedCode, originalCode } : ann
+      ann.id === id ? {
+        ...ann,
+        ...(text !== undefined && { text }),
+        ...(suggestedCode !== undefined && { suggestedCode }),
+        ...(originalCode !== undefined && { originalCode }),
+      } : ann
     ));
   }, []);
 
