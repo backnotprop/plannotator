@@ -61,7 +61,7 @@ When the agent calls `exit_plan_mode`, the Plannotator UI opens in your browser.
 - **Deny with annotations** to send structured feedback back to the agent
 - **Approve with notes** to proceed but include implementation guidance
 
-The agent iterates on the plan until you approve, then executes with full tool access. On resubmission, Plan Diff highlights what changed since the previous version.
+The agent iterates on the plan until you approve, then executes with the same tool set that was active before entering plan mode. On resubmission, Plan Diff highlights what changed since the previous version.
 
 ### Code review
 
@@ -102,15 +102,25 @@ During execution, the agent marks completed steps with `[DONE:n]` markers. Progr
 The extension manages a state machine: **idle** → **planning** → **executing** → **idle**.
 
 During **planning**:
-- Tools restricted to: `read`, `bash` (read-only commands only), `grep`, `find`, `ls`, `write` (plan file only), `exit_plan_mode`
-- `edit` is disabled, bash is gated to a read-only allowlist, writes only allowed to the plan file
+- Tools restricted to: `read`, `bash` (read-only commands only), `grep`, `find`, `ls`, `write` (plan file only), `edit` (plan file only), `exit_plan_mode`
+- Bash is gated to a strict read-only allowlist
+- Sensitive commands are blocked in planning mode (`curl`, `wget`, `env`, `printenv`)
 
 During **executing**:
-- Full tool access: `read`, `bash`, `edit`, `write`
+- Restores the exact tool set that was active before planning began
 - Progress tracked via `[DONE:n]` markers in agent responses
 - Plan re-read from disk each turn to stay current
 
+Local review servers bind to `127.0.0.1` only.
+
 State persists across session restarts via Pi's `appendEntry` API.
+
+## Environment variables
+
+| Variable | Description |
+|----------|-------------|
+| `PLANNOTATOR_DISABLE_HISTORY` | Set to `1` / `true` / `yes` to disable plan history writes under `~/.plannotator/history`. |
+| `PLANNOTATOR_HISTORY_MAX_VERSIONS` | Maximum versions retained per plan slug (default: `200`). |
 
 ## Requirements
 

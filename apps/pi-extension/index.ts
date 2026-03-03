@@ -53,10 +53,15 @@ try {
 
 // Tool sets by phase
 const PLANNING_TOOLS = ["read", "bash", "grep", "find", "ls", "write", "edit", "exit_plan_mode"];
-const EXECUTION_TOOLS = ["read", "bash", "edit", "write"];
-const NORMAL_TOOLS = ["read", "bash", "edit", "write"];
+const FALLBACK_ACTIVE_TOOLS = ["read", "bash", "edit", "write"];
 
 type Phase = "idle" | "planning" | "executing";
+
+interface PersistedPlannotatorState {
+  phase: Phase;
+  planFilePath?: string;
+  previousActiveTools?: string[];
+}
 
 function isAssistantMessage(m: AgentMessage): m is AssistantMessage {
   return m.role === "assistant" && Array.isArray(m.content);
@@ -73,6 +78,7 @@ export default function plannotator(pi: ExtensionAPI): void {
   let phase: Phase = "idle";
   let planFilePath = "PLAN.md";
   let checklistItems: ChecklistItem[] = [];
+  let previousActiveTools: string[] = [];
 
   // ── Flags ────────────────────────────────────────────────────────────
 
@@ -92,6 +98,36 @@ export default function plannotator(pi: ExtensionAPI): void {
 
   function resolvePlanPath(cwd: string): string {
     return resolve(cwd, planFilePath);
+  }
+
+  function normalizeTools(tools: string[] | undefined): string[] {
+    return Array.from(new Set((tools ?? []).filter((t): t is string => typeof t === "string" && t.length > 0)));
+  }
+
+  function capturePrePlanTools(): void {
+    const active = normalizeTools(pi.getActiveTools()).filter((t) => t !== "exit_plan_mode");
+    previousActiveTools = active.length > 0 ? active : [...FALLBACK_ACTIVE_TOOLS];
+  }
+
+  function getRestoredTools(): string[] {
+    return previousActiveTools.length > 0 ? [...previousActiveTools] : [...FALLBACK_ACTIVE_TOOLS];
+  }
+
+  function applyRestoredTools(): string[] {
+    const tools = getRestoredTools();
+    pi.setActiveTools(tools);
+    return tools;
+  }
+
+  function enterExecuting(ctx?: ExtensionContext): string[] {
+    phase = "executing";
+    const restoredTools = applyRestoredTools();
+    if (ctx) {
+      updateStatus(ctx);
+      updateWidget(ctx);
+    }
+    persistState();
+    return restoredTools;
   }
 
   function updateStatus(ctx: ExtensionContext): void {
@@ -123,10 +159,11 @@ export default function plannotator(pi: ExtensionAPI): void {
   }
 
   function persistState(): void {
-    pi.appendEntry("plannotator", { phase, planFilePath });
+    pi.appendEntry("plannotator", { phase, planFilePath, previousActiveTools });
   }
 
   function enterPlanning(ctx: ExtensionContext): void {
+    capturePrePlanTools();
     phase = "planning";
     checklistItems = [];
     pi.setActiveTools(PLANNING_TOOLS);
@@ -137,13 +174,14 @@ export default function plannotator(pi: ExtensionAPI): void {
   }
 
   function exitToIdle(ctx: ExtensionContext): void {
+    const restoredTools = applyRestoredTools();
     phase = "idle";
     checklistItems = [];
-    pi.setActiveTools(NORMAL_TOOLS);
+    previousActiveTools = [];
     updateStatus(ctx);
     updateWidget(ctx);
     persistState();
-    ctx.ui.notify("Plannotator: disabled. Full access restored.");
+    ctx.ui.notify(`Plannotator: disabled. Restored tools: ${restoredTools.join(", ")}.`);
   }
 
   function togglePlanMode(ctx: ExtensionContext): void {
@@ -318,14 +356,12 @@ export default function plannotator(pi: ExtensionAPI): void {
 
       // Non-interactive or no HTML: auto-approve
       if (!ctx.hasUI || !planHtmlContent) {
-        phase = "executing";
-        pi.setActiveTools(EXECUTION_TOOLS);
-        persistState();
+        const restoredTools = enterExecuting(ctx);
         return {
           content: [
             {
               type: "text",
-              text: "Plan auto-approved (non-interactive mode). Execute the plan now.",
+              text: `Plan auto-approved (non-interactive mode). Execute the plan now. Restored tools: ${restoredTools.join(", ")}.`,
             },
           ],
           details: { approved: true },
@@ -347,11 +383,7 @@ export default function plannotator(pi: ExtensionAPI): void {
       server.stop();
 
       if (result.approved) {
-        phase = "executing";
-        pi.setActiveTools(EXECUTION_TOOLS);
-        updateStatus(ctx);
-        updateWidget(ctx);
-        persistState();
+        const restoredTools = enterExecuting(ctx);
 
         pi.appendEntry("plannotator-execute", { planFilePath });
 
@@ -364,7 +396,7 @@ export default function plannotator(pi: ExtensionAPI): void {
             content: [
               {
                 type: "text",
-                text: `Plan approved with notes! You now have full tool access (read, bash, edit, write). Execute the plan in ${planFilePath}. ${doneMsg}\n\n## Implementation Notes\n\nThe user approved your plan but added the following notes to consider during implementation:\n\n${result.feedback}\n\nProceed with implementation, incorporating these notes where applicable.`,
+                text: `Plan approved with notes! Restored pre-plan tools (${restoredTools.join(", ")}). Execute the plan in ${planFilePath}. ${doneMsg}\n\n## Implementation Notes\n\nThe user approved your plan but added the following notes to consider during implementation:\n\n${result.feedback}\n\nProceed with implementation, incorporating these notes where applicable.`,
               },
             ],
             details: { approved: true, feedback: result.feedback },
@@ -375,7 +407,7 @@ export default function plannotator(pi: ExtensionAPI): void {
           content: [
             {
               type: "text",
-              text: `Plan approved. You now have full tool access (read, bash, edit, write). Execute the plan in ${planFilePath}. ${doneMsg}`,
+              text: `Plan approved. Restored pre-plan tools (${restoredTools.join(", ")}). Execute the plan in ${planFilePath}. ${doneMsg}`,
             },
           ],
           details: { approved: true },
@@ -524,7 +556,7 @@ Do not end your turn without doing one of these two things.`,
           message: {
             customType: "plannotator-context",
             content: `[PLANNOTATOR - EXECUTING PLAN]
-Full tool access is enabled. Execute the plan from ${planFilePath}.
+Pre-plan tool access has been restored (${getRestoredTools().join(", ")}). Execute the plan from ${planFilePath}.
 
 Remaining steps:
 ${todoList}
@@ -588,12 +620,14 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
         },
         { triggerTurn: false },
       );
+      const restoredTools = applyRestoredTools();
       phase = "idle";
       checklistItems = [];
-      pi.setActiveTools(NORMAL_TOOLS);
+      previousActiveTools = [];
       updateStatus(ctx);
       updateWidget(ctx);
       persistState();
+      ctx.ui.notify(`Plannotator: plan complete. Restored tools: ${restoredTools.join(", ")}.`, "success");
     }
   });
 
@@ -614,11 +648,16 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
     const entries = ctx.sessionManager.getEntries();
     const stateEntry = entries
       .filter((e: { type: string; customType?: string }) => e.type === "custom" && e.customType === "plannotator")
-      .pop() as { data?: { phase: Phase; planFilePath?: string } } | undefined;
+      .pop() as { data?: PersistedPlannotatorState } | undefined;
 
     if (stateEntry?.data) {
       phase = stateEntry.data.phase ?? phase;
       planFilePath = stateEntry.data.planFilePath ?? planFilePath;
+      previousActiveTools = normalizeTools(stateEntry.data.previousActiveTools).filter((t) => t !== "exit_plan_mode");
+    }
+
+    if ((phase === "planning" || phase === "executing") && previousActiveTools.length === 0) {
+      capturePrePlanTools();
     }
 
     // Rebuild execution state from disk + session messages
@@ -659,7 +698,7 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
     if (phase === "planning") {
       pi.setActiveTools(PLANNING_TOOLS);
     } else if (phase === "executing") {
-      pi.setActiveTools(EXECUTION_TOOLS);
+      applyRestoredTools();
     }
 
     updateStatus(ctx);

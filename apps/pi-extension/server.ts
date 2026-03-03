@@ -9,7 +9,7 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { execSync } from "node:child_process";
 import os from "node:os";
-import { mkdirSync, writeFileSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join, basename } from "node:path";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -38,9 +38,15 @@ function html(res: import("node:http").ServerResponse, content: string): void {
   res.end(content);
 }
 
+const LOOPBACK_HOST = "127.0.0.1";
+const DEFAULT_HISTORY_MAX_VERSIONS = 200;
+
 function listenOnRandomPort(server: Server): number {
-  server.listen(0);
-  const addr = server.address() as { port: number };
+  server.listen({ port: 0, host: LOOPBACK_HOST });
+  const addr = server.address();
+  if (!addr || typeof addr === "string") {
+    throw new Error("Failed to bind local server");
+  }
   return addr.port;
 }
 
@@ -121,6 +127,56 @@ function detectProjectName(): string {
   }
 }
 
+function isTruthyEnv(value: string | undefined): boolean {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
+function isHistoryDisabled(): boolean {
+  return isTruthyEnv(process.env.PLANNOTATOR_DISABLE_HISTORY);
+}
+
+function getHistoryMaxVersions(): number {
+  const raw = process.env.PLANNOTATOR_HISTORY_MAX_VERSIONS;
+  if (!raw) return DEFAULT_HISTORY_MAX_VERSIONS;
+
+  const parsed = parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_HISTORY_MAX_VERSIONS;
+  }
+  return parsed;
+}
+
+function pruneHistoryVersions(historyDir: string): void {
+  const maxVersions = getHistoryMaxVersions();
+  if (maxVersions <= 0) return;
+
+  try {
+    const versions = readdirSync(historyDir)
+      .map((entry) => {
+        const match = entry.match(/^(\d+)\.md$/);
+        if (!match) return null;
+        return { entry, version: parseInt(match[1], 10) };
+      })
+      .filter((v): v is { entry: string; version: number } => v !== null)
+      .sort((a, b) => a.version - b.version);
+
+    const removeCount = versions.length - maxVersions;
+    if (removeCount <= 0) return;
+
+    for (const stale of versions.slice(0, removeCount)) {
+      try {
+        unlinkSync(join(historyDir, stale.entry));
+      } catch {
+        // best effort cleanup
+      }
+    }
+  } catch {
+    // best effort cleanup
+  }
+}
+
 function getHistoryDir(project: string, slug: string): string {
   const historyDir = join(os.homedir(), ".plannotator", "history", project, slug);
   mkdirSync(historyDir, { recursive: true });
@@ -149,6 +205,10 @@ function saveToHistory(
   slug: string,
   plan: string,
 ): { version: number; path: string; isNew: boolean } {
+  if (isHistoryDisabled()) {
+    return { version: 0, path: "", isNew: false };
+  }
+
   const historyDir = getHistoryDir(project, slug);
   const nextVersion = getNextVersionNumber(historyDir);
   if (nextVersion > 1) {
@@ -156,13 +216,17 @@ function saveToHistory(
     try {
       const existing = readFileSync(latestPath, "utf-8");
       if (existing === plan) {
+        pruneHistoryVersions(historyDir);
         return { version: nextVersion - 1, path: latestPath, isNew: false };
       }
-    } catch { /* proceed with saving */ }
+    } catch {
+      // proceed with saving
+    }
   }
   const fileName = `${String(nextVersion).padStart(3, "0")}.md`;
   const filePath = join(historyDir, fileName);
   writeFileSync(filePath, plan, "utf-8");
+  pruneHistoryVersions(historyDir);
   return { version: nextVersion, path: filePath, isNew: true };
 }
 
@@ -266,16 +330,33 @@ export function startPlanReviewServer(options: {
   // Version history
   const slug = generateSlug(options.plan);
   const project = detectProjectName();
-  const historyResult = saveToHistory(project, slug, options.plan);
-  const previousPlan =
-    historyResult.version > 1
-      ? getPlanVersion(project, slug, historyResult.version - 1)
-      : null;
-  const versionInfo = {
-    version: historyResult.version,
-    totalVersions: getVersionCount(project, slug),
+  const historyEnabled = !isHistoryDisabled();
+
+  let previousPlan: string | null = null;
+  let versionInfo: {
+    version: number;
+    totalVersions: number;
+    project: string;
+    historyDisabled?: boolean;
+  } = {
+    version: 0,
+    totalVersions: 0,
     project,
+    historyDisabled: true,
   };
+
+  if (historyEnabled) {
+    const historyResult = saveToHistory(project, slug, options.plan);
+    previousPlan =
+      historyResult.version > 1
+        ? getPlanVersion(project, slug, historyResult.version - 1)
+        : null;
+    versionInfo = {
+      version: historyResult.version,
+      totalVersions: getVersionCount(project, slug),
+      project,
+    };
+  }
 
   let resolveDecision!: (result: { approved: boolean; feedback?: string }) => void;
   const decisionPromise = new Promise<{ approved: boolean; feedback?: string }>((r) => {
@@ -283,9 +364,14 @@ export function startPlanReviewServer(options: {
   });
 
   const server = createServer(async (req, res) => {
-    const url = new URL(req.url!, `http://localhost`);
+    const url = new URL(req.url!, `http://${LOOPBACK_HOST}`);
 
     if (url.pathname === "/api/plan/version") {
+      if (!historyEnabled) {
+        json(res, { error: "Plan history is disabled" }, 404);
+        return;
+      }
+
       const vParam = url.searchParams.get("v");
       if (!vParam) {
         json(res, { error: "Missing v parameter" }, 400);
@@ -303,8 +389,16 @@ export function startPlanReviewServer(options: {
       }
       json(res, { plan: content, version: v });
     } else if (url.pathname === "/api/plan/versions") {
+      if (!historyEnabled) {
+        json(res, { project, slug, versions: [], historyDisabled: true });
+        return;
+      }
       json(res, { project, slug, versions: listVersions(project, slug) });
     } else if (url.pathname === "/api/plan/history") {
+      if (!historyEnabled) {
+        json(res, { project, plans: [], historyDisabled: true });
+        return;
+      }
       json(res, { project, plans: listProjectPlans(project) });
     } else if (url.pathname === "/api/plan") {
       json(res, { plan: options.plan, origin: options.origin ?? "pi", previousPlan, versionInfo });
@@ -325,7 +419,7 @@ export function startPlanReviewServer(options: {
 
   return {
     port,
-    url: `http://localhost:${port}`,
+    url: `http://${LOOPBACK_HOST}:${port}`,
     waitForDecision: () => decisionPromise,
     stop: () => server.close(),
   };
@@ -421,7 +515,7 @@ export function startReviewServer(options: {
   });
 
   const server = createServer(async (req, res) => {
-    const url = new URL(req.url!, `http://localhost`);
+    const url = new URL(req.url!, `http://${LOOPBACK_HOST}`);
 
     if (url.pathname === "/api/diff" && req.method === "GET") {
       json(res, {
@@ -457,7 +551,7 @@ export function startReviewServer(options: {
 
   return {
     port,
-    url: `http://localhost:${port}`,
+    url: `http://${LOOPBACK_HOST}:${port}`,
     waitForDecision: () => decisionPromise,
     stop: () => server.close(),
   };
@@ -484,7 +578,7 @@ export function startAnnotateServer(options: {
   });
 
   const server = createServer(async (req, res) => {
-    const url = new URL(req.url!, `http://localhost`);
+    const url = new URL(req.url!, `http://${LOOPBACK_HOST}`);
 
     if (url.pathname === "/api/plan" && req.method === "GET") {
       json(res, {
@@ -506,7 +600,7 @@ export function startAnnotateServer(options: {
 
   return {
     port,
-    url: `http://localhost:${port}`,
+    url: `http://${LOOPBACK_HOST}:${port}`,
     waitForDecision: () => decisionPromise,
     stop: () => server.close(),
   };
