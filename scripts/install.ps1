@@ -107,6 +107,24 @@ Address the code review feedback above. The user has reviewed your changes in th
 
 Write-Host "Installed /plannotator-review command to $claudeCommandsDir\plannotator-review.md"
 
+# Install Claude Code /annotate slash command
+@'
+---
+description: Open interactive annotation UI for a markdown file
+allowed-tools: Bash(plannotator:*)
+---
+
+## Markdown Annotations
+
+!`plannotator annotate $ARGUMENTS`
+
+## Your task
+
+Address the annotation feedback above. The user has reviewed the markdown file and provided specific annotations and comments.
+'@ | Set-Content -Path "$claudeCommandsDir\plannotator-annotate.md"
+
+Write-Host "Installed /plannotator-annotate command to $claudeCommandsDir\plannotator-annotate.md"
+
 # Install OpenCode slash command
 $opencodeCommandsDir = "$env:USERPROFILE\.config\opencode\command"
 New-Item -ItemType Directory -Force -Path $opencodeCommandsDir | Out-Null
@@ -122,6 +140,18 @@ Acknowledge "Opening code review..." and wait for the user's feedback.
 
 Write-Host "Installed /plannotator-review command to $opencodeCommandsDir\plannotator-review.md"
 
+# Install OpenCode /annotate slash command
+@"
+---
+description: Open interactive annotation UI for a markdown file
+---
+
+The Plannotator Annotate has been triggered. Opening the annotation UI...
+Acknowledge "Opening annotation UI..." and wait for the user's feedback.
+"@ | Set-Content -Path "$opencodeCommandsDir\plannotator-annotate.md"
+
+Write-Host "Installed /plannotator-annotate command to $opencodeCommandsDir\plannotator-annotate.md"
+
 Write-Host ""
 Write-Host "=========================================="
 Write-Host "  OPENCODE USERS"
@@ -131,7 +161,7 @@ Write-Host "Add the plugin to your opencode.json:"
 Write-Host ""
 Write-Host '  "plugin": ["@plannotator/opencode@latest"]'
 Write-Host ""
-Write-Host "Then restart OpenCode. The /plannotator-review command is ready!"
+Write-Host "Then restart OpenCode. The /plannotator-review and /plannotator-annotate commands are ready!"
 Write-Host ""
 Write-Host "=========================================="
 Write-Host "  CLAUDE CODE USERS: YOU ARE ALL SET!"
@@ -141,4 +171,4 @@ Write-Host "Install the Claude Code plugin:"
 Write-Host "  /plugin marketplace add backnotprop/plannotator"
 Write-Host "  /plugin install plannotator@plannotator"
 Write-Host ""
-Write-Host "The /plannotator-review command is ready to use after you restart Claude Code!"
+Write-Host "The /plannotator-review and /plannotator-annotate commands are ready to use after you restart Claude Code!"

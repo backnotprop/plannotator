@@ -107,6 +107,24 @@ COMMAND_EOF
 
 echo "Installed /plannotator-review command to ${CLAUDE_COMMANDS_DIR}/plannotator-review.md"
 
+# Install /annotate slash command for Claude Code
+cat > "$CLAUDE_COMMANDS_DIR/plannotator-annotate.md" << 'COMMAND_EOF'
+---
+description: Open interactive annotation UI for a markdown file
+allowed-tools: Bash(plannotator:*)
+---
+
+## Markdown Annotations
+
+!`plannotator annotate $ARGUMENTS`
+
+## Your task
+
+Address the annotation feedback above. The user has reviewed the markdown file and provided specific annotations and comments.
+COMMAND_EOF
+
+echo "Installed /plannotator-annotate command to ${CLAUDE_COMMANDS_DIR}/plannotator-annotate.md"
+
 # Install OpenCode slash command
 OPENCODE_COMMANDS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/command"
 mkdir -p "$OPENCODE_COMMANDS_DIR"
@@ -122,6 +140,18 @@ COMMAND_EOF
 
 echo "Installed /plannotator-review command to ${OPENCODE_COMMANDS_DIR}/plannotator-review.md"
 
+# Install /annotate slash command for OpenCode
+cat > "$OPENCODE_COMMANDS_DIR/plannotator-annotate.md" << 'COMMAND_EOF'
+---
+description: Open interactive annotation UI for a markdown file
+---
+
+The Plannotator Annotate has been triggered. Opening the annotation UI...
+Acknowledge "Opening annotation UI..." and wait for the user's feedback.
+COMMAND_EOF
+
+echo "Installed /plannotator-annotate command to ${OPENCODE_COMMANDS_DIR}/plannotator-annotate.md"
+
 echo ""
 echo "=========================================="
 echo "  OPENCODE USERS"
@@ -131,7 +161,7 @@ echo "Add the plugin to your opencode.json:"
 echo ""
 echo '  "plugin": ["@plannotator/opencode@latest"]'
 echo ""
-echo "Then restart OpenCode. The /plannotator-review command is ready!"
+echo "Then restart OpenCode. The /plannotator-review and /plannotator-annotate commands are ready!"
 echo ""
 echo "=========================================="
 echo "  CLAUDE CODE USERS: YOU'RE ALL SET!"
@@ -141,4 +171,4 @@ echo "Install the Claude Code plugin:"
 echo "  /plugin marketplace add backnotprop/plannotator"
 echo "  /plugin install plannotator@plannotator"
 echo ""
-echo "The /plannotator-review command is ready to use after you restart Claude Code!"
+echo "The /plannotator-review and /plannotator-annotate commands are ready to use after you restart Claude Code!"

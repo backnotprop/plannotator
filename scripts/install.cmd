@@ -152,6 +152,23 @@ echo Address the code review feedback above. The user has reviewed your changes 
 
 echo Installed /plannotator-review command to !CLAUDE_COMMANDS_DIR!\plannotator-review.md
 
+(
+echo ---
+echo description: Open interactive annotation UI for a markdown file
+echo allowed-tools: Bash^(plannotator:*^)
+echo ---
+echo.
+echo ## Markdown Annotations
+echo.
+echo !`plannotator annotate $ARGUMENTS`
+echo.
+echo ## Your task
+echo.
+echo Address the annotation feedback above. The user has reviewed the markdown file and provided specific annotations and comments.
+) > "!CLAUDE_COMMANDS_DIR!\plannotator-annotate.md"
+
+echo Installed /plannotator-annotate command to !CLAUDE_COMMANDS_DIR!\plannotator-annotate.md
+
 echo.
 echo Test the install:
 echo   echo {"tool_input":{"plan":"# Test Plan\\n\\nHello world"}} ^| plannotator
@@ -160,6 +177,6 @@ echo Then install the Claude Code plugin:
 echo   /plugin marketplace add backnotprop/plannotator
 echo   /plugin install plannotator@plannotator
 echo.
-echo The /plannotator-review command is ready to use!
+echo The /plannotator-review and /plannotator-annotate commands are ready to use!
 echo.
 exit /b 0
