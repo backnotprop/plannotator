@@ -35,7 +35,7 @@ The hook is defined in `hooks.json` inside the plugin directory. When installed 
           {
             "type": "command",
             "command": "plannotator",
-            "timeout": 1800
+            "timeout": 345600
           }
         ]
       }
@@ -44,7 +44,7 @@ The hook is defined in `hooks.json` inside the plugin directory. When installed 
 }
 ```
 
-The `matcher` targets the `ExitPlanMode` tool specifically. The `timeout` is in seconds (30 minutes) — plan reviews can take a while.
+The `matcher` targets the `ExitPlanMode` tool specifically. The `timeout` is in seconds (`345600` = 96 hours) — long reviews can stay open without expiring.
 
 ## Plugin configuration (OpenCode)
 

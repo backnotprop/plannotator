@@ -8,6 +8,7 @@
  * Environment variables:
  *   PLANNOTATOR_REMOTE - Set to "1" or "true" for remote mode (devcontainer, SSH)
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
+ *   PLANNOTATOR_PLAN_TIMEOUT_SECONDS - Max wait for submit_plan approval (default: 345600, set 0 to disable)
  *
  * @packageDocumentation
  */
@@ -36,6 +37,8 @@ const htmlContent = indexHtml as unknown as string;
 import reviewHtml from "./review-editor.html" with { type: "text" };
 const reviewHtmlContent = reviewHtml as unknown as string;
 
+const DEFAULT_PLAN_TIMEOUT_SECONDS = 345_600; // 96 hours
+
 export const PlannotatorPlugin: Plugin = async (ctx) => {
   // Helper to determine if sharing is enabled (lazy evaluation)
   // Priority: OpenCode config > env var > default (enabled)
@@ -58,6 +61,28 @@ export const PlannotatorPlugin: Plugin = async (ctx) => {
   // Custom share portal URL for self-hosting
   function getShareBaseUrl(): string | undefined {
     return process.env.PLANNOTATOR_SHARE_URL || undefined;
+  }
+
+  /**
+   * submit_plan wait timeout in seconds.
+   * - unset: default to 96h
+   * - 0: disable timeout
+   * - invalid/negative: fall back to default
+   */
+  function getPlanTimeoutSeconds(): number | null {
+    const raw = process.env.PLANNOTATOR_PLAN_TIMEOUT_SECONDS?.trim();
+    if (!raw) return DEFAULT_PLAN_TIMEOUT_SECONDS;
+
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      console.error(
+        `[Plannotator] Invalid PLANNOTATOR_PLAN_TIMEOUT_SECONDS="${raw}". Using default ${DEFAULT_PLAN_TIMEOUT_SECONDS}s.`
+      );
+      return DEFAULT_PLAN_TIMEOUT_SECONDS;
+    }
+
+    if (parsed === 0) return null;
+    return parsed;
   }
 
   return {
@@ -321,17 +346,26 @@ Do NOT proceed with implementation until your plan is approved.
             },
           });
 
-          const PLANNOTATOR_TIMEOUT_MS = 10 * 60 * 1000; // 10min timeout
-          let timeoutId: ReturnType<typeof setTimeout>;
-          const result = await Promise.race([
-            server.waitForDecision().then((r) => { clearTimeout(timeoutId); return r; }),
-            new Promise<{ approved: boolean; feedback?: string }>((resolve) => {
-              timeoutId = setTimeout(
-                () => resolve({ approved: false, feedback: "[Plannotator] No response within 10 minutes. Port released automatically. Please call submit_plan again." }),
-                PLANNOTATOR_TIMEOUT_MS
-              );
-            }),
-          ]);
+          const timeoutSeconds = getPlanTimeoutSeconds();
+          const timeoutMs = timeoutSeconds === null ? null : timeoutSeconds * 1000;
+
+          const result = timeoutMs === null
+            ? await server.waitForDecision()
+            : await new Promise<Awaited<ReturnType<typeof server.waitForDecision>>>((resolve) => {
+                const timeoutId = setTimeout(
+                  () =>
+                    resolve({
+                      approved: false,
+                      feedback: `[Plannotator] No response within ${timeoutSeconds} seconds. Port released automatically. Please call submit_plan again.`,
+                    }),
+                  timeoutMs
+                );
+
+                server.waitForDecision().then((r) => {
+                  clearTimeout(timeoutId);
+                  resolve(r);
+                });
+              });
           await Bun.sleep(1500);
           server.stop();
 

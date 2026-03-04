@@ -57,7 +57,7 @@ If you prefer not to use the plugin system, add this to your `~/.claude/settings
           {
             "type": "command",
             "command": "plannotator",
-            "timeout": 1800
+            "timeout": 345600
           }
         ]
       }
