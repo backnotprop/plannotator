@@ -97,6 +97,41 @@ export async function getGitContext(): Promise<GitContext> {
 }
 
 /**
+ * Get diffs for untracked (new) files not yet added to git.
+ *
+ * `git diff HEAD` and `git diff` only show tracked files. Newly created files
+ * that haven't been staged with `git add` are invisible to those commands.
+ * This helper discovers them via `git ls-files --others --exclude-standard` and
+ * generates a proper unified diff for each using `git diff --no-index`.
+ *
+ * Note: `git diff --no-index` exits with code 1 when files differ (standard git
+ * behaviour), so we use `.nothrow()` to avoid treating that as an error.
+ */
+async function getUntrackedFileDiffs(srcPrefix = 'a/', dstPrefix = 'b/'): Promise<string> {
+  try {
+    const output = (await $`git ls-files --others --exclude-standard`.quiet()).text();
+    const files = output.trim().split('\n').filter((f) => f.length > 0);
+    if (files.length === 0) return '';
+
+    const diffs = await Promise.all(
+      files.map(async (file) => {
+        try {
+          const result = await $`git diff --no-index --src-prefix=${srcPrefix} --dst-prefix=${dstPrefix} /dev/null ${file}`
+            .quiet()
+            .nothrow();
+          return result.text();
+        } catch {
+          return '';
+        }
+      }),
+    );
+    return diffs.join('');
+  } catch {
+    return '';
+  }
+}
+
+/**
  * Run git diff with the specified type
  */
 export async function runGitDiff(
@@ -108,20 +143,28 @@ export async function runGitDiff(
 
   try {
     switch (diffType) {
-      case "uncommitted":
-        patch = (await $`git diff HEAD --src-prefix=a/ --dst-prefix=b/`.quiet()).text();
+      case "uncommitted": {
+        // Include tracked changes (staged + unstaged vs HEAD) and untracked new files
+        const trackedDiff = (await $`git diff HEAD --src-prefix=a/ --dst-prefix=b/`.quiet()).text();
+        const untrackedDiff = await getUntrackedFileDiffs();
+        patch = trackedDiff + untrackedDiff;
         label = "Uncommitted changes";
         break;
+      }
 
       case "staged":
         patch = (await $`git diff --staged --src-prefix=a/ --dst-prefix=b/`.quiet()).text();
         label = "Staged changes";
         break;
 
-      case "unstaged":
-        patch = (await $`git diff --src-prefix=a/ --dst-prefix=b/`.quiet()).text();
+      case "unstaged": {
+        // Include unstaged changes to tracked files and untracked new files
+        const trackedDiff = (await $`git diff --src-prefix=a/ --dst-prefix=b/`.quiet()).text();
+        const untrackedDiff = await getUntrackedFileDiffs();
+        patch = trackedDiff + untrackedDiff;
         label = "Unstaged changes";
         break;
+      }
 
       case "last-commit":
         patch = (await $`git diff HEAD~1..HEAD --src-prefix=a/ --dst-prefix=b/`.quiet()).text();
