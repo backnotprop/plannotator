@@ -56,7 +56,7 @@ import type { PlanDiffMode } from '@plannotator/ui/components/plan-diff/PlanDiff
 const PLAN_CONTENT = `# Implementation Plan: Real-time Collaboration
 
 ## Overview
-Add real-time collaboration features to the editor using WebSocket connections and operational transforms.
+Add real-time collaboration features to the editor using **[WebSocket API](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API)** and *[operational transforms](https://en.wikipedia.org/wiki/Operational_transformation)*.
 
 ### Architecture
 

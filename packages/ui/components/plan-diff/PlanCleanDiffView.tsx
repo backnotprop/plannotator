@@ -299,7 +299,7 @@ const InlineMarkdown: React.FC<{ text: string }> = ({ text }) => {
     if (match) {
       parts.push(
         <strong key={key++} className="font-semibold">
-          {match[1]}
+          <InlineMarkdown text={match[1]} />
         </strong>
       );
       remaining = remaining.slice(match[0].length);
@@ -308,7 +308,7 @@ const InlineMarkdown: React.FC<{ text: string }> = ({ text }) => {
 
     match = remaining.match(/^\*(.+?)\*/);
     if (match) {
-      parts.push(<em key={key++}>{match[1]}</em>);
+      parts.push(<em key={key++}><InlineMarkdown text={match[1]} /></em>);
       remaining = remaining.slice(match[0].length);
       continue;
     }

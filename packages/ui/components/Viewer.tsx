@@ -955,7 +955,7 @@ const InlineMarkdown: React.FC<{ text: string; onOpenLinkedDoc?: (path: string) 
     // Bold: **text**
     let match = remaining.match(/^\*\*(.+?)\*\*/);
     if (match) {
-      parts.push(<strong key={key++} className="font-semibold">{match[1]}</strong>);
+      parts.push(<strong key={key++} className="font-semibold"><InlineMarkdown text={match[1]} onOpenLinkedDoc={onOpenLinkedDoc} /></strong>);
       remaining = remaining.slice(match[0].length);
       continue;
     }
@@ -963,7 +963,7 @@ const InlineMarkdown: React.FC<{ text: string; onOpenLinkedDoc?: (path: string) 
     // Italic: *text*
     match = remaining.match(/^\*(.+?)\*/);
     if (match) {
-      parts.push(<em key={key++}>{match[1]}</em>);
+      parts.push(<em key={key++}><InlineMarkdown text={match[1]} onOpenLinkedDoc={onOpenLinkedDoc} /></em>);
       remaining = remaining.slice(match[0].length);
       continue;
     }
