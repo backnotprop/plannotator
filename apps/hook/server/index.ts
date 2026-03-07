@@ -37,6 +37,7 @@ import {
 } from "@plannotator/server/annotate";
 import { getGitContext, runGitDiff } from "@plannotator/server/git";
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
+import path from "path";
 
 // Embed the built HTML at compile time
 // @ts-ignore - Bun import attribute for text
