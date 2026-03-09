@@ -552,9 +552,37 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 
     highlighter.run();
 
-    return () => highlighter.dispose();
-  }, [onSelectAnnotation]);
+    // Mobile: bridge native text selection (long-press) to the highlighter's CREATE flow.
+    // On mobile/touch, native selection handles don't reliably fire touchend on the content
+    // root, so the web-highlighter's built-in PointerEnd listener never triggers.
+    // This selectionchange listener detects valid selections and uses the highlighter's
+    // public fromRange() API to programmatically create the highlight and emit CREATE.
+    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    let selectionTimer: ReturnType<typeof setTimeout>;
+    const handleSelectionChange = isTouchDevice ? () => {
+      clearTimeout(selectionTimer);
+      selectionTimer = setTimeout(() => {
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+        if (!containerRef.current?.contains(sel.anchorNode)) return;
 
+        const range = sel.getRangeAt(0);
+        highlighter.fromRange(range);
+      }, 400);
+    } : null;
+
+    if (handleSelectionChange) {
+      document.addEventListener('selectionchange', handleSelectionChange);
+    }
+
+    return () => {
+      if (handleSelectionChange) {
+        clearTimeout(selectionTimer);
+        document.removeEventListener('selectionchange', handleSelectionChange);
+      }
+      highlighter.dispose();
+    };
+  }, [onSelectAnnotation]);
 
   useEffect(() => {
     const highlighter = highlighterRef.current;

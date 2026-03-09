@@ -55,9 +55,12 @@ interface SettingsProps {
   /** Mode determines which settings are shown. 'plan' shows all, 'review' shows only identity + agent switching */
   mode?: 'plan' | 'review';
   onUIPreferencesChange?: (prefs: UIPreferences) => void;
+  /** Externally controlled open state (for mobile menu integration) */
+  externalOpen?: boolean;
+  onExternalClose?: () => void;
 }
 
-export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', onUIPreferencesChange }) => {
+export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', onUIPreferencesChange, externalOpen, onExternalClose }) => {
   const [showDialog, setShowDialog] = useState(false);
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [identity, setIdentity] = useState('');
@@ -93,6 +96,14 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const integrationTabs: { id: SettingsTab; label: string }[] = mode === 'plan'
     ? [{ id: 'obsidian', label: 'Obsidian' }, { id: 'bear', label: 'Bear' }]
     : [];
+
+  // Sync external open state
+  useEffect(() => {
+    if (externalOpen) {
+      setShowDialog(true);
+      onExternalClose?.();
+    }
+  }, [externalOpen, onExternalClose]);
 
   useEffect(() => {
     if (showDialog) {
@@ -214,9 +225,26 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
               </button>
             </div>
 
-            <div className="flex" style={{ minHeight: '420px' }}>
-              {/* Sidebar */}
-              <nav className="w-40 border-r border-border p-2 flex-shrink-0">
+            <div className="flex flex-col md:flex-row md:min-h-[420px]">
+              {/* Mobile: horizontal tab bar */}
+              <nav className="md:hidden flex overflow-x-auto border-b border-border px-2 py-1.5 gap-1 flex-shrink-0">
+                {[...mainTabs, ...integrationTabs].map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`px-3 py-1.5 rounded text-xs whitespace-nowrap transition-colors ${
+                      activeTab === tab.id
+                        ? 'bg-primary/10 text-primary font-medium'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </nav>
+
+              {/* Desktop: sidebar */}
+              <nav className="hidden md:block w-40 border-r border-border p-2 flex-shrink-0">
                 <div className="space-y-0.5">
                   {mainTabs.map(tab => (
                     <button

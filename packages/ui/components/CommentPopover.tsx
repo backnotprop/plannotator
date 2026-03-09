@@ -18,21 +18,22 @@ interface CommentPopoverProps {
   onClose: () => void;
 }
 
-const POPOVER_WIDTH = 384;
+const MAX_POPOVER_WIDTH = 384;
 const GAP = 8;
 
-function computePosition(anchorRect: DOMRect): { top: number; left: number; flipAbove: boolean } {
+function computePosition(anchorRect: DOMRect): { top: number; left: number; flipAbove: boolean; width: number } {
   const spaceBelow = window.innerHeight - anchorRect.bottom;
   const flipAbove = spaceBelow < 280;
+  const width = Math.min(MAX_POPOVER_WIDTH, window.innerWidth - 32);
 
   const top = flipAbove
     ? anchorRect.top - GAP
     : anchorRect.bottom + GAP;
 
-  let left = anchorRect.left + anchorRect.width / 2 - POPOVER_WIDTH / 2;
-  left = Math.max(16, Math.min(left, window.innerWidth - POPOVER_WIDTH - 16));
+  let left = anchorRect.left + anchorRect.width / 2 - width / 2;
+  left = Math.max(16, Math.min(left, window.innerWidth - width - 16));
 
-  return { top, left, flipAbove };
+  return { top, left, flipAbove, width };
 }
 
 export const CommentPopover: React.FC<CommentPopoverProps> = ({
@@ -142,7 +143,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           style={{
             animation: 'comment-dialog-in 0.15s ease-out',
           }}
-          onMouseDown={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
         >
           <style>{`
             @keyframes comment-dialog-in {
@@ -220,16 +221,17 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   return createPortal(
     <div
       ref={popoverRef}
-      className="fixed z-[100] bg-popover border border-border rounded-xl shadow-2xl w-96 flex flex-col"
+      className="fixed z-[100] bg-popover border border-border rounded-xl shadow-2xl flex flex-col"
       style={{
         top: position.top,
         left: position.left,
+        width: position.width,
         ...(position.flipAbove ? { transform: 'translateY(-100%)' } : {}),
         animation: position.flipAbove
           ? 'comment-popover-in-above 0.15s ease-out'
           : 'comment-popover-in 0.15s ease-out',
       }}
-      onMouseDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
     >
       <style>{`
         @keyframes comment-popover-in {
