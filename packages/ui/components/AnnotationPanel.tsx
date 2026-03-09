@@ -43,7 +43,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
     if (!selectedId || !listRef.current) return;
     const card = listRef.current.querySelector(`[data-annotation-id="${selectedId}"]`);
     if (card) {
-      card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   }, [selectedId]);
 
