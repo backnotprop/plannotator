@@ -34,8 +34,18 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   onDeleteEditorAnnotation,
 }) => {
   const [copied, setCopied] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
   const sortedAnnotations = [...annotations].sort((a, b) => a.createdA - b.createdA);
   const totalCount = annotations.length + (editorAnnotations?.length ?? 0);
+
+  // Scroll selected annotation card into view
+  useEffect(() => {
+    if (!selectedId || !listRef.current) return;
+    const card = listRef.current.querySelector(`[data-annotation-id="${selectedId}"]`);
+    if (card) {
+      card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [selectedId]);
 
   const handleQuickShare = async () => {
     if (!shareUrl) return;
@@ -65,7 +75,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
       </div>
 
       {/* List */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+      <div ref={listRef} className="flex-1 overflow-y-auto p-2 space-y-1.5">
         {totalCount === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 text-center px-4">
             <div className="w-10 h-10 rounded-full bg-muted/50 flex items-center justify-center mb-3">
@@ -276,6 +286,7 @@ const AnnotationCard: React.FC<{
 
   return (
     <div
+      data-annotation-id={annotation.id}
       onClick={onSelect}
       className={`
         group relative p-2.5 rounded-lg border cursor-pointer transition-all

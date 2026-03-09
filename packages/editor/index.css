@@ -249,6 +249,18 @@ pre code.hljs .hljs-code {
   background: oklch(0.70 0.20 60 / 0.15);
 }
 
+.annotation-highlight.focused {
+  background: oklch(0.70 0.20 200 / 0.45) !important;
+  box-shadow: 0 0 8px oklch(0.70 0.20 200 / 0.4);
+  border-bottom: 2px solid oklch(0.70 0.20 200);
+  filter: none;
+}
+
+.light .annotation-highlight.focused {
+  background: oklch(0.70 0.22 200 / 0.3) !important;
+  box-shadow: 0 0 6px oklch(0.60 0.20 200 / 0.3);
+}
+
 .annotation-highlight:hover {
   filter: brightness(1.2);
   cursor: pointer;
