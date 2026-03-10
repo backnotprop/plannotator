@@ -764,11 +764,11 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   }, []);
 
   return (
-    <div className="relative z-50 w-full max-w-[832px] 2xl:max-w-5xl">
+    <div className="relative z-50 w-full max-w-[1040px] 2xl:max-w-[1280px]">
       {taterMode && <TaterSpriteSitting />}
       <article
         ref={containerRef}
-        className={`w-full max-w-[832px] 2xl:max-w-5xl bg-card rounded-xl shadow-xl p-5 md:p-8 lg:p-10 xl:p-12 relative ${
+        className={`w-full max-w-[1040px] 2xl:max-w-[1280px] bg-card rounded-xl shadow-xl p-5 md:p-8 lg:p-10 xl:p-12 relative ${
           linkedDocInfo ? 'border-2 border-primary' : 'border border-border/50'
         } ${inputMethod === 'pinpoint' ? 'cursor-crosshair' : ''}`}
       >
@@ -1239,7 +1239,7 @@ const BlockRenderer: React.FC<{ block: Block; onOpenLinkedDoc?: (path: string) =
     }
 
     case 'code':
-      return <CodeBlock block={block} />;
+      return <CodeBlock block={block} onHover={() => {}} onLeave={() => {}} isHovered={false} />;
 
     case 'table': {
       const { headers, rows } = parseTableContent(block.content);
@@ -1359,4 +1359,3 @@ const CodeBlock: React.FC<CodeBlockProps> = ({ block, onHover, onLeave, isHovere
     </div>
   );
 };
-
