@@ -1,19 +1,22 @@
 {
   "name": "plannotator",
   "version": "0.11.4",
-  "private": true,
-  "description": "Interactive Plan Review for Claude Code - annotate plans visually, share with team, automatically send feedback",
   "author": "backnotprop",
-  "license": "MIT OR Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/backnotprop/plannotator.git"
   },
-  "homepage": "https://github.com/backnotprop/plannotator",
+  "dependencies": {
+    "@pierre/diffs": "^1.1.0-beta.19",
+    "diff": "^8.0.3"
+  },
   "bugs": {
     "url": "https://github.com/backnotprop/plannotator/issues"
   },
-  "workspaces": ["apps/*", "packages/*"],
+  "description": "Interactive Plan Review for Claude Code - annotate plans visually, share with team, automatically send feedback",
+  "homepage": "https://github.com/backnotprop/plannotator",
+  "license": "MIT OR Apache-2.0",
+  "private": true,
   "scripts": {
     "dev:hook": "bun run --cwd apps/hook dev",
     "dev:portal": "bun run --cwd apps/portal dev",
@@ -31,11 +34,5 @@
     "package:vscode": "bun run --cwd apps/vscode-extension package",
     "test": "bun test"
   },
-  "dependencies": {
-    "@pierre/diffs": "^1.1.0-beta.19",
-    "diff": "^8.0.3"
-  },
-  "devDependencies": {
-    "happy-dom": "^20.5.0"
-  }
+  "workspaces": ["apps/*", "packages/*"]
 }
