@@ -17,7 +17,7 @@ const DEFAULT_MODE: EditorMode = 'selection';
  */
 export function getEditorMode(): EditorMode {
   const stored = storage.getItem(STORAGE_KEY);
-  if (stored === 'selection' || stored === 'comment' || stored === 'redline') {
+  if (stored === 'selection' || stored === 'comment' || stored === 'redline' || stored === 'quickLabel') {
     return stored;
   }
   return DEFAULT_MODE;
