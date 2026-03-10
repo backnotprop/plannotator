@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { AnnotationType } from "../types";
 import { createPortal } from "react-dom";
 import { useDismissOnOutsideAndEscape } from "../hooks/useDismissOnOutsideAndEscape";
+import { type QuickLabel, getQuickLabels, getLabelColors } from "../utils/quickLabels";
 
 type PositionMode = 'center-above' | 'top-right';
 
@@ -19,6 +20,8 @@ interface AnnotationToolbarProps {
   onClose: () => void;
   /** Called when user wants to write a comment (opens CommentPopover in parent) */
   onRequestComment?: (initialChar?: string) => void;
+  /** Called when a quick label chip is selected */
+  onQuickLabel?: (label: QuickLabel) => void;
   /** Text to copy (for text selection, pass source.text) */
   copyText?: string;
   /** Close toolbar when element scrolls out of viewport */
@@ -36,6 +39,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   onAnnotate,
   onClose,
   onRequestComment,
+  onQuickLabel,
   copyText,
   closeOnScrollOut = false,
   isExiting = false,
@@ -44,7 +48,9 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
 }) => {
   const [position, setPosition] = useState<{ top: number; left?: number; right?: number } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [showQuickLabels, setShowQuickLabels] = useState(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const quickLabels = useMemo(() => getQuickLabels(), []);
 
   const handleCopy = async () => {
     let textToCopy = copyText;
@@ -95,12 +101,27 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     };
   }, [element, positionMode, closeOnScrollOut, onClose]);
 
-  // Type-to-comment: typing opens CommentPopover via parent
+  // Type-to-comment + Alt+N quick label shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.isComposing) return;
       if (isEditableElement(e.target) || isEditableElement(document.activeElement)) return;
-      if (e.key === "Escape") { onClose(); return; }
+      if (e.key === "Escape") {
+        setShowQuickLabels(false);
+        onClose();
+        return;
+      }
+
+      // Alt+1..8: apply quick label
+      if (e.altKey && e.code >= 'Digit1' && e.code <= 'Digit8') {
+        e.preventDefault();
+        const index = parseInt(e.code.slice(5), 10) - 1;
+        if (index < quickLabels.length) {
+          onQuickLabel?.(quickLabels[index]);
+        }
+        return;
+      }
+
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === "Tab" || e.key === "Enter") return;
       if (e.key.length !== 1) return;
@@ -110,7 +131,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose, onRequestComment]);
+  }, [onClose, onRequestComment, onQuickLabel, quickLabels]);
 
   useDismissOnOutsideAndEscape({
     enabled: true,
@@ -180,6 +201,25 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           label="Comment"
           className="text-accent hover:bg-accent/10"
         />
+        {onQuickLabel && (
+          <div className="relative">
+            <ToolbarButton
+              onClick={() => setShowQuickLabels(prev => !prev)}
+              icon={<ZapIcon />}
+              label="Quick label"
+              className={showQuickLabels ? "text-amber-500 bg-amber-500/10" : "text-amber-500 hover:bg-amber-500/10"}
+            />
+            {showQuickLabels && (
+              <QuickLabelDropdown
+                labels={quickLabels}
+                onSelect={(label) => {
+                  setShowQuickLabels(false);
+                  onQuickLabel(label);
+                }}
+              />
+            )}
+          </div>
+        )}
         <div className="w-px h-5 bg-border mx-0.5" />
         <ToolbarButton
           onClick={onClose}
@@ -190,6 +230,45 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       </div>
     </div>,
     document.body
+  );
+};
+
+// Quick Label Dropdown
+const QuickLabelDropdown: React.FC<{
+  labels: QuickLabel[];
+  onSelect: (label: QuickLabel) => void;
+}> = ({ labels, onSelect }) => {
+  const isMac = navigator.platform?.includes('Mac');
+  const altKey = isMac ? '⌥' : 'Alt+';
+
+  return (
+    <div
+      className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 bg-popover border border-border rounded-lg shadow-2xl p-2 min-w-[220px] z-[101]"
+      style={{ animation: 'annotation-toolbar-in 0.1s ease-out' }}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <div className="text-[10px] text-muted-foreground/60 px-1 mb-1.5 font-medium uppercase tracking-wide">Quick Labels</div>
+      <div className="flex flex-wrap gap-1">
+        {labels.map((label, index) => {
+          const colors = getLabelColors(label.color);
+          return (
+            <button
+              key={label.id}
+              onClick={() => onSelect(label)}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-opacity hover:opacity-75 active:opacity-60"
+              style={{ backgroundColor: colors.bg, color: colors.text }}
+              title={index < 8 ? `${altKey}${index + 1}` : undefined}
+            >
+              <span>{label.emoji}</span>
+              <span>{label.text}</span>
+              {index < 8 && (
+                <span className="text-[9px] opacity-40 ml-0.5">{index + 1}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 };
 
@@ -215,6 +294,12 @@ const TrashIcon = () => (
 const CommentIcon = () => (
   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+  </svg>
+);
+
+const ZapIcon = () => (
+  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
   </svg>
 );
 

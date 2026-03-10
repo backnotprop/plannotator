@@ -26,6 +26,7 @@ export interface Annotation {
   createdA: number;
   author?: string; // Tater identity for collaborative sharing
   images?: ImageAttachment[]; // Attached images with human-readable names
+  isQuickLabel?: boolean; // true if created via quick label chip
   // web-highlighter metadata for cross-element selections
   startMeta?: {
     parentTagName: string;

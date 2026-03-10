@@ -44,8 +44,9 @@ import {
 } from '../utils/defaultNotesApp';
 import { useAgents } from '../hooks/useAgents';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
+import { type QuickLabel, getQuickLabels, saveQuickLabels, resetQuickLabels, DEFAULT_QUICK_LABELS, getLabelColors, LABEL_COLOR_MAP } from '../utils/quickLabels';
 
-type SettingsTab = 'general' | 'display' | 'saving' | 'shortcuts' | 'obsidian' | 'bear';
+type SettingsTab = 'general' | 'display' | 'saving' | 'labels' | 'shortcuts' | 'obsidian' | 'bear';
 
 interface SettingsProps {
   taterMode: boolean;
@@ -76,6 +77,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const [agentWarning, setAgentWarning] = useState<string | null>(null);
   const [autoCloseDelay, setAutoCloseDelayState] = useState<AutoCloseDelay>('off');
   const [defaultNotesApp, setDefaultNotesApp] = useState<DefaultNotesApp>('ask');
+  const [quickLabelsState, setQuickLabelsState] = useState<QuickLabel[]>([]);
 
   // Fetch available agents for OpenCode
   const { agents: availableAgents, validateAgent, getAgentWarning } = useAgents(origin ?? null);
@@ -85,6 +87,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
     if (mode === 'plan') {
       t.push({ id: 'display', label: 'Display' });
       t.push({ id: 'saving', label: 'Saving' });
+      t.push({ id: 'labels', label: 'Labels' });
     }
     t.push({ id: 'shortcuts', label: 'Shortcuts' });
     return t;
@@ -105,6 +108,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       setPermissionMode(getPermissionModeSettings().mode);
       setAutoCloseDelayState(getAutoCloseDelay());
       setDefaultNotesApp(getDefaultNotesApp());
+      setQuickLabelsState(getQuickLabels());
 
       // Validate agent setting when dialog opens
       if (origin === 'opencode') {
@@ -612,6 +616,108 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                           </svg>
                         </span>
                       </button>
+                    </div>
+                  </>
+                )}
+
+                {/* === LABELS TAB === */}
+                {activeTab === 'labels' && (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-sm font-medium">Quick Labels</div>
+                        <div className="text-xs text-muted-foreground">
+                          Preset annotations for one-click feedback
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          resetQuickLabels();
+                          setQuickLabelsState(DEFAULT_QUICK_LABELS);
+                        }}
+                        className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        Reset to defaults
+                      </button>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      {quickLabelsState.map((label, index) => {
+                        const colors = getLabelColors(label.color);
+                        return (
+                          <div key={index} className="flex items-center gap-2 p-2 rounded-lg" style={{ backgroundColor: colors.bg }}>
+                            <span className="text-sm flex-shrink-0">{label.emoji}</span>
+                            <input
+                              type="text"
+                              value={label.text}
+                              onChange={(e) => {
+                                const updated = [...quickLabelsState];
+                                updated[index] = {
+                                  ...label,
+                                  text: e.target.value,
+                                  id: e.target.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
+                                };
+                                setQuickLabelsState(updated);
+                                saveQuickLabels(updated);
+                              }}
+                              className="flex-1 px-2 py-1 bg-background/80 rounded text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
+                            />
+                            <select
+                              value={label.color}
+                              onChange={(e) => {
+                                const updated = [...quickLabelsState];
+                                updated[index] = { ...label, color: e.target.value };
+                                setQuickLabelsState(updated);
+                                saveQuickLabels(updated);
+                              }}
+                              className="px-1.5 py-1 bg-background/80 rounded text-[10px] focus:outline-none focus:ring-1 focus:ring-primary/50"
+                            >
+                              {Object.keys(LABEL_COLOR_MAP).map(c => (
+                                <option key={c} value={c}>{c}</option>
+                              ))}
+                            </select>
+                            <span className="text-[10px] text-muted-foreground/50 font-mono w-8 text-center flex-shrink-0">
+                              {index < 8 ? `${navigator.platform?.includes('Mac') ? '⌥' : 'Alt+'}${index + 1}` : ''}
+                            </span>
+                            <button
+                              onClick={() => {
+                                const updated = quickLabelsState.filter((_, i) => i !== index);
+                                setQuickLabelsState(updated);
+                                saveQuickLabels(updated);
+                              }}
+                              className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors flex-shrink-0"
+                              title="Remove label"
+                            >
+                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {quickLabelsState.length < 12 && (
+                      <button
+                        onClick={() => {
+                          const newLabel: QuickLabel = {
+                            id: `custom-${Date.now()}`,
+                            emoji: '📌',
+                            text: 'New label',
+                            color: 'blue',
+                          };
+                          const updated = [...quickLabelsState, newLabel];
+                          setQuickLabelsState(updated);
+                          saveQuickLabels(updated);
+                        }}
+                        className="w-full py-1.5 text-xs text-muted-foreground hover:text-foreground border border-dashed border-border rounded-lg hover:border-foreground/30 transition-colors"
+                      >
+                        + Add label
+                      </button>
+                    )}
+
+                    <div className="text-[10px] text-muted-foreground/70">
+                      Use {navigator.platform?.includes('Mac') ? '⌥' : 'Alt+'}1 through {navigator.platform?.includes('Mac') ? '⌥' : 'Alt+'}8 when the annotation toolbar is visible to apply a label instantly.
                     </div>
                   </>
                 )}

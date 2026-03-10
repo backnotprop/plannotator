@@ -5,11 +5,30 @@ import 'highlight.js/styles/github-dark.css';
 import { Block, Annotation, AnnotationType, EditorMode, type InputMethod, type ImageAttachment } from '../types';
 import { Frontmatter } from '../utils/parser';
 import { AnnotationToolbar } from './AnnotationToolbar';
+
+// Debug error boundary to catch silent toolbar crashes
+class ToolbarErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error) { console.error('AnnotationToolbar crashed:', error); }
+  render() {
+    if (this.state.error) {
+      return <div style={{ position: 'fixed', top: 10, left: 10, zIndex: 9999, background: 'red', color: 'white', padding: '8px 12px', borderRadius: 6, fontSize: 12 }}>
+        Toolbar error: {this.state.error.message}
+      </div>;
+    }
+    return this.props.children;
+  }
+}
 import { CommentPopover } from './CommentPopover';
 import { TaterSpriteSitting } from './TaterSpriteSitting';
 import { AttachmentsButton } from './AttachmentsButton';
 import { MermaidBlock } from './MermaidBlock';
 import { getIdentity } from '../utils/identity';
+import { type QuickLabel } from '../utils/quickLabels';
 import { PlanDiffBadge } from './plan-diff/PlanDiffBadge';
 import { PinpointOverlay } from './PinpointOverlay';
 import { usePinpoint } from '../hooks/usePinpoint';
@@ -220,7 +239,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     source: any,
     type: AnnotationType,
     text?: string,
-    images?: ImageAttachment[]
+    images?: ImageAttachment[],
+    isQuickLabel?: boolean,
   ) => {
     const doms = highlighter.getDoms(source.id);
     let blockId = '';
@@ -253,6 +273,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       startMeta: source.startMeta,
       endMeta: source.endMeta,
       images,
+      ...(isQuickLabel ? { isQuickLabel: true } : {}),
     };
 
     if (type === AnnotationType.DELETION) {
@@ -552,7 +573,38 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 
     highlighter.run();
 
-    return () => highlighter.dispose();
+    // Mobile: bridge native text selection (long-press) to the highlighter's CREATE flow.
+    // On mobile/touch, native selection handles don't reliably fire touchend on the content
+    // root, so the web-highlighter's built-in PointerEnd listener never triggers.
+    // This selectionchange listener detects valid selections and uses the highlighter's
+    // public fromRange() API to programmatically create the highlight and emit CREATE.
+    // Use (pointer: coarse) instead of 'ontouchstart' in window — the latter is true on
+    // desktop Chrome when the machine has a touchscreen or DevTools touch was toggled.
+    const isTouchPrimary = window.matchMedia('(pointer: coarse)').matches;
+    let selectionTimer: ReturnType<typeof setTimeout>;
+    const handleSelectionChange = isTouchPrimary ? () => {
+      clearTimeout(selectionTimer);
+      selectionTimer = setTimeout(() => {
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+        if (!containerRef.current?.contains(sel.anchorNode)) return;
+
+        const range = sel.getRangeAt(0);
+        highlighter.fromRange(range);
+      }, 400);
+    } : null;
+
+    if (handleSelectionChange) {
+      document.addEventListener('selectionchange', handleSelectionChange);
+    }
+
+    return () => {
+      if (handleSelectionChange) {
+        clearTimeout(selectionTimer);
+        document.removeEventListener('selectionchange', handleSelectionChange);
+      }
+      highlighter.dispose();
+    };
   }, [onSelectAnnotation]);
 
 
@@ -630,6 +682,19 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     window.getSelection()?.removeAllRanges();
   };
 
+  const handleQuickLabel = (label: QuickLabel) => {
+    const highlighter = highlighterRef.current;
+    if (!toolbarState || !highlighter) return;
+
+    createAnnotationFromSource(
+      highlighter, toolbarState.source, AnnotationType.COMMENT,
+      `${label.emoji} ${label.text}`, undefined, true
+    );
+    pendingSourceRef.current = null;
+    setToolbarState(null);
+    window.getSelection()?.removeAllRanges();
+  };
+
   const handleToolbarClose = () => {
     if (toolbarState && highlighterRef.current) {
       highlighterRef.current.remove(toolbarState.source.id);
@@ -645,6 +710,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     type: AnnotationType,
     text?: string,
     images?: ImageAttachment[],
+    isQuickLabel?: boolean,
   ) => {
     const id = `codeblock-${Date.now()}`;
     const codeText = codeEl.textContent || '';
@@ -668,6 +734,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       createdA: Date.now(),
       author: getIdentity(),
       images,
+      ...(isQuickLabel ? { isQuickLabel: true } : {}),
     };
 
     justCreatedIdRef.current = newAnnotation.id;
@@ -680,6 +747,17 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     const codeEl = hoveredCodeBlock.element.querySelector('code');
     if (!codeEl) return;
     applyCodeBlockAnnotation(hoveredCodeBlock.block.id, codeEl, type);
+    setHoveredCodeBlock(null);
+  };
+
+  const handleCodeBlockQuickLabel = (label: QuickLabel) => {
+    if (!hoveredCodeBlock) return;
+    const codeEl = hoveredCodeBlock.element.querySelector('code');
+    if (!codeEl) return;
+    applyCodeBlockAnnotation(
+      hoveredCodeBlock.block.id, codeEl, AnnotationType.COMMENT,
+      `${label.emoji} ${label.text}`, undefined, true
+    );
     setHoveredCodeBlock(null);
   };
 
@@ -932,25 +1010,30 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 
         {/* Text selection toolbar */}
         {toolbarState && (
-          <AnnotationToolbar
-            element={toolbarState.element}
-            positionMode="center-above"
-            onAnnotate={handleAnnotate}
-            onClose={handleToolbarClose}
-            onRequestComment={handleRequestComment}
-            copyText={toolbarState.selectionText}
-            closeOnScrollOut
-          />
+          <ToolbarErrorBoundary>
+            <AnnotationToolbar
+              element={toolbarState.element}
+              positionMode="center-above"
+              onAnnotate={handleAnnotate}
+              onClose={handleToolbarClose}
+              onRequestComment={handleRequestComment}
+              onQuickLabel={handleQuickLabel}
+              copyText={toolbarState.selectionText}
+              closeOnScrollOut
+            />
+          </ToolbarErrorBoundary>
         )}
 
         {/* Code block hover toolbar */}
         {hoveredCodeBlock && !toolbarState && (
+          <ToolbarErrorBoundary>
           <AnnotationToolbar
             element={hoveredCodeBlock.element}
             positionMode="top-right"
             onAnnotate={handleCodeBlockAnnotate}
             onClose={handleCodeBlockToolbarClose}
             onRequestComment={handleCodeBlockRequestComment}
+            onQuickLabel={handleCodeBlockQuickLabel}
             isExiting={isCodeBlockToolbarExiting}
             onMouseEnter={() => {
               if (hoverTimeoutRef.current) {
@@ -969,6 +1052,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               }, 100);
             }}
           />
+          </ToolbarErrorBoundary>
         )}
 
         {/* Pinpoint hover overlay */}
