@@ -89,10 +89,6 @@ function fileExists(filePath: string): boolean {
   }
 }
 
-function shouldIgnoreMatch(input: string): boolean {
-  return IGNORED_DIRS.some((dir) => input.includes(dir)) || !isSearchableMarkdownPath(input);
-}
-
 export function normalizeMarkdownPathInput(
   input: string,
   platform = process.platform,
@@ -167,14 +163,14 @@ export async function resolveMarkdownFile(
     return { kind: "found", path: fromRoot };
   }
 
-  // 3. Case-insensitive search
-  const glob = new Bun.Glob("**/*");
+  // 3. Case-insensitive search (only scan markdown files)
+  const glob = new Bun.Glob("**/*.[mM][dD]{,[xX]}");
   const matches: string[] = [];
 
   for await (const match of glob.scan({ cwd: projectRoot, onlyFiles: true })) {
     const normalizedMatch = normalizeSeparators(match);
 
-    if (shouldIgnoreMatch(normalizedMatch)) continue;
+    if (IGNORED_DIRS.some((dir) => normalizedMatch.includes(dir))) continue;
 
     const matchLookupKey = getLookupKey(normalizedMatch, isBareFilename);
 
