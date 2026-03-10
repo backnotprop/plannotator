@@ -8,7 +8,9 @@ import { AnnotationToolbar } from './AnnotationToolbar';
 import { CommentPopover } from './CommentPopover';
 import { TaterSpriteSitting } from './TaterSpriteSitting';
 import { AttachmentsButton } from './AttachmentsButton';
+import { GraphvizBlock } from './GraphvizBlock';
 import { MermaidBlock } from './MermaidBlock';
+import { isGraphvizLanguage, isMermaidLanguage } from './diagramLanguages';
 import { getIdentity } from '../utils/identity';
 import { PlanDiffBadge } from './plan-diff/PlanDiffBadge';
 import { PinpointOverlay } from './PinpointOverlay';
@@ -893,8 +895,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                 <BlockRenderer key={block.id} block={block} onOpenLinkedDoc={onOpenLinkedDoc} />
               ))}
             </div>
-          ) : group.block.type === 'code' && group.block.language === 'mermaid' ? (
+          ) : group.block.type === 'code' && isMermaidLanguage(group.block.language) ? (
             <MermaidBlock key={group.block.id} block={group.block} />
+          ) : group.block.type === 'code' && isGraphvizLanguage(group.block.language) ? (
+            <GraphvizBlock key={group.block.id} block={group.block} />
           ) : group.block.type === 'code' ? (
             <CodeBlock
               key={group.block.id}
