@@ -10,6 +10,7 @@
  */
 
 import { isAbsolute, resolve, win32 } from "path";
+import { existsSync } from "fs";
 
 const MARKDOWN_PATH_REGEX = /\.mdx?$/i;
 const WINDOWS_DRIVE_PATH_PATTERNS = [
@@ -64,11 +65,28 @@ function getLookupKey(input: string, isBareFilename: boolean): string {
 }
 
 function resolveAbsolutePath(input: string, platform = process.platform): string {
-  return platform === "win32" ? win32.resolve(input) : resolve(input);
+  // Use win32.resolve for Windows paths regardless of reported platform
+  return (platform === "win32" || hasWindowsDriveLetter(input))
+    ? win32.resolve(input)
+    : resolve(input);
 }
 
 function isSearchableMarkdownPath(input: string): boolean {
-  return MARKDOWN_PATH_REGEX.test(input);
+  return MARKDOWN_PATH_REGEX.test(input.trim());
+}
+
+/** Check if a path looks like a Windows absolute path (e.g. C:\ or C:/) */
+function hasWindowsDriveLetter(input: string): boolean {
+  return /^[a-zA-Z]:[/\\]/.test(input);
+}
+
+/** Cross-platform file existence check using Node fs (more reliable than Bun.file in compiled exes) */
+function fileExists(filePath: string): boolean {
+  try {
+    return existsSync(filePath);
+  } catch {
+    return false;
+  }
 }
 
 function shouldIgnoreMatch(input: string): boolean {
@@ -101,6 +119,11 @@ export function isAbsoluteMarkdownPath(
   platform = process.platform,
 ): boolean {
   const normalizedInput = normalizeMarkdownPathInput(input, platform);
+  // Always check for Windows drive letters (handles compiled Bun exes where
+  // process.platform may not reflect the actual OS correctly)
+  if (hasWindowsDriveLetter(normalizedInput)) {
+    return true;
+  }
   return platform === "win32"
     ? win32.isAbsolute(normalizedInput)
     : isAbsolute(normalizedInput);
@@ -116,6 +139,8 @@ export async function resolveMarkdownFile(
   input: string,
   projectRoot: string,
 ): Promise<ResolveResult> {
+  // Trim whitespace/CR that may leak from Windows shell pipelines
+  input = input.trim();
   const normalizedInput = normalizeMarkdownPathInput(input);
   const searchInput = normalizeSeparators(normalizedInput);
   const isBareFilename = !searchInput.includes("/");
@@ -130,7 +155,7 @@ export async function resolveMarkdownFile(
   //    the user explicitly typed the full path)
   if (isAbsoluteMarkdownPath(normalizedInput)) {
     const absolutePath = resolveAbsolutePath(normalizedInput);
-    if (await Bun.file(absolutePath).exists()) {
+    if (fileExists(absolutePath)) {
       return { kind: "found", path: absolutePath };
     }
     return { kind: "not_found", input };
@@ -138,7 +163,7 @@ export async function resolveMarkdownFile(
 
   // 2. Exact relative path from project root
   const fromRoot = resolve(projectRoot, searchInput);
-  if (isWithinProjectRoot(fromRoot, projectRoot) && (await Bun.file(fromRoot).exists())) {
+  if (isWithinProjectRoot(fromRoot, projectRoot) && fileExists(fromRoot)) {
     return { kind: "found", path: fromRoot };
   }
 
