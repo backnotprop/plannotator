@@ -161,9 +161,13 @@ export const GraphvizBlock: React.FC<{ block: Block }> = ({ block }) => {
       try {
         const viz = await getVizInstance();
         const renderedSvg = await viz.renderString(block.content, { format: 'svg' });
+        const cleaned = renderedSvg
+          .replace(/ width="[^"]*"/, ' width="100%"')
+          .replace(/ height="[^"]*"/, ' height="100%"')
+          .replace(/ style="[^"]*"/, '');
         if (!cancelled) {
-          naturalBoundsRef.current = parseViewBoxFromMarkup(renderedSvg);
-          setSvg(renderedSvg);
+          naturalBoundsRef.current = parseViewBoxFromMarkup(cleaned);
+          setSvg(cleaned);
           setError(null);
         }
       } catch (err) {
@@ -264,16 +268,20 @@ export const GraphvizBlock: React.FC<{ block: Block }> = ({ block }) => {
     };
   }, [fitToCurrentViewport, isExpanded, showSource, svg]);
 
-  const handleWheelZoom = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
-    if (showSource || Math.abs(event.deltaY) < 0.1 || event.ctrlKey) {
-      return;
-    }
+  useEffect(() => {
+    if (showSource || !containerRef.current) return;
 
-    event.preventDefault();
-    const delta = event.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
-    const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoomLevelRef.current + delta));
-    updateZoom(newZoom);
-  }, [showSource, updateZoom]);
+    const container = containerRef.current;
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
+      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoomLevelRef.current + delta));
+      updateZoom(newZoom);
+    };
+
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => container.removeEventListener('wheel', handleWheel);
+  }, [showSource, isExpanded, updateZoom]);
 
   const handleZoomIn = useCallback(() => {
     updateZoom(Math.min(zoomLevelRef.current + ZOOM_STEP, MAX_ZOOM));
@@ -451,7 +459,6 @@ export const GraphvizBlock: React.FC<{ block: Block }> = ({ block }) => {
       ref={containerRef}
       className={`rounded-xl bg-muted/30 border border-border/30 overflow-hidden select-none cursor-grab ${isExpanded ? 'h-full min-h-0' : 'h-[min(65vh,36rem)] min-h-[20rem]'}`}
       dangerouslySetInnerHTML={{ __html: svg }}
-      onWheel={handleWheelZoom}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={stopDragging}
