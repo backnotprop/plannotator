@@ -23,7 +23,7 @@ import { getBearSettings } from '@plannotator/ui/utils/bear';
 import { getDefaultNotesApp } from '@plannotator/ui/utils/defaultNotesApp';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { getPlanSaveSettings } from '@plannotator/ui/utils/planSave';
-import { getUIPreferences, needsUIFeaturesSetup, type UIPreferences } from '@plannotator/ui/utils/uiPreferences';
+import { getUIPreferences, needsUIFeaturesSetup, type UIPreferences, type PlanWidth } from '@plannotator/ui/utils/uiPreferences';
 import { getEditorMode, saveEditorMode } from '@plannotator/ui/utils/editorMode';
 import { getInputMethod, saveInputMethod } from '@plannotator/ui/utils/inputMethod';
 import { useInputMethodSwitch } from '@plannotator/ui/hooks/useInputMethodSwitch';
@@ -1146,6 +1146,11 @@ const App: React.FC = () => {
     return 'Coding Agent';
   }, [origin]);
 
+  const planMaxWidth = useMemo(() => {
+    const widths: Record<PlanWidth, number> = { compact: 832, default: 1040, wide: 1280 };
+    return widths[uiPrefs.planWidth] ?? 832;
+  }, [uiPrefs.planWidth]);
+
   return (
     <ThemeProvider defaultTheme="dark">
       <div className="h-screen flex flex-col bg-background overflow-hidden">
@@ -1474,7 +1479,7 @@ const App: React.FC = () => {
             <div className="min-h-full flex flex-col items-center px-2 py-3 md:px-10 md:py-8 xl:px-16">
               {/* Annotation Toolstrip (hidden during plan diff) */}
               {!isPlanDiffActive && (
-                <div className="w-full max-w-[832px] 2xl:max-w-5xl mb-3 md:mb-4 flex items-center justify-start">
+                <div className="w-full mb-3 md:mb-4 flex items-center justify-start" style={{ maxWidth: planMaxWidth }}>
                   <AnnotationToolstrip
                     inputMethod={inputMethod}
                     onInputMethodChange={handleInputMethodChange}
@@ -1496,6 +1501,7 @@ const App: React.FC = () => {
                   repoInfo={repoInfo}
                   baseVersionLabel={planDiff.diffBaseVersion != null ? `v${planDiff.diffBaseVersion}` : undefined}
                   baseVersion={planDiff.diffBaseVersion ?? undefined}
+                  maxWidth={planMaxWidth}
                 />
               ) : (
                 <Viewer
@@ -1521,6 +1527,7 @@ const App: React.FC = () => {
                   onPlanDiffToggle={() => setIsPlanDiffActive(!isPlanDiffActive)}
                   hasPreviousVersion={!linkedDocHook.isActive && planDiff.hasPreviousVersion}
                   showDemoBadge={!isApiMode && !isLoadingShared && !isSharedSession}
+                  maxWidth={planMaxWidth}
                   onOpenLinkedDoc={handleOpenLinkedDoc}
                   linkedDocInfo={linkedDocHook.isActive ? { filepath: linkedDocHook.filepath!, onBack: handleLinkedDocBack, label: vaultBrowser.activeFile ? 'Vault File' : undefined } : null}
                 />

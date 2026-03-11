@@ -26,6 +26,7 @@ interface PlanDiffViewerProps {
   repoInfo?: { display: string; branch?: string } | null;
   baseVersionLabel?: string;
   baseVersion?: number;
+  maxWidth?: number;
 }
 
 export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
@@ -37,6 +38,7 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
   repoInfo,
   baseVersionLabel,
   baseVersion,
+  maxWidth,
 }) => {
   const [vscodeDiffLoading, setVscodeDiffLoading] = useState(false);
   const [vscodeDiffError, setVscodeDiffError] = useState<string | null>(null);
@@ -65,8 +67,8 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
   };
 
   return (
-    <div className="relative z-50 w-full max-w-[1040px] 2xl:max-w-[1280px]">
-      <article className="w-full max-w-[1040px] 2xl:max-w-[1280px] bg-card border border-border/50 rounded-xl shadow-xl p-5 md:p-8 lg:p-10 xl:p-12 relative">
+    <div className="relative z-50 w-full" style={maxWidth ? { maxWidth } : { maxWidth: 832 }}>
+      <article className="w-full bg-card border border-border/50 rounded-xl shadow-xl p-5 md:p-8 lg:p-10 xl:p-12 relative">
         {/* Top-left: repo info + diff badge — matches Viewer layout (flex-col) so badge doesn't jump position */}
         <div className="absolute top-3 left-3 md:top-4 md:left-5 flex flex-col items-start gap-1 text-[9px] text-muted-foreground/50 font-mono">
           {repoInfo && (

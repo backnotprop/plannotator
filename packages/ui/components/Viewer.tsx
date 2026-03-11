@@ -41,6 +41,8 @@ interface ViewerProps {
   hasPreviousVersion?: boolean;
   /** Show amber "Demo" badge (portal mode, no shared content loaded) */
   showDemoBadge?: boolean;
+  /** Max width in px for the plan card (from plan width setting) */
+  maxWidth?: number;
 }
 
 export interface ViewerHandle {
@@ -103,6 +105,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   onPlanDiffToggle,
   hasPreviousVersion,
   showDemoBadge,
+  maxWidth,
   onOpenLinkedDoc,
   linkedDocInfo,
 }, ref) => {
@@ -794,11 +797,11 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   }, []);
 
   return (
-    <div className="relative z-50 w-full max-w-[1040px] 2xl:max-w-[1280px]">
+    <div className="relative z-50 w-full" style={maxWidth ? { maxWidth } : { maxWidth: 832 }}>
       {taterMode && <TaterSpriteSitting />}
       <article
         ref={containerRef}
-        className={`w-full max-w-[1040px] 2xl:max-w-[1280px] bg-card rounded-xl shadow-xl p-5 md:p-8 lg:p-10 xl:p-12 relative ${
+        className={`w-full bg-card rounded-xl shadow-xl p-5 md:p-8 lg:p-10 xl:p-12 relative ${
           linkedDocInfo ? 'border-2 border-primary' : 'border border-border/50'
         } ${inputMethod === 'pinpoint' ? 'cursor-crosshair' : ''}`}
       >
