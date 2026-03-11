@@ -112,13 +112,13 @@ export function handleDraftDelete(contentKey: string): Response {
   return Response.json({ ok: true });
 }
 
-/** Open browser for local sessions. Used by all 3 servers. */
+/** Open browser for local sessions or when a custom handler (e.g. VS Code extension) is configured. */
 export async function handleServerReady(
   url: string,
   isRemote: boolean,
   _port: number,
 ): Promise<void> {
-  if (!isRemote) {
+  if (!isRemote || process.env.PLANNOTATOR_BROWSER) {
     await openBrowser(url);
   }
 }
