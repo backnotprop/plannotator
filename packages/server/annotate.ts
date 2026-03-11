@@ -31,7 +31,7 @@ export interface AnnotateServerOptions {
   /** HTML content to serve for the UI */
   htmlContent: string;
   /** Origin identifier for UI customization */
-  origin?: "opencode" | "claude-code";
+  origin?: "opencode" | "claude-code" | "pi";
   /** Whether URL sharing is enabled (default: true) */
   sharingEnabled?: boolean;
   /** Custom base URL for share links */

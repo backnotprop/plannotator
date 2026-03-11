@@ -35,7 +35,7 @@ interface DiffData {
   files: DiffFile[];
   rawPatch: string;
   gitRef: string;
-  origin?: 'opencode' | 'claude-code';
+  origin?: 'opencode' | 'claude-code' | 'pi';
   diffType?: string;
   gitContext?: GitContext;
   sharingEnabled?: boolean;
@@ -139,7 +139,7 @@ const ReviewApp: React.FC = () => {
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
   const [hideViewedFiles, setHideViewedFiles] = useState(false);
-  const [origin, setOrigin] = useState<'opencode' | 'claude-code' | null>(null);
+  const [origin, setOrigin] = useState<'opencode' | 'claude-code' | 'pi' | null>(null);
   const [diffType, setDiffType] = useState<string>('uncommitted');
   const [gitContext, setGitContext] = useState<GitContext | null>(null);
   const [isLoadingDiff, setIsLoadingDiff] = useState(false);
@@ -214,7 +214,7 @@ const ReviewApp: React.FC = () => {
       .then((data: {
         rawPatch: string;
         gitRef: string;
-        origin?: 'opencode' | 'claude-code';
+        origin?: 'opencode' | 'claude-code' | 'pi';
         diffType?: string;
         gitContext?: GitContext;
         sharingEnabled?: boolean;
@@ -615,9 +615,11 @@ const ReviewApp: React.FC = () => {
               <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium hidden md:inline ${
                 origin === 'claude-code'
                   ? 'bg-orange-500/15 text-orange-400'
-                  : 'bg-zinc-500/20 text-zinc-400'
+                  : origin === 'pi'
+                    ? 'bg-violet-500/15 text-violet-400'
+                    : 'bg-zinc-500/20 text-zinc-400'
               }`}>
-                {origin === 'claude-code' ? 'Claude Code' : 'OpenCode'}
+                {origin === 'claude-code' ? 'Claude Code' : origin === 'pi' ? 'Pi' : 'OpenCode'}
               </span>
             )}
             {repoInfo && (
@@ -991,10 +993,10 @@ const ReviewApp: React.FC = () => {
           title={submitted === 'approved' ? 'Changes Approved' : 'Feedback Sent'}
           subtitle={
             submitted === 'approved'
-              ? `${origin === 'claude-code' ? 'Claude Code' : 'OpenCode'} will proceed with the changes.`
-              : `${origin === 'claude-code' ? 'Claude Code' : 'OpenCode'} will address your review feedback.`
+              ? `${origin === 'claude-code' ? 'Claude Code' : origin === 'pi' ? 'Pi' : 'OpenCode'} will proceed with the changes.`
+              : `${origin === 'claude-code' ? 'Claude Code' : origin === 'pi' ? 'Pi' : 'OpenCode'} will address your review feedback.`
           }
-          agentLabel={origin === 'claude-code' ? 'Claude Code' : 'OpenCode'}
+          agentLabel={origin === 'claude-code' ? 'Claude Code' : origin === 'pi' ? 'Pi' : 'OpenCode'}
         />
 
         {/* Update notification */}

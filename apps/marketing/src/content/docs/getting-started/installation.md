@@ -101,4 +101,11 @@ Coming soon.
 
 ## Codex
 
-Coming soon.
+Plan mode is not yet supported.
+
+Install the binary, then use it directly:
+
+```
+!plannotator review           # Code review for current changes
+!plannotator annotate file.md # Annotate a markdown file
+```

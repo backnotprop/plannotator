@@ -34,7 +34,7 @@ export interface ReviewServerOptions {
   /** HTML content to serve for the UI */
   htmlContent: string;
   /** Origin identifier for UI customization */
-  origin?: "opencode" | "claude-code";
+  origin?: "opencode" | "claude-code" | "pi";
   /** Current diff type being displayed */
   diffType?: DiffType;
   /** Git context with branch info and available diff options */

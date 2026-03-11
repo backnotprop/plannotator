@@ -1,4 +1,5 @@
-import { resolve } from "path";
+import { resolve, join } from "path";
+import { tmpdir } from "os";
 
 const ALLOWED_IMAGE_EXTENSIONS = new Set([
   "png",
@@ -14,7 +15,7 @@ const ALLOWED_IMAGE_EXTENSIONS = new Set([
   "avif",
 ]);
 
-const UPLOAD_DIR = "/tmp/plannotator";
+const UPLOAD_DIR = join(tmpdir(), "plannotator");
 
 function getExtension(filePath: string): string {
   const lastDot = filePath.lastIndexOf(".");

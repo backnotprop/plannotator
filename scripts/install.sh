@@ -110,6 +110,13 @@ fi
 # Clear any cached OpenCode plugin to force fresh download on next run
 rm -rf "$HOME/.cache/opencode/node_modules/@plannotator" "$HOME/.bun/install/cache/@plannotator" 2>/dev/null || true
 
+# Update Pi extension if pi is installed
+if command -v pi &>/dev/null; then
+    echo "Updating Pi extension..."
+    pi install npm:@plannotator/pi-extension
+    echo "Pi extension updated."
+fi
+
 # Install /review slash command
 CLAUDE_COMMANDS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/commands"
 mkdir -p "$CLAUDE_COMMANDS_DIR"

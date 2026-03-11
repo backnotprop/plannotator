@@ -8,7 +8,9 @@ import { AnnotationToolbar } from './AnnotationToolbar';
 import { CommentPopover } from './CommentPopover';
 import { TaterSpriteSitting } from './TaterSpriteSitting';
 import { AttachmentsButton } from './AttachmentsButton';
+import { GraphvizBlock } from './GraphvizBlock';
 import { MermaidBlock } from './MermaidBlock';
+import { isGraphvizLanguage, isMermaidLanguage } from './diagramLanguages';
 import { getIdentity } from '../utils/identity';
 import { PlanDiffBadge } from './plan-diff/PlanDiffBadge';
 import { PinpointOverlay } from './PinpointOverlay';
@@ -792,11 +794,11 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   }, []);
 
   return (
-    <div className="relative z-50 w-full max-w-[832px] 2xl:max-w-5xl">
+    <div className="relative z-50 w-full max-w-[1040px] 2xl:max-w-[1280px]">
       {taterMode && <TaterSpriteSitting />}
       <article
         ref={containerRef}
-        className={`w-full max-w-[832px] 2xl:max-w-5xl bg-card rounded-xl shadow-xl p-5 md:p-8 lg:p-10 xl:p-12 relative ${
+        className={`w-full max-w-[1040px] 2xl:max-w-[1280px] bg-card rounded-xl shadow-xl p-5 md:p-8 lg:p-10 xl:p-12 relative ${
           linkedDocInfo ? 'border-2 border-primary' : 'border border-border/50'
         } ${inputMethod === 'pinpoint' ? 'cursor-crosshair' : ''}`}
       >
@@ -921,8 +923,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                 <BlockRenderer key={block.id} block={block} onOpenLinkedDoc={onOpenLinkedDoc} />
               ))}
             </div>
-          ) : group.block.type === 'code' && group.block.language === 'mermaid' ? (
+          ) : group.block.type === 'code' && isMermaidLanguage(group.block.language) ? (
             <MermaidBlock key={group.block.id} block={group.block} />
+          ) : group.block.type === 'code' && isGraphvizLanguage(group.block.language) ? (
+            <GraphvizBlock key={group.block.id} block={group.block} />
           ) : group.block.type === 'code' ? (
             <CodeBlock
               key={group.block.id}
@@ -1267,7 +1271,7 @@ const BlockRenderer: React.FC<{ block: Block; onOpenLinkedDoc?: (path: string) =
     }
 
     case 'code':
-      return <CodeBlock block={block} />;
+      return <CodeBlock block={block} onHover={() => {}} onLeave={() => {}} isHovered={false} />;
 
     case 'table': {
       const { headers, rows } = parseTableContent(block.content);
@@ -1387,4 +1391,3 @@ const CodeBlock: React.FC<CodeBlockProps> = ({ block, onHover, onLeave, isHovere
     </div>
   );
 };
-
