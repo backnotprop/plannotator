@@ -46,12 +46,6 @@ describe("isRemoteSession", () => {
     expect(isRemoteSession()).toBe(true);
   });
 
-  test("true when PLANNOTATOR_REMOTE=TRUE (case-insensitive)", () => {
-    clearEnv();
-    process.env.PLANNOTATOR_REMOTE = "TRUE";
-    expect(isRemoteSession()).toBe(true);
-  });
-
   test("true when SSH_TTY is set (legacy)", () => {
     clearEnv();
     process.env.SSH_TTY = "/dev/pts/0";

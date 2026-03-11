@@ -15,7 +15,7 @@ describe("UPLOAD_DIR", () => {
     // On Windows it returns C:\Users\...\AppData\Local\Temp
     // The key thing: it should NOT be hardcoded to /tmp/plannotator
     expect(UPLOAD_DIR).toContain("plannotator");
-    expect(UPLOAD_DIR.startsWith(tmpdir()) || UPLOAD_DIR === "/tmp/plannotator").toBe(true);
+    expect(UPLOAD_DIR.startsWith(tmpdir())).toBe(true);
   });
 });
 
