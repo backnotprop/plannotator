@@ -28,7 +28,7 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
 
   return (
     <>
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1.5 flex-wrap">
         {/* Input method group */}
         <div className="inline-flex items-center gap-0.5 bg-muted/50 rounded-lg p-0.5 border border-border/30">
           <ToolstripButton
@@ -109,7 +109,7 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
         {/* Help */}
         <button
           onClick={() => setShowHelp(true)}
-          className="ml-2 text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+          className="ml-2 text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors hidden sm:block"
         >
           how does this work?
         </button>
@@ -229,6 +229,7 @@ const ToolstripButton: React.FC<{
   const [labelWidth, setLabelWidth] = useState(0);
   const measureRef = useRef<HTMLSpanElement>(null);
   const styles = colorStyles[color];
+  const [isTouchDevice] = useState(() => 'ontouchstart' in window || navigator.maxTouchPoints > 0);
 
   // Measure label text width synchronously before first paint
   useLayoutEffect(() => {
@@ -237,7 +238,7 @@ const ToolstripButton: React.FC<{
     }
   }, [label]);
 
-  const expanded = active || hovered;
+  const expanded = active || hovered || isTouchDevice;
   const expandedWidth = H_PAD + ICON_INNER + GAP + labelWidth + H_PAD;
   const currentWidth = expanded ? expandedWidth : ICON_SIZE;
 

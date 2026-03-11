@@ -1,32 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import mermaid from 'mermaid';
+import { instance } from '@viz-js/viz';
 import type { Block } from '../types';
-
-mermaid.initialize({
-  startOnLoad: false,
-  securityLevel: 'strict',
-  theme: 'dark',
-  themeVariables: {
-    primaryColor: '#3b82f6',
-    primaryTextColor: '#f8fafc',
-    primaryBorderColor: '#475569',
-    lineColor: '#64748b',
-    secondaryColor: '#1e293b',
-    tertiaryColor: '#0f172a',
-    background: '#1e293b',
-    mainBkg: '#1e293b',
-    nodeBorder: '#475569',
-    clusterBkg: '#1e293b',
-    clusterBorder: '#475569',
-    titleColor: '#f8fafc',
-    edgeLabelBackground: '#1e293b',
-  },
-  flowchart: {
-    htmlLabels: true,
-    curve: 'basis',
-  },
-});
 
 interface ViewBox {
   x: number;
@@ -38,6 +13,13 @@ interface ViewBox {
 const ZOOM_STEP = 0.25;
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 8;
+
+let vizInstancePromise: ReturnType<typeof instance> | null = null;
+
+function getVizInstance() {
+  vizInstancePromise ??= instance();
+  return vizInstancePromise;
+}
 
 function parseViewBox(svgEl: SVGSVGElement): ViewBox | null {
   const raw = svgEl.getAttribute('viewBox');
@@ -57,7 +39,6 @@ function parseViewBox(svgEl: SVGSVGElement): ViewBox | null {
   return { x, y, width, height };
 }
 
-// Parse base viewBox from Mermaid SVG markup before DOM mount
 function parseViewBoxFromMarkup(markup: string): ViewBox | null {
   const viewBoxMatch = markup.match(/viewBox\s*=\s*"([^"]+)"/i);
   if (viewBoxMatch?.[1]) {
@@ -74,8 +55,8 @@ function parseViewBoxFromMarkup(markup: string): ViewBox | null {
     }
   }
 
-  const widthMatch = markup.match(/\bwidth\s*=\s*"([0-9.]+)(?:px)?"/i);
-  const heightMatch = markup.match(/\bheight\s*=\s*"([0-9.]+)(?:px)?"/i);
+  const widthMatch = markup.match(/\bwidth\s*=\s*"([0-9.]+)(?:px|pt)?"/i);
+  const heightMatch = markup.match(/\bheight\s*=\s*"([0-9.]+)(?:px|pt)?"/i);
   const width = widthMatch?.[1] ? Number.parseFloat(widthMatch[1]) : NaN;
   const height = heightMatch?.[1] ? Number.parseFloat(heightMatch[1]) : NaN;
   if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
@@ -85,7 +66,6 @@ function parseViewBoxFromMarkup(markup: string): ViewBox | null {
   return null;
 }
 
-// Apply calculated viewBox from zoom and pan state
 function applyView(svgEl: SVGSVGElement, base: ViewBox, zoom: number, pan: { x: number; y: number }): void {
   const zoomedWidth = base.width / zoom;
   const zoomedHeight = base.height / zoom;
@@ -96,7 +76,6 @@ function applyView(svgEl: SVGSVGElement, base: ViewBox, zoom: number, pan: { x: 
   svgEl.setAttribute('viewBox', `${vbX} ${vbY} ${zoomedWidth} ${zoomedHeight}`);
 }
 
-// Compute a fitted base viewBox for the current container ratio
 function fitBoundsToContainer(bounds: ViewBox, containerRect: DOMRect): ViewBox {
   const containerWidth = Math.max(containerRect.width, 1);
   const containerHeight = Math.max(containerRect.height, 1);
@@ -124,18 +103,13 @@ function fitBoundsToContainer(bounds: ViewBox, containerRect: DOMRect): ViewBox 
   };
 }
 
-/**
- * Renders a mermaid diagram block with zoom controls.
- */
-export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
+export const GraphvizBlock: React.FC<{ block: Block }> = ({ block }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const expandedOverlayRef = useRef<HTMLDivElement>(null);
   const [svg, setSvg] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [showSource, setShowSource] = useState(true);
   const [isExpanded, setIsExpanded] = useState(false);
 
-  // All zoom/pan state as refs to avoid re-renders
   const zoomLevelRef = useRef(1);
   const isDraggingRef = useRef(false);
   const naturalBoundsRef = useRef<ViewBox | null>(null);
@@ -144,12 +118,10 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
   const dragStartRef = useRef({ x: 0, y: 0 });
   const panStartRef = useRef({ x: 0, y: 0 });
 
-  // UI refs for zoom controls
   const zoomInBtnRef = useRef<HTMLButtonElement>(null);
   const zoomOutBtnRef = useRef<HTMLButtonElement>(null);
   const zoomDisplayRef = useRef<HTMLSpanElement>(null);
 
-  // Update zoom level, viewBox, and UI without React re-render
   const updateZoom = useCallback((newZoom: number) => {
     zoomLevelRef.current = newZoom;
 
@@ -185,14 +157,17 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
   useEffect(() => {
     let cancelled = false;
 
-    // Render mermaid diagram
     const renderDiagram = async () => {
       try {
-        const id = `mermaid-${block.id}`;
-        const { svg: renderedSvg } = await mermaid.render(id, block.content);
+        const viz = await getVizInstance();
+        const renderedSvg = await viz.renderString(block.content, { format: 'svg' });
+        const cleaned = renderedSvg
+          .replace(/ width="[^"]*"/, ' width="100%"')
+          .replace(/ height="[^"]*"/, ' height="100%"')
+          .replace(/ style="[^"]*"/, '');
         if (!cancelled) {
-          naturalBoundsRef.current = parseViewBoxFromMarkup(renderedSvg);
-          setSvg(renderedSvg);
+          naturalBoundsRef.current = parseViewBoxFromMarkup(cleaned);
+          setSvg(cleaned);
           setError(null);
         }
       } catch (err) {
@@ -208,9 +183,8 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
     return () => {
       cancelled = true;
     };
-  }, [block.content, block.id]);
+  }, [block.content]);
 
-  // Reset zoom and pan when content changes
   useEffect(() => {
     zoomLevelRef.current = 1;
     naturalBoundsRef.current = null;
@@ -219,7 +193,6 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
     setIsExpanded(false);
   }, [block.content]);
 
-  // Reset zoom and pan when switching from source back to diagram
   useEffect(() => {
     if (showSource) {
       setIsExpanded(false);
@@ -251,7 +224,6 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
     };
   }, [isExpanded]);
 
-  // Compute base viewBox from rendered SVG and apply initial view
   useEffect(() => {
     if (!svg || showSource || !containerRef.current) return;
 
@@ -296,54 +268,20 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
     };
   }, [fitToCurrentViewport, isExpanded, showSource, svg]);
 
-  const applyWheelZoomDelta = useCallback((deltaY: number) => {
-    if (Math.abs(deltaY) < 0.1) {
-      return;
-    }
-
-    const delta = deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
-    const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoomLevelRef.current + delta));
-    updateZoom(newZoom);
-  }, [updateZoom]);
-
   useEffect(() => {
     if (showSource || !containerRef.current) return;
 
     const container = containerRef.current;
-    const handleWheel = (event: WheelEvent) => {
-      if (Math.abs(event.deltaY) < 0.1) return;
-      event.preventDefault();
-      applyWheelZoomDelta(event.deltaY);
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
+      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoomLevelRef.current + delta));
+      updateZoom(newZoom);
     };
 
     container.addEventListener('wheel', handleWheel, { passive: false });
-
-    return () => {
-      container.removeEventListener('wheel', handleWheel);
-    };
-  }, [applyWheelZoomDelta, showSource]);
-
-  useEffect(() => {
-    if (showSource || !isExpanded) return;
-
-    const handleExpandedPinchWheel = (event: WheelEvent) => {
-      if (!event.ctrlKey && !event.metaKey) return;
-      if (!expandedOverlayRef.current) return;
-
-      const eventTarget = event.target;
-      if (!(eventTarget instanceof Node) || !expandedOverlayRef.current.contains(eventTarget)) return;
-
-      event.preventDefault();
-      event.stopPropagation();
-      applyWheelZoomDelta(event.deltaY);
-    };
-
-    window.addEventListener('wheel', handleExpandedPinchWheel, { passive: false, capture: true });
-
-    return () => {
-      window.removeEventListener('wheel', handleExpandedPinchWheel, { capture: true });
-    };
-  }, [applyWheelZoomDelta, isExpanded, showSource]);
+    return () => container.removeEventListener('wheel', handleWheel);
+  }, [showSource, isExpanded, updateZoom]);
 
   const handleZoomIn = useCallback(() => {
     updateZoom(Math.min(zoomLevelRef.current + ZOOM_STEP, MAX_ZOOM));
@@ -370,7 +308,6 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
     return () => observer.disconnect();
   }, [fitToCurrentViewport, isExpanded, showSource, svg]);
 
-  // Drag-to-pan handlers (all ref-based to avoid re-renders)
   const handleMouseDown = useCallback((event: React.MouseEvent) => {
     if (event.button !== 0) return;
     event.preventDefault();
@@ -416,7 +353,7 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
           <svg className="w-4 h-4 text-destructive" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
-          <span className="text-xs text-destructive font-medium">Mermaid Error</span>
+          <span className="text-xs text-destructive font-medium">Graphviz Error</span>
         </div>
         <pre className="p-3 text-xs text-destructive/80 overflow-x-auto">{error}</pre>
         <pre className="p-3 text-xs text-muted-foreground bg-muted/30 border-t border-border/30 overflow-x-auto">
@@ -427,9 +364,7 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
   }
 
   const controls = (
-    /* Controls container */
     <div className={`absolute top-2 right-2 flex flex-col gap-1 items-center z-10 ${isExpanded ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 transition-opacity'}`}>
-      {/* Toggle source/diagram button */}
       <button
         onClick={() => setShowSource(!showSource)}
         className="p-1.5 rounded-md bg-muted/85 hover:bg-muted text-muted-foreground hover:text-foreground"
@@ -448,9 +383,7 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
 
       {!showSource && svg && (
         <>
-          {/* Diagram interaction controls */}
           <div className="flex w-10 flex-col items-center gap-0.5 bg-muted/85 rounded-md p-0.5">
-            {/* Expand/exit expanded button */}
             <button
               onClick={() => setIsExpanded(!isExpanded)}
               className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
@@ -468,7 +401,6 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
               )}
             </button>
 
-            {/* Zoom in button */}
             <button
               ref={zoomInBtnRef}
               onClick={handleZoomIn}
@@ -481,7 +413,6 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
               </svg>
             </button>
 
-            {/* Fit to view button */}
             <button
               onClick={handleFitToScreen}
               className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
@@ -494,7 +425,6 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
               </svg>
             </button>
 
-            {/* Zoom out button */}
             <button
               ref={zoomOutBtnRef}
               onClick={handleZoomOut}
@@ -508,7 +438,6 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
             </button>
           </div>
 
-          {/* Zoom percentage badge */}
           <span
             ref={zoomDisplayRef}
             hidden
@@ -521,7 +450,7 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
 
   const inlineSource = (
     <pre className="rounded-lg text-[13px] overflow-x-auto bg-muted/50 border border-border/30 p-4">
-      <code className="hljs font-mono language-mermaid">{block.content}</code>
+      <code className={`hljs font-mono language-${block.language ?? 'graphviz'}`}>{block.content}</code>
     </pre>
   );
 
@@ -545,10 +474,10 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
       </div>
 
       {!showSource && svg && isExpanded && typeof document !== 'undefined' && createPortal(
-        <div ref={expandedOverlayRef} className="fixed inset-0 z-[9999] bg-background/90 backdrop-blur-sm p-4 md:p-6">
+        <div className="fixed inset-0 z-[9999] bg-background/90 backdrop-blur-sm p-4 md:p-6">
           <div className="mx-auto flex h-full max-w-[min(96vw,110rem)] flex-col gap-3">
             <div className="flex items-center justify-between gap-4 text-xs text-muted-foreground">
-              <span className="truncate">Mermaid diagram</span>
+              <span className="truncate">Graphviz diagram</span>
               <button
                 onClick={() => setIsExpanded(false)}
                 className="rounded-md border border-border/60 bg-card/70 px-2.5 py-1.5 text-foreground hover:bg-card"

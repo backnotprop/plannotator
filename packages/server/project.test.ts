@@ -105,10 +105,11 @@ describe("detectProjectName", () => {
     }
   });
 
-  // This test verifies we get "planning-hook" when run from this repo
-  test("detects current repo name", async () => {
+  // Verify we detect a repo name from the current working directory.
+  // The exact name depends on the checkout path (local vs CI).
+  test("detects a valid repo name", async () => {
     const result = await detectProjectName();
-    // We're in the planning-hook repo, so should get that name
-    expect(result).toBe("planning-hook");
+    expect(result).not.toBeNull();
+    expect(result!.length).toBeGreaterThanOrEqual(2);
   });
 });
