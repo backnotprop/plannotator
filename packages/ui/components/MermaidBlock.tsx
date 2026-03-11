@@ -129,6 +129,7 @@ function fitBoundsToContainer(bounds: ViewBox, containerRect: DOMRect): ViewBox 
  */
 export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const expandedOverlayRef = useRef<HTMLDivElement>(null);
   const [svg, setSvg] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [showSource, setShowSource] = useState(true);
@@ -295,17 +296,78 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
     };
   }, [fitToCurrentViewport, isExpanded, showSource, svg]);
 
-  // Wheel zoom support
-  const handleWheelZoom = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
-    if (showSource || Math.abs(event.deltaY) < 0.1 || event.ctrlKey) {
+  const applyWheelZoomDelta = useCallback((deltaY: number) => {
+    if (Math.abs(deltaY) < 0.1) {
       return;
     }
 
-    event.preventDefault();
-    const delta = event.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
+    const delta = deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
     const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoomLevelRef.current + delta));
     updateZoom(newZoom);
-  }, [showSource, updateZoom]);
+  }, [updateZoom]);
+
+  useEffect(() => {
+    if (showSource || !containerRef.current) return;
+
+    const container = containerRef.current;
+    const handleWheel = (event: WheelEvent) => {
+      if (Math.abs(event.deltaY) < 0.1) return;
+      event.preventDefault();
+      applyWheelZoomDelta(event.deltaY);
+    };
+    const blockBrowserZoom = (event: Event) => {
+      event.preventDefault();
+    };
+
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    container.addEventListener('gesturestart', blockBrowserZoom, { passive: false });
+    container.addEventListener('gesturechange', blockBrowserZoom, { passive: false });
+    container.addEventListener('gestureend', blockBrowserZoom, { passive: false });
+
+    return () => {
+      container.removeEventListener('wheel', handleWheel);
+      container.removeEventListener('gesturestart', blockBrowserZoom);
+      container.removeEventListener('gesturechange', blockBrowserZoom);
+      container.removeEventListener('gestureend', blockBrowserZoom);
+    };
+  }, [applyWheelZoomDelta, showSource]);
+
+  useEffect(() => {
+    if (showSource || !isExpanded) return;
+
+    const handleExpandedPinchWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      if (!expandedOverlayRef.current) return;
+
+      const eventTarget = event.target;
+      if (!(eventTarget instanceof Node) || !expandedOverlayRef.current.contains(eventTarget)) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      applyWheelZoomDelta(event.deltaY);
+    };
+
+    const blockExpandedGestureZoom = (event: Event) => {
+      if (!expandedOverlayRef.current) return;
+      const eventTarget = event.target;
+      if (!(eventTarget instanceof Node) || !expandedOverlayRef.current.contains(eventTarget)) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    window.addEventListener('wheel', handleExpandedPinchWheel, { passive: false, capture: true });
+    document.addEventListener('gesturestart', blockExpandedGestureZoom, { passive: false, capture: true });
+    document.addEventListener('gesturechange', blockExpandedGestureZoom, { passive: false, capture: true });
+    document.addEventListener('gestureend', blockExpandedGestureZoom, { passive: false, capture: true });
+
+    return () => {
+      window.removeEventListener('wheel', handleExpandedPinchWheel, { capture: true });
+      document.removeEventListener('gesturestart', blockExpandedGestureZoom, { capture: true });
+      document.removeEventListener('gesturechange', blockExpandedGestureZoom, { capture: true });
+      document.removeEventListener('gestureend', blockExpandedGestureZoom, { capture: true });
+    };
+  }, [applyWheelZoomDelta, isExpanded, showSource]);
 
   const handleZoomIn = useCallback(() => {
     updateZoom(Math.min(zoomLevelRef.current + ZOOM_STEP, MAX_ZOOM));
@@ -492,7 +554,6 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
       ref={containerRef}
       className={`rounded-xl bg-muted/30 border border-border/30 overflow-hidden select-none cursor-grab ${isExpanded ? 'h-full min-h-0' : 'h-[min(65vh,36rem)] min-h-[20rem]'}`}
       dangerouslySetInnerHTML={{ __html: svg }}
-      onWheel={handleWheelZoom}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={stopDragging}
@@ -508,7 +569,7 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
       </div>
 
       {!showSource && svg && isExpanded && typeof document !== 'undefined' && createPortal(
-        <div className="fixed inset-0 z-[9999] bg-background/90 backdrop-blur-sm p-4 md:p-6">
+        <div ref={expandedOverlayRef} className="fixed inset-0 z-[9999] bg-background/90 backdrop-blur-sm p-4 md:p-6">
           <div className="mx-auto flex h-full max-w-[min(96vw,110rem)] flex-col gap-3">
             <div className="flex items-center justify-between gap-4 text-xs text-muted-foreground">
               <span className="truncate">Mermaid diagram</span>
