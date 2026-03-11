@@ -1451,7 +1451,7 @@ const App: React.FC = () => {
               cancelText="Dismiss"
               showCancel
             />
-            <div className="min-h-full flex flex-col items-center px-4 py-3 md:px-10 md:py-8 xl:px-16">
+            <div className="min-h-full flex flex-col items-center px-2 py-3 md:px-10 md:py-8 xl:px-16">
               {/* Annotation Toolstrip (hidden during plan diff) */}
               {!isPlanDiffActive && (
                 <div className="w-full max-w-[832px] 2xl:max-w-5xl mb-3 md:mb-4 flex items-center justify-start">

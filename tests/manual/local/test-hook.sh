@@ -19,8 +19,9 @@ echo "=== Plannotator Hook Test ==="
 echo ""
 
 # Build first to ensure latest code
-echo "Building hook..."
+echo "Building review + hook..."
 cd "$PROJECT_ROOT"
+bun run build:review
 bun run build:hook
 
 echo ""

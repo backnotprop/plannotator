@@ -860,7 +860,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         {stickyActions && <div ref={stickySentinelRef} className="h-0 w-0 float-right" aria-hidden="true" />}
 
         {/* Header buttons - top right */}
-        <div className={`${stickyActions ? 'sticky top-3' : ''} z-30 float-right flex items-start gap-2 rounded-lg p-2 transition-colors duration-150 ${isStuck ? 'bg-card/95 backdrop-blur-sm shadow-sm' : ''} -mr-4 -mt-4 md:-mr-5 md:-mt-5 lg:-mr-7 lg:-mt-7 xl:-mr-9 xl:-mt-9`}>
+        <div className={`${stickyActions ? 'sticky top-3' : ''} z-30 float-right flex items-start gap-1 md:gap-2 rounded-lg p-1 md:p-2 transition-colors duration-150 ${isStuck ? 'bg-card/95 backdrop-blur-sm shadow-sm' : ''} -mr-3 mt-6 md:-mr-5 md:-mt-5 lg:-mr-7 lg:-mt-7 xl:-mr-9 xl:-mt-9`}>
           {/* Attachments button */}
           {onAddGlobalAttachment && onRemoveGlobalAttachment && (
             <AttachmentsButton
@@ -871,7 +871,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             />
           )}
 
-          {/* Global comment button */}
+          {/* <span className="md:hidden">Comment</span><span className="hidden md:inline">Global comment</span> button */}
           <button
             ref={globalCommentButtonRef}
             onClick={() => {
@@ -887,7 +887,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
             </svg>
-            <span className="hidden md:inline">Global comment</span>
+            <span className="md:hidden">Comment</span><span className="hidden md:inline">Global comment</span>
           </button>
 
           {/* Copy plan/file button */}
@@ -901,19 +901,19 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                 <svg className="w-3.5 h-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
-                <span className="hidden md:inline">Copied!</span>
+                Copied!
               </>
             ) : (
               <>
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                 </svg>
-                <span className="hidden md:inline">{linkedDocInfo ? 'Copy file' : 'Copy plan'}</span>
+                <span className="md:hidden">Copy</span><span className="hidden md:inline">{linkedDocInfo ? 'Copy file' : 'Copy plan'}</span>
               </>
             )}
           </button>
         </div>
-        {frontmatter && <FrontmatterCard frontmatter={frontmatter} />}
+        {frontmatter && <><div className="clear-right md:hidden" /><FrontmatterCard frontmatter={frontmatter} /></>}
         {groupBlocks(blocks).map(group =>
           group.type === 'list-group' ? (
             <div key={group.key} data-pinpoint-group="list" className="py-1 -mx-2 px-2">
