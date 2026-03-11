@@ -315,20 +315,11 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
       event.preventDefault();
       applyWheelZoomDelta(event.deltaY);
     };
-    const blockBrowserZoom = (event: Event) => {
-      event.preventDefault();
-    };
 
     container.addEventListener('wheel', handleWheel, { passive: false });
-    container.addEventListener('gesturestart', blockBrowserZoom, { passive: false });
-    container.addEventListener('gesturechange', blockBrowserZoom, { passive: false });
-    container.addEventListener('gestureend', blockBrowserZoom, { passive: false });
 
     return () => {
       container.removeEventListener('wheel', handleWheel);
-      container.removeEventListener('gesturestart', blockBrowserZoom);
-      container.removeEventListener('gesturechange', blockBrowserZoom);
-      container.removeEventListener('gestureend', blockBrowserZoom);
     };
   }, [applyWheelZoomDelta, showSource]);
 
@@ -347,25 +338,10 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
       applyWheelZoomDelta(event.deltaY);
     };
 
-    const blockExpandedGestureZoom = (event: Event) => {
-      if (!expandedOverlayRef.current) return;
-      const eventTarget = event.target;
-      if (!(eventTarget instanceof Node) || !expandedOverlayRef.current.contains(eventTarget)) return;
-
-      event.preventDefault();
-      event.stopPropagation();
-    };
-
     window.addEventListener('wheel', handleExpandedPinchWheel, { passive: false, capture: true });
-    document.addEventListener('gesturestart', blockExpandedGestureZoom, { passive: false, capture: true });
-    document.addEventListener('gesturechange', blockExpandedGestureZoom, { passive: false, capture: true });
-    document.addEventListener('gestureend', blockExpandedGestureZoom, { passive: false, capture: true });
 
     return () => {
       window.removeEventListener('wheel', handleExpandedPinchWheel, { capture: true });
-      document.removeEventListener('gesturestart', blockExpandedGestureZoom, { capture: true });
-      document.removeEventListener('gesturechange', blockExpandedGestureZoom, { capture: true });
-      document.removeEventListener('gestureend', blockExpandedGestureZoom, { capture: true });
     };
   }, [applyWheelZoomDelta, isExpanded, showSource]);
 
