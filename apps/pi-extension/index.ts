@@ -182,12 +182,6 @@ export default function plannotator(pi: ExtensionAPI): void {
       // Accept path as argument: /plannotator plans/auth.md
       let targetPath = args?.trim() || undefined;
 
-      // No arg — prompt for file path interactively
-      if (!targetPath && ctx.hasUI) {
-        targetPath = await ctx.ui.input("Plan file path", planFilePath);
-        if (targetPath === undefined) return; // cancelled
-      }
-
       if (targetPath) planFilePath = targetPath;
       enterPlanning(ctx);
     },
@@ -275,7 +269,9 @@ export default function plannotator(pi: ExtensionAPI): void {
         return;
       }
 
-      const absolutePath = resolve(ctx.cwd, filePath);
+      // Strip leading @ (Pi file reference syntax)
+      const cleanPath = filePath.startsWith("@") ? filePath.slice(1) : filePath;
+      const absolutePath = resolve(ctx.cwd, cleanPath);
       if (!existsSync(absolutePath)) {
         ctx.ui.notify(`File not found: ${absolutePath}`, "error");
         return;

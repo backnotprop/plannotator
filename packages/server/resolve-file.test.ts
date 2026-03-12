@@ -182,6 +182,26 @@ describe("resolveMarkdownFile", () => {
     });
   });
 
+  // @ prefix stripping (coding agent file references)
+
+  test("strips leading @ from relative path", async () => {
+    const root = createTempProject({ "docs/analyse.md": "# Analyse" });
+    const result = await resolveMarkdownFile("@docs/analyse.md", root);
+    expect(result).toEqual({
+      kind: "found",
+      path: resolve(root, "docs/analyse.md"),
+    });
+  });
+
+  test("strips leading @ from bare filename", async () => {
+    const root = createTempProject({ "plan.md": "# Plan" });
+    const result = await resolveMarkdownFile("@plan.md", root);
+    expect(result).toEqual({
+      kind: "found",
+      path: resolve(root, "plan.md"),
+    });
+  });
+
   // Edge cases
 
   test("returns not_found for nonexistent file", async () => {

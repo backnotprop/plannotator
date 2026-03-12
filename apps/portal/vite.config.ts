@@ -19,6 +19,7 @@ export default defineConfig({
       '@plannotator/ui': path.resolve(__dirname, '../../packages/ui'),
       '@plannotator/editor/styles': path.resolve(__dirname, '../../packages/editor/index.css'),
       '@plannotator/editor': path.resolve(__dirname, '../../packages/editor/App.tsx'),
+      '@plannotator/shared': path.resolve(__dirname, '../../packages/shared'),
     }
   },
   build: {

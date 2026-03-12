@@ -137,6 +137,10 @@ export async function resolveMarkdownFile(
 ): Promise<ResolveResult> {
   // Trim whitespace/CR that may leak from Windows shell pipelines
   input = input.trim();
+  // Strip leading @ (coding agent file reference syntax, e.g. @docs/file.md)
+  if (input.startsWith("@")) {
+    input = input.slice(1);
+  }
   const normalizedInput = normalizeMarkdownPathInput(input);
   const searchInput = normalizeSeparators(normalizedInput);
   const isBareFilename = !searchInput.includes("/");

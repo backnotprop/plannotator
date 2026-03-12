@@ -20,6 +20,7 @@ export default defineConfig({
       '@plannotator/ui': path.resolve(__dirname, '../../packages/ui'),
       '@plannotator/review-editor/styles': path.resolve(__dirname, '../../packages/review-editor/index.css'),
       '@plannotator/review-editor': path.resolve(__dirname, '../../packages/review-editor/App.tsx'),
+      '@plannotator/shared': path.resolve(__dirname, '../../packages/shared'),
     }
   },
   build: {
