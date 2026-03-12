@@ -120,6 +120,18 @@ export const window = {
       },
     };
   },
+  createTextEditorDecorationType(_options: unknown) {
+    return { dispose() {} };
+  },
+  get activeTextEditor() {
+    return undefined;
+  },
+  get visibleTextEditors(): unknown[] {
+    return [];
+  },
+  onDidChangeActiveTextEditor(_listener: unknown) {
+    return { dispose() {} };
+  },
 };
 
 export const env = {
@@ -127,6 +139,61 @@ export const env = {
     return uri;
   },
 };
+
+export const comments = {
+  createCommentController(_id: string, _label: string) {
+    return {
+      options: {},
+      dispose() {},
+      createCommentThread(_uri: Uri, _range: unknown, _comments: unknown[]) {
+        return {
+          uri: _uri,
+          range: _range,
+          comments: _comments,
+          collapsibleState: 0,
+          canReply: true,
+          contextValue: "",
+          dispose() {},
+        };
+      },
+    };
+  },
+};
+
+export const languages = {
+  registerCodeActionsProvider(_selector: unknown, _provider: unknown, _metadata?: unknown) {
+    return { dispose() {} };
+  },
+};
+
+export class Range {
+  start: { line: number; character: number };
+  end: { line: number; character: number };
+  isEmpty: boolean;
+  constructor(startLine: number | { line: number; character: number }, startChar?: number | { line: number; character: number }, endLine?: number, endChar?: number) {
+    if (typeof startLine === "object") {
+      this.start = startLine;
+      this.end = startChar as { line: number; character: number };
+    } else {
+      this.start = { line: startLine, character: startChar as number };
+      this.end = { line: endLine!, character: endChar! };
+    }
+    this.isEmpty = this.start.line === this.end.line && this.start.character === this.end.character;
+  }
+  isEqual(other: Range) {
+    return this.start.line === other.start.line && this.start.character === other.start.character &&
+      this.end.line === other.end.line && this.end.character === other.end.character;
+  }
+}
+
+export const CommentMode = { Preview: 1, Editing: 0 };
+export const CommentThreadCollapsibleState = { Collapsed: 0, Expanded: 1 };
+
+export const CodeActionKind = {
+  RefactorInline: { value: "refactor.inline" },
+};
+
+export const OverviewRulerLane = { Left: 1, Center: 2, Right: 4, Full: 7 };
 
 export const workspace = {
   getConfiguration(_section?: string) {

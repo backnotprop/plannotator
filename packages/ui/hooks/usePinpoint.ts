@@ -38,16 +38,15 @@ export function usePinpoint({
     }
   }, [isActive]);
 
-  // Mousemove — resolve target and update hover state
+  // Mousemove / touchstart — resolve target and update hover state
   useEffect(() => {
     const container = containerRef.current;
     if (!isActive || !container) return;
 
     let prevElement: HTMLElement | null = null;
 
-    const handleMouseMove = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      const resolved = resolvePinpointTarget(target, container, { clientX: e.clientX, clientY: e.clientY });
+    const updateHover = (clientX: number, clientY: number, target: HTMLElement) => {
+      const resolved = resolvePinpointTarget(target, container, { clientX, clientY });
 
       if (resolved) {
         if (resolved.element !== prevElement) {
@@ -65,6 +64,17 @@ export function usePinpoint({
       }
     };
 
+    const handleMouseMove = (e: MouseEvent) => {
+      updateHover(e.clientX, e.clientY, e.target as HTMLElement);
+    };
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const touch = e.touches[0];
+      const target = document.elementFromPoint(touch.clientX, touch.clientY) as HTMLElement;
+      if (target) updateHover(touch.clientX, touch.clientY, target);
+    };
+
     const handleMouseLeave = () => {
       prevElement?.removeAttribute('data-pinpoint-hover');
       prevElement = null;
@@ -73,11 +83,13 @@ export function usePinpoint({
 
     container.addEventListener('mousemove', handleMouseMove);
     container.addEventListener('mouseleave', handleMouseLeave);
+    container.addEventListener('touchstart', handleTouchStart, { passive: true });
 
     return () => {
       prevElement?.removeAttribute('data-pinpoint-hover');
       container.removeEventListener('mousemove', handleMouseMove);
       container.removeEventListener('mouseleave', handleMouseLeave);
+      container.removeEventListener('touchstart', handleTouchStart);
     };
   }, [isActive, containerRef]);
 

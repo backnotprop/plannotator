@@ -24,10 +24,23 @@ export async function handleImage(req: Request): Promise<Response> {
   }
   try {
     const file = Bun.file(validation.resolved);
-    if (!(await file.exists())) {
-      return new Response("File not found", { status: 404 });
+    if (await file.exists()) {
+      return new Response(file);
     }
-    return new Response(file);
+    // If not found and a base directory is provided, try resolving relative to it
+    const base = url.searchParams.get("base");
+    if (base && !imagePath.startsWith("/")) {
+      const { resolve: resolvePath } = await import("path");
+      const fromBase = resolvePath(base, imagePath);
+      const baseValidation = validateImagePath(fromBase);
+      if (baseValidation.valid) {
+        const baseFile = Bun.file(baseValidation.resolved);
+        if (await baseFile.exists()) {
+          return new Response(baseFile);
+        }
+      }
+    }
+    return new Response("File not found", { status: 404 });
   } catch {
     return new Response("Failed to read file", { status: 500 });
   }
@@ -112,13 +125,13 @@ export function handleDraftDelete(contentKey: string): Response {
   return Response.json({ ok: true });
 }
 
-/** Open browser for local sessions. Used by all 3 servers. */
+/** Open browser for local sessions or when a custom handler (e.g. VS Code extension) is configured. */
 export async function handleServerReady(
   url: string,
   isRemote: boolean,
   _port: number,
 ): Promise<void> {
-  if (!isRemote) {
+  if (!isRemote || process.env.PLANNOTATOR_BROWSER) {
     await openBrowser(url);
   }
 }

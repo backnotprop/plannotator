@@ -1,8 +1,14 @@
 import React, { useState } from 'react';
 import { useUpdateCheck } from '../hooks/useUpdateCheck';
 
-const DEFAULT_INSTALL_COMMAND = 'curl -fsSL https://plannotator.ai/install.sh | bash';
 const PI_INSTALL_COMMAND = 'pi install npm:@plannotator/pi-extension';
+
+function getInstallCommand(): string {
+  const isWindows = typeof navigator !== 'undefined' && /^Win/.test(navigator.platform);
+  return isWindows
+    ? 'powershell -c "irm https://plannotator.ai/install.ps1 | iex"'
+    : 'curl -fsSL https://plannotator.ai/install.sh | bash';
+}
 
 interface UpdateBannerProps {
   origin?: 'claude-code' | 'opencode' | 'pi' | null;
@@ -19,7 +25,7 @@ export const UpdateBanner: React.FC<UpdateBannerProps> = ({ origin }) => {
   const effectiveOrigin = previewOrigin || origin;
   const isPi = effectiveOrigin === 'pi';
   const isOpenCode = effectiveOrigin === 'opencode';
-  const installCommand = isPi ? PI_INSTALL_COMMAND : DEFAULT_INSTALL_COMMAND;
+  const installCommand = isPi ? PI_INSTALL_COMMAND : getInstallCommand();
 
   if (!updateInfo?.updateAvailable || dismissed) return null;
 

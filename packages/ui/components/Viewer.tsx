@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect, forwardRef, useImperativeHandle, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import Highlighter from '@plannotator/web-highlighter';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
@@ -27,7 +28,10 @@ class ToolbarErrorBoundary extends React.Component<
 import { CommentPopover } from './CommentPopover';
 import { TaterSpriteSitting } from './TaterSpriteSitting';
 import { AttachmentsButton } from './AttachmentsButton';
+import { GraphvizBlock } from './GraphvizBlock';
 import { MermaidBlock } from './MermaidBlock';
+import { getImageSrc } from './ImageThumbnail';
+import { isGraphvizLanguage, isMermaidLanguage } from './diagramLanguages';
 import { getIdentity } from '../utils/identity';
 import { type QuickLabel } from '../utils/quickLabels';
 import { PlanDiffBadge } from './plan-diff/PlanDiffBadge';
@@ -51,6 +55,7 @@ interface ViewerProps {
   repoInfo?: { display: string; branch?: string } | null;
   stickyActions?: boolean;
   onOpenLinkedDoc?: (path: string) => void;
+  imageBaseDir?: string;
   linkedDocInfo?: { filepath: string; onBack: () => void; label?: string } | null;
   // Plan diff props
   planDiffStats?: { additions: number; deletions: number; modifications: number } | null;
@@ -59,6 +64,8 @@ interface ViewerProps {
   hasPreviousVersion?: boolean;
   /** Show amber "Demo" badge (portal mode, no shared content loaded) */
   showDemoBadge?: boolean;
+  /** Max width in px for the plan card (from plan width setting) */
+  maxWidth?: number;
 }
 
 export interface ViewerHandle {
@@ -121,10 +128,13 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   onPlanDiffToggle,
   hasPreviousVersion,
   showDemoBadge,
+  maxWidth,
   onOpenLinkedDoc,
   linkedDocInfo,
+  imageBaseDir,
 }, ref) => {
   const [copied, setCopied] = useState(false);
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
   const globalCommentButtonRef = useRef<HTMLButtonElement>(null);
 
   const handleCopyPlan = async () => {
@@ -638,7 +648,6 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     };
   }, [onSelectAnnotation]);
 
-
   useEffect(() => {
     const highlighter = highlighterRef.current;
     if (!highlighter) return;
@@ -907,11 +916,11 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   }, []);
 
   return (
-    <div className="relative z-50 w-full max-w-[832px] 2xl:max-w-5xl">
+    <div className="relative z-50 w-full" style={maxWidth ? { maxWidth } : { maxWidth: 832 }}>
       {taterMode && <TaterSpriteSitting />}
       <article
         ref={containerRef}
-        className={`w-full max-w-[832px] 2xl:max-w-5xl bg-card rounded-xl shadow-xl p-5 md:p-8 lg:p-10 xl:p-12 relative ${
+        className={`w-full bg-card rounded-xl shadow-xl p-5 md:p-8 lg:p-10 xl:p-12 relative ${
           linkedDocInfo ? 'border-2 border-primary' : 'border border-border/50'
         } ${inputMethod === 'pinpoint' ? 'cursor-crosshair' : ''}`}
       >
@@ -975,7 +984,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         {stickyActions && <div ref={stickySentinelRef} className="h-0 w-0 float-right" aria-hidden="true" />}
 
         {/* Header buttons - top right */}
-        <div className={`${stickyActions ? 'sticky top-3' : ''} z-30 float-right flex items-start gap-2 rounded-lg p-2 transition-colors duration-150 ${isStuck ? 'bg-card/95 backdrop-blur-sm shadow-sm' : ''} -mr-4 -mt-4 md:-mr-5 md:-mt-5 lg:-mr-7 lg:-mt-7 xl:-mr-9 xl:-mt-9`}>
+        <div className={`${stickyActions ? 'sticky top-3' : ''} z-30 float-right flex items-start gap-1 md:gap-2 rounded-lg p-1 md:p-2 transition-colors duration-150 ${isStuck ? 'bg-card/95 backdrop-blur-sm shadow-sm' : ''} -mr-3 mt-6 md:-mr-5 md:-mt-5 lg:-mr-7 lg:-mt-7 xl:-mr-9 xl:-mt-9`}>
           {/* Attachments button */}
           {onAddGlobalAttachment && onRemoveGlobalAttachment && (
             <AttachmentsButton
@@ -986,7 +995,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             />
           )}
 
-          {/* Global comment button */}
+          {/* <span className="md:hidden">Comment</span><span className="hidden md:inline">Global comment</span> button */}
           <button
             ref={globalCommentButtonRef}
             onClick={() => {
@@ -1002,7 +1011,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
             </svg>
-            <span className="hidden md:inline">Global comment</span>
+            <span className="md:hidden">Comment</span><span className="hidden md:inline">Global comment</span>
           </button>
 
           {/* Copy plan/file button */}
@@ -1016,28 +1025,30 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                 <svg className="w-3.5 h-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
-                <span className="hidden md:inline">Copied!</span>
+                Copied!
               </>
             ) : (
               <>
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                 </svg>
-                <span className="hidden md:inline">{linkedDocInfo ? 'Copy file' : 'Copy plan'}</span>
+                <span className="md:hidden">Copy</span><span className="hidden md:inline">{linkedDocInfo ? 'Copy file' : 'Copy plan'}</span>
               </>
             )}
           </button>
         </div>
-        {frontmatter && <FrontmatterCard frontmatter={frontmatter} />}
+        {frontmatter && <><div className="clear-right md:hidden" /><FrontmatterCard frontmatter={frontmatter} /></>}
         {groupBlocks(blocks).map(group =>
           group.type === 'list-group' ? (
             <div key={group.key} data-pinpoint-group="list" className="py-1 -mx-2 px-2">
               {group.blocks.map(block => (
-                <BlockRenderer key={block.id} block={block} onOpenLinkedDoc={onOpenLinkedDoc} />
+                <BlockRenderer imageBaseDir={imageBaseDir} onImageClick={(src, alt) => setLightbox({ src, alt })} key={block.id} block={block} onOpenLinkedDoc={onOpenLinkedDoc} />
               ))}
             </div>
-          ) : group.block.type === 'code' && group.block.language === 'mermaid' ? (
+          ) : group.block.type === 'code' && isMermaidLanguage(group.block.language) ? (
             <MermaidBlock key={group.block.id} block={group.block} />
+          ) : group.block.type === 'code' && isGraphvizLanguage(group.block.language) ? (
+            <GraphvizBlock key={group.block.id} block={group.block} />
           ) : group.block.type === 'code' ? (
             <CodeBlock
               key={group.block.id}
@@ -1069,7 +1080,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               isHovered={inputMethod !== 'pinpoint' && hoveredCodeBlock?.block.id === group.block.id}
             />
           ) : (
-            <BlockRenderer key={group.block.id} block={group.block} onOpenLinkedDoc={onOpenLinkedDoc} />
+            <BlockRenderer imageBaseDir={imageBaseDir} onImageClick={(src, alt) => setLightbox({ src, alt })} key={group.block.id} block={group.block} onOpenLinkedDoc={onOpenLinkedDoc} />
           )
         )}
 
@@ -1147,14 +1158,48 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           />
         )}
       </article>
+
+      {/* Image lightbox */}
+      {lightbox && createPortal(
+        <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />,
+        document.body
+      )}
     </div>
   );
 });
 
+/** Simple lightbox overlay for enlarged image viewing. */
+const ImageLightbox: React.FC<{ src: string; alt: string; onClose: () => void }> = ({ src, alt, onClose }) => {
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm cursor-zoom-out"
+      onClick={onClose}
+    >
+      <img
+        src={src}
+        alt={alt}
+        className="max-w-[90vw] max-h-[85vh] object-contain rounded-lg shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      />
+      {alt && (
+        <div className="mt-3 text-sm text-white/70 max-w-[90vw] text-center truncate">{alt}</div>
+      )}
+    </div>
+  );
+};
+
 /**
  * Renders inline markdown: **bold**, *italic*, `code`, [links](url)
  */
-const InlineMarkdown: React.FC<{ text: string; onOpenLinkedDoc?: (path: string) => void }> = ({ text, onOpenLinkedDoc }) => {
+const InlineMarkdown: React.FC<{ text: string; onOpenLinkedDoc?: (path: string) => void; imageBaseDir?: string; onImageClick?: (src: string, alt: string) => void }> = ({ text, onOpenLinkedDoc, imageBaseDir, onImageClick }) => {
   const parts: React.ReactNode[] = [];
   let remaining = text;
   let key = 0;
@@ -1163,7 +1208,7 @@ const InlineMarkdown: React.FC<{ text: string; onOpenLinkedDoc?: (path: string) 
     // Bold: **text**
     let match = remaining.match(/^\*\*(.+?)\*\*/);
     if (match) {
-      parts.push(<strong key={key++} className="font-semibold"><InlineMarkdown text={match[1]} onOpenLinkedDoc={onOpenLinkedDoc} /></strong>);
+      parts.push(<strong key={key++} className="font-semibold"><InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={match[1]} onOpenLinkedDoc={onOpenLinkedDoc} /></strong>);
       remaining = remaining.slice(match[0].length);
       continue;
     }
@@ -1171,7 +1216,7 @@ const InlineMarkdown: React.FC<{ text: string; onOpenLinkedDoc?: (path: string) 
     // Italic: *text*
     match = remaining.match(/^\*(.+?)\*/);
     if (match) {
-      parts.push(<em key={key++}><InlineMarkdown text={match[1]} onOpenLinkedDoc={onOpenLinkedDoc} /></em>);
+      parts.push(<em key={key++}><InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={match[1]} onOpenLinkedDoc={onOpenLinkedDoc} /></em>);
       remaining = remaining.slice(match[0].length);
       continue;
     }
@@ -1218,6 +1263,26 @@ const InlineMarkdown: React.FC<{ text: string; onOpenLinkedDoc?: (path: string) 
           <span key={key++} className="text-primary">{display}</span>
         );
       }
+      remaining = remaining.slice(match[0].length);
+      continue;
+    }
+
+    // Images: ![alt](path)
+    match = remaining.match(/^!\[([^\]]*)\]\(([^)]+)\)/);
+    if (match) {
+      const alt = match[1];
+      const src = match[2];
+      const imgSrc = /^https?:\/\//.test(src) ? src : getImageSrc(src, imageBaseDir);
+      parts.push(
+        <img
+          key={key++}
+          src={imgSrc}
+          alt={alt}
+          className="max-w-full rounded my-2 cursor-zoom-in"
+          loading="lazy"
+          onClick={(e) => { e.stopPropagation(); onImageClick?.(imgSrc, alt); }}
+        />
+      );
       remaining = remaining.slice(match[0].length);
       continue;
     }
@@ -1278,7 +1343,7 @@ const InlineMarkdown: React.FC<{ text: string; onOpenLinkedDoc?: (path: string) 
     }
 
     // Find next special character or consume one regular character
-    const nextSpecial = remaining.slice(1).search(/[\*`\[]/);
+    const nextSpecial = remaining.slice(1).search(/[\*`\[!]/);
     if (nextSpecial === -1) {
       parts.push(remaining);
       break;
@@ -1342,7 +1407,7 @@ function groupBlocks(blocks: Block[]): RenderGroup[] {
   return groups;
 }
 
-const BlockRenderer: React.FC<{ block: Block; onOpenLinkedDoc?: (path: string) => void }> = ({ block, onOpenLinkedDoc }) => {
+const BlockRenderer: React.FC<{ block: Block; onOpenLinkedDoc?: (path: string) => void; imageBaseDir?: string; onImageClick?: (src: string, alt: string) => void }> = ({ block, onOpenLinkedDoc, imageBaseDir, onImageClick }) => {
   switch (block.type) {
     case 'heading':
       const Tag = `h${block.level || 1}` as keyof JSX.IntrinsicElements;
@@ -1352,7 +1417,7 @@ const BlockRenderer: React.FC<{ block: Block; onOpenLinkedDoc?: (path: string) =
         3: 'text-base font-semibold mb-2 mt-6 text-foreground/80',
       }[block.level || 1] || 'text-base font-semibold mb-2 mt-4';
 
-      return <Tag className={styles} data-block-id={block.id} data-block-type="heading"><InlineMarkdown text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} /></Tag>;
+      return <Tag className={styles} data-block-id={block.id} data-block-type="heading"><InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} /></Tag>;
 
     case 'blockquote':
       return (
@@ -1360,7 +1425,7 @@ const BlockRenderer: React.FC<{ block: Block; onOpenLinkedDoc?: (path: string) =
           className="border-l-2 border-primary/50 pl-4 my-4 text-muted-foreground italic"
           data-block-id={block.id}
         >
-          <InlineMarkdown text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} />
+          <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} />
         </blockquote>
       );
 
@@ -1391,14 +1456,14 @@ const BlockRenderer: React.FC<{ block: Block; onOpenLinkedDoc?: (path: string) =
             )}
           </span>
           <span className={`text-sm leading-relaxed ${isCheckbox && block.checked ? 'text-muted-foreground line-through' : 'text-foreground/90'}`}>
-            <InlineMarkdown text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} />
+            <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} />
           </span>
         </div>
       );
     }
 
     case 'code':
-      return <CodeBlock block={block} />;
+      return <CodeBlock block={block} onHover={() => {}} onLeave={() => {}} isHovered={false} />;
 
     case 'table': {
       const { headers, rows } = parseTableContent(block.content);
@@ -1412,7 +1477,7 @@ const BlockRenderer: React.FC<{ block: Block; onOpenLinkedDoc?: (path: string) =
                     key={i}
                     className="px-3 py-2 text-left font-semibold text-foreground/90 bg-muted/30"
                   >
-                    <InlineMarkdown text={header} onOpenLinkedDoc={onOpenLinkedDoc} />
+                    <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={header} onOpenLinkedDoc={onOpenLinkedDoc} />
                   </th>
                 ))}
               </tr>
@@ -1422,7 +1487,7 @@ const BlockRenderer: React.FC<{ block: Block; onOpenLinkedDoc?: (path: string) =
                 <tr key={rowIdx} className="border-b border-border/50 hover:bg-muted/20">
                   {row.map((cell, cellIdx) => (
                     <td key={cellIdx} className="px-3 py-2 text-foreground/80">
-                      <InlineMarkdown text={cell} onOpenLinkedDoc={onOpenLinkedDoc} />
+                      <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={cell} onOpenLinkedDoc={onOpenLinkedDoc} />
                     </td>
                   ))}
                 </tr>
@@ -1442,7 +1507,7 @@ const BlockRenderer: React.FC<{ block: Block; onOpenLinkedDoc?: (path: string) =
           className="mb-4 leading-relaxed text-foreground/90 text-[15px]"
           data-block-id={block.id}
         >
-          <InlineMarkdown text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} />
+          <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} />
         </p>
       );
   }
@@ -1518,4 +1583,3 @@ const CodeBlock: React.FC<CodeBlockProps> = ({ block, onHover, onLeave, isHovere
     </div>
   );
 };
-

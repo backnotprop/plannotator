@@ -134,6 +134,8 @@ if defined CLAUDE_CONFIG_DIR (
     set "PLUGIN_HOOKS=%USERPROFILE%\.claude\plugins\marketplaces\plannotator\apps\hook\hooks\hooks.json"
 )
 if exist "!PLUGIN_HOOKS!" (
+    REM Use full path so the hook works without PATH being set in the shell
+    set "EXE_PATH=!INSTALL_PATH:\=/!"
     (
 echo {
 echo   "hooks": {
@@ -143,7 +145,7 @@ echo         "matcher": "ExitPlanMode",
 echo         "hooks": [
 echo           {
 echo             "type": "command",
-echo             "command": "plannotator",
+echo             "command": "!EXE_PATH!",
 echo             "timeout": 345600
 echo           }
 echo         ]

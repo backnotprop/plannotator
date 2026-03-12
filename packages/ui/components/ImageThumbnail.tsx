@@ -3,11 +3,15 @@ import React, { useState } from 'react';
 /**
  * Get the display URL for an image path or URL
  */
-export const getImageSrc = (path: string): string => {
+export const getImageSrc = (path: string, base?: string): string => {
   if (path.startsWith('http://') || path.startsWith('https://')) {
     return path; // Remote URL, use directly
   }
-  return `/api/image?path=${encodeURIComponent(path)}`; // Local path, proxy through server
+  let url = `/api/image?path=${encodeURIComponent(path)}`;
+  if (base && !path.startsWith('/')) {
+    url += `&base=${encodeURIComponent(base)}`;
+  }
+  return url;
 };
 
 interface ImageThumbnailProps {

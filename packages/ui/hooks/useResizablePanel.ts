@@ -12,6 +12,7 @@ interface UseResizablePanelOptions {
 export interface ResizeHandleProps {
   isDragging: boolean;
   onMouseDown: (e: React.MouseEvent) => void;
+  onTouchStart: (e: React.TouchEvent) => void;
   onDoubleClick: () => void;
 }
 
@@ -48,13 +49,26 @@ export function useResizablePanel({
     setIsDragging(true);
   }, []);
 
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    e.preventDefault();
+    startXRef.current = e.touches[0].clientX;
+    startWidthRef.current = widthRef.current;
+    setIsDragging(true);
+  }, []);
+
   useEffect(() => {
     if (!isDragging) return;
 
-    const onMove = (e: MouseEvent) => {
+    const getClientX = (e: MouseEvent | TouchEvent): number => {
+      if ('touches' in e) return e.touches[0]?.clientX ?? (e as TouchEvent).changedTouches[0]?.clientX ?? 0;
+      return (e as MouseEvent).clientX;
+    };
+
+    const onMove = (e: MouseEvent | TouchEvent) => {
+      const clientX = getClientX(e);
       const delta = side === 'right'
-        ? startXRef.current - e.clientX
-        : e.clientX - startXRef.current;
+        ? startXRef.current - clientX
+        : clientX - startXRef.current;
       updateWidth(Math.min(maxWidth, Math.max(minWidth, startWidthRef.current + delta)));
     };
 
@@ -65,9 +79,15 @@ export function useResizablePanel({
 
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('touchend', onUp);
+    document.addEventListener('touchcancel', onUp);
     return () => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onUp);
+      document.removeEventListener('touchcancel', onUp);
     };
   }, [isDragging, minWidth, maxWidth, storageKey, side, updateWidth]);
 
@@ -79,6 +99,11 @@ export function useResizablePanel({
   return {
     width,
     isDragging,
-    handleProps: { isDragging, onMouseDown: handleMouseDown, onDoubleClick: resetWidth } as ResizeHandleProps,
+    handleProps: {
+      isDragging,
+      onMouseDown: handleMouseDown,
+      onTouchStart: handleTouchStart,
+      onDoubleClick: resetWidth,
+    } as ResizeHandleProps,
   };
 }
