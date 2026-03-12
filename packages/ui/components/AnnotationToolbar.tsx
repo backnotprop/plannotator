@@ -108,15 +108,18 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.isComposing) return;
       if (isEditableElement(e.target) || isEditableElement(document.activeElement)) return;
+
+      // When picker is open, let FloatingQuickLabelPicker own all keyboard input
+      if (showQuickLabels) return;
+
       if (e.key === "Escape") {
-        setShowQuickLabels(false);
         onClose();
         return;
       }
 
-      // Quick label by digit — Alt+N always works, bare digit when picker is open
+      // Alt+N applies quick label (picker closed)
       const isDigit = (e.code >= 'Digit1' && e.code <= 'Digit9') || e.code === 'Digit0';
-      if (isDigit && !e.ctrlKey && !e.metaKey && (e.altKey || showQuickLabels)) {
+      if (isDigit && !e.ctrlKey && !e.metaKey && e.altKey) {
         e.preventDefault();
         const digit = parseInt(e.code.slice(5), 10);
         const index = digit === 0 ? 9 : digit - 1;
