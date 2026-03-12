@@ -276,6 +276,23 @@ export async function saveToObsidian(config: ObsidianConfig): Promise<Integratio
 
 // --- Bear Integration ---
 
+export function stripH1(plan: string): string {
+  return plan.replace(/^#\s+.+\n?/m, '').trimStart();
+}
+
+export function buildHashtags(customTags: string | undefined, autoTags: string[]): string {
+  if (customTags?.trim()) {
+    return customTags.split(',').map(t => `#${t.trim()}`).filter(t => t !== '#').join(' ');
+  }
+  return autoTags.map(t => `#${t}`).join(' ');
+}
+
+export function buildBearContent(body: string, hashtags: string, tagPosition: 'prepend' | 'append'): string {
+  return tagPosition === 'prepend'
+    ? `${hashtags}\n\n${body}`
+    : `${body}\n\n${hashtags}`;
+}
+
 /**
  * Save plan to Bear using x-callback-url
  */
@@ -284,23 +301,14 @@ export async function saveToBear(config: BearConfig): Promise<IntegrationResult>
     const { plan, customTags, tagPosition = 'append' } = config;
 
     const title = extractTitle(plan);
+    const body = stripH1(plan);
 
-    // Strip first H1 from body (Bear's title param already carries it)
-    const body = plan.replace(/^#\s+.+\n?/m, '').trimStart();
+    const tags = customTags?.trim()
+      ? undefined
+      : await extractTags(plan);
+    const hashtags = buildHashtags(customTags, tags ?? []);
 
-    // Build hashtags: custom tags if provided, otherwise auto-generate
-    let hashtags: string;
-    if (customTags?.trim()) {
-      hashtags = customTags.split(',').map(t => `#${t.trim()}`).filter(t => t !== '#').join(' ');
-    } else {
-      const tags = await extractTags(plan);
-      hashtags = tags.map(t => `#${t}`).join(' ');
-    }
-
-    // Position tags relative to content
-    const content = tagPosition === 'prepend'
-      ? `${hashtags}\n\n${body}`
-      : `${body}\n\n${hashtags}`;
+    const content = buildBearContent(body, hashtags, tagPosition);
 
     const url = `bear://x-callback-url/create?title=${encodeURIComponent(title)}&text=${encodeURIComponent(content)}&open_note=no`;
 

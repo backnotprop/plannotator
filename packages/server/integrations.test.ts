@@ -5,27 +5,13 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { extractTitle, extractTags } from "./integrations";
-
-// We can't test saveToBear() directly (calls `open` with bear:// URL),
-// but we can test the building blocks and inline the body-construction logic.
-
-function stripH1(plan: string): string {
-  return plan.replace(/^#\s+.+\n?/m, "").trimStart();
-}
-
-function buildHashtags(customTags: string | undefined, autoTags: string[]): string {
-  if (customTags?.trim()) {
-    return customTags.split(",").map(t => `#${t.trim()}`).filter(t => t !== "#").join(" ");
-  }
-  return autoTags.map(t => `#${t}`).join(" ");
-}
-
-function buildContent(body: string, hashtags: string, tagPosition: "prepend" | "append"): string {
-  return tagPosition === "prepend"
-    ? `${hashtags}\n\n${body}`
-    : `${body}\n\n${hashtags}`;
-}
+import {
+  extractTitle,
+  extractTags,
+  stripH1,
+  buildHashtags,
+  buildBearContent,
+} from "./integrations";
 
 describe("extractTitle", () => {
   test("extracts plain H1", () => {
@@ -99,14 +85,14 @@ describe("buildHashtags", () => {
   });
 });
 
-describe("buildContent", () => {
+describe("buildBearContent", () => {
   test("appends tags by default", () => {
-    const result = buildContent("Body text", "#plan #work", "append");
+    const result = buildBearContent("Body text", "#plan #work", "append");
     expect(result).toBe("Body text\n\n#plan #work");
   });
 
   test("prepends tags when configured", () => {
-    const result = buildContent("Body text", "#plan #work", "prepend");
+    const result = buildBearContent("Body text", "#plan #work", "prepend");
     expect(result).toBe("#plan #work\n\nBody text");
   });
 });
@@ -123,7 +109,7 @@ describe("full Bear content pipeline", () => {
   test("custom tags prepended after title removal", () => {
     const body = stripH1(plan);
     const hashtags = buildHashtags("plan, work", []);
-    const content = buildContent(body, hashtags, "prepend");
+    const content = buildBearContent(body, hashtags, "prepend");
     expect(content).toStartWith("#plan #work");
     expect(content).toContain("## Context");
     expect(content).not.toContain("# SPE-589");
@@ -132,7 +118,7 @@ describe("full Bear content pipeline", () => {
   test("auto tags appended when no custom tags", () => {
     const body = stripH1(plan);
     const hashtags = buildHashtags("", ["plannotator", "dev"]);
-    const content = buildContent(body, hashtags, "append");
+    const content = buildBearContent(body, hashtags, "append");
     expect(content).toEndWith("#plannotator #dev");
     expect(content).toStartWith("## Context");
   });
