@@ -147,7 +147,6 @@ const ReviewApp: React.FC = () => {
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [submitted, setSubmitted] = useState<'approved' | 'feedback' | false>(false);
-  const [showApproveWarning, setShowApproveWarning] = useState(false);
   const [sharingEnabled, setSharingEnabled] = useState(true);
   const [repoInfo, setRepoInfo] = useState<{ display: string; branch?: string } | null>(null);
 
@@ -554,7 +553,7 @@ const ReviewApp: React.FC = () => {
 
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      if (showExportModal || showNoAnnotationsDialog || showApproveWarning) return;
+      if (showExportModal || showNoAnnotationsDialog) return;
       if (submitted || isSendingFeedback || isApproving) return;
       if (!origin) return; // Demo mode
 
@@ -571,7 +570,7 @@ const ReviewApp: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
-    showExportModal, showNoAnnotationsDialog, showApproveWarning,
+    showExportModal, showNoAnnotationsDialog,
     submitted, isSendingFeedback, isApproving, origin, totalAnnotationCount,
     handleApprove, handleSendFeedback
   ]);
@@ -682,56 +681,33 @@ const ReviewApp: React.FC = () => {
 
             {origin ? (
               <>
-                {/* Send Feedback button - accent color, disabled if no annotations */}
+                {/* Single action button: Send Feedback (if annotations) or Approve (if none) */}
                 <button
-                  onClick={handleSendFeedback}
-                  disabled={isSendingFeedback || isApproving || totalAnnotationCount === 0}
-                  className={`p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium transition-all ${
+                  onClick={totalAnnotationCount > 0 ? handleSendFeedback : handleApprove}
+                  disabled={isSendingFeedback || isApproving}
+                  className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${
                     isSendingFeedback || isApproving
                       ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
-                      : totalAnnotationCount === 0
-                        ? 'opacity-50 cursor-not-allowed bg-accent/10 text-accent/50'
-                        : 'bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30'
+                      : totalAnnotationCount > 0
+                        ? 'bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30'
+                        : 'bg-success text-success-foreground hover:opacity-90'
                   }`}
-                  title={totalAnnotationCount === 0 ? "Add annotations to send feedback" : "Send feedback"}
+                  title={totalAnnotationCount > 0 ? "Send feedback" : "Approve - no changes needed"}
                 >
-                  <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                  </svg>
-                  <span className="hidden md:inline">{isSendingFeedback ? 'Sending...' : 'Send Feedback'}</span>
-                </button>
-
-                {/* Approve button - green/success, dimmed if annotations exist */}
-                <div className="relative group/approve">
-                  <button
-                    onClick={() => {
-                      if (totalAnnotationCount > 0) {
-                        setShowApproveWarning(true);
-                      } else {
-                        handleApprove();
-                      }
-                    }}
-                    disabled={isSendingFeedback || isApproving}
-                    className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${
-                      isSendingFeedback || isApproving
-                        ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
-                        : totalAnnotationCount > 0
-                          ? 'bg-success/50 text-success-foreground/70 hover:bg-success hover:text-success-foreground'
-                          : 'bg-success text-success-foreground hover:opacity-90'
-                    }`}
-                    title="Approve - no changes needed"
-                  >
-                    <span className="md:hidden">{isApproving ? '...' : 'OK'}</span>
-                    <span className="hidden md:inline">{isApproving ? 'Approving...' : 'Approve'}</span>
-                  </button>
-                  {totalAnnotationCount > 0 && (
-                    <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
-                      <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
-                      <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
-                      Your {totalAnnotationCount} annotation{totalAnnotationCount !== 1 ? 's' : ''} won't be sent if you approve.
-                    </div>
+                  {totalAnnotationCount > 0 ? (
+                    <>
+                      <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                      </svg>
+                      <span className="hidden md:inline">{isSendingFeedback ? 'Sending...' : 'Send Feedback'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="md:hidden">{isApproving ? '...' : 'OK'}</span>
+                      <span className="hidden md:inline">{isApproving ? 'Approving...' : 'Approve'}</span>
+                    </>
                   )}
-                </div>
+                </button>
               </>
             ) : (
               <button
@@ -970,22 +946,6 @@ const ReviewApp: React.FC = () => {
           variant="info"
         />
 
-        {/* Approve with annotations warning */}
-        <ConfirmDialog
-          isOpen={showApproveWarning}
-          onClose={() => setShowApproveWarning(false)}
-          onConfirm={() => {
-            setShowApproveWarning(false);
-            handleApprove();
-          }}
-          title="Annotations Won't Be Sent"
-          message={<>You have {totalAnnotationCount} annotation{totalAnnotationCount !== 1 ? 's' : ''} that will be lost if you approve.</>}
-          subMessage="To send your feedback, use Send Feedback instead."
-          confirmText="Approve Anyway"
-          cancelText="Cancel"
-          variant="warning"
-          showCancel
-        />
 
         {/* Completion overlay - shown after approve/feedback */}
         <CompletionOverlay
