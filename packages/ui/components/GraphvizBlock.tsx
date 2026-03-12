@@ -107,7 +107,7 @@ export const GraphvizBlock: React.FC<{ block: Block }> = ({ block }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [svg, setSvg] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [showSource, setShowSource] = useState(true);
+  const [showSource, setShowSource] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
 
   const zoomLevelRef = useRef(1);

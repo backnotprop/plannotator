@@ -132,7 +132,7 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
   const expandedOverlayRef = useRef<HTMLDivElement>(null);
   const [svg, setSvg] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [showSource, setShowSource] = useState(true);
+  const [showSource, setShowSource] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
 
   // All zoom/pan state as refs to avoid re-renders
