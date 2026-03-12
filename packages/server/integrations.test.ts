@@ -98,11 +98,11 @@ describe("buildBearContent", () => {
 });
 
 describe("full Bear content pipeline", () => {
-  const plan = "# SPE-589: Fix cross-account expense\n\n## Context\nSome content here";
+  const plan = "# Add user authentication flow\n\n## Context\nSome content here";
 
   test("no double title — H1 stripped from body", () => {
     const body = stripH1(plan);
-    expect(body).not.toContain("# SPE-589");
+    expect(body).not.toContain("# Add user");
     expect(body).toStartWith("## Context");
   });
 
@@ -112,7 +112,7 @@ describe("full Bear content pipeline", () => {
     const content = buildBearContent(body, hashtags, "prepend");
     expect(content).toStartWith("#plan #work");
     expect(content).toContain("## Context");
-    expect(content).not.toContain("# SPE-589");
+    expect(content).not.toContain("# Add user");
   });
 
   test("auto tags appended when no custom tags", () => {
