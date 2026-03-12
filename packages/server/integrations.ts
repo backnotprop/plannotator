@@ -286,7 +286,7 @@ export async function saveToBear(config: BearConfig): Promise<IntegrationResult>
     const title = extractTitle(plan);
 
     // Strip first H1 from body (Bear's title param already carries it)
-    const body = plan.replace(/^#\s+(?:Implementation\s+Plan:|Plan:)?\s*.+\n?/im, '').trimStart();
+    const body = plan.replace(/^#\s+.+\n?/m, '').trimStart();
 
     // Build hashtags: custom tags if provided, otherwise auto-generate
     let hashtags: string;
