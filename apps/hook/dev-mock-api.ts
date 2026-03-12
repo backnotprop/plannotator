@@ -3,8 +3,6 @@
  * Provides plan data with version history so the Versions tab works in dev mode.
  */
 import type { Plugin } from 'vite';
-import { execSync } from 'child_process';
-import type { IncomingMessage, ServerResponse } from 'http';
 
 // Version 1: earlier draft (shorter, missing sections)
 const PLAN_V1 = `# Implementation Plan: Real-time Collaboration
@@ -252,61 +250,8 @@ export function devMockApi(): Plugin {
           return;
         }
 
-        // Handle approve/save-notes for Bear testing in dev mode
-        if ((req.url === '/api/approve' || req.url === '/api/save-notes') && req.method === 'POST') {
-          parseBody(req).then((body) => {
-            const results: Record<string, unknown> = {};
-            if (body.bear?.plan) {
-              try {
-                const plan = body.bear.plan as string;
-                const customTags = body.bear.customTags as string | undefined;
-                const tagPosition = (body.bear.tagPosition as string) || 'append';
-
-                // Extract title from H1
-                const h1Match = plan.match(/^#\s+(?:Implementation\s+Plan:|Plan:)?\s*(.+)$/im);
-                const title = h1Match?.[1]?.trim().replace(/[<>:"/\\|?*(){}\[\]#~`]/g, '').slice(0, 50) || 'Plan';
-
-                // Strip H1 from body
-                const strippedBody = plan.replace(/^#\s+(?:Implementation\s+Plan:|Plan:)?\s*.+\n?/im, '').trimStart();
-
-                // Build hashtags
-                let hashtags: string;
-                if (customTags?.trim()) {
-                  hashtags = customTags.split(',').map((t: string) => `#${t.trim()}`).filter((t: string) => t !== '#').join(' ');
-                } else {
-                  hashtags = '#plannotator #dev';
-                }
-
-                const content = tagPosition === 'prepend'
-                  ? `${hashtags}\n\n${strippedBody}`
-                  : `${strippedBody}\n\n${hashtags}`;
-
-                const url = `bear://x-callback-url/create?title=${encodeURIComponent(title)}&text=${encodeURIComponent(content)}&open_note=no`;
-                execSync(`open "${url}"`);
-                results.bear = { success: true };
-              } catch (err) {
-                results.bear = { success: false, error: String(err) };
-              }
-            }
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({ ok: true, ...results }));
-          });
-          return;
-        }
-
         next();
       });
     },
   };
-}
-
-function parseBody(req: IncomingMessage): Promise<Record<string, any>> {
-  return new Promise((resolve) => {
-    let data = '';
-    req.on('data', (chunk: Buffer) => { data += chunk; });
-    req.on('end', () => {
-      try { resolve(JSON.parse(data)); }
-      catch { resolve({}); }
-    });
-  });
 }
