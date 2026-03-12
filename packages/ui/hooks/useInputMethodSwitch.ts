@@ -36,6 +36,8 @@ export function useInputMethodSwitch(
       // Don't interfere when user is typing
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
+      // Don't interfere when a quick label picker is open (it uses Alt+N shortcuts)
+      if (document.querySelector('[data-quick-label-picker]')) return;
 
       if (stateRef.current === 'idle') {
         // First press — switch immediately

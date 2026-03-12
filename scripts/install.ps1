@@ -114,6 +114,9 @@ if (Test-Path $pluginHooks) {
 Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\opencode\node_modules\@plannotator" -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force "$env:USERPROFILE\.bun\install\cache\@plannotator" -ErrorAction SilentlyContinue
 
+# Clear Pi jiti cache to force fresh download on next run
+Remove-Item -Recurse -Force "$env:TEMP\jiti" -ErrorAction SilentlyContinue
+
 # Update Pi extension if pi is installed
 if (Get-Command pi -ErrorAction SilentlyContinue) {
     Write-Host "Updating Pi extension..."
@@ -197,6 +200,14 @@ Write-Host ""
 Write-Host '  "plugin": ["@plannotator/opencode@latest"]'
 Write-Host ""
 Write-Host "Then restart OpenCode. The /plannotator-review and /plannotator-annotate commands are ready!"
+Write-Host ""
+Write-Host "=========================================="
+Write-Host "  PI USERS"
+Write-Host "=========================================="
+Write-Host ""
+Write-Host "Install or update the extension:"
+Write-Host ""
+Write-Host "  pi install npm:@plannotator/pi-extension"
 Write-Host ""
 Write-Host "=========================================="
 Write-Host "  CLAUDE CODE USERS: YOU ARE ALL SET!"

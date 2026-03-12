@@ -328,3 +328,8 @@ pre code.hljs .hljs-code {
 .sidebar-tab-flag:hover {
   transform: translateX(2px);
 }
+
+@keyframes settings-ping {
+  0%, 100% { opacity: 0; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(2); }
+}

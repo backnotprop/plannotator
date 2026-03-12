@@ -3,6 +3,7 @@ import { Annotation, AnnotationType, Block, type EditorAnnotation } from '../typ
 import { isCurrentUser } from '../utils/identity';
 import { ImageThumbnail } from './ImageThumbnail';
 import { EditorAnnotationCard } from './EditorAnnotationCard';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 interface PanelProps {
   isOpen: boolean;
@@ -17,6 +18,7 @@ interface PanelProps {
   width?: number;
   editorAnnotations?: EditorAnnotation[];
   onDeleteEditorAnnotation?: (id: string) => void;
+  onClose?: () => void;
 }
 
 export const AnnotationPanel: React.FC<PanelProps> = ({
@@ -32,7 +34,9 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   width,
   editorAnnotations,
   onDeleteEditorAnnotation,
+  onClose,
 }) => {
+  const isMobile = useIsMobile();
   const [copied, setCopied] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const sortedAnnotations = [...annotations].sort((a, b) => a.createdA - b.createdA);
@@ -60,17 +64,35 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
 
   if (!isOpen) return null;
 
-  return (
-    <aside className="border-l border-border/50 bg-card/30 backdrop-blur-sm flex flex-col flex-shrink-0" style={{ width: width ?? 288 }}>
+  const panel = (
+    <aside
+      className={`border-l border-border/50 bg-card/30 backdrop-blur-sm flex flex-col flex-shrink-0 ${
+        isMobile ? 'fixed top-12 bottom-0 right-0 z-[60] w-full max-w-sm shadow-2xl bg-card' : ''
+      }`}
+      style={isMobile ? undefined : { width: width ?? 288 }}
+    >
       {/* Header */}
       <div className="p-3 border-b border-border/50">
         <div className="flex items-center justify-between">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             Annotations
           </h2>
-          <span className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-            {totalCount}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
+              {totalCount}
+            </span>
+            {isMobile && onClose && (
+              <button
+                onClick={onClose}
+                className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                title="Close panel"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -148,6 +170,20 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
       )}
     </aside>
   );
+
+  if (isMobile) {
+    return (
+      <>
+        <div
+          className="fixed inset-0 z-[59] bg-background/60 backdrop-blur-sm"
+          onClick={onClose}
+        />
+        {panel}
+      </>
+    );
+  }
+
+  return panel;
 };
 
 function formatTimestamp(ts: number): string {
@@ -321,7 +357,7 @@ const AnnotationCard: React.FC<{
             {formatTimestamp(annotation.createdA)}
           </span>
         </div>
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-all">
           {onEdit && annotation.type !== AnnotationType.DELETION && !isEditing && (
             <button
               onClick={handleStartEdit}

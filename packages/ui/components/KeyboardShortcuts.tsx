@@ -94,6 +94,7 @@ const planShortcuts: ShortcutSection[] = [
     title: 'Annotations',
     shortcuts: [
       { keys: ['a-z'], desc: 'Start typing comment', hint: 'When the annotation toolbar is open, any letter key opens the comment editor with that character' },
+      { keys: [alt, '1-0'], desc: 'Apply quick label', hint: 'Instantly applies the Nth preset label (0 = 10th). When the label picker is open, bare digits also work.' },
       { keys: [mod, enter], desc: 'Submit comment' },
       { keys: [mod, 'C'], desc: 'Copy selected text' },
       { keys: ['Esc'], desc: 'Close toolbar / Cancel' },

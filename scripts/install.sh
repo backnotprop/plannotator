@@ -110,6 +110,9 @@ fi
 # Clear any cached OpenCode plugin to force fresh download on next run
 rm -rf "$HOME/.cache/opencode/node_modules/@plannotator" "$HOME/.bun/install/cache/@plannotator" 2>/dev/null || true
 
+# Clear Pi jiti cache to force fresh download on next run
+rm -rf /tmp/jiti 2>/dev/null || true
+
 # Update Pi extension if pi is installed
 if command -v pi &>/dev/null; then
     echo "Updating Pi extension..."
@@ -193,6 +196,14 @@ echo ""
 echo '  "plugin": ["@plannotator/opencode@latest"]'
 echo ""
 echo "Then restart OpenCode. The /plannotator-review and /plannotator-annotate commands are ready!"
+echo ""
+echo "=========================================="
+echo "  PI USERS"
+echo "=========================================="
+echo ""
+echo "Install or update the extension:"
+echo ""
+echo "  pi install npm:@plannotator/pi-extension"
 echo ""
 echo "=========================================="
 echo "  CLAUDE CODE USERS: YOU'RE ALL SET!"

@@ -14,7 +14,9 @@
 import { isRemoteSession, getServerPort } from "./remote";
 import { getRepoInfo } from "./repo";
 import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete } from "./shared-handlers";
+import { handleDoc } from "./reference-handlers";
 import { contentHash, deleteDraft } from "./draft";
+import { dirname } from "path";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -128,6 +130,17 @@ export async function startAnnotateServer(
           // API: Serve images (local paths or temp uploads)
           if (url.pathname === "/api/image") {
             return handleImage(req);
+          }
+
+          // API: Serve a linked markdown document
+          // Inject source file's directory as base for relative path resolution
+          if (url.pathname === "/api/doc" && req.method === "GET") {
+            if (!url.searchParams.has("base")) {
+              const docUrl = new URL(req.url);
+              docUrl.searchParams.set("base", dirname(filePath));
+              return handleDoc(new Request(docUrl.toString()));
+            }
+            return handleDoc(req);
           }
 
           // API: Upload image -> save to temp -> return path

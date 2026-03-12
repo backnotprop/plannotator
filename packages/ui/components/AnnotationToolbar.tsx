@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { AnnotationType } from "../types";
 import { createPortal } from "react-dom";
 import { useDismissOnOutsideAndEscape } from "../hooks/useDismissOnOutsideAndEscape";
+import { type QuickLabel, getQuickLabels } from "../utils/quickLabels";
+import { FloatingQuickLabelPicker } from "./FloatingQuickLabelPicker";
 
 type PositionMode = 'center-above' | 'top-right';
 
@@ -19,6 +21,8 @@ interface AnnotationToolbarProps {
   onClose: () => void;
   /** Called when user wants to write a comment (opens CommentPopover in parent) */
   onRequestComment?: (initialChar?: string) => void;
+  /** Called when a quick label chip is selected */
+  onQuickLabel?: (label: QuickLabel) => void;
   /** Text to copy (for text selection, pass source.text) */
   copyText?: string;
   /** Close toolbar when element scrolls out of viewport */
@@ -36,6 +40,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   onAnnotate,
   onClose,
   onRequestComment,
+  onQuickLabel,
   copyText,
   closeOnScrollOut = false,
   isExiting = false,
@@ -44,7 +49,10 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
 }) => {
   const [position, setPosition] = useState<{ top: number; left?: number; right?: number } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [showQuickLabels, setShowQuickLabels] = useState(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const zapButtonRef = useRef<HTMLButtonElement>(null);
+  const quickLabels = useMemo(() => getQuickLabels(), []);
 
   const handleCopy = async () => {
     let textToCopy = copyText;
@@ -95,12 +103,32 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     };
   }, [element, positionMode, closeOnScrollOut, onClose]);
 
-  // Type-to-comment: typing opens CommentPopover via parent
+  // Type-to-comment + Alt+N / bare digit quick label shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.isComposing) return;
       if (isEditableElement(e.target) || isEditableElement(document.activeElement)) return;
-      if (e.key === "Escape") { onClose(); return; }
+
+      // When picker is open, let FloatingQuickLabelPicker own all keyboard input
+      if (showQuickLabels) return;
+
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+
+      // Alt+N applies quick label (picker closed)
+      const isDigit = (e.code >= 'Digit1' && e.code <= 'Digit9') || e.code === 'Digit0';
+      if (isDigit && !e.ctrlKey && !e.metaKey && e.altKey) {
+        e.preventDefault();
+        const digit = parseInt(e.code.slice(5), 10);
+        const index = digit === 0 ? 9 : digit - 1;
+        if (index < quickLabels.length) {
+          onQuickLabel?.(quickLabels[index]);
+        }
+        return;
+      }
+
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === "Tab" || e.key === "Enter") return;
       if (e.key.length !== 1) return;
@@ -110,10 +138,10 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose, onRequestComment]);
+  }, [onClose, onRequestComment, onQuickLabel, quickLabels, showQuickLabels]);
 
   useDismissOnOutsideAndEscape({
-    enabled: true,
+    enabled: !showQuickLabels,
     ref: toolbarRef,
     onDismiss: onClose,
   });
@@ -180,6 +208,27 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           label="Comment"
           className="text-accent hover:bg-accent/10"
         />
+        {onQuickLabel && (
+          <>
+            <ToolbarButton
+              ref={zapButtonRef}
+              onClick={() => setShowQuickLabels(prev => !prev)}
+              icon={<ZapIcon />}
+              label="Quick label"
+              className={showQuickLabels ? "text-amber-500 bg-amber-500/10" : "text-amber-500 hover:bg-amber-500/10"}
+            />
+            {showQuickLabels && zapButtonRef.current && (
+              <FloatingQuickLabelPicker
+                anchorEl={zapButtonRef.current}
+                onSelect={(label) => {
+                  setShowQuickLabels(false);
+                  onQuickLabel(label);
+                }}
+                onDismiss={() => setShowQuickLabels(false)}
+              />
+            )}
+          </>
+        )}
         <div className="w-px h-5 bg-border mx-0.5" />
         <ToolbarButton
           onClick={onClose}
@@ -218,23 +267,30 @@ const CommentIcon = () => (
   </svg>
 );
 
+const ZapIcon = () => (
+  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+  </svg>
+);
+
 const CloseIcon = () => (
   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
   </svg>
 );
 
-const ToolbarButton: React.FC<{
+const ToolbarButton = React.forwardRef<HTMLButtonElement, {
   onClick: () => void;
   icon: React.ReactNode;
   label: string;
   className: string;
-}> = ({ onClick, icon, label, className }) => (
+}>(({ onClick, icon, label, className }, ref) => (
   <button
+    ref={ref}
     onClick={onClick}
     title={label}
     className={`p-1.5 rounded-md transition-colors ${className}`}
   >
     {icon}
   </button>
-);
+));

@@ -27,7 +27,7 @@ export const EditorAnnotationCard: React.FC<EditorAnnotationCardProps> = ({ anno
         </div>
         <button
           onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all opacity-0 group-hover:opacity-100"
+          className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
           title="Delete annotation"
         >
           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
