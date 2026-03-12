@@ -65,7 +65,7 @@ export const FloatingQuickLabelPicker: React.FC<FloatingQuickLabelPickerProps> =
     };
   }, [anchorEl, cursorHint]);
 
-  // Keyboard: Alt+1..8 and Escape
+  // Keyboard: 1-9/0 or Alt+1-9/0 to apply label, Escape to dismiss
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -73,9 +73,12 @@ export const FloatingQuickLabelPicker: React.FC<FloatingQuickLabelPickerProps> =
         onDismiss();
         return;
       }
-      if (e.altKey && e.code >= 'Digit1' && e.code <= 'Digit9') {
+      // Accept bare digit or Alt+digit — picker is open so digits mean labels
+      const isDigit = (e.code >= 'Digit1' && e.code <= 'Digit9') || e.code === 'Digit0';
+      if (isDigit && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        const index = parseInt(e.code.slice(5), 10) - 1;
+        const digit = parseInt(e.code.slice(5), 10);
+        const index = digit === 0 ? 9 : digit - 1;
         if (index < quickLabels.length) {
           onSelect(quickLabels[index]);
         }

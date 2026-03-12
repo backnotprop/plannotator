@@ -713,7 +713,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                                 ))}
                               </select>
                               <span className="text-[10px] text-muted-foreground/50 font-mono w-8 text-center flex-shrink-0">
-                                {index < 9 ? `${navigator.platform?.includes('Mac') ? '⌥' : 'Alt+'}${index + 1}` : ''}
+                                {index < 10 ? `${navigator.platform?.includes('Mac') ? '⌥' : 'Alt+'}${index === 9 ? '0' : index + 1}` : ''}
                               </span>
                               <button
                                 onClick={() => {
@@ -756,6 +756,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                                   placeholder="AI instruction tip..."
                                   className="flex-1 px-2 py-1 bg-background/60 rounded text-[10px] text-muted-foreground placeholder:text-muted-foreground/30 focus:outline-none focus:ring-1 focus:ring-primary/50"
                                   autoFocus
+                                  onFocus={(e) => { e.target.setSelectionRange(0, 0); e.target.scrollLeft = 0; }}
                                 />
                                 <button
                                   onClick={() => {
@@ -799,7 +800,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                     )}
 
                     <div className="text-[10px] text-muted-foreground/70">
-                      Use {navigator.platform?.includes('Mac') ? '⌥' : 'Alt+'}1 through {navigator.platform?.includes('Mac') ? '⌥' : 'Alt+'}9 when the annotation toolbar is visible to apply a label instantly.
+                      Use {navigator.platform?.includes('Mac') ? '⌥' : 'Alt+'}1 through {navigator.platform?.includes('Mac') ? '⌥' : 'Alt+'}0 when the annotation toolbar is visible to apply a label instantly.
                     </div>
                   </>
                 )}

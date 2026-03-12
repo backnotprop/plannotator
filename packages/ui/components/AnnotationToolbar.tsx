@@ -103,7 +103,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     };
   }, [element, positionMode, closeOnScrollOut, onClose]);
 
-  // Type-to-comment + Alt+N quick label shortcuts
+  // Type-to-comment + Alt+N / bare digit quick label shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.isComposing) return;
@@ -114,10 +114,12 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
         return;
       }
 
-      // Alt+1..8: apply quick label
-      if (e.altKey && e.code >= 'Digit1' && e.code <= 'Digit9') {
+      // Quick label by digit — Alt+N always works, bare digit when picker is open
+      const isDigit = (e.code >= 'Digit1' && e.code <= 'Digit9') || e.code === 'Digit0';
+      if (isDigit && !e.ctrlKey && !e.metaKey && (e.altKey || showQuickLabels)) {
         e.preventDefault();
-        const index = parseInt(e.code.slice(5), 10) - 1;
+        const digit = parseInt(e.code.slice(5), 10);
+        const index = digit === 0 ? 9 : digit - 1;
         if (index < quickLabels.length) {
           onQuickLabel?.(quickLabels[index]);
         }
@@ -133,7 +135,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose, onRequestComment, onQuickLabel, quickLabels]);
+  }, [onClose, onRequestComment, onQuickLabel, quickLabels, showQuickLabels]);
 
   useDismissOnOutsideAndEscape({
     enabled: !showQuickLabels,

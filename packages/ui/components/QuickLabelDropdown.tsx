@@ -50,9 +50,9 @@ export const QuickLabelDropdown: React.FC<{
               {label.text}
             </span>
             {/* Shortcut hint */}
-            {index < 9 && (
+            {index < 10 && (
               <span className="text-[9px] tabular-nums text-muted-foreground/40 group-hover:text-muted-foreground/60 flex-shrink-0 font-mono">
-                {index + 1}
+                {index === 9 ? '0' : index + 1}
               </span>
             )}
           </button>
