@@ -506,7 +506,11 @@ const App: React.FC = () => {
       }
 
       if (bearSettings.enabled) {
-        body.bear = { plan: markdown };
+        body.bear = {
+          plan: markdown,
+          customTags: bearSettings.customTags,
+          tagPosition: bearSettings.tagPosition,
+        };
       }
 
       // Include annotations as feedback if any exist (for OpenCode "approve with notes")
@@ -731,7 +735,12 @@ const App: React.FC = () => {
       }
     }
     if (target === 'bear') {
-      body.bear = { plan: markdown };
+      const bs = getBearSettings();
+      body.bear = {
+        plan: markdown,
+        customTags: bs.customTags,
+        tagPosition: bs.tagPosition,
+      };
     }
 
     try {

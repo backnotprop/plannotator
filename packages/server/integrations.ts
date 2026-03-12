@@ -19,6 +19,8 @@ export interface ObsidianConfig {
 
 export interface BearConfig {
   plan: string;
+  customTags?: string;
+  tagPosition?: 'prepend' | 'append';
 }
 
 export interface IntegrationResult {
@@ -279,20 +281,29 @@ export async function saveToObsidian(config: ObsidianConfig): Promise<Integratio
  */
 export async function saveToBear(config: BearConfig): Promise<IntegrationResult> {
   try {
-    const { plan } = config;
+    const { plan, customTags, tagPosition = 'append' } = config;
 
-    // Extract title and tags
     const title = extractTitle(plan);
-    const tags = await extractTags(plan);
-    const hashtags = tags.map(t => `#${t}`).join(' ');
 
-    // Append hashtags to content
-    const content = `${plan}\n\n${hashtags}`;
+    // Strip first H1 from body (Bear's title param already carries it)
+    const body = plan.replace(/^#\s+(?:Implementation\s+Plan:|Plan:)?\s*.+\n?/im, '').trimStart();
 
-    // Build Bear URL
+    // Build hashtags: custom tags if provided, otherwise auto-generate
+    let hashtags: string;
+    if (customTags?.trim()) {
+      hashtags = customTags.split(',').map(t => `#${t.trim()}`).filter(t => t !== '#').join(' ');
+    } else {
+      const tags = await extractTags(plan);
+      hashtags = tags.map(t => `#${t}`).join(' ');
+    }
+
+    // Position tags relative to content
+    const content = tagPosition === 'prepend'
+      ? `${hashtags}\n\n${body}`
+      : `${body}\n\n${hashtags}`;
+
     const url = `bear://x-callback-url/create?title=${encodeURIComponent(title)}&text=${encodeURIComponent(content)}&open_note=no`;
 
-    // Open Bear via URL scheme
     await $`open ${url}`.quiet();
 
     return { success: true };
