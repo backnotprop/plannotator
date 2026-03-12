@@ -13,12 +13,18 @@ const STORAGE_KEY_TAG_POSITION = 'plannotator-bear-tag-position';
 
 export type TagPosition = 'prepend' | 'append';
 
+/**
+ * Bear integration settings
+ */
 export interface BearSettings {
   enabled: boolean;
   customTags: string;
   tagPosition: TagPosition;
 }
 
+/**
+ * Get current Bear settings from storage
+ */
 export function getBearSettings(): BearSettings {
   return {
     enabled: storage.getItem(STORAGE_KEY_ENABLED) === 'true',
@@ -27,6 +33,9 @@ export function getBearSettings(): BearSettings {
   };
 }
 
+/**
+ * Save Bear settings to storage
+ */
 export function saveBearSettings(settings: BearSettings): void {
   storage.setItem(STORAGE_KEY_ENABLED, String(settings.enabled));
   storage.setItem(STORAGE_KEY_CUSTOM_TAGS, settings.customTags);
