@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { AnnotationType } from "../types";
 import { createPortal } from "react-dom";
 import { useDismissOnOutsideAndEscape } from "../hooks/useDismissOnOutsideAndEscape";
 import { type QuickLabel, getQuickLabels } from "../utils/quickLabels";
-import { QuickLabelDropdown } from "./QuickLabelDropdown";
+import { FloatingQuickLabelPicker } from "./FloatingQuickLabelPicker";
 
 type PositionMode = 'center-above' | 'top-right';
 
@@ -51,6 +51,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   const [copied, setCopied] = useState(false);
   const [showQuickLabels, setShowQuickLabels] = useState(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const zapButtonRef = useRef<HTMLButtonElement>(null);
   const quickLabels = useMemo(() => getQuickLabels(), []);
 
   const handleCopy = async () => {
@@ -114,7 +115,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       }
 
       // Alt+1..8: apply quick label
-      if (e.altKey && e.code >= 'Digit1' && e.code <= 'Digit8') {
+      if (e.altKey && e.code >= 'Digit1' && e.code <= 'Digit9') {
         e.preventDefault();
         const index = parseInt(e.code.slice(5), 10) - 1;
         if (index < quickLabels.length) {
@@ -135,7 +136,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   }, [onClose, onRequestComment, onQuickLabel, quickLabels]);
 
   useDismissOnOutsideAndEscape({
-    enabled: true,
+    enabled: !showQuickLabels,
     ref: toolbarRef,
     onDismiss: onClose,
   });
@@ -203,23 +204,25 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           className="text-accent hover:bg-accent/10"
         />
         {onQuickLabel && (
-          <div className="relative">
+          <>
             <ToolbarButton
+              ref={zapButtonRef}
               onClick={() => setShowQuickLabels(prev => !prev)}
               icon={<ZapIcon />}
               label="Quick label"
               className={showQuickLabels ? "text-amber-500 bg-amber-500/10" : "text-amber-500 hover:bg-amber-500/10"}
             />
-            {showQuickLabels && (
-              <InlineQuickLabelDropdown
-                labels={quickLabels}
+            {showQuickLabels && zapButtonRef.current && (
+              <FloatingQuickLabelPicker
+                anchorEl={zapButtonRef.current}
                 onSelect={(label) => {
                   setShowQuickLabels(false);
                   onQuickLabel(label);
                 }}
+                onDismiss={() => setShowQuickLabels(false)}
               />
             )}
-          </div>
+          </>
         )}
         <div className="w-px h-5 bg-border mx-0.5" />
         <ToolbarButton
@@ -233,19 +236,6 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     document.body
   );
 };
-
-// Inline dropdown wrapper positioned below the zap button
-const InlineQuickLabelDropdown: React.FC<{
-  labels: QuickLabel[];
-  onSelect: (label: QuickLabel) => void;
-}> = ({ labels, onSelect }) => (
-  <div
-    className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 bg-popover border border-border rounded-lg shadow-2xl p-2 min-w-[220px] z-[101]"
-    style={{ animation: 'annotation-toolbar-in 0.1s ease-out' }}
-  >
-    <QuickLabelDropdown labels={labels} onSelect={onSelect} />
-  </div>
-);
 
 // Icons
 const CopyIcon = () => (
@@ -284,17 +274,18 @@ const CloseIcon = () => (
   </svg>
 );
 
-const ToolbarButton: React.FC<{
+const ToolbarButton = React.forwardRef<HTMLButtonElement, {
   onClick: () => void;
   icon: React.ReactNode;
   label: string;
   className: string;
-}> = ({ onClick, icon, label, className }) => (
+}>(({ onClick, icon, label, className }, ref) => (
   <button
+    ref={ref}
     onClick={onClick}
     title={label}
     className={`p-1.5 rounded-md transition-colors ${className}`}
   >
     {icon}
   </button>
-);
+));

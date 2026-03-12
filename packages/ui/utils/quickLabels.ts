@@ -14,6 +14,7 @@ export interface QuickLabel {
   emoji: string;  // single emoji e.g. "🧪"
   text: string;   // display text e.g. "Needs tests"
   color: string;  // key into LABEL_COLOR_MAP
+  tip?: string;   // optional instruction injected into feedback for the agent
 }
 
 /** Inline styles for label colors (avoids Tailwind dynamic class purging) */
@@ -29,12 +30,13 @@ export const LABEL_COLOR_MAP: Record<string, { bg: string; text: string; darkTex
 };
 
 export const DEFAULT_QUICK_LABELS: QuickLabel[] = [
+  { id: 'clarify-this',        emoji: '❓', text: 'Clarify this',        color: 'yellow' },
   { id: 'needs-tests',         emoji: '🧪', text: 'Needs tests',         color: 'blue' },
+  { id: 'consider-edge-cases', emoji: '🧩', text: 'Consider edge cases', color: 'teal' },
+  { id: 'missing-overview',    emoji: '🗺️', text: 'Missing overview',    color: 'purple', tip: 'Provide a narrative overview of what is being built, why it is being built, and how it will be built. Add this before the implementation details.' },
   { id: 'security-concern',    emoji: '🔒', text: 'Security concern',    color: 'red' },
   { id: 'break-this-up',       emoji: '✂️',  text: 'Break this up',       color: 'orange' },
-  { id: 'clarify-this-step',   emoji: '❓', text: 'Clarify this step',   color: 'yellow' },
   { id: 'wrong-order',         emoji: '🔀', text: 'Wrong order',         color: 'purple' },
-  { id: 'consider-edge-cases', emoji: '🧩', text: 'Consider edge cases', color: 'teal' },
   { id: 'discuss-first',       emoji: '💬', text: 'Discuss first',       color: 'pink' },
   { id: 'nice-approach',       emoji: '👍', text: 'Nice approach',       color: 'green' },
 ];

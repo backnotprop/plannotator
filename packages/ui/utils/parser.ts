@@ -298,6 +298,9 @@ export const exportAnnotations = (blocks: Block[], annotations: any[], globalAtt
       case 'COMMENT':
         if (ann.isQuickLabel) {
           output += `[${ann.text}] Feedback on: "${ann.originalText}"\n`;
+          if (ann.quickLabelTip) {
+            output += `> ${ann.quickLabelTip}\n`;
+          }
         } else {
           output += `Feedback on: "${ann.originalText}"\n`;
           output += `> ${ann.text}\n`;

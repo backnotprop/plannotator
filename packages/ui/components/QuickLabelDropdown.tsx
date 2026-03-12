@@ -1,36 +1,63 @@
 import React from 'react';
 import { type QuickLabel, getLabelColors } from '../utils/quickLabels';
 
+/**
+ * Shared vertical label list used by both FloatingQuickLabelPicker
+ * and the AnnotationToolbar's inline dropdown.
+ *
+ * Context-menu style: single column, colored accent bars, full-width rows.
+ */
 export const QuickLabelDropdown: React.FC<{
   labels: QuickLabel[];
   onSelect: (label: QuickLabel) => void;
-}> = ({ labels, onSelect }) => {
-  const isMac = navigator.platform?.includes('Mac');
-  const altKey = isMac ? '⌥' : 'Alt+';
-
+  /** Enable staggered row entrance animation */
+  animate?: boolean;
+}> = ({ labels, onSelect, animate = false }) => {
   return (
-    <div onMouseDown={(e) => e.stopPropagation()}>
-      <div className="text-[10px] text-muted-foreground/60 px-1 mb-1.5 font-medium uppercase tracking-wide">Quick Labels</div>
-      <div className="flex flex-wrap gap-1">
-        {labels.map((label, index) => {
-          const colors = getLabelColors(label.color);
-          return (
-            <button
-              key={label.id}
-              onClick={() => onSelect(label)}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-opacity hover:opacity-75 active:opacity-60"
-              style={{ backgroundColor: colors.bg, color: colors.text }}
-              title={index < 8 ? `${altKey}${index + 1}` : undefined}
-            >
-              <span>{label.emoji}</span>
-              <span>{label.text}</span>
-              {index < 8 && (
-                <span className="text-[9px] opacity-40 ml-0.5">{index + 1}</span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+    <div className="py-1" onMouseDown={(e) => e.stopPropagation()}>
+      {animate && (
+        <style>{`
+          @keyframes qld-row-in {
+            from { opacity: 0; transform: translateX(-3px); }
+            to   { opacity: 1; transform: translateX(0); }
+          }
+        `}</style>
+      )}
+      {labels.map((label, index) => {
+        const colors = getLabelColors(label.color);
+        return (
+          <button
+            key={label.id}
+            onClick={() => onSelect(label)}
+            className="group w-full flex items-center gap-2 px-2 py-[5px] text-left transition-colors hover:bg-muted/60 active:bg-muted"
+            style={animate ? {
+              animationDelay: `${index * 18}ms`,
+              animationName: 'qld-row-in',
+              animationDuration: '0.1s',
+              animationFillMode: 'both',
+              animationTimingFunction: 'ease-out',
+            } : undefined}
+          >
+            {/* Color accent bar */}
+            <span
+              className="w-[3px] self-stretch rounded-full flex-shrink-0"
+              style={{ backgroundColor: colors.text }}
+            />
+            {/* Emoji */}
+            <span className="text-xs leading-none flex-shrink-0">{label.emoji}</span>
+            {/* Label text */}
+            <span className="text-[11px] leading-tight text-foreground/85 group-hover:text-foreground truncate flex-1">
+              {label.text}
+            </span>
+            {/* Shortcut hint */}
+            {index < 9 && (
+              <span className="text-[9px] tabular-nums text-muted-foreground/40 group-hover:text-muted-foreground/60 flex-shrink-0 font-mono">
+                {index + 1}
+              </span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 };

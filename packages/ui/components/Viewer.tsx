@@ -159,9 +159,11 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   } | null>(null);
   const [quickLabelPicker, setQuickLabelPicker] = useState<{
     anchorEl: HTMLElement;
+    cursorHint?: { x: number; y: number };
     source?: any;
     codeBlock?: { block: Block; element: HTMLElement };
   } | null>(null);
+  const lastMousePosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const stickySentinelRef = useRef<HTMLDivElement>(null);
   const [isStuck, setIsStuck] = useState(false);
@@ -252,6 +254,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     text?: string,
     images?: ImageAttachment[],
     isQuickLabel?: boolean,
+    quickLabelTip?: string,
   ) => {
     const doms = highlighter.getDoms(source.id);
     let blockId = '';
@@ -285,6 +288,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       endMeta: source.endMeta,
       images,
       ...(isQuickLabel ? { isQuickLabel: true } : {}),
+      ...(quickLabelTip ? { quickLabelTip } : {}),
     };
 
     if (type === AnnotationType.DELETION) {
@@ -531,6 +535,13 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     }
   }), [findTextInDOM, onSelectAnnotation]);
 
+  // Track last mouse position for cursor-anchored quick label picker
+  useEffect(() => {
+    const track = (e: MouseEvent) => { lastMousePosRef.current = { x: e.clientX, y: e.clientY }; };
+    document.addEventListener('mouseup', track, true);
+    return () => document.removeEventListener('mouseup', track, true);
+  }, []);
+
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -574,6 +585,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             pendingSourceRef.current = source;
             setQuickLabelPicker({
               anchorEl: doms[0] as HTMLElement,
+              cursorHint: lastMousePosRef.current,
               source,
             });
           } else {
@@ -707,7 +719,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 
     createAnnotationFromSource(
       highlighter, toolbarState.source, AnnotationType.COMMENT,
-      `${label.emoji} ${label.text}`, undefined, true
+      `${label.emoji} ${label.text}`, undefined, true, label.tip
     );
     pendingSourceRef.current = null;
     setToolbarState(null);
@@ -720,7 +732,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     if (quickLabelPicker.source && highlighterRef.current) {
       createAnnotationFromSource(
         highlighterRef.current, quickLabelPicker.source, AnnotationType.COMMENT,
-        `${label.emoji} ${label.text}`, undefined, true
+        `${label.emoji} ${label.text}`, undefined, true, label.tip
       );
       pendingSourceRef.current = null;
     } else if (quickLabelPicker.codeBlock) {
@@ -728,7 +740,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       if (codeEl) {
         applyCodeBlockAnnotation(
           quickLabelPicker.codeBlock.block.id, codeEl, AnnotationType.COMMENT,
-          `${label.emoji} ${label.text}`, undefined, true
+          `${label.emoji} ${label.text}`, undefined, true, label.tip
         );
       }
     }
@@ -762,6 +774,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     text?: string,
     images?: ImageAttachment[],
     isQuickLabel?: boolean,
+    quickLabelTip?: string,
   ) => {
     const id = `codeblock-${Date.now()}`;
     const codeText = codeEl.textContent || '';
@@ -786,6 +799,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       author: getIdentity(),
       images,
       ...(isQuickLabel ? { isQuickLabel: true } : {}),
+      ...(quickLabelTip ? { quickLabelTip } : {}),
     };
 
     justCreatedIdRef.current = newAnnotation.id;
@@ -807,7 +821,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     if (!codeEl) return;
     applyCodeBlockAnnotation(
       hoveredCodeBlock.block.id, codeEl, AnnotationType.COMMENT,
-      `${label.emoji} ${label.text}`, undefined, true
+      `${label.emoji} ${label.text}`, undefined, true, label.tip
     );
     setHoveredCodeBlock(null);
   };
@@ -1127,6 +1141,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         {quickLabelPicker && (
           <FloatingQuickLabelPicker
             anchorEl={quickLabelPicker.anchorEl}
+            cursorHint={quickLabelPicker.cursorHint}
             onSelect={handleFloatingQuickLabel}
             onDismiss={handleQuickLabelPickerDismiss}
           />

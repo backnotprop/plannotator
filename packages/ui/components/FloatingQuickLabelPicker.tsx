@@ -5,45 +5,65 @@ import { QuickLabelDropdown } from './QuickLabelDropdown';
 
 interface FloatingQuickLabelPickerProps {
   anchorEl: HTMLElement;
+  /** Mouse coordinates at the moment of selection — picker appears here */
+  cursorHint?: { x: number; y: number };
   onSelect: (label: QuickLabel) => void;
   onDismiss: () => void;
 }
 
+const PICKER_WIDTH = 192;
+const GAP = 6;
+const VIEWPORT_PADDING = 12;
+
+function computePosition(
+  anchorEl: HTMLElement,
+  cursorHint?: { x: number; y: number },
+): { top: number; left: number; flipAbove: boolean } {
+  const rect = anchorEl.getBoundingClientRect();
+
+  // Vertical: use anchor rect for above/below decision + placement
+  const spaceBelow = window.innerHeight - rect.bottom;
+  const flipAbove = spaceBelow < 220;
+  const top = flipAbove ? rect.top - GAP : rect.bottom + GAP;
+
+  // Horizontal: prefer cursor x, fallback to anchor right edge
+  let left: number;
+  if (cursorHint) {
+    // Anchor left edge of picker at cursor x, nudge left slightly so
+    // the first row's text is directly under the pointer
+    left = cursorHint.x - 28;
+  } else {
+    // Fallback: right edge of anchor (where selection likely ended)
+    left = rect.right - PICKER_WIDTH / 2;
+  }
+
+  // Clamp to viewport
+  left = Math.max(VIEWPORT_PADDING, Math.min(left, window.innerWidth - PICKER_WIDTH - VIEWPORT_PADDING));
+
+  return { top, left, flipAbove };
+}
+
 export const FloatingQuickLabelPicker: React.FC<FloatingQuickLabelPickerProps> = ({
   anchorEl,
+  cursorHint,
   onSelect,
   onDismiss,
 }) => {
-  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+  const [position, setPosition] = useState<{ top: number; left: number; flipAbove: boolean } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const quickLabels = useMemo(() => getQuickLabels(), []);
 
   // Position tracking
   useEffect(() => {
-    const updatePosition = () => {
-      const rect = anchorEl.getBoundingClientRect();
-      const dropdownHeight = 120; // approximate
-      const gap = 8;
-
-      const hasSpaceAbove = rect.top > dropdownHeight + gap;
-      const top = hasSpaceAbove
-        ? rect.top - gap
-        : rect.bottom + gap;
-
-      setPosition({
-        top,
-        left: rect.left + rect.width / 2,
-      });
-    };
-
-    updatePosition();
-    window.addEventListener('scroll', updatePosition, true);
-    window.addEventListener('resize', updatePosition);
+    const update = () => setPosition(computePosition(anchorEl, cursorHint));
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
     return () => {
-      window.removeEventListener('scroll', updatePosition, true);
-      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
     };
-  }, [anchorEl]);
+  }, [anchorEl, cursorHint]);
 
   // Keyboard: Alt+1..8 and Escape
   useEffect(() => {
@@ -53,60 +73,67 @@ export const FloatingQuickLabelPicker: React.FC<FloatingQuickLabelPickerProps> =
         onDismiss();
         return;
       }
-      if (e.altKey && e.code >= 'Digit1' && e.code <= 'Digit8') {
+      if (e.altKey && e.code >= 'Digit1' && e.code <= 'Digit9') {
         e.preventDefault();
         const index = parseInt(e.code.slice(5), 10) - 1;
         if (index < quickLabels.length) {
           onSelect(quickLabels[index]);
         }
-        return;
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onDismiss, onSelect, quickLabels]);
 
   // Click outside to dismiss
   useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
+    const handlePointerDown = (e: PointerEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
         onDismiss();
       }
     };
-
-    // Use setTimeout to avoid dismissing from the same click that triggered the picker
+    // Defer to avoid catching the triggering click
     const timer = setTimeout(() => {
-      document.addEventListener('mousedown', handleClick);
+      document.addEventListener('pointerdown', handlePointerDown, true);
     }, 0);
-
     return () => {
       clearTimeout(timer);
-      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('pointerdown', handlePointerDown, true);
     };
   }, [onDismiss]);
 
   if (!position) return null;
 
+  const animName = position.flipAbove ? 'qlp-in-above' : 'qlp-in-below';
+
   return createPortal(
     <div
       ref={ref}
-      className="fixed z-[100] bg-popover border border-border rounded-lg shadow-2xl p-2 min-w-[220px]"
+      data-quick-label-picker
+      className="fixed z-[100]"
       style={{
         top: position.top,
         left: position.left,
-        transform: 'translate(-50%, -100%)',
-        animation: 'floating-picker-in 0.15s ease-out',
+        width: PICKER_WIDTH,
+        ...(position.flipAbove ? { transform: 'translateY(-100%)' } : {}),
+        animation: `${animName} 0.12s ease-out`,
       }}
       onMouseDown={(e) => e.stopPropagation()}
     >
       <style>{`
-        @keyframes floating-picker-in {
-          from { opacity: 0; transform: translate(-50%, -100%) translateY(8px); }
-          to { opacity: 1; transform: translate(-50%, -100%) translateY(0); }
+        @keyframes qlp-in-below {
+          from { opacity: 0; transform: translateY(-4px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes qlp-in-above {
+          from { opacity: 0; transform: translateY(-100%) translateY(4px); }
+          to   { opacity: 1; transform: translateY(-100%); }
         }
       `}</style>
-      <QuickLabelDropdown labels={quickLabels} onSelect={onSelect} />
+
+      <div className="bg-popover border border-border/60 rounded-lg shadow-xl overflow-hidden">
+        <QuickLabelDropdown labels={quickLabels} onSelect={onSelect} animate />
+      </div>
     </div>,
     document.body
   );
