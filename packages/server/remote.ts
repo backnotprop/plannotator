@@ -1,14 +1,18 @@
 /**
- * Remote session detection and port configuration
+ * Remote session detection, port configuration, and hostname resolution
  *
  * Environment variables:
- *   PLANNOTATOR_REMOTE - Set to "1"/"true" to force remote, "0"/"false" to force local
- *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
+ *   PLANNOTATOR_REMOTE   - Set to "1"/"true" to force remote, "0"/"false" to force local
+ *   PLANNOTATOR_PORT     - Fixed port to use (default: random)
+ *   PLANNOTATOR_HOSTNAME - Explicit hostname for remote URLs (e.g. "mybox.ts.net")
  *
  * Legacy (still supported): SSH_TTY, SSH_CONNECTION
+ *
+ * When Tailscale is available, the server URL uses the Tailscale hostname
+ * so remote users can connect directly without port forwarding. This also
+ * allows random ports, so parallel sessions work.
  */
 
-const DEFAULT_REMOTE_PORT = 19432;
 const LOOPBACK_HOST = "127.0.0.1";
 
 function getRemoteOverride(): boolean | null {
@@ -46,7 +50,11 @@ export function isRemoteSession(): boolean {
 }
 
 /**
- * Get the server port to use
+ * Get the server port to use.
+ *
+ * Always uses a random port (0) unless PLANNOTATOR_PORT is explicitly set.
+ * The old default of 19432 for remote is no longer needed since we resolve
+ * the actual hostname (Tailscale/explicit) instead of relying on port forwarding.
  */
 export function getServerPort(): number {
   // Explicit port from environment takes precedence
@@ -61,14 +69,77 @@ export function getServerPort(): number {
     );
   }
 
-  // Remote sessions use fixed port for port forwarding; local uses random
-  return isRemoteSession() ? DEFAULT_REMOTE_PORT : 0;
+  return 0;
 }
 
 /**
  * Bind local sessions to loopback, but keep remote sessions reachable via the
- * container or host network interface for SSH/devcontainer/Docker forwarding.
+ * container or host network interface (Tailscale/SSH/devcontainer/Docker).
  */
 export function getServerHostname(): string {
   return isRemoteSession() ? "0.0.0.0" : LOOPBACK_HOST;
+}
+
+let cachedHostname: string | null | undefined;
+
+/**
+ * Get the hostname to use in user-facing server URLs.
+ *
+ * Priority:
+ *   1. PLANNOTATOR_HOSTNAME env var (explicit override)
+ *   2. Tailscale hostname (auto-detected via `tailscale status`)
+ *   3. "localhost" (fallback)
+ */
+export async function getServerUrlHostname(): Promise<string> {
+  if (cachedHostname !== undefined) {
+    return cachedHostname ?? "localhost";
+  }
+
+  // 1. Explicit env var
+  const envHostname = process.env.PLANNOTATOR_HOSTNAME;
+  if (envHostname) {
+    cachedHostname = envHostname;
+    return envHostname;
+  }
+
+  // 2. Auto-detect Tailscale
+  if (isRemoteSession()) {
+    const tsHostname = await detectTailscaleHostname();
+    if (tsHostname) {
+      cachedHostname = tsHostname;
+      return tsHostname;
+    }
+  }
+
+  // 3. Fallback
+  cachedHostname = null;
+  return "localhost";
+}
+
+/**
+ * Detect the Tailscale DNS name by running `tailscale status --self --json`.
+ * Returns null if Tailscale is not available or not running.
+ */
+async function detectTailscaleHostname(): Promise<string | null> {
+  try {
+    const proc = Bun.spawn(["tailscale", "status", "--self", "--json"], {
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+
+    const text = await new Response(proc.stdout).text();
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) return null;
+
+    const data = JSON.parse(text);
+    // DNSName has a trailing dot, e.g. "a4000.chaco-dory.ts.net."
+    const dnsName = data?.Self?.DNSName;
+    if (typeof dnsName === "string" && dnsName.length > 1) {
+      return dnsName.replace(/\.$/, "");
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
 }

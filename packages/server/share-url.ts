@@ -1,12 +1,21 @@
 /**
- * Server-side share URL generation for remote sessions
+ * Server-side share URL generation and notification for remote sessions.
  *
- * Generates a share.plannotator.ai URL from plan content so remote users
- * can open the review in their local browser without port forwarding.
+ * When Tailscale (or PLANNOTATOR_HOSTNAME) is available, the server URL is
+ * directly reachable from the user's local browser — no port forwarding
+ * needed. That URL is shown as the primary link (full approve/deny).
+ *
+ * As a fallback, a read-only share.plannotator.ai URL is generated so remote
+ * users can still open the review in their local browser (plan-only).
+ *
+ * Notification priority:
+ *   1. ntfy push notification (if CLAUDE_HOOKS_NTFY_URL is set)
+ *   2. stderr (fallback — works for OpenCode, logging, etc.)
  */
 
 import { compress } from "@plannotator/shared/compress";
 import { encrypt } from "@plannotator/shared/crypto";
+import { getServerUrlHostname } from "./remote";
 
 const DEFAULT_SHARE_BASE = "https://share.plannotator.ai";
 const DEFAULT_PASTE_API = "https://plannotator-paste.plannotator.workers.dev";
@@ -15,6 +24,25 @@ export interface RemoteShareOptions {
   rawHtml?: string;
   pasteApiUrl?: string;
   fetchImpl?: typeof fetch;
+  /**
+   * Local server URL (e.g. `http://localhost:45231`). When a reachable
+   * hostname (Tailscale/explicit) is detected, its `localhost` host is
+   * rewritten to that hostname and shown as the primary link with full
+   * approve/deny. Left untouched otherwise (read-only share link is used).
+   */
+  serverUrl?: string;
+}
+
+/**
+ * Resolve the directly-reachable server URL by swapping the local host for the
+ * detected Tailscale/explicit hostname. Returns null when no reachable
+ * hostname is available (so the read-only share link should be used instead).
+ */
+async function resolveReachableServerUrl(serverUrl?: string): Promise<string | null> {
+  if (!serverUrl) return null;
+  const host = await getServerUrlHostname();
+  if (host === "localhost") return null;
+  return serverUrl.replace("localhost", host).replace("127.0.0.1", host);
 }
 
 /**
@@ -98,9 +126,51 @@ export function formatSize(bytes: number): string {
 }
 
 /**
- * Generate a remote share URL and write it to stderr for the user.
- * Keeps the local server running, but warns when the fallback share link
- * cannot be created for remote sessions.
+ * Send URL via ntfy push notification.
+ *
+ * Reads config from env vars (compatible with claude-code ntfy hooks):
+ *   CLAUDE_HOOKS_NTFY_URL   - Full ntfy URL (e.g. https://ntfy.sh/mytopic)
+ *   CLAUDE_HOOKS_NTFY_TOKEN - Optional auth token
+ *
+ * Returns true if the notification was sent successfully.
+ */
+async function notifyNtfy(url: string, verb: string): Promise<boolean> {
+  const ntfyUrl = process.env.CLAUDE_HOOKS_NTFY_URL;
+  if (!ntfyUrl) return false;
+
+  const headers: Record<string, string> = {
+    Title: `Plannotator: ${verb}`,
+    Click: url,
+    Tags: "clipboard",
+  };
+
+  const token = process.env.CLAUDE_HOOKS_NTFY_TOKEN;
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  try {
+    const response = await fetch(ntfyUrl, {
+      method: "POST",
+      headers,
+      body: url,
+      signal: AbortSignal.timeout(5_000),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Notify the remote user about the review server URL.
+ *
+ * When a directly-reachable server URL is provided (Tailscale/explicit
+ * hostname), it is shown as the primary link with full approve/deny.
+ * Otherwise a read-only share URL is generated as the fallback.
+ *
+ * Notifies via ntfy push (if configured) and stderr. Silently does nothing
+ * on failure.
  */
 export async function writeRemoteShareLink(
   content: string,
@@ -109,14 +179,28 @@ export async function writeRemoteShareLink(
   noun: string,
   options: RemoteShareOptions = {},
 ): Promise<void> {
+  // Primary path: the server is directly reachable (full review w/ approve/deny).
+  const reachableUrl = await resolveReachableServerUrl(options.serverUrl);
+  if (reachableUrl) {
+    const ntfyOk = await notifyNtfy(reachableUrl, verb);
+    const lines = [`\n  Open this link on your local machine to ${verb}:\n  ${reachableUrl}\n`];
+    lines.push(`  (${noun} — full review with approve/deny)`);
+    if (ntfyOk) lines.push(`  [notified via ntfy]`);
+    lines.push("\n");
+    process.stderr.write(lines.join("\n"));
+    return;
+  }
+
+  // Fallback path: read-only share URL (works without port forwarding).
   try {
     const shareUrl = await generateRemoteShareUrl(content, shareBaseUrl, options);
+    const ntfyOk = await notifyNtfy(shareUrl, verb);
     const size = formatSize(new TextEncoder().encode(shareUrl).length);
-    process.stderr.write(
-      `\n  Open this link on your local machine to ${verb}:\n` +
-      `  ${shareUrl}\n\n` +
-      `  (${size} — ${noun}, annotations added in browser)\n\n`
-    );
+    const lines = [`\n  Open this link on your local machine to ${verb}:\n  ${shareUrl}\n`];
+    lines.push(`  (${size} — ${noun}, read-only, annotations added in browser)`);
+    if (ntfyOk) lines.push(`  [notified via ntfy]`);
+    lines.push("\n");
+    process.stderr.write(lines.join("\n"));
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     const pasteHint = options.rawHtml

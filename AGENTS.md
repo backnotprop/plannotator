@@ -133,6 +133,9 @@ claude --plugin-dir ./apps/hook
 | `PLANNOTATOR_SHARE` | Set to `disabled` to turn off URL sharing entirely. Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "share": "disabled" }`); the env var takes precedence. |
 | `PLANNOTATOR_SHARE_URL` | Custom base URL for share links (self-hosted portal). Default: `https://share.plannotator.ai`. |
 | `PLANNOTATOR_PASTE_URL` | Base URL of the paste service API for short URL sharing. Default: `https://plannotator-paste.plannotator.workers.dev`. |
+| `PLANNOTATOR_HOSTNAME` | Explicit hostname for remote URLs (e.g. `mybox.ts.net`). Auto-detected from Tailscale if not set. |
+| `CLAUDE_HOOKS_NTFY_URL` | Full ntfy URL (e.g. `https://ntfy.sh/mytopic`). When set, remote review URLs are sent as push notifications. |
+| `CLAUDE_HOOKS_NTFY_TOKEN` | Optional ntfy auth token (Bearer). |
 | `PLANNOTATOR_ORIGIN` | Explicit agent-origin override at the top of the detection chain. Valid values: `claude-code`, `amp`, `droid`, `opencode`, `codex`, `copilot-cli`, `gemini-cli`, `kiro-cli`, `pi`. Invalid values silently fall through to env-based detection. Unset by default. |
 | `PLANNOTATOR_JINA` | Set to `0` / `false` to disable Jina Reader for URL annotation, or `1` / `true` to enable. Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "jina": false }`) or per-invocation via `--no-jina`. |
 | `JINA_API_KEY` | Optional Jina Reader API key for higher rate limits (500 RPM vs 20 RPM unauthenticated). Free keys include 10M tokens. |

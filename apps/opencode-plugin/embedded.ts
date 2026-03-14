@@ -43,6 +43,16 @@ export async function runEmbeddedPlanReview(
     onReady: async (url, isRemote, port) => {
       await handleServerReady(url, isRemote, port);
       input.logReady(url, isRemote, port);
+      if (isRemote && input.sharingEnabled) {
+        const { writeRemoteShareLink } = await import("@plannotator/server/share-url");
+        await writeRemoteShareLink(
+          input.planContent,
+          input.shareBaseUrl,
+          "review the plan",
+          "plan only",
+          { serverUrl: url, pasteApiUrl: input.pasteApiUrl },
+        ).catch(() => {});
+      }
     },
   });
 

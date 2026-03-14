@@ -91,10 +91,14 @@ describe("getServerPort", () => {
     expect(getServerPort()).toBe(0);
   });
 
-  test("returns 19432 for remote session", () => {
+  test("returns 0 (random port) for remote session", () => {
+    // Remote sessions also use a random port now: the reachable URL hostname
+    // (Tailscale/explicit) is resolved separately, so port forwarding — and
+    // the old fixed 19432 default — is no longer needed. Random ports also let
+    // parallel sessions coexist without colliding.
     clearEnv();
     process.env.PLANNOTATOR_REMOTE = "1";
-    expect(getServerPort()).toBe(19432);
+    expect(getServerPort()).toBe(0);
   });
 
   test("returns 0 when PLANNOTATOR_REMOTE=false overrides SSH", () => {
