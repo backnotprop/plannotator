@@ -276,6 +276,23 @@ if (args[0] === "sessions") {
   // PLAN REVIEW MODE (default)
   // ============================================
 
+  // Passthrough flag path — used by "Approve in CLI" to skip UI on next invocation
+  const passthroughFlag = path.join(process.env.HOME || "~", ".plannotator", ".cli-passthrough");
+
+  // Check for CLI passthrough flag — if set, return no decision so CLI shows native prompt
+  try {
+    if (await Bun.file(passthroughFlag).exists()) {
+      const { unlink } = await import("node:fs/promises");
+      await unlink(passthroughFlag);
+      // Return empty response — no decision means CLI falls through to native prompt
+      // (the one with "Yes, clear context" / "Yes, auto-accept" options)
+      console.log("{}");
+      process.exit(0);
+    }
+  } catch {
+    // Flag doesn't exist or can't read — continue normally
+  }
+
   // Read hook event from stdin
   const eventJson = await Bun.stdin.text();
 
@@ -335,7 +352,22 @@ if (args[0] === "sessions") {
   server.stop();
 
   // Output JSON for PermissionRequest hook decision control
-  if (result.approved) {
+  if (result.deferToCli) {
+    // Write passthrough flag so next ExitPlanMode invocation skips the UI
+    await Bun.write(passthroughFlag, "1");
+    // Deny with instruction to re-call ExitPlanMode — the passthrough flag will auto-approve next time
+    console.log(
+      JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "PermissionRequest",
+          decision: {
+            behavior: "deny",
+            message: "The user chose to approve this plan via the CLI. Call ExitPlanMode again immediately with the exact same plan. Do NOT modify the plan.",
+          },
+        },
+      })
+    );
+  } else if (result.approved) {
     // Build updatedPermissions to preserve the current permission mode
     const updatedPermissions = [];
     if (result.permissionMode) {

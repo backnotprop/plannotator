@@ -466,6 +466,16 @@ const App: React.FC = () => {
   };
 
   // API mode handlers
+  const handleDeferToCli = async () => {
+    setIsSubmitting(true);
+    try {
+      await fetch('/api/defer-to-cli', { method: 'POST' });
+      setSubmitted('approved');
+    } catch {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleApprove = async () => {
     setIsSubmitting(true);
     try {
@@ -931,6 +941,28 @@ const App: React.FC = () => {
                     </div>
                   )}
                 </div>}
+
+                {!annotateMode && origin === 'claude-code' && (
+                  <div className="relative group/defer">
+                    <button
+                      onClick={handleDeferToCli}
+                      disabled={isSubmitting}
+                      className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${
+                        isSubmitting
+                          ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
+                          : 'bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                      }`}
+                    >
+                      <span className="md:hidden">CLI</span>
+                      <span className="hidden md:inline">Approve in CLI</span>
+                    </button>
+                    <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/defer:opacity-100 group-hover/defer:visible transition-all pointer-events-none z-50">
+                      <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
+                      <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
+                      Approve via Claude Code's native flow. Use this if you want to /compact before implementing.
+                    </div>
+                  </div>
+                )}
 
                 <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
               </>
