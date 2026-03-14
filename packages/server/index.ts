@@ -76,13 +76,14 @@ export interface ServerResult {
   url: string;
   /** Whether running in remote mode */
   isRemote: boolean;
-  /** Wait for user decision (approve/deny) */
+  /** Wait for user decision (approve/deny/defer) */
   waitForDecision: () => Promise<{
     approved: boolean;
     feedback?: string;
     savedPath?: string;
     agentSwitch?: string;
     permissionMode?: string;
+    deferToCli?: boolean;
   }>;
   /** Stop the server */
   stop: () => void;
@@ -140,6 +141,7 @@ export async function startPlannotatorServer(
     savedPath?: string;
     agentSwitch?: string;
     permissionMode?: string;
+    deferToCli?: boolean;
   }) => void;
   const decisionPromise = new Promise<{
     approved: boolean;
@@ -147,6 +149,7 @@ export async function startPlannotatorServer(
     savedPath?: string;
     agentSwitch?: string;
     permissionMode?: string;
+    deferToCli?: boolean;
   }>((resolve) => {
     resolveDecision = resolve;
   });
@@ -387,6 +390,14 @@ export async function startPlannotatorServer(
             const effectivePermissionMode = requestedPermissionMode || permissionMode;
             resolveDecision({ approved: true, feedback, savedPath, agentSwitch, permissionMode: effectivePermissionMode });
             return Response.json({ ok: true, savedPath });
+          }
+
+          // API: Defer to CLI — let Claude Code's native approval handle it
+          if (url.pathname === "/api/defer-to-cli" && req.method === "POST") {
+            // Clean up draft on defer
+            deleteDraft(draftKey);
+            resolveDecision({ approved: false, deferToCli: true });
+            return Response.json({ ok: true });
           }
 
           // API: Deny with feedback
