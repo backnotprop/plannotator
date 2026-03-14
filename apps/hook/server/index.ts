@@ -183,7 +183,12 @@ if (args[0] === "sessions") {
   server.stop();
 
   // Output feedback (captured by slash command)
-  console.log(result.feedback || "No feedback provided.");
+  const hasAnnotations = Array.isArray(result.annotations) && result.annotations.length > 0;
+  if (hasAnnotations) {
+    console.log(result.feedback);
+  } else {
+    console.log("Code review completed — no changes requested.");
+  }
   process.exit(0);
 
 } else if (args[0] === "annotate") {

@@ -217,11 +217,17 @@ Do NOT proceed with implementation until your plan is approved.
 
           // Only try to send feedback if we have a valid session ID
           if (sessionId) {
+            const hasAnnotations = Array.isArray(result.annotations) && result.annotations.length > 0;
+
             // Check agent switch setting (defaults to 'build' if not set)
             const shouldSwitchAgent = result.agentSwitch && result.agentSwitch !== 'disabled';
             const targetAgent = result.agentSwitch || 'build';
 
-            // Send feedback to agent - it will automatically respond and address it
+            const message = hasAnnotations
+              ? `# Code Review Feedback\n\n${result.feedback}\n\nPlease address this feedback.`
+              : `# Code Review\n\nCode review completed — no changes requested.`;
+
+            // Send feedback to agent
             try {
               await ctx.client.session.prompt({
                 path: { id: sessionId },
@@ -230,7 +236,7 @@ Do NOT proceed with implementation until your plan is approved.
                   parts: [
                     {
                       type: "text",
-                      text: `# Code Review Feedback\n\n${result.feedback}\n\nPlease address this feedback.`,
+                      text: message,
                     },
                   ],
                 },
