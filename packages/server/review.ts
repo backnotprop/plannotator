@@ -56,8 +56,9 @@ export interface ReviewServerResult {
   url: string;
   /** Whether running in remote mode */
   isRemote: boolean;
-  /** Wait for user feedback submission */
+  /** Wait for user review decision */
   waitForDecision: () => Promise<{
+    approved: boolean;
     feedback: string;
     annotations: unknown[];
     agentSwitch?: string;
@@ -101,11 +102,13 @@ export async function startReviewServer(
 
   // Decision promise
   let resolveDecision: (result: {
+    approved: boolean;
     feedback: string;
     annotations: unknown[];
     agentSwitch?: string;
   }) => void;
   const decisionPromise = new Promise<{
+    approved: boolean;
     feedback: string;
     annotations: unknown[];
     agentSwitch?: string;
@@ -259,6 +262,7 @@ export async function startReviewServer(
           if (url.pathname === "/api/feedback" && req.method === "POST") {
             try {
               const body = (await req.json()) as {
+                approved?: boolean;
                 feedback: string;
                 annotations: unknown[];
                 agentSwitch?: string;
@@ -266,6 +270,7 @@ export async function startReviewServer(
 
               deleteDraft(draftKey);
               resolveDecision({
+                approved: body.approved ?? false,
                 feedback: body.feedback || "",
                 annotations: body.annotations || [],
                 agentSwitch: body.agentSwitch,

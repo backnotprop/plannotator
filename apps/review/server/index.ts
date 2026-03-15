@@ -88,6 +88,7 @@ server.stop();
 console.log(
   JSON.stringify({
     gitRef: displayRef,
+    approved: result.approved,
     feedback: result.feedback,
     annotations: result.annotations,
   }, null, 2)

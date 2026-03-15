@@ -349,7 +349,7 @@ export interface GitContext {
 export interface ReviewServerResult {
   port: number;
   url: string;
-  waitForDecision: () => Promise<{ feedback: string }>;
+  waitForDecision: () => Promise<{ approved: boolean; feedback: string }>;
   stop: () => void;
 }
 
@@ -415,8 +415,8 @@ export function startReviewServer(options: {
   let currentGitRef = options.gitRef;
   let currentDiffType: DiffType = options.diffType || "uncommitted";
 
-  let resolveDecision!: (result: { feedback: string }) => void;
-  const decisionPromise = new Promise<{ feedback: string }>((r) => {
+  let resolveDecision!: (result: { approved: boolean; feedback: string }) => void;
+  const decisionPromise = new Promise<{ approved: boolean; feedback: string }>((r) => {
     resolveDecision = r;
   });
 
@@ -446,7 +446,10 @@ export function startReviewServer(options: {
       json(res, { rawPatch: currentPatch, gitRef: currentGitRef, diffType: currentDiffType });
     } else if (url.pathname === "/api/feedback" && req.method === "POST") {
       const body = await parseBody(req);
-      resolveDecision({ feedback: (body.feedback as string) || "" });
+      resolveDecision({
+        approved: (body.approved as boolean) ?? false,
+        feedback: (body.feedback as string) || "",
+      });
       json(res, { ok: true });
     } else {
       html(res, options.htmlContent);

@@ -255,11 +255,10 @@ export default function plannotator(pi: ExtensionAPI): void {
       server.stop();
 
       if (result.feedback) {
-        const hasAnnotations = Array.isArray(result.annotations) && result.annotations.length > 0;
-        if (hasAnnotations) {
-          pi.sendUserMessage(`# Code Review Feedback\n\n${result.feedback}\n\nPlease address this feedback.`);
-        } else {
+        if (result.approved) {
           pi.sendUserMessage(`# Code Review\n\nCode review completed — no changes requested.`);
+        } else {
+          pi.sendUserMessage(`# Code Review Feedback\n\n${result.feedback}\n\nPlease address this feedback.`);
         }
       } else {
         ctx.ui.notify("Code review closed (no feedback).", "info");

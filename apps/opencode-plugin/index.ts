@@ -217,15 +217,13 @@ Do NOT proceed with implementation until your plan is approved.
 
           // Only try to send feedback if we have a valid session ID
           if (sessionId) {
-            const hasAnnotations = Array.isArray(result.annotations) && result.annotations.length > 0;
-
             // Check agent switch setting (defaults to 'build' if not set)
             const shouldSwitchAgent = result.agentSwitch && result.agentSwitch !== 'disabled';
             const targetAgent = result.agentSwitch || 'build';
 
-            const message = hasAnnotations
-              ? `# Code Review Feedback\n\n${result.feedback}\n\nPlease address this feedback.`
-              : `# Code Review\n\nCode review completed — no changes requested.`;
+            const message = result.approved
+              ? `# Code Review\n\nCode review completed — no changes requested.`
+              : `# Code Review Feedback\n\n${result.feedback}\n\nPlease address this feedback.`;
 
             // Send feedback to agent
             try {
