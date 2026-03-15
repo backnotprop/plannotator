@@ -3,6 +3,7 @@ import { FileDiff } from '@pierre/diffs/react';
 import { getSingularPatch, processFile } from '@pierre/diffs';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata } from '@plannotator/ui/types';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
+import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { detectLanguage } from '../utils/detectLanguage';
 import { useAnnotationToolbar } from '../hooks/useAnnotationToolbar';
 import { FileHeader } from './FileHeader';
@@ -57,6 +58,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 }) => {
   const { theme, colorTheme, resolvedMode } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
+  const [fileCommentAnchor, setFileCommentAnchor] = useState<HTMLElement | null>(null);
 
   const toolbar = useAnnotationToolbar({ patch, filePath, onLineSelection, onAddAnnotation, onEditAnnotation });
 
@@ -222,7 +224,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         onStage={onStage}
         canStage={canStage}
         stageError={stageError}
-        onAddFileComment={onAddFileComment}
+        onFileComment={setFileCommentAnchor}
       />
 
       <div className="p-4">
@@ -274,6 +276,19 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           modalLayout={toolbar.modalLayout}
           setModalLayout={toolbar.setModalLayout}
           onClose={() => toolbar.setShowCodeModal(false)}
+        />
+      )}
+
+      {fileCommentAnchor && (
+        <CommentPopover
+          anchorEl={fileCommentAnchor}
+          contextText={filePath.split('/').pop() || filePath}
+          isGlobal={false}
+          onSubmit={(text) => {
+            onAddFileComment(text);
+            setFileCommentAnchor(null);
+          }}
+          onClose={() => setFileCommentAnchor(null)}
         />
       )}
     </div>
