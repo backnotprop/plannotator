@@ -80,7 +80,6 @@ function parseDiffToFiles(rawPatch: string): DiffFile[] {
 function generateId(): string {
   return Math.random().toString(36).substring(2, 9);
 }
-
 const ReviewApp: React.FC = () => {
   const [diffData, setDiffData] = useState<DiffData | null>(null);
   const [files, setFiles] = useState<DiffFile[]>([]);

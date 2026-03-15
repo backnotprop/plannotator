@@ -224,7 +224,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         onStage={onStage}
         canStage={canStage}
         stageError={stageError}
-        onFileComment={setFileCommentAnchor}
+        onAddFileComment={onAddFileComment}
       />
 
       <div className="p-4">
