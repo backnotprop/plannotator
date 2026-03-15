@@ -532,7 +532,7 @@ const ReviewApp: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           approved: true,
-          feedback: 'LGTM - no changes requested.',
+          feedback: 'LGTM - no changes requested.', // unused — integrations branch on `approved` flag
           annotations: [],
         }),
       });
