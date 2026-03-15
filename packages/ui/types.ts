@@ -60,10 +60,12 @@ export interface DiffResult {
 
 // Code Review Types
 export type CodeAnnotationType = 'comment' | 'suggestion' | 'concern';
+export type CodeAnnotationScope = 'line' | 'file';
 
 export interface CodeAnnotation {
   id: string;
   type: CodeAnnotationType;
+  scope?: CodeAnnotationScope; // Defaults to 'line' for backward compatibility
   filePath: string;
   lineStart: number;
   lineEnd: number;

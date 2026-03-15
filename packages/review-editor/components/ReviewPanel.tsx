@@ -68,6 +68,25 @@ function formatTimestamp(ts: number): string {
   return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+const FILE_SCOPE_FIRST = { file: 0, line: 1 } as const;
+
+function getAnnotationScope(annotation: CodeAnnotation): 'line' | 'file' {
+  return annotation.scope ?? 'line';
+}
+
+function compareCodeAnnotations(a: CodeAnnotation, b: CodeAnnotation): number {
+  const aScope = getAnnotationScope(a);
+  const bScope = getAnnotationScope(b);
+
+  if (aScope !== bScope) {
+    return FILE_SCOPE_FIRST[aScope] - FILE_SCOPE_FIRST[bScope];
+  }
+
+  return aScope === 'file'
+    ? b.createdAt - a.createdAt
+    : a.lineStart - b.lineStart;
+}
+
 export const ReviewPanel: React.FC<ReviewPanelProps> = ({
   isOpen,
   onToggle,
@@ -102,9 +121,9 @@ export const ReviewPanel: React.FC<ReviewPanelProps> = ({
       existing.push(ann);
       grouped.set(ann.filePath, existing);
     }
-    // Sort each group by line number
+    // Sort file comments first, then line comments
     for (const [, anns] of grouped) {
-      anns.sort((a, b) => a.lineStart - b.lineStart);
+      anns.sort(compareCodeAnnotations);
     }
     return grouped;
   }, [annotations]);
@@ -151,6 +170,7 @@ export const ReviewPanel: React.FC<ReviewPanelProps> = ({
                   <div className="space-y-1">
                     {fileAnnotations.map((annotation) => {
                       const isSelected = selectedAnnotationId === annotation.id;
+                      const isFileScope = getAnnotationScope(annotation) === 'file';
                       return (
                         <div
                           key={annotation.id}
@@ -164,11 +184,17 @@ export const ReviewPanel: React.FC<ReviewPanelProps> = ({
                           {/* Header: Line + Timestamp */}
                           <div className="flex items-center justify-between mb-1.5">
                             <div className="flex items-center gap-2">
-                              <span className="text-[10px] font-mono text-muted-foreground">
-                                {annotation.lineStart === annotation.lineEnd
-                                  ? `L${annotation.lineStart}`
-                                  : `L${annotation.lineStart}-${annotation.lineEnd}`}
-                              </span>
+                              {isFileScope ? (
+                                <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                                  file
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-mono text-muted-foreground">
+                                  {annotation.lineStart === annotation.lineEnd
+                                    ? `L${annotation.lineStart}`
+                                    : `L${annotation.lineStart}-${annotation.lineEnd}`}
+                                </span>
+                              )}
                               {annotation.author && (
                                 <span className={`text-[10px] truncate max-w-[100px] ${isCurrentUser(annotation.author) ? 'text-muted-foreground/50' : 'text-muted-foreground/70'}`}>
                                   {annotation.author}{isCurrentUser(annotation.author) && ' (me)'}

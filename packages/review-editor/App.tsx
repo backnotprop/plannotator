@@ -97,10 +97,34 @@ function exportReviewFeedback(annotations: CodeAnnotation[], files: DiffFile[]):
   for (const [filePath, fileAnnotations] of grouped) {
     output += `## ${filePath}\n\n`;
 
-    const sorted = [...fileAnnotations].sort((a, b) => a.lineStart - b.lineStart);
+    const sorted = [...fileAnnotations].sort((a, b) => {
+      const aScope = a.scope ?? 'line';
+      const bScope = b.scope ?? 'line';
+      if (aScope !== bScope) {
+        return aScope === 'file' ? -1 : 1;
+      }
+      return a.lineStart - b.lineStart;
+    });
 
     for (let i = 0; i < sorted.length; i++) {
       const ann = sorted[i];
+      const scope = ann.scope ?? 'line';
+
+      if (scope === 'file') {
+        output += `### File Comment\n`;
+
+        if (ann.text) {
+          output += `${ann.text}\n`;
+        }
+
+        if (ann.suggestedCode) {
+          output += `\n**Suggested code:**\n\`\`\`\n${ann.suggestedCode}\n\`\`\`\n`;
+        }
+
+        output += '\n';
+        continue;
+      }
+
       const lineRange = ann.lineStart === ann.lineEnd
         ? `Line ${ann.lineStart}`
         : `Lines ${ann.lineStart}-${ann.lineEnd}`;
@@ -279,6 +303,7 @@ const ReviewApp: React.FC = () => {
     const newAnnotation: CodeAnnotation = {
       id: generateId(),
       type,
+      scope: 'line',
       filePath: files[activeFileIndex].path,
       lineStart,
       lineEnd,
@@ -293,6 +318,27 @@ const ReviewApp: React.FC = () => {
     setAnnotations(prev => [...prev, newAnnotation]);
     setPendingSelection(null);
   }, [pendingSelection, files, activeFileIndex, identity]);
+
+  const handleAddFileComment = useCallback((text: string) => {
+    const activeFile = files[activeFileIndex];
+    const trimmed = text.trim();
+    if (!activeFile || !trimmed) return;
+
+    const newAnnotation: CodeAnnotation = {
+      id: generateId(),
+      type: 'comment',
+      scope: 'file',
+      filePath: activeFile.path,
+      lineStart: 1,
+      lineEnd: 1,
+      side: 'new',
+      text: trimmed,
+      createdAt: Date.now(),
+      author: identity,
+    };
+
+    setAnnotations(prev => [...prev, newAnnotation]);
+  }, [files, activeFileIndex, identity]);
 
   // Edit annotation
   const handleEditAnnotation = useCallback((
@@ -854,6 +900,7 @@ const ReviewApp: React.FC = () => {
                 pendingSelection={pendingSelection}
                 onLineSelection={handleLineSelection}
                 onAddAnnotation={handleAddAnnotation}
+                onAddFileComment={handleAddFileComment}
                 onEditAnnotation={handleEditAnnotation}
                 onSelectAnnotation={handleSelectAnnotation}
                 onDeleteAnnotation={handleDeleteAnnotation}

@@ -20,6 +20,7 @@ interface DiffViewerProps {
   pendingSelection: SelectedLineRange | null;
   onLineSelection: (range: SelectedLineRange | null) => void;
   onAddAnnotation: (type: CodeAnnotationType, text?: string, suggestedCode?: string, originalCode?: string) => void;
+  onAddFileComment: (text: string) => void;
   onEditAnnotation: (id: string, text?: string, suggestedCode?: string, originalCode?: string) => void;
   onSelectAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
@@ -42,6 +43,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   pendingSelection,
   onLineSelection,
   onAddAnnotation,
+  onAddFileComment,
   onEditAnnotation,
   onSelectAnnotation,
   onDeleteAnnotation,
@@ -118,18 +120,20 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 
   // Map annotations to @pierre/diffs format
   const lineAnnotations = useMemo(() => {
-    return annotations.map(ann => ({
-      side: ann.side === 'new' ? 'additions' as const : 'deletions' as const,
-      lineNumber: ann.lineEnd,
-      metadata: {
-        annotationId: ann.id,
-        type: ann.type,
-        text: ann.text,
-        suggestedCode: ann.suggestedCode,
-        originalCode: ann.originalCode,
-        author: ann.author,
-      } as DiffAnnotationMetadata,
-    }));
+    return annotations
+      .filter(ann => (ann.scope ?? 'line') === 'line')
+      .map(ann => ({
+        side: ann.side === 'new' ? 'additions' as const : 'deletions' as const,
+        lineNumber: ann.lineEnd,
+        metadata: {
+          annotationId: ann.id,
+          type: ann.type,
+          text: ann.text,
+          suggestedCode: ann.suggestedCode,
+          originalCode: ann.originalCode,
+          author: ann.author,
+        } as DiffAnnotationMetadata,
+      }));
   }, [annotations]);
 
   // Handle edit: find annotation and start editing in toolbar
@@ -218,6 +222,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         onStage={onStage}
         canStage={canStage}
         stageError={stageError}
+        onAddFileComment={onAddFileComment}
       />
 
       <div className="p-4">
