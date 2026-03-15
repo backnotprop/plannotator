@@ -36,6 +36,15 @@ import {
   openBrowser,
 } from "./server.js";
 
+// ── Types ──────────────────────────────────────────────────────────────
+
+/** Common interface for servers that can wait for a user decision in a browser. */
+interface DecisionServer<T> {
+  url: string;
+  stop: () => void;
+  waitForDecision: () => Promise<T>;
+}
+
 // Load HTML at runtime (jiti doesn't support import attributes)
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let planHtmlContent = "";
@@ -65,6 +74,25 @@ function getTextContent(message: AssistantMessage): string {
     .filter((block): block is TextContent => block.type === "text")
     .map((block) => block.text)
     .join("\n");
+}
+
+/**
+ * Open browser for user review, wait for decision, then stop server.
+ * Handles remote session notification automatically.
+ */
+async function runBrowserReview<T>(
+  server: DecisionServer<T>,
+  ctx: ExtensionContext,
+): Promise<T> {
+  const browserResult = openBrowser(server.url);
+  if (browserResult.isRemote) {
+    ctx.ui.notify(`Remote session. Open manually: ${browserResult.url}`, "info");
+  }
+
+  const result = await server.waitForDecision();
+  await new Promise((r) => setTimeout(r, 1500));
+  server.stop();
+  return result;
 }
 
 export default function plannotator(pi: ExtensionAPI): void {
@@ -248,11 +276,7 @@ export default function plannotator(pi: ExtensionAPI): void {
         htmlContent: reviewHtmlContent,
       });
 
-      openBrowser(server.url);
-
-      const result = await server.waitForDecision();
-      await new Promise((r) => setTimeout(r, 1500));
-      server.stop();
+      const result = await runBrowserReview(server, ctx);
 
       if (result.feedback) {
         if (result.approved) {
@@ -295,11 +319,7 @@ export default function plannotator(pi: ExtensionAPI): void {
         htmlContent: planHtmlContent,
       });
 
-      openBrowser(server.url);
-
-      const result = await server.waitForDecision();
-      await new Promise((r) => setTimeout(r, 1500));
-      server.stop();
+      const result = await runBrowserReview(server, ctx);
 
       if (result.feedback) {
         pi.sendUserMessage(
@@ -396,12 +416,7 @@ export default function plannotator(pi: ExtensionAPI): void {
         origin: "pi",
       });
 
-      openBrowser(server.url);
-
-      // Wait for user decision in the browser
-      const result = await server.waitForDecision();
-      await new Promise((r) => setTimeout(r, 1500));
-      server.stop();
+      const result = await runBrowserReview(server, ctx);
 
       if (result.approved) {
         phase = "executing";

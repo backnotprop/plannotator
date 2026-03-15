@@ -38,17 +38,63 @@ function html(res: import("node:http").ServerResponse, content: string): void {
   res.end(content);
 }
 
-function listenOnRandomPort(server: Server): number {
-  server.listen(0);
+const DEFAULT_REMOTE_PORT = 19432;
+
+/**
+ * Check if running in a remote session (SSH, devcontainer, etc.)
+ * Honors PLANNOTATOR_REMOTE env var, or detects SSH_TTY/SSH_CONNECTION.
+ */
+function isRemoteSession(): boolean {
+  const remote = process.env.PLANNOTATOR_REMOTE;
+  if (remote === "1" || remote?.toLowerCase() === "true") {
+    return true;
+  }
+  // Legacy SSH detection
+  if (process.env.SSH_TTY || process.env.SSH_CONNECTION) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Get the server port to use.
+ * - PLANNOTATOR_PORT env var takes precedence
+ * - Remote sessions default to 19432 (for port forwarding)
+ * - Local sessions use random port
+ * Returns { port, portSource } so caller can notify user if needed.
+ */
+function getServerPort(): { port: number; portSource: "env" | "remote-default" | "random" } {
+  const envPort = process.env.PLANNOTATOR_PORT;
+  if (envPort) {
+    const parsed = parseInt(envPort, 10);
+    if (!isNaN(parsed) && parsed > 0 && parsed < 65536) {
+      return { port: parsed, portSource: "env" };
+    }
+    // Invalid port - fall back silently, caller can check env var themselves
+  }
+  if (isRemoteSession()) {
+    return { port: DEFAULT_REMOTE_PORT, portSource: "remote-default" };
+  }
+  return { port: 0, portSource: "random" };
+}
+
+function listenOnPort(server: Server): { port: number; portSource: "env" | "remote-default" | "random" } {
+  const result = getServerPort();
+  server.listen(result.port);
   const addr = server.address() as { port: number };
-  return addr.port;
+  return { port: addr.port, portSource: result.portSource };
 }
 
 /**
  * Open URL in system browser (Node-compatible, no Bun $ dependency).
  * Honors PLANNOTATOR_BROWSER and BROWSER env vars, matching packages/server/browser.ts.
+ * Returns { opened: true } if browser was opened, { opened: false, isRemote: true, url } if remote session.
  */
-export function openBrowser(url: string): void {
+export function openBrowser(url: string): { opened: boolean; isRemote?: boolean; url?: string } {
+  if (isRemoteSession()) {
+    return { opened: false, isRemote: true, url };
+  }
+
   try {
     const browser = process.env.PLANNOTATOR_BROWSER || process.env.BROWSER;
     const platform = process.platform;
@@ -82,8 +128,9 @@ export function openBrowser(url: string): void {
     const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
     child.once("error", () => {});
     child.unref();
+    return { opened: true };
   } catch {
-    // Silently fail
+    return { opened: false };
   }
 }
 
@@ -266,6 +313,7 @@ function listProjectPlans(
 
 export interface PlanServerResult {
   port: number;
+  portSource: "env" | "remote-default" | "random";
   url: string;
   waitForDecision: () => Promise<{ approved: boolean; feedback?: string }>;
   stop: () => void;
@@ -334,17 +382,16 @@ export function startPlanReviewServer(options: {
     }
   });
 
-  const port = listenOnRandomPort(server);
+  const { port, portSource } = listenOnPort(server);
 
   return {
     port,
+    portSource,
     url: `http://localhost:${port}`,
     waitForDecision: () => decisionPromise,
     stop: () => server.close(),
   };
 }
-
-// ── Code Review Server ──────────────────────────────────────────────────
 
 export type DiffType = "uncommitted" | "staged" | "unstaged" | "last-commit" | "branch";
 
@@ -361,6 +408,7 @@ export interface GitContext {
 
 export interface ReviewServerResult {
   port: number;
+  portSource: "env" | "remote-default" | "random";
   url: string;
   waitForDecision: () => Promise<{ approved: boolean; feedback: string }>;
   stop: () => void;
@@ -469,10 +517,11 @@ export function startReviewServer(options: {
     }
   });
 
-  const port = listenOnRandomPort(server);
+  const { port, portSource } = listenOnPort(server);
 
   return {
     port,
+    portSource,
     url: `http://localhost:${port}`,
     waitForDecision: () => decisionPromise,
     stop: () => server.close(),
@@ -483,6 +532,7 @@ export function startReviewServer(options: {
 
 export interface AnnotateServerResult {
   port: number;
+  portSource: "env" | "remote-default" | "random";
   url: string;
   waitForDecision: () => Promise<{ feedback: string }>;
   stop: () => void;
@@ -518,10 +568,11 @@ export function startAnnotateServer(options: {
     }
   });
 
-  const port = listenOnRandomPort(server);
+  const { port, portSource } = listenOnPort(server);
 
   return {
     port,
+    portSource,
     url: `http://localhost:${port}`,
     waitForDecision: () => decisionPromise,
     stop: () => server.close(),
