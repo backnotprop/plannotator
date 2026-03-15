@@ -187,6 +187,7 @@ if (args[0] === "sessions") {
     console.log("Code review completed — no changes requested.");
   } else {
     console.log(result.feedback);
+    console.log("\nThe reviewer has identified issues above. You must address all of them.");
   }
   process.exit(0);
 
