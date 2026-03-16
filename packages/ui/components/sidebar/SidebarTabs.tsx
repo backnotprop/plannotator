@@ -13,6 +13,8 @@ interface SidebarTabsProps {
   onToggleTab: (tab: SidebarTab) => void;
   hasDiff: boolean;
   showVaultTab?: boolean;
+  showHistoryTab?: boolean;
+  hasHistory?: boolean;
   className?: string;
 }
 
@@ -21,6 +23,8 @@ export const SidebarTabs: React.FC<SidebarTabsProps> = ({
   onToggleTab,
   hasDiff,
   showVaultTab,
+  showHistoryTab,
+  hasHistory,
   className,
 }) => {
   return (
@@ -93,6 +97,33 @@ export const SidebarTabs: React.FC<SidebarTabsProps> = ({
               d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
             />
           </svg>
+        </button>
+      )}
+
+      {/* Review History tab */}
+      {showHistoryTab && (
+        <button
+          onClick={() => onToggleTab("history")}
+          className="sidebar-tab-flag group relative flex items-center justify-center w-7 h-9 rounded-r-md border border-l-0 border-border/50 bg-card/80 backdrop-blur-sm text-muted-foreground hover:text-foreground hover:bg-card transition-colors"
+          title="Review History"
+        >
+          <svg
+            className="w-3.5 h-3.5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={1.5}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3"
+            />
+          </svg>
+          {/* Availability indicator dot */}
+          {hasHistory && (
+            <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-accent" />
+          )}
         </button>
       )}
     </div>

@@ -48,8 +48,10 @@ import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations
 import { isVaultBrowserEnabled } from '@plannotator/ui/utils/obsidian';
 import { SidebarTabs } from '@plannotator/ui/components/sidebar/SidebarTabs';
 import { SidebarContainer } from '@plannotator/ui/components/sidebar/SidebarContainer';
+import { ClarificationPanel, ClarificationBadge, type ClarificationQuestion, type QuestionAnswer } from '@plannotator/ui/components/ClarificationPanel';
 import { PlanDiffViewer } from '@plannotator/ui/components/plan-diff/PlanDiffViewer';
 import type { PlanDiffMode } from '@plannotator/ui/components/plan-diff/PlanDiffModeSwitcher';
+import type { ReviewIterationDisplay } from '@plannotator/ui/components/sidebar/ReviewHistory';
 import { DEMO_PLAN_CONTENT } from './demoPlan';
 
 type NoteAutoSaveResults = {
@@ -104,6 +106,15 @@ const App: React.FC = () => {
   const [planDiffMode, setPlanDiffMode] = useState<PlanDiffMode>('clean');
   const [previousPlan, setPreviousPlan] = useState<string | null>(null);
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
+  // Review session state (context persistence across iterations)
+  const [reviewSessionId, setReviewSessionId] = useState<string | null>(null);
+  const [reviewIterations, setReviewIterations] = useState<ReviewIterationDisplay[]>([]);
+  const [currentIteration, setCurrentIteration] = useState(1);
+  // Clarification questions state (bidirectional AI conversation)
+  const [clarificationQuestions, setClarificationQuestions] = useState<ClarificationQuestion[]>([]);
+  const [clarificationAnswers, setClarificationAnswers] = useState<QuestionAnswer[]>([]);
+  const [showClarificationPanel, setShowClarificationPanel] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
 
   const viewerRef = useRef<ViewerHandle>(null);
   const containerRef = useRef<HTMLElement>(null);
@@ -368,6 +379,110 @@ const App: React.FC = () => {
       })
       .finally(() => setIsLoading(false));
   }, [isLoadingShared, isSharedSession]);
+
+  // Fetch review session data (context persistence across iterations)
+  useEffect(() => {
+    if (!isApiMode || isSharedSession) return;
+
+    fetch('/api/session')
+      .then(res => {
+        if (!res.ok) return null;
+        return res.json();
+      })
+      .then((data: { sessionId?: string; previousIterations?: ReviewIterationDisplay[]; iterationCount?: number } | null) => {
+        if (!data) return;
+        if (data.sessionId) setReviewSessionId(data.sessionId);
+        if (data.previousIterations && data.previousIterations.length > 0) {
+          setReviewIterations(data.previousIterations);
+          setCurrentIteration(data.previousIterations.length + 1);
+          // Auto-open the history tab when there are previous iterations
+          sidebar.open('history');
+        }
+      })
+      .catch(() => {
+        // Session endpoint not available — no-op
+      });
+  }, [isApiMode, isSharedSession]);
+
+  // Fetch clarification questions and establish WebSocket for real-time updates
+  useEffect(() => {
+    if (!isApiMode || isSharedSession) return;
+
+    // Fetch initial question state
+    fetch('/api/questions')
+      .then(res => {
+        if (!res.ok) return null;
+        return res.json();
+      })
+      .then((data: { questions?: ClarificationQuestion[]; answers?: QuestionAnswer[] } | null) => {
+        if (!data) return;
+        if (data.questions && data.questions.length > 0) {
+          setClarificationQuestions(data.questions);
+          setClarificationAnswers(data.answers || []);
+          setShowClarificationPanel(true);
+        }
+      })
+      .catch(() => {});
+
+    // Establish WebSocket connection for real-time question updates
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    const ws = new WebSocket(wsUrl);
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'questions:state' || msg.type === 'questions:update') {
+          if (msg.questions && msg.questions.length > 0) {
+            setClarificationQuestions(msg.questions);
+            setClarificationAnswers(msg.answers || []);
+            // Auto-open panel when new questions arrive
+            if (msg.type === 'questions:update') {
+              setShowClarificationPanel(true);
+            }
+          }
+        }
+      } catch {
+        // Ignore non-JSON messages
+      }
+    };
+
+    ws.onclose = () => {
+      // Auto-reconnect after 2 seconds
+      setTimeout(() => {
+        if (wsRef.current === ws) {
+          wsRef.current = null;
+        }
+      }, 2000);
+    };
+
+    wsRef.current = ws;
+
+    return () => {
+      ws.close();
+      wsRef.current = null;
+    };
+  }, [isApiMode, isSharedSession]);
+
+  // Submit clarification answer to server
+  const handleSubmitClarificationAnswer = useCallback(async (answer: QuestionAnswer) => {
+    setClarificationAnswers(prev => [...prev, answer]);
+    try {
+      const res = await fetch('/api/answers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(answer),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.answers) {
+          setClarificationAnswers(data.answers);
+        }
+      }
+    } catch {
+      // Answer already saved optimistically in state
+    }
+  }, []);
 
   useEffect(() => {
     const { frontmatter: fm } = extractFrontmatter(markdown);
@@ -993,22 +1108,22 @@ const App: React.FC = () => {
                     className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${
                       isSubmitting
                         ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
-                        : origin === 'claude-code' && annotations.length > 0
-                          ? 'bg-success/50 text-success-foreground/70 hover:bg-success hover:text-success-foreground'
-                          : 'bg-success text-success-foreground hover:opacity-90'
+                        : 'bg-success text-success-foreground hover:opacity-90'
                     }`}
                   >
                     <span className="md:hidden">{isSubmitting ? '...' : 'OK'}</span>
-                    <span className="hidden md:inline">{isSubmitting ? 'Approving...' : 'Approve'}</span>
+                    <span className="hidden md:inline">{isSubmitting ? 'Approving...' : annotations.length > 0 ? 'Approve with Notes' : 'Approve'}</span>
                   </button>
-                  {origin === 'claude-code' && annotations.length > 0 && (
-                    <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
-                      <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
-                      <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
-                      {agentName} doesn't support feedback on approval. Your annotations won't be seen.
-                    </div>
-                  )}
                 </div>}
+
+                {/* Clarification questions badge */}
+                {clarificationQuestions.length > 0 && (
+                  <ClarificationBadge
+                    totalQuestions={clarificationQuestions.length}
+                    answeredCount={clarificationAnswers.length}
+                    onClick={() => setShowClarificationPanel(true)}
+                  />
+                )}
 
                 <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
               </>
@@ -1189,6 +1304,8 @@ const App: React.FC = () => {
               onToggleTab={sidebar.toggleTab}
               hasDiff={planDiff.hasPreviousVersion}
               showVaultTab={showVaultTab}
+              showHistoryTab={reviewIterations.length > 0}
+              hasHistory={reviewIterations.length > 0}
               className="hidden lg:flex"
             />
           )}
@@ -1212,6 +1329,11 @@ const App: React.FC = () => {
                 vaultBrowser={vaultBrowser}
                 onVaultSelectFile={handleVaultFileSelect}
                 onVaultFetchTree={handleVaultFetchTree}
+                showHistoryTab={reviewIterations.length > 0}
+                hasHistory={reviewIterations.length > 0}
+                reviewSessionId={reviewSessionId}
+                reviewIterations={reviewIterations}
+                currentIteration={currentIteration}
                 versionInfo={versionInfo}
                 versions={planDiff.versions}
                 projectPlans={planDiff.projectPlans}
@@ -1371,7 +1493,7 @@ const App: React.FC = () => {
           variant="info"
         />
 
-        {/* Claude Code annotation warning dialog */}
+        {/* Claude Code approve with notes dialog */}
         <ConfirmDialog
           isOpen={showClaudeCodeWarning}
           onClose={() => setShowClaudeCodeWarning(false)}
@@ -1379,22 +1501,16 @@ const App: React.FC = () => {
             setShowClaudeCodeWarning(false);
             handleApprove();
           }}
-          title="Annotations Won't Be Sent"
-          message={<>{agentName} doesn't yet support feedback on approval. Your {annotations.length} annotation{annotations.length !== 1 ? 's' : ''} will be lost.</>}
+          title="Approve with Notes"
+          message={<>Your {annotations.length} annotation{annotations.length !== 1 ? 's' : ''} will be sent as implementation notes. {agentName} will proceed with the plan, incorporating your notes where applicable.</>}
           subMessage={
             <>
-              To send feedback, use <strong>Send Feedback</strong> instead.
-              <br /><br />
-              Want this feature? Upvote these issues:
-              <br />
-              <a href="https://github.com/anthropics/claude-code/issues/16001" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">#16001</a>
-              {' · '}
-              <a href="https://github.com/anthropics/claude-code/issues/15755" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">#15755</a>
+              To <strong>block</strong> the plan and require revisions, use <strong>Send Feedback</strong> instead.
             </>
           }
-          confirmText="Approve Anyway"
+          confirmText="Approve with Notes"
           cancelText="Cancel"
-          variant="warning"
+          variant="info"
           showCancel
         />
 
@@ -1439,6 +1555,16 @@ const App: React.FC = () => {
             {noteSaveToast.message}
           </div>
         )}
+
+        {/* Clarification questions panel */}
+        <ClarificationPanel
+          isOpen={showClarificationPanel}
+          questions={clarificationQuestions}
+          answers={clarificationAnswers}
+          onSubmitAnswer={handleSubmitClarificationAnswer}
+          onClose={() => setShowClarificationPanel(false)}
+          isSubmitting={isSubmitting}
+        />
 
         {/* Completion overlay - shown after approve/deny */}
         <CompletionOverlay

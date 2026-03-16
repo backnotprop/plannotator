@@ -39,6 +39,14 @@ import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraft
 import { contentHash, deleteDraft } from "./draft";
 import { handleDoc, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc } from "./reference-handlers";
 import { createEditorAnnotationHandler } from "./editor-annotations";
+import {
+  createQuestionSession,
+  submitAnswer,
+  getSessionState,
+  getAllAnswers,
+  type QuestionSession,
+} from "./questions";
+import type { QuestionAnswer } from "@plannotator/shared/questions";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -69,6 +77,12 @@ export interface ServerOptions {
   onReady?: (url: string, isRemote: boolean, port: number) => void;
   /** OpenCode client for querying available agents (OpenCode only) */
   opencodeClient?: OpencodeClient;
+  /** Review session ID for context persistence across iterations */
+  sessionId?: string;
+  /** Previous review iterations (loaded from session store) */
+  previousIterations?: import("@plannotator/shared/questions").ReviewIteration[];
+  /** AI clarification questions embedded in this plan submission */
+  questions?: import("@plannotator/shared/questions").ClarificationQuestion[];
 }
 
 export interface ServerResult {
@@ -85,6 +99,8 @@ export interface ServerResult {
     savedPath?: string;
     agentSwitch?: string;
     permissionMode?: string;
+    /** Collected answers to AI clarification questions */
+    answers?: QuestionAnswer[];
   }>;
   /** Stop the server */
   stop: () => void;
@@ -135,6 +151,26 @@ export async function startPlannotatorServer(
   };
 
 
+  // Question session (if the AI embedded questions in the plan)
+  const questionSession: QuestionSession | null =
+    options.questions && options.questions.length > 0
+      ? createQuestionSession(options.questions)
+      : null;
+
+  // WebSocket clients for real-time question/answer updates
+  const wsClients = new Set<{ send: (data: string) => void }>();
+
+  function broadcastWs(message: object): void {
+    const data = JSON.stringify(message);
+    for (const ws of wsClients) {
+      try {
+        ws.send(data);
+      } catch {
+        wsClients.delete(ws);
+      }
+    }
+  }
+
   // Decision promise
   let resolveDecision: (result: {
     approved: boolean;
@@ -142,6 +178,7 @@ export async function startPlannotatorServer(
     savedPath?: string;
     agentSwitch?: string;
     permissionMode?: string;
+    answers?: QuestionAnswer[];
   }) => void;
   const decisionPromise = new Promise<{
     approved: boolean;
@@ -149,6 +186,7 @@ export async function startPlannotatorServer(
     savedPath?: string;
     agentSwitch?: string;
     permissionMode?: string;
+    answers?: QuestionAnswer[];
   }>((resolve) => {
     resolveDecision = resolve;
   });
@@ -161,8 +199,37 @@ export async function startPlannotatorServer(
       server = Bun.serve({
         port: configuredPort,
 
-        async fetch(req) {
+        // WebSocket handler for real-time question/answer updates
+        websocket: {
+          open(ws) {
+            wsClients.add(ws);
+            // Send current question state on connect
+            if (questionSession) {
+              ws.send(
+                JSON.stringify({
+                  type: "questions:state",
+                  ...getSessionState(questionSession),
+                })
+              );
+            }
+          },
+          message(_ws, _message) {
+            // Client messages not used currently — answers come via POST /api/answers
+          },
+          close(ws) {
+            wsClients.delete(ws);
+          },
+        },
+
+        async fetch(req, server) {
           const url = new URL(req.url);
+
+          // WebSocket upgrade
+          if (url.pathname === "/ws") {
+            const upgraded = server.upgrade(req);
+            if (upgraded) return undefined as unknown as Response;
+            return new Response("WebSocket upgrade failed", { status: 400 });
+          }
 
           // API: Get a specific plan version from history
           if (url.pathname === "/api/plan/version") {
@@ -313,6 +380,61 @@ export async function startPlannotatorServer(
             return Response.json({ ok: true, results });
           }
 
+          // API: Get review session context (previous iterations, questions)
+          if (url.pathname === "/api/session") {
+            return Response.json({
+              sessionId: options.sessionId || null,
+              previousIterations: options.previousIterations || [],
+              questions: options.questions || [],
+              answers: questionSession ? getAllAnswers(questionSession) : [],
+              iterationCount: (options.previousIterations?.length || 0) + 1,
+            });
+          }
+
+          // API: Submit an answer to a clarification question
+          if (url.pathname === "/api/answers" && req.method === "POST") {
+            if (!questionSession) {
+              return Response.json(
+                { error: "No active question session" },
+                { status: 400 }
+              );
+            }
+
+            try {
+              const body = (await req.json()) as QuestionAnswer;
+              if (!body.questionId || !body.type) {
+                return Response.json(
+                  { error: "Missing questionId or type" },
+                  { status: 400 }
+                );
+              }
+
+              submitAnswer(questionSession, body);
+
+              // Broadcast the answer to all connected WebSocket clients
+              broadcastWs({
+                type: "questions:answer",
+                answer: body,
+                ...getSessionState(questionSession),
+              });
+
+              return Response.json({ ok: true, ...getSessionState(questionSession) });
+            } catch (err) {
+              return Response.json(
+                { error: err instanceof Error ? err.message : "Failed to submit answer" },
+                { status: 500 }
+              );
+            }
+          }
+
+          // API: Get current question state
+          if (url.pathname === "/api/questions") {
+            if (!questionSession) {
+              return Response.json({ questions: [], answers: [], allAnswered: true });
+            }
+            return Response.json(getSessionState(questionSession));
+          }
+
           // API: Approve plan
           if (url.pathname === "/api/approve" && req.method === "POST") {
             // Check for note integrations and optional feedback
@@ -394,7 +516,8 @@ export async function startPlannotatorServer(
 
             // Use permission mode from client request if provided, otherwise fall back to hook input
             const effectivePermissionMode = requestedPermissionMode || permissionMode;
-            resolveDecision({ approved: true, feedback, savedPath, agentSwitch, permissionMode: effectivePermissionMode });
+            const answers = questionSession ? getAllAnswers(questionSession) : undefined;
+            resolveDecision({ approved: true, feedback, savedPath, agentSwitch, permissionMode: effectivePermissionMode, answers });
             return Response.json({ ok: true, savedPath });
           }
 
@@ -427,7 +550,8 @@ export async function startPlannotatorServer(
             }
 
             deleteDraft(draftKey);
-            resolveDecision({ approved: false, feedback, savedPath });
+            const answers = questionSession ? getAllAnswers(questionSession) : undefined;
+            resolveDecision({ approved: false, feedback, savedPath, answers });
             return Response.json({ ok: true, savedPath });
           }
 

@@ -29,7 +29,19 @@ import {
 import { getGitContext, runGitDiff } from "@plannotator/server/git";
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
 import { resolveMarkdownFile } from "@plannotator/server/resolve-file";
-import { planDenyFeedback } from "@plannotator/shared/feedback-templates";
+import { planDenyFeedback, planApproveWithNotesFeedback } from "@plannotator/shared/feedback-templates";
+import {
+  extractSessionId,
+  extractQuestions,
+  stripPlanMetadata,
+  generateSessionId,
+} from "@plannotator/shared/questions";
+import {
+  createSession,
+  recordIteration,
+  getPreviousIterations,
+  cleanupSessions,
+} from "@plannotator/server/review-session";
 
 // @ts-ignore - Bun import attribute for text
 import indexHtml from "./plannotator.html" with { type: "text" };
@@ -348,17 +360,44 @@ Do NOT proceed with implementation until your plan is approved.
         },
 
         async execute(args, context) {
+          // --- Session tracking for context persistence ---
+          let sessionId = extractSessionId(args.plan);
+          const isReturningSession = !!sessionId;
+
+          if (!sessionId) {
+            sessionId = generateSessionId();
+          }
+
+          // Extract embedded questions and strip metadata
+          const embeddedQuestions = extractQuestions(args.plan);
+          const cleanPlan = stripPlanMetadata(args.plan);
+
+          // Load previous iterations for context
+          const previousIterations = isReturningSession
+            ? getPreviousIterations(sessionId)
+            : [];
+
+          if (!isReturningSession) {
+            createSession(sessionId, process.cwd(), "");
+          }
+
+          // Periodically clean up old sessions (non-blocking)
+          cleanupSessions();
+
           const server = await startPlannotatorServer({
-            plan: args.plan,
+            plan: cleanPlan,
             origin: "opencode",
             sharingEnabled: await getSharingEnabled(),
             shareBaseUrl: getShareBaseUrl(),
             htmlContent,
             opencodeClient: ctx.client,
+            sessionId,
+            previousIterations,
+            questions: embeddedQuestions,
             onReady: async (url, isRemote, port) => {
               handleServerReady(url, isRemote, port);
               if (isRemote && await getSharingEnabled()) {
-                await writeRemoteShareLink(args.plan, getShareBaseUrl(), "review the plan", "plan only").catch(() => {});
+                await writeRemoteShareLink(cleanPlan, getShareBaseUrl(), "review the plan", "plan only").catch(() => {});
               }
             },
           });
@@ -385,6 +424,15 @@ Do NOT proceed with implementation until your plan is approved.
               });
           await Bun.sleep(1500);
           server.stop();
+
+          // Record this iteration in the session store for context persistence
+          recordIteration(sessionId, {
+            plan: cleanPlan,
+            feedback: result.feedback || "",
+            questions: embeddedQuestions,
+            answers: result.answers || [],
+            decision: result.approved ? "approved" : "denied",
+          });
 
           if (result.approved) {
             // Check agent switch setting (defaults to 'build' if not set)
@@ -419,20 +467,20 @@ Do NOT proceed with implementation until your plan is approved.
               }
             }
 
-            // If user approved with annotations, include them as notes for implementation
-            if (result.feedback) {
-              return `Plan approved with notes!
+            // If user approved with annotations or answered questions, include context
+            const hasQA = embeddedQuestions.length > 0 && result.answers?.length;
+            if (result.feedback || hasQA) {
+              const approveMessage = planApproveWithNotesFeedback(
+                result.feedback || "",
+                {
+                  clarificationQuestions: embeddedQuestions,
+                  clarificationAnswers: result.answers || [],
+                },
+              );
+              return `${approveMessage}
 
 Plan Summary: ${args.summary}
-${result.savedPath ? `Saved to: ${result.savedPath}` : ""}
-
-## Implementation Notes
-
-The user approved your plan but added the following notes to consider during implementation:
-
-${result.feedback}
-
-Proceed with implementation, incorporating these notes where applicable.`;
+${result.savedPath ? `Saved to: ${result.savedPath}` : ""}`;
             }
 
             return `Plan approved!
@@ -440,7 +488,18 @@ Proceed with implementation, incorporating these notes where applicable.`;
 Plan Summary: ${args.summary}
 ${result.savedPath ? `Saved to: ${result.savedPath}` : ""}`;
           } else {
-            return planDenyFeedback(result.feedback || "", "submit_plan");
+            // Include session ID in deny feedback so the AI embeds it in the next plan submission
+            const sessionHint = `\n\nIMPORTANT: Include this session marker at the top of your next plan so review context is preserved:\n<!-- plannotator:session ${sessionId} -->`;
+
+            return planDenyFeedback(
+              (result.feedback || "") + sessionHint,
+              "submit_plan",
+              {
+                previousIterations,
+                clarificationQuestions: embeddedQuestions,
+                clarificationAnswers: result.answers || [],
+              },
+            );
           }
         },
       }),

@@ -49,7 +49,21 @@ import { resolveMarkdownFile } from "@plannotator/server/resolve-file";
 import { registerSession, unregisterSession, listSessions } from "@plannotator/server/sessions";
 import { openBrowser } from "@plannotator/server/browser";
 import { detectProjectName } from "@plannotator/server/project";
-import { planDenyFeedback } from "@plannotator/shared/feedback-templates";
+import { planDenyFeedback, planApproveWithNotesFeedback } from "@plannotator/shared/feedback-templates";
+import {
+  extractSessionId,
+  extractQuestions,
+  stripPlanMetadata,
+  generateSessionId,
+  embedSessionId,
+} from "@plannotator/shared/questions";
+import {
+  loadSession,
+  createSession,
+  recordIteration,
+  getPreviousIterations,
+  cleanupSessions,
+} from "@plannotator/server/review-session";
 import path from "path";
 
 // Embed the built HTML at compile time
@@ -303,20 +317,51 @@ if (args[0] === "sessions") {
 
   const planProject = (await detectProjectName()) ?? "_unknown";
 
-  // Start the plan review server
+  // --- Session tracking for context persistence ---
+  // Extract or create a session ID so we can accumulate context across deny/revise cycles
+  let sessionId = extractSessionId(planContent);
+  const isReturningSession = !!sessionId;
+
+  if (!sessionId) {
+    sessionId = generateSessionId();
+  }
+
+  // Extract any embedded clarification questions from the plan
+  const embeddedQuestions = extractQuestions(planContent);
+
+  // Strip metadata from the plan so the user sees clean markdown
+  const cleanPlan = stripPlanMetadata(planContent);
+
+  // Load previous iterations for context
+  const previousIterations = isReturningSession
+    ? getPreviousIterations(sessionId)
+    : [];
+
+  // Ensure session exists on disk
+  if (!isReturningSession) {
+    createSession(sessionId, planProject, "");
+  }
+
+  // Periodically clean up old sessions (non-blocking)
+  cleanupSessions();
+
+  // Start the plan review server (use clean plan without metadata comments)
   const server = await startPlannotatorServer({
-    plan: planContent,
+    plan: cleanPlan,
     origin: "claude-code",
     permissionMode,
     sharingEnabled,
     shareBaseUrl,
     pasteApiUrl,
     htmlContent: planHtmlContent,
+    sessionId,
+    previousIterations,
+    questions: embeddedQuestions,
     onReady: async (url, isRemote, port) => {
       handleServerReady(url, isRemote, port);
 
       if (isRemote && sharingEnabled) {
-        await writeRemoteShareLink(planContent, shareBaseUrl, "review the plan", "plan only").catch(() => {});
+        await writeRemoteShareLink(cleanPlan, shareBaseUrl, "review the plan", "plan only").catch(() => {});
       }
     },
   });
@@ -340,6 +385,15 @@ if (args[0] === "sessions") {
   // Cleanup
   server.stop();
 
+  // Record this iteration in the session store for context persistence
+  recordIteration(sessionId, {
+    plan: cleanPlan,
+    feedback: result.feedback || "",
+    questions: embeddedQuestions,
+    answers: result.answers || [],
+    decision: result.approved ? "approved" : "denied",
+  });
+
   // Output JSON for PermissionRequest hook decision control
   if (result.approved) {
     // Build updatedPermissions to preserve the current permission mode
@@ -359,18 +413,43 @@ if (args[0] === "sessions") {
           decision: {
             behavior: "allow",
             ...(updatedPermissions.length > 0 && { updatedPermissions }),
+            // Pass through user annotations as implementation notes when approving with feedback
+            ...(result.feedback && {
+              message: planApproveWithNotesFeedback(result.feedback, {
+                clarificationQuestions: embeddedQuestions,
+                clarificationAnswers: result.answers || [],
+              }),
+            }),
+            // If no annotations but questions were answered, still include Q&A context
+            ...(!result.feedback && embeddedQuestions.length > 0 && result.answers?.length && {
+              message: planApproveWithNotesFeedback("", {
+                clarificationQuestions: embeddedQuestions,
+                clarificationAnswers: result.answers,
+              }),
+            }),
           },
         },
       })
     );
   } else {
+    // Include session ID in deny feedback so the AI embeds it in the next plan submission
+    const sessionHint = `\n\nIMPORTANT: Include this session marker at the top of your next plan so review context is preserved:\n<!-- plannotator:session ${sessionId} -->`;
+
     console.log(
       JSON.stringify({
         hookSpecificOutput: {
           hookEventName: "PermissionRequest",
           decision: {
             behavior: "deny",
-            message: planDenyFeedback(result.feedback || "", "ExitPlanMode"),
+            message: planDenyFeedback(
+              (result.feedback || "") + sessionHint,
+              "ExitPlanMode",
+              {
+                previousIterations,
+                clarificationQuestions: embeddedQuestions,
+                clarificationAnswers: result.answers || [],
+              },
+            ),
           },
         },
       })
