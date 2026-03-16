@@ -267,7 +267,7 @@ export default function plannotator(pi: ExtensionAPI): void {
       const gitCtx = getGitContext();
       const { patch: rawPatch, label: gitRef } = runGitDiff("uncommitted", gitCtx.defaultBranch);
 
-      const server = startReviewServer({
+      const server = await startReviewServer({
         rawPatch,
         gitRef,
         origin: "pi",
@@ -312,7 +312,7 @@ export default function plannotator(pi: ExtensionAPI): void {
       ctx.ui.notify(`Opening annotation UI for ${filePath}...`, "info");
 
       const markdown = readFileSync(absolutePath, "utf-8");
-      const server = startAnnotateServer({
+      const server = await startAnnotateServer({
         markdown,
         filePath: absolutePath,
         origin: "pi",
@@ -410,7 +410,7 @@ export default function plannotator(pi: ExtensionAPI): void {
       }
 
       // Start browser-based plan review server
-      const server = startPlanReviewServer({
+      const server = await startPlanReviewServer({
         plan: planContent,
         htmlContent: planHtmlContent,
         origin: "pi",

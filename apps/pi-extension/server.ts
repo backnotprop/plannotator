@@ -78,11 +78,36 @@ function getServerPort(): { port: number; portSource: "env" | "remote-default" |
   return { port: 0, portSource: "random" };
 }
 
-function listenOnPort(server: Server): { port: number; portSource: "env" | "remote-default" | "random" } {
+const MAX_RETRIES = 5;
+const RETRY_DELAY_MS = 500;
+
+async function listenOnPort(server: Server): Promise<{ port: number; portSource: "env" | "remote-default" | "random" }> {
   const result = getServerPort();
-  server.listen(result.port);
-  const addr = server.address() as { port: number };
-  return { port: addr.port, portSource: result.portSource };
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(result.port, () => {
+          server.removeListener("error", reject);
+          resolve();
+        });
+      });
+      const addr = server.address() as { port: number };
+      return { port: addr.port, portSource: result.portSource };
+    } catch (err: unknown) {
+      const isAddressInUse = err instanceof Error && err.message.includes("EADDRINUSE");
+      if (isAddressInUse && attempt < MAX_RETRIES) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+        continue;
+      }
+      const hint = isRemoteSession() ? " (set PLANNOTATOR_PORT to use a different port)" : "";
+      throw new Error(`Port ${result.port} in use after ${MAX_RETRIES} retries${hint}`);
+    }
+  }
+
+  // Unreachable, but satisfies TypeScript
+  throw new Error("Failed to bind port");
 }
 
 /**
@@ -91,12 +116,12 @@ function listenOnPort(server: Server): { port: number; portSource: "env" | "remo
  * Returns { opened: true } if browser was opened, { opened: false, isRemote: true, url } if remote session.
  */
 export function openBrowser(url: string): { opened: boolean; isRemote?: boolean; url?: string } {
-  if (isRemoteSession()) {
+  const browser = process.env.PLANNOTATOR_BROWSER || process.env.BROWSER;
+  if (isRemoteSession() && !browser) {
     return { opened: false, isRemote: true, url };
   }
 
   try {
-    const browser = process.env.PLANNOTATOR_BROWSER || process.env.BROWSER;
     const platform = process.platform;
     const wsl = platform === "linux" && os.release().toLowerCase().includes("microsoft");
 
@@ -323,7 +348,7 @@ export function startPlanReviewServer(options: {
   plan: string;
   htmlContent: string;
   origin?: string;
-}): PlanServerResult {
+}): Promise<PlanServerResult> {
   // Version history
   const slug = generateSlug(options.plan);
   const project = detectProjectName();
@@ -382,7 +407,7 @@ export function startPlanReviewServer(options: {
     }
   });
 
-  const { port, portSource } = listenOnPort(server);
+  const { port, portSource } = await listenOnPort(server);
 
   return {
     port,
@@ -471,7 +496,7 @@ export function startReviewServer(options: {
   origin?: string;
   diffType?: DiffType;
   gitContext?: GitContext;
-}): ReviewServerResult {
+}): Promise<ReviewServerResult> {
   let currentPatch = options.rawPatch;
   let currentGitRef = options.gitRef;
   let currentDiffType: DiffType = options.diffType || "uncommitted";
@@ -517,7 +542,7 @@ export function startReviewServer(options: {
     }
   });
 
-  const { port, portSource } = listenOnPort(server);
+  const { port, portSource } = await listenOnPort(server);
 
   return {
     port,
@@ -543,7 +568,7 @@ export function startAnnotateServer(options: {
   filePath: string;
   htmlContent: string;
   origin?: string;
-}): AnnotateServerResult {
+}): Promise<AnnotateServerResult> {
   let resolveDecision!: (result: { feedback: string }) => void;
   const decisionPromise = new Promise<{ feedback: string }>((r) => {
     resolveDecision = r;
@@ -568,7 +593,7 @@ export function startAnnotateServer(options: {
     }
   });
 
-  const { port, portSource } = listenOnPort(server);
+  const { port, portSource } = await listenOnPort(server);
 
   return {
     port,
