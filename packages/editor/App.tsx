@@ -9,6 +9,7 @@ import { Annotation, Block, EditorMode, type InputMethod, type ImageAttachment }
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
 import { ModeToggle } from '@plannotator/ui/components/ModeToggle';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
+import { CollaborativeSessionButton } from '@plannotator/ui/components/CollaborativeSessionButton';
 import { TaterSpriteRunning } from '@plannotator/ui/components/TaterSpriteRunning';
 import { TaterSpritePullup } from '@plannotator/ui/components/TaterSpritePullup';
 import { Settings } from '@plannotator/ui/components/Settings';
@@ -1031,6 +1032,18 @@ const App: React.FC = () => {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
                 </svg>
               </button>
+
+              {/* Collaborative Session Button */}
+              {!linkedDocHook.isActive && sharingEnabled && (
+                <CollaborativeSessionButton
+                  markdown={markdown}
+                  annotations={annotations}
+                  globalAttachments={globalAttachments}
+                  setAnnotations={setAnnotations}
+                  setGlobalAttachments={setGlobalAttachments}
+                  pasteApiUrl={pasteApiUrl}
+                />
+              )}
 
               <div className="relative flex" data-export-dropdown>
                 <button

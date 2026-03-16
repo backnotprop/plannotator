@@ -103,3 +103,53 @@ export interface VaultNode {
 }
 
 export type { EditorAnnotation } from '@plannotator/shared/types';
+
+// Collaborative Review Session Types
+export interface ReviewSession {
+  /** Unique session ID (8 chars, same format as paste IDs) */
+  id: string;
+
+  /** Base plan markdown that all reviewers see */
+  plan: string;
+
+  /** Accumulated annotations from all reviewers */
+  annotations: Annotation[];
+
+  /** Global attachments (images uploaded by reviewers) */
+  globalAttachments?: ImageAttachment[];
+
+  /** Optional diff contexts (parallel to annotations array) */
+  diffContexts?: (string | null)[];
+
+  /** Timestamp when session was created */
+  createdAt: number;
+
+  /** Timestamp of last annotation added */
+  lastUpdatedAt: number;
+
+  /** Expiration timestamp (7 days from creation) */
+  expiresAt: number;
+
+  /** Number of unique reviewers (tracked via author field) */
+  reviewerCount: number;
+
+  /** Lock to prevent concurrent writes (simple optimistic locking) */
+  version: number;
+}
+
+export interface CreateReviewSessionRequest {
+  plan: string;
+  globalAttachments?: ImageAttachment[];
+}
+
+export interface AddAnnotationsRequest {
+  annotations: Annotation[];
+  globalAttachments?: ImageAttachment[];
+  /** Expected version for optimistic locking (prevents overwrite conflicts) */
+  expectedVersion: number;
+}
+
+export interface ReviewSessionResponse {
+  session: ReviewSession;
+  shareUrl: string; // Full URL for sharing with team
+}

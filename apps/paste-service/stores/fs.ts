@@ -1,6 +1,7 @@
 import { mkdirSync, readdirSync, readFileSync, unlinkSync } from "fs";
 import { join, resolve } from "path";
 import type { PasteStore } from "../core/storage";
+import type { ReviewSession } from "@plannotator/ui/types";
 
 interface PasteFile {
   data: string;
@@ -65,6 +66,60 @@ export class FsPasteStore implements PasteStore {
       }
     } catch {
       // dataDir might not exist yet
+    }
+  }
+
+  // Review Session methods
+
+  async putSession(id: string, session: ReviewSession, ttlSeconds: number): Promise<void> {
+    const entry: PasteFile = {
+      data: JSON.stringify(session),
+      expiresAt: Date.now() + ttlSeconds * 1000,
+    };
+    const path = this.safePath(`session-${id}`);
+    await Bun.write(path, JSON.stringify(entry));
+  }
+
+  async getSession(id: string): Promise<ReviewSession | null> {
+    const path = this.safePath(`session-${id}`);
+    try {
+      const entry: PasteFile = await Bun.file(path).json();
+      if (Date.now() > entry.expiresAt) {
+        unlinkSync(path);
+        return null;
+      }
+      return JSON.parse(entry.data);
+    } catch {
+      return null;
+    }
+  }
+
+  async updateSession(id: string, session: ReviewSession, ttlSeconds: number): Promise<boolean> {
+    const path = this.safePath(`session-${id}`);
+    try {
+      // Read existing session
+      const entry: PasteFile = await Bun.file(path).json();
+      if (Date.now() > entry.expiresAt) {
+        unlinkSync(path);
+        return false;
+      }
+
+      const existing: ReviewSession = JSON.parse(entry.data);
+
+      // Optimistic locking check
+      if (existing.version !== session.version - 1) {
+        return false; // Version mismatch — another client updated first
+      }
+
+      // Write updated session
+      const newEntry: PasteFile = {
+        data: JSON.stringify(session),
+        expiresAt: Date.now() + ttlSeconds * 1000,
+      };
+      await Bun.write(path, JSON.stringify(newEntry));
+      return true;
+    } catch {
+      return false;
     }
   }
 }

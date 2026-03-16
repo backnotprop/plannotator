@@ -150,6 +150,34 @@ User annotates markdown, provides feedback
 Send Annotations → feedback sent to agent session
 ```
 
+## Collaborative Review Flow
+
+```
+User clicks "Start Collaborative Review" in plan editor
+        ↓
+POST /api/review-session → creates session with unique ID
+        ↓
+Share URL displayed: /s/<session-id>
+        ↓
+User shares URL with team members (Reviewer A, B, C...)
+        ↓
+Each reviewer:
+  1. Opens /s/<session-id> → auto-joins session
+  2. Adds their annotations
+  3. Clicks "Submit" → PATCH /api/review-session/:id/annotations
+     (Optimistic locking: fails if version mismatch)
+        ↓
+Original user clicks "Refresh" → fetches all merged annotations
+        ↓
+User approves/denies plan with all team feedback → sent to agent
+```
+
+**Key features:**
+- One fixed URL for all reviewers (no N-way URL ping-pong)
+- Server merges annotations automatically (deduplicates)
+- Version conflicts auto-resolve with refresh
+- Works offline (local filesystem) or cloud (Cloudflare KV)
+
 ## Server API
 
 ### Plan Server (`packages/server/index.ts`)
@@ -205,8 +233,18 @@ All servers use random ports locally or fixed port (`19432`) in remote mode.
 | --------------------- | ------ | ------------------------------------------ |
 | `/api/paste`          | POST   | Store compressed plan data, returns `{ id }` |
 | `/api/paste/:id`      | GET    | Retrieve stored compressed data            |
+| `/api/review-session` | POST   | Create collaborative review session, returns `{ session, shareUrl }` |
+| `/api/review-session/:id` | GET | Retrieve review session with all annotations |
+| `/api/review-session/:id/annotations` | PATCH | Add annotations to session (optimistic locking) |
 
 Runs as a separate service on port `19433` (self-hosted) or as a Cloudflare Worker (hosted).
+
+**Collaborative Review Sessions:**
+- Fixed session URL (`/s/<id>`) for multiple reviewers
+- Server-side annotation merging with deduplication
+- Optimistic locking (version field) prevents conflicts
+- Auto-expires after 7 days (same as paste TTL)
+- Supports both filesystem and Cloudflare KV storage
 
 ## Plan Version History
 
