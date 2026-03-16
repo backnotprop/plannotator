@@ -28,8 +28,11 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { Key } from "@mariozechner/pi-tui";
 import { markCompletedSteps, parseChecklist, type ChecklistItem } from "./utils.js";
 import {
+  type AnnotateServerResult,
   startPlanReviewServer,
+  type PlanServerResult,
   startReviewServer,
+  type ReviewServerResult,
   startAnnotateServer,
   getGitContext,
   runGitDiff,
@@ -93,6 +96,10 @@ async function runBrowserReview<T>(
   await new Promise((r) => setTimeout(r, 1500));
   server.stop();
   return result;
+}
+
+function getStartupErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : "Unknown error";
 }
 
 export default function plannotator(pi: ExtensionAPI): void {
@@ -267,14 +274,20 @@ export default function plannotator(pi: ExtensionAPI): void {
       const gitCtx = getGitContext();
       const { patch: rawPatch, label: gitRef } = runGitDiff("uncommitted", gitCtx.defaultBranch);
 
-      const server = await startReviewServer({
-        rawPatch,
-        gitRef,
-        origin: "pi",
-        diffType: "uncommitted",
-        gitContext: gitCtx,
-        htmlContent: reviewHtmlContent,
-      });
+      let server: ReviewServerResult;
+      try {
+        server = await startReviewServer({
+          rawPatch,
+          gitRef,
+          origin: "pi",
+          diffType: "uncommitted",
+          gitContext: gitCtx,
+          htmlContent: reviewHtmlContent,
+        });
+      } catch (err) {
+        ctx.ui.notify(`Failed to start code review UI: ${getStartupErrorMessage(err)}`, "error");
+        return;
+      }
 
       const result = await runBrowserReview(server, ctx);
 
@@ -312,12 +325,18 @@ export default function plannotator(pi: ExtensionAPI): void {
       ctx.ui.notify(`Opening annotation UI for ${filePath}...`, "info");
 
       const markdown = readFileSync(absolutePath, "utf-8");
-      const server = await startAnnotateServer({
-        markdown,
-        filePath: absolutePath,
-        origin: "pi",
-        htmlContent: planHtmlContent,
-      });
+      let server: AnnotateServerResult;
+      try {
+        server = await startAnnotateServer({
+          markdown,
+          filePath: absolutePath,
+          origin: "pi",
+          htmlContent: planHtmlContent,
+        });
+      } catch (err) {
+        ctx.ui.notify(`Failed to start annotation UI: ${getStartupErrorMessage(err)}`, "error");
+        return;
+      }
 
       const result = await runBrowserReview(server, ctx);
 
@@ -410,11 +429,21 @@ export default function plannotator(pi: ExtensionAPI): void {
       }
 
       // Start browser-based plan review server
-      const server = await startPlanReviewServer({
-        plan: planContent,
-        htmlContent: planHtmlContent,
-        origin: "pi",
-      });
+      let server: PlanServerResult;
+      try {
+        server = await startPlanReviewServer({
+          plan: planContent,
+          htmlContent: planHtmlContent,
+          origin: "pi",
+        });
+      } catch (err) {
+        const message = `Failed to start plan review UI: ${getStartupErrorMessage(err)}`;
+        ctx.ui.notify(message, "error");
+        return {
+          content: [{ type: "text", text: message }],
+          details: { approved: false },
+        };
+      }
 
       const result = await runBrowserReview(server, ctx);
 

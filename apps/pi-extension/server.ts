@@ -101,8 +101,11 @@ async function listenOnPort(server: Server): Promise<{ port: number; portSource:
         await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
         continue;
       }
-      const hint = isRemoteSession() ? " (set PLANNOTATOR_PORT to use a different port)" : "";
-      throw new Error(`Port ${result.port} in use after ${MAX_RETRIES} retries${hint}`);
+      if (isAddressInUse) {
+        const hint = isRemoteSession() ? " (set PLANNOTATOR_PORT to use a different port)" : "";
+        throw new Error(`Port ${result.port} in use after ${MAX_RETRIES} retries${hint}`);
+      }
+      throw err;
     }
   }
 
@@ -344,7 +347,7 @@ export interface PlanServerResult {
   stop: () => void;
 }
 
-export function startPlanReviewServer(options: {
+export async function startPlanReviewServer(options: {
   plan: string;
   htmlContent: string;
   origin?: string;
@@ -489,7 +492,7 @@ export function runGitDiff(diffType: DiffType, defaultBranch = "main"): { patch:
   }
 }
 
-export function startReviewServer(options: {
+export async function startReviewServer(options: {
   rawPatch: string;
   gitRef: string;
   htmlContent: string;
@@ -563,7 +566,7 @@ export interface AnnotateServerResult {
   stop: () => void;
 }
 
-export function startAnnotateServer(options: {
+export async function startAnnotateServer(options: {
   markdown: string;
   filePath: string;
   htmlContent: string;
