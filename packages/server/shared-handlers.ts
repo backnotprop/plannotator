@@ -144,7 +144,5 @@ export async function handleServerReady(
   isRemote: boolean,
   _port: number,
 ): Promise<void> {
-  if (!isRemote || process.env.PLANNOTATOR_BROWSER) {
-    await openBrowser(url);
-  }
+  await openBrowser(url);
 }

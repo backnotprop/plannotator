@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "plannotator",
@@ -51,7 +52,7 @@
     },
     "apps/opencode-plugin": {
       "name": "@plannotator/opencode",
-      "version": "0.13.0",
+      "version": "0.13.1",
       "dependencies": {
         "@opencode-ai/plugin": "^1.1.10",
       },
@@ -73,7 +74,7 @@
     },
     "apps/pi-extension": {
       "name": "@plannotator/pi-extension",
-      "version": "0.13.0",
+      "version": "0.13.1",
       "peerDependencies": {
         "@mariozechner/pi-coding-agent": ">=0.53.0",
       },
@@ -119,7 +120,7 @@
     },
     "apps/vscode-extension": {
       "name": "plannotator-webview",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "devDependencies": {
         "@types/bun": "latest",
         "@types/vscode": "^1.85.0",
@@ -153,7 +154,7 @@
     },
     "packages/server": {
       "name": "@plannotator/server",
-      "version": "0.13.0",
+      "version": "0.13.1",
       "dependencies": {
         "@plannotator/shared": "workspace:*",
       },

@@ -1,9 +1,39 @@
 import * as vscode from "vscode";
 import * as path from "path";
+import * as fs from "fs";
+import * as os from "os";
 import { createIpcServer } from "./ipc-server";
 import { createCookieProxy } from "./cookie-proxy";
 import { PanelManager } from "./panel-manager";
 import { setActiveProxyPort, registerEditorAnnotationCommand } from "./editor-annotations";
+
+const IPC_REGISTRY = path.join(os.homedir(), ".plannotator", "vscode-ipc.json");
+
+function readIpcRegistry(): Record<string, number> {
+  try {
+    return JSON.parse(fs.readFileSync(IPC_REGISTRY, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
+function writeIpcRegistry(registry: Record<string, number>): void {
+  const dir = path.dirname(IPC_REGISTRY);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(IPC_REGISTRY, JSON.stringify(registry, null, 2));
+}
+
+function registerIpcPort(workspacePath: string, port: number): void {
+  const registry = readIpcRegistry();
+  registry[workspacePath] = port;
+  writeIpcRegistry(registry);
+}
+
+function unregisterIpcPort(workspacePath: string): void {
+  const registry = readIpcRegistry();
+  delete registry[workspacePath];
+  writeIpcRegistry(registry);
+}
 
 const COOKIE_KEY = "plannotator-cookies";
 
@@ -59,6 +89,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }, lastPort);
   context.workspaceState.update("ipcPort", port);
   context.subscriptions.push({ dispose: () => server.close() });
+
+  // Write IPC port to file-based registry so non-terminal processes (e.g. hooks)
+  // can discover it without relying on environmentVariableCollection.
+  const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
+  if (workspacePath) {
+    registerIpcPort(workspacePath, port);
+    context.subscriptions.push({ dispose: () => unregisterIpcPort(workspacePath) });
+  }
 
   // Inject env vars into integrated terminals
   const config = vscode.workspace.getConfiguration("plannotatorWebview");
