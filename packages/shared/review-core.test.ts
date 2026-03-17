@@ -134,7 +134,7 @@ describe("review-core", () => {
 
     expect(result.patch).toBe("");
     expect(result.label).toBe("Error: branch");
-    expect(result.error).toContain("git diff master..HEAD");
+    expect(result.error).toContain("git diff --no-ext-diff master..HEAD");
   });
 
   test("git context lists worktrees and file content lookup returns old/new content", async () => {

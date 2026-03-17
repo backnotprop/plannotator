@@ -188,6 +188,7 @@ async function getUntrackedFileDiffs(
       const diffResult = await runtime.runGit(
         [
           "diff",
+          "--no-ext-diff",
           "--no-index",
           `--src-prefix=${srcPrefix}`,
           `--dst-prefix=${dstPrefix}`,
@@ -271,6 +272,7 @@ export async function runGitDiff(
       case "uncommitted": {
         const trackedDiffArgs = [
           "diff",
+          "--no-ext-diff",
           "HEAD",
           "--src-prefix=a/",
           "--dst-prefix=b/",
@@ -298,6 +300,7 @@ export async function runGitDiff(
       case "staged": {
         const stagedDiffArgs = [
           "diff",
+          "--no-ext-diff",
           "--staged",
           "--src-prefix=a/",
           "--dst-prefix=b/",
@@ -312,7 +315,7 @@ export async function runGitDiff(
       }
 
       case "unstaged": {
-        const trackedDiffArgs = ["diff", "--src-prefix=a/", "--dst-prefix=b/"];
+        const trackedDiffArgs = ["diff", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/"];
         const trackedDiff = assertGitSuccess(
           await runtime.runGit(trackedDiffArgs, { cwd }),
           trackedDiffArgs,
@@ -335,8 +338,8 @@ export async function runGitDiff(
         );
         const args =
           hasParent.exitCode === 0
-            ? ["diff", "HEAD~1..HEAD", "--src-prefix=a/", "--dst-prefix=b/"]
-            : ["diff", "--root", "HEAD", "--src-prefix=a/", "--dst-prefix=b/"];
+            ? ["diff", "--no-ext-diff", "HEAD~1..HEAD", "--src-prefix=a/", "--dst-prefix=b/"]
+            : ["diff", "--no-ext-diff", "--root", "HEAD", "--src-prefix=a/", "--dst-prefix=b/"];
         const lastCommitDiff = assertGitSuccess(
           await runtime.runGit(args, { cwd }),
           args,
@@ -349,6 +352,7 @@ export async function runGitDiff(
       case "branch": {
         const branchDiffArgs = [
           "diff",
+          "--no-ext-diff",
           `${defaultBranch}..HEAD`,
           "--src-prefix=a/",
           "--dst-prefix=b/",
