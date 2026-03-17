@@ -54,8 +54,24 @@ function getHtml(url: string, origin: string): string {
   </style>
 </head>
 <body>
-  <iframe src="${url}"></iframe>
+  <iframe id="pn-frame" src="${url}"></iframe>
   ${themeScript}
+  <script>
+    (function() {
+      var ready = false;
+      var reloads = 0;
+      window.addEventListener("message", function(e) {
+        if (e.data === "plannotator-ready") { ready = true; }
+      });
+      setTimeout(function() {
+        if (!ready && reloads < 1) {
+          reloads++;
+          var f = document.getElementById("pn-frame");
+          if (f) { f.src = f.src; }
+        }
+      }, 3000);
+    })();
+  </script>
 </body>
 </html>`;
 }

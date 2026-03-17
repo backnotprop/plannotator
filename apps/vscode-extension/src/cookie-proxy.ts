@@ -60,46 +60,64 @@ export function createCookieProxy(
         "accept-encoding": "identity",
       };
 
-      const proxyReq = http.request(
-        targetUrl.toString(),
-        { method: req.method, headers: proxyHeaders },
-        (proxyRes) => {
-          const contentType = proxyRes.headers["content-type"] || "";
+      // Buffer request body so retries can replay it
+      const bodyChunks: Buffer[] = [];
+      req.on("data", (chunk: Buffer) => bodyChunks.push(chunk));
+      req.on("end", () => {
+        const body = Buffer.concat(bodyChunks);
+        const MAX_RETRIES = 3;
+        const BASE_DELAY = 200;
 
-          if (contentType.includes("text/html")) {
-            // Buffer HTML to inject cookie sync script
-            const chunks: Buffer[] = [];
-            proxyRes.on("data", (chunk: Buffer) => chunks.push(chunk));
-            proxyRes.on("end", () => {
-              const html = Buffer.concat(chunks).toString("utf-8");
-              const savedCookies = options.loadCookies();
-              const injected = injectScript(html, savedCookies);
-              const headers = { ...proxyRes.headers };
-              delete headers["content-length"];
-              delete headers["content-encoding"];
-              delete headers["transfer-encoding"];
-              // Restore cookies via Set-Cookie headers (works before any JS runs)
-              const setCookieHeaders = buildSetCookieHeaders(savedCookies);
-              if (setCookieHeaders.length > 0) {
-                headers["set-cookie"] = setCookieHeaders;
+        function tryUpstreamRequest(attempt: number): void {
+          const proxyReq = http.request(
+            targetUrl.toString(),
+            { method: req.method, headers: proxyHeaders },
+            (proxyRes) => {
+              const contentType = proxyRes.headers["content-type"] || "";
+
+              if (contentType.includes("text/html")) {
+                // Buffer HTML to inject cookie sync script
+                const chunks: Buffer[] = [];
+                proxyRes.on("data", (chunk: Buffer) => chunks.push(chunk));
+                proxyRes.on("end", () => {
+                  const html = Buffer.concat(chunks).toString("utf-8");
+                  const savedCookies = options.loadCookies();
+                  const injected = injectScript(html, savedCookies);
+                  const headers = { ...proxyRes.headers };
+                  delete headers["content-length"];
+                  delete headers["content-encoding"];
+                  delete headers["transfer-encoding"];
+                  // Restore cookies via Set-Cookie headers (works before any JS runs)
+                  const setCookieHeaders = buildSetCookieHeaders(savedCookies);
+                  if (setCookieHeaders.length > 0) {
+                    headers["set-cookie"] = setCookieHeaders;
+                  }
+                  res.writeHead(proxyRes.statusCode || 200, headers);
+                  res.end(injected);
+                });
+              } else {
+                // Pass through non-HTML responses
+                res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
+                proxyRes.pipe(res);
               }
-              res.writeHead(proxyRes.statusCode || 200, headers);
-              res.end(injected);
-            });
-          } else {
-            // Pass through non-HTML responses
-            res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
-            proxyRes.pipe(res);
-          }
-        },
-      );
+            },
+          );
 
-      proxyReq.on("error", () => {
-        res.writeHead(502);
-        res.end("proxy error");
+          proxyReq.on("error", () => {
+            if (attempt < MAX_RETRIES) {
+              const delay = BASE_DELAY * Math.pow(2, attempt);
+              setTimeout(() => tryUpstreamRequest(attempt + 1), delay);
+            } else {
+              res.writeHead(502);
+              res.end("proxy error");
+            }
+          });
+
+          proxyReq.end(body);
+        }
+
+        tryUpstreamRequest(0);
       });
-
-      req.pipe(proxyReq);
     });
 
     server.listen(0, "127.0.0.1", () => {
@@ -163,6 +181,7 @@ function injectScript(html: string, savedCookies: string): string {
       function sc(){var c=document.cookie;if(c)fetch("/___ext/cookies",{method:"POST",body:c}).catch(function(){});}
       setTimeout(sc,500);setInterval(sc,2000);
       var ci=setInterval(function(){if(document.body&&document.body.textContent.indexOf("Your response has been sent")!==-1){clearInterval(ci);sc();fetch("/___ext/close",{method:"POST"});}},500);
+      try{window.parent.postMessage("plannotator-ready","*");}catch(e){}
     })();</script>`;
 
   const headMatch = html.match(/<head(\s[^>]*)?>/) ;
