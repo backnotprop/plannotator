@@ -156,9 +156,10 @@ export async function startReviewServer(
               }
 
               const defaultBranch = gitContext?.defaultBranch || "main";
+              const defaultCwd = gitContext?.cwd;
 
               // Run the new diff
-              const result = await runGitDiff(newDiffType, defaultBranch);
+              const result = await runGitDiff(newDiffType, defaultBranch, defaultCwd);
 
               // Update state
               currentPatch = result.patch;
@@ -195,11 +196,13 @@ export async function startReviewServer(
               }
             }
             const defaultBranch = gitContext?.defaultBranch || "main";
+            const defaultCwd = gitContext?.cwd;
             const result = await getFileContentsForDiff(
               currentDiffType,
               defaultBranch,
               filePath,
               oldPath,
+              defaultCwd,
             );
             return Response.json(result);
           }
@@ -217,6 +220,9 @@ export async function startReviewServer(
               if (currentDiffType.startsWith("worktree:")) {
                 const parsed = parseWorktreeDiffType(currentDiffType);
                 if (parsed) cwd = parsed.path;
+              }
+              if (!cwd) {
+                cwd = gitContext?.cwd;
               }
 
               if (body.undo) {

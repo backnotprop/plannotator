@@ -22,6 +22,7 @@ import {
   gitResetFile as gitResetFileCore,
   parseWorktreeDiffType,
   runGitDiff as runGitDiffCore,
+  runGitDiffWithContext as runGitDiffWithContextCore,
   validateFilePath,
 } from "@plannotator/shared/review-core";
 
@@ -75,15 +76,23 @@ export function getWorktrees(): Promise<WorktreeInfo[]> {
   return getWorktreesCore(runtime);
 }
 
-export function getGitContext(): Promise<GitContext> {
-  return getGitContextCore(runtime);
+export function getGitContext(cwd?: string): Promise<GitContext> {
+  return getGitContextCore(runtime, cwd);
 }
 
 export function runGitDiff(
   diffType: DiffType,
   defaultBranch: string = "main",
+  cwd?: string,
 ): Promise<DiffResult> {
-  return runGitDiffCore(runtime, diffType, defaultBranch);
+  return runGitDiffCore(runtime, diffType, defaultBranch, cwd);
+}
+
+export function runGitDiffWithContext(
+  diffType: DiffType,
+  gitContext: GitContext,
+): Promise<DiffResult> {
+  return runGitDiffWithContextCore(runtime, diffType, gitContext);
 }
 
 export function getFileContentsForDiff(

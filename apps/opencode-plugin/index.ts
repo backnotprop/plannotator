@@ -31,7 +31,7 @@ import {
   startAnnotateServer,
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
-import { getGitContext, runGitDiff } from "@plannotator/server/git";
+import { getGitContext, runGitDiffWithContext } from "@plannotator/server/git";
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
 import { resolveMarkdownFile } from "@plannotator/server/resolve-file";
 import { planDenyFeedback } from "@plannotator/shared/feedback-templates";
@@ -279,10 +279,11 @@ Do NOT proceed with implementation until your plan is approved.
           message: "Opening code review UI...",
         });
 
-        const gitContext = await getGitContext();
-        const { patch: rawPatch, label: gitRef, error: diffError } = await runGitDiff(
+        const cwd = ctx.directory;
+        const gitContext = await getGitContext(cwd);
+        const { patch: rawPatch, label: gitRef, error: diffError } = await runGitDiffWithContext(
           "uncommitted",
-          gitContext.defaultBranch
+          gitContext
         );
 
         const server = await startReviewServer({
