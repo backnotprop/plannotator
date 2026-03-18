@@ -133,10 +133,10 @@ The VS Code extension (`apps/vscode-extension/package.json`) has independent ver
 Build in dependency order. Each step depends on the previous:
 
 ```bash
-bun run build:review    # 1. Code review editor (independent Vite build)
-bun run build:hook      # 2. Plan review + hook server (copies review output)
-bun run build:opencode  # 3. OpenCode plugin (copies HTML from hook + review)
-bun run build:pi        # 4. Pi extension (chains: review → hook → pi internally, but since 1-2 are done, it just builds pi)
+bun run build:review    # 1. Code review editor (standalone Vite build)
+bun run build:hook      # 2. Plan review + hook server (copies review's built HTML into hook dist)
+bun run build:opencode  # 3. OpenCode plugin (copies built HTML from hook + review)
+bun run build:pi        # 4. Pi extension (chains review → hook → pi internally, safe to run after 1-2)
 ```
 
 The `build:pi` script internally runs `bun run build:review && bun run build:hook && bun run --cwd apps/pi-extension build`, so if you've already run steps 1-2, you can just run `bun run --cwd apps/pi-extension build` directly. But running the full `build:pi` is also fine — it's idempotent.
