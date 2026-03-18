@@ -106,7 +106,7 @@ The release notes file goes in the repo root as `RELEASE_NOTES_v<VERSION>.md`.
 
 ### Step 4: Present for review
 
-Write the draft to `RELEASE_NOTES_v<VERSION>.md` and tell the user it's ready for review. Wait for their feedback before proceeding to Phase 2.
+Write the draft to `RELEASE_NOTES_v<VERSION>.md` in the repo root and tell the user it's ready for review. Do not `git add` or commit this file — release notes are kept untracked by design. Wait for their feedback before proceeding to Phase 2.
 
 ---
 
