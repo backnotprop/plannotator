@@ -83,6 +83,14 @@ describe("buildHashtags", () => {
   test("handles whitespace-only custom tags as empty", () => {
     expect(buildHashtags("   ", ["auto"])).toBe("#auto");
   });
+
+  test("preserves slashes in nested Bear tags", () => {
+    expect(buildHashtags("plannotator/plans, work/code", [])).toBe("#plannotator/plans #work/code");
+  });
+
+  test("preserves slashes in auto tags with nested paths", () => {
+    expect(buildHashtags(undefined, ["plannotator/plans", "work"])).toBe("#plannotator/plans #work");
+  });
 });
 
 describe("buildBearContent", () => {

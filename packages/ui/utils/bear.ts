@@ -53,7 +53,7 @@ export function saveBearSettings(settings: BearSettings): void {
 export function normalizeTags(raw: string): string {
   return raw
     .split(',')
-    .map(t => t.trim().replace(/^#+/, '').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''))
+    .map(t => t.trim().replace(/^#+/, '').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9\-\/]/g, '').replace(/\/+/g, '/').replace(/^\/|\/$/g, ''))
     .filter(Boolean)
     .join(', ');
 }
