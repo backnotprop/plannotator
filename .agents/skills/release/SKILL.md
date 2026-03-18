@@ -100,6 +100,9 @@ The release notes file goes in the repo root as `RELEASE_NOTES_v<VERSION>.md`.
 - **Narrative over noise.** Write in clear, readable prose. Not marketing-speak, not changelog-dump. Explain what changed and why someone should care, in plain language.
 - **Bullets where they help.** Use bullet lists for enumerating discrete items (additional changes, contributor lists). Use paragraphs for explaining features.
 - **No cliches or buzzwords.** Don't say "exciting", "game-changing", "seamless", "powerful". Just describe what happened.
+- **No punchlines.** Don't end sections with a clever quip or a summary zinger. Let the feature speak for itself.
+- **Speak through practical benefit.** Describe what changed and what it means for the user in concrete, reliable terms. Not aspirational, not hype — just what it does.
+- **Don't overuse em dashes.** One or two per release is fine. If you notice them stacking up, restructure the sentence instead.
 - **Grammatical structure matters.** Vary sentence structure. Active voice. Concrete subjects and verbs.
 - **Contributor tags.** Use `@username` — bare at-mentions, not markdown links like `[@user](url)`. GitHub renders bare `@mentions` with avatar icons in release notes. This is important for community recognition.
 - **Every contributor counts.** Everyone who filed an issue, left a comment that shaped a decision, or participated in a discussion gets mentioned. This project's community is its lifeblood.
