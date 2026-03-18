@@ -1,0 +1,188 @@
+---
+name: release
+description: Prepare and execute a Plannotator release — draft release notes with full contributor credit, bump versions across all package files, build in dependency order, and kick off the tag-driven release pipeline. Use this skill whenever the user mentions preparing a release, bumping versions, writing release notes, tagging a release, or publishing. Also trigger when the user says things like "let's ship", "prep a release", "what's changed since last release", or "time to cut a new version".
+---
+
+# Plannotator Release
+
+This skill handles the full release lifecycle for the Plannotator monorepo. The process has four phases, and Phase 1 (release notes) is where most of the work happens. Present the release notes draft for review before proceeding to later phases.
+
+## Phase 1: Draft Release Notes
+
+This is the most important phase. The release notes are the public face of each version and the primary way the community sees their contributions recognized.
+
+### Step 1: Determine scope
+
+1. Find the latest release tag: `git tag --sort=-v:refname | head -1`
+2. Determine the new version number. Ask the user if unclear (patch, minor, or major).
+3. Gather all changes since the last tag:
+   - `git log --oneline <last-tag>..HEAD` for commit history
+   - `git log --merges --oneline <last-tag>..HEAD` for merged PRs
+4. For each PR, use `gh pr view <number> --json title,author,body,closedIssues,labels` to get details.
+
+### Step 2: Research contributors
+
+This is critical. Every person who participated in the release gets credit — not just PR authors.
+
+For each PR and linked issue, collect:
+- **PR authors** — the person who wrote the code
+- **Issue reporters** — who filed the bug or feature request
+- **Issue commenters** — who participated in the discussion with useful context
+- **Discussion creators** — who started relevant GitHub Discussions
+- **Feature requestors** — check the linked "closes #N" issues and their authors
+
+Use the GitHub API via `gh`:
+```bash
+# Get issue details including author
+gh issue view <number> --json author,title,body
+
+# Get issue comments to find participants
+gh api repos/backnotprop/plannotator/issues/<number>/comments --jq '.[].user.login'
+
+# Get PR review comments
+gh api repos/backnotprop/plannotator/pulls/<number>/comments --jq '.[].user.login'
+```
+
+Also check `FEATURE_REQUESTS.md` in the repo root — it catalogs open feature requests with issue numbers. Cross-reference any closed issues against this list.
+
+### Step 3: Write the release notes
+
+Read `references/release-notes-v0.13.0.md` and `references/release-notes-v0.12.0.md` for the canonical template structure. These are real release notes from previous versions — match their tone, structure, and level of detail.
+
+The release notes file goes in the repo root as `RELEASE_NOTES_v<VERSION>.md`.
+
+#### Structure
+
+1. **X/Twitter follow link** — first line, always the same:
+   ```
+   Follow [@plannotator](https://x.com/plannotator) on X for updates
+   ```
+
+2. **"Missed recent releases?"** collapsible table — copy from the previous release's notes, then:
+   - Add the previous release (the one you're succeeding) as the newest row
+   - Keep roughly 10-12 rows; drop the oldest if needed
+   - Each row: version link + comma-separated feature highlights (short phrases)
+
+3. **"What's New in vX.Y.Z"** — the heart of the notes
+   - Open with 1-3 sentences summarizing the release theme and scope. Mention how many PRs, how many from external contributors, any first-timers.
+   - Each major feature/fix gets its own `###` subsection with:
+     - A descriptive heading (not the PR title verbatim — rephrase for clarity)
+     - 1-4 paragraphs explaining what changed and why it matters. Be specific and concrete. Describe the problem that existed before, what the change does, and how users experience it.
+     - Credit line at the bottom: PR link, linked issues with `closing [#N]`, and contributor attribution
+   - Minor changes go under `### Additional Changes` as bold-titled bullets
+
+4. **Install / Update** — standard block, read from the previous release notes and reuse verbatim
+
+5. **"What's Changed"** — bullet list of every PR in the release:
+   ```
+   - feat: descriptive PR title by @author in [#N](url)
+   ```
+
+6. **"New Contributors"** — if any first-time contributors:
+   ```
+   - @username made their first contribution in [#N](url)
+   ```
+
+7. **"Contributors" or "Community"** — narrative section recognizing everyone who participated:
+   - PR authors get a sentence about what they built
+   - Issue reporters and commenters get listed with what they reported/discussed
+   - Group community issue reporters in a bullet list at the end
+
+8. **Full Changelog link**:
+   ```
+   **Full Changelog**: https://github.com/backnotprop/plannotator/compare/<prev-tag>...<new-tag>
+   ```
+
+#### Writing guidelines
+
+- **Narrative over noise.** Write in clear, readable prose. Not marketing-speak, not changelog-dump. Explain what changed and why someone should care, in plain language.
+- **Bullets where they help.** Use bullet lists for enumerating discrete items (additional changes, contributor lists). Use paragraphs for explaining features.
+- **No cliches or buzzwords.** Don't say "exciting", "game-changing", "seamless", "powerful". Just describe what happened.
+- **Grammatical structure matters.** Vary sentence structure. Active voice. Concrete subjects and verbs.
+- **Contributor tags.** Use `@username` — bare at-mentions, not markdown links like `[@user](url)`. GitHub renders bare `@mentions` with avatar icons in release notes. This is important for community recognition.
+- **Every contributor counts.** Everyone who filed an issue, left a comment that shaped a decision, or participated in a discussion gets mentioned. This project's community is its lifeblood.
+
+### Step 4: Present for review
+
+Write the draft to `RELEASE_NOTES_v<VERSION>.md` and tell the user it's ready for review. Wait for their feedback before proceeding to Phase 2.
+
+---
+
+## Phase 2: Version Bump
+
+Bump the version string in these **5 files** (and only these — other package.json files use stub versions):
+
+| File | Field |
+|------|-------|
+| `package.json` (root) | `"version"` |
+| `apps/opencode-plugin/package.json` | `"version"` |
+| `apps/pi-extension/package.json` | `"version"` |
+| `apps/hook/.claude-plugin/plugin.json` | `"version"` |
+| `packages/server/package.json` | `"version"` |
+
+Read each file, confirm the current version matches expectations, then update all 5 atomically.
+
+The VS Code extension (`apps/vscode-extension/package.json`) has independent versioning and is NOT bumped during main releases.
+
+---
+
+## Phase 3: Build
+
+Build in dependency order. Each step depends on the previous:
+
+```bash
+bun run build:review    # 1. Code review editor (independent Vite build)
+bun run build:hook      # 2. Plan review + hook server (copies review output)
+bun run build:opencode  # 3. OpenCode plugin (copies HTML from hook + review)
+bun run build:pi        # 4. Pi extension (chains: review → hook → pi internally, but since 1-2 are done, it just builds pi)
+```
+
+The `build:pi` script internally runs `bun run build:review && bun run build:hook && bun run --cwd apps/pi-extension build`, so if you've already run steps 1-2, you can just run `bun run --cwd apps/pi-extension build` directly. But running the full `build:pi` is also fine — it's idempotent.
+
+Verify builds succeed with no errors before proceeding.
+
+---
+
+## Phase 4: Commit, Tag, and Release
+
+1. **Commit the version bump:**
+   ```
+   chore: bump version to X.Y.Z
+   ```
+   Stage only the 5 version-bumped files. Do not stage the release notes file (it's untracked by design).
+
+2. **Create and push the tag:**
+   ```bash
+   git tag vX.Y.Z
+   git push origin main
+   git push origin vX.Y.Z
+   ```
+   Pushing the `v*` tag triggers the release pipeline (`.github/workflows/release.yml`).
+
+3. **The pipeline handles everything else:**
+   - Runs tests
+   - Cross-compiles binaries for 5 platforms (macOS ARM64/x64, Linux x64/ARM64, Windows x64)
+   - Compiles paste service binaries (same 5 platforms)
+   - Creates the GitHub Release with all binaries attached
+   - Publishes `@plannotator/opencode` and `@plannotator/pi-extension` to npm with provenance
+
+4. **After the pipeline completes:**
+   - Go to the GitHub Release page
+   - Replace the auto-generated release notes body with the contents of `RELEASE_NOTES_v<VERSION>.md`
+   - The release notes file stays in the repo root as an untracked local reference
+
+The user will handle pasting the release notes into GitHub. Your job is to have them ready.
+
+---
+
+## Checklist
+
+Before tagging, verify:
+- [ ] All 5 version files bumped consistently
+- [ ] Release notes drafted and reviewed
+- [ ] `bun run build:review` succeeded
+- [ ] `bun run build:hook` succeeded
+- [ ] `bun run build:opencode` succeeded
+- [ ] `bun run build:pi` succeeded (or pi-specific build step)
+- [ ] Version bump committed
+- [ ] No stale build artifacts (clean builds, no cache issues — run `bun install` first if dependencies changed)
