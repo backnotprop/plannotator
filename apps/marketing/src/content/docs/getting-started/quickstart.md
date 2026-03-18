@@ -55,3 +55,11 @@ Your annotations are exported as structured feedback that Claude can act on dire
 ## 5. Claude continues
 
 After approval, Claude implements the plan. After feedback, Claude revises the plan and presents it again for review. When the revised plan arrives, a diff badge shows what changed — click it to toggle between normal and diff view. The cycle continues until you approve.
+
+## Other commands
+
+Beyond plan review, Plannotator provides slash commands you can use anytime during a session:
+
+- **`/plannotator-review`** — Review uncommitted code changes. See [Code Review](/docs/commands/code-review/).
+- **`/plannotator-annotate <file.md>`** — Annotate any markdown file. See [Annotate](/docs/commands/annotate/).
+- **`/plannotator-last`** — Annotate the agent's last message. See [Annotate Last](/docs/commands/annotate-last/).

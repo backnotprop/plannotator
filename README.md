@@ -36,6 +36,7 @@ Interactive Plan & Code Review for AI Coding Agents. Mark up and refine your pla
 <tr><td><strong>Plan Diff</strong></td><td>Automatic</td><td>See what changed when the agent revises a plan</td></tr>
 <tr><td><strong>Code Review</strong></td><td><code>/plannotator-review</code></td><td>Review git diffs with line-level annotations</td></tr>
 <tr><td><strong>Annotate Any File</strong></td><td><code>/plannotator-annotate</code></td><td>Annotate any markdown file and send feedback to your agent</td></tr>
+<tr><td><strong>Annotate Last Message</strong></td><td><code>/plannotator-last</code></td><td>Annotate the agent's last response and send structured feedback</td></tr>
 </table>
 
 #### Sharing Plans
@@ -143,6 +144,7 @@ irm https://plannotator.ai/install.ps1 | iex
 ```
 !plannotator review           # Code review for current changes
 !plannotator annotate file.md # Annotate a markdown file
+!plannotator last             # Annotate the last agent message
 ```
 
 Plan mode is not yet supported.

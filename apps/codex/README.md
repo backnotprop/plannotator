@@ -36,6 +36,16 @@ Run `!plannotator annotate` to annotate any markdown file:
 !plannotator annotate path/to/file.md
 ```
 
+### Annotate Last Message
+
+Run `!plannotator last` to annotate the agent's most recent response:
+
+```
+!plannotator last
+```
+
+The message opens in the annotation UI where you can highlight text, add comments, and send structured feedback back to the agent.
+
 ## Environment Variables
 
 | Variable | Description |

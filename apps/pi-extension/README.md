@@ -71,6 +71,10 @@ Run `/plannotator-review` to open your current git changes in the code review UI
 
 Run `/plannotator-annotate <file.md>` to open any markdown file in the annotation UI. Useful for reviewing documentation or design specs with the agent.
 
+### Annotate last message
+
+Run `/plannotator-last` to annotate the agent's most recent response. The message opens in the annotation UI where you can highlight text, add comments, and send structured feedback back to the agent.
+
 ### Progress tracking
 
 During execution, the agent marks completed steps with `[DONE:n]` markers. Progress is shown in the status line and as a checklist widget in the terminal.
@@ -84,6 +88,7 @@ During execution, the agent marks completed steps with `[DONE:n]` markers. Progr
 | `/plannotator-status` | Show current phase, plan file, and progress |
 | `/plannotator-review` | Open code review UI for current changes |
 | `/plannotator-annotate <file>` | Open markdown file in annotation UI |
+| `/plannotator-last` | Annotate the last assistant message |
 
 ## Flags
 

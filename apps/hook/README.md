@@ -102,6 +102,16 @@ Host your-server
     LocalForward 9999 localhost:9999
 ```
 
+## Slash Commands
+
+The plugin registers three slash commands:
+
+| Command | Description |
+|---------|-------------|
+| `/plannotator-review` | Open code review UI for uncommitted changes |
+| `/plannotator-annotate <file.md>` | Annotate any markdown file |
+| `/plannotator-last` | Annotate the agent's last message |
+
 ## Obsidian Integration
 
 Approved plans can be automatically saved to your Obsidian vault.

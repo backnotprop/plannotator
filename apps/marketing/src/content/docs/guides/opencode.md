@@ -40,7 +40,7 @@ If the configured agent isn't found in the current OpenCode session, Plannotator
 
 ## Slash commands
 
-The plugin registers two slash commands:
+The plugin registers three slash commands:
 
 ### `/plannotator-review`
 
@@ -49,6 +49,10 @@ Opens a code review UI for uncommitted changes. Requires the CLI to be installed
 ### `/plannotator-annotate <file.md>`
 
 Opens a markdown file in the annotation UI. Also requires the CLI.
+
+### `/plannotator-last`
+
+Annotates the agent's most recent message. See the [annotate last docs](/docs/commands/annotate-last/) for details.
 
 Install the CLI for slash command support:
 
