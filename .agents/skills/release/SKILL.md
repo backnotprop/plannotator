@@ -45,7 +45,11 @@ gh api repos/backnotprop/plannotator/pulls/<number>/comments --jq '.[].user.logi
 
 ### Step 3: Write the release notes
 
-Read `references/release-notes-v0.13.0.md` and `references/release-notes-v0.12.0.md` for the canonical template structure. These are real release notes from previous versions — match their tone, structure, and level of detail.
+Read the reference release notes in `references/` for the canonical template structure. These are real release notes from previous versions — match their tone, structure, and level of detail.
+
+- `release-notes-v0.13.0.md` — large release, 14 PRs, 3 first-time contributors, "New Contributors" + narrative "Contributors" section
+- `release-notes-v0.12.0.md` — large community release, 14 PRs, 10 external, detailed narrative "Contributors" section
+- `release-notes-v0.13.1.md` — small patch release, 2 PRs, no external authors, "Community" section focused on issue reporters
 
 The release notes file goes in the repo root as `RELEASE_NOTES_v<VERSION>.md`.
 
