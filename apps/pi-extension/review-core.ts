@@ -31,6 +31,7 @@ export interface GitContext {
   defaultBranch: string;
   diffOptions: DiffOption[];
   worktrees: WorktreeInfo[];
+  cwd?: string;
 }
 
 export interface DiffResult {
@@ -88,8 +89,9 @@ export async function getDefaultBranch(
 
 export async function getWorktrees(
   runtime: ReviewGitRuntime,
+  cwd?: string,
 ): Promise<WorktreeInfo[]> {
-  const result = await runtime.runGit(["worktree", "list", "--porcelain"]);
+  const result = await runtime.runGit(["worktree", "list", "--porcelain"], { cwd });
   if (result.exitCode !== 0) return [];
 
   const entries: WorktreeInfo[] = [];
@@ -129,10 +131,11 @@ export async function getWorktrees(
 
 export async function getGitContext(
   runtime: ReviewGitRuntime,
+  cwd?: string,
 ): Promise<GitContext> {
   const [currentBranch, defaultBranch] = await Promise.all([
-    getCurrentBranch(runtime),
-    getDefaultBranch(runtime),
+    getCurrentBranch(runtime, cwd),
+    getDefaultBranch(runtime, cwd),
   ]);
 
   const diffOptions: DiffOption[] = [
@@ -147,8 +150,8 @@ export async function getGitContext(
   }
 
   const [worktrees, currentTreePathResult] = await Promise.all([
-    getWorktrees(runtime),
-    runtime.runGit(["rev-parse", "--show-toplevel"]),
+    getWorktrees(runtime, cwd),
+    runtime.runGit(["rev-parse", "--show-toplevel"], { cwd }),
   ]);
 
   const currentTreePath =
@@ -161,6 +164,7 @@ export async function getGitContext(
     defaultBranch,
     diffOptions,
     worktrees: worktrees.filter((wt) => wt.path !== currentTreePath),
+    cwd,
   };
 }
 
@@ -248,10 +252,11 @@ export async function runGitDiff(
   runtime: ReviewGitRuntime,
   diffType: DiffType,
   defaultBranch: string = "main",
+  externalCwd?: string,
 ): Promise<DiffResult> {
   let patch = "";
   let label = "";
-  let cwd: string | undefined;
+  let cwd: string | undefined = externalCwd;
   let effectiveDiffType = diffType as string;
 
   if (diffType.startsWith("worktree:")) {
@@ -391,6 +396,14 @@ export async function runGitDiff(
   }
 
   return { patch, label };
+}
+
+export async function runGitDiffWithContext(
+  runtime: ReviewGitRuntime,
+  diffType: DiffType,
+  gitContext: GitContext,
+): Promise<DiffResult> {
+  return runGitDiff(runtime, diffType, gitContext.defaultBranch, gitContext.cwd);
 }
 
 export async function getFileContentsForDiff(
