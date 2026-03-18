@@ -43,8 +43,6 @@ gh api repos/backnotprop/plannotator/issues/<number>/comments --jq '.[].user.log
 gh api repos/backnotprop/plannotator/pulls/<number>/comments --jq '.[].user.login'
 ```
 
-Also check `FEATURE_REQUESTS.md` in the repo root — it catalogs open feature requests with issue numbers. Cross-reference any closed issues against this list.
-
 ### Step 3: Write the release notes
 
 Read `references/release-notes-v0.13.0.md` and `references/release-notes-v0.12.0.md` for the canonical template structure. These are real release notes from previous versions — match their tone, structure, and level of detail.
