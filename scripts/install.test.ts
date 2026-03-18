@@ -55,6 +55,7 @@ describe("install.sh", () => {
   test("installs slash commands for Claude Code and OpenCode", () => {
     expect(script).toContain("plannotator-review.md");
     expect(script).toContain("plannotator-annotate.md");
+    expect(script).toContain("plannotator-last.md");
     expect(script).toContain("CLAUDE_COMMANDS_DIR");
     expect(script).toContain("OPENCODE_COMMANDS_DIR");
   });
@@ -99,6 +100,7 @@ describe("install.ps1", () => {
   test("installs slash commands", () => {
     expect(script).toContain("plannotator-review.md");
     expect(script).toContain("plannotator-annotate.md");
+    expect(script).toContain("plannotator-last.md");
   });
 });
 
@@ -138,5 +140,6 @@ describe("install.cmd", () => {
   test("installs slash commands", () => {
     expect(script).toContain("plannotator-review.md");
     expect(script).toContain("plannotator-annotate.md");
+    expect(script).toContain("plannotator-last.md");
   });
 });

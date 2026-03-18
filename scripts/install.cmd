@@ -207,6 +207,23 @@ echo Address the annotation feedback above. The user has reviewed the markdown f
 
 echo Installed /plannotator-annotate command to !CLAUDE_COMMANDS_DIR!\plannotator-annotate.md
 
+(
+echo ---
+echo description: Annotate the last rendered assistant message
+echo allowed-tools: Bash^(plannotator:*^)
+echo ---
+echo.
+echo ## Message Annotations
+echo.
+echo !`plannotator annotate-last`
+echo.
+echo ## Your task
+echo.
+echo Address the annotation feedback above. The user has reviewed your last message and provided specific annotations and comments.
+) > "!CLAUDE_COMMANDS_DIR!\plannotator-last.md"
+
+echo Installed /plannotator-last command to !CLAUDE_COMMANDS_DIR!\plannotator-last.md
+
 echo.
 echo Test the install:
 echo   echo {"tool_input":{"plan":"# Test Plan\\n\\nHello world"}} ^| plannotator
@@ -215,7 +232,7 @@ echo Then install the Claude Code plugin:
 echo   /plugin marketplace add backnotprop/plannotator
 echo   /plugin install plannotator@plannotator
 echo.
-echo The /plannotator-review and /plannotator-annotate commands are ready to use!
+echo The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready to use!
 
 REM Warn if plannotator is configured in both settings.json hooks AND the plugin (causes double execution)
 REM Only warn when the plugin is installed — manual-only users won't have overlap

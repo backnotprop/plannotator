@@ -163,6 +163,24 @@ Address the annotation feedback above. The user has reviewed the markdown file a
 
 Write-Host "Installed /plannotator-annotate command to $claudeCommandsDir\plannotator-annotate.md"
 
+# Install Claude Code /plannotator-last slash command
+@'
+---
+description: Annotate the last rendered assistant message
+allowed-tools: Bash(plannotator:*)
+---
+
+## Message Annotations
+
+!`plannotator annotate-last`
+
+## Your task
+
+Address the annotation feedback above. The user has reviewed your last message and provided specific annotations and comments.
+'@ | Set-Content -Path "$claudeCommandsDir\plannotator-last.md"
+
+Write-Host "Installed /plannotator-last command to $claudeCommandsDir\plannotator-last.md"
+
 # Install OpenCode slash command
 $opencodeCommandsDir = "$env:USERPROFILE\.config\opencode\command"
 New-Item -ItemType Directory -Force -Path $opencodeCommandsDir | Out-Null
@@ -190,6 +208,15 @@ Acknowledge "Opening annotation UI..." and wait for the user's feedback.
 
 Write-Host "Installed /plannotator-annotate command to $opencodeCommandsDir\plannotator-annotate.md"
 
+# Install OpenCode /plannotator-last slash command
+@"
+---
+description: Annotate the last assistant message
+---
+"@ | Set-Content -Path "$opencodeCommandsDir\plannotator-last.md"
+
+Write-Host "Installed /plannotator-last command to $opencodeCommandsDir\plannotator-last.md"
+
 Write-Host ""
 Write-Host "=========================================="
 Write-Host "  OPENCODE USERS"
@@ -199,7 +226,7 @@ Write-Host "Add the plugin to your opencode.json:"
 Write-Host ""
 Write-Host '  "plugin": ["@plannotator/opencode@latest"]'
 Write-Host ""
-Write-Host "Then restart OpenCode. The /plannotator-review and /plannotator-annotate commands are ready!"
+Write-Host "Then restart OpenCode. The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready!"
 Write-Host ""
 Write-Host "=========================================="
 Write-Host "  PI USERS"
@@ -217,7 +244,7 @@ Write-Host "Install the Claude Code plugin:"
 Write-Host "  /plugin marketplace add backnotprop/plannotator"
 Write-Host "  /plugin install plannotator@plannotator"
 Write-Host ""
-Write-Host "The /plannotator-review and /plannotator-annotate commands are ready to use after you restart Claude Code!"
+Write-Host "The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready to use after you restart Claude Code!"
 
 # Warn if plannotator is configured in both settings.json hooks AND the plugin (causes double execution)
 # Only warn when the plugin is installed — manual-only users won't have overlap
