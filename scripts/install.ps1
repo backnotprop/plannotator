@@ -140,7 +140,7 @@ allowed-tools: Bash(plannotator:*)
 
 ## Your task
 
-Address the code review feedback above. The user has reviewed your changes in the Plannotator UI and provided specific annotations and comments.
+If the review above contains feedback or annotations, address them. If no changes were requested, acknowledge and continue.
 "@ | Set-Content -Path "$claudeCommandsDir\plannotator-review.md"
 
 Write-Host "Installed /plannotator-review command to $claudeCommandsDir\plannotator-review.md"

@@ -185,7 +185,7 @@ echo !`plannotator review`
 echo.
 echo ## Your task
 echo.
-echo Address the code review feedback above. The user has reviewed your changes in the Plannotator UI and provided specific annotations and comments.
+echo If the review above contains feedback or annotations, address them. If no changes were requested, acknowledge and continue.
 ) > "!CLAUDE_COMMANDS_DIR!\plannotator-review.md"
 
 echo Installed /plannotator-review command to !CLAUDE_COMMANDS_DIR!\plannotator-review.md
