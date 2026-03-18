@@ -168,12 +168,24 @@ Verify builds succeed with no errors before proceeding.
    - Creates the GitHub Release with all binaries attached
    - Publishes `@plannotator/opencode` and `@plannotator/pi-extension` to npm with provenance
 
-4. **After the pipeline completes:**
-   - Go to the GitHub Release page
-   - Replace the auto-generated release notes body with the contents of `RELEASE_NOTES_v<VERSION>.md`
-   - The release notes file stays in the repo root as an untracked local reference
+4. **Monitor the pipeline:**
+   Watch the release workflow run until it completes:
+   ```bash
+   gh run list --workflow=release.yml --limit=1
+   gh run view <run-id> --log
+   ```
+   Verify:
+   - All jobs pass (test, build, release, npm-publish)
+   - The GitHub Release was created with all binary artifacts
+   - npm packages published successfully (check with `npm view @plannotator/opencode version` and `npm view @plannotator/pi-extension version`)
 
-The user will handle pasting the release notes into GitHub. Your job is to have them ready.
+   If anything fails, investigate the logs and report to the user before retrying.
+
+5. **Replace the release notes:**
+   Once the release is live and verified, replace the auto-generated notes body with the drafted release notes:
+   ```bash
+   gh release edit vX.Y.Z --notes-file RELEASE_NOTES_v<VERSION>.md
+   ```
 
 ---
 
@@ -188,3 +200,9 @@ Before tagging, verify:
 - [ ] `bun run build:pi` succeeded (or pi-specific build step)
 - [ ] Version bump committed
 - [ ] No stale build artifacts (clean builds, no cache issues — run `bun install` first if dependencies changed)
+
+After tagging, verify:
+- [ ] Release workflow completed (all 4 jobs green)
+- [ ] GitHub Release created with all binaries
+- [ ] npm packages published at correct version
+- [ ] Release notes replaced via `gh release edit`
