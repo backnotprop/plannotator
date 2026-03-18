@@ -5,7 +5,7 @@ description: Prepare and execute a Plannotator release — draft release notes w
 
 # Plannotator Release
 
-This skill handles the full release lifecycle for the Plannotator monorepo. The process has four phases, and Phase 1 (release notes) is where most of the work happens. Present the release notes draft for review before proceeding to later phases.
+The process has four phases. Phase 1 (release notes) is where most of the work happens — present the draft for review before proceeding to later phases.
 
 ## Phase 1: Draft Release Notes
 
@@ -51,7 +51,9 @@ Read the reference release notes in `references/` for the canonical template str
 - `release-notes-v0.12.0.md` — large community release, 14 PRs, 10 external, detailed narrative "Contributors" section
 - `release-notes-v0.13.1.md` — small patch release, 2 PRs, no external authors, "Community" section focused on issue reporters
 
-The release notes file goes in the repo root as `RELEASE_NOTES_v<VERSION>.md`.
+Pay attention to how each reference handles contributor crediting differently. Pick the pattern that fits the release's contributor profile — a release with many external PRs warrants a narrative "Contributors" section; a patch driven by issue reports uses a lighter "Community" section.
+
+Write the file to the repo root as `RELEASE_NOTES_v<VERSION>.md`.
 
 #### Structure
 
@@ -127,13 +129,13 @@ Bump the version string in these **5 files** (and only these — other package.j
 
 Read each file, confirm the current version matches expectations, then update all 5 atomically.
 
-The VS Code extension (`apps/vscode-extension/package.json`) has independent versioning and is NOT bumped during main releases.
+Do not bump the VS Code extension (`apps/vscode-extension/package.json`) — it has independent versioning.
 
 ---
 
 ## Phase 3: Build
 
-Build in dependency order. Each step depends on the previous:
+Run builds in dependency order:
 
 ```bash
 bun run build:review    # 1. Code review editor (standalone Vite build)
@@ -142,9 +144,9 @@ bun run build:opencode  # 3. OpenCode plugin (copies built HTML from hook + revi
 bun run build:pi        # 4. Pi extension (chains review → hook → pi internally, safe to run after 1-2)
 ```
 
-The `build:pi` script internally runs `bun run build:review && bun run build:hook && bun run --cwd apps/pi-extension build`, so if you've already run steps 1-2, you can just run `bun run --cwd apps/pi-extension build` directly. But running the full `build:pi` is also fine — it's idempotent.
+`build:pi` chains review and hook internally, so after steps 1-2 it only runs the pi-specific build.
 
-Verify builds succeed with no errors before proceeding.
+Verify all builds succeed before proceeding.
 
 ---
 
@@ -162,7 +164,7 @@ Verify builds succeed with no errors before proceeding.
    git push origin main
    git push origin vX.Y.Z
    ```
-   Pushing the `v*` tag triggers the release pipeline (`.github/workflows/release.yml`).
+   The `v*` tag push triggers the release pipeline (`.github/workflows/release.yml`).
 
 3. **The pipeline handles everything else:**
    - Runs tests
