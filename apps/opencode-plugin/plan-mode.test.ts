@@ -4,6 +4,7 @@ import { tmpdir } from "os";
 import path from "path";
 import {
   getPlanDirectory,
+  normalizeEditPermission,
   validatePlanPath,
   stripConflictingPlanModeRules,
 } from "./plan-mode";
@@ -141,6 +142,41 @@ describe("validatePlanPath", () => {
     const result2 = validatePlanPath(planPath, planDir);
     expect(result2.ok).toBe(true);
     if (result2.ok) expect(result2.content).toBe("# Plan v2 — addressed feedback");
+  });
+});
+
+describe("normalizeEditPermission", () => {
+  test("returns empty object for undefined", () => {
+    expect(normalizeEditPermission(undefined)).toEqual({});
+  });
+
+  test("converts 'deny' string to wildcard object", () => {
+    // Triggered by `tools: { edit: false }` or `permission: { edit: "deny" }`
+    expect(normalizeEditPermission("deny")).toEqual({ "*": "deny" });
+  });
+
+  test("converts 'allow' string to wildcard object", () => {
+    expect(normalizeEditPermission("allow")).toEqual({ "*": "allow" });
+  });
+
+  test("converts 'ask' string to wildcard object", () => {
+    expect(normalizeEditPermission("ask")).toEqual({ "*": "ask" });
+  });
+
+  test("passes through an existing object unchanged", () => {
+    const obj = { "*.ts": "deny", "src/**": "allow" };
+    expect(normalizeEditPermission(obj)).toEqual(obj);
+  });
+
+  test("merging with '*.md': 'allow' preserves deny-all + md-allow", () => {
+    // This is the main scenario fixed by this function:
+    // user has tools: { edit: false } which produces permission.edit = "deny",
+    // and we need to merge in "*.md": "allow" without string-spreading.
+    const base = normalizeEditPermission("deny");
+    const merged = { ...base, "*.md": "allow" };
+    expect(merged).toEqual({ "*": "deny", "*.md": "allow" });
+    // Crucially, no char-index keys like "0", "1", "2", "3"
+    expect(Object.keys(merged)).not.toContain("0");
   });
 });
 

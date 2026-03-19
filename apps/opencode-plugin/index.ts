@@ -41,6 +41,7 @@ import {
 } from "./commands";
 import { planDenyFeedback } from "@plannotator/shared/feedback-templates";
 import {
+  normalizeEditPermission,
   stripConflictingPlanModeRules,
 } from "./plan-mode";
 
@@ -188,7 +189,7 @@ export const PlannotatorPlugin: Plugin = async (ctx) => {
       opencodeConfig.agent.plan ??= {};
       opencodeConfig.agent.plan.permission ??= {};
       opencodeConfig.agent.plan.permission.edit = {
-        ...opencodeConfig.agent.plan.permission.edit,
+        ...normalizeEditPermission(opencodeConfig.agent.plan.permission.edit),
         "*.md": "allow",
       };
     },
