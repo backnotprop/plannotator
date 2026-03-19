@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { ThemeProvider, useTheme } from '@plannotator/ui/components/ThemeProvider';
+import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
 import { ModeToggle } from '@plannotator/ui/components/ModeToggle';
 import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
 import { Settings } from '@plannotator/ui/components/Settings';
@@ -12,6 +12,7 @@ import { CodeAnnotation, CodeAnnotationType, SelectedLineRange } from '@plannota
 import { useResizablePanel } from '@plannotator/ui/hooks/useResizablePanel';
 import { useCodeAnnotationDraft } from '@plannotator/ui/hooks/useCodeAnnotationDraft';
 import { useGitAdd } from './hooks/useGitAdd';
+import { isTypingTarget, useReviewSearch } from './hooks/useReviewSearch';
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
 import { exportEditorAnnotations } from '@plannotator/ui/utils/parser';
 import { ResizeHandle } from '@plannotator/ui/components/ResizeHandle';
@@ -80,6 +81,7 @@ function parseDiffToFiles(rawPatch: string): DiffFile[] {
 function generateId(): string {
   return Math.random().toString(36).substring(2, 9);
 }
+
 const ReviewApp: React.FC = () => {
   const [diffData, setDiffData] = useState<DiffData | null>(null);
   const [files, setFiles] = useState<DiffFile[]>([]);
@@ -126,6 +128,32 @@ const ReviewApp: React.FC = () => {
     if (restored.viewedFiles.length > 0) setViewedFiles(new Set(restored.viewedFiles));
   }, [restoreDraft]);
 
+  const clearPendingSelection = useCallback(() => {
+    setPendingSelection(null);
+  }, []);
+
+  const {
+    searchQuery,
+    isSearchOpen,
+    activeSearchMatchId,
+    activeSearchMatch,
+    activeFileSearchMatches,
+    searchMatches,
+    searchGroups,
+    searchInputRef,
+    openSearch,
+    closeSearch,
+    clearSearch,
+    stepSearchMatch,
+    handleSearchInputChange,
+    handleSelectSearchMatch,
+  } = useReviewSearch({
+    files,
+    activeFileIndex,
+    setActiveFileIndex,
+    clearPendingSelection,
+  });
+
   // VS Code editor annotations (only polls when inside VS Code webview)
   const { editorAnnotations, deleteEditorAnnotation } = useEditorAnnotations();
 
@@ -140,8 +168,30 @@ const ReviewApp: React.FC = () => {
   // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f' && !isTypingTarget(e.target)) {
+        e.preventDefault();
+        openSearch();
+        return;
+      }
+
+      if ((e.key === 'Enter' || e.key === 'F3') && searchMatches.length > 0 && !isTypingTarget(e.target)) {
+        e.preventDefault();
+        stepSearchMatch(e.shiftKey ? -1 : 1);
+        return;
+      }
+
       // Escape closes modals
       if (e.key === 'Escape') {
+        if (searchQuery) {
+          e.preventDefault();
+          clearSearch();
+          return;
+        }
+        if (isSearchOpen) {
+          e.preventDefault();
+          closeSearch();
+          return;
+        }
         if (showExportModal) {
           setShowExportModal(false);
         }
@@ -156,7 +206,7 @@ const ReviewApp: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showExportModal]);
+  }, [showExportModal, isSearchOpen, searchQuery, searchMatches, openSearch, stepSearchMatch]);
 
   // Get annotations for active file
   const activeFileAnnotations = useMemo(() => {
@@ -651,6 +701,69 @@ const ReviewApp: React.FC = () => {
               </button>
             </div>
 
+            <div className={`review-search ${isSearchOpen || searchQuery ? 'open' : ''}`}>
+              <button
+                onClick={() => {
+                  openSearch();
+                }}
+                className="review-search-toggle"
+                title="Search diff (Cmd/Ctrl+F)"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-4.35-4.35m1.85-5.15a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z" />
+                </svg>
+              </button>
+              {(isSearchOpen || searchQuery) && (
+                <>
+                  <input
+                    ref={searchInputRef}
+                    value={searchQuery}
+                    onChange={(e) => handleSearchInputChange(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        stepSearchMatch(e.shiftKey ? -1 : 1);
+                      }
+                    }}
+                    placeholder="Search whole diff"
+                    className="review-search-input"
+                  />
+                  <span className="review-search-count">
+                    {searchMatches.length === 0 && searchQuery.trim() ? '0' : searchMatches.length}
+                  </span>
+                  <button
+                    onClick={() => stepSearchMatch(-1)}
+                    disabled={searchMatches.length === 0}
+                    className="review-search-nav"
+                    title="Previous match"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m15 19-7-7 7-7" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => stepSearchMatch(1)}
+                    disabled={searchMatches.length === 0}
+                    className="review-search-nav"
+                    title="Next match"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m9 5 7 7-7 7" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={clearSearch}
+                    className="review-search-clear"
+                    title="Clear search"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </>
+              )}
+            </div>
+
             {/* Primary actions */}
             <button
               onClick={handleCopyDiff}
@@ -808,18 +921,22 @@ const ReviewApp: React.FC = () => {
                 onToggleHideViewed={() => setHideViewedFiles(prev => !prev)}
                 enableKeyboardNav={!showExportModal}
                 diffOptions={gitContext?.diffOptions}
-                activeDiffType={activeDiffBase}
-                onSelectDiff={handleDiffSwitch}
-                isLoadingDiff={isLoadingDiff}
-                width={fileTreeResize.width}
+                 activeDiffType={activeDiffBase}
+                 onSelectDiff={handleDiffSwitch}
+                 isLoadingDiff={isLoadingDiff}
+                 width={fileTreeResize.width}
                 worktrees={gitContext?.worktrees}
                 activeWorktreePath={activeWorktreePath}
                 onSelectWorktree={handleWorktreeSwitch}
-                currentBranch={gitContext?.currentBranch}
-                stagedFiles={stagedFiles}
-              />
-              <ResizeHandle {...fileTreeResize.handleProps} />
-            </>
+                 currentBranch={gitContext?.currentBranch}
+                 stagedFiles={stagedFiles}
+                 searchQuery={searchQuery}
+                 searchGroups={searchGroups}
+                 activeSearchMatchId={activeSearchMatchId}
+                 onSelectSearchMatch={handleSelectSearchMatch}
+               />
+               <ResizeHandle {...fileTreeResize.handleProps} />
+             </>
           )}
 
           {/* Diff viewer */}
@@ -861,6 +978,10 @@ const ReviewApp: React.FC = () => {
                 onStage={() => stageFile(activeFile.path)}
                 canStage={canStageFiles}
                 stageError={stageError}
+                searchQuery={searchQuery}
+                searchMatches={activeFileSearchMatches}
+                activeSearchMatchId={activeSearchMatchId}
+                activeSearchMatch={activeSearchMatch?.filePath === activeFile.path ? activeSearchMatch : null}
               />
             ) : (
               <div className="h-full flex items-center justify-center">

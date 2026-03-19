@@ -3,13 +3,18 @@ import { FileDiff } from '@pierre/diffs/react';
 import { getSingularPatch, processFile } from '@pierre/diffs';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata } from '@plannotator/ui/types';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
-import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { detectLanguage } from '../utils/detectLanguage';
 import { useAnnotationToolbar } from '../hooks/useAnnotationToolbar';
 import { FileHeader } from './FileHeader';
 import { InlineAnnotation } from './InlineAnnotation';
 import { AnnotationToolbar } from './AnnotationToolbar';
 import { SuggestionModal } from './SuggestionModal';
+import { type ReviewSearchMatch } from '../utils/reviewSearch';
+import {
+  applySearchHighlights,
+  getSearchRoots,
+  retryScrollToSearchMatch,
+} from '../utils/reviewSearchHighlight';
 
 interface DiffViewerProps {
   patch: string;
@@ -32,6 +37,10 @@ interface DiffViewerProps {
   onStage?: () => void;
   canStage?: boolean;
   stageError?: string | null;
+  searchQuery?: string;
+  searchMatches?: ReviewSearchMatch[];
+  activeSearchMatchId?: string | null;
+  activeSearchMatch?: ReviewSearchMatch | null;
 }
 
 export const DiffViewer: React.FC<DiffViewerProps> = ({
@@ -55,11 +64,13 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   onStage,
   canStage = false,
   stageError,
+  searchQuery = '',
+  searchMatches = [],
+  activeSearchMatchId = null,
+  activeSearchMatch = null,
 }) => {
-  const { theme, colorTheme, resolvedMode } = useTheme();
+  const { colorTheme, resolvedMode } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
-  const [fileCommentAnchor, setFileCommentAnchor] = useState<HTMLElement | null>(null);
-
   const toolbar = useAnnotationToolbar({ patch, filePath, onLineSelection, onAddAnnotation, onEditAnnotation });
 
   // Parse patch into FileDiffMetadata for @pierre/diffs FileDiff component
@@ -119,6 +130,22 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 
     return () => clearTimeout(timeoutId);
   }, [selectedAnnotationId]);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const frameId = requestAnimationFrame(() => {
+      const roots = getSearchRoots(containerRef.current);
+      roots.forEach(root => applySearchHighlights(root, searchQuery, searchMatches, activeSearchMatchId));
+    });
+
+    return () => cancelAnimationFrame(frameId);
+  }, [searchQuery, searchMatches, activeSearchMatchId, filePath, diffStyle, augmentedDiff]);
+
+  useEffect(() => {
+    if (!activeSearchMatch || !containerRef.current) return;
+    return retryScrollToSearchMatch(containerRef.current, activeSearchMatch);
+  }, [activeSearchMatch, filePath, diffStyle]);
 
   // Map annotations to @pierre/diffs format
   const lineAnnotations = useMemo(() => {
@@ -224,12 +251,11 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         onStage={onStage}
         canStage={canStage}
         stageError={stageError}
-        onFileComment={setFileCommentAnchor}
+        onAddFileComment={onAddFileComment}
       />
 
       <div className="p-4">
         <FileDiff
-          key={filePath}
           fileDiff={augmentedDiff}
           options={{
             themeType: pierreTheme.type,
@@ -276,19 +302,6 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           modalLayout={toolbar.modalLayout}
           setModalLayout={toolbar.setModalLayout}
           onClose={() => toolbar.setShowCodeModal(false)}
-        />
-      )}
-
-      {fileCommentAnchor && (
-        <CommentPopover
-          anchorEl={fileCommentAnchor}
-          contextText={filePath.split('/').pop() || filePath}
-          isGlobal={false}
-          onSubmit={(text) => {
-            onAddFileComment(text);
-            setFileCommentAnchor(null);
-          }}
-          onClose={() => setFileCommentAnchor(null)}
         />
       )}
     </div>

@@ -3,6 +3,10 @@ import { CodeAnnotation } from '@plannotator/ui/types';
 import type { DiffOption, WorktreeInfo } from '@plannotator/shared/types';
 import { buildFileTree, getAncestorPaths, getAllFolderPaths } from '../utils/buildFileTree';
 import { FileTreeNodeItem } from './FileTreeNode';
+import {
+  getReviewSearchSideLabel,
+  type ReviewSearchFileGroup,
+} from '../utils/reviewSearch';
 
 interface DiffFile {
   path: string;
@@ -32,6 +36,43 @@ interface FileTreeProps {
   onSelectWorktree?: (path: string | null) => void;
   currentBranch?: string;
   stagedFiles?: Set<string>;
+  searchQuery?: string;
+  searchGroups?: ReviewSearchFileGroup[];
+  activeSearchMatchId?: string | null;
+  onSelectSearchMatch?: (matchId: string) => void;
+}
+
+function renderHighlightedSnippet(snippet: string, query: string) {
+  if (!query.trim()) return snippet;
+
+  const lowerSnippet = snippet.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  let matchIndex = 0;
+
+  while (cursor < snippet.length) {
+    const nextIndex = lowerSnippet.indexOf(lowerQuery, cursor);
+    if (nextIndex === -1) {
+      parts.push(snippet.slice(cursor));
+      break;
+    }
+
+    if (nextIndex > cursor) {
+      parts.push(snippet.slice(cursor, nextIndex));
+    }
+
+    parts.push(
+      <mark key={`snippet-match-${matchIndex}`} className="review-search-snippet-mark">
+        {snippet.slice(nextIndex, nextIndex + query.length)}
+      </mark>
+    );
+
+    cursor = nextIndex + query.length;
+    matchIndex += 1;
+  }
+
+  return parts;
 }
 
 export const FileTree: React.FC<FileTreeProps> = ({
@@ -54,6 +95,10 @@ export const FileTree: React.FC<FileTreeProps> = ({
   onSelectWorktree,
   currentBranch,
   stagedFiles,
+  searchQuery = '',
+  searchGroups = [],
+  activeSearchMatchId,
+  onSelectSearchMatch,
 }) => {
   // Keyboard navigation: j/k or arrow keys
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -134,6 +179,8 @@ export const FileTree: React.FC<FileTreeProps> = ({
       return next;
     });
   }, []);
+
+  const isSearchMode = searchQuery.trim().length > 0;
 
   return (
     <aside className="border-r border-border bg-card/30 flex flex-col flex-shrink-0 overflow-hidden" style={{ width: width ?? 256 }}>
@@ -245,21 +292,59 @@ export const FileTree: React.FC<FileTreeProps> = ({
 
       {/* File tree */}
       <div className="flex-1 overflow-y-auto p-2">
-        {tree.map(node => (
-          <FileTreeNodeItem
-            key={node.type === 'file' ? node.path : `folder:${node.path}`}
-            node={node}
-            expandedFolders={expandedFolders}
-            onToggleFolder={handleToggleFolder}
-            activeFileIndex={activeFileIndex}
-            onSelectFile={onSelectFile}
-            viewedFiles={viewedFiles}
-            onToggleViewed={onToggleViewed}
-            hideViewedFiles={hideViewedFiles}
-            getAnnotationCount={getAnnotationCount}
-            stagedFiles={stagedFiles}
-          />
-        ))}
+        {isSearchMode ? (
+          searchGroups.length > 0 ? (
+            <div className="space-y-3">
+              {searchGroups.map(group => (
+                <div key={group.filePath} className="review-search-group">
+                  <button
+                    onClick={() => onSelectSearchMatch?.(group.matches[0].id)}
+                    className={`review-search-file ${group.fileIndex === activeFileIndex ? 'active' : ''}`}
+                  >
+                    <span className="truncate">{group.filePath}</span>
+                    <span className="review-search-file-count">{group.matches.length}</span>
+                  </button>
+                  <div className="review-search-match-list">
+                    {group.matches.map(match => (
+                      <button
+                        key={match.id}
+                        onClick={() => onSelectSearchMatch?.(match.id)}
+                        className={`review-search-match ${activeSearchMatchId === match.id ? 'active' : ''}`}
+                      >
+                        <span className="review-search-match-meta">
+                          {getReviewSearchSideLabel(match.side)} {match.lineNumber}
+                        </span>
+                        <span className="review-search-match-text">
+                          {renderHighlightedSnippet(match.snippet, searchQuery)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="review-search-empty">
+              No matches for <span className="font-medium text-foreground">{searchQuery}</span>
+            </div>
+          )
+        ) : (
+          tree.map(node => (
+            <FileTreeNodeItem
+              key={node.type === 'file' ? node.path : `folder:${node.path}`}
+              node={node}
+              expandedFolders={expandedFolders}
+              onToggleFolder={handleToggleFolder}
+              activeFileIndex={activeFileIndex}
+              onSelectFile={onSelectFile}
+              viewedFiles={viewedFiles}
+              onToggleViewed={onToggleViewed}
+              hideViewedFiles={hideViewedFiles}
+              getAnnotationCount={getAnnotationCount}
+              stagedFiles={stagedFiles}
+            />
+          ))
+        )}
       </div>
 
       {/* Footer */}
@@ -277,7 +362,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
         </div>
         {enableKeyboardNav && (
           <div className="text-[10px] text-muted-foreground/50 text-center">
-            j/k or arrows to navigate
+            {isSearchMode ? 'Enter or Shift+Enter moves search matches' : 'j/k or arrows to navigate'}
           </div>
         )}
       </div>
