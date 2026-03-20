@@ -291,6 +291,7 @@ export default function plannotator(pi: ExtensionAPI): void {
           htmlContent: reviewHtmlContent,
           sharingEnabled: process.env.PLANNOTATOR_SHARE !== "disabled",
           shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
+          pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
         });
       } catch (err) {
         ctx.ui.notify(`Failed to start code review UI: ${getStartupErrorMessage(err)}`, "error");
@@ -340,6 +341,9 @@ export default function plannotator(pi: ExtensionAPI): void {
           filePath: absolutePath,
           origin: "pi",
           htmlContent: planHtmlContent,
+          sharingEnabled: process.env.PLANNOTATOR_SHARE !== "disabled",
+          shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
+          pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
         });
       } catch (err) {
         ctx.ui.notify(`Failed to start annotation UI: ${getStartupErrorMessage(err)}`, "error");
@@ -394,6 +398,9 @@ export default function plannotator(pi: ExtensionAPI): void {
           origin: "pi",
           mode: "annotate-last",
           htmlContent: planHtmlContent,
+          sharingEnabled: process.env.PLANNOTATOR_SHARE !== "disabled",
+          shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
+          pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
         });
       } catch (err) {
         ctx.ui.notify(`Failed to start annotation UI: ${getStartupErrorMessage(err)}`, "error");
@@ -497,6 +504,9 @@ export default function plannotator(pi: ExtensionAPI): void {
           plan: planContent,
           htmlContent: planHtmlContent,
           origin: "pi",
+          sharingEnabled: process.env.PLANNOTATOR_SHARE !== "disabled",
+          shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
+          pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
         });
       } catch (err) {
         const message = `Failed to start plan review UI: ${getStartupErrorMessage(err)}`;

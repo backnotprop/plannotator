@@ -614,7 +614,17 @@ export async function startPlanReviewServer(options: {
   plan: string;
   htmlContent: string;
   origin?: string;
+  sharingEnabled?: boolean;
+  shareBaseUrl?: string;
+  pasteApiUrl?: string;
 }): Promise<PlanServerResult> {
+  const sharingEnabled =
+    options.sharingEnabled ?? process.env.PLANNOTATOR_SHARE !== "disabled";
+  const shareBaseUrl =
+    (options.shareBaseUrl ?? process.env.PLANNOTATOR_SHARE_URL) || undefined;
+  const pasteApiUrl =
+    (options.pasteApiUrl ?? process.env.PLANNOTATOR_PASTE_URL) || undefined;
+
   // Version history
   const slug = generateSlug(options.plan);
   const project = detectProjectName();
@@ -659,7 +669,7 @@ export async function startPlanReviewServer(options: {
     } else if (url.pathname === "/api/plan/history") {
       json(res, { project, plans: listProjectPlans(project) });
     } else if (url.pathname === "/api/plan") {
-      json(res, { plan: options.plan, origin: options.origin ?? "pi", previousPlan, versionInfo });
+      json(res, { plan: options.plan, origin: options.origin ?? "pi", previousPlan, versionInfo, sharingEnabled, shareBaseUrl, pasteApiUrl });
     } else if (url.pathname === "/api/approve" && req.method === "POST") {
       const body = await parseBody(req);
       resolveDecision({ approved: true, feedback: body.feedback as string | undefined });
@@ -751,6 +761,7 @@ export async function startReviewServer(options: {
   error?: string;
   sharingEnabled?: boolean;
   shareBaseUrl?: string;
+  pasteApiUrl?: string;
 }): Promise<ReviewServerResult> {
   const draftKey = contentHash(options.rawPatch);
   const repoInfo = getRepoInfo();
@@ -763,6 +774,8 @@ export async function startReviewServer(options: {
     options.sharingEnabled ?? process.env.PLANNOTATOR_SHARE !== "disabled";
   const shareBaseUrl =
     (options.shareBaseUrl ?? process.env.PLANNOTATOR_SHARE_URL) || undefined;
+  const pasteApiUrl =
+    (options.pasteApiUrl ?? process.env.PLANNOTATOR_PASTE_URL) || undefined;
 
   let resolveDecision!: (result: {
     approved: boolean;
@@ -791,6 +804,7 @@ export async function startReviewServer(options: {
         gitContext: options.gitContext,
         sharingEnabled,
         shareBaseUrl,
+        pasteApiUrl,
         repoInfo,
         ...(currentError ? { error: currentError } : {}),
       });
@@ -991,7 +1005,18 @@ export async function startAnnotateServer(options: {
   filePath: string;
   htmlContent: string;
   origin?: string;
+  mode?: string;
+  sharingEnabled?: boolean;
+  shareBaseUrl?: string;
+  pasteApiUrl?: string;
 }): Promise<AnnotateServerResult> {
+  const sharingEnabled =
+    options.sharingEnabled ?? process.env.PLANNOTATOR_SHARE !== "disabled";
+  const shareBaseUrl =
+    (options.shareBaseUrl ?? process.env.PLANNOTATOR_SHARE_URL) || undefined;
+  const pasteApiUrl =
+    (options.pasteApiUrl ?? process.env.PLANNOTATOR_PASTE_URL) || undefined;
+
   let resolveDecision!: (result: { feedback: string }) => void;
   const decisionPromise = new Promise<{ feedback: string }>((r) => {
     resolveDecision = r;
@@ -1004,8 +1029,11 @@ export async function startAnnotateServer(options: {
       json(res, {
         plan: options.markdown,
         origin: options.origin ?? "pi",
-        mode: "annotate",
+        mode: options.mode || "annotate",
         filePath: options.filePath,
+        sharingEnabled,
+        shareBaseUrl,
+        pasteApiUrl,
       });
     } else if (url.pathname === "/api/feedback" && req.method === "POST") {
       const body = await parseBody(req);
