@@ -97,9 +97,7 @@ const App: React.FC = () => {
   const [repoInfo, setRepoInfo] = useState<{ display: string; branch?: string } | null>(null);
 
   useEffect(() => {
-    if (repoInfo) {
-      document.title = `${repoInfo.display} · Plannotator`;
-    }
+    document.title = repoInfo ? `${repoInfo.display} · Plannotator` : "Plannotator";
   }, [repoInfo]);
 
   const [showExportDropdown, setShowExportDropdown] = useState(false);
