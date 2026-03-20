@@ -639,8 +639,25 @@ const ReviewApp: React.FC = () => {
       };
     }).filter(c => c.body.length > 0);
 
+    // Editor annotations (VS Code extension) — always on new/RIGHT side
+    for (const ea of editorAnnotations) {
+      const body = ea.comment || `> ${ea.selectedText}`;
+      if (!body.trim()) continue;
+      const isMultiLine = ea.lineStart !== ea.lineEnd;
+      fileComments.push({
+        path: ea.filePath,
+        line: ea.lineEnd,
+        side: 'RIGHT' as const,
+        body: ea.comment ? `> ${ea.selectedText}\n\n${ea.comment}` : `> ${ea.selectedText}`,
+        ...(isMultiLine && {
+          start_line: ea.lineStart,
+          start_side: 'RIGHT' as const,
+        }),
+      });
+    }
+
     return { action, body, fileComments };
-  }, [annotations]);
+  }, [annotations, editorAnnotations]);
 
   // Submit a review directly to GitHub
   const handleGitHubAction = useCallback(async (action: 'approve' | 'comment', generalComment?: string) => {
