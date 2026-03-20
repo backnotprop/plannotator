@@ -13,6 +13,7 @@
     "@plannotator/server": "workspace:*",
     "@plannotator/ui": "workspace:*",
     "@pierre/diffs": "^1.1.0-beta.19",
+    "dompurify": "^3.3.3",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "tailwindcss": "^4.1.18",

@@ -111,6 +111,11 @@ const ReviewApp: React.FC = () => {
   const [sharingEnabled, setSharingEnabled] = useState(true);
   const [repoInfo, setRepoInfo] = useState<{ display: string; branch?: string } | null>(null);
   const [prMetadata, setPrMetadata] = useState<PRMetadata | null>(null);
+  const [githubMode, setGithubMode] = useState(false);
+  const [isGitHubActioning, setIsGitHubActioning] = useState(false);
+  const [githubActionError, setGithubActionError] = useState<string | null>(null);
+  const [githubCommentDialog, setGithubCommentDialog] = useState<{ action: 'approve' | 'comment' } | null>(null);
+  const [githubGeneralComment, setGithubGeneralComment] = useState('');
 
   const identity = useMemo(() => getIdentity(), []);
 
@@ -580,6 +585,86 @@ const ReviewApp: React.FC = () => {
     }
   }, []);
 
+  // Build the payload for /api/pr-action from current annotations
+  const buildPRReviewPayload = useCallback((action: 'approve' | 'comment', generalComment?: string) => {
+    const fileAnnotations = annotations.filter(a => (a.scope ?? 'line') === 'line');
+    const fileScoped = annotations.filter(a => a.scope === 'file');
+
+    // Top-level body: file-scoped comments
+    const bodyParts: string[] = [];
+    if (fileScoped.length > 0) {
+      for (const ann of fileScoped) {
+        if (ann.text) bodyParts.push(`**${ann.filePath}:** ${ann.text}`);
+      }
+    }
+    const body = bodyParts.length > 0
+      ? `${generalComment ? generalComment + '\n\n' : ''}Review from Plannotator\n\n${bodyParts.join('\n\n')}`
+      : generalComment || 'Review from Plannotator';
+
+    // Inline file comments
+    const fileComments = fileAnnotations.map(ann => {
+      let commentBody = ann.text ?? '';
+      if (ann.suggestedCode) {
+        commentBody += `\n\n\`\`\`suggestion\n${ann.suggestedCode}\n\`\`\``;
+      }
+      return {
+        path: ann.filePath,
+        line: ann.lineEnd ?? ann.lineStart,
+        side: (ann.side === 'old' ? 'LEFT' : 'RIGHT') as 'LEFT' | 'RIGHT',
+        body: commentBody.trim(),
+      };
+    }).filter(c => c.body.length > 0);
+
+    return { action, body, fileComments };
+  }, [annotations]);
+
+  // Submit a review directly to GitHub
+  const handleGitHubAction = useCallback(async (action: 'approve' | 'comment', generalComment?: string) => {
+    setIsGitHubActioning(true);
+    setGithubActionError(null);
+    try {
+      const payload = buildPRReviewPayload(action, generalComment);
+      const prRes = await fetch('/api/pr-action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const prData = await prRes.json() as { ok?: boolean; prUrl?: string; error?: string };
+      if (!prRes.ok || prData.error) {
+        setGithubActionError(prData.error ?? 'Failed to submit PR review');
+        setIsGitHubActioning(false);
+        return;
+      }
+
+      // Open PR in browser
+      if (prData.prUrl) {
+        window.open(prData.prUrl, '_blank');
+      }
+
+      // Close the local session with a neutral message — don't send annotations to the agent
+      const agentSwitchSettings = getAgentSwitchSettings();
+      const effectiveAgent = getEffectiveAgentName(agentSwitchSettings);
+      const prLink = prData.prUrl ?? '';
+      const statusMessage = action === 'approve'
+        ? `Pull request approved on GitHub${prLink ? ': ' + prLink : ''}`
+        : `Pull request reviewed on GitHub${prLink ? ': ' + prLink : ''}`;
+      await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          approved: false,
+          feedback: statusMessage,
+          annotations: [],
+          ...(effectiveAgent && { agentSwitch: effectiveAgent }),
+        }),
+      });
+      setSubmitted(action === 'approve' ? 'approved' : 'feedback');
+    } catch (err) {
+      setGithubActionError(err instanceof Error ? err.message : 'Failed to submit PR review');
+      setIsGitHubActioning(false);
+    }
+  }, [buildPRReviewPayload, feedbackMarkdown, annotations]);
+
   // Cmd/Ctrl+Enter keyboard shortcut to approve or send feedback
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -587,26 +672,38 @@ const ReviewApp: React.FC = () => {
 
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      if (showExportModal || showNoAnnotationsDialog || showApproveWarning) return;
-      if (submitted || isSendingFeedback || isApproving) return;
+      if (showExportModal || showNoAnnotationsDialog || showApproveWarning || githubCommentDialog) return;
+      if (submitted || isSendingFeedback || isApproving || isGitHubActioning) return;
       if (!origin) return; // Demo mode
 
       e.preventDefault();
 
-      // No annotations → Approve, otherwise → Send Feedback
-      if (totalAnnotationCount === 0) {
-        handleApprove();
+      if (githubMode && prMetadata) {
+        // GitHub mode: No annotations → Approve on GitHub, otherwise → Post Review
+        if (totalAnnotationCount === 0) {
+          setGithubGeneralComment('');
+          setGithubCommentDialog({ action: 'approve' });
+        } else {
+          setGithubGeneralComment('');
+          setGithubCommentDialog({ action: 'comment' });
+        }
       } else {
-        handleSendFeedback();
+        // Agent mode: No annotations → Approve, otherwise → Send Feedback
+        if (totalAnnotationCount === 0) {
+          handleApprove();
+        } else {
+          handleSendFeedback();
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
-    showExportModal, showNoAnnotationsDialog, showApproveWarning,
-    submitted, isSendingFeedback, isApproving, origin, totalAnnotationCount,
-    handleApprove, handleSendFeedback
+    showExportModal, showNoAnnotationsDialog, showApproveWarning, githubCommentDialog,
+    submitted, isSendingFeedback, isApproving, isGitHubActioning,
+    origin, githubMode, prMetadata, totalAnnotationCount,
+    handleApprove, handleSendFeedback, handleGitHubAction
   ]);
 
   if (isLoading) {
@@ -722,56 +819,132 @@ const ReviewApp: React.FC = () => {
 
             {origin ? (
               <>
-                {/* Send Feedback button - accent color, disabled if no annotations */}
-                <button
-                  onClick={handleSendFeedback}
-                  disabled={isSendingFeedback || isApproving || totalAnnotationCount === 0}
-                  className={`p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium transition-all ${
-                    isSendingFeedback || isApproving
-                      ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
-                      : totalAnnotationCount === 0
-                        ? 'opacity-50 cursor-not-allowed bg-accent/10 text-accent/50'
-                        : 'bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30'
-                  }`}
-                  title={totalAnnotationCount === 0 ? "Add annotations to send feedback" : "Send feedback"}
-                >
-                  <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                  </svg>
-                  <span className="hidden md:inline">{isSendingFeedback ? 'Sending...' : 'Send Feedback'}</span>
-                </button>
+                {/* Agent / GitHub mode toggle (PR mode only) */}
+                {prMetadata && (
+                  <div className="flex items-center gap-0.5 bg-muted rounded-lg p-0.5 text-xs">
+                    <button
+                      onClick={() => { setGithubMode(false); setGithubActionError(null); }}
+                      className={`px-2 py-0.5 rounded-md transition-colors ${
+                        !githubMode
+                          ? 'bg-background text-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                      title="Send feedback to the AI agent"
+                    >
+                      Agent
+                    </button>
+                    <button
+                      onClick={() => { setGithubMode(true); setGithubActionError(null); }}
+                      className={`px-2 py-0.5 rounded-md transition-colors ${
+                        githubMode
+                          ? 'bg-background text-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                      title="Post review directly to GitHub"
+                    >
+                      GitHub
+                    </button>
+                  </div>
+                )}
 
-                {/* Approve button - green/success, dimmed if annotations exist */}
-                <div className="relative group/approve">
-                  <button
-                    onClick={() => {
-                      if (totalAnnotationCount > 0) {
-                        setShowApproveWarning(true);
-                      } else {
-                        handleApprove();
-                      }
-                    }}
-                    disabled={isSendingFeedback || isApproving}
-                    className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${
-                      isSendingFeedback || isApproving
-                        ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
-                        : totalAnnotationCount > 0
-                          ? 'bg-success/50 text-success-foreground/70 hover:bg-success hover:text-success-foreground'
-                          : 'bg-success text-success-foreground hover:opacity-90'
-                    }`}
-                    title="Approve - no changes needed"
+                {/* GitHub error message */}
+                {githubActionError && (
+                  <div
+                    className="text-xs text-destructive px-2 py-1 bg-destructive/10 rounded border border-destructive/20 max-w-[200px] truncate"
+                    title={githubActionError}
                   >
-                    <span className="md:hidden">{isApproving ? '...' : 'OK'}</span>
-                    <span className="hidden md:inline">{isApproving ? 'Approving...' : 'Approve'}</span>
-                  </button>
-                  {totalAnnotationCount > 0 && (
-                    <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
-                      <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
-                      <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
-                      Your {totalAnnotationCount} annotation{totalAnnotationCount !== 1 ? 's' : ''} won't be sent if you approve.
+                    {githubActionError}
+                  </div>
+                )}
+
+                {githubMode && prMetadata ? (
+                  <>
+                    {/* Post Review Comment to GitHub */}
+                    <button
+                      onClick={() => { setGithubGeneralComment(''); setGithubCommentDialog({ action: 'comment' }); }}
+                      disabled={isGitHubActioning}
+                      className={`p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium transition-all ${
+                        isGitHubActioning
+                          ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
+                          : 'bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30'
+                      }`}
+                      title="Post review comment to GitHub PR"
+                    >
+                      <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                      </svg>
+                      <span className="hidden md:inline">{isGitHubActioning ? 'Sending...' : 'Send Feedback'}</span>
+                    </button>
+
+                    {/* Approve on GitHub */}
+                    <button
+                      onClick={() => { setGithubGeneralComment(''); setGithubCommentDialog({ action: 'approve' }); }}
+                      disabled={isGitHubActioning}
+                      className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${
+                        isGitHubActioning
+                          ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
+                          : 'bg-success text-success-foreground hover:opacity-90'
+                      }`}
+                      title="Approve this PR on GitHub"
+                    >
+                      <span className="md:hidden">{isGitHubActioning ? '...' : 'OK'}</span>
+                      <span className="hidden md:inline">{isGitHubActioning ? 'Approving...' : 'Approve'}</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {/* Send Feedback button - accent color, disabled if no annotations */}
+                    <button
+                      onClick={handleSendFeedback}
+                      disabled={isSendingFeedback || isApproving || totalAnnotationCount === 0}
+                      className={`p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium transition-all ${
+                        isSendingFeedback || isApproving
+                          ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
+                          : totalAnnotationCount === 0
+                            ? 'opacity-50 cursor-not-allowed bg-accent/10 text-accent/50'
+                            : 'bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30'
+                      }`}
+                      title={totalAnnotationCount === 0 ? "Add annotations to send feedback" : "Send feedback"}
+                    >
+                      <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                      </svg>
+                      <span className="hidden md:inline">{isSendingFeedback ? 'Sending...' : 'Send Feedback'}</span>
+                    </button>
+
+                    {/* Approve button - green/success, dimmed if annotations exist */}
+                    <div className="relative group/approve">
+                      <button
+                        onClick={() => {
+                          if (totalAnnotationCount > 0) {
+                            setShowApproveWarning(true);
+                          } else {
+                            handleApprove();
+                          }
+                        }}
+                        disabled={isSendingFeedback || isApproving}
+                        className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${
+                          isSendingFeedback || isApproving
+                            ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
+                            : totalAnnotationCount > 0
+                              ? 'bg-success/50 text-success-foreground/70 hover:bg-success hover:text-success-foreground'
+                              : 'bg-success text-success-foreground hover:opacity-90'
+                        }`}
+                        title="Approve - no changes needed"
+                      >
+                        <span className="md:hidden">{isApproving ? '...' : 'OK'}</span>
+                        <span className="hidden md:inline">{isApproving ? 'Approving...' : 'Approve'}</span>
+                      </button>
+                      {totalAnnotationCount > 0 && (
+                        <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
+                          <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
+                          <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
+                          Your {totalAnnotationCount} annotation{totalAnnotationCount !== 1 ? 's' : ''} won't be sent if you approve.
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
+                  </>
+                )}
               </>
             ) : (
               <button
@@ -1061,6 +1234,50 @@ const ReviewApp: React.FC = () => {
 
         {/* Update notification */}
         <UpdateBanner origin={origin} />
+
+        {/* GitHub general comment dialog */}
+        {githubCommentDialog && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
+            <div className="bg-card border border-border rounded-xl w-full max-w-sm shadow-2xl p-6">
+              <h3 className="font-semibold mb-1">
+                {githubCommentDialog.action === 'approve' ? 'Approve PR' : 'Post Review Comment'}
+              </h3>
+              <p className="text-sm text-muted-foreground mb-3">
+                Add a general comment to the review (optional).
+              </p>
+              <textarea
+                autoFocus
+                value={githubGeneralComment}
+                onChange={e => setGithubGeneralComment(e.target.value)}
+                placeholder="Leave a comment..."
+                rows={4}
+                className="w-full rounded-md border border-border bg-background text-sm px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-primary mb-4"
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setGithubCommentDialog(null)}
+                  className="px-4 py-2 rounded-md text-sm font-medium bg-muted text-muted-foreground hover:bg-muted/80"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    const { action } = githubCommentDialog;
+                    setGithubCommentDialog(null);
+                    handleGitHubAction(action, githubGeneralComment);
+                  }}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-opacity ${
+                    githubCommentDialog.action === 'approve'
+                      ? 'bg-success text-success-foreground hover:opacity-90'
+                      : 'bg-primary text-primary-foreground hover:opacity-90'
+                  }`}
+                >
+                  {githubCommentDialog.action === 'approve' ? 'Approve' : 'Send Feedback'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </ThemeProvider>
   );

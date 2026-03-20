@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "plannotator",
@@ -55,7 +56,7 @@
     },
     "apps/opencode-plugin": {
       "name": "@plannotator/opencode",
-      "version": "0.14.2",
+      "version": "0.14.3",
       "dependencies": {
         "@opencode-ai/plugin": "^1.1.10",
       },
@@ -77,7 +78,7 @@
     },
     "apps/pi-extension": {
       "name": "@plannotator/pi-extension",
-      "version": "0.14.2",
+      "version": "0.14.3",
       "peerDependencies": {
         "@mariozechner/pi-coding-agent": ">=0.53.0",
       },
@@ -109,6 +110,7 @@
         "@plannotator/server": "workspace:*",
         "@plannotator/ui": "workspace:*",
         "@tailwindcss/vite": "^4.1.18",
+        "dompurify": "^3.3.3",
         "react": "^19.2.3",
         "react-dom": "^19.2.3",
         "tailwindcss": "^4.1.18",
@@ -157,7 +159,7 @@
     },
     "packages/server": {
       "name": "@plannotator/server",
-      "version": "0.14.2",
+      "version": "0.14.3",
       "dependencies": {
         "@plannotator/shared": "workspace:*",
       },

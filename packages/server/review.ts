@@ -15,7 +15,7 @@ import { getRepoInfo } from "./repo";
 import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft } from "./draft";
 import { createEditorAnnotationHandler } from "./editor-annotations";
-import { type PRMetadata, fetchPRFileContent, fetchPRContext } from "./pr";
+import { type PRMetadata, type PRReviewFileComment, fetchPRFileContent, fetchPRContext, submitPRReview } from "./pr";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -342,6 +342,41 @@ export async function startReviewServer(
             } catch (err) {
               const message =
                 err instanceof Error ? err.message : "Failed to process feedback";
+              return Response.json({ error: message }, { status: 500 });
+            }
+          }
+
+          // API: Submit PR review directly to GitHub (PR mode only)
+          if (url.pathname === "/api/pr-action" && req.method === "POST") {
+            if (!isPRMode || !prMetadata) {
+              return Response.json({ error: "Not in PR mode" }, { status: 400 });
+            }
+            try {
+              const body = (await req.json()) as {
+                action: "approve" | "comment";
+                body: string;
+                fileComments: PRReviewFileComment[];
+              };
+
+              const prRef = {
+                platform: "github" as const,
+                owner: prMetadata.owner,
+                repo: prMetadata.repo,
+                number: prMetadata.number,
+              };
+
+              await submitPRReview(
+                prRef,
+                prMetadata.headSha,
+                body.action,
+                body.body,
+                body.fileComments,
+              );
+
+              return Response.json({ ok: true, prUrl: prMetadata.url });
+            } catch (err) {
+              const message =
+                err instanceof Error ? err.message : "Failed to submit PR review";
               return Response.json({ error: message }, { status: 500 });
             }
           }
