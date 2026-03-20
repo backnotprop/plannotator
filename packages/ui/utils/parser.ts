@@ -185,7 +185,7 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
       // Fast forward until end of code block
       let codeContent = [];
       i++; // Skip start fence
-      while(i < lines.length && !closingFence.test(lines[i].trim())) {
+      while(i < lines.length && !closingFence.test(lines[i])) {
         codeContent.push(lines[i]);
         i++;
       }

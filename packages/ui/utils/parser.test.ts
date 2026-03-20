@@ -35,6 +35,7 @@ describe("parseMarkdownToBlocks — code fences", () => {
   test("4-backtick fence preserves language tag", () => {
     const md = "````markdown\nhello\n````";
     const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
     expect(blocks[0].language).toBe("markdown");
   });
 
@@ -72,5 +73,31 @@ describe("parseMarkdownToBlocks — code fences", () => {
     const types = blocks.map((b) => b.type);
     expect(types).toEqual(["paragraph", "code", "paragraph"]);
     expect(blocks[1].content).toBe("```\nnested\n```");
+  });
+
+  /**
+   * An unclosed fence at end-of-file should produce a code block containing
+   * whatever content was seen (CommonMark §4.5: unclosed fences extend to EOF).
+   */
+  test("unclosed fence at EOF produces a code block with seen content", () => {
+    const md = "```js\nconst x = 1;";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("code");
+    expect(blocks[0].language).toBe("js");
+    expect(blocks[0].content).toBe("const x = 1;");
+  });
+
+  /**
+   * A fence opener as the very last line of the document (no content, no
+   * closing fence) should produce an empty code block rather than crashing.
+   */
+  test("fence opener as last line produces an empty code block", () => {
+    const md = "```ts";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("code");
+    expect(blocks[0].language).toBe("ts");
+    expect(blocks[0].content).toBe("");
   });
 });
