@@ -118,6 +118,7 @@ const reviewShortcuts: ShortcutSection[] = [
     title: 'Actions',
     shortcuts: [
       { keys: [mod, enter], desc: 'Approve / Send feedback' },
+      { keys: [alt, alt], desc: 'Toggle destination', hint: 'Double-tap to switch between GitHub and Agent in PR review mode' },
       { keys: [mod, '⇧', 'C'], desc: 'Toggle comment mode' },
       { keys: ['Esc'], desc: 'Collapse sidebar' },
     ],
