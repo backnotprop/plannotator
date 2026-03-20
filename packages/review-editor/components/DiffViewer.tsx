@@ -239,7 +239,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           pre, code { background-color: ${bg} !important; }
           [data-file-info] { background-color: ${muted} !important; }
           [data-column-number] { background-color: ${bg} !important; }
-          [data-diffs-header] [data-title], [data-diffs-header] [data-prev-name] { display: none !important; }
+          [data-diffs-header] [data-title] { display: none !important; }
         `,
       });
     });

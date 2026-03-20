@@ -640,7 +640,10 @@ const ReviewApp: React.FC = () => {
     }).filter(c => c.body.length > 0);
 
     // Editor annotations (VS Code extension) — always on new/RIGHT side
+    // Only include annotations targeting files in the diff to avoid GitHub API rejection
+    const diffPaths = new Set(files.map(f => f.path));
     for (const ea of editorAnnotations) {
+      if (!diffPaths.has(ea.filePath)) continue;
       const body = ea.comment || `> ${ea.selectedText}`;
       if (!body.trim()) continue;
       const isMultiLine = ea.lineStart !== ea.lineEnd;
@@ -657,7 +660,7 @@ const ReviewApp: React.FC = () => {
     }
 
     return { action, body, fileComments };
-  }, [annotations, editorAnnotations]);
+  }, [annotations, editorAnnotations, files]);
 
   // Submit a review directly to GitHub
   const handleGitHubAction = useCallback(async (action: 'approve' | 'comment', generalComment?: string) => {
@@ -770,7 +773,8 @@ const ReviewApp: React.FC = () => {
 
       if (githubMode) {
         // GitHub mode: No annotations → Approve on GitHub, otherwise → Post Review
-        if (totalAnnotationCount === 0) {
+        const isOwnPR = !!ghUser && prMetadata?.author === ghUser;
+        if (totalAnnotationCount === 0 && !isOwnPR) {
           setGithubGeneralComment('');
           setGithubCommentDialog({ action: 'approve' });
         } else {
@@ -793,7 +797,7 @@ const ReviewApp: React.FC = () => {
     showExportModal, showNoAnnotationsDialog, showApproveWarning,
     githubCommentDialog, githubGeneralComment,
     submitted, isSendingFeedback, isApproving, isGitHubActioning,
-    origin, githubMode, totalAnnotationCount,
+    origin, githubMode, ghUser, prMetadata, totalAnnotationCount,
     handleApprove, handleSendFeedback, handleGitHubAction
   ]);
 
