@@ -177,12 +177,15 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
     if (trimmed.startsWith('```')) {
       flush();
       const codeStartLine = currentLineNum;
+      // Count backticks in opening fence to support nested fences (e.g. ```` wrapping ```)
+      const fenceLen = trimmed.match(/^`+/)?.[0].length ?? 3;
+      const closingFence = new RegExp('^`{' + fenceLen + ',}\\s*$');
       // Extract language from fence (e.g., ```rust → "rust")
-      const language = trimmed.slice(3).trim() || undefined;
+      const language = trimmed.slice(fenceLen).trim() || undefined;
       // Fast forward until end of code block
       let codeContent = [];
       i++; // Skip start fence
-      while(i < lines.length && !lines[i].trim().startsWith('```')) {
+      while(i < lines.length && !closingFence.test(lines[i].trim())) {
         codeContent.push(lines[i]);
         i++;
       }
