@@ -133,6 +133,18 @@ export async function checkGhAuth(runtime: PRRuntime): Promise<void> {
   }
 }
 
+export async function getGhUser(runtime: PRRuntime): Promise<string | null> {
+  try {
+    const result = await runtime.runCommand("gh", ["api", "user", "--jq", ".login"]);
+    if (result.exitCode === 0 && result.stdout.trim()) {
+      return result.stdout.trim();
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // --- Fetch PR ---
 
 export async function fetchPR(
@@ -309,6 +321,8 @@ export interface PRReviewFileComment {
   line: number;
   side: "LEFT" | "RIGHT";
   body: string;
+  start_line?: number;
+  start_side?: "LEFT" | "RIGHT";
 }
 
 export async function submitPRReview(

@@ -114,8 +114,10 @@ const ReviewApp: React.FC = () => {
   const [githubMode, setGithubMode] = useState(false);
   const [isGitHubActioning, setIsGitHubActioning] = useState(false);
   const [githubActionError, setGithubActionError] = useState<string | null>(null);
+  const [ghUser, setGhUser] = useState<string | null>(null);
   const [githubCommentDialog, setGithubCommentDialog] = useState<{ action: 'approve' | 'comment' } | null>(null);
   const [githubGeneralComment, setGithubGeneralComment] = useState('');
+  const [githubOpenPR, setGithubOpenPR] = useState(() => storage.getItem('plannotator-github-open-pr') !== 'false');
 
   const identity = useMemo(() => getIdentity(), []);
 
@@ -251,6 +253,7 @@ const ReviewApp: React.FC = () => {
         if (data.sharingEnabled !== undefined) setSharingEnabled(data.sharingEnabled);
         if (data.repoInfo) setRepoInfo(data.repoInfo);
         if (data.prMetadata) setPrMetadata(data.prMetadata);
+        if (data.ghUser) setGhUser(data.ghUser);
         if (data.error) setDiffError(data.error);
       })
       .catch(() => {
@@ -607,11 +610,17 @@ const ReviewApp: React.FC = () => {
       if (ann.suggestedCode) {
         commentBody += `\n\n\`\`\`suggestion\n${ann.suggestedCode}\n\`\`\``;
       }
+      const side = (ann.side === 'old' ? 'LEFT' : 'RIGHT') as 'LEFT' | 'RIGHT';
+      const isMultiLine = ann.lineStart != null && ann.lineEnd != null && ann.lineStart !== ann.lineEnd;
       return {
         path: ann.filePath,
         line: ann.lineEnd ?? ann.lineStart,
-        side: (ann.side === 'old' ? 'LEFT' : 'RIGHT') as 'LEFT' | 'RIGHT',
+        side,
         body: commentBody.trim(),
+        ...(isMultiLine && {
+          start_line: ann.lineStart,
+          start_side: side,
+        }),
       };
     }).filter(c => c.body.length > 0);
 
@@ -636,8 +645,8 @@ const ReviewApp: React.FC = () => {
         return;
       }
 
-      // Open PR in browser
-      if (prData.prUrl) {
+      // Open PR in browser (if opted in)
+      if (prData.prUrl && githubOpenPR) {
         window.open(prData.prUrl, '_blank');
       }
 
@@ -663,16 +672,29 @@ const ReviewApp: React.FC = () => {
       setGithubActionError(err instanceof Error ? err.message : 'Failed to submit PR review');
       setIsGitHubActioning(false);
     }
-  }, [buildPRReviewPayload, feedbackMarkdown, annotations]);
+  }, [buildPRReviewPayload, githubOpenPR]);
 
   // Cmd/Ctrl+Enter keyboard shortcut to approve or send feedback
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
 
+      // If the GitHub comment dialog is open, Cmd+Enter submits it
+      if (githubCommentDialog) {
+        if (submitted || isGitHubActioning) return;
+        const isApproveAction = githubCommentDialog.action === 'approve';
+        const canSubmit = isApproveAction || totalAnnotationCount > 0 || githubGeneralComment.trim();
+        if (!canSubmit) return;
+        e.preventDefault();
+        const { action } = githubCommentDialog;
+        setGithubCommentDialog(null);
+        handleGitHubAction(action, githubGeneralComment);
+        return;
+      }
+
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      if (showExportModal || showNoAnnotationsDialog || showApproveWarning || githubCommentDialog) return;
+      if (showExportModal || showNoAnnotationsDialog || showApproveWarning) return;
       if (submitted || isSendingFeedback || isApproving || isGitHubActioning) return;
       if (!origin) return; // Demo mode
 
@@ -700,7 +722,8 @@ const ReviewApp: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
-    showExportModal, showNoAnnotationsDialog, showApproveWarning, githubCommentDialog,
+    showExportModal, showNoAnnotationsDialog, showApproveWarning,
+    githubCommentDialog, githubGeneralComment,
     submitted, isSendingFeedback, isApproving, isGitHubActioning,
     origin, githubMode, prMetadata, totalAnnotationCount,
     handleApprove, handleSendFeedback, handleGitHubAction
@@ -873,23 +896,41 @@ const ReviewApp: React.FC = () => {
                       <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                       </svg>
-                      <span className="hidden md:inline">{isGitHubActioning ? 'Sending...' : 'Send Feedback'}</span>
+                      <span className="hidden md:inline">{isGitHubActioning ? 'Posting...' : 'Post Comments'}</span>
                     </button>
 
                     {/* Approve on GitHub */}
-                    <button
-                      onClick={() => { setGithubGeneralComment(''); setGithubCommentDialog({ action: 'approve' }); }}
-                      disabled={isGitHubActioning}
-                      className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${
-                        isGitHubActioning
-                          ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
-                          : 'bg-success text-success-foreground hover:opacity-90'
-                      }`}
-                      title="Approve this PR on GitHub"
-                    >
-                      <span className="md:hidden">{isGitHubActioning ? '...' : 'OK'}</span>
-                      <span className="hidden md:inline">{isGitHubActioning ? 'Approving...' : 'Approve'}</span>
-                    </button>
+                    {ghUser && prMetadata.author === ghUser ? (
+                      <div className="relative group/own-pr">
+                        <button
+                          disabled
+                          className="px-2 py-1 md:px-2.5 rounded-md text-xs font-medium opacity-40 cursor-not-allowed bg-muted text-muted-foreground"
+                          title="You can't approve your own PR"
+                        >
+                          <span className="md:hidden">OK</span>
+                          <span className="hidden md:inline">Approve</span>
+                        </button>
+                        <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-48 text-center opacity-0 invisible group-hover/own-pr:opacity-100 group-hover/own-pr:visible transition-all pointer-events-none z-50">
+                          <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
+                          <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
+                          You can't approve your own pull request on GitHub.
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => { setGithubGeneralComment(''); setGithubCommentDialog({ action: 'approve' }); }}
+                        disabled={isGitHubActioning}
+                        className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${
+                          isGitHubActioning
+                            ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
+                            : 'bg-success text-success-foreground hover:opacity-90'
+                        }`}
+                        title="Approve this PR on GitHub"
+                      >
+                        <span className="md:hidden">OK</span>
+                        <span className="hidden md:inline">Approve</span>
+                      </button>
+                    )}
                   </>
                 ) : (
                   <>
@@ -1225,11 +1266,15 @@ const ReviewApp: React.FC = () => {
           submitted={submitted}
           title={submitted === 'approved' ? 'Changes Approved' : 'Feedback Sent'}
           subtitle={
-            submitted === 'approved'
-              ? `${origin === 'claude-code' ? 'Claude Code' : origin === 'pi' ? 'Pi' : 'OpenCode'} will proceed with the changes.`
-              : `${origin === 'claude-code' ? 'Claude Code' : origin === 'pi' ? 'Pi' : 'OpenCode'} will address your review feedback.`
+            githubMode
+              ? submitted === 'approved'
+                ? 'Your approval was submitted to GitHub.'
+                : 'Your feedback was submitted to GitHub.'
+              : submitted === 'approved'
+                ? `${origin === 'claude-code' ? 'Claude Code' : origin === 'opencode' ? 'OpenCode' : origin === 'pi' ? 'Pi' : 'Your agent'} will proceed with the changes.`
+                : `${origin === 'claude-code' ? 'Claude Code' : origin === 'opencode' ? 'OpenCode' : origin === 'pi' ? 'Pi' : 'Your agent'} will address your review feedback.`
           }
-          agentLabel={origin === 'claude-code' ? 'Claude Code' : origin === 'pi' ? 'Pi' : 'OpenCode'}
+          agentLabel={origin === 'claude-code' ? 'Claude Code' : origin === 'opencode' ? 'OpenCode' : origin === 'pi' ? 'Pi' : 'Your agent'}
         />
 
         {/* Update notification */}
@@ -1251,8 +1296,20 @@ const ReviewApp: React.FC = () => {
                 onChange={e => setGithubGeneralComment(e.target.value)}
                 placeholder="Leave a comment..."
                 rows={4}
-                className="w-full rounded-md border border-border bg-background text-sm px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-primary mb-4"
+                className="w-full rounded-md border border-border bg-background text-sm px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-primary mb-3"
               />
+              <label className="flex items-center gap-2 text-sm text-muted-foreground mb-4 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={githubOpenPR}
+                  onChange={e => {
+                    setGithubOpenPR(e.target.checked);
+                    storage.setItem('plannotator-github-open-pr', String(e.target.checked));
+                  }}
+                  className="rounded border-border"
+                />
+                Open PR after submitting
+              </label>
               <div className="flex justify-end gap-2">
                 <button
                   onClick={() => setGithubCommentDialog(null)}
@@ -1266,13 +1323,16 @@ const ReviewApp: React.FC = () => {
                     setGithubCommentDialog(null);
                     handleGitHubAction(action, githubGeneralComment);
                   }}
+                  disabled={githubCommentDialog.action !== 'approve' && totalAnnotationCount === 0 && !githubGeneralComment.trim()}
                   className={`px-4 py-2 rounded-md text-sm font-medium transition-opacity ${
-                    githubCommentDialog.action === 'approve'
-                      ? 'bg-success text-success-foreground hover:opacity-90'
-                      : 'bg-primary text-primary-foreground hover:opacity-90'
+                    githubCommentDialog.action !== 'approve' && totalAnnotationCount === 0 && !githubGeneralComment.trim()
+                      ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
+                      : githubCommentDialog.action === 'approve'
+                        ? 'bg-success text-success-foreground hover:opacity-90'
+                        : 'bg-primary text-primary-foreground hover:opacity-90'
                   }`}
                 >
-                  {githubCommentDialog.action === 'approve' ? 'Approve' : 'Send Feedback'}
+                  {githubCommentDialog.action === 'approve' ? 'Approve' : 'Post Comments'}
                 </button>
               </div>
             </div>

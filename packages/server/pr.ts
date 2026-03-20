@@ -17,6 +17,7 @@ import {
   fetchPRFileContent as fetchPRFileContentCore,
   fetchPRContext as fetchPRContextCore,
   submitPRReview as submitPRReviewCore,
+  getGhUser as getGhUserCore,
 } from "@plannotator/shared/pr-provider";
 
 export type { PRRef, PRMetadata, PRContext, PRReviewFileComment } from "@plannotator/shared/pr-provider";
@@ -81,6 +82,10 @@ export function fetchPRFileContent(
   filePath: string,
 ): Promise<string | null> {
   return fetchPRFileContentCore(runtime, ref, sha, filePath);
+}
+
+export function getGhUser(): Promise<string | null> {
+  return getGhUserCore(runtime);
 }
 
 export function submitPRReview(

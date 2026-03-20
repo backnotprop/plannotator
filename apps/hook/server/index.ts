@@ -157,7 +157,13 @@ if (args[0] === "sessions") {
     try {
       await checkGhAuth();
     } catch (err) {
-      console.error(err instanceof Error ? err.message : "GitHub CLI auth check failed");
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("not found") || msg.includes("ENOENT")) {
+        console.error("GitHub CLI (gh) is not installed.");
+        console.error("Install it from https://cli.github.com");
+      } else {
+        console.error(msg);
+      }
       process.exit(1);
     }
 

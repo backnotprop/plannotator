@@ -15,7 +15,7 @@ import { getRepoInfo } from "./repo";
 import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft } from "./draft";
 import { createEditorAnnotationHandler } from "./editor-annotations";
-import { type PRMetadata, type PRReviewFileComment, fetchPRFileContent, fetchPRContext, submitPRReview } from "./pr";
+import { type PRMetadata, type PRReviewFileComment, fetchPRFileContent, fetchPRContext, submitPRReview, getGhUser } from "./pr";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -108,6 +108,9 @@ export async function startReviewServer(
     ? { display: `${prMetadata.owner}/${prMetadata.repo}`, branch: `PR #${prMetadata.number}` }
     : await getRepoInfo();
 
+  // Fetch current GitHub user (for own-PR detection)
+  const ghUser = isPRMode ? await getGhUser() : null;
+
   // Decision promise
   let resolveDecision: (result: {
     approved: boolean;
@@ -146,7 +149,7 @@ export async function startReviewServer(
               sharingEnabled,
               shareBaseUrl,
               repoInfo,
-              ...(isPRMode && { prMetadata }),
+              ...(isPRMode && { prMetadata, ghUser }),
               ...(currentError && { error: currentError }),
             });
           }
