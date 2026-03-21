@@ -7,8 +7,10 @@ import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
 import { storage } from '@plannotator/ui/utils/storage';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { GitHubIcon } from '@plannotator/ui/components/GitHubIcon';
+import { GitLabIcon } from '@plannotator/ui/components/GitLabIcon';
 import { RepoIcon } from '@plannotator/ui/components/RepoIcon';
 import { PullRequestIcon } from '@plannotator/ui/components/PullRequestIcon';
+import { getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo } from '@plannotator/shared/pr-provider';
 import { getIdentity } from '@plannotator/ui/utils/identity';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange } from '@plannotator/ui/types';
@@ -122,19 +124,26 @@ const ReviewApp: React.FC = () => {
   }, [repoInfo]);
 
   const [prMetadata, setPrMetadata] = useState<PRMetadata | null>(null);
-  const [reviewDestination, setReviewDestination] = useState<'agent' | 'github'>(() =>
-    storage.getItem('plannotator-review-dest') === 'agent' ? 'agent' : 'github'
-  );
+  const [reviewDestination, setReviewDestination] = useState<'agent' | 'platform'>(() => {
+    const stored = storage.getItem('plannotator-review-dest');
+    return stored === 'agent' ? 'agent' : 'platform'; // 'github' (legacy) → 'platform'
+  });
   const [showDestinationMenu, setShowDestinationMenu] = useState(false);
-  const [isGitHubActioning, setIsGitHubActioning] = useState(false);
-  const [githubActionError, setGithubActionError] = useState<string | null>(null);
-  const [ghUser, setGhUser] = useState<string | null>(null);
-  const [githubCommentDialog, setGithubCommentDialog] = useState<{ action: 'approve' | 'comment' } | null>(null);
-  const [githubGeneralComment, setGithubGeneralComment] = useState('');
-  const [githubOpenPR, setGithubOpenPR] = useState(() => storage.getItem('plannotator-github-open-pr') !== 'false');
+  const [isPlatformActioning, setIsPlatformActioning] = useState(false);
+  const [platformActionError, setPlatformActionError] = useState<string | null>(null);
+  const [platformUser, setPlatformUser] = useState<string | null>(null);
+  const [platformCommentDialog, setPlatformCommentDialog] = useState<{ action: 'approve' | 'comment' } | null>(null);
+  const [platformGeneralComment, setPlatformGeneralComment] = useState('');
+  const [platformOpenPR, setPlatformOpenPR] = useState(() => storage.getItem('plannotator-github-open-pr') !== 'false');
 
-  // Derived: GitHub mode is active when destination is GitHub AND we have PR metadata
-  const githubMode = reviewDestination === 'github' && !!prMetadata;
+  // Derived: Platform mode is active when destination is platform AND we have PR/MR metadata
+  const platformMode = reviewDestination === 'platform' && !!prMetadata;
+
+  // Platform-aware labels
+  const platformLabel = prMetadata ? getPlatformLabel(prMetadata) : 'GitHub';
+  const mrLabel = prMetadata ? getMRLabel(prMetadata) : 'PR';
+  const mrNumberLabel = prMetadata ? getMRNumberLabel(prMetadata) : '';
+  const displayRepo = prMetadata ? getDisplayRepo(prMetadata) : '';
 
   const identity = useMemo(() => getIdentity(), []);
 
@@ -253,7 +262,7 @@ const ReviewApp: React.FC = () => {
         sharingEnabled?: boolean;
         repoInfo?: { display: string; branch?: string };
         prMetadata?: PRMetadata;
-        ghUser?: string;
+        platformUser?: string;
         error?: string;
       }) => {
         const apiFiles = parseDiffToFiles(data.rawPatch);
@@ -273,7 +282,7 @@ const ReviewApp: React.FC = () => {
         if (data.sharingEnabled !== undefined) setSharingEnabled(data.sharingEnabled);
         if (data.repoInfo) setRepoInfo(data.repoInfo);
         if (data.prMetadata) setPrMetadata(data.prMetadata);
-        if (data.ghUser) setGhUser(data.ghUser);
+        if (data.platformUser) setPlatformUser(data.platformUser);
         if (data.error) setDiffError(data.error);
       })
       .catch(() => {
@@ -668,9 +677,9 @@ const ReviewApp: React.FC = () => {
   }, [annotations, editorAnnotations, files]);
 
   // Submit a review directly to GitHub
-  const handleGitHubAction = useCallback(async (action: 'approve' | 'comment', generalComment?: string) => {
-    setIsGitHubActioning(true);
-    setGithubActionError(null);
+  const handlePlatformAction = useCallback(async (action: 'approve' | 'comment', generalComment?: string) => {
+    setIsPlatformActioning(true);
+    setPlatformActionError(null);
     try {
       const payload = buildPRReviewPayload(action, generalComment);
       const prRes = await fetch('/api/pr-action', {
@@ -680,13 +689,13 @@ const ReviewApp: React.FC = () => {
       });
       const prData = await prRes.json() as { ok?: boolean; prUrl?: string; error?: string };
       if (!prRes.ok || prData.error) {
-        setGithubActionError(prData.error ?? 'Failed to submit PR review');
-        setIsGitHubActioning(false);
+        setPlatformActionError(prData.error ?? 'Failed to submit PR review');
+        setIsPlatformActioning(false);
         return;
       }
 
       // Open PR in browser (if opted in)
-      if (prData.prUrl && githubOpenPR) {
+      if (prData.prUrl && platformOpenPR) {
         window.open(prData.prUrl, '_blank');
       }
 
@@ -695,8 +704,8 @@ const ReviewApp: React.FC = () => {
       const effectiveAgent = getEffectiveAgentName(agentSwitchSettings);
       const prLink = prData.prUrl ?? '';
       const statusMessage = action === 'approve'
-        ? `Pull request approved on GitHub${prLink ? ': ' + prLink : ''}`
-        : `Pull request reviewed on GitHub${prLink ? ': ' + prLink : ''}`;
+        ? `${mrLabel === 'MR' ? 'Merge request' : 'Pull request'} approved on ${platformLabel}${prLink ? ': ' + prLink : ''}`
+        : `${mrLabel === 'MR' ? 'Merge request' : 'Pull request'} reviewed on ${platformLabel}${prLink ? ': ' + prLink : ''}`;
       await fetch('/api/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -709,10 +718,10 @@ const ReviewApp: React.FC = () => {
       });
       setSubmitted(action === 'approve' ? 'approved' : 'feedback');
     } catch (err) {
-      setGithubActionError(err instanceof Error ? err.message : 'Failed to submit PR review');
-      setIsGitHubActioning(false);
+      setPlatformActionError(err instanceof Error ? err.message : 'Failed to submit PR review');
+      setIsPlatformActioning(false);
     }
-  }, [buildPRReviewPayload, githubOpenPR]);
+  }, [buildPRReviewPayload, platformOpenPR]);
 
   // Double-tap Option/Alt to toggle review destination (PR mode only)
   useEffect(() => {
@@ -731,9 +740,9 @@ const ReviewApp: React.FC = () => {
       const now = Date.now();
       if (now - lastAltUp < DOUBLE_TAP_WINDOW) {
         setReviewDestination(prev => {
-          const next = prev === 'github' ? 'agent' : 'github';
+          const next = prev === 'platform' ? 'agent' : 'platform';
           storage.setItem('plannotator-review-dest', next);
-          setGithubActionError(null);
+          setPlatformActionError(null);
           return next;
         });
         lastAltUp = 0;
@@ -756,35 +765,35 @@ const ReviewApp: React.FC = () => {
       if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
 
       // If the GitHub comment dialog is open, Cmd+Enter submits it
-      if (githubCommentDialog) {
-        if (submitted || isGitHubActioning) return;
-        const isApproveAction = githubCommentDialog.action === 'approve';
-        const canSubmit = isApproveAction || totalAnnotationCount > 0 || githubGeneralComment.trim();
+      if (platformCommentDialog) {
+        if (submitted || isPlatformActioning) return;
+        const isApproveAction = platformCommentDialog.action === 'approve';
+        const canSubmit = isApproveAction || totalAnnotationCount > 0 || platformGeneralComment.trim();
         if (!canSubmit) return;
         e.preventDefault();
-        const { action } = githubCommentDialog;
-        setGithubCommentDialog(null);
-        handleGitHubAction(action, githubGeneralComment);
+        const { action } = platformCommentDialog;
+        setPlatformCommentDialog(null);
+        handlePlatformAction(action, platformGeneralComment);
         return;
       }
 
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       if (showExportModal || showNoAnnotationsDialog || showApproveWarning) return;
-      if (submitted || isSendingFeedback || isApproving || isGitHubActioning) return;
+      if (submitted || isSendingFeedback || isApproving || isPlatformActioning) return;
       if (!origin) return; // Demo mode
 
       e.preventDefault();
 
-      if (githubMode) {
+      if (platformMode) {
         // GitHub mode: No annotations → Approve on GitHub, otherwise → Post Review
-        const isOwnPR = !!ghUser && prMetadata?.author === ghUser;
+        const isOwnPR = !!platformUser && prMetadata?.author === platformUser;
         if (totalAnnotationCount === 0 && !isOwnPR) {
-          setGithubGeneralComment('');
-          setGithubCommentDialog({ action: 'approve' });
+          setPlatformGeneralComment('');
+          setPlatformCommentDialog({ action: 'approve' });
         } else {
-          setGithubGeneralComment('');
-          setGithubCommentDialog({ action: 'comment' });
+          setPlatformGeneralComment('');
+          setPlatformCommentDialog({ action: 'comment' });
         }
       } else {
         // Agent mode: No annotations → Approve, otherwise → Send Feedback
@@ -800,10 +809,10 @@ const ReviewApp: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
     showExportModal, showNoAnnotationsDialog, showApproveWarning,
-    githubCommentDialog, githubGeneralComment,
-    submitted, isSendingFeedback, isApproving, isGitHubActioning,
-    origin, githubMode, ghUser, prMetadata, totalAnnotationCount,
-    handleApprove, handleSendFeedback, handleGitHubAction
+    platformCommentDialog, platformGeneralComment,
+    submitted, isSendingFeedback, isApproving, isPlatformActioning,
+    origin, platformMode, platformUser, prMetadata, totalAnnotationCount,
+    handleApprove, handleSendFeedback, handlePlatformAction
   ]);
 
   if (isLoading) {
@@ -841,14 +850,14 @@ const ReviewApp: React.FC = () => {
             <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium hidden md:inline ${
               prMetadata ? 'bg-violet-500/15 text-violet-400' : 'bg-secondary/15 text-secondary'
             }`}>
-              {prMetadata ? 'PR Review' : 'Code Review'}
+              {prMetadata ? `${mrLabel} Review` : 'Code Review'}
             </span>
             {prMetadata ? (
               <>
                 <span className="text-muted-foreground/40 hidden md:inline">|</span>
                 <span className="text-xs text-muted-foreground/60 hidden md:inline-flex items-center gap-1">
                   <RepoIcon className="w-3 h-3" />
-                  {prMetadata.owner}/{prMetadata.repo}
+                  {displayRepo}
                 </span>
                 <a
                   href={prMetadata.url}
@@ -858,7 +867,7 @@ const ReviewApp: React.FC = () => {
                   title={prMetadata.title}
                 >
                   <PullRequestIcon className="w-3 h-3 flex-shrink-0" />
-                  #{prMetadata.number} {prMetadata.title}
+                  {mrNumberLabel} {prMetadata.title}
                 </a>
               </>
             ) : repoInfo ? (
@@ -928,12 +937,12 @@ const ReviewApp: React.FC = () => {
                     <button
                       onClick={() => setShowDestinationMenu(prev => !prev)}
                       className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-muted hover:bg-muted/80 transition-colors"
-                      title={reviewDestination === 'github' ? 'Posting to GitHub PR' : 'Sending to agent session'}
+                      title={reviewDestination === 'platform' ? `Posting to ${platformLabel} ${mrLabel}` : 'Sending to agent session'}
                     >
-                      {reviewDestination === 'github' ? (
+                      {reviewDestination === 'platform' ? (
                         <>
-                          <GitHubIcon className="w-3.5 h-3.5" />
-                          <span>GitHub</span>
+                          {prMetadata?.platform === 'gitlab' ? <GitLabIcon className="w-3.5 h-3.5" /> : <GitHubIcon className="w-3.5 h-3.5" />}
+                          <span>{platformLabel}</span>
                         </>
                       ) : 'Agent'}
                       <svg className="w-3 h-3 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -946,26 +955,26 @@ const ReviewApp: React.FC = () => {
                         <div className="absolute right-0 top-full mt-1 py-1 bg-popover border border-border rounded-lg shadow-xl z-50 min-w-[160px]">
                           <button
                             onClick={() => {
-                              setReviewDestination('github');
-                              storage.setItem('plannotator-review-dest', 'github');
+                              setReviewDestination('platform');
+                              storage.setItem('plannotator-review-dest', 'platform');
                               setShowDestinationMenu(false);
-                              setGithubActionError(null);
+                              setPlatformActionError(null);
                             }}
                             className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
-                              reviewDestination === 'github'
+                              reviewDestination === 'platform'
                                 ? 'text-foreground bg-muted/50'
                                 : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'
                             }`}
                           >
-                            <div className="font-medium">GitHub</div>
-                            <div className="text-muted-foreground/60">Post to PR</div>
+                            <div className="font-medium">{platformLabel}</div>
+                            <div className="text-muted-foreground/60">Post to {mrLabel}</div>
                           </button>
                           <button
                             onClick={() => {
                               setReviewDestination('agent');
                               storage.setItem('plannotator-review-dest', 'agent');
                               setShowDestinationMenu(false);
-                              setGithubActionError(null);
+                              setPlatformActionError(null);
                             }}
                             className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
                               reviewDestination === 'agent'
@@ -990,45 +999,45 @@ const ReviewApp: React.FC = () => {
                 )}
 
                 {/* GitHub error message */}
-                {githubActionError && (
+                {platformActionError && (
                   <div
                     className="text-xs text-destructive px-2 py-1 bg-destructive/10 rounded border border-destructive/20 max-w-[200px] truncate"
-                    title={githubActionError}
+                    title={platformActionError}
                   >
-                    {githubActionError}
+                    {platformActionError}
                   </div>
                 )}
 
                 {/* Send Feedback button — always the same label */}
                 <button
                   onClick={() => {
-                    if (githubMode) {
-                      setGithubGeneralComment('');
-                      setGithubCommentDialog({ action: 'comment' });
+                    if (platformMode) {
+                      setPlatformGeneralComment('');
+                      setPlatformCommentDialog({ action: 'comment' });
                     } else {
                       handleSendFeedback();
                     }
                   }}
                   disabled={
-                    isSendingFeedback || isApproving || isGitHubActioning ||
-                    (!githubMode && totalAnnotationCount === 0)
+                    isSendingFeedback || isApproving || isPlatformActioning ||
+                    (!platformMode && totalAnnotationCount === 0)
                   }
                   className={`p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium transition-all ${
-                    isSendingFeedback || isApproving || isGitHubActioning
+                    isSendingFeedback || isApproving || isPlatformActioning
                       ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
-                      : !githubMode && totalAnnotationCount === 0
+                      : !platformMode && totalAnnotationCount === 0
                         ? 'opacity-50 cursor-not-allowed bg-accent/10 text-accent/50'
                         : 'bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30'
                   }`}
-                  title={!githubMode && totalAnnotationCount === 0 ? "Add annotations to send feedback" : "Send feedback"}
+                  title={!platformMode && totalAnnotationCount === 0 ? "Add annotations to send feedback" : "Send feedback"}
                 >
                   <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                   </svg>
                   <span className="hidden md:inline">{
-                    isSendingFeedback || isGitHubActioning
-                      ? (githubMode ? 'Posting...' : 'Sending...')
-                      : (githubMode ? 'Post Comments' : 'Send Feedback')
+                    isSendingFeedback || isPlatformActioning
+                      ? (platformMode ? 'Posting...' : 'Sending...')
+                      : (platformMode ? 'Post Comments' : 'Send Feedback')
                   }</span>
                 </button>
 
@@ -1036,10 +1045,10 @@ const ReviewApp: React.FC = () => {
                 <div className="relative group/approve">
                   <button
                     onClick={() => {
-                      if (githubMode) {
-                        if (ghUser && prMetadata?.author === ghUser) return;
-                        setGithubGeneralComment('');
-                        setGithubCommentDialog({ action: 'approve' });
+                      if (platformMode) {
+                        if (platformUser && prMetadata?.author === platformUser) return;
+                        setPlatformGeneralComment('');
+                        setPlatformCommentDialog({ action: 'approve' });
                       } else {
                         if (totalAnnotationCount > 0) {
                           setShowApproveWarning(true);
@@ -1049,21 +1058,21 @@ const ReviewApp: React.FC = () => {
                       }
                     }}
                     disabled={
-                      isSendingFeedback || isApproving || isGitHubActioning ||
-                      (githubMode && !!ghUser && prMetadata?.author === ghUser)
+                      isSendingFeedback || isApproving || isPlatformActioning ||
+                      (platformMode && !!platformUser && prMetadata?.author === platformUser)
                     }
                     className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${
-                      isSendingFeedback || isApproving || isGitHubActioning
+                      isSendingFeedback || isApproving || isPlatformActioning
                         ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
-                        : githubMode && ghUser && prMetadata?.author === ghUser
+                        : platformMode && platformUser && prMetadata?.author === platformUser
                           ? 'opacity-40 cursor-not-allowed bg-muted text-muted-foreground'
-                          : !githubMode && totalAnnotationCount > 0
+                          : !platformMode && totalAnnotationCount > 0
                             ? 'bg-success/50 text-success-foreground/70 hover:bg-success hover:text-success-foreground'
                             : 'bg-success text-success-foreground hover:opacity-90'
                     }`}
                     title={
-                      githubMode && ghUser && prMetadata?.author === ghUser
-                        ? "You can't approve your own PR"
+                      platformMode && platformUser && prMetadata?.author === platformUser
+                        ? `You can't approve your own ${mrLabel}`
                         : "Approve - no changes needed"
                     }
                   >
@@ -1071,13 +1080,13 @@ const ReviewApp: React.FC = () => {
                     <span className="hidden md:inline">{isApproving ? 'Approving...' : 'Approve'}</span>
                   </button>
                   {/* Tooltip: own PR warning OR annotations-lost warning */}
-                  {githubMode && ghUser && prMetadata?.author === ghUser ? (
+                  {platformMode && platformUser && prMetadata?.author === platformUser ? (
                     <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-48 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
                       <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
                       <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
-                      You can't approve your own pull request on GitHub.
+                      You can't approve your own {mrLabel === 'MR' ? 'merge request' : 'pull request'} on {platformLabel}.
                     </div>
-                  ) : !githubMode && totalAnnotationCount > 0 ? (
+                  ) : !platformMode && totalAnnotationCount > 0 ? (
                     <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
                       <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
                       <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
@@ -1365,10 +1374,10 @@ const ReviewApp: React.FC = () => {
           submitted={submitted}
           title={submitted === 'approved' ? 'Changes Approved' : 'Feedback Sent'}
           subtitle={
-            githubMode
+            platformMode
               ? submitted === 'approved'
-                ? 'Your approval was submitted to GitHub.'
-                : 'Your feedback was submitted to GitHub.'
+                ? `Your approval was submitted to ${platformLabel}.`
+                : `Your feedback was submitted to ${platformLabel}.`
               : submitted === 'approved'
                 ? `${origin === 'claude-code' ? 'Claude Code' : origin === 'opencode' ? 'OpenCode' : origin === 'pi' ? 'Pi' : 'Your agent'} will proceed with the changes.`
                 : `${origin === 'claude-code' ? 'Claude Code' : origin === 'opencode' ? 'OpenCode' : origin === 'pi' ? 'Pi' : 'Your agent'} will address your review feedback.`
@@ -1380,19 +1389,19 @@ const ReviewApp: React.FC = () => {
         <UpdateBanner origin={origin} />
 
         {/* GitHub general comment dialog */}
-        {githubCommentDialog && (
+        {platformCommentDialog && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
             <div className="bg-card border border-border rounded-xl w-full max-w-sm shadow-2xl p-6">
               <h3 className="font-semibold mb-1">
-                {githubCommentDialog.action === 'approve' ? 'Approve PR' : 'Post Review Comment'}
+                {platformCommentDialog.action === 'approve' ? `Approve ${mrLabel}` : 'Post Review Comment'}
               </h3>
               <p className="text-sm text-muted-foreground mb-3">
                 Add a general comment to the review (optional).
               </p>
               <textarea
                 autoFocus
-                value={githubGeneralComment}
-                onChange={e => setGithubGeneralComment(e.target.value)}
+                value={platformGeneralComment}
+                onChange={e => setPlatformGeneralComment(e.target.value)}
                 placeholder="Leave a comment..."
                 rows={4}
                 className="w-full rounded-md border border-border bg-background text-sm px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-primary mb-3"
@@ -1400,38 +1409,38 @@ const ReviewApp: React.FC = () => {
               <label className="flex items-center gap-2 text-sm text-muted-foreground mb-4 cursor-pointer select-none">
                 <input
                   type="checkbox"
-                  checked={githubOpenPR}
+                  checked={platformOpenPR}
                   onChange={e => {
-                    setGithubOpenPR(e.target.checked);
+                    setPlatformOpenPR(e.target.checked);
                     storage.setItem('plannotator-github-open-pr', String(e.target.checked));
                   }}
                   className="rounded border-border"
                 />
-                Open PR after submitting
+                Open {mrLabel} after submitting
               </label>
               <div className="flex justify-end gap-2">
                 <button
-                  onClick={() => setGithubCommentDialog(null)}
+                  onClick={() => setPlatformCommentDialog(null)}
                   className="px-4 py-2 rounded-md text-sm font-medium bg-muted text-muted-foreground hover:bg-muted/80"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={() => {
-                    const { action } = githubCommentDialog;
-                    setGithubCommentDialog(null);
-                    handleGitHubAction(action, githubGeneralComment);
+                    const { action } = platformCommentDialog;
+                    setPlatformCommentDialog(null);
+                    handlePlatformAction(action, platformGeneralComment);
                   }}
-                  disabled={githubCommentDialog.action !== 'approve' && totalAnnotationCount === 0 && !githubGeneralComment.trim()}
+                  disabled={platformCommentDialog.action !== 'approve' && totalAnnotationCount === 0 && !platformGeneralComment.trim()}
                   className={`px-4 py-2 rounded-md text-sm font-medium transition-opacity ${
-                    githubCommentDialog.action !== 'approve' && totalAnnotationCount === 0 && !githubGeneralComment.trim()
+                    platformCommentDialog.action !== 'approve' && totalAnnotationCount === 0 && !platformGeneralComment.trim()
                       ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
-                      : githubCommentDialog.action === 'approve'
+                      : platformCommentDialog.action === 'approve'
                         ? 'bg-success text-success-foreground hover:opacity-90'
                         : 'bg-primary text-primary-foreground hover:opacity-90'
                   }`}
                 >
-                  {githubCommentDialog.action === 'approve' ? 'Approve' : 'Post Comments'}
+                  {platformCommentDialog.action === 'approve' ? 'Approve' : 'Post Comments'}
                 </button>
               </div>
             </div>

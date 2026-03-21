@@ -15,7 +15,7 @@ import { getRepoInfo } from "./repo";
 import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft } from "./draft";
 import { createEditorAnnotationHandler } from "./editor-annotations";
-import { type PRMetadata, type PRReviewFileComment, fetchPRFileContent, fetchPRContext, submitPRReview, getGhUser } from "./pr";
+import { type PRMetadata, type PRReviewFileComment, fetchPRFileContent, fetchPRContext, submitPRReview, getUser, prRefFromMetadata, getDisplayRepo, getMRLabel, getMRNumberLabel } from "./pr";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -105,11 +105,12 @@ export async function startReviewServer(
   // Detect repo info (cached for this session)
   // In PR mode, derive from metadata instead of local git
   const repoInfo = isPRMode
-    ? { display: `${prMetadata.owner}/${prMetadata.repo}`, branch: `PR #${prMetadata.number}` }
+    ? { display: getDisplayRepo(prMetadata), branch: `${getMRLabel(prMetadata)} ${getMRNumberLabel(prMetadata)}` }
     : await getRepoInfo();
 
-  // Fetch current GitHub user (for own-PR detection)
-  const ghUser = isPRMode ? await getGhUser() : null;
+  // Fetch current platform user (for own-PR/MR detection)
+  const prRef = isPRMode ? prRefFromMetadata(prMetadata) : null;
+  const platformUser = prRef ? await getUser(prRef) : null;
 
   // Decision promise
   let resolveDecision: (result: {
@@ -149,7 +150,7 @@ export async function startReviewServer(
               sharingEnabled,
               shareBaseUrl,
               repoInfo,
-              ...(isPRMode && { prMetadata, ghUser }),
+              ...(isPRMode && { prMetadata, platformUser }),
               ...(currentError && { error: currentError }),
             });
           }
@@ -207,13 +208,7 @@ export async function startReviewServer(
               );
             }
             try {
-              const ref = {
-                platform: "github" as const,
-                owner: prMetadata!.owner,
-                repo: prMetadata!.repo,
-                number: prMetadata!.number,
-              };
-              const context = await fetchPRContext(ref);
+              const context = await fetchPRContext(prRef!);
               return Response.json(context);
             } catch (err) {
               const message =
@@ -239,11 +234,10 @@ export async function startReviewServer(
             }
 
             if (isPRMode) {
-              // Fetch file content from GitHub API using base/head SHAs
-              const prRef = { platform: prMetadata.platform, owner: prMetadata.owner, repo: prMetadata.repo, number: prMetadata.number } as const;
+              // Fetch file content from platform API using base/head SHAs
               const [oldContent, newContent] = await Promise.all([
-                fetchPRFileContent(prRef, prMetadata.baseSha, oldPath || filePath),
-                fetchPRFileContent(prRef, prMetadata.headSha, filePath),
+                fetchPRFileContent(prRef!, prMetadata.baseSha, oldPath || filePath),
+                fetchPRFileContent(prRef!, prMetadata.headSha, filePath),
               ]);
               return Response.json({ oldContent, newContent });
             }
@@ -361,15 +355,8 @@ export async function startReviewServer(
                 fileComments: PRReviewFileComment[];
               };
 
-              const prRef = {
-                platform: "github" as const,
-                owner: prMetadata.owner,
-                repo: prMetadata.repo,
-                number: prMetadata.number,
-              };
-
               await submitPRReview(
-                prRef,
+                prRef!,
                 prMetadata.headSha,
                 body.action,
                 body.body,

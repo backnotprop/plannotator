@@ -1,5 +1,6 @@
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import type { PRMetadata } from '@plannotator/shared/pr-provider';
+import { getMRLabel, getMRNumberLabel, getDisplayRepo } from '@plannotator/shared/pr-provider';
 
 /**
  * Build markdown feedback from code review annotations.
@@ -23,7 +24,7 @@ export function exportReviewFeedback(
   }
 
   let output = prMeta
-    ? `# PR Review: ${prMeta.owner}/${prMeta.repo}#${prMeta.number}\n\n` +
+    ? `# ${getMRLabel(prMeta)} Review: ${getDisplayRepo(prMeta)}${getMRNumberLabel(prMeta)}\n\n` +
       `**${prMeta.title}**\n` +
       `Branch: \`${prMeta.headBranch}\` → \`${prMeta.baseBranch}\`\n` +
       `${prMeta.url}\n\n`

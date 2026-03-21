@@ -44,7 +44,7 @@ import {
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
 import { getGitContext, runGitDiff } from "@plannotator/server/git";
-import { parsePRUrl, checkGhAuth, fetchPR } from "@plannotator/server/pr";
+import { parsePRUrl, checkAuth, fetchPR, getCliName, getCliInstallUrl, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
 import { resolveMarkdownFile } from "@plannotator/server/resolve-file";
 import { registerSession, unregisterSession, listSessions } from "@plannotator/server/sessions";
@@ -149,29 +149,34 @@ if (args[0] === "sessions") {
     // --- PR Review Mode ---
     const prRef = parsePRUrl(urlArg);
     if (!prRef) {
-      console.error(`Invalid PR URL: ${urlArg}`);
-      console.error("Supported formats: https://github.com/owner/repo/pull/123");
+      console.error(`Invalid PR/MR URL: ${urlArg}`);
+      console.error("Supported formats:");
+      console.error("  GitHub: https://github.com/owner/repo/pull/123");
+      console.error("  GitLab: https://gitlab.com/group/project/-/merge_requests/42");
       process.exit(1);
     }
 
+    const cliName = getCliName(prRef);
+    const cliUrl = getCliInstallUrl(prRef);
+
     try {
-      await checkGhAuth();
+      await checkAuth(prRef);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("not found") || msg.includes("ENOENT")) {
-        console.error("GitHub CLI (gh) is not installed.");
-        console.error("Install it from https://cli.github.com");
+        console.error(`${cliName === "gh" ? "GitHub" : "GitLab"} CLI (${cliName}) is not installed.`);
+        console.error(`Install it from ${cliUrl}`);
       } else {
         console.error(msg);
       }
       process.exit(1);
     }
 
-    console.error(`Fetching PR #${prRef.number} from ${prRef.owner}/${prRef.repo}...`);
+    console.error(`Fetching ${getMRLabel(prRef)} ${getMRNumberLabel(prRef)} from ${getDisplayRepo(prRef)}...`);
     try {
       const pr = await fetchPR(prRef);
       rawPatch = pr.rawPatch;
-      gitRef = `PR #${prRef.number}`;
+      gitRef = `${getMRLabel(prRef)} ${getMRNumberLabel(prRef)}`;
       prMetadata = pr.metadata;
     } catch (err) {
       console.error(err instanceof Error ? err.message : "Failed to fetch PR");
@@ -216,7 +221,7 @@ if (args[0] === "sessions") {
     mode: "review",
     project: reviewProject,
     startedAt: new Date().toISOString(),
-    label: isPRMode ? `pr-review-${prMetadata!.owner}/${prMetadata!.repo}#${prMetadata!.number}` : `review-${reviewProject}`,
+    label: isPRMode ? `${getMRLabel(prMetadata!).toLowerCase()}-review-${getDisplayRepo(prMetadata!)}${getMRNumberLabel(prMetadata!)}` : `review-${reviewProject}`,
   });
 
   // Wait for user feedback

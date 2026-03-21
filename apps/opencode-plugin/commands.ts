@@ -14,7 +14,7 @@ import {
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
 import { getGitContext, runGitDiffWithContext } from "@plannotator/server/git";
-import { parsePRUrl, checkGhAuth, fetchPR } from "@plannotator/server/pr";
+import { parsePRUrl, checkAuth, fetchPR, getCliName, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { resolveMarkdownFile } from "@plannotator/server/resolve-file";
 
 /** Shared dependencies injected by the plugin */
@@ -44,28 +44,29 @@ export async function handleReviewCommand(
   let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
 
   if (isPRMode) {
-    client.app.log({ level: "info", message: "Fetching PR for review..." });
-
     const prRef = parsePRUrl(urlArg);
     if (!prRef) {
-      client.app.log({ level: "error", message: `Invalid PR URL: ${urlArg}` });
+      client.app.log({ level: "error", message: `Invalid PR/MR URL: ${urlArg}` });
       return;
     }
 
+    client.app.log({ level: "info", message: `Fetching ${getMRLabel(prRef)} ${getMRNumberLabel(prRef)} from ${getDisplayRepo(prRef)}...` });
+
     try {
-      await checkGhAuth();
+      await checkAuth(prRef);
     } catch (err) {
-      client.app.log({ level: "error", message: err instanceof Error ? err.message : "GitHub CLI auth check failed" });
+      const cliName = getCliName(prRef);
+      client.app.log({ level: "error", message: err instanceof Error ? err.message : `${cliName} auth check failed` });
       return;
     }
 
     try {
       const pr = await fetchPR(prRef);
       rawPatch = pr.rawPatch;
-      gitRef = `PR #${prRef.number}`;
+      gitRef = `${getMRLabel(prRef)} ${getMRNumberLabel(prRef)}`;
       prMetadata = pr.metadata;
     } catch (err) {
-      client.app.log({ level: "error", message: err instanceof Error ? err.message : "Failed to fetch PR" });
+      client.app.log({ level: "error", message: err instanceof Error ? err.message : `Failed to fetch ${getMRLabel(prRef)} ${getMRNumberLabel(prRef)}` });
       return;
     }
   } else {
