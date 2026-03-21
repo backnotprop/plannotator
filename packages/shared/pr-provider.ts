@@ -189,6 +189,11 @@ export function getCliInstallUrl(ref: PRRef): string {
     : "https://gitlab.com/gitlab-org/cli";
 }
 
+/** Encode a file path for use in platform API URLs */
+export function encodeApiFilePath(filePath: string): string {
+  return encodeURIComponent(filePath);
+}
+
 // --- URL Parsing ---
 
 /**

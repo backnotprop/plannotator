@@ -5,6 +5,7 @@
  */
 
 import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, CommandResult } from "./pr-provider";
+import { encodeApiFilePath } from "./pr-provider";
 
 // GitHub-specific PRRef shape (used internally)
 interface GhPRRef {
@@ -189,7 +190,7 @@ export async function fetchGhPRFileContent(
 ): Promise<string | null> {
   const result = await runtime.runCommand("gh", [
     "api",
-    `repos/${ref.owner}/${ref.repo}/contents/${filePath}?ref=${sha}`,
+    `repos/${ref.owner}/${ref.repo}/contents/${encodeApiFilePath(filePath)}?ref=${sha}`,
     "--jq", ".content",
   ]);
 

@@ -6,6 +6,7 @@
  */
 
 import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, CommandResult } from "./pr-provider";
+import { encodeApiFilePath } from "./pr-provider";
 
 // GitLab-specific MRRef shape (used internally)
 interface GlMRRef {
@@ -221,8 +222,25 @@ export async function fetchGlMRContext(
     : mergeStatus === "unchecked" ? "UNKNOWN"
     : mergeStatus.toUpperCase();
 
+  // Map GitLab detailed_merge_status to GitHub-compatible merge state enums
+  const mergeStateMap: Record<string, string> = {
+    mergeable: "CLEAN",
+    broken_status: "DIRTY",
+    checking: "UNKNOWN",
+    unchecked: "UNKNOWN",
+    ci_must_pass: "BLOCKED",
+    ci_still_running: "BLOCKED",
+    discussions_not_resolved: "BLOCKED",
+    draft_status: "BLOCKED",
+    blocked_status: "BLOCKED",
+    not_approved: "BLOCKED",
+    not_open: "DIRTY",
+    need_rebase: "BEHIND",
+    conflict: "DIRTY",
+    jira_association_missing: "BLOCKED",
+  };
   const mergeStateStatus = detailedStatus
-    ? detailedStatus.toUpperCase()
+    ? (mergeStateMap[detailedStatus] ?? detailedStatus.toUpperCase())
     : mergeable;
 
   // --- Notes (comments) ---
@@ -249,11 +267,10 @@ export async function fetchGlMRContext(
   if (approvalsResult.exitCode === 0) {
     try {
       const approvals = JSON.parse(approvalsResult.stdout) as Record<string, unknown>;
-      const approvalsLeft = typeof approvals.approvals_left === "number" ? approvals.approvals_left : -1;
-      const approved = approvals.approved === true || approvalsLeft === 0;
+      const approvedBy = arr(approvals.approved_by);
+      const approved = approvals.approved === true || approvedBy.length > 0;
       reviewDecision = approved ? "APPROVED" : "";
 
-      const approvedBy = arr(approvals.approved_by);
       for (const a of approvedBy) {
         const user = (a as any)?.user;
         if (!user) continue;
@@ -285,10 +302,17 @@ export async function fetchGlMRContext(
             for (const job of jobs) {
               const jobStatus = str(job.status);
               const isComplete = ["success", "failed", "canceled", "skipped"].includes(jobStatus);
+              // Map GitLab job statuses to GitHub-compatible conclusion enums
+              const conclusionMap: Record<string, string> = {
+                success: "SUCCESS",
+                failed: "FAILURE",
+                canceled: "NEUTRAL",
+                skipped: "SKIPPED",
+              };
               checks.push({
                 name: str(job.name),
                 status: isComplete ? "COMPLETED" : "IN_PROGRESS",
-                conclusion: isComplete ? jobStatus.toUpperCase() : null,
+                conclusion: isComplete ? (conclusionMap[jobStatus] ?? jobStatus.toUpperCase()) : null,
                 workflowName: str(latest.ref),
                 detailsUrl: str(job.web_url),
               });
@@ -340,7 +364,7 @@ export async function fetchGlFileContent(
   filePath: string,
 ): Promise<string | null> {
   const encoded = encodeProject(ref.projectPath);
-  const encodedPath = encodeURIComponent(filePath);
+  const encodedPath = encodeApiFilePath(filePath);
 
   const result = await runtime.runCommand(
     "glab",
