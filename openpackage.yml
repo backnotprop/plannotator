@@ -1,0 +1,8 @@
+name: plannotator
+version: 0.8.0
+description: Interactive Plan Review for Claude Code. Annotate plans visually, share with team, and send feedback to agents.
+author: backnotprop
+license: MIT
+
+includes:
+  - apps/hook/**/*
