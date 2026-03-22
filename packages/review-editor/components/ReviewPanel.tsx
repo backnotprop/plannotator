@@ -188,7 +188,7 @@ export const ReviewPanel: React.FC<ReviewPanelProps> = ({
   return (
     <aside className="border-l border-border/50 bg-card/30 backdrop-blur-sm flex flex-col flex-shrink-0" style={{ width: width ?? 288 }}>
         {/* Header */}
-        <div className="p-3 border-b border-border/50">
+        <div className="px-3 flex items-center border-b border-border/50" style={{ height: 'var(--panel-header-h)' }}>
           <div className="flex items-center gap-2">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               {activeTab === 'annotations' ? 'Annotations' : activeTab === 'summary' ? 'Summary' : activeTab === 'comments' ? 'Comments' : 'Checks'}

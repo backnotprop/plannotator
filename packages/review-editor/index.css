@@ -12,6 +12,12 @@
    Code Review Specific Styles
    ===================================================== */
 
+/* Shared panel header height — keeps file header, sidebar headers, and
+   search bar vertically aligned across all three columns. */
+:root {
+  --panel-header-h: 37px;
+}
+
 /* @pierre/diffs theme integration — pass plannotator theme colors into shadow DOM */
 diffs-container {
   --diffs-dark-bg: var(--background);
@@ -155,7 +161,7 @@ diffs-container {
 
 /* Line selection highlight */
 .line-selected {
-  background: oklch(from var(--primary) l c h / 0.15) !important;
+  background: oklch(from var(--primary) l c h / 0.3) !important;
 }
 
 /* Hover utility button (GitHub-style +) */
@@ -198,8 +204,8 @@ diffs-container {
 }
 
 .file-tree-item.active {
-  background: var(--primary);
-  color: var(--primary-foreground);
+  background: oklch(from var(--primary) l c h / 0.3);
+  color: var(--primary);
 }
 
 .file-tree-item.has-annotations {
@@ -211,7 +217,7 @@ diffs-container {
 }
 
 .file-tree-item.active.has-annotations {
-  background: var(--primary);
+  background: oklch(from var(--primary) l c h / 0.3);
 }
 
 .file-tree-item .additions {
@@ -222,10 +228,12 @@ diffs-container {
   color: var(--destructive);
 }
 
-.file-tree-item.active .additions,
+.file-tree-item.active .additions {
+  color: var(--success);
+}
+
 .file-tree-item.active .deletions {
-  color: var(--primary-foreground);
-  opacity: 0.8;
+  color: var(--destructive);
 }
 
 .file-tree-item.staged {
@@ -237,7 +245,7 @@ diffs-container {
 }
 
 .file-tree-item.staged.active {
-  background: var(--primary);
+  background: oklch(from var(--primary) l c h / 0.3);
 }
 
 /* Annotation toolbar for code review */
