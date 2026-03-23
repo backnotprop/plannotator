@@ -1,6 +1,8 @@
 ---
 import { getCollection, render } from 'astro:content';
 import Docs from '../../layouts/Docs.astro';
+import ShortcutReference from '../../components/ShortcutReference.astro';
+import { shortcutReferenceHeadings } from '../../lib/shortcutReference';
 
 export async function getStaticPaths() {
   const docs = await getCollection('docs');
@@ -11,7 +13,12 @@ export async function getStaticPaths() {
 }
 
 const { doc } = Astro.props;
-const { Content, headings } = await render(doc);
+const isShortcutReference = doc.id === 'reference/keyboard-shortcuts';
+const rendered = isShortcutReference ? null : await render(doc);
+const Content = rendered?.Content;
+const headings = isShortcutReference
+  ? shortcutReferenceHeadings
+  : rendered?.headings ?? [];
 ---
 <Docs
   title={doc.data.title}
@@ -19,5 +26,5 @@ const { Content, headings } = await render(doc);
   headings={headings}
   currentId={doc.id}
 >
-  <Content />
+  {isShortcutReference ? <ShortcutReference /> : Content && <Content />}
 </Docs>

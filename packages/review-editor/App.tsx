@@ -35,7 +35,8 @@ import { exportReviewFeedback } from './utils/exportFeedback';
 import type { DiffFile } from './types';
 import type { DiffOption, WorktreeInfo, GitContext } from '@plannotator/shared/types';
 import type { PRMetadata } from '@plannotator/shared/pr-provider';
-import { altKey } from '@plannotator/ui/utils/platform';
+import { formatShortcutBindingText, formatShortcutBindingTokens, getShortcutPlatform } from '@plannotator/ui/shortcuts';
+import { reviewEditorShortcuts, reviewSettingsShortcutRegistry, useReviewEditorShortcuts, useReviewEditorDoubleTap } from './shortcuts';
 
 declare const __APP_VERSION__: string;
 
@@ -320,47 +321,123 @@ const ReviewApp: React.FC = () => {
     defaultWidth: 256, minWidth: 160, maxWidth: 400, side: 'left',
   });
   const isResizing = panelResize.isDragging || fileTreeResize.isDragging;
+  const isReviewShortcutTarget = (e: KeyboardEvent) => {
+    const tag = (e.target as HTMLElement)?.tagName;
+    return tag !== 'INPUT' && tag !== 'TEXTAREA';
+  };
 
   // Global keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Cmd/Ctrl+F to focus search (only when sidebar is rendered)
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f' && !isTypingTarget(e.target)) {
-        if (files.length > 1 || gitContext?.diffOptions) {
+  useReviewEditorShortcuts({
+    handlers: {
+      focusSearch: {
+        // Cmd/Ctrl+F to focus search (only when sidebar is rendered)
+        when: (e) => !isTypingTarget(e.target) && (files.length > 1 || !!gitContext?.diffOptions),
+        handle: (e) => {
           e.preventDefault();
           openSearch();
-        }
-        return;
-      }
+        },
+      },
+      nextSearchMatch: {
+        // Enter/F3 to step through search matches
+        when: (e) => searchMatches.length > 0 && !isTypingTarget(e.target),
+        handle: (e) => {
+          e.preventDefault();
+          stepSearchMatch(1);
+        },
+      },
+      prevSearchMatch: {
+        when: (e) => searchMatches.length > 0 && !isTypingTarget(e.target),
+        handle: (e) => {
+          e.preventDefault();
+          stepSearchMatch(-1);
+        },
+      },
+      clearSearch: {
+        // Escape closes modals, destination menu, or clears search
+        when: () => showDestinationMenu || showExportModal || !!searchQuery,
+        handle: () => {
+          if (showDestinationMenu) {
+            setShowDestinationMenu(false);
+          } else if (showExportModal) {
+            setShowExportModal(false);
+          } else if (searchQuery) {
+            clearSearch();
+          }
+        },
+      },
+      copyDiff: {
+        // Cmd/Ctrl+Shift+C to copy diff
+        handle: (e) => {
+          e.preventDefault();
+          handleCopyDiff();
+        },
+      },
+      submit: {
+        // Cmd/Ctrl+Enter keyboard shortcut to approve or send feedback
+        when: (e) => {
+          // Platform comment dialog: allow Cmd+Enter from any target (including textarea)
+          if (platformCommentDialog) {
+            if (submitted || isPlatformActioning) return false;
+            const isApproveAction = platformCommentDialog.action === 'approve';
+            return isApproveAction || totalAnnotationCount > 0 || !!platformGeneralComment.trim();
+          }
+          // Normal: only from non-input targets
+          if (!isReviewShortcutTarget(e)) return false;
+          if (showExportModal || showNoAnnotationsDialog || showApproveWarning) return false;
+          if (submitted || isSendingFeedback || isApproving || isPlatformActioning) return false;
+          if (!origin) return false;
+          return true;
+        },
+        handle: (e) => {
+          e.preventDefault();
 
-      // Enter/F3 to step through search matches
-      if ((e.key === 'Enter' || e.key === 'F3') && searchMatches.length > 0 && !isTypingTarget(e.target)) {
-        e.preventDefault();
-        stepSearchMatch(e.shiftKey ? -1 : 1);
-        return;
-      }
+          // Platform comment dialog submission
+          if (platformCommentDialog) {
+            const { action } = platformCommentDialog;
+            setPlatformCommentDialog(null);
+            handlePlatformAction(action, platformGeneralComment);
+            return;
+          }
 
-      // Escape closes modals or clears search
-      if (e.key === 'Escape') {
-        if (showDestinationMenu) {
-          setShowDestinationMenu(false);
-        } else if (showExportModal) {
-          setShowExportModal(false);
-        } else if (searchQuery) {
-          clearSearch();
-        }
-      }
-      // Cmd/Ctrl+Shift+C to copy diff
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'c') {
-        e.preventDefault();
-        handleCopyDiff();
-      }
-    };
+          if (platformMode) {
+            // Platform mode: No annotations → Approve, otherwise → Post Review
+            const isOwnPR = !!platformUser && prMetadata?.author === platformUser;
+            if (totalAnnotationCount === 0 && !isOwnPR) {
+              setPlatformGeneralComment('');
+              setPlatformCommentDialog({ action: 'approve' });
+            } else {
+              setPlatformGeneralComment('');
+              setPlatformCommentDialog({ action: 'comment' });
+            }
+          } else {
+            // Agent mode: No annotations → Approve, otherwise → Send Feedback
+            if (totalAnnotationCount === 0) {
+              handleApprove();
+            } else {
+              handleSendFeedback();
+            }
+          }
+        },
+      },
+    },
+  });
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showExportModal, showDestinationMenu, searchQuery, searchMatches, openSearch, stepSearchMatch, clearSearch, files, gitContext?.diffOptions]);
+  // Double-tap Alt to toggle review destination (PR mode only)
+  useReviewEditorDoubleTap({
+    handlers: {
+      toggleDestination: {
+        when: (e) => !!prMetadata && isReviewShortcutTarget(e),
+        handle: () => {
+          setReviewDestination(prev => {
+            const next = prev === 'platform' ? 'agent' : 'platform';
+            storage.setItem('plannotator-review-dest', next);
+            setPlatformActionError(null);
+            return next;
+          });
+        },
+      },
+    },
+  });
 
   // Get annotations for active file
   const activeFileAnnotations = useMemo(() => {
@@ -846,97 +923,6 @@ const ReviewApp: React.FC = () => {
     }
   }, [buildPRReviewPayload, platformOpenPR]);
 
-  // Double-tap Option/Alt to toggle review destination (PR mode only)
-  useEffect(() => {
-    if (!prMetadata) return;
-    let lastAltUp = 0;
-    const DOUBLE_TAP_WINDOW = 300;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Alt' || e.repeat) return;
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key !== 'Alt') return;
-      const now = Date.now();
-      if (now - lastAltUp < DOUBLE_TAP_WINDOW) {
-        setReviewDestination(prev => {
-          const next = prev === 'platform' ? 'agent' : 'platform';
-          storage.setItem('plannotator-review-dest', next);
-          setPlatformActionError(null);
-          return next;
-        });
-        lastAltUp = 0;
-      } else {
-        lastAltUp = now;
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [prMetadata]);
-
-  // Cmd/Ctrl+Enter keyboard shortcut to approve or send feedback
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
-
-      // If the GitHub comment dialog is open, Cmd+Enter submits it
-      if (platformCommentDialog) {
-        if (submitted || isPlatformActioning) return;
-        const isApproveAction = platformCommentDialog.action === 'approve';
-        const canSubmit = isApproveAction || totalAnnotationCount > 0 || platformGeneralComment.trim();
-        if (!canSubmit) return;
-        e.preventDefault();
-        const { action } = platformCommentDialog;
-        setPlatformCommentDialog(null);
-        handlePlatformAction(action, platformGeneralComment);
-        return;
-      }
-
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      if (showExportModal || showNoAnnotationsDialog || showApproveWarning) return;
-      if (submitted || isSendingFeedback || isApproving || isPlatformActioning) return;
-      if (!origin) return; // Demo mode
-
-      e.preventDefault();
-
-      if (platformMode) {
-        // GitHub mode: No annotations → Approve on GitHub, otherwise → Post Review
-        const isOwnPR = !!platformUser && prMetadata?.author === platformUser;
-        if (totalAnnotationCount === 0 && !isOwnPR) {
-          setPlatformGeneralComment('');
-          setPlatformCommentDialog({ action: 'approve' });
-        } else {
-          setPlatformGeneralComment('');
-          setPlatformCommentDialog({ action: 'comment' });
-        }
-      } else {
-        // Agent mode: No annotations → Approve, otherwise → Send Feedback
-        if (totalAnnotationCount === 0) {
-          handleApprove();
-        } else {
-          handleSendFeedback();
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [
-    showExportModal, showNoAnnotationsDialog, showApproveWarning,
-    platformCommentDialog, platformGeneralComment,
-    submitted, isSendingFeedback, isApproving, isPlatformActioning,
-    origin, platformMode, platformUser, prMetadata, totalAnnotationCount,
-    handleApprove, handleSendFeedback, handlePlatformAction
-  ]);
 
   if (isLoading) {
     return (
@@ -1033,7 +1019,7 @@ const ReviewApp: React.FC = () => {
             <button
               onClick={handleCopyDiff}
               className="px-2 py-1 md:px-2.5 rounded-md text-xs font-medium bg-muted hover:bg-muted/80 transition-colors flex items-center gap-1.5"
-              title="Copy all raw diffs (Cmd+Shift+C)"
+              title={`Copy all raw diffs (${formatShortcutBindingText(reviewEditorShortcuts.shortcuts.copyDiff.bindings[0], getShortcutPlatform())})`}
             >
               {copyFeedback === 'Diff copied!' ? (
                 <>
@@ -1110,8 +1096,8 @@ const ReviewApp: React.FC = () => {
                           </button>
                           <div className="border-t border-border/50 mt-1 pt-1 px-3 py-1">
                             <span className="text-[10px] text-muted-foreground/40">
-                              <kbd className="inline-flex items-center justify-center min-w-[18px] h-[16px] px-1 rounded bg-muted border border-border/60 border-b-[2px] text-[9px] font-mono leading-none text-foreground/60 shadow-sm">{altKey}</kbd>
-                              <kbd className="inline-flex items-center justify-center min-w-[18px] h-[16px] px-1 rounded bg-muted border border-border/60 border-b-[2px] text-[9px] font-mono leading-none text-foreground/60 shadow-sm ml-0.5">{altKey}</kbd>
+                              <kbd className="inline-flex items-center justify-center min-w-[18px] h-[16px] px-1 rounded bg-muted border border-border/60 border-b-[2px] text-[9px] font-mono leading-none text-foreground/60 shadow-sm">{formatShortcutBindingTokens('Alt', getShortcutPlatform())[0]}</kbd>
+                              <kbd className="inline-flex items-center justify-center min-w-[18px] h-[16px] px-1 rounded bg-muted border border-border/60 border-b-[2px] text-[9px] font-mono leading-none text-foreground/60 shadow-sm ml-0.5">{formatShortcutBindingTokens('Alt', getShortcutPlatform())[0]}</kbd>
                               <span className="ml-1.5">to toggle</span>
                             </span>
                           </div>
@@ -1251,6 +1237,7 @@ const ReviewApp: React.FC = () => {
               onTaterModeChange={() => {}}
               onIdentityChange={handleIdentityChange}
               origin={origin}
+              shortcutRegistry={reviewSettingsShortcutRegistry}
               mode="review"
               aiProviders={aiProviders}
             />

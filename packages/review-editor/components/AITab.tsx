@@ -8,7 +8,8 @@ import { CountBadge } from './CountBadge';
 import { CopyButton } from './CopyButton';
 import { PermissionCard } from './PermissionCard';
 import { AIConfigBar } from './AIConfigBar';
-import { submitHint } from '@plannotator/ui/utils/platform';
+import { dispatchShortcutEvent, formatShortcutBindingText, getShortcutPlatform } from '@plannotator/ui/shortcuts';
+import { reviewAnnotationToolbarShortcuts } from '../annotationToolbar.shortcuts';
 
 interface AIProviderInfo {
   id: string;
@@ -312,17 +313,22 @@ const GeneralInput: React.FC<{
           style={{ maxHeight: 120 }}
           disabled={disabled}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing && !disabled) {
-              e.preventDefault();
-              onSubmit();
-            }
+            dispatchShortcutEvent(reviewAnnotationToolbarShortcuts, {
+              submitComment: {
+                when: (event) => !event.isComposing && !disabled,
+                handle: (event) => {
+                  event.preventDefault();
+                  onSubmit();
+                },
+              },
+            }, e.nativeEvent);
           }}
         />
         <button
           onClick={onSubmit}
           disabled={disabled || !value.trim()}
           className="p-1.5 mb-px rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-          title={`Send (${submitHint})`}
+          title={`Send (${formatShortcutBindingText(reviewAnnotationToolbarShortcuts.shortcuts.submitComment.bindings[0], getShortcutPlatform())})`}
         >
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />

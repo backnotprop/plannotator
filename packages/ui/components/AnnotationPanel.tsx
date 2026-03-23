@@ -4,6 +4,7 @@ import { isCurrentUser } from '../utils/identity';
 import { ImageThumbnail } from './ImageThumbnail';
 import { EditorAnnotationCard } from './EditorAnnotationCard';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { commentPopoverShortcuts, dispatchShortcutEvent } from '../shortcuts';
 
 interface PanelProps {
   isOpen: boolean;
@@ -277,13 +278,19 @@ const AnnotationCard: React.FC<{
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
-      e.preventDefault();
-      handleSaveEdit();
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      handleCancelEdit();
-    }
+    dispatchShortcutEvent(commentPopoverShortcuts, {
+      submit: {
+        when: (event) => !event.isComposing,
+        handle: (event) => {
+          event.preventDefault();
+          handleSaveEdit();
+        },
+      },
+      cancel: (event) => {
+        event.preventDefault();
+        handleCancelEdit();
+      },
+    }, e.nativeEvent);
   };
 
   const typeConfig = {

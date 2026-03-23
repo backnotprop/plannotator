@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { useDismissOnOutsideAndEscape } from "../hooks/useDismissOnOutsideAndEscape";
 import { type QuickLabel, getQuickLabels } from "../utils/quickLabels";
 import { FloatingQuickLabelPicker } from "./FloatingQuickLabelPicker";
+import { getShortcutDigit, useAnnotationToolbarShortcuts } from "../shortcuts";
 
 type PositionMode = 'center-above' | 'top-right';
 
@@ -103,42 +104,51 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     };
   }, [element, positionMode, closeOnScrollOut, onClose]);
 
-  // Type-to-comment + Alt+N / bare digit quick label shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.isComposing) return;
-      if (isEditableElement(e.target) || isEditableElement(document.activeElement)) return;
+  const canHandleToolbarShortcut = (e: KeyboardEvent) => {
+    if (showQuickLabels) return false;
+    if (e.isComposing) return false;
+    if (isEditableElement(e.target) || isEditableElement(document.activeElement)) return false;
+    return true;
+  };
 
-      // When picker is open, let FloatingQuickLabelPicker own all keyboard input
-      if (showQuickLabels) return;
+  const canApplyQuickLabel = (e: KeyboardEvent) => {
+    if (!canHandleToolbarShortcut(e)) return false;
+    const digit = getShortcutDigit(e);
+    const index = digit === null ? Number.NaN : digit === 0 ? 9 : digit - 1;
+    return !!onQuickLabel && index >= 0 && index < quickLabels.length;
+  };
 
-      if (e.key === "Escape") {
-        onClose();
-        return;
-      }
+  const canTypeToComment = (e: KeyboardEvent) => {
+    if (!canHandleToolbarShortcut(e)) return false;
+    if (e.key === 'Tab' || e.key === 'Enter') return false;
+    return e.key.length === 1;
+  };
 
-      // Alt+N applies quick label (picker closed)
-      const isDigit = (e.code >= 'Digit1' && e.code <= 'Digit9') || e.code === 'Digit0';
-      if (isDigit && !e.ctrlKey && !e.metaKey && e.altKey) {
-        e.preventDefault();
-        const digit = parseInt(e.code.slice(5), 10);
-        const index = digit === 0 ? 9 : digit - 1;
-        if (index < quickLabels.length) {
-          onQuickLabel?.(quickLabels[index]);
-        }
-        return;
-      }
-
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (e.key === "Tab" || e.key === "Enter") return;
-      if (e.key.length !== 1) return;
-
-      onRequestComment?.(e.key);
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose, onRequestComment, onQuickLabel, quickLabels, showQuickLabels]);
+  useAnnotationToolbarShortcuts({
+    handlers: {
+      close: {
+        when: canHandleToolbarShortcut,
+        handle: () => {
+          onClose();
+        },
+      },
+      applyQuickLabel: {
+        when: canApplyQuickLabel,
+        handle: (e) => {
+          const digit = getShortcutDigit(e);
+          if (digit === null) return;
+          e.preventDefault();
+          onQuickLabel?.(quickLabels[digit === 0 ? 9 : digit - 1]);
+        },
+      },
+      typeToComment: {
+        when: canTypeToComment,
+        handle: (e) => {
+          onRequestComment?.(e.key);
+        },
+      },
+    },
+  });
 
   useDismissOnOutsideAndEscape({
     enabled: !showQuickLabels,

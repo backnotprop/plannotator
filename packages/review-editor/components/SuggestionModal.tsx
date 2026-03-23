@@ -3,6 +3,8 @@ import { HighlightedCode } from './HighlightedCode';
 import { ToolbarState } from '../hooks/useAnnotationToolbar';
 import { useTabIndent } from '../hooks/useTabIndent';
 import { detectLanguage } from '../utils/detectLanguage';
+import { dispatchShortcutEvent } from '@plannotator/ui/shortcuts';
+import { reviewAnnotationToolbarShortcuts } from '../annotationToolbar.shortcuts';
 
 interface SuggestionModalProps {
   filePath: string;
@@ -103,11 +105,14 @@ export const SuggestionModal: React.FC<SuggestionModalProps> = ({
               autoFocus
               spellCheck={false}
               onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  onClose();
-                } else if (e.key === 'Tab') {
-                  handleTabIndent(e);
-                }
+                dispatchShortcutEvent(reviewAnnotationToolbarShortcuts, {
+                  cancel: () => {
+                    onClose();
+                  },
+                  indentSuggestedCode: () => {
+                    handleTabIndent(e);
+                  },
+                }, e.nativeEvent);
               }}
             />
           </div>

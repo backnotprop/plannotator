@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Tool } from './types';
 import { COLORS } from './types';
+import { formatShortcutBindingText, getShortcutPlatform, imageAnnotatorShortcuts } from '../../shortcuts';
 
 interface ToolbarProps {
   tool: Tool;
@@ -69,9 +70,9 @@ const CheckIcon = () => (
 );
 
 const TOOLS: { id: Tool; icon: React.FC; label: string }[] = [
-  { id: 'pen', icon: PenIcon, label: 'Pen (1)' },
-  { id: 'arrow', icon: ArrowIcon, label: 'Arrow (2)' },
-  { id: 'circle', icon: CircleIcon, label: 'Circle (3)' },
+  { id: 'pen', icon: PenIcon, label: 'Pen' },
+  { id: 'arrow', icon: ArrowIcon, label: 'Arrow' },
+  { id: 'circle', icon: CircleIcon, label: 'Circle' },
 ];
 
 const STROKE_SIZES = [3, 6, 10, 16, 24];
@@ -91,6 +92,14 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   const currentSizeIndex = STROKE_SIZES.indexOf(strokeSize);
   const canDecrease = currentSizeIndex > 0;
   const canIncrease = currentSizeIndex < STROKE_SIZES.length - 1;
+  const platform = getShortcutPlatform();
+  const toolShortcutTitle = {
+    pen: formatShortcutBindingText(imageAnnotatorShortcuts.shortcuts.penTool.bindings[0], platform),
+    arrow: formatShortcutBindingText(imageAnnotatorShortcuts.shortcuts.arrowTool.bindings[0], platform),
+    circle: formatShortcutBindingText(imageAnnotatorShortcuts.shortcuts.circleTool.bindings[0], platform),
+  } as const;
+  const undoShortcutTitle = formatShortcutBindingText(imageAnnotatorShortcuts.shortcuts.undo.bindings[0], platform);
+  const saveShortcutTitle = formatShortcutBindingText(imageAnnotatorShortcuts.shortcuts.save.bindings[0], platform);
 
   return (
     <div className="flex items-center gap-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl">
@@ -101,7 +110,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             key={id}
             type="button"
             onClick={() => onToolChange(id)}
-            title={label}
+            title={`${label} (${toolShortcutTitle[id]})`}
             className={`p-1.5 rounded transition-colors ${
               tool === id
                 ? 'bg-primary text-primary-foreground'
@@ -182,7 +191,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         type="button"
         onClick={onUndo}
         disabled={!canUndo}
-        title="Undo (Cmd+Z)"
+        title={`Undo (${undoShortcutTitle})`}
         className={`p-1.5 rounded transition-colors ${
           canUndo
             ? 'hover:bg-muted text-muted-foreground hover:text-foreground'
@@ -208,7 +217,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       <button
         type="button"
         onClick={onSave}
-        title="Save (Esc)"
+        title={`Save (${saveShortcutTitle})`}
         className="p-1.5 rounded transition-colors bg-success text-success-foreground hover:opacity-90"
       >
         <CheckIcon />

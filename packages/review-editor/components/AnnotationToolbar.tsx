@@ -5,6 +5,8 @@ import { formatLineRange } from '../utils/formatLineRange';
 import { AskAIInput } from './AskAIInput';
 import { SparklesIcon } from './SparklesIcon';
 import type { AIChatEntry } from '../hooks/useAIChat';
+import { dispatchShortcutEvent } from '@plannotator/ui/shortcuts';
+import { reviewAnnotationToolbarShortcuts } from '../annotationToolbar.shortcuts';
 
 interface AnnotationToolbarProps {
   toolbarState: ToolbarState;
@@ -122,11 +124,17 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
             rows={3}
             autoFocus
             onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                onDismiss();
-              } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
-                onSubmit();
-              }
+              dispatchShortcutEvent(reviewAnnotationToolbarShortcuts, {
+                cancel: () => {
+                  onDismiss();
+                },
+                submitComment: {
+                  when: (event) => !event.isComposing,
+                  handle: () => {
+                    onSubmit();
+                  },
+                },
+              }, e.nativeEvent);
             }}
           />
 
@@ -154,11 +162,17 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
                 autoFocus
                 spellCheck={false}
                 onKeyDown={(e) => {
-                  if (e.key === 'Tab') {
-                    handleTabIndent(e);
-                  } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
-                    onSubmit();
-                  }
+                  dispatchShortcutEvent(reviewAnnotationToolbarShortcuts, {
+                    indentSuggestedCode: () => {
+                      handleTabIndent(e);
+                    },
+                    submitComment: {
+                      when: (event) => !event.isComposing,
+                      handle: () => {
+                        onSubmit();
+                      },
+                    },
+                  }, e.nativeEvent);
                 }}
               />
             </div>

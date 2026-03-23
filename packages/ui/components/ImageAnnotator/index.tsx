@@ -1,25 +1,31 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { Canvas } from './Canvas';
 import { Toolbar } from './Toolbar';
 import { renderStroke } from './utils';
-import type { Point, Stroke, Tool, AnnotatorState } from './types';
+import type { Point, AnnotatorState } from './types';
 import { DEFAULT_STATE } from './types';
+import { useImageAnnotatorShortcuts } from '../../shortcuts';
 
 interface ImageAnnotatorProps {
   imageSrc: string;
   isOpen: boolean;
   onAccept: (blob: Blob, hasDrawings: boolean, name: string) => Promise<void>;
   onClose: () => void;
-  /** Pre-populated image name (derived from filename) */
   initialName?: string;
 }
 
-export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
+interface OpenImageAnnotatorProps {
+  imageSrc: string;
+  onAccept: (blob: Blob, hasDrawings: boolean, name: string) => Promise<void>;
+  onClose: () => void;
+  initialName: string;
+}
+
+const OpenImageAnnotator: React.FC<OpenImageAnnotatorProps> = ({
   imageSrc,
-  isOpen,
   onAccept,
   onClose,
-  initialName = '',
+  initialName,
 }) => {
   const [state, setState] = useState<AnnotatorState>(DEFAULT_STATE);
   const [saving, setSaving] = useState(false);
@@ -27,53 +33,105 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
   const imageRef = useRef<HTMLImageElement | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
-  // Reset state when dialog opens
-  useEffect(() => {
-    if (isOpen) {
-      setState(DEFAULT_STATE);
-      setName(initialName);
-    }
-  }, [isOpen, initialName]);
+  const isAnnotatorTextInputTarget = (target: EventTarget | null) => target instanceof HTMLElement && target.tagName === 'INPUT';
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    if (!isOpen) return;
+  const handleUndo = useCallback(() => {
+    setState(s => ({
+      ...s,
+      strokes: s.strokes.slice(0, -1),
+    }));
+  }, []);
 
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't intercept when typing in the name input
-      const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT') {
-        if (e.key === 'Escape') {
-          // Blur and let the next Escape close
-          target.blur();
-          e.preventDefault();
+  const handleAccept = useCallback(async () => {
+    if (saving) return;
+    setSaving(true);
+
+    try {
+      const img = imageRef.current;
+      if (!img) {
+        onClose();
+        return;
+      }
+
+      const hasDrawings = state.strokes.length > 0;
+      const finalName = name.trim() || initialName || 'image';
+
+      if (!hasDrawings) {
+        const response = await fetch(imageSrc);
+        const blob = await response.blob();
+        await onAccept(blob, false, finalName);
+        onClose();
+        return;
+      }
+
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d')!;
+
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      ctx.drawImage(img, 0, 0);
+
+      const scale = img.naturalWidth / img.clientWidth;
+      state.strokes.forEach(stroke => {
+        renderStroke(ctx, stroke, scale);
+      });
+
+      canvas.toBlob(async (blob) => {
+        if (blob) {
+          await onAccept(blob, true, finalName);
         }
-        return;
-      }
+        onClose();
+      }, 'image/png');
+    } catch (err) {
+      console.error('Failed to save annotated image:', err);
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  }, [imageSrc, initialName, name, onAccept, onClose, saving, state.strokes]);
 
-      // Escape or Enter to accept
-      if (e.key === 'Escape' || e.key === 'Enter') {
+  useImageAnnotatorShortcuts({
+    handlers: {
+      save: (e) => {
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'INPUT') {
+          if (e.key === 'Escape') {
+            target.blur();
+            e.preventDefault();
+          }
+          return;
+        }
+
         e.preventDefault();
-        handleAccept();
-        return;
-      }
-
-      // Cmd+Z to undo
-      if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
-        e.preventDefault();
-        handleUndo();
-        return;
-      }
-
-      // 1/2/3 to switch tools
-      if (e.key === '1') setState(s => ({ ...s, tool: 'pen' }));
-      if (e.key === '2') setState(s => ({ ...s, tool: 'arrow' }));
-      if (e.key === '3') setState(s => ({ ...s, tool: 'circle' }));
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, state.strokes]);
+        void handleAccept();
+      },
+      undo: {
+        when: (e) => !isAnnotatorTextInputTarget(e.target),
+        handle: (e) => {
+          e.preventDefault();
+          handleUndo();
+        },
+      },
+      penTool: {
+        when: (e) => !isAnnotatorTextInputTarget(e.target),
+        handle: () => {
+          setState(s => ({ ...s, tool: 'pen' }));
+        },
+      },
+      arrowTool: {
+        when: (e) => !isAnnotatorTextInputTarget(e.target),
+        handle: () => {
+          setState(s => ({ ...s, tool: 'arrow' }));
+        },
+      },
+      circleTool: {
+        when: (e) => !isAnnotatorTextInputTarget(e.target),
+        handle: () => {
+          setState(s => ({ ...s, tool: 'circle' }));
+        },
+      },
+    },
+  });
 
   const handleStrokeStart = useCallback((point: Point) => {
     const id = crypto.randomUUID();
@@ -115,13 +173,6 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
     });
   }, []);
 
-  const handleUndo = useCallback(() => {
-    setState(s => ({
-      ...s,
-      strokes: s.strokes.slice(0, -1),
-    }));
-  }, []);
-
   const handleClear = useCallback(() => {
     setState(s => ({
       ...s,
@@ -134,69 +185,11 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
     imageRef.current = img;
   }, []);
 
-  const handleAccept = async () => {
-    if (saving) return;
-    setSaving(true);
-
-    try {
-      const img = imageRef.current;
-      if (!img) {
-        onClose();
-        return;
-      }
-
-      const hasDrawings = state.strokes.length > 0;
-      const finalName = name.trim() || initialName || 'image';
-
-      // If no drawings, just pass through original image
-      if (!hasDrawings) {
-        const response = await fetch(imageSrc);
-        const blob = await response.blob();
-        await onAccept(blob, false, finalName);
-        onClose();
-        return;
-      }
-
-      // Composite image + drawings
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d')!;
-
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-
-      // Draw original image
-      ctx.drawImage(img, 0, 0);
-
-      // Scale factor from display size to natural size
-      const scale = img.naturalWidth / img.clientWidth;
-
-      // Draw all strokes at full resolution
-      state.strokes.forEach(stroke => {
-        renderStroke(ctx, stroke, scale);
-      });
-
-      // Convert to blob
-      canvas.toBlob(async (blob) => {
-        if (blob) {
-          await onAccept(blob, true, finalName);
-        }
-        onClose();
-      }, 'image/png');
-    } catch (err) {
-      console.error('Failed to save annotated image:', err);
-      onClose();
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
-      handleAccept();
+      void handleAccept();
     }
   };
-
-  if (!isOpen) return null;
 
   return (
     <div
@@ -204,9 +197,7 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
       data-popover-layer
       onClick={handleBackdropClick}
     >
-      {/* Canvas with image and toolbar */}
       <div className="relative flex flex-col items-center gap-3" onClick={(e) => e.stopPropagation()}>
-        {/* Toolbar - above image */}
         <Toolbar
           tool={state.tool}
           color={state.color}
@@ -217,7 +208,7 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
           onStrokeSizeChange={(strokeSize) => setState(s => ({ ...s, strokeSize }))}
           onUndo={handleUndo}
           onClear={handleClear}
-          onSave={handleAccept}
+          onSave={() => void handleAccept()}
         />
 
         <Canvas
@@ -232,7 +223,6 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
           onImageLoad={handleImageLoad}
         />
 
-        {/* Image name input */}
         {initialName && (
           <div className="flex items-center gap-2 w-full max-w-xs">
             <label className="text-xs text-muted-foreground whitespace-nowrap">Name</label>
@@ -244,7 +234,7 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
                   e.preventDefault();
-                  handleAccept();
+                  void handleAccept();
                 }
               }}
               className="flex-1 px-2 py-1 text-xs bg-muted/50 border border-border rounded-md text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
@@ -253,19 +243,36 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
           </div>
         )}
 
-        {/* Accept hint */}
         <div className="text-xs text-muted-foreground">
           Press <kbd className="px-1.5 py-0.5 bg-muted rounded text-foreground">Esc</kbd> or <kbd className="px-1.5 py-0.5 bg-muted rounded text-foreground">Enter</kbd> or click outside to accept
         </div>
       </div>
 
-      {/* Loading overlay */}
       {saving && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/50">
           <div className="text-sm text-muted-foreground">Saving...</div>
         </div>
       )}
     </div>
+  );
+};
+
+export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
+  imageSrc,
+  isOpen,
+  onAccept,
+  onClose,
+  initialName = '',
+}) => {
+  if (!isOpen) return null;
+
+  return (
+    <OpenImageAnnotator
+      imageSrc={imageSrc}
+      onAccept={onAccept}
+      onClose={onClose}
+      initialName={initialName}
+    />
   );
 };
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import type { ImageAttachment } from '../types';
 import { AttachmentsButton } from './AttachmentsButton';
-import { submitHint } from '../utils/platform';
+import { commentPopoverShortcuts, dispatchShortcutEvent, formatShortcutBindingText, getShortcutPlatform } from '../shortcuts';
 
 interface CommentPopoverProps {
   /** Element to anchor the popover near (re-reads position on scroll) */
@@ -106,19 +106,23 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   }, [text, images, onSubmit]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Escape') {
-      e.stopPropagation();
-      if (mode === 'dialog') {
-        setMode('popover');
-      } else {
-        onClose();
-      }
-      return;
-    }
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
-      e.preventDefault();
-      handleSubmit();
-    }
+    dispatchShortcutEvent(commentPopoverShortcuts, {
+      cancel: () => {
+        e.stopPropagation();
+        if (mode === 'dialog') {
+          setMode('popover');
+        } else {
+          onClose();
+        }
+      },
+      submit: {
+        when: (event) => !event.isComposing,
+        handle: () => {
+          e.preventDefault();
+          handleSubmit();
+        },
+      },
+    }, e.nativeEvent);
   };
 
   const headerLabel = isGlobal
@@ -128,6 +132,10 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       : 'Comment';
 
   const canSubmit = text.trim().length > 0 || images.length > 0;
+  const shortcutHint = formatShortcutBindingText(
+    commentPopoverShortcuts.shortcuts.submit.bindings[0],
+    getShortcutPlatform(),
+  );
 
   if (mode === 'dialog') {
     return createPortal(
@@ -198,7 +206,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
               />
             </div>
             <div className="flex items-center gap-3">
-              <span className="text-[10px] text-muted-foreground">{submitHint}</span>
+              <span className="text-[10px] text-muted-foreground">{shortcutHint}</span>
               <button
                 onClick={handleSubmit}
                 disabled={!canSubmit}
@@ -290,7 +298,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           />
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-[10px] text-muted-foreground">{submitHint}</span>
+          <span className="text-[10px] text-muted-foreground">{shortcutHint}</span>
           <button
             onClick={handleSubmit}
             disabled={!canSubmit}

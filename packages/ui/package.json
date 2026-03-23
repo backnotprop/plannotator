@@ -6,6 +6,7 @@
     "./components/*": "./components/*.tsx",
     "./utils/*": "./utils/*.ts",
     "./hooks/*": "./hooks/*.ts",
+    "./shortcuts": "./shortcuts/index.ts",
     "./types": "./types.ts",
     "./theme": "./theme.css"
   },

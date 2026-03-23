@@ -1,7 +1,10 @@
 import React from 'react';
-import { isMac, modKey, altKey } from '../utils/platform';
-
-/* ─── Key cap component ─── */
+import {
+  formatShortcutBindingTokens,
+  getShortcutPlatform,
+  listRegistryShortcutSections,
+  type ShortcutRegistry,
+} from '../shortcuts';
 
 const Kbd: React.FC<{ children: React.ReactNode; wide?: boolean }> = ({ children, wide }) => (
   <kbd
@@ -13,21 +16,32 @@ const Kbd: React.FC<{ children: React.ReactNode; wide?: boolean }> = ({ children
   </kbd>
 );
 
-/* ─── Key combo renderer ─── */
+const KeyCombo: React.FC<{ binding: string }> = ({ binding }) => {
+  const keys = formatShortcutBindingTokens(binding, getShortcutPlatform());
 
-const Keys: React.FC<{ keys: string[] }> = ({ keys }) => (
-  <span className="inline-flex items-center gap-0.5">
-    {keys.map((k, i) => (
-      <Kbd key={i} wide={k.length > 1}>{k}</Kbd>
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      {keys.map((key, index) => (
+        <Kbd key={`${binding}-${index}`} wide={key.length > 1}>{key}</Kbd>
+      ))}
+    </span>
+  );
+};
+
+const ShortcutBindings: React.FC<{ bindings: string[] }> = ({ bindings }) => (
+  <span className="inline-flex items-center gap-1.5 flex-wrap justify-end">
+    {bindings.map((binding, index) => (
+      <React.Fragment key={binding}>
+        {index > 0 && <span className="text-[10px] text-muted-foreground/60">or</span>}
+        <KeyCombo binding={binding} />
+      </React.Fragment>
     ))}
   </span>
 );
 
-/* ─── Shortcut row ─── */
-
-const ShortcutRow: React.FC<{ keys: string[]; desc: string; hint?: string }> = ({ keys, desc, hint }) => (
-  <div className="flex items-center justify-between py-1">
-    <span className="text-xs text-muted-foreground">
+const ShortcutRow: React.FC<{ bindings: string[]; desc: string; hint?: string }> = ({ bindings, desc, hint }) => (
+  <div className="flex items-center justify-between gap-4 py-1">
+    <span className="text-xs text-muted-foreground min-w-0">
       {desc}
       {hint && (
         <span className="relative group ml-1 inline-flex">
@@ -38,11 +52,9 @@ const ShortcutRow: React.FC<{ keys: string[]; desc: string; hint?: string }> = (
         </span>
       )}
     </span>
-    <Keys keys={keys} />
+    <ShortcutBindings bindings={bindings} />
   </div>
 );
-
-/* ─── Section ─── */
 
 const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
   <div className="space-y-0.5">
@@ -53,102 +65,24 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title
   </div>
 );
 
-/* ─── Platform-aware key names ─── */
+export const KeyboardShortcuts: React.FC<{ shortcutRegistry: ShortcutRegistry }> = ({ shortcutRegistry }) => {
+  const sections = listRegistryShortcutSections(shortcutRegistry);
 
-const enter = isMac ? '⏎' : '↵';
-
-/* ─── Shortcut data ─── */
-
-interface Shortcut {
-  keys: string[];
-  desc: string;
-  hint?: string;
-}
-
-interface ShortcutSection {
-  title: string;
-  shortcuts: Shortcut[];
-}
-
-const planShortcuts: ShortcutSection[] = [
-  {
-    title: 'Actions',
-    shortcuts: [
-      { keys: [modKey, enter], desc: 'Submit / Approve' },
-      { keys: [modKey, 'S'], desc: 'Save to notes app' },
-      { keys: ['Esc'], desc: 'Close dialog' },
-    ],
-  },
-  {
-    title: 'Input Method',
-    shortcuts: [
-      { keys: [altKey, 'hold'], desc: 'Temporarily switch mode', hint: 'Hold to switch between Select and Pinpoint, release to revert' },
-      { keys: [altKey, altKey], desc: 'Toggle mode', hint: 'Double-tap to permanently switch between Select and Pinpoint' },
-    ],
-  },
-  {
-    title: 'Annotations',
-    shortcuts: [
-      { keys: ['a-z'], desc: 'Start typing comment', hint: 'When the annotation toolbar is open, any letter key opens the comment editor with that character' },
-      { keys: [altKey, '1-0'], desc: 'Apply quick label', hint: 'Instantly applies the Nth preset label (0 = 10th). When the label picker is open, bare digits also work.' },
-      { keys: [modKey, enter], desc: 'Submit comment' },
-      { keys: [modKey, 'C'], desc: 'Copy selected text' },
-      { keys: ['Esc'], desc: 'Close toolbar / Cancel' },
-    ],
-  },
-  {
-    title: 'Image Annotator',
-    shortcuts: [
-      { keys: ['1'], desc: 'Pen tool' },
-      { keys: ['2'], desc: 'Arrow tool' },
-      { keys: ['3'], desc: 'Circle tool' },
-      { keys: [modKey, 'Z'], desc: 'Undo' },
-      { keys: [enter], desc: 'Finish' },
-      { keys: ['Esc'], desc: 'Cancel' },
-    ],
-  },
-];
-
-const reviewShortcuts: ShortcutSection[] = [
-  {
-    title: 'Actions',
-    shortcuts: [
-      { keys: [modKey, enter], desc: 'Approve / Send feedback' },
-      { keys: [altKey, altKey], desc: 'Toggle destination', hint: 'Double-tap to switch between GitHub and Agent in PR review mode' },
-      { keys: [modKey, '⇧', 'C'], desc: 'Toggle comment mode' },
-      { keys: ['Esc'], desc: 'Collapse sidebar' },
-    ],
-  },
-  {
-    title: 'File Navigation',
-    shortcuts: [
-      { keys: ['J'], desc: 'Next file' },
-      { keys: ['K'], desc: 'Previous file' },
-      { keys: ['Home'], desc: 'First file' },
-      { keys: ['End'], desc: 'Last file' },
-    ],
-  },
-  {
-    title: 'Annotations',
-    shortcuts: [
-      { keys: [modKey, enter], desc: 'Submit comment' },
-      { keys: ['Tab'], desc: 'Indent in editor' },
-      { keys: ['Esc'], desc: 'Close toolbar / Cancel' },
-    ],
-  },
-];
-
-/* ─── Exported panel ─── */
-
-export const KeyboardShortcuts: React.FC<{ mode: 'plan' | 'review' }> = ({ mode }) => {
-  const sections = mode === 'review' ? reviewShortcuts : planShortcuts;
+  if (sections.length === 0) {
+    return <div className="text-xs text-muted-foreground">No shortcuts are available in this view.</div>;
+  }
 
   return (
     <div className="space-y-4">
       {sections.map((section) => (
         <Section key={section.title} title={section.title}>
-          {section.shortcuts.map((s, i) => (
-            <ShortcutRow key={i} keys={s.keys} desc={s.desc} hint={s.hint} />
+          {section.shortcuts.map((shortcut) => (
+            <ShortcutRow
+              key={`${shortcut.scopeId}-${shortcut.actionId}`}
+              bindings={shortcut.bindings}
+              desc={shortcut.description}
+              hint={shortcut.hint}
+            />
           ))}
         </Section>
       ))}

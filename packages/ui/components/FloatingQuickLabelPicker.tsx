@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { type QuickLabel, getQuickLabels } from '../utils/quickLabels';
 import { QuickLabelDropdown } from './QuickLabelDropdown';
+import { getShortcutDigit, useAnnotationToolbarShortcuts } from '../shortcuts';
 
 interface FloatingQuickLabelPickerProps {
   anchorEl: HTMLElement;
@@ -52,6 +53,11 @@ export const FloatingQuickLabelPicker: React.FC<FloatingQuickLabelPickerProps> =
   const [position, setPosition] = useState<{ top: number; left: number; flipAbove: boolean } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const quickLabels = useMemo(() => getQuickLabels(), []);
+  const canApplyQuickLabelFromPicker = (e: KeyboardEvent) => {
+    const digit = getShortcutDigit(e);
+    const index = digit === null ? Number.NaN : digit === 0 ? 9 : digit - 1;
+    return index >= 0 && index < quickLabels.length;
+  };
 
   // Position tracking
   useEffect(() => {
@@ -65,28 +71,23 @@ export const FloatingQuickLabelPicker: React.FC<FloatingQuickLabelPickerProps> =
     };
   }, [anchorEl, cursorHint]);
 
-  // Keyboard: 1-9/0 or Alt+1-9/0 to apply label, Escape to dismiss
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+  useAnnotationToolbarShortcuts({
+    handlers: {
+      close: (e) => {
         e.preventDefault();
         onDismiss();
-        return;
-      }
-      // Accept bare digit or Alt+digit — picker is open so digits mean labels
-      const isDigit = (e.code >= 'Digit1' && e.code <= 'Digit9') || e.code === 'Digit0';
-      if (isDigit && !e.ctrlKey && !e.metaKey) {
-        e.preventDefault();
-        const digit = parseInt(e.code.slice(5), 10);
-        const index = digit === 0 ? 9 : digit - 1;
-        if (index < quickLabels.length) {
-          onSelect(quickLabels[index]);
-        }
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onDismiss, onSelect, quickLabels]);
+      },
+      applyQuickLabelFromPicker: {
+        when: canApplyQuickLabelFromPicker,
+        handle: (e) => {
+          const digit = getShortcutDigit(e);
+          if (digit === null) return;
+          e.preventDefault();
+          onSelect(quickLabels[digit === 0 ? 9 : digit - 1]);
+        },
+      },
+    },
+  });
 
   // Click outside to dismiss
   useEffect(() => {

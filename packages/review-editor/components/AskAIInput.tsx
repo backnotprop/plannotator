@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { formatLineRange } from '../utils/formatLineRange';
 import { SparklesIcon } from './SparklesIcon';
 import type { AIChatEntry } from '../hooks/useAIChat';
-import { submitHint } from '@plannotator/ui/utils/platform';
+import { dispatchShortcutEvent, formatShortcutBindingText, getShortcutPlatform } from '@plannotator/ui/shortcuts';
+import { reviewAnnotationToolbarShortcuts } from '../annotationToolbar.shortcuts';
 
 interface AskAIInputProps {
   lineStart: number;
@@ -65,11 +66,17 @@ export const AskAIInput: React.FC<AskAIInputProps> = ({
         autoFocus
         disabled={isLoading}
         onKeyDown={(e) => {
-          if (e.key === 'Escape') {
-            onCancel();
-          } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
-            handleSubmit();
-          }
+          dispatchShortcutEvent(reviewAnnotationToolbarShortcuts, {
+            cancel: () => {
+              onCancel();
+            },
+            submitComment: {
+              when: (event) => !event.isComposing,
+              handle: () => {
+                handleSubmit();
+              },
+            },
+          }, e.nativeEvent);
         }}
       />
 
@@ -92,7 +99,7 @@ export const AskAIInput: React.FC<AskAIInputProps> = ({
           onClick={handleSubmit}
           disabled={!question.trim() || isLoading}
           className="review-toolbar-btn primary disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 ml-auto"
-          title={`Ask (${submitHint})`}
+          title={`Ask (${formatShortcutBindingText(reviewAnnotationToolbarShortcuts.shortcuts.submitComment.bindings[0], getShortcutPlatform())})`}
         >
           {isLoading ? (
             <>

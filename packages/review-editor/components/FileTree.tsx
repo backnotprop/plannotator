@@ -5,6 +5,9 @@ import { buildFileTree, getAncestorPaths, getAllFolderPaths } from '../utils/bui
 import { FileTreeNodeItem } from './FileTreeNode';
 import { getReviewSearchSideLabel, type ReviewSearchFileGroup, type ReviewSearchMatch } from '../utils/reviewSearch';
 import type { DiffFile } from '../types';
+import { dispatchShortcutEvent } from '@plannotator/ui/shortcuts';
+import { useReviewFileTreeShortcuts } from '../fileTree.shortcuts';
+import { reviewEditorShortcuts } from '../shortcuts';
 
 interface FileTreeProps {
   files: DiffFile[];
@@ -67,36 +70,44 @@ export const FileTree: React.FC<FileTreeProps> = ({
   onSelectSearchMatch,
   onStepSearchMatch,
 }) => {
-  // Keyboard navigation: j/k or arrow keys
-  const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (!enableKeyboardNav) return;
+  const isFileTreeShortcutTarget = (target: EventTarget | null) => !(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement);
 
-    // Don't interfere with input fields
-    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-      return;
-    }
+  const canHandleFileTreeShortcut = (e: KeyboardEvent) => enableKeyboardNav && isFileTreeShortcutTarget(e.target);
 
-    if (e.key === 'j' || e.key === 'ArrowDown') {
-      e.preventDefault();
-      const nextIndex = Math.min(activeFileIndex + 1, files.length - 1);
-      onSelectFile(nextIndex);
-    } else if (e.key === 'k' || e.key === 'ArrowUp') {
-      e.preventDefault();
-      const prevIndex = Math.max(activeFileIndex - 1, 0);
-      onSelectFile(prevIndex);
-    } else if (e.key === 'Home') {
-      e.preventDefault();
-      onSelectFile(0);
-    } else if (e.key === 'End') {
-      e.preventDefault();
-      onSelectFile(files.length - 1);
-    }
-  }, [enableKeyboardNav, activeFileIndex, files.length, onSelectFile]);
-
-  useEffect(() => {
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleKeyDown]);
+  useReviewFileTreeShortcuts({
+    handlers: {
+      nextFile: {
+        when: canHandleFileTreeShortcut,
+        handle: (e) => {
+          e.preventDefault();
+          const nextIndex = Math.min(activeFileIndex + 1, files.length - 1);
+          onSelectFile(nextIndex);
+        },
+      },
+      prevFile: {
+        when: canHandleFileTreeShortcut,
+        handle: (e) => {
+          e.preventDefault();
+          const prevIndex = Math.max(activeFileIndex - 1, 0);
+          onSelectFile(prevIndex);
+        },
+      },
+      firstFile: {
+        when: canHandleFileTreeShortcut,
+        handle: (e) => {
+          e.preventDefault();
+          onSelectFile(0);
+        },
+      },
+      lastFile: {
+        when: canHandleFileTreeShortcut,
+        handle: (e) => {
+          e.preventDefault();
+          onSelectFile(files.length - 1);
+        },
+      },
+    },
+  });
 
   const annotationCountMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -162,22 +173,33 @@ export const FileTree: React.FC<FileTreeProps> = ({
               value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}
               onKeyDown={(e) => {
-                if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
-                  e.preventDefault();
-                  return;
-                }
-                if (e.key === 'Enter' && searchMatches.length > 0) {
-                  e.preventDefault();
-                  onStepSearchMatch?.(e.shiftKey ? -1 : 1);
-                }
-                if (e.key === 'Escape') {
-                  e.preventDefault();
-                  if (searchQuery) {
-                    onSearchClear?.();
-                  } else {
-                    (e.target as HTMLInputElement).blur();
-                  }
-                }
+                dispatchShortcutEvent(reviewEditorShortcuts, {
+                  focusSearch: () => {
+                    e.preventDefault();
+                  },
+                  nextSearchMatch: {
+                    when: () => searchMatches.length > 0,
+                    handle: () => {
+                      e.preventDefault();
+                      onStepSearchMatch?.(1);
+                    },
+                  },
+                  prevSearchMatch: {
+                    when: () => searchMatches.length > 0,
+                    handle: () => {
+                      e.preventDefault();
+                      onStepSearchMatch?.(-1);
+                    },
+                  },
+                  clearSearch: () => {
+                    e.preventDefault();
+                    if (searchQuery) {
+                      onSearchClear?.();
+                    } else {
+                      (e.target as HTMLInputElement).blur();
+                    }
+                  },
+                }, e.nativeEvent);
               }}
               placeholder="Search diff..."
               className={`w-full pl-7 py-1.5 bg-muted rounded-md text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50 ${searchQuery ? 'pr-14' : 'pr-7'}`}

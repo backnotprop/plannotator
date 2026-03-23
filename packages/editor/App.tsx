@@ -55,6 +55,7 @@ import type { ArchivedPlan } from '@plannotator/ui/components/sidebar/ArchiveBro
 import { PlanDiffViewer } from '@plannotator/ui/components/plan-diff/PlanDiffViewer';
 import type { PlanDiffMode } from '@plannotator/ui/components/plan-diff/PlanDiffModeSwitcher';
 import { DEMO_PLAN_CONTENT } from './demoPlan';
+import { annotateSettingsShortcutRegistry, planReviewSettingsShortcutRegistry, usePlanEditorShortcuts } from './shortcuts';
 
 type NoteAutoSaveResults = {
   obsidian?: boolean;
@@ -146,17 +147,17 @@ const App: React.FC = () => {
     }
   }, [sidebar.activeTab]);
 
-  // Clear diff view on Escape key
-  useEffect(() => {
-    if (!isPlanDiffActive) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setIsPlanDiffActive(false);
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isPlanDiffActive]);
+  usePlanEditorShortcuts({
+    target: 'document',
+    handlers: {
+      exitPlanDiff: {
+        when: () => isPlanDiffActive,
+        handle: () => {
+          setIsPlanDiffActive(false);
+        },
+      },
+    },
+  });
 
   // Plan diff computation
   const planDiff = usePlanDiff(markdown, previousPlan, versionInfo);
@@ -714,66 +715,127 @@ const App: React.FC = () => {
     }
   };
 
+  const isPlanShortcutTarget = (e: KeyboardEvent) => {
+    const tag = (e.target as HTMLElement)?.tagName;
+    return tag !== 'INPUT' && tag !== 'TEXTAREA';
+  };
+
   // Global keyboard shortcuts (Cmd/Ctrl+Enter to submit)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Only handle Cmd/Ctrl+Enter
-      if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
+  usePlanEditorShortcuts({
+    handlers: {
+      submitPlan: {
+        when: (e) => {
+          // Don't intercept if typing in an input/textarea
+          if (!isPlanShortcutTarget(e)) return false;
 
-      // Don't intercept if typing in an input/textarea
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+          // Don't intercept if any modal is open
+          if (showExport || showImport || showFeedbackPrompt || showClaudeCodeWarning ||
+              showAgentWarning || showPermissionModeSetup || pendingPasteImage) return false;
 
-      // Don't intercept if any modal is open
-      if (showExport || showImport || showFeedbackPrompt || showClaudeCodeWarning ||
-          showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
+          // Don't intercept if already submitted or submitting
+          if (submitted || isSubmitting) return false;
 
-      // Don't intercept if already submitted or submitting
-      if (submitted || isSubmitting) return;
+          // Don't intercept in demo/share mode (no API)
+          if (!isApiMode) return false;
 
-      // Don't intercept in demo/share mode (no API)
-      if (!isApiMode) return;
+          // Don't submit while viewing a linked doc
+          if (linkedDocHook.isActive) return false;
 
-      // Don't submit while viewing a linked doc
-      if (linkedDocHook.isActive) return;
+          // Don't use the plan submit action in annotate mode
+          if (annotateMode) return false;
 
-      e.preventDefault();
+          return true;
+        },
+        handle: (e) => {
+          e.preventDefault();
 
-      // Annotate mode: always send feedback (empty = "no feedback" message)
-      if (annotateMode) {
-        handleAnnotateFeedback();
-        return;
-      }
-
-      // No annotations → Approve, otherwise → Send Feedback
-      const docAnnotations = linkedDocHook.getDocAnnotations();
-      const hasDocAnnotations = Array.from(docAnnotations.values()).some(
-        (d) => d.annotations.length > 0 || d.globalAttachments.length > 0
-      );
-      if (annotations.length === 0 && editorAnnotations.length === 0 && !hasDocAnnotations) {
-        // Check if agent exists for OpenCode users
-        if (origin === 'opencode') {
-          const warning = getAgentWarning();
-          if (warning) {
-            setAgentWarningMessage(warning);
-            setShowAgentWarning(true);
-            return;
+          const docAnnotations = linkedDocHook.getDocAnnotations();
+          const hasDocAnnotations = Array.from(docAnnotations.values()).some(
+            (d) => d.annotations.length > 0 || d.globalAttachments.length > 0
+          );
+          if (annotations.length === 0 && editorAnnotations.length === 0 && !hasDocAnnotations) {
+            if (origin === 'opencode') {
+              const warning = getAgentWarning();
+              if (warning) {
+                setAgentWarningMessage(warning);
+                setShowAgentWarning(true);
+                return;
+              }
+            }
+            handleApprove();
+          } else {
+            handleDeny();
           }
-        }
-        handleApprove();
-      } else {
-        handleDeny();
-      }
-    };
+        },
+      },
+      submitAnnotations: {
+        when: (e) => {
+          // Don't intercept if typing in an input/textarea
+          if (!isPlanShortcutTarget(e)) return false;
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [
-    showExport, showImport, showFeedbackPrompt, showClaudeCodeWarning, showAgentWarning,
-    showPermissionModeSetup, pendingPasteImage,
-    submitted, isSubmitting, isApiMode, linkedDocHook.isActive, annotations.length, annotateMode,
-    origin, getAgentWarning,
-  ]);
+          // Don't intercept if any modal is open
+          if (showExport || showImport || showFeedbackPrompt || showClaudeCodeWarning ||
+              showAgentWarning || showPermissionModeSetup || pendingPasteImage) return false;
+
+          // Don't intercept if already submitted or submitting
+          if (submitted || isSubmitting) return false;
+
+          // Don't intercept in demo/share mode (no API)
+          if (!isApiMode) return false;
+
+          // Don't submit while viewing a linked doc
+          if (linkedDocHook.isActive) return false;
+
+          // Only use the annotation submit action in annotate mode
+          if (!annotateMode) return false;
+
+          return true;
+        },
+        handle: (e) => {
+          e.preventDefault();
+
+          handleAnnotateFeedback();
+        },
+      },
+      // Cmd/Ctrl+S keyboard shortcut — save to default notes app
+      quickSave: {
+        when: (e) => {
+          // Don't intercept if typing in an input/textarea
+          if (!isPlanShortcutTarget(e)) return false;
+
+          // Don't intercept if any modal is open
+          if (showExport || showFeedbackPrompt || showClaudeCodeWarning ||
+              showAgentWarning || showPermissionModeSetup || pendingPasteImage) return false;
+
+          // Don't intercept after submission or in demo/share mode (no API)
+          if (submitted || !isApiMode) return false;
+
+          return true;
+        },
+        handle: (e) => {
+          e.preventDefault();
+
+          const defaultApp = getDefaultNotesApp();
+          const obsOk = isObsidianConfigured();
+          const bearOk = getBearSettings().enabled;
+          const octOk = isOctarineConfigured();
+
+          if (defaultApp === 'download') {
+            handleDownloadAnnotations();
+          } else if (defaultApp === 'obsidian' && obsOk) {
+            handleQuickSaveToNotes('obsidian');
+          } else if (defaultApp === 'bear' && bearOk) {
+            handleQuickSaveToNotes('bear');
+          } else if (defaultApp === 'octarine' && octOk) {
+            handleQuickSaveToNotes('octarine');
+          } else {
+            setInitialExportTab('notes');
+            setShowExport(true);
+          }
+        },
+      },
+    },
+  });
 
   const handleAddAnnotation = (ann: Annotation) => {
     setAnnotations(prev => [...prev, ann]);
@@ -914,47 +976,6 @@ const App: React.FC = () => {
     setTimeout(() => setNoteSaveToast(null), 3000);
   };
 
-  // Cmd/Ctrl+S keyboard shortcut — save to default notes app
-  useEffect(() => {
-    const handleSaveShortcut = (e: KeyboardEvent) => {
-      if (e.key !== 's' || !(e.metaKey || e.ctrlKey)) return;
-
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-
-      if (showExport || showFeedbackPrompt || showClaudeCodeWarning ||
-          showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
-
-      if (submitted || !isApiMode) return;
-
-      e.preventDefault();
-
-      const defaultApp = getDefaultNotesApp();
-      const obsOk = isObsidianConfigured();
-      const bearOk = getBearSettings().enabled;
-      const octOk = isOctarineConfigured();
-
-      if (defaultApp === 'download') {
-        handleDownloadAnnotations();
-      } else if (defaultApp === 'obsidian' && obsOk) {
-        handleQuickSaveToNotes('obsidian');
-      } else if (defaultApp === 'bear' && bearOk) {
-        handleQuickSaveToNotes('bear');
-      } else if (defaultApp === 'octarine' && octOk) {
-        handleQuickSaveToNotes('octarine');
-      } else {
-        setInitialExportTab('notes');
-        setShowExport(true);
-      }
-    };
-
-    window.addEventListener('keydown', handleSaveShortcut);
-    return () => window.removeEventListener('keydown', handleSaveShortcut);
-  }, [
-    showExport, showFeedbackPrompt, showClaudeCodeWarning, showAgentWarning,
-    showPermissionModeSetup, pendingPasteImage,
-    submitted, isApiMode, markdown, annotationsOutput,
-  ]);
 
   // Close export dropdown on click outside
   useEffect(() => {
@@ -1122,7 +1143,7 @@ const App: React.FC = () => {
             {/* Desktop buttons — hidden on mobile */}
             <div className="hidden md:flex items-center gap-2">
               <ModeToggle />
-              {!linkedDocHook.isActive && <Settings taterMode={taterMode} onTaterModeChange={handleTaterModeChange} onIdentityChange={handleIdentityChange} origin={origin} onUIPreferencesChange={setUiPrefs} externalOpen={mobileSettingsOpen} onExternalClose={() => setMobileSettingsOpen(false)} />}
+              {!linkedDocHook.isActive && <Settings taterMode={taterMode} onTaterModeChange={handleTaterModeChange} onIdentityChange={handleIdentityChange} origin={origin} shortcutRegistry={annotateMode ? annotateSettingsShortcutRegistry : planReviewSettingsShortcutRegistry} onUIPreferencesChange={setUiPrefs} externalOpen={mobileSettingsOpen} onExternalClose={() => setMobileSettingsOpen(false)} />}
 
               <button
                 onClick={() => setIsPanelOpen(!isPanelOpen)}

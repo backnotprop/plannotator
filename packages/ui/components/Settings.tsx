@@ -53,10 +53,10 @@ import {
 } from '../utils/defaultNotesApp';
 import { useAgents } from '../hooks/useAgents';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
+import { annotationToolbarShortcuts, formatShortcutBindingText, getShortcutPlatform, type ShortcutRegistry } from '../shortcuts';
 import { type QuickLabel, getQuickLabels, saveQuickLabels, resetQuickLabels, DEFAULT_QUICK_LABELS, getLabelColors, LABEL_COLOR_MAP } from '../utils/quickLabels';
 import { hasNewSettings, markNewSettingsSeen } from '../utils/newSettingsHint';
 import { ThemeTab } from './ThemeTab';
-import { isMac, modKey, altKey } from '../utils/platform';
 import { getAIProviderSettings } from '../utils/aiProvider';
 import { AISettingsTab } from './AISettingsTab';
 import {
@@ -72,6 +72,7 @@ interface SettingsProps {
   onTaterModeChange: (enabled: boolean) => void;
   onIdentityChange?: (oldIdentity: string, newIdentity: string) => void;
   origin?: 'claude-code' | 'opencode' | 'pi' | 'codex' | null;
+  shortcutRegistry: ShortcutRegistry;
   /** Mode determines which settings are shown. 'plan' shows all, 'review' shows only identity + agent switching */
   mode?: 'plan' | 'review';
   onUIPreferencesChange?: (prefs: UIPreferences) => void;
@@ -82,7 +83,7 @@ interface SettingsProps {
   aiProviders?: Array<{ id: string; name: string; capabilities: Record<string, boolean> }>;
 }
 
-export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', onUIPreferencesChange, externalOpen, onExternalClose, aiProviders = [] }) => {
+export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, shortcutRegistry, mode = 'plan', onUIPreferencesChange, externalOpen, onExternalClose, aiProviders = [] }) => {
   const [showDialog, setShowDialog] = useState(false);
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [identity, setIdentity] = useState('');
@@ -109,6 +110,8 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const [aiProvider, setAiProvider] = useState<string | null>(null);
   const [fileBrowserSettings, setFileBrowserSettings] = useState<FileBrowserSettings>({ enabled: false, directories: [] });
   const [newDirPath, setNewDirPath] = useState('');
+  const shortcutPlatform = getShortcutPlatform();
+
 
   // Fetch available agents for OpenCode
   const { agents: availableAgents, validateAgent, getAgentWarning } = useAgents(origin ?? null);
@@ -794,7 +797,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                       <div>
                         <div className="text-sm font-medium">Default Save Action</div>
                         <div className="text-xs text-muted-foreground">
-                          Used for keyboard shortcut ({modKey}+S)
+                          Used for keyboard shortcut ({formatShortcutBindingText('Mod+S', shortcutPlatform)})
                         </div>
                       </div>
                       <select
@@ -812,8 +815,8 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                         {defaultNotesApp === 'ask'
                           ? 'Opens Export dialog with Notes tab'
                           : defaultNotesApp === 'download'
-                            ? `${modKey}+S downloads the annotations file`
-                            : `${modKey}+S saves directly to ${{ obsidian: 'Obsidian', bear: 'Bear', octarine: 'Octarine' }[defaultNotesApp] ?? defaultNotesApp}`}
+                            ? `${formatShortcutBindingText('Mod+S', shortcutPlatform)} downloads the annotations file`
+                            : `${formatShortcutBindingText('Mod+S', shortcutPlatform)} saves directly to ${{ obsidian: 'Obsidian', bear: 'Bear', octarine: 'Octarine' }[defaultNotesApp] ?? defaultNotesApp}`}
                       </div>
                     </div>
 
@@ -960,8 +963,8 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                                   <option key={c} value={c}>{c}</option>
                                 ))}
                               </select>
-                              <span className="text-[10px] text-muted-foreground/50 font-mono w-8 text-center flex-shrink-0">
-                                {index < 10 ? `${altKey}${isMac ? '' : '+'}${index === 9 ? '0' : index + 1}` : ''}
+                              <span className="text-[10px] text-muted-foreground/50 font-mono w-12 text-center flex-shrink-0">
+                                {index < 10 ? formatShortcutBindingText(`Alt+${index === 9 ? '0' : index + 1}`, shortcutPlatform) : ''}
                               </span>
                               <button
                                 onClick={() => {
@@ -1048,15 +1051,13 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                     )}
 
                     <div className="text-[10px] text-muted-foreground/70">
-                      Use {altKey}{isMac ? '' : '+'}1 through {altKey}{isMac ? '' : '+'}0 when the annotation toolbar is visible to apply a label instantly.
+                      Use {formatShortcutBindingText(annotationToolbarShortcuts.shortcuts.applyQuickLabel.bindings[0], shortcutPlatform)} when the annotation toolbar is visible to apply a label instantly.
                     </div>
                   </>
                 )}
 
                 {/* === SHORTCUTS TAB === */}
-                {activeTab === 'shortcuts' && (
-                  <KeyboardShortcuts mode={mode} />
-                )}
+                {activeTab === 'shortcuts' && <KeyboardShortcuts shortcutRegistry={shortcutRegistry} />}
 
                 {/* === AI TAB === */}
                 {activeTab === 'ai' && (

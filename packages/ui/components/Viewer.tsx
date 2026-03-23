@@ -28,6 +28,7 @@ import { CommentPopover } from './CommentPopover';
 import { TaterSpriteSitting } from './TaterSpriteSitting';
 import { AttachmentsButton } from './AttachmentsButton';
 import { GraphvizBlock } from './GraphvizBlock';
+import { useViewerShortcuts } from '../shortcuts';
 import { MermaidBlock } from './MermaidBlock';
 import { getImageSrc } from './ImageThumbnail';
 import { isGraphvizLanguage, isMermaidLanguage } from './diagramLanguages';
@@ -261,31 +262,27 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     return () => observer.disconnect();
   }, [stickyActions]);
 
-  // Cmd+C / Ctrl+C keyboard shortcut for copying selected text
-  useEffect(() => {
-    const handleKeyDown = async (e: KeyboardEvent) => {
-      // Check for Cmd+C (Mac) or Ctrl+C (Windows/Linux)
-      if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
-        // Don't intercept if typing in an input/textarea
-        const tag = (e.target as HTMLElement)?.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+  const selectionText = toolbarState?.selectionText;
 
-        // If we have an active selection with captured text, use that
-        if (toolbarState?.selectionText) {
+  useViewerShortcuts({
+    target: 'document',
+    handlers: {
+      copySelection: {
+        when: (e) => {
+          const tag = (e.target as HTMLElement)?.tagName;
+          return tag !== 'INPUT' && tag !== 'TEXTAREA' && !!selectionText;
+        },
+        handle: async (e) => {
           e.preventDefault();
           try {
-            await navigator.clipboard.writeText(toolbarState.selectionText);
+            await navigator.clipboard.writeText(selectionText!);
           } catch (err) {
             console.error('Failed to copy:', err);
           }
-        }
-        // Otherwise let the browser handle default copy behavior
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [toolbarState]);
+        },
+      },
+    },
+  });
 
   // Imperative handle — delegates to hook, extends removeHighlight for code blocks
   useImperativeHandle(ref, () => ({
