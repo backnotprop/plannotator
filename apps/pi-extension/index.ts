@@ -304,7 +304,7 @@ export default function plannotator(pi: ExtensionAPI): void {
         if (result.approved) {
           pi.sendUserMessage(`# Code Review\n\nCode review completed — no changes requested.`);
         } else {
-          pi.sendUserMessage(`# Code Review Feedback\n\n${result.feedback}\n\nPlease address this feedback.`);
+          pi.sendUserMessage(`${result.feedback}\n\nPlease address this feedback.`);
         }
       } else {
         ctx.ui.notify("Code review closed (no feedback).", "info");

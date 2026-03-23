@@ -135,4 +135,16 @@ describe("exportReviewFeedback", () => {
     ]);
     expect(result).toContain("### Line 3 (old)");
   });
+
+  it("contains exactly one top-level heading so integrations can use the output directly", () => {
+    const result = exportReviewFeedback([ann()]);
+    const headingMatches = result.match(/^# /gm) || [];
+    expect(headingMatches).toHaveLength(1);
+  });
+
+  it("contains exactly one top-level heading in PR mode", () => {
+    const result = exportReviewFeedback([ann()], prMeta);
+    const headingMatches = result.match(/^# /gm) || [];
+    expect(headingMatches).toHaveLength(1);
+  });
 });
