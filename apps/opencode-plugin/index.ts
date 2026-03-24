@@ -37,6 +37,7 @@ import {
   handleReviewCommand,
   handleAnnotateCommand,
   handleAnnotateLastCommand,
+  handleArchiveCommand,
   type CommandDeps,
 } from "./commands";
 import { planDenyFeedback } from "@plannotator/shared/feedback-templates";
@@ -364,6 +365,8 @@ Do NOT proceed with implementation until your plan is approved.`);
         return handleReviewCommand(event, deps);
       if (commandName === "plannotator-annotate")
         return handleAnnotateCommand(event, deps);
+      if (commandName === "plannotator-archive")
+        return handleArchiveCommand(event, deps);
     },
 
     tool: {
