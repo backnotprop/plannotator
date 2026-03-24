@@ -41,21 +41,21 @@ Start plan mode with `pi --plan` or toggle it mid-session with `/plannotator` or
 - **Read-only access** — `read`, `grep`, `find`, `ls` all work normally
 - **Bash is gated** — every command is checked against a safety allowlist before execution. `cat`, `git status`, `ls`, `find`, `rg` pass. `rm`, `git commit`, `npm install`, `sudo` don't. The allowlist is pattern-based, not a simple command list — it catches destructive commands even in pipes or subshells.
 - **Writes restricted to the plan file** — the agent can write to `PLAN.md` (or a custom path via `--plan-file`) but nowhere else. Edits to other files are blocked.
-- **`exit_plan_mode` tool available** — this is how the agent signals the plan is ready for review.
+- **`plannotator_submit_plan` tool available** — this is how the agent signals the plan is ready for review.
 
-The agent explores your codebase using read-only tools, drafts a plan as a markdown checklist in `PLAN.md`, and calls `exit_plan_mode` when ready. The planning prompt instructs the agent to work iteratively — explore, update the plan, ask questions, repeat — rather than dumping a fully-formed plan in one shot.
+The agent explores your codebase using read-only tools, drafts a plan as a markdown checklist in `PLAN.md`, and calls `plannotator_submit_plan` when ready. The planning prompt instructs the agent to work iteratively — explore, update the plan, ask questions, repeat — rather than dumping a fully-formed plan in one shot.
 
 Because the plan lives on disk as a regular file, you can open it in your editor alongside the terminal. Git tracks it. Your team can read it in a PR.
 
 ### Review phase
 
-When the agent calls `exit_plan_mode`, the extension reads `PLAN.md` from disk, starts a local HTTP server, and opens the Plannotator browser UI. You see the rendered plan with all the annotation tools — comments, deletions, replacements, insertions.
+When the agent calls `plannotator_submit_plan`, the extension reads `PLAN.md` from disk, starts a local HTTP server, and opens the Plannotator browser UI. You see the rendered plan with all the annotation tools — comments, deletions, replacements, insertions.
 
 Three outcomes:
 
 - **Approve** — the extension transitions to the executing phase. The agent gets full tool access.
 - **Approve with notes** — same transition, but the annotation feedback is included in the tool response as implementation guidance. The agent sees your notes and incorporates them.
-- **Deny with annotations** — the extension stays in planning. The agent receives your structured feedback and is told to use `edit` (not `write`) to make targeted revisions, then call `exit_plan_mode` again.
+- **Deny with annotations** — the extension stays in planning. The agent receives your structured feedback and is told to use `edit` (not `write`) to make targeted revisions, then call `plannotator_submit_plan` again.
 
 This loop continues until you approve. Each round, the agent refines the plan based on your specific annotations rather than vague instructions.
 
@@ -103,7 +103,7 @@ Plannotator now supports three coding agents — Claude Code, OpenCode, and Pi �
 |---|---|---|---|
 | **Integration type** | PermissionRequest hook | Plugin with tools + events | Extension with tools + events |
 | **Plan mode** | Built into Claude Code | Built into OpenCode | Provided by the extension |
-| **Review trigger** | `ExitPlanMode` hook event | `submit_plan` tool call | `exit_plan_mode` tool call |
+| **Review trigger** | `ExitPlanMode` hook event | `submit_plan` tool call | `plannotator_submit_plan` tool call |
 | **Server runtime** | Bun | Bun | Node.js (via jiti) |
 | **Feedback delivery** | stdout JSON decision | `session.prompt()` API | `sendUserMessage()` API |
 | **Tool gating** | Not needed (Claude Code handles it) | Not needed (OpenCode handles it) | Extension manages tool restrictions |

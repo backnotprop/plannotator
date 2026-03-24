@@ -55,7 +55,7 @@ In plan mode the agent is restricted — destructive commands are blocked, write
 - [ ] Update error messages in the UI
 ```
 
-When the agent calls `exit_plan_mode`, the Plannotator UI opens in your browser. You can:
+When the agent calls `plannotator_submit_plan`, the Plannotator UI opens in your browser. You can:
 
 - **Approve** the plan to begin execution
 - **Deny with annotations** to send structured feedback back to the agent

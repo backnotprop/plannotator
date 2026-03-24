@@ -2,9 +2,9 @@
  * Plannotator Pi Extension — File-based plan mode with visual browser review.
  *
  * Plans are written to PLAN.md on disk (git-trackable, editor-visible).
- * The agent calls exit_plan_mode to request approval; the user reviews
- * the plan in the Plannotator browser UI and can approve, deny with
- * annotations, or request changes.
+ * The agent calls plannotator_submit_plan to request approval; the user
+ * reviews the plan in the Plannotator browser UI and can approve, deny
+ * with annotations, or request changes.
  *
  * Features:
  * - /plannotator command or Ctrl+Alt+P to toggle
@@ -12,7 +12,7 @@
  * - --plan-file flag to customize the plan file path
  * - Bash unrestricted during planning (prompt-guided)
  * - Write restricted to plan file only during planning
- * - exit_plan_mode tool with browser-based visual approval
+ * - plannotator_submit_plan tool with browser-based visual approval
  * - [DONE:n] markers for execution progress tracking
  * - /plannotator-review command for code review
  * - /plannotator-annotate command for markdown annotation
@@ -46,6 +46,12 @@ import {
 	startPlanReviewServer,
 	startReviewServer,
 } from "./server.js";
+import {
+	getToolsForPhase,
+	PLAN_SUBMIT_TOOL,
+	type Phase,
+	stripPlanningOnlyTools,
+} from "./tool-scope.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -76,11 +82,6 @@ try {
 } catch {
 	// HTML not built yet — review feature will be unavailable
 }
-
-/** Extra tools to ensure are available during planning (on top of whatever is already active). */
-const PLANNING_EXTRA_TOOLS = ["grep", "find", "ls", "exit_plan_mode"];
-
-type Phase = "idle" | "planning" | "executing";
 
 function isAssistantMessage(m: AgentMessage): m is AssistantMessage {
 	return m.role === "assistant" && Array.isArray(m.content);
@@ -177,28 +178,19 @@ export default function plannotator(pi: ExtensionAPI): void {
 	}
 
 	function persistState(): void {
-		pi.appendEntry("plannotator", { phase, planFilePath });
+		pi.appendEntry("plannotator", { phase, planFilePath, preplanTools });
 	}
 
 	/** Apply tool visibility for the current phase, preserving tools from other extensions. */
 	function applyToolsForPhase(): void {
-		if (phase === "planning") {
-			const base = preplanTools ?? pi.getActiveTools();
-			const toolSet = new Set(base);
-			for (const t of PLANNING_EXTRA_TOOLS) toolSet.add(t);
-			pi.setActiveTools([...toolSet]);
-		} else if (preplanTools) {
-			// Restore pre-plan tool set (removes exit_plan_mode, etc.)
-			pi.setActiveTools(preplanTools);
-			preplanTools = null;
-		}
-		// If no preplanTools (e.g. session restore to executing/idle), leave tools as-is
+		const baseTools = stripPlanningOnlyTools(preplanTools ?? pi.getActiveTools());
+		pi.setActiveTools(getToolsForPhase(baseTools, phase));
 	}
 
 	function enterPlanning(ctx: ExtensionContext): void {
 		phase = "planning";
 		checklistItems = [];
-		preplanTools = pi.getActiveTools();
+		preplanTools = stripPlanningOnlyTools(pi.getActiveTools());
 		applyToolsForPhase();
 		updateStatus(ctx);
 		updateWidget(ctx);
@@ -212,6 +204,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 		phase = "idle";
 		checklistItems = [];
 		applyToolsForPhase();
+		preplanTools = null;
 		updateStatus(ctx);
 		updateWidget(ctx);
 		persistState();
@@ -519,14 +512,14 @@ export default function plannotator(pi: ExtensionAPI): void {
 		handler: async (ctx) => togglePlanMode(ctx),
 	});
 
-	// ── exit_plan_mode Tool ──────────────────────────────────────────────
+	// ── plannotator_submit_plan Tool ────────────────────────────────────
 
 	pi.registerTool({
-		name: "exit_plan_mode",
-		label: "Exit Plan Mode",
+		name: PLAN_SUBMIT_TOOL,
+		label: "Submit Plan",
 		description:
-			"Submit your plan for user review. " +
-			"Call this after drafting or revising your plan file. " +
+			"Submit your Plannotator plan for user review. " +
+			"Call this only while Plannotator planning mode is active, after drafting or revising your plan file. " +
 			"The user will review the plan in a visual browser UI and can approve, deny with feedback, or annotate it. " +
 			"If denied, use the edit tool to make targeted revisions (not write), then call this again.",
 		parameters: Type.Object({
@@ -561,7 +554,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 					content: [
 						{
 							type: "text",
-							text: `Error: ${planFilePath} does not exist. Write your plan using the write tool first, then call exit_plan_mode again.`,
+							text: `Error: ${planFilePath} does not exist. Write your plan using the write tool first, then call ${PLAN_SUBMIT_TOOL} again.`,
 						},
 					],
 					details: { approved: false },
@@ -573,7 +566,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 					content: [
 						{
 							type: "text",
-							text: `Error: ${planFilePath} is empty. Write your plan first, then call exit_plan_mode again.`,
+							text: `Error: ${planFilePath} is empty. Write your plan first, then call ${PLAN_SUBMIT_TOOL} again.`,
 						},
 					],
 					details: { approved: false },
@@ -587,6 +580,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			if (!ctx.hasUI || !planHtmlContent) {
 				phase = "executing";
 				applyToolsForPhase();
+				preplanTools = null;
 				persistState();
 				return {
 					content: [
@@ -624,6 +618,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			if (result.approved) {
 				phase = "executing";
 				applyToolsForPhase();
+				preplanTools = null;
 				updateStatus(ctx);
 				updateWidget(ctx);
 				persistState();
@@ -664,7 +659,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				content: [
 					{
 						type: "text",
-						text: planDenyFeedback(feedbackText, "exit_plan_mode", {
+						text: planDenyFeedback(feedbackText, PLAN_SUBMIT_TOOL, {
 							planFilePath,
 						}),
 					},
@@ -712,7 +707,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 					content: `[PLANNOTATOR - PLANNING PHASE]
 You are in plan mode. You MUST NOT make any changes to the codebase — no edits, no commits, no installs, no destructive commands. The ONLY file you may write to or edit is the plan file: ${planFilePath}.
 
-Available tools: read, bash, grep, find, ls, write (${planFilePath} only), edit (${planFilePath} only), exit_plan_mode
+Available tools: read, bash, grep, find, ls, write (${planFilePath} only), edit (${planFilePath} only), ${PLAN_SUBMIT_TOOL}
 
 Do not run destructive bash commands (rm, git push, npm install, etc.) — focus on reading and exploring the codebase. Web fetching (curl, wget) is fine.
 
@@ -755,20 +750,20 @@ Keep the plan concise enough to scan quickly, but detailed enough to execute eff
 
 ### When to Submit
 
-Your plan is ready when you've addressed all ambiguities and it covers: what to change, which files to modify, what existing code to reuse, and how to verify. Call exit_plan_mode to submit for review.
+Your plan is ready when you've addressed all ambiguities and it covers: what to change, which files to modify, what existing code to reuse, and how to verify. Call ${PLAN_SUBMIT_TOOL} to submit for review.
 
 ### Revising After Feedback
 
 When the user denies a plan with feedback:
 1. Read ${planFilePath} to see the current plan.
 2. Use the edit tool to make targeted changes addressing the feedback — do NOT rewrite the entire file.
-3. Call exit_plan_mode again to resubmit.
+3. Call ${PLAN_SUBMIT_TOOL} again to resubmit.
 
 ### Ending Your Turn
 
 Your turn should only end by either:
 - Asking the user a question to gather more information.
-- Calling exit_plan_mode when the plan is ready for review.
+- Calling ${PLAN_SUBMIT_TOOL} when the plan is ready for review.
 
 Do not end your turn without doing one of these two things.`,
 					display: false,
@@ -867,6 +862,7 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 			phase = "idle";
 			checklistItems = [];
 			applyToolsForPhase();
+			preplanTools = null;
 			updateStatus(ctx);
 			updateWidget(ctx);
 			persistState();
@@ -893,11 +889,14 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 				(e: { type: string; customType?: string }) =>
 					e.type === "custom" && e.customType === "plannotator",
 			)
-			.pop() as { data?: { phase: Phase; planFilePath?: string } } | undefined;
+			.pop() as {
+				data?: { phase: Phase; planFilePath?: string; preplanTools?: string[] | null };
+			} | undefined;
 
 		if (stateEntry?.data) {
 			phase = stateEntry.data.phase ?? phase;
 			planFilePath = stateEntry.data.planFilePath ?? planFilePath;
+			preplanTools = stateEntry.data.preplanTools ?? preplanTools;
 		}
 
 		// Rebuild execution state from disk + session messages
@@ -934,10 +933,9 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 			}
 		}
 
-		// Apply tool restrictions for current phase
-		if (phase === "planning") {
-			applyToolsForPhase();
-		}
+		// Re-apply tool visibility on startup/resume so planning-only tools stay hidden
+		// outside planning and pre-plan tool state is restored after approvals.
+		applyToolsForPhase();
 
 		updateStatus(ctx);
 		updateWidget(ctx);
