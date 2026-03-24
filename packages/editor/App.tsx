@@ -390,6 +390,7 @@ const App: React.FC = () => {
           // Archive mode: show first archived plan or clear demo content
           setMarkdown(data.plan || '');
           if (data.archivePlans) archive.init(data.archivePlans);
+          archive.fetchPlans();
           setSharingEnabled(false);
           sidebar.open('archive');
         } else if (data.plan) {
