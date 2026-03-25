@@ -386,6 +386,7 @@ const ReviewApp: React.FC = () => {
         repoInfo?: { display: string; branch?: string };
         prMetadata?: PRMetadata;
         platformUser?: string;
+        viewedFiles?: string[];
         error?: string;
       }) => {
         const apiFiles = parseDiffToFiles(data.rawPatch);
@@ -406,6 +407,10 @@ const ReviewApp: React.FC = () => {
         if (data.repoInfo) setRepoInfo(data.repoInfo);
         if (data.prMetadata) setPrMetadata(data.prMetadata);
         if (data.platformUser) setPlatformUser(data.platformUser);
+        // Initialize viewed files from GitHub's state (set before draft restore so draft takes precedence)
+        if (data.viewedFiles && data.viewedFiles.length > 0) {
+          setViewedFiles(new Set(data.viewedFiles));
+        }
         if (data.error) setDiffError(data.error);
       })
       .catch(() => {
@@ -528,14 +533,26 @@ const ReviewApp: React.FC = () => {
   const handleToggleViewed = useCallback((filePath: string) => {
     setViewedFiles(prev => {
       const next = new Set(prev);
-      if (next.has(filePath)) {
-        next.delete(filePath);
-      } else {
+      const willBeViewed = !prev.has(filePath);
+      if (willBeViewed) {
         next.add(filePath);
+      } else {
+        next.delete(filePath);
+      }
+      // Sync viewed state to GitHub (fire and forget — best effort)
+      // Capture willBeViewed inside the callback to ensure correctness with React batching
+      if (prMetadata && prMetadata.platform === 'github') {
+        fetch('/api/pr-viewed', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filePaths: [filePath], viewed: willBeViewed }),
+        }).catch(() => {
+          // Silently ignore — viewed sync is best-effort
+        });
       }
       return next;
     });
-  }, []);
+  }, [prMetadata]);
 
   // Derive worktree path and base diff type from the composite diffType string
   const { activeWorktreePath, activeDiffBase } = useMemo(() => {

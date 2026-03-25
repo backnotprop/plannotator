@@ -56,7 +56,7 @@ export async function fetchGhPR(
     runtime.runCommand("gh", [
       "pr", "view", String(ref.number),
       "--repo", repo,
-      "--json", "title,author,baseRefName,headRefName,baseRefOid,headRefOid,url",
+      "--json", "id,title,author,baseRefName,headRefName,baseRefOid,headRefOid,url",
     ]),
   ]);
 
@@ -73,6 +73,7 @@ export async function fetchGhPR(
   }
 
   const raw = JSON.parse(viewResult.stdout) as {
+    id: string;
     title: string;
     author: { login: string };
     baseRefName: string;
@@ -87,6 +88,7 @@ export async function fetchGhPR(
     owner: ref.owner,
     repo: ref.repo,
     number: ref.number,
+    prNodeId: raw.id,
     title: raw.title,
     author: raw.author.login,
     baseBranch: raw.baseRefName,
@@ -205,6 +207,137 @@ export async function fetchGhPRFileContent(
     return Buffer.from(cleaned, "base64").toString("utf-8");
   } catch {
     return null;
+  }
+}
+
+// --- Viewed Files ---
+
+/**
+ * Fetch the per-file "viewed" state for a GitHub PR via GraphQL.
+ * Returns a map of { filePath: isViewed } where isViewed is true for
+ * VIEWED or DISMISSED states (i.e., the file was reviewed but may need
+ * re-review after new commits).
+ */
+export async function fetchGhPRViewedFiles(
+  runtime: PRRuntime,
+  ref: GhPRRef,
+): Promise<Record<string, boolean>> {
+  const query = `
+    query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $number) {
+          files(first: 100, after: $cursor) {
+            nodes {
+              path
+              viewerViewedState
+            }
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const result: Record<string, boolean> = {};
+  let cursor: string | null = null;
+
+  // Paginate through all files (GitHub returns max 100 per page)
+  do {
+    const args = [
+      "api", "graphql",
+      "-f", `query=${query}`,
+      "-F", `owner=${ref.owner}`,
+      "-F", `repo=${ref.repo}`,
+      "-F", `number=${ref.number}`,
+    ];
+    if (cursor) {
+      args.push("-F", `cursor=${cursor}`);
+    }
+
+    const res = await runtime.runCommand("gh", args);
+    if (res.exitCode !== 0) {
+      throw new Error(
+        `Failed to fetch PR viewed files: ${res.stderr.trim() || `exit code ${res.exitCode}`}`,
+      );
+    }
+
+    const data = JSON.parse(res.stdout) as {
+      data?: {
+        repository?: {
+          pullRequest?: {
+            files?: {
+              nodes: Array<{ path: string; viewerViewedState: string }>;
+              pageInfo: { hasNextPage: boolean; endCursor: string | null };
+            };
+          };
+        };
+      };
+      errors?: Array<{ message: string }>;
+    };
+
+    if (data.errors?.length) {
+      throw new Error(`GraphQL error: ${data.errors[0].message}`);
+    }
+
+    const files = data.data?.repository?.pullRequest?.files;
+    if (!files) break;
+
+    for (const node of files.nodes) {
+      // VIEWED = explicitly marked as viewed
+      // DISMISSED = was viewed but new commits arrived (still "was reviewed")
+      result[node.path] = node.viewerViewedState === "VIEWED" || node.viewerViewedState === "DISMISSED";
+    }
+
+    cursor = files.pageInfo.hasNextPage ? files.pageInfo.endCursor : null;
+  } while (cursor !== null);
+
+  return result;
+}
+
+/**
+ * Mark or unmark a set of files as viewed in a GitHub PR via GraphQL mutations.
+ * Uses Promise.allSettled so a single file failure doesn't block the rest.
+ * Throws only if ALL mutations fail.
+ */
+export async function markGhFilesViewed(
+  runtime: PRRuntime,
+  _ref: GhPRRef,
+  prNodeId: string,
+  filePaths: string[],
+  viewed: boolean,
+): Promise<void> {
+  if (filePaths.length === 0) return;
+
+  const mutationName = viewed ? "markFileAsViewed" : "unmarkFileAsViewed";
+  const mutation = `
+    mutation($id: ID!, $path: String!) {
+      ${mutationName}(input: { pullRequestId: $id, path: $path }) {
+        clientMutationId
+      }
+    }
+  `;
+
+  const results = await Promise.allSettled(
+    filePaths.map((path) =>
+      runtime.runCommandWithInput
+        ? runtime.runCommand("gh", [
+            "api", "graphql",
+            "-f", `query=${mutation}`,
+            "-F", `id=${prNodeId}`,
+            "-F", `path=${path}`,
+          ])
+        : Promise.reject(new Error("Runtime does not support commands")),
+    ),
+  );
+
+  const failures = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+  if (failures.length === filePaths.length) {
+    throw new Error(
+      `Failed to ${mutationName} all files: ${failures[0].reason}`,
+    );
   }
 }
 

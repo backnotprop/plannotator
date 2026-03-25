@@ -18,6 +18,8 @@ import {
   fetchPRContext as fetchPRContextCore,
   fetchPRFileContent as fetchPRFileContentCore,
   submitPRReview as submitPRReviewCore,
+  fetchPRViewedFiles as fetchPRViewedFilesCore,
+  markPRFilesViewed as markPRFilesViewedCore,
   prRefFromMetadata,
   getPlatformLabel,
   getMRLabel,
@@ -29,6 +31,7 @@ import {
 
 export type { PRRef, PRMetadata, PRContext, PRReviewFileComment } from "@plannotator/shared/pr-provider";
 export { prRefFromMetadata, getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo, getCliName, getCliInstallUrl } from "@plannotator/shared/pr-provider";
+export type { GithubPRMetadata } from "@plannotator/shared/pr-provider";
 
 const runtime: PRRuntime = {
   async runCommand(cmd, args) {
@@ -104,4 +107,19 @@ export function submitPRReview(
   fileComments: PRReviewFileComment[],
 ): Promise<void> {
   return submitPRReviewCore(runtime, ref, headSha, action, body, fileComments);
+}
+
+export function fetchPRViewedFiles(
+  ref: PRRef,
+): Promise<Record<string, boolean>> {
+  return fetchPRViewedFilesCore(runtime, ref);
+}
+
+export function markPRFilesViewed(
+  ref: PRRef,
+  prNodeId: string,
+  filePaths: string[],
+  viewed: boolean,
+): Promise<void> {
+  return markPRFilesViewedCore(runtime, ref, prNodeId, filePaths, viewed);
 }

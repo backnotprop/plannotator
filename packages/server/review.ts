@@ -15,7 +15,7 @@ import { getRepoInfo } from "./repo";
 import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft } from "./draft";
 import { createEditorAnnotationHandler } from "./editor-annotations";
-import { type PRMetadata, type PRReviewFileComment, fetchPRFileContent, fetchPRContext, submitPRReview, getPRUser, prRefFromMetadata, getDisplayRepo, getMRLabel, getMRNumberLabel } from "./pr";
+import { type PRMetadata, type PRReviewFileComment, fetchPRFileContent, fetchPRContext, submitPRReview, fetchPRViewedFiles, markPRFilesViewed, getPRUser, prRefFromMetadata, getDisplayRepo, getMRLabel, getMRNumberLabel } from "./pr";
 import { createAIEndpoints, ProviderRegistry, SessionManager, createProvider, type AIEndpoints, type PiSDKConfig } from "@plannotator/ai";
 
 // Re-export utilities
@@ -200,6 +200,23 @@ export async function startReviewServer(
   const prRef = isPRMode ? prRefFromMetadata(prMetadata) : null;
   const platformUser = prRef ? await getPRUser(prRef) : null;
 
+  // Fetch GitHub viewed file state (non-blocking — errors are silently ignored)
+  let initialViewedFiles: string[] = [];
+  if (isPRMode && prRef) {
+    console.log("[plannotator] Fetching PR viewed files for", prRef);
+    try {
+      const viewedMap = await fetchPRViewedFiles(prRef);
+      console.log("[plannotator] PR viewed files map:", viewedMap);
+      initialViewedFiles = Object.entries(viewedMap)
+        .filter(([, isViewed]) => isViewed)
+        .map(([path]) => path);
+      console.log("[plannotator] Initial viewed files:", initialViewedFiles);
+    } catch (err) {
+      // Non-fatal: viewed state is best-effort
+      console.warn("[plannotator] Could not fetch PR viewed files:", err instanceof Error ? err.message : err);
+    }
+  }
+
   // Decision promise
   let resolveDecision: (result: {
     approved: boolean;
@@ -239,6 +256,7 @@ export async function startReviewServer(
               shareBaseUrl,
               repoInfo,
               ...(isPRMode && { prMetadata, platformUser }),
+              ...(isPRMode && initialViewedFiles.length > 0 && { viewedFiles: initialViewedFiles }),
               ...(currentError && { error: currentError }),
             });
           }
@@ -455,6 +473,38 @@ export async function startReviewServer(
             } catch (err) {
               const message =
                 err instanceof Error ? err.message : "Failed to submit PR review";
+              return Response.json({ error: message }, { status: 500 });
+            }
+          }
+
+          // API: Mark/unmark PR files as viewed on GitHub (PR mode, GitHub only)
+          if (url.pathname === "/api/pr-viewed" && req.method === "POST") {
+            if (!isPRMode || !prMetadata) {
+              console.log("[plannotator] /api/pr-viewed: not in PR mode");
+              return Response.json({ error: "Not in PR mode" }, { status: 400 });
+            }
+            if (prMetadata.platform !== "github") {
+              console.log("[plannotator] /api/pr-viewed: platform is", prMetadata.platform, "(not github)");
+              return Response.json({ error: "Viewed sync only supported for GitHub" }, { status: 400 });
+            }
+            const prNodeId = prMetadata.prNodeId;
+            if (!prNodeId) {
+              console.log("[plannotator] /api/pr-viewed: prNodeId missing from metadata:", prMetadata);
+              return Response.json({ error: "PR node ID not available" }, { status: 400 });
+            }
+            try {
+              const body = (await req.json()) as {
+                filePaths: string[];
+                viewed: boolean;
+              };
+              console.log("[plannotator] /api/pr-viewed: marking", body.filePaths, "as viewed=", body.viewed, "prNodeId=", prNodeId);
+              await markPRFilesViewed(prRef!, prNodeId, body.filePaths, body.viewed);
+              console.log("[plannotator] /api/pr-viewed: success");
+              return Response.json({ ok: true });
+            } catch (err) {
+              const message =
+                err instanceof Error ? err.message : "Failed to update viewed state";
+              console.error("[plannotator] /api/pr-viewed error:", message);
               return Response.json({ error: message }, { status: 500 });
             }
           }

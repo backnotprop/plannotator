@@ -47,7 +47,9 @@ import { listenOnPort } from "./network.js";
 import {
 	fetchPRContext,
 	fetchPRFileContent,
+	fetchPRViewedFiles,
 	getPRUser,
+	markPRFilesViewed,
 	submitPRReview,
 } from "./pr.js";
 import { getRepoInfo } from "./project.js";
@@ -119,6 +121,19 @@ export async function startReviewServer(options: {
 	const isPRMode = !!prMeta;
 	const prRef = prMeta ? prRefFromMetadata(prMeta) : null;
 	const platformUser = prRef ? await getPRUser(prRef) : null;
+
+	// Fetch GitHub viewed file state (non-blocking — errors are silently ignored)
+	let initialViewedFiles: string[] = [];
+	if (isPRMode && prRef) {
+		try {
+			const viewedMap = await fetchPRViewedFiles(prRef);
+			initialViewedFiles = Object.entries(viewedMap)
+				.filter(([, isViewed]) => isViewed)
+				.map(([path]) => path);
+		} catch {
+			// Non-fatal: viewed state is best-effort
+		}
+	}
 	const repoInfo = prMeta
 		? {
 				display: getDisplayRepo(prMeta),
@@ -280,6 +295,7 @@ export async function startReviewServer(options: {
 				shareBaseUrl,
 				repoInfo,
 				...(isPRMode && { prMetadata: prMeta, platformUser }),
+				...(isPRMode && initialViewedFiles.length > 0 && { viewedFiles: initialViewedFiles }),
 				...(currentError ? { error: currentError } : {}),
 			});
 		} else if (url.pathname === "/api/diff/switch" && req.method === "POST") {
@@ -350,6 +366,39 @@ export async function startReviewServer(options: {
 					{
 						error:
 							err instanceof Error ? err.message : "Failed to submit PR review",
+					},
+					500,
+				);
+			}
+		} else if (url.pathname === "/api/pr-viewed" && req.method === "POST") {
+			if (!isPRMode || !prMeta || !prRef) {
+				json(res, { error: "Not in PR mode" }, 400);
+				return;
+			}
+			if (prMeta.platform !== "github") {
+				json(res, { error: "Viewed sync only supported for GitHub" }, 400);
+				return;
+			}
+			const prNodeId = prMeta.prNodeId;
+			if (!prNodeId) {
+				json(res, { error: "PR node ID not available" }, 400);
+				return;
+			}
+			try {
+				const body = await parseBody(req);
+				await markPRFilesViewed(
+					prRef,
+					prNodeId,
+					body.filePaths as string[],
+					body.viewed as boolean,
+				);
+				json(res, { ok: true });
+			} catch (err) {
+				json(
+					res,
+					{
+						error:
+							err instanceof Error ? err.message : "Failed to update viewed state",
 					},
 					500,
 				);

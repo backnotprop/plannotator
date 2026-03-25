@@ -8,7 +8,7 @@
  * execution so the logic is reusable across Bun and Node/jiti.
  */
 
-import { checkGhAuth, getGhUser, fetchGhPR, fetchGhPRContext, fetchGhPRFileContent, submitGhPRReview } from "./pr-github";
+import { checkGhAuth, getGhUser, fetchGhPR, fetchGhPRContext, fetchGhPRFileContent, submitGhPRReview, fetchGhPRViewedFiles, markGhFilesViewed } from "./pr-github";
 import { checkGlAuth, getGlUser, fetchGlMR, fetchGlMRContext, fetchGlFileContent, submitGlMRReview } from "./pr-gitlab";
 
 // --- Runtime Types ---
@@ -60,6 +60,8 @@ export interface GithubPRMetadata {
   owner: string;
   repo: string;
   number: number;
+  /** GraphQL node ID for the PR — used for markFileAsViewed mutations */
+  prNodeId?: string;
   title: string;
   author: string;
   baseBranch: string;
@@ -285,4 +287,33 @@ export async function submitPRReview(
 ): Promise<void> {
   if (ref.platform === "github") return submitGhPRReview(runtime, ref, headSha, action, body, fileComments);
   return submitGlMRReview(runtime, ref, headSha, action, body, fileComments);
+}
+
+/**
+ * Fetch per-file "viewed" state for a PR.
+ * GitHub: returns { filePath: isViewed } map.
+ * GitLab: always returns {} (no server-side viewed state API).
+ */
+export async function fetchPRViewedFiles(
+  runtime: PRRuntime,
+  ref: PRRef,
+): Promise<Record<string, boolean>> {
+  if (ref.platform === "github") return fetchGhPRViewedFiles(runtime, ref);
+  return {}; // GitLab has no server-side viewed state
+}
+
+/**
+ * Mark or unmark files as viewed in a PR.
+ * GitHub: fires markFileAsViewed / unmarkFileAsViewed GraphQL mutations.
+ * GitLab: no-op (no server-side viewed state API).
+ */
+export async function markPRFilesViewed(
+  runtime: PRRuntime,
+  ref: PRRef,
+  prNodeId: string,
+  filePaths: string[],
+  viewed: boolean,
+): Promise<void> {
+  if (ref.platform === "github") return markGhFilesViewed(runtime, ref, prNodeId, filePaths, viewed);
+  // GitLab: no-op
 }
