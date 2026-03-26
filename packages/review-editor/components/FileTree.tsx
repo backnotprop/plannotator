@@ -221,6 +221,26 @@ export const FileTree: React.FC<FileTreeProps> = ({
             <span className="text-xs text-muted-foreground">
               {viewedFiles.size}/{files.length}
             </span>
+            <button
+              onClick={() => setExpandedFolders(new Set(getAllFolderPaths(tree)))}
+              className="p-1 rounded transition-colors hover:bg-muted text-muted-foreground"
+              title="Expand all folders"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 8l7-6 7 6" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 16l7 6 7-6" />
+              </svg>
+            </button>
+            <button
+              onClick={() => setExpandedFolders(new Set())}
+              className="p-1 rounded transition-colors hover:bg-muted text-muted-foreground"
+              title="Collapse all folders"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 2l7 6 7-6" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 22l7-6 7 6" />
+              </svg>
+            </button>
             {onToggleHideViewed && (
               <button
                 onClick={onToggleHideViewed}
