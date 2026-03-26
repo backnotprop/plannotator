@@ -17,6 +17,7 @@
     "./repo": "./repo.ts",
     "./reference-common": "./reference-common.ts",
     "./favicon": "./favicon.ts",
-    "./resolve-file": "./resolve-file.ts"
+    "./resolve-file": "./resolve-file.ts",
+    "./external-annotation": "./external-annotation.ts"
   }
 }

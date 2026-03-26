@@ -1,4 +1,4 @@
-import { Block, type Annotation, type EditorAnnotation, type ImageAttachment } from '../types';
+import { Block, type Annotation, type EditorAnnotation, type ExternalAnnotation, type ImageAttachment } from '../types';
 import { planDenyFeedback } from '@plannotator/shared/feedback-templates';
 
 /**
@@ -450,6 +450,63 @@ export const exportEditorAnnotations = (editorAnnotations: EditorAnnotation[]): 
 
     output += '\n';
   });
+
+  output += `---\n`;
+  return output;
+};
+
+export const exportExternalAnnotations = (annotations: ExternalAnnotation[]): string => {
+  if (annotations.length === 0) return '';
+
+  // Group by source
+  const grouped = new Map<string, ExternalAnnotation[]>();
+  for (const ann of annotations) {
+    const existing = grouped.get(ann.source) || [];
+    existing.push(ann);
+    grouped.set(ann.source, existing);
+  }
+
+  let output = `\n# External Annotations\n\n`;
+
+  for (const [source, sourceAnnotations] of grouped) {
+    output += `## ${source} (${sourceAnnotations.length} annotation${sourceAnnotations.length !== 1 ? 's' : ''})\n\n`;
+
+    sourceAnnotations.forEach((ann, index) => {
+      const parts: string[] = [];
+
+      if (ann.filePath) {
+        const lineRange = ann.lineStart != null && ann.lineEnd != null
+          ? ann.lineStart === ann.lineEnd
+            ? `line ${ann.lineStart}`
+            : `lines ${ann.lineStart}-${ann.lineEnd}`
+          : null;
+        parts.push(ann.filePath + (lineRange ? ` (${lineRange})` : ''));
+      }
+
+      if (ann.ruleId) {
+        parts.push(`[${ann.kind}: ${ann.ruleId}]`);
+      } else if (ann.kind !== 'comment') {
+        parts.push(`[${ann.kind}]`);
+      }
+
+      const heading = parts.length > 0 ? parts.join(' ') : `Annotation ${index + 1}`;
+      output += `### ${heading}\n`;
+
+      if (ann.selectedText) {
+        output += `\`\`\`\n${ann.selectedText}\n\`\`\`\n`;
+      }
+
+      if (ann.comment) {
+        output += `${ann.comment}\n`;
+      }
+
+      if (ann.suggestedCode) {
+        output += `\n**Suggested code:**\n\`\`\`\n${ann.suggestedCode}\n\`\`\`\n`;
+      }
+
+      output += '\n';
+    });
+  }
 
   output += `---\n`;
   return output;

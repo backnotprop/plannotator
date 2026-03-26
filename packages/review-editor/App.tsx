@@ -25,7 +25,8 @@ import { useAIChat } from './hooks/useAIChat';
 import { extractLinesFromPatch } from './utils/patchParser';
 import { isTypingTarget, useReviewSearch } from './hooks/useReviewSearch';
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
-import { exportEditorAnnotations } from '@plannotator/ui/utils/parser';
+import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotations';
+import { exportEditorAnnotations, exportExternalAnnotations } from '@plannotator/ui/utils/parser';
 import { ResizeHandle } from '@plannotator/ui/components/ResizeHandle';
 import { DiffViewer } from './components/DiffViewer';
 import { ReviewPanel } from './components/ReviewPanel';
@@ -182,6 +183,9 @@ const ReviewApp: React.FC = () => {
 
   // VS Code editor annotations (only polls when inside VS Code webview)
   const { editorAnnotations, deleteEditorAnnotation } = useEditorAnnotations();
+
+  // External annotations (SSE-based, for any external tool)
+  const { externalAnnotations, deleteExternalAnnotation } = useExternalAnnotations();
 
   // AI Chat
   const [aiAvailable, setAiAvailable] = useState(false);
@@ -678,10 +682,13 @@ const ReviewApp: React.FC = () => {
     if (editorAnnotations.length > 0) {
       output += exportEditorAnnotations(editorAnnotations);
     }
+    if (externalAnnotations.length > 0) {
+      output += exportExternalAnnotations(externalAnnotations);
+    }
     return output;
-  }, [annotations, prMetadata, editorAnnotations]);
+  }, [annotations, prMetadata, editorAnnotations, externalAnnotations]);
 
-  const totalAnnotationCount = annotations.length + editorAnnotations.length;
+  const totalAnnotationCount = annotations.length + editorAnnotations.length + externalAnnotations.length;
 
   // Send feedback to OpenCode via API
   const handleSendFeedback = useCallback(async () => {
@@ -1436,6 +1443,8 @@ const ReviewApp: React.FC = () => {
             width={panelResize.width}
             editorAnnotations={editorAnnotations}
             onDeleteEditorAnnotation={deleteEditorAnnotation}
+            externalAnnotations={externalAnnotations}
+            onDeleteExternalAnnotation={deleteExternalAnnotation}
             prMetadata={prMetadata}
             aiAvailable={aiAvailable}
             aiMessages={aiChat.messages}

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { CodeAnnotation, type EditorAnnotation } from '@plannotator/ui/types';
+import { CodeAnnotation, type EditorAnnotation, type ExternalAnnotation } from '@plannotator/ui/types';
 import { isCurrentUser } from '@plannotator/ui/utils/identity';
 import { EditorAnnotationCard } from '@plannotator/ui/components/EditorAnnotationCard';
+import { ExternalAnnotationCard } from '@plannotator/ui/components/ExternalAnnotationCard';
 import { HighlightedCode } from './HighlightedCode';
 import { detectLanguage } from '../utils/detectLanguage';
 import { renderInlineMarkdown } from '../utils/renderInlineMarkdown';
@@ -30,6 +31,8 @@ interface ReviewPanelProps {
   width?: number;
   editorAnnotations?: EditorAnnotation[];
   onDeleteEditorAnnotation?: (id: string) => void;
+  externalAnnotations?: ExternalAnnotation[];
+  onDeleteExternalAnnotation?: (id: string) => void;
   prMetadata?: PRMetadata | null;
   // AI props
   aiAvailable?: boolean;
@@ -130,6 +133,8 @@ export const ReviewPanel: React.FC<ReviewPanelProps> = ({
   width,
   editorAnnotations,
   onDeleteEditorAnnotation,
+  externalAnnotations,
+  onDeleteExternalAnnotation,
   prMetadata,
   aiAvailable = false,
   aiMessages = [],
@@ -148,7 +153,7 @@ export const ReviewPanel: React.FC<ReviewPanelProps> = ({
   onAIConfigChange,
   hasAISession,
 }) => {
-  const totalCount = annotations.length + (editorAnnotations?.length ?? 0);
+  const totalCount = annotations.length + (editorAnnotations?.length ?? 0) + (externalAnnotations?.length ?? 0);
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<ReviewPanelTab>('annotations');
   const hasPRTabs = !!prMetadata;
@@ -388,6 +393,26 @@ export const ReviewPanel: React.FC<ReviewPanelProps> = ({
                       key={ann.id}
                       annotation={ann}
                       onDelete={() => onDeleteEditorAnnotation?.(ann.id)}
+                    />
+                  ))}
+                </>
+              )}
+
+              {/* External annotations */}
+              {externalAnnotations && externalAnnotations.length > 0 && (
+                <>
+                  {(annotations.length > 0 || (editorAnnotations && editorAnnotations.length > 0)) && (
+                    <div className="flex items-center gap-2 pt-2 pb-1">
+                      <div className="flex-1 border-t border-border/30" />
+                      <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/60">External</span>
+                      <div className="flex-1 border-t border-border/30" />
+                    </div>
+                  )}
+                  {externalAnnotations.map(ann => (
+                    <ExternalAnnotationCard
+                      key={ann.id}
+                      annotation={ann}
+                      onDelete={() => onDeleteExternalAnnotation?.(ann.id)}
                     />
                   ))}
                 </>

@@ -15,6 +15,7 @@ import {
 	saveToHistory,
 } from "../generated/storage.js";
 import { createEditorAnnotationHandler } from "./annotations.js";
+import { createExternalAnnotationHandler } from "./external-annotations.js";
 import {
 	handleDraftRequest,
 	handleFavicon,
@@ -133,6 +134,7 @@ export async function startPlanReviewServer(options: {
 
 	// Editor annotations (in-memory, VS Code integration — skip in archive mode)
 	const editorAnnotations = options.mode !== "archive" ? createEditorAnnotationHandler() : null;
+	const externalAnnotations = options.mode !== "archive" ? createExternalAnnotationHandler() : null;
 
 	// Lazy cache for in-session archive tab
 	let cachedArchivePlans: ArchivedPlan[] | null = null;
@@ -211,6 +213,8 @@ export async function startPlanReviewServer(options: {
 		} else if (url.pathname === "/api/draft") {
 			await handleDraftRequest(req, res, draftKey);
 		} else if (editorAnnotations && (await editorAnnotations.handle(req, res, url))) {
+			return;
+		} else if (externalAnnotations && (await externalAnnotations.handle(req, res, url))) {
 			return;
 		} else if (url.pathname === "/api/doc" && req.method === "GET") {
 			handleDocRequest(res, url);

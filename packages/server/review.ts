@@ -15,6 +15,7 @@ import { getRepoInfo } from "./repo";
 import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft } from "./draft";
 import { createEditorAnnotationHandler } from "./editor-annotations";
+import { createExternalAnnotationHandler } from "./external-annotations";
 import { type PRMetadata, type PRReviewFileComment, fetchPRFileContent, fetchPRContext, submitPRReview, getPRUser, prRefFromMetadata, getDisplayRepo, getMRLabel, getMRNumberLabel } from "./pr";
 import { createAIEndpoints, ProviderRegistry, SessionManager, createProvider, type AIEndpoints, type PiSDKConfig } from "@plannotator/ai";
 import { isWSL } from "./browser";
@@ -94,6 +95,7 @@ export async function startReviewServer(
   const isPRMode = !!prMetadata;
   const draftKey = contentHash(options.rawPatch);
   const editorAnnotations = createEditorAnnotationHandler();
+  const externalAnnotations = createExternalAnnotationHandler();
 
   // Mutable state for diff switching
   let currentPatch = options.rawPatch;
@@ -407,6 +409,10 @@ export async function startReviewServer(
           // API: Editor annotations (VS Code extension)
           const editorResponse = await editorAnnotations.handle(req, url);
           if (editorResponse) return editorResponse;
+
+          // API: External annotations (SSE-based, for any external tool)
+          const externalResponse = await externalAnnotations.handle(req, url);
+          if (externalResponse) return externalResponse;
 
           // API: Submit review feedback
           if (url.pathname === "/api/feedback" && req.method === "POST") {

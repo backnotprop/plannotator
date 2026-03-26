@@ -134,3 +134,9 @@ export interface VaultNode {
 }
 
 export type { EditorAnnotation } from '@plannotator/shared/types';
+
+export type {
+  ExternalAnnotation,
+  ExternalAnnotationKind,
+  ExternalAnnotationEvent,
+} from '@plannotator/shared/external-annotation';

@@ -16,6 +16,7 @@ import { getRepoInfo } from "./repo";
 import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon } from "./shared-handlers";
 import { handleDoc, handleFileBrowserFiles } from "./reference-handlers";
 import { contentHash, deleteDraft } from "./draft";
+import { createExternalAnnotationHandler } from "./external-annotations";
 import { dirname } from "path";
 import { isWSL } from "./browser";
 
@@ -98,6 +99,7 @@ export async function startAnnotateServer(
   const configuredPort = getServerPort();
   const wslFlag = await isWSL();
   const draftKey = contentHash(markdown);
+  const externalAnnotations = createExternalAnnotationHandler();
 
   // Detect repo info (cached for this session)
   const repoInfo = await getRepoInfo();
@@ -173,6 +175,10 @@ export async function startAnnotateServer(
             if (req.method === "DELETE") return handleDraftDelete(draftKey);
             return handleDraftLoad(draftKey);
           }
+
+          // API: External annotations (SSE-based, for any external tool)
+          const externalResponse = await externalAnnotations.handle(req, url);
+          if (externalResponse) return externalResponse;
 
           // API: Submit annotation feedback
           if (url.pathname === "/api/feedback" && req.method === "POST") {

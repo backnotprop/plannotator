@@ -41,6 +41,7 @@ import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraft
 import { contentHash, deleteDraft } from "./draft";
 import { handleDoc, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, handleFileBrowserFiles } from "./reference-handlers";
 import { createEditorAnnotationHandler } from "./editor-annotations";
+import { createExternalAnnotationHandler } from "./external-annotations";
 import { isWSL } from "./browser";
 
 // Re-export utilities
@@ -139,6 +140,7 @@ export async function startPlannotatorServer(
   // --- Plan review mode setup (skip in archive mode) ---
   const draftKey = mode !== "archive" ? contentHash(plan) : "";
   const editorAnnotations = mode !== "archive" ? createEditorAnnotationHandler() : null;
+  const externalAnnotations = mode !== "archive" ? createExternalAnnotationHandler() : null;
   const slug = mode !== "archive" ? generateSlug(plan) : "";
 
   // Lazy cache for in-session archive browsing (plan review sidebar tab)
@@ -345,6 +347,10 @@ export async function startPlannotatorServer(
           // API: Editor annotations (VS Code extension)
           const editorResponse = await editorAnnotations?.handle(req, url);
           if (editorResponse) return editorResponse;
+
+          // API: External annotations (SSE-based, for any external tool)
+          const externalResponse = await externalAnnotations?.handle(req, url);
+          if (externalResponse) return externalResponse;
 
           // API: Save to notes (decoupled from approve/deny)
           if (url.pathname === "/api/save-notes" && req.method === "POST") {
