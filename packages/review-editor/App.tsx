@@ -147,6 +147,8 @@ const ReviewApp: React.FC = () => {
 
   const {
     searchQuery,
+    debouncedSearchQuery,
+    isSearchPending,
     isSearchOpen,
     activeSearchMatchId,
     activeSearchMatch,
@@ -336,7 +338,7 @@ const ReviewApp: React.FC = () => {
       }
 
       // Enter/F3 to step through search matches
-      if ((e.key === 'Enter' || e.key === 'F3') && searchMatches.length > 0 && !isTypingTarget(e.target)) {
+      if ((e.key === 'Enter' || e.key === 'F3') && searchMatches.length > 0 && !isSearchPending && !isTypingTarget(e.target)) {
         e.preventDefault();
         stepSearchMatch(e.shiftKey ? -1 : 1);
         return;
@@ -362,7 +364,7 @@ const ReviewApp: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showExportModal, showDestinationMenu, searchQuery, searchMatches, openSearch, stepSearchMatch, clearSearch, files, gitContext?.diffOptions]);
+  }, [showExportModal, showDestinationMenu, searchQuery, searchMatches, isSearchPending, openSearch, stepSearchMatch, clearSearch, files, gitContext?.diffOptions]);
 
   // Get annotations for active file
   const activeFileAnnotations = useMemo(() => {
@@ -1337,6 +1339,7 @@ const ReviewApp: React.FC = () => {
                 currentBranch={gitContext?.currentBranch}
                 stagedFiles={stagedFiles}
                 searchQuery={searchQuery}
+                isSearchPending={isSearchPending}
                 searchInputRef={searchInputRef}
                 onSearchChange={handleSearchInputChange}
                 onSearchClear={clearSearch}
@@ -1389,7 +1392,7 @@ const ReviewApp: React.FC = () => {
                 onStage={() => stageFile(activeFile.path)}
                 canStage={canStageFiles}
                 stageError={stageError}
-                searchQuery={searchQuery}
+                searchQuery={isSearchPending ? '' : debouncedSearchQuery}
                 searchMatches={activeFileSearchMatches}
                 activeSearchMatchId={activeSearchMatchId}
                 activeSearchMatch={activeSearchMatch?.filePath === activeFile.path ? activeSearchMatch : null}

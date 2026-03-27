@@ -42,12 +42,13 @@ export interface ReviewSearchFileGroup {
   matches: ReviewSearchMatch[];
 }
 
-interface SearchableLine {
+export interface SearchableLine {
   filePath: string;
   side: ReviewSearchSide;
   lineNumber: number;
   altLineNumber?: number;
   text: string;
+  normalizedText: string;
 }
 
 function isDiffMetadataLine(line: string): boolean {
@@ -84,6 +85,7 @@ function buildSearchableLinesForPatch(file: ReviewSearchableDiffFile): Searchabl
         lineNumber: newLine,
         altLineNumber: oldLine,
         text,
+        normalizedText: text.toLowerCase(),
       });
       continue;
     }
@@ -95,6 +97,7 @@ function buildSearchableLinesForPatch(file: ReviewSearchableDiffFile): Searchabl
         side: 'deletion',
         lineNumber: oldLine,
         text,
+        normalizedText: text.toLowerCase(),
       });
       continue;
     }
@@ -106,11 +109,16 @@ function buildSearchableLinesForPatch(file: ReviewSearchableDiffFile): Searchabl
         side: 'addition',
         lineNumber: newLine,
         text,
+        normalizedText: text.toLowerCase(),
       });
     }
   }
 
   return searchableLines;
+}
+
+export function buildSearchIndex(files: ReviewSearchableDiffFile[]): SearchableLine[] {
+  return files.flatMap(file => buildSearchableLinesForPatch(file));
 }
 
 function buildSnippet(text: string, start: number, end: number): string {
@@ -121,45 +129,44 @@ function buildSnippet(text: string, start: number, end: number): string {
   return `${prefix}${text.slice(snippetStart, snippetEnd)}${suffix}`;
 }
 
-export function findReviewSearchMatches(files: ReviewSearchableDiffFile[], query: string): ReviewSearchMatch[] {
+export function findMatchesInIndex(index: SearchableLine[], query: string): ReviewSearchMatch[] {
   const trimmedQuery = query.trim();
   if (!trimmedQuery) return [];
 
   const normalizedQuery = trimmedQuery.toLowerCase();
   const matches: ReviewSearchMatch[] = [];
 
-  files.forEach((file) => {
-    const searchableLines = buildSearchableLinesForPatch(file);
+  index.forEach((line) => {
+    let fromIndex = 0;
+    let matchCountForLine = 0;
 
-    searchableLines.forEach((line) => {
-      const normalizedText = line.text.toLowerCase();
-      let fromIndex = 0;
-      let matchCountForLine = 0;
+    while (fromIndex <= line.normalizedText.length) {
+      const matchStart = line.normalizedText.indexOf(normalizedQuery, fromIndex);
+      if (matchStart === -1) break;
 
-      while (fromIndex <= normalizedText.length) {
-        const matchStart = normalizedText.indexOf(normalizedQuery, fromIndex);
-        if (matchStart === -1) break;
+      const matchEnd = matchStart + normalizedQuery.length;
+      matches.push({
+        id: `${line.filePath}:${line.side}:${line.lineNumber}:${matchStart}:${matchCountForLine}`,
+        filePath: line.filePath,
+        side: line.side,
+        lineNumber: line.lineNumber,
+        altLineNumber: line.altLineNumber,
+        text: line.text,
+        matchStart,
+        matchEnd,
+        snippet: buildSnippet(line.text, matchStart, matchEnd),
+      });
 
-        const matchEnd = matchStart + normalizedQuery.length;
-        matches.push({
-          id: `${line.filePath}:${line.side}:${line.lineNumber}:${matchStart}:${matchCountForLine}`,
-          filePath: line.filePath,
-          side: line.side,
-          lineNumber: line.lineNumber,
-          altLineNumber: line.altLineNumber,
-          text: line.text,
-          matchStart,
-          matchEnd,
-          snippet: buildSnippet(line.text, matchStart, matchEnd),
-        });
-
-        matchCountForLine += 1;
-        fromIndex = matchStart + Math.max(1, normalizedQuery.length);
-      }
-    });
+      matchCountForLine += 1;
+      fromIndex = matchStart + Math.max(1, normalizedQuery.length);
+    }
   });
 
   return matches;
+}
+
+export function findReviewSearchMatches(files: ReviewSearchableDiffFile[], query: string): ReviewSearchMatch[] {
+  return findMatchesInIndex(buildSearchIndex(files), query);
 }
 
 export function groupReviewSearchMatches(

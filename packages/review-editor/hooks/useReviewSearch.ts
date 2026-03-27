@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  findReviewSearchMatches,
   groupReviewSearchMatches,
+  buildSearchIndex,
+  findMatchesInIndex,
   type ReviewSearchMatch,
   type ReviewSearchableDiffFile,
 } from '../utils/reviewSearch';
@@ -33,14 +34,29 @@ export function useReviewSearch({
   clearPendingSelection,
 }: UseReviewSearchOptions) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [activeSearchMatchId, setActiveSearchMatchId] = useState(null as string | null);
 
   const searchInputRef = useRef(null as HTMLInputElement | null);
 
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setDebouncedSearchQuery('');
+      return;
+    }
+    const timeoutId = setTimeout(() => setDebouncedSearchQuery(searchQuery), 200);
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery]);
+
+  const isSearchPending = searchQuery.trim() !== ''
+    && searchQuery.trim().toLowerCase() !== debouncedSearchQuery.trim().toLowerCase();
+
+  const searchIndex = useMemo(() => buildSearchIndex(files), [files]);
+
   const searchMatches = useMemo(() => {
-    return findReviewSearchMatches(files, searchQuery);
-  }, [files, searchQuery]);
+    return findMatchesInIndex(searchIndex, debouncedSearchQuery);
+  }, [searchIndex, debouncedSearchQuery]);
 
   const searchGroups = useMemo(() => {
     return groupReviewSearchMatches(files, searchMatches);
@@ -68,6 +84,7 @@ export function useReviewSearch({
 
   const clearSearch = useCallback(() => {
     setSearchQuery('');
+    setDebouncedSearchQuery('');
     setActiveSearchMatchId(null);
     setIsSearchOpen(false);
   }, []);
@@ -95,7 +112,7 @@ export function useReviewSearch({
   }, [searchMatches, activeSearchMatchId]);
 
   useEffect(() => {
-    if (!searchQuery.trim() || searchMatches.length === 0) {
+    if (!debouncedSearchQuery.trim() || searchMatches.length === 0) {
       setActiveSearchMatchId(null);
       return;
     }
@@ -106,7 +123,7 @@ export function useReviewSearch({
     if (!stillExists) {
       setActiveSearchMatchId(searchMatches[0].id);
     }
-  }, [searchQuery, searchMatches, activeSearchMatchId]);
+  }, [debouncedSearchQuery, searchMatches, activeSearchMatchId]);
 
   useEffect(() => {
     if (!activeSearchMatch) return;
@@ -120,6 +137,8 @@ export function useReviewSearch({
 
   return {
     searchQuery,
+    debouncedSearchQuery,
+    isSearchPending,
     isSearchOpen,
     activeSearchMatchId,
     activeSearchMatch,
