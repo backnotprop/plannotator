@@ -4,25 +4,29 @@
  * Primary transport: EventSource on /api/external-annotations/stream.
  * Fallback: version-gated GET polling if SSE fails (e.g., proxy environments).
  *
+ * Generic over the annotation type — plan editor uses Annotation,
+ * review editor uses CodeAnnotation. The hook is shape-agnostic;
+ * it just serializes/deserializes JSON.
+ *
  * Always active — no VS Code gate. Any running Plannotator session can
  * receive external annotations from any tool.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { ExternalAnnotation, ExternalAnnotationEvent } from '../types';
+import type { ExternalAnnotationEvent } from '../types';
 
 const POLL_INTERVAL_MS = 500;
 const STREAM_URL = '/api/external-annotations/stream';
 const SNAPSHOT_URL = '/api/external-annotations';
 
-interface UseExternalAnnotationsReturn {
-  externalAnnotations: ExternalAnnotation[];
+interface UseExternalAnnotationsReturn<T> {
+  externalAnnotations: T[];
   deleteExternalAnnotation: (id: string) => void;
   clearExternalAnnotations: (source?: string) => void;
 }
 
-export function useExternalAnnotations(): UseExternalAnnotationsReturn {
-  const [annotations, setAnnotations] = useState<ExternalAnnotation[]>([]);
+export function useExternalAnnotations<T extends { id: string; source?: string }>(): UseExternalAnnotationsReturn<T> {
+  const [annotations, setAnnotations] = useState<T[]>([]);
   const versionRef = useRef(0);
   const fallbackRef = useRef(false);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -38,7 +42,7 @@ export function useExternalAnnotations(): UseExternalAnnotationsReturn {
       if (cancelled) return;
 
       try {
-        const parsed: ExternalAnnotationEvent = JSON.parse(event.data);
+        const parsed: ExternalAnnotationEvent<T> = JSON.parse(event.data);
 
         switch (parsed.type) {
           case 'snapshot':

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, exportExternalAnnotations, extractFrontmatter, wrapFeedbackForAgent, Frontmatter } from '@plannotator/ui/utils/parser';
+import { parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, extractFrontmatter, wrapFeedbackForAgent, Frontmatter } from '@plannotator/ui/utils/parser';
 import { Viewer, ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { ExportModal } from '@plannotator/ui/components/ExportModal';
@@ -330,7 +330,13 @@ const App: React.FC = () => {
   });
 
   const { editorAnnotations, deleteEditorAnnotation } = useEditorAnnotations();
-  const { externalAnnotations, deleteExternalAnnotation } = useExternalAnnotations();
+  const { externalAnnotations, deleteExternalAnnotation } = useExternalAnnotations<Annotation>();
+
+  // Merge external annotations into the main list — they render as native Annotation objects
+  const allAnnotations = useMemo(
+    () => [...annotations, ...externalAnnotations],
+    [annotations, externalAnnotations]
+  );
 
   const handleRestoreDraft = React.useCallback(() => {
     const { annotations: restored, globalAttachments: restoredGlobal } = restoreDraft();
@@ -679,7 +685,7 @@ const App: React.FC = () => {
       const hasDocAnnotations = Array.from(linkedDocHook.getDocAnnotations().values()).some(
         (d) => d.annotations.length > 0 || d.globalAttachments.length > 0
       );
-      if (annotations.length > 0 || globalAttachments.length > 0 || hasDocAnnotations || editorAnnotations.length > 0 || externalAnnotations.length > 0) {
+      if (allAnnotations.length > 0 || globalAttachments.length > 0 || hasDocAnnotations || editorAnnotations.length > 0) {
         body.feedback = annotationsOutput;
       }
 
@@ -769,7 +775,7 @@ const App: React.FC = () => {
       const hasDocAnnotations = Array.from(docAnnotations.values()).some(
         (d) => d.annotations.length > 0 || d.globalAttachments.length > 0
       );
-      if (annotations.length === 0 && editorAnnotations.length === 0 && externalAnnotations.length === 0 && !hasDocAnnotations) {
+      if (allAnnotations.length === 0 && editorAnnotations.length === 0 && !hasDocAnnotations) {
         // Check if agent exists for OpenCode users
         if (origin === 'opencode') {
           const warning = getAgentWarning();
@@ -807,6 +813,13 @@ const App: React.FC = () => {
   }, []);
 
   const handleDeleteAnnotation = (id: string) => {
+    // Route to external delete if this is an external annotation
+    const ann = allAnnotations.find(a => a.id === id);
+    if (ann?.source) {
+      deleteExternalAnnotation(id);
+      if (selectedAnnotationId === id) setSelectedAnnotationId(null);
+      return;
+    }
     viewerRef.current?.removeHighlight(id);
     setAnnotations(prev => prev.filter(a => a.id !== id));
     if (selectedAnnotationId === id) setSelectedAnnotationId(null);
@@ -843,16 +856,15 @@ const App: React.FC = () => {
     const hasDocAnnotations = Array.from(docAnnotations.values()).some(
       (d) => d.annotations.length > 0 || d.globalAttachments.length > 0
     );
-    const hasPlanAnnotations = annotations.length > 0 || globalAttachments.length > 0;
+    const hasPlanAnnotations = allAnnotations.length > 0 || globalAttachments.length > 0;
     const hasEditorAnnotations = editorAnnotations.length > 0;
-    const hasExternalAnnotations = externalAnnotations.length > 0;
 
-    if (!hasPlanAnnotations && !hasDocAnnotations && !hasEditorAnnotations && !hasExternalAnnotations) {
+    if (!hasPlanAnnotations && !hasDocAnnotations && !hasEditorAnnotations) {
       return 'User reviewed the document and has no feedback.';
     }
 
     let output = hasPlanAnnotations
-      ? exportAnnotations(blocks, annotations, globalAttachments, annotateSource === 'message' ? 'Message Feedback' : annotateSource === 'folder' ? 'Folder Feedback' : annotateSource === 'file' ? 'File Feedback' : 'Plan Feedback', annotateSource ?? 'plan')
+      ? exportAnnotations(blocks, allAnnotations, globalAttachments, annotateSource === 'message' ? 'Message Feedback' : annotateSource === 'folder' ? 'Folder Feedback' : annotateSource === 'file' ? 'File Feedback' : 'Plan Feedback', annotateSource ?? 'plan')
       : '';
 
     if (hasDocAnnotations) {
@@ -863,12 +875,8 @@ const App: React.FC = () => {
       output += exportEditorAnnotations(editorAnnotations);
     }
 
-    if (hasExternalAnnotations) {
-      output += exportExternalAnnotations(externalAnnotations);
-    }
-
     return output;
-  }, [blocks, annotations, globalAttachments, linkedDocHook.getDocAnnotations, editorAnnotations, externalAnnotations]);
+  }, [blocks, allAnnotations, globalAttachments, linkedDocHook.getDocAnnotations, editorAnnotations]);
 
   // Quick-save handlers for export dropdown and keyboard shortcut
   const handleDownloadAnnotations = () => {
@@ -1077,7 +1085,7 @@ const App: React.FC = () => {
                     const hasDocAnnotations = Array.from(docAnnotations.values()).some(
                       (d) => d.annotations.length > 0 || d.globalAttachments.length > 0
                     );
-                    if (annotations.length === 0 && editorAnnotations.length === 0 && externalAnnotations.length === 0 && !hasDocAnnotations) {
+                    if (allAnnotations.length === 0 && editorAnnotations.length === 0 && !hasDocAnnotations) {
                       setShowFeedbackPrompt(true);
                     } else {
                       handleDeny();
@@ -1089,12 +1097,12 @@ const App: React.FC = () => {
                       ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
                       : 'bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30'
                   }`}
-                  title={annotateMode ? (annotations.length > 0 || editorAnnotations.length > 0 || externalAnnotations.length > 0 || linkedDocHook.docAnnotationCount > 0 ? 'Send Annotations' : 'Done') : 'Send Feedback'}
+                  title={annotateMode ? (allAnnotations.length > 0 || editorAnnotations.length > 0 || linkedDocHook.docAnnotationCount > 0 ? 'Send Annotations' : 'Done') : 'Send Feedback'}
                 >
                   <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                   </svg>
-                  <span className="hidden md:inline">{isSubmitting ? 'Sending...' : annotateMode ? (annotations.length > 0 || editorAnnotations.length > 0 || externalAnnotations.length > 0 || linkedDocHook.docAnnotationCount > 0 ? 'Send Annotations' : 'Done') : 'Send Feedback'}</span>
+                  <span className="hidden md:inline">{isSubmitting ? 'Sending...' : annotateMode ? (allAnnotations.length > 0 || editorAnnotations.length > 0 || linkedDocHook.docAnnotationCount > 0 ? 'Send Annotations' : 'Done') : 'Send Feedback'}</span>
                 </button>
 
                 {!annotateMode && <div className="relative group/approve">
@@ -1275,7 +1283,7 @@ const App: React.FC = () => {
               className="md:hidden"
               isPanelOpen={isPanelOpen}
               onTogglePanel={() => setIsPanelOpen(!isPanelOpen)}
-              annotationCount={annotations.length + editorAnnotations.length + externalAnnotations.length}
+              annotationCount={allAnnotations.length + editorAnnotations.length}
               onOpenExport={() => { setInitialExportTab(undefined); setShowExport(true); }}
               onOpenSettings={() => setMobileSettingsOpen(true)}
               onDownloadAnnotations={handleDownloadAnnotations}
@@ -1469,7 +1477,7 @@ const App: React.FC = () => {
           <AnnotationPanel
             isOpen={isPanelOpen}
             blocks={blocks}
-            annotations={annotations}
+            annotations={allAnnotations}
             selectedId={selectedAnnotationId}
             onSelect={setSelectedAnnotationId}
             onDelete={handleDeleteAnnotation}
@@ -1479,8 +1487,6 @@ const App: React.FC = () => {
             width={panelResize.width}
             editorAnnotations={editorAnnotations}
             onDeleteEditorAnnotation={deleteEditorAnnotation}
-            externalAnnotations={externalAnnotations}
-            onDeleteExternalAnnotation={deleteExternalAnnotation}
             onClose={() => setIsPanelOpen(false)}
             onQuickCopy={async () => {
               await navigator.clipboard.writeText(wrapFeedbackForAgent(annotationsOutput));

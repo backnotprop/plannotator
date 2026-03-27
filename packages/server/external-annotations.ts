@@ -11,15 +11,17 @@
 
 import {
   createAnnotationStore,
-  parseAnnotationInput,
+  transformPlanInput,
+  transformReviewInput,
   serializeSSEEvent,
   HEARTBEAT_COMMENT,
   HEARTBEAT_INTERVAL_MS,
   type AnnotationStore,
+  type StorableAnnotation,
   type ExternalAnnotationEvent,
 } from "@plannotator/shared/external-annotation";
 
-export type { ExternalAnnotation, ExternalAnnotationEvent } from "@plannotator/shared/external-annotation";
+export type { ExternalAnnotationEvent } from "@plannotator/shared/external-annotation";
 
 // ---------------------------------------------------------------------------
 // Handler interface (matches existing EditorAnnotationHandler pattern)
@@ -40,13 +42,16 @@ const STREAM = `${BASE}/stream`;
 // Factory
 // ---------------------------------------------------------------------------
 
-export function createExternalAnnotationHandler(): ExternalAnnotationHandler {
-  const store: AnnotationStore = createAnnotationStore();
+export function createExternalAnnotationHandler(
+  mode: "plan" | "review",
+): ExternalAnnotationHandler {
+  const store: AnnotationStore<StorableAnnotation> = createAnnotationStore();
   const subscribers = new Set<ReadableStreamDefaultController>();
   const encoder = new TextEncoder();
+  const transform = mode === "plan" ? transformPlanInput : transformReviewInput;
 
   // Wire store mutations → SSE broadcast
-  store.onMutation((event: ExternalAnnotationEvent) => {
+  store.onMutation((event: ExternalAnnotationEvent<StorableAnnotation>) => {
     const data = encoder.encode(serializeSSEEvent(event));
     for (const controller of subscribers) {
       try {
@@ -70,7 +75,7 @@ export function createExternalAnnotationHandler(): ExternalAnnotationHandler {
             ctrl = controller;
 
             // Send current state as snapshot
-            const snapshot: ExternalAnnotationEvent = {
+            const snapshot: ExternalAnnotationEvent<StorableAnnotation> = {
               type: "snapshot",
               annotations: store.getAll(),
             };
@@ -123,7 +128,7 @@ export function createExternalAnnotationHandler(): ExternalAnnotationHandler {
       if (url.pathname === BASE && req.method === "POST") {
         try {
           const body = await req.json();
-          const parsed = parseAnnotationInput(body);
+          const parsed = transform(body);
 
           if ("error" in parsed) {
             return Response.json({ error: parsed.error }, { status: 400 });

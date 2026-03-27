@@ -136,7 +136,7 @@ export async function startPlanReviewServer(options: {
 
 	// Editor annotations (in-memory, VS Code integration — skip in archive mode)
 	const editorAnnotations = options.mode !== "archive" ? createEditorAnnotationHandler() : null;
-	const externalAnnotations = options.mode !== "archive" ? createExternalAnnotationHandler() : null;
+	const externalAnnotations = options.mode !== "archive" ? createExternalAnnotationHandler("plan") : null;
 
 	// Lazy cache for in-session archive tab
 	let cachedArchivePlans: ArchivedPlan[] | null = null;

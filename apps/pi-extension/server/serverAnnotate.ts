@@ -62,7 +62,7 @@ export async function startAnnotateServer(options: {
 	// Detect repo info (cached for this session)
 	const repoInfo = getRepoInfo();
 
-	const externalAnnotations = createExternalAnnotationHandler();
+	const externalAnnotations = createExternalAnnotationHandler("plan");
 
 	const server = createServer(async (req, res) => {
 		const url = requestUrl(req);

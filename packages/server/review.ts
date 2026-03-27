@@ -96,7 +96,7 @@ export async function startReviewServer(
   const isPRMode = !!prMetadata;
   const draftKey = contentHash(options.rawPatch);
   const editorAnnotations = createEditorAnnotationHandler();
-  const externalAnnotations = createExternalAnnotationHandler();
+  const externalAnnotations = createExternalAnnotationHandler("review");
 
   // Mutable state for diff switching
   let currentPatch = options.rawPatch;

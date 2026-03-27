@@ -142,7 +142,7 @@ export async function startPlannotatorServer(
   // --- Plan review mode setup (skip in archive mode) ---
   const draftKey = mode !== "archive" ? contentHash(plan) : "";
   const editorAnnotations = mode !== "archive" ? createEditorAnnotationHandler() : null;
-  const externalAnnotations = mode !== "archive" ? createExternalAnnotationHandler() : null;
+  const externalAnnotations = mode !== "archive" ? createExternalAnnotationHandler("plan") : null;
   const slug = mode !== "archive" ? generateSlug(plan) : "";
 
   // Lazy cache for in-session archive browsing (plan review sidebar tab)

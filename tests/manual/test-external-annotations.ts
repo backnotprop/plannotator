@@ -7,7 +7,7 @@
  * What it does:
  *   1. Starts the review server with a sample diff (sandbox mode)
  *   2. Opens browser so you can see annotations arrive in real-time
- *   3. Sends a batch of annotations over timed intervals
+ *   3. Sends a batch of CodeAnnotation-shaped annotations over timed intervals
  *   4. Demonstrates single add, batch add, delete, and clear operations
  *   5. Prints server decision when you submit feedback
  */
@@ -95,75 +95,80 @@ index 1111111..2222222 100644
 `;
 
 // ---------------------------------------------------------------------------
-// Annotation sequences to send
+// Annotation sequences — CodeAnnotation shape for review mode
 // ---------------------------------------------------------------------------
 
 const ANNOTATIONS = {
-  // Wave 1: Single annotation (eslint warning)
+  // Wave 1: Single comment annotation
   wave1: {
     source: "eslint",
-    kind: "warning",
+    type: "concern",
     filePath: "src/utils/parser.ts",
     lineStart: 12,
     lineEnd: 12,
-    comment: "Unexpected empty return. Consider returning an explicit empty array for clarity.",
-    ruleId: "no-implicit-return",
-    url: "https://eslint.org/docs/rules/no-implicit-return",
+    side: "new",
+    text: "Unexpected empty return. Consider returning an explicit empty array for clarity.",
+    author: "eslint",
   },
 
-  // Wave 2: Batch of 3 annotations (linter + type checker)
+  // Wave 2: Batch of 3 annotations
   wave2: [
     {
       source: "eslint",
-      kind: "error",
+      type: "concern",
       filePath: "src/components/App.tsx",
       lineStart: 3,
       lineEnd: 3,
-      selectedText: "import { formatBlock } from '../utils/parser';",
-      comment: "Duplicate import from '../utils/parser'. Merge with line 2.",
-      ruleId: "no-duplicate-imports",
+      side: "new",
+      text: "Duplicate import from '../utils/parser'. Merge with line 2.",
+      author: "eslint",
     },
     {
       source: "typescript",
-      kind: "error",
+      type: "concern",
       filePath: "src/components/App.tsx",
       lineStart: 19,
       lineEnd: 21,
-      selectedText: "const handleFormat = (block: Block) => {\n    return formatBlock(block);\n  };",
-      comment: "Parameter 'block' implicitly has an 'any' type. Add explicit type annotation.",
-      ruleId: "TS7006",
+      side: "new",
+      text: "Parameter 'block' implicitly has an 'any' type. Add explicit type annotation.",
+      author: "typescript",
     },
     {
       source: "eslint",
-      kind: "suggestion",
+      type: "suggestion",
       filePath: "src/utils/parser.ts",
       lineStart: 28,
       lineEnd: 28,
-      selectedText: "return block.content.trim();",
-      comment: "Consider using optional chaining for safer access.",
+      side: "new",
+      text: "Consider using optional chaining for safer access.",
       suggestedCode: "return block.content?.trim() ?? '';",
-      ruleId: "prefer-optional-chain",
+      originalCode: "return block.content.trim();",
+      author: "eslint",
     },
   ],
 
-  // Wave 3: Info annotation (coverage report)
+  // Wave 3: Coverage comment
   wave3: {
     source: "coverage",
-    kind: "info",
+    type: "comment",
     filePath: "src/utils/parser.ts",
-    comment: "Branch coverage: 67% (2/3 branches). Missing: empty input path.",
-    metadata: { coverage: 67, branches: { covered: 2, total: 3 } },
+    lineStart: 10,
+    lineEnd: 15,
+    side: "new",
+    text: "Branch coverage: 67% (2/3 branches). Missing: empty input path.",
+    author: "coverage",
   },
 
-  // Wave 4: Package.json suggestion
+  // Wave 4: Package.json comment
   wave4: {
     source: "depcheck",
-    kind: "warning",
+    type: "concern",
     filePath: "package.json",
     lineStart: 9,
     lineEnd: 9,
-    comment: "eslint is referenced in scripts but not listed in devDependencies.",
-    ruleId: "missing-dependency",
+    side: "new",
+    text: "eslint is referenced in scripts but not listed in devDependencies.",
+    author: "depcheck",
   },
 };
 
@@ -221,7 +226,7 @@ const server = await startReviewServer({
 async function scheduleWaves(port: number) {
   // Wave 1: Single annotation after 2s
   await Bun.sleep(2000);
-  log("Wave 1: Sending single eslint warning...");
+  log("Wave 1: Sending single eslint concern...");
   const r1 = await post(port, ANNOTATIONS.wave1);
   log(`  → Created: ${JSON.stringify(r1.ids)}`);
 
@@ -231,15 +236,15 @@ async function scheduleWaves(port: number) {
   const r2 = await post(port, { annotations: ANNOTATIONS.wave2 });
   log(`  → Created: ${JSON.stringify(r2.ids)}`);
 
-  // Wave 3: Info annotation after 3s
+  // Wave 3: Coverage comment after 3s
   await Bun.sleep(3000);
-  log("Wave 3: Sending coverage info annotation...");
+  log("Wave 3: Sending coverage comment...");
   const r3 = await post(port, ANNOTATIONS.wave3);
   log(`  → Created: ${JSON.stringify(r3.ids)}`);
 
   // Wave 4: One more after 2s
   await Bun.sleep(2000);
-  log("Wave 4: Sending depcheck warning...");
+  log("Wave 4: Sending depcheck concern...");
   const r4 = await post(port, ANNOTATIONS.wave4);
   log(`  → Created: ${JSON.stringify(r4.ids)}`);
 
@@ -258,7 +263,7 @@ async function scheduleWaves(port: number) {
 
   log("");
   log("=== Demo complete ===");
-  log("Remaining annotations should be: coverage + depcheck");
+  log("Remaining annotations should be: coverage + depcheck + typescript");
   log("Submit feedback or close the browser when done.");
 }
 

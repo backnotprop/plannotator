@@ -9,11 +9,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
 	createAnnotationStore,
-	parseAnnotationInput,
+	transformPlanInput,
+	transformReviewInput,
 	serializeSSEEvent,
 	HEARTBEAT_COMMENT,
 	HEARTBEAT_INTERVAL_MS,
-	type AnnotationStore,
+	type StorableAnnotation,
 	type ExternalAnnotationEvent,
 } from "../generated/external-annotation.js";
 import { json, parseBody } from "./helpers.js";
@@ -29,12 +30,13 @@ const STREAM = `${BASE}/stream`;
 // Factory
 // ---------------------------------------------------------------------------
 
-export function createExternalAnnotationHandler() {
-	const store: AnnotationStore = createAnnotationStore();
+export function createExternalAnnotationHandler(mode: "plan" | "review") {
+	const store = createAnnotationStore<StorableAnnotation>();
 	const subscribers = new Set<ServerResponse>();
+	const transform = mode === "plan" ? transformPlanInput : transformReviewInput;
 
 	// Wire store mutations → SSE broadcast
-	store.onMutation((event: ExternalAnnotationEvent) => {
+	store.onMutation((event: ExternalAnnotationEvent<StorableAnnotation>) => {
 		const data = serializeSSEEvent(event);
 		for (const res of subscribers) {
 			try {
@@ -64,7 +66,7 @@ export function createExternalAnnotationHandler() {
 				res.setTimeout(0);
 
 				// Send current state as snapshot
-				const snapshot: ExternalAnnotationEvent = {
+				const snapshot: ExternalAnnotationEvent<StorableAnnotation> = {
 					type: "snapshot",
 					annotations: store.getAll(),
 				};
@@ -99,7 +101,7 @@ export function createExternalAnnotationHandler() {
 					const sinceVersion = parseInt(since, 10);
 					if (!isNaN(sinceVersion) && sinceVersion === store.version) {
 						res.writeHead(304);
-					res.end();
+						res.end();
 						return true;
 					}
 				}
@@ -114,7 +116,7 @@ export function createExternalAnnotationHandler() {
 			if (url.pathname === BASE && req.method === "POST") {
 				try {
 					const body = await parseBody(req);
-					const parsed = parseAnnotationInput(body);
+					const parsed = transform(body);
 
 					if ("error" in parsed) {
 						json(res, { error: parsed.error }, 400);
@@ -122,7 +124,7 @@ export function createExternalAnnotationHandler() {
 					}
 
 					const created = store.add(parsed.annotations);
-					json(res, { ids: created.map((a) => a.id) }, 201);
+					json(res, { ids: created.map((a: StorableAnnotation) => a.id) }, 201);
 				} catch {
 					json(res, { error: "Invalid JSON" }, 400);
 				}

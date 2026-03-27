@@ -26,7 +26,7 @@ import { extractLinesFromPatch } from './utils/patchParser';
 import { isTypingTarget, useReviewSearch } from './hooks/useReviewSearch';
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
 import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotations';
-import { exportEditorAnnotations, exportExternalAnnotations } from '@plannotator/ui/utils/parser';
+import { exportEditorAnnotations } from '@plannotator/ui/utils/parser';
 import { ResizeHandle } from '@plannotator/ui/components/ResizeHandle';
 import { DiffViewer } from './components/DiffViewer';
 import { ReviewPanel } from './components/ReviewPanel';
@@ -186,7 +186,13 @@ const ReviewApp: React.FC = () => {
   const { editorAnnotations, deleteEditorAnnotation } = useEditorAnnotations();
 
   // External annotations (SSE-based, for any external tool)
-  const { externalAnnotations, deleteExternalAnnotation } = useExternalAnnotations();
+  const { externalAnnotations, deleteExternalAnnotation } = useExternalAnnotations<CodeAnnotation>();
+
+  // Merge external annotations into the main list
+  const allAnnotations = useMemo(
+    () => [...annotations, ...externalAnnotations],
+    [annotations, externalAnnotations]
+  );
 
   // AI Chat
   const [aiAvailable, setAiAvailable] = useState(false);
@@ -372,8 +378,8 @@ const ReviewApp: React.FC = () => {
   const activeFileAnnotations = useMemo(() => {
     const activeFile = files[activeFileIndex];
     if (!activeFile) return [];
-    return annotations.filter(a => a.filePath === activeFile.path);
-  }, [annotations, files, activeFileIndex]);
+    return allAnnotations.filter(a => a.filePath === activeFile.path);
+  }, [allAnnotations, files, activeFileIndex]);
 
   // Load diff content - try API first, fall back to demo
   useEffect(() => {
@@ -522,11 +528,18 @@ const ReviewApp: React.FC = () => {
 
   // Delete annotation
   const handleDeleteAnnotation = useCallback((id: string) => {
+    // Route to external delete if this is an external annotation
+    const ann = allAnnotations.find(a => a.id === id);
+    if (ann?.source) {
+      deleteExternalAnnotation(id);
+      if (selectedAnnotationId === id) setSelectedAnnotationId(null);
+      return;
+    }
     setAnnotations(prev => prev.filter(a => a.id !== id));
     if (selectedAnnotationId === id) {
       setSelectedAnnotationId(null);
     }
-  }, [selectedAnnotationId]);
+  }, [selectedAnnotationId, allAnnotations, deleteExternalAnnotation]);
 
   // Handle identity change - update author on existing annotations
   const handleIdentityChange = useCallback((oldIdentity: string, newIdentity: string) => {
@@ -652,7 +665,7 @@ const ReviewApp: React.FC = () => {
     }
 
     // Find the annotation
-    const annotation = annotations.find(a => a.id === id);
+    const annotation = allAnnotations.find(a => a.id === id);
     if (!annotation) {
       setSelectedAnnotationId(id);
       return;
@@ -665,7 +678,7 @@ const ReviewApp: React.FC = () => {
     }
 
     setSelectedAnnotationId(id);
-  }, [annotations, files, activeFileIndex, handleFileSwitch]);
+  }, [allAnnotations, files, activeFileIndex, handleFileSwitch]);
 
   // Copy raw diff to clipboard
   const handleCopyDiff = useCallback(async () => {
@@ -683,12 +696,12 @@ const ReviewApp: React.FC = () => {
 
   // Copy feedback markdown to clipboard
   const handleCopyFeedback = useCallback(async () => {
-    if (annotations.length === 0) {
+    if (allAnnotations.length === 0) {
       setShowNoAnnotationsDialog(true);
       return;
     }
     try {
-      const feedback = exportReviewFeedback(annotations, prMetadata);
+      const feedback = exportReviewFeedback(allAnnotations, prMetadata);
       await navigator.clipboard.writeText(feedback);
       setCopyFeedback('Feedback copied!');
       setTimeout(() => setCopyFeedback(null), 2000);
@@ -697,21 +710,18 @@ const ReviewApp: React.FC = () => {
       setCopyFeedback('Failed to copy');
       setTimeout(() => setCopyFeedback(null), 2000);
     }
-  }, [annotations, prMetadata]);
+  }, [allAnnotations, prMetadata]);
 
   const activeFile = files[activeFileIndex];
   const feedbackMarkdown = useMemo(() => {
-    let output = exportReviewFeedback(annotations, prMetadata);
+    let output = exportReviewFeedback(allAnnotations, prMetadata);
     if (editorAnnotations.length > 0) {
       output += exportEditorAnnotations(editorAnnotations);
     }
-    if (externalAnnotations.length > 0) {
-      output += exportExternalAnnotations(externalAnnotations);
-    }
     return output;
-  }, [annotations, prMetadata, editorAnnotations, externalAnnotations]);
+  }, [allAnnotations, prMetadata, editorAnnotations]);
 
-  const totalAnnotationCount = annotations.length + editorAnnotations.length + externalAnnotations.length;
+  const totalAnnotationCount = allAnnotations.length + editorAnnotations.length;
 
   // Send feedback to OpenCode via API
   const handleSendFeedback = useCallback(async () => {
@@ -730,7 +740,7 @@ const ReviewApp: React.FC = () => {
         body: JSON.stringify({
           approved: false,
           feedback: feedbackMarkdown,
-          annotations,
+          annotations: allAnnotations,
           ...(effectiveAgent && { agentSwitch: effectiveAgent }),
         }),
       });
@@ -745,7 +755,7 @@ const ReviewApp: React.FC = () => {
       setTimeout(() => setCopyFeedback(null), 2000);
       setIsSendingFeedback(false);
     }
-  }, [totalAnnotationCount, feedbackMarkdown, annotations]);
+  }, [totalAnnotationCount, feedbackMarkdown, allAnnotations]);
 
   // Approve without feedback (LGTM)
   const handleApprove = useCallback(async () => {
@@ -775,8 +785,8 @@ const ReviewApp: React.FC = () => {
 
   // Build the payload for /api/pr-action from current annotations
   const buildPRReviewPayload = useCallback((action: 'approve' | 'comment', generalComment?: string) => {
-    const fileAnnotations = annotations.filter(a => (a.scope ?? 'line') === 'line');
-    const fileScoped = annotations.filter(a => a.scope === 'file');
+    const fileAnnotations = allAnnotations.filter(a => (a.scope ?? 'line') === 'line');
+    const fileScoped = allAnnotations.filter(a => a.scope === 'file');
 
     // Top-level body: file-scoped comments
     const bodyParts: string[] = [];
@@ -830,7 +840,7 @@ const ReviewApp: React.FC = () => {
     }
 
     return { action, body, fileComments };
-  }, [annotations, editorAnnotations, files]);
+  }, [allAnnotations, editorAnnotations, files]);
 
   // Submit a review directly to GitHub
   const handlePlatformAction = useCallback(async (action: 'approve' | 'comment', generalComment?: string) => {
@@ -1327,7 +1337,7 @@ const ReviewApp: React.FC = () => {
                 files={files}
                 activeFileIndex={activeFileIndex}
                 onSelectFile={handleFileSwitch}
-                annotations={annotations}
+                annotations={allAnnotations}
                 viewedFiles={viewedFiles}
                 onToggleViewed={handleToggleViewed}
                 hideViewedFiles={hideViewedFiles}
@@ -1458,7 +1468,7 @@ const ReviewApp: React.FC = () => {
           <ReviewPanel
             isOpen={isPanelOpen}
             onToggle={() => setIsPanelOpen(!isPanelOpen)}
-            annotations={annotations}
+            annotations={allAnnotations}
             files={files}
             selectedAnnotationId={selectedAnnotationId}
             onSelectAnnotation={handleSelectAnnotation}
@@ -1467,8 +1477,6 @@ const ReviewApp: React.FC = () => {
             width={panelResize.width}
             editorAnnotations={editorAnnotations}
             onDeleteEditorAnnotation={deleteEditorAnnotation}
-            externalAnnotations={externalAnnotations}
-            onDeleteExternalAnnotation={deleteExternalAnnotation}
             prMetadata={prMetadata}
             aiAvailable={aiAvailable}
             aiMessages={aiChat.messages}
@@ -1506,7 +1514,7 @@ const ReviewApp: React.FC = () => {
               </div>
               <div className="flex-1 overflow-auto p-4">
                 <div className="text-xs text-muted-foreground mb-2">
-                  {annotations.length} annotation{annotations.length !== 1 ? 's' : ''}
+                  {allAnnotations.length} annotation{allAnnotations.length !== 1 ? 's' : ''}
                 </div>
                 <pre className="export-code-block whitespace-pre-wrap">
                   {feedbackMarkdown}

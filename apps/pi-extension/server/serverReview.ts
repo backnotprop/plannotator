@@ -144,7 +144,7 @@ export async function startReviewServer(options: {
 			}
 		: getRepoInfo();
 	const editorAnnotations = createEditorAnnotationHandler();
-	const externalAnnotations = createExternalAnnotationHandler();
+	const externalAnnotations = createExternalAnnotationHandler("review");
 	let currentPatch = options.rawPatch;
 	let currentGitRef = options.gitRef;
 	let currentDiffType: DiffType = options.diffType || "uncommitted";

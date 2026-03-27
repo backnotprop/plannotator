@@ -101,7 +101,7 @@ export async function startAnnotateServer(
   const wslFlag = await isWSL();
   const gitUser = detectGitUser();
   const draftKey = contentHash(markdown);
-  const externalAnnotations = createExternalAnnotationHandler();
+  const externalAnnotations = createExternalAnnotationHandler("plan");
 
   // Detect repo info (cached for this session)
   const repoInfo = await getRepoInfo();

@@ -1,9 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Annotation, AnnotationType, Block, type EditorAnnotation, type ExternalAnnotation } from '../types';
+import { Annotation, AnnotationType, Block, type EditorAnnotation } from '../types';
 import { isCurrentUser } from '../utils/identity';
 import { ImageThumbnail } from './ImageThumbnail';
 import { EditorAnnotationCard } from './EditorAnnotationCard';
-import { ExternalAnnotationCard } from './ExternalAnnotationCard';
 import { useIsMobile } from '../hooks/useIsMobile';
 
 interface PanelProps {
@@ -19,8 +18,6 @@ interface PanelProps {
   width?: number;
   editorAnnotations?: EditorAnnotation[];
   onDeleteEditorAnnotation?: (id: string) => void;
-  externalAnnotations?: ExternalAnnotation[];
-  onDeleteExternalAnnotation?: (id: string) => void;
   onClose?: () => void;
   onQuickCopy?: () => Promise<void>;
 }
@@ -38,8 +35,6 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   width,
   editorAnnotations,
   onDeleteEditorAnnotation,
-  externalAnnotations,
-  onDeleteExternalAnnotation,
   onClose,
   onQuickCopy,
 }) => {
@@ -148,24 +143,6 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
               </>
             )}
 
-            {externalAnnotations && externalAnnotations.length > 0 && (
-              <>
-                {(sortedAnnotations.length > 0 || (editorAnnotations && editorAnnotations.length > 0)) && (
-                  <div className="flex items-center gap-2 pt-2 pb-1">
-                    <div className="flex-1 border-t border-border/30" />
-                    <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/60">External</span>
-                    <div className="flex-1 border-t border-border/30" />
-                  </div>
-                )}
-                {externalAnnotations.map(ann => (
-                  <ExternalAnnotationCard
-                    key={ann.id}
-                    annotation={ann}
-                    onDelete={() => onDeleteExternalAnnotation?.(ann.id)}
-                  />
-                ))}
-              </>
-            )}
           </>
         )}
       </div>
