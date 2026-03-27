@@ -16,7 +16,8 @@ import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraft
 import { contentHash, deleteDraft } from "./draft";
 import { createEditorAnnotationHandler } from "./editor-annotations";
 import { createExternalAnnotationHandler } from "./external-annotations";
-import { type PRMetadata, type PRReviewFileComment, fetchPRFileContent, fetchPRContext, submitPRReview, getPRUser, prRefFromMetadata, getDisplayRepo, getMRLabel, getMRNumberLabel } from "./pr";
+import { saveConfig, detectGitUser, getServerConfig } from "./config";
+import { type PRMetadata, type PRReviewFileComment, fetchPRFileContent, fetchPRContext, submitPRReview, fetchPRViewedFiles, markPRFilesViewed, getPRUser, prRefFromMetadata, getDisplayRepo, getMRLabel, getMRNumberLabel } from "./pr";
 import { createAIEndpoints, ProviderRegistry, SessionManager, createProvider, type AIEndpoints, type PiSDKConfig } from "@plannotator/ai";
 import { isWSL } from "./browser";
 
@@ -193,6 +194,7 @@ export async function startReviewServer(
   const isRemote = isRemoteSession();
   const configuredPort = getServerPort();
   const wslFlag = await isWSL();
+  const gitUser = detectGitUser();
 
   // Detect repo info (cached for this session)
   // In PR mode, derive from metadata instead of local git
@@ -203,6 +205,23 @@ export async function startReviewServer(
   // Fetch current platform user (for own-PR/MR detection)
   const prRef = isPRMode ? prRefFromMetadata(prMetadata) : null;
   const platformUser = prRef ? await getPRUser(prRef) : null;
+
+  // Fetch GitHub viewed file state (non-blocking — errors are silently ignored)
+  let initialViewedFiles: string[] = [];
+  if (isPRMode && prRef) {
+    console.log("[plannotator] Fetching PR viewed files for", prRef);
+    try {
+      const viewedMap = await fetchPRViewedFiles(prRef);
+      console.log("[plannotator] PR viewed files map:", viewedMap);
+      initialViewedFiles = Object.entries(viewedMap)
+        .filter(([, isViewed]) => isViewed)
+        .map(([path]) => path);
+      console.log("[plannotator] Initial viewed files:", initialViewedFiles);
+    } catch (err) {
+      // Non-fatal: viewed state is best-effort
+      console.warn("[plannotator] Could not fetch PR viewed files:", err instanceof Error ? err.message : err);
+    }
+  }
 
   // Decision promise
   let resolveDecision: (result: {
@@ -244,7 +263,9 @@ export async function startReviewServer(
               repoInfo,
               isWSL: wslFlag,
               ...(isPRMode && { prMetadata, platformUser }),
+              ...(isPRMode && initialViewedFiles.length > 0 && { viewedFiles: initialViewedFiles }),
               ...(currentError && { error: currentError }),
+              serverConfig: getServerConfig(gitUser),
             });
           }
 
@@ -384,6 +405,19 @@ export async function startReviewServer(
             }
           }
 
+          // API: Update user config (write-back to ~/.plannotator/config.json)
+          if (url.pathname === "/api/config" && req.method === "POST") {
+            try {
+              const body = (await req.json()) as { displayName?: string };
+              if (body.displayName !== undefined) {
+                saveConfig({ displayName: body.displayName });
+              }
+              return Response.json({ ok: true });
+            } catch {
+              return Response.json({ error: "Invalid request" }, { status: 400 });
+            }
+          }
+
           // API: Serve images (local paths or temp uploads)
           if (url.pathname === "/api/image") {
             return handleImage(req);
@@ -464,6 +498,38 @@ export async function startReviewServer(
             } catch (err) {
               const message =
                 err instanceof Error ? err.message : "Failed to submit PR review";
+              return Response.json({ error: message }, { status: 500 });
+            }
+          }
+
+          // API: Mark/unmark PR files as viewed on GitHub (PR mode, GitHub only)
+          if (url.pathname === "/api/pr-viewed" && req.method === "POST") {
+            if (!isPRMode || !prMetadata) {
+              console.log("[plannotator] /api/pr-viewed: not in PR mode");
+              return Response.json({ error: "Not in PR mode" }, { status: 400 });
+            }
+            if (prMetadata.platform !== "github") {
+              console.log("[plannotator] /api/pr-viewed: platform is", prMetadata.platform, "(not github)");
+              return Response.json({ error: "Viewed sync only supported for GitHub" }, { status: 400 });
+            }
+            const prNodeId = prMetadata.prNodeId;
+            if (!prNodeId) {
+              console.log("[plannotator] /api/pr-viewed: prNodeId missing from metadata:", prMetadata);
+              return Response.json({ error: "PR node ID not available" }, { status: 400 });
+            }
+            try {
+              const body = (await req.json()) as {
+                filePaths: string[];
+                viewed: boolean;
+              };
+              console.log("[plannotator] /api/pr-viewed: marking", body.filePaths, "as viewed=", body.viewed, "prNodeId=", prNodeId);
+              await markPRFilesViewed(prRef!, prNodeId, body.filePaths, body.viewed);
+              console.log("[plannotator] /api/pr-viewed: success");
+              return Response.json({ ok: true });
+            } catch (err) {
+              const message =
+                err instanceof Error ? err.message : "Failed to update viewed state";
+              console.error("[plannotator] /api/pr-viewed error:", message);
               return Response.json({ error: message }, { status: 500 });
             }
           }

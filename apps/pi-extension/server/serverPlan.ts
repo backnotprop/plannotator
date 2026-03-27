@@ -35,6 +35,7 @@ import {
 } from "./integrations.js";
 import { listenOnPort } from "./network.js";
 
+import { saveConfig, detectGitUser, getServerConfig } from "../generated/config.js";
 import { detectProjectName, getRepoInfo } from "./project.js";
 import {
 	handleDocRequest,
@@ -64,6 +65,7 @@ export async function startPlanReviewServer(options: {
 	mode?: "archive";
 	customPlanPath?: string | null;
 }): Promise<PlanServerResult> {
+	const gitUser = detectGitUser();
 	const sharingEnabled =
 		options.sharingEnabled ?? process.env.PLANNOTATOR_SHARE !== "disabled";
 	const shareBaseUrl =
@@ -191,6 +193,7 @@ export async function startPlanReviewServer(options: {
 					archivePlans,
 					sharingEnabled,
 					shareBaseUrl,
+					serverConfig: getServerConfig(gitUser),
 				});
 			} else {
 				json(res, {
@@ -204,7 +207,18 @@ export async function startPlanReviewServer(options: {
 					pasteApiUrl,
 					repoInfo,
 					projectRoot: process.cwd(),
+					serverConfig: getServerConfig(gitUser),
 				});
+			}
+		} else if (url.pathname === "/api/config" && req.method === "POST") {
+			try {
+				const body = (await parseBody(req)) as { displayName?: string };
+				if (body.displayName !== undefined) {
+					saveConfig({ displayName: body.displayName });
+				}
+				json(res, { ok: true });
+			} catch {
+				json(res, { error: "Invalid request" }, 400);
 			}
 		} else if (url.pathname === "/api/image") {
 			handleImageRequest(res, url);

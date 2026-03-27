@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import { Readable } from "node:stream";
 
 import { contentHash, deleteDraft } from "../generated/draft.js";
+import { saveConfig, detectGitUser, getServerConfig } from "../generated/config.js";
 
 export type {
 	DiffOption,
@@ -48,7 +49,9 @@ import { listenOnPort } from "./network.js";
 import {
 	fetchPRContext,
 	fetchPRFileContent,
+	fetchPRViewedFiles,
 	getPRUser,
+	markPRFilesViewed,
 	submitPRReview,
 } from "./pr.js";
 import { getRepoInfo } from "./project.js";
@@ -115,11 +118,25 @@ export async function startReviewServer(options: {
 	shareBaseUrl?: string;
 	prMetadata?: PRMetadata;
 }): Promise<ReviewServerResult> {
+	const gitUser = detectGitUser();
 	const draftKey = contentHash(options.rawPatch);
 	const prMeta = options.prMetadata;
 	const isPRMode = !!prMeta;
 	const prRef = prMeta ? prRefFromMetadata(prMeta) : null;
 	const platformUser = prRef ? await getPRUser(prRef) : null;
+
+	// Fetch GitHub viewed file state (non-blocking — errors are silently ignored)
+	let initialViewedFiles: string[] = [];
+	if (isPRMode && prRef) {
+		try {
+			const viewedMap = await fetchPRViewedFiles(prRef);
+			initialViewedFiles = Object.entries(viewedMap)
+				.filter(([, isViewed]) => isViewed)
+				.map(([path]) => path);
+		} catch {
+			// Non-fatal: viewed state is best-effort
+		}
+	}
 	const repoInfo = prMeta
 		? {
 				display: getDisplayRepo(prMeta),
@@ -282,7 +299,9 @@ export async function startReviewServer(options: {
 				shareBaseUrl,
 				repoInfo,
 				...(isPRMode && { prMetadata: prMeta, platformUser }),
+				...(isPRMode && initialViewedFiles.length > 0 && { viewedFiles: initialViewedFiles }),
 				...(currentError ? { error: currentError } : {}),
+				serverConfig: getServerConfig(gitUser),
 			});
 		} else if (url.pathname === "/api/diff/switch" && req.method === "POST") {
 			if (isPRMode) {
@@ -356,6 +375,39 @@ export async function startReviewServer(options: {
 					500,
 				);
 			}
+		} else if (url.pathname === "/api/pr-viewed" && req.method === "POST") {
+			if (!isPRMode || !prMeta || !prRef) {
+				json(res, { error: "Not in PR mode" }, 400);
+				return;
+			}
+			if (prMeta.platform !== "github") {
+				json(res, { error: "Viewed sync only supported for GitHub" }, 400);
+				return;
+			}
+			const prNodeId = prMeta.prNodeId;
+			if (!prNodeId) {
+				json(res, { error: "PR node ID not available" }, 400);
+				return;
+			}
+			try {
+				const body = await parseBody(req);
+				await markPRFilesViewed(
+					prRef,
+					prNodeId,
+					body.filePaths as string[],
+					body.viewed as boolean,
+				);
+				json(res, { ok: true });
+			} catch (err) {
+				json(
+					res,
+					{
+						error:
+							err instanceof Error ? err.message : "Failed to update viewed state",
+					},
+					500,
+				);
+			}
 		} else if (url.pathname === "/api/file-content" && req.method === "GET") {
 			const filePath = url.searchParams.get("path");
 			if (!filePath) {
@@ -411,6 +463,16 @@ export async function startReviewServer(options: {
 				defaultCwd,
 			);
 			json(res, result);
+		} else if (url.pathname === "/api/config" && req.method === "POST") {
+			try {
+				const body = (await parseBody(req)) as { displayName?: string };
+				if (body.displayName !== undefined) {
+					saveConfig({ displayName: body.displayName });
+				}
+				json(res, { ok: true });
+			} catch {
+				json(res, { error: "Invalid request" }, 400);
+			}
 		} else if (url.pathname === "/api/image") {
 			handleImageRequest(res, url);
 		} else if (url.pathname === "/api/upload" && req.method === "POST") {

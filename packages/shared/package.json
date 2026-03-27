@@ -18,6 +18,7 @@
     "./reference-common": "./reference-common.ts",
     "./favicon": "./favicon.ts",
     "./resolve-file": "./resolve-file.ts",
-    "./external-annotation": "./external-annotation.ts"
+    "./external-annotation": "./external-annotation.ts",
+    "./config": "./config.ts"
   }
 }

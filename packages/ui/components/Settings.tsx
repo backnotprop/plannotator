@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { TaterSpritePullup } from './TaterSpritePullup';
-import { getIdentity, regenerateIdentity } from '../utils/identity';
+import { getIdentity, regenerateIdentity, setCustomIdentity } from '../utils/identity';
+import { GitUser } from '../icons/GitUser';
 import {
   getObsidianSettings,
   saveObsidianSettings,
@@ -80,9 +81,11 @@ interface SettingsProps {
   onExternalClose?: () => void;
   /** Available AI providers (from /api/ai/capabilities). */
   aiProviders?: Array<{ id: string; name: string; capabilities: Record<string, boolean> }>;
+  /** Git user name from `git config user.name`, for quick identity set */
+  gitUser?: string;
 }
 
-export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', onUIPreferencesChange, externalOpen, onExternalClose, aiProviders = [] }) => {
+export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', onUIPreferencesChange, externalOpen, onExternalClose, aiProviders = [], gitUser }) => {
   const [showDialog, setShowDialog] = useState(false);
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [identity, setIdentity] = useState('');
@@ -274,11 +277,27 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
     saveDefaultNotesApp(app);
   };
 
+  // Server write-back is handled automatically by configStore.set() (debounced POST /api/config)
+
   const handleRegenerateIdentity = () => {
     const oldIdentity = identity;
     const newIdentity = regenerateIdentity();
     setIdentity(newIdentity);
     onIdentityChange?.(oldIdentity, newIdentity);
+  };
+
+  const handleIdentitySave = (newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === identity) return;
+    const oldIdentity = identity;
+    const saved = setCustomIdentity(trimmed);
+    setIdentity(saved);
+    onIdentityChange?.(oldIdentity, saved);
+  };
+
+  const handleUseGitName = () => {
+    if (!gitUser) return;
+    handleIdentitySave(gitUser);
   };
 
   return (
@@ -401,13 +420,35 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                         Used when sharing annotations with others
                       </div>
                       <div className="flex items-center gap-2">
-                        <div className="flex-1 px-3 py-2 bg-muted rounded-lg text-xs font-mono truncate">
-                          {identity}
-                        </div>
+                        <input
+                          key={identity}
+                          type="text"
+                          defaultValue={identity}
+                          onBlur={(e) => handleIdentitySave(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              handleIdentitySave((e.target as HTMLInputElement).value);
+                              (e.target as HTMLInputElement).blur();
+                            }
+                          }}
+                          className="flex-1 px-3 py-2 bg-muted rounded-lg text-xs font-mono truncate border border-transparent focus:border-primary/50 focus:outline-none transition-colors"
+                          placeholder="Enter your name..."
+                        />
+                        {gitUser && (
+                          <button
+                            onClick={handleUseGitName}
+                            onMouseDown={(e) => e.preventDefault()}
+                            className="p-2 rounded-lg bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+                            title={`Use git identity: ${gitUser}`}
+                          >
+                            <GitUser className="w-5 h-5" />
+                          </button>
+                        )}
                         <button
                           onClick={handleRegenerateIdentity}
+                          onMouseDown={(e) => e.preventDefault()}
                           className="p-2 rounded-lg bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
-                          title="Regenerate identity"
+                          title="Regenerate random identity"
                         >
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />

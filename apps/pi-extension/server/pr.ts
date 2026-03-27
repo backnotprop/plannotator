@@ -10,7 +10,9 @@ import {
 	fetchPRContext as fetchPRContextCore,
 	fetchPR as fetchPRCore,
 	fetchPRFileContent as fetchPRFileContentCore,
+	fetchPRViewedFiles as fetchPRViewedFilesCore,
 	getUser as getUserCore,
+	markPRFilesViewed as markPRFilesViewedCore,
 	type PRRef,
 	type PRReviewFileComment,
 	type PRRuntime,
@@ -88,4 +90,17 @@ export function submitPRReview(
 		body,
 		fileComments,
 	);
+}
+
+export function fetchPRViewedFiles(ref: PRRef): Promise<Record<string, boolean>> {
+	return fetchPRViewedFilesCore(prRuntime, ref);
+}
+
+export function markPRFilesViewed(
+	ref: PRRef,
+	prNodeId: string,
+	filePaths: string[],
+	viewed: boolean,
+): Promise<void> {
+	return markPRFilesViewedCore(prRuntime, ref, prNodeId, filePaths, viewed);
 }

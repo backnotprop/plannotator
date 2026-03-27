@@ -37,6 +37,7 @@ import {
 } from "./storage";
 import { getRepoInfo } from "./repo";
 import { detectProjectName } from "./project";
+import { saveConfig, detectGitUser, getServerConfig } from "./config";
 import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft } from "./draft";
 import { handleDoc, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, handleFileBrowserFiles } from "./reference-handlers";
@@ -122,6 +123,7 @@ export async function startPlannotatorServer(
   const isRemote = isRemoteSession();
   const configuredPort = getServerPort();
   const wslFlag = await isWSL();
+  const gitUser = detectGitUser();
 
   // --- Archive mode setup ---
   let archivePlans: ArchivedPlan[] = [];
@@ -267,14 +269,28 @@ export async function startPlannotatorServer(
                 sharingEnabled,
                 shareBaseUrl,
                 isWSL: wslFlag,
+                serverConfig: getServerConfig(gitUser),
               });
             }
-            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, projectRoot: process.cwd(), isWSL: wslFlag });
+            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, projectRoot: process.cwd(), isWSL: wslFlag, serverConfig: getServerConfig(gitUser) });
           }
 
           // API: Serve a linked markdown document
           if (url.pathname === "/api/doc" && req.method === "GET") {
             return handleDoc(req);
+          }
+
+          // API: Update user config (write-back to ~/.plannotator/config.json)
+          if (url.pathname === "/api/config" && req.method === "POST") {
+            try {
+              const body = (await req.json()) as { displayName?: string };
+              if (body.displayName !== undefined) {
+                saveConfig({ displayName: body.displayName });
+              }
+              return Response.json({ ok: true });
+            } catch {
+              return Response.json({ error: "Invalid request" }, { status: 400 });
+            }
           }
 
           // API: Serve images (local paths or temp uploads)
