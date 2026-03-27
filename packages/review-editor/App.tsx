@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { ThemeProvider, useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { ModeToggle } from '@plannotator/ui/components/ModeToggle';
 import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
@@ -188,11 +188,12 @@ const ReviewApp: React.FC = () => {
   // External annotations (SSE-based, for any external tool)
   const { externalAnnotations, deleteExternalAnnotation } = useExternalAnnotations<CodeAnnotation>();
 
-  // Merge external annotations into the main list
   const allAnnotations = useMemo(
     () => [...annotations, ...externalAnnotations],
     [annotations, externalAnnotations]
   );
+  const allAnnotationsRef = useRef(allAnnotations);
+  allAnnotationsRef.current = allAnnotations;
 
   // AI Chat
   const [aiAvailable, setAiAvailable] = useState(false);
@@ -526,10 +527,8 @@ const ReviewApp: React.FC = () => {
     ));
   }, []);
 
-  // Delete annotation
   const handleDeleteAnnotation = useCallback((id: string) => {
-    // Route to external delete if this is an external annotation
-    const ann = allAnnotations.find(a => a.id === id);
+    const ann = allAnnotationsRef.current.find(a => a.id === id);
     if (ann?.source) {
       deleteExternalAnnotation(id);
       if (selectedAnnotationId === id) setSelectedAnnotationId(null);
@@ -539,7 +538,7 @@ const ReviewApp: React.FC = () => {
     if (selectedAnnotationId === id) {
       setSelectedAnnotationId(null);
     }
-  }, [selectedAnnotationId, allAnnotations, deleteExternalAnnotation]);
+  }, [selectedAnnotationId, deleteExternalAnnotation]);
 
   // Handle identity change - update author on existing annotations
   const handleIdentityChange = useCallback((oldIdentity: string, newIdentity: string) => {

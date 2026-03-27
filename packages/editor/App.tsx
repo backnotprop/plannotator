@@ -332,7 +332,6 @@ const App: React.FC = () => {
   const { editorAnnotations, deleteEditorAnnotation } = useEditorAnnotations();
   const { externalAnnotations, deleteExternalAnnotation } = useExternalAnnotations<Annotation>();
 
-  // Merge external annotations into the main list — they render as native Annotation objects
   const allAnnotations = useMemo(
     () => [...annotations, ...externalAnnotations],
     [annotations, externalAnnotations]
@@ -813,7 +812,6 @@ const App: React.FC = () => {
   }, []);
 
   const handleDeleteAnnotation = (id: string) => {
-    // Route to external delete if this is an external annotation
     const ann = allAnnotations.find(a => a.id === id);
     if (ann?.source) {
       deleteExternalAnnotation(id);
