@@ -186,7 +186,7 @@ const ReviewApp: React.FC = () => {
   const { editorAnnotations, deleteEditorAnnotation } = useEditorAnnotations();
 
   // External annotations (SSE-based, for any external tool)
-  const { externalAnnotations, deleteExternalAnnotation } = useExternalAnnotations<CodeAnnotation>();
+  const { externalAnnotations, deleteExternalAnnotation } = useExternalAnnotations<CodeAnnotation>({ enabled: !!origin });
 
   const allAnnotations = useMemo(
     () => [...annotations, ...externalAnnotations],
@@ -517,13 +517,16 @@ const ReviewApp: React.FC = () => {
     suggestedCode?: string,
     originalCode?: string
   ) => {
-    setAnnotations(prev => prev.map(ann =>
-      ann.id === id ? {
-        ...ann,
+    // External annotations (source-backed) are read-only — skip edit
+    const ann = allAnnotationsRef.current.find(a => a.id === id);
+    if (ann?.source) return;
+    setAnnotations(prev => prev.map(a =>
+      a.id === id ? {
+        ...a,
         ...(text !== undefined && { text }),
         ...(suggestedCode !== undefined && { suggestedCode }),
         ...(originalCode !== undefined && { originalCode }),
-      } : ann
+      } : a
     ));
   }, []);
 

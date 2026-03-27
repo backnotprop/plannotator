@@ -330,7 +330,7 @@ const App: React.FC = () => {
   });
 
   const { editorAnnotations, deleteEditorAnnotation } = useEditorAnnotations();
-  const { externalAnnotations, deleteExternalAnnotation } = useExternalAnnotations<Annotation>();
+  const { externalAnnotations, deleteExternalAnnotation } = useExternalAnnotations<Annotation>({ enabled: isApiMode });
 
   const allAnnotations = useMemo(
     () => [...annotations, ...externalAnnotations],
@@ -729,7 +729,7 @@ const App: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           feedback: annotationsOutput,
-          annotations,
+          annotations: allAnnotations,
         }),
       });
       setSubmitted('denied'); // reuse 'denied' state for "feedback sent" overlay
@@ -824,8 +824,11 @@ const App: React.FC = () => {
   };
 
   const handleEditAnnotation = (id: string, updates: Partial<Annotation>) => {
-    setAnnotations(prev => prev.map(ann =>
-      ann.id === id ? { ...ann, ...updates } : ann
+    // External annotations (source-backed) are read-only — skip edit
+    const ann = allAnnotations.find(a => a.id === id);
+    if (ann?.source) return;
+    setAnnotations(prev => prev.map(a =>
+      a.id === id ? { ...a, ...updates } : a
     ));
   };
 

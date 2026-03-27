@@ -25,7 +25,10 @@ interface UseExternalAnnotationsReturn<T> {
   clearExternalAnnotations: (source?: string) => void;
 }
 
-export function useExternalAnnotations<T extends { id: string; source?: string }>(): UseExternalAnnotationsReturn<T> {
+export function useExternalAnnotations<T extends { id: string; source?: string }>(
+  options?: { enabled?: boolean },
+): UseExternalAnnotationsReturn<T> {
+  const enabled = options?.enabled ?? true;
   const [annotations, setAnnotations] = useState<T[]>([]);
   const versionRef = useRef(0);
   const fallbackRef = useRef(false);
@@ -33,6 +36,7 @@ export function useExternalAnnotations<T extends { id: string; source?: string }
   const receivedSnapshotRef = useRef(false);
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
 
     // --- SSE primary transport ---
@@ -125,7 +129,7 @@ export function useExternalAnnotations<T extends { id: string; source?: string }
         pollTimerRef.current = null;
       }
     };
-  }, []);
+  }, [enabled]);
 
   const deleteExternalAnnotation = useCallback(async (id: string) => {
     // Optimistic update
