@@ -138,6 +138,11 @@ export function transformPlanInput(
       };
     }
 
+    // DELETION requires originalText (the text to remove)
+    if (type === "DELETION" && (typeof obj.originalText !== "string" || obj.originalText.length === 0)) {
+      return { error: `annotations[${i}] DELETION type requires non-empty "originalText" field` };
+    }
+
     annotations.push({
       id: crypto.randomUUID(),
       blockId: "external",
