@@ -933,16 +933,20 @@ const App: React.FC = () => {
       const res = await fetch(callbackConfig.callbackUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "approve", annotated_url: window.location.href, token: callbackConfig.token }),
+        body: JSON.stringify({ action: "approve", token: callbackConfig.token, annotated_url: window.location.href }),
       });
-      if (res.status === 401) {
-        alert("Plan link expired — please request a new one from the bot.");
-      } else if (!res.ok) {
-        alert("Callback failed — please send the URL manually to the bot.");
+      if (!res.ok) {
+        const msg = res.status === 401
+          ? "Plan link expired — request a new one from the bot."
+          : "Callback failed.";
+        setNoteSaveToast({ type: 'error', message: msg });
+      } else {
+        setNoteSaveToast({ type: 'success', message: "Plan approved! The bot will proceed to implementation." });
       }
     } catch {
-      alert("Callback failed — please send the URL manually to the bot.");
+      setNoteSaveToast({ type: 'error', message: "Callback failed." });
     }
+    setTimeout(() => setNoteSaveToast(null), 4000);
   }, [callbackConfig]);
 
   const handleCallbackFeedback = React.useCallback(async () => {
@@ -952,16 +956,20 @@ const App: React.FC = () => {
       const res = await fetch(callbackConfig.callbackUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "feedback", annotated_url: annotatedUrl, token: callbackConfig.token }),
+        body: JSON.stringify({ action: "feedback", token: callbackConfig.token, annotated_url: annotatedUrl }),
       });
-      if (res.status === 401) {
-        alert("Plan link expired — please request a new one from the bot.");
-      } else if (!res.ok) {
-        alert("Callback failed — please send the URL manually to the bot.");
+      if (!res.ok) {
+        const msg = res.status === 401
+          ? "Plan link expired — request a new one from the bot."
+          : "Callback failed.";
+        setNoteSaveToast({ type: 'error', message: msg });
+      } else {
+        setNoteSaveToast({ type: 'success', message: "Feedback sent! The bot will re-plan with your annotations." });
       }
     } catch {
-      alert("Callback failed — please send the URL manually to the bot.");
+      setNoteSaveToast({ type: 'error', message: "Callback failed." });
     }
+    setTimeout(() => setNoteSaveToast(null), 4000);
   }, [callbackConfig]);
 
   // Quick-save handlers for export dropdown and keyboard shortcut
