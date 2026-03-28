@@ -8,6 +8,7 @@ import { storage } from '@plannotator/ui/utils/storage';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { GitHubIcon } from '@plannotator/ui/components/GitHubIcon';
 import { GitLabIcon } from '@plannotator/ui/components/GitLabIcon';
+import { AzureDevOpsIcon } from '@plannotator/ui/components/AzureDevOpsIcon';
 import { RepoIcon } from '@plannotator/ui/components/RepoIcon';
 import { PullRequestIcon } from '@plannotator/ui/components/PullRequestIcon';
 import { getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo } from '@plannotator/shared/pr-provider';
@@ -1092,7 +1093,7 @@ const ReviewApp: React.FC = () => {
                     >
                       {reviewDestination === 'platform' ? (
                         <>
-                          {prMetadata?.platform === 'gitlab' ? <GitLabIcon className="w-3.5 h-3.5" /> : <GitHubIcon className="w-3.5 h-3.5" />}
+                          {prMetadata?.platform === 'gitlab' ? <GitLabIcon className="w-3.5 h-3.5" /> : prMetadata?.platform === 'azuredevops' ? <AzureDevOpsIcon className="w-3.5 h-3.5" /> : <GitHubIcon className="w-3.5 h-3.5" />}
                           <span>{platformLabel}</span>
                         </>
                       ) : 'Agent'}

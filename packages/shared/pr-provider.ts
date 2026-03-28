@@ -10,6 +10,7 @@
 
 import { checkGhAuth, getGhUser, fetchGhPR, fetchGhPRContext, fetchGhPRFileContent, submitGhPRReview, fetchGhPRViewedFiles, markGhFilesViewed } from "./pr-github";
 import { checkGlAuth, getGlUser, fetchGlMR, fetchGlMRContext, fetchGlFileContent, submitGlMRReview } from "./pr-gitlab";
+import { checkAdoAuth, getAdoUser, fetchAdoPR, fetchAdoPRContext, fetchAdoFileContent, submitAdoPRReview } from "./pr-azuredevops";
 
 // --- Runtime Types ---
 
@@ -33,7 +34,7 @@ export interface PRRuntime {
 
 // --- Platform Types ---
 
-export type Platform = "github" | "gitlab";
+export type Platform = "github" | "gitlab" | "azuredevops";
 
 /** GitHub PR reference */
 export interface GithubPRRef {
@@ -51,8 +52,18 @@ export interface GitlabMRRef {
   iid: number;
 }
 
+/** Azure DevOps PR reference */
+export interface AzureDevOpsPRRef {
+  platform: "azuredevops";
+  orgUrl: string;       // e.g., "https://dev.azure.com/myorg"
+  organization: string; // e.g., "myorg"
+  project: string;      // e.g., "MyProject"
+  repo: string;         // e.g., "MyRepo"
+  id: number;           // PR number
+}
+
 /** Discriminated union — auto-detected from URL */
-export type PRRef = GithubPRRef | GitlabMRRef;
+export type PRRef = GithubPRRef | GitlabMRRef | AzureDevOpsPRRef;
 
 /** GitHub PR metadata */
 export interface GithubPRMetadata {
@@ -86,8 +97,25 @@ export interface GitlabMRMetadata {
   url: string;
 }
 
+/** Azure DevOps PR metadata */
+export interface AzureDevOpsPRMetadata {
+  platform: "azuredevops";
+  orgUrl: string;
+  organization: string;
+  project: string;
+  repo: string;
+  id: number;
+  title: string;
+  author: string;
+  baseBranch: string;
+  headBranch: string;
+  baseSha: string;
+  headSha: string;
+  url: string;
+}
+
 /** Discriminated union — downstream gets type narrowing for free */
-export type PRMetadata = GithubPRMetadata | GitlabMRMetadata;
+export type PRMetadata = GithubPRMetadata | GitlabMRMetadata | AzureDevOpsPRMetadata;
 
 // --- PR Context Types (platform-agnostic) ---
 
@@ -149,26 +177,30 @@ export interface PRReviewFileComment {
 
 type HasPlatform = PRRef | PRMetadata;
 
-/** "GitHub" or "GitLab" */
+/** "GitHub", "GitLab", or "Azure DevOps" */
 export function getPlatformLabel(m: HasPlatform): string {
-  return m.platform === "github" ? "GitHub" : "GitLab";
+  if (m.platform === "github") return "GitHub";
+  if (m.platform === "gitlab") return "GitLab";
+  return "Azure DevOps";
 }
 
 /** "PR" or "MR" */
 export function getMRLabel(m: HasPlatform): string {
-  return m.platform === "github" ? "PR" : "MR";
+  return m.platform === "github" ? "PR" : m.platform === "gitlab" ? "MR" : "PR";
 }
 
-/** "#123" or "!42" */
+/** "#123", "!42", or "!123" */
 export function getMRNumberLabel(m: HasPlatform): string {
   if (m.platform === "github") return `#${m.number}`;
-  return `!${m.iid}`;
+  if (m.platform === "gitlab") return `!${m.iid}`;
+  return `!${m.id}`;
 }
 
-/** "owner/repo" or "group/project" */
+/** "owner/repo", "group/project", or "org/project/repo" */
 export function getDisplayRepo(m: HasPlatform): string {
   if (m.platform === "github") return `${m.owner}/${m.repo}`;
-  return m.projectPath;
+  if (m.platform === "gitlab") return m.projectPath;
+  return `${m.organization}/${m.project}/${m.repo}`;
 }
 
 /** Reconstruct a PRRef from metadata */
@@ -176,19 +208,24 @@ export function prRefFromMetadata(m: PRMetadata): PRRef {
   if (m.platform === "github") {
     return { platform: "github", owner: m.owner, repo: m.repo, number: m.number };
   }
-  return { platform: "gitlab", host: m.host, projectPath: m.projectPath, iid: m.iid };
+  if (m.platform === "gitlab") {
+    return { platform: "gitlab", host: m.host, projectPath: m.projectPath, iid: m.iid };
+  }
+  return { platform: "azuredevops", orgUrl: m.orgUrl, organization: m.organization, project: m.project, repo: m.repo, id: m.id };
 }
 
 /** CLI tool name for the platform */
 export function getCliName(ref: PRRef): string {
-  return ref.platform === "github" ? "gh" : "glab";
+  if (ref.platform === "github") return "gh";
+  if (ref.platform === "gitlab") return "glab";
+  return "az";
 }
 
 /** Install URL for the platform CLI */
 export function getCliInstallUrl(ref: PRRef): string {
-  return ref.platform === "github"
-    ? "https://cli.github.com"
-    : "https://gitlab.com/gitlab-org/cli";
+  if (ref.platform === "github") return "https://cli.github.com";
+  if (ref.platform === "gitlab") return "https://gitlab.com/gitlab-org/cli";
+  return "https://learn.microsoft.com/en-us/cli/azure/install-azure-cli";
 }
 
 /** Encode a file path for use in platform API URLs */
@@ -205,6 +242,8 @@ export function encodeApiFilePath(filePath: string): string {
  * - GitHub: https://github.com/owner/repo/pull/123[/files|/commits]
  * - GitLab: https://gitlab.com/group/subgroup/project/-/merge_requests/42[/diffs]
  * - Self-hosted GitLab: https://gitlab.mycompany.com/group/project/-/merge_requests/42
+ * - Azure DevOps: https://dev.azure.com/{org}/{project}/_git/{repo}/pullrequest/{id}
+ * - Azure DevOps (legacy): https://{org}.visualstudio.com/{project}/_git/{repo}/pullrequest/{id}
  */
 export function parsePRUrl(url: string): PRRef | null {
   if (!url) return null;
@@ -222,8 +261,39 @@ export function parsePRUrl(url: string): PRRef | null {
     };
   }
 
+  // Azure DevOps: https://dev.azure.com/{org}/{project}/_git/{repo}/pullrequest/{id}
+  const adoMatch = url.match(
+    /^https?:\/\/dev\.azure\.com\/([^/]+)\/([^/]+)\/_git\/([^/]+)\/pullrequest\/(\d+)/i,
+  );
+  if (adoMatch) {
+    return {
+      platform: "azuredevops",
+      orgUrl: `https://dev.azure.com/${adoMatch[1]}`,
+      organization: adoMatch[1],
+      project: decodeURIComponent(adoMatch[2]),
+      repo: decodeURIComponent(adoMatch[3]),
+      id: parseInt(adoMatch[4], 10),
+    };
+  }
+
+  // Azure DevOps (legacy visualstudio.com): https://{org}.visualstudio.com/{project}/_git/{repo}/pullrequest/{id}
+  const vsMatch = url.match(
+    /^https?:\/\/([^.]+)\.visualstudio\.com\/([^/]+)\/_git\/([^/]+)\/pullrequest\/(\d+)/i,
+  );
+  if (vsMatch) {
+    return {
+      platform: "azuredevops",
+      orgUrl: `https://${vsMatch[1]}.visualstudio.com`,
+      organization: vsMatch[1],
+      project: decodeURIComponent(vsMatch[2]),
+      repo: decodeURIComponent(vsMatch[3]),
+      id: parseInt(vsMatch[4], 10),
+    };
+  }
+
   // GitLab: https://{host}/{projectPath}/-/merge_requests/{iid}[/...]
-  // Handles any hostname, nested groups, self-hosted instances
+  // Handles any hostname, nested groups, self-hosted instances.
+  // Must come after ADO checks to avoid false-matching dev.azure.com paths.
   const glMatch = url.match(
     /^https?:\/\/([^/]+)\/(.+?)\/-\/merge_requests\/(\d+)/,
   );
@@ -243,12 +313,14 @@ export function parsePRUrl(url: string): PRRef | null {
 
 export async function checkAuth(runtime: PRRuntime, ref: PRRef): Promise<void> {
   if (ref.platform === "github") return checkGhAuth(runtime);
-  return checkGlAuth(runtime, ref.host);
+  if (ref.platform === "gitlab") return checkGlAuth(runtime, ref.host);
+  return checkAdoAuth(runtime, ref.orgUrl);
 }
 
 export async function getUser(runtime: PRRuntime, ref: PRRef): Promise<string | null> {
   if (ref.platform === "github") return getGhUser(runtime);
-  return getGlUser(runtime, ref.host);
+  if (ref.platform === "gitlab") return getGlUser(runtime, ref.host);
+  return getAdoUser(runtime, ref.orgUrl);
 }
 
 export async function fetchPR(
@@ -256,7 +328,8 @@ export async function fetchPR(
   ref: PRRef,
 ): Promise<{ metadata: PRMetadata; rawPatch: string }> {
   if (ref.platform === "github") return fetchGhPR(runtime, ref);
-  return fetchGlMR(runtime, ref);
+  if (ref.platform === "gitlab") return fetchGlMR(runtime, ref);
+  return fetchAdoPR(runtime, ref);
 }
 
 export async function fetchPRContext(
@@ -264,7 +337,8 @@ export async function fetchPRContext(
   ref: PRRef,
 ): Promise<PRContext> {
   if (ref.platform === "github") return fetchGhPRContext(runtime, ref);
-  return fetchGlMRContext(runtime, ref);
+  if (ref.platform === "gitlab") return fetchGlMRContext(runtime, ref);
+  return fetchAdoPRContext(runtime, ref);
 }
 
 export async function fetchPRFileContent(
@@ -274,7 +348,8 @@ export async function fetchPRFileContent(
   filePath: string,
 ): Promise<string | null> {
   if (ref.platform === "github") return fetchGhPRFileContent(runtime, ref, sha, filePath);
-  return fetchGlFileContent(runtime, ref, sha, filePath);
+  if (ref.platform === "gitlab") return fetchGlFileContent(runtime, ref, sha, filePath);
+  return fetchAdoFileContent(runtime, ref, sha, filePath);
 }
 
 export async function submitPRReview(
@@ -286,26 +361,27 @@ export async function submitPRReview(
   fileComments: PRReviewFileComment[],
 ): Promise<void> {
   if (ref.platform === "github") return submitGhPRReview(runtime, ref, headSha, action, body, fileComments);
-  return submitGlMRReview(runtime, ref, headSha, action, body, fileComments);
+  if (ref.platform === "gitlab") return submitGlMRReview(runtime, ref, headSha, action, body, fileComments);
+  return submitAdoPRReview(runtime, ref, headSha, action, body, fileComments);
 }
 
 /**
  * Fetch per-file "viewed" state for a PR.
  * GitHub: returns { filePath: isViewed } map.
- * GitLab: always returns {} (no server-side viewed state API).
+ * GitLab/Azure DevOps: always returns {} (no server-side viewed state API).
  */
 export async function fetchPRViewedFiles(
   runtime: PRRuntime,
   ref: PRRef,
 ): Promise<Record<string, boolean>> {
   if (ref.platform === "github") return fetchGhPRViewedFiles(runtime, ref);
-  return {}; // GitLab has no server-side viewed state
+  return {}; // GitLab and Azure DevOps have no server-side viewed state
 }
 
 /**
  * Mark or unmark files as viewed in a PR.
  * GitHub: fires markFileAsViewed / unmarkFileAsViewed GraphQL mutations.
- * GitLab: no-op (no server-side viewed state API).
+ * GitLab/Azure DevOps: no-op (no server-side viewed state API).
  */
 export async function markPRFilesViewed(
   runtime: PRRuntime,
@@ -315,5 +391,5 @@ export async function markPRFilesViewed(
   viewed: boolean,
 ): Promise<void> {
   if (ref.platform === "github") return markGhFilesViewed(runtime, ref, prNodeId, filePaths, viewed);
-  // GitLab: no-op
+  // GitLab and Azure DevOps: no-op
 }

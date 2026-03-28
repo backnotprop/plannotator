@@ -29,7 +29,7 @@ import {
   getCliInstallUrl,
 } from "@plannotator/shared/pr-provider";
 
-export type { PRRef, PRMetadata, PRContext, PRReviewFileComment } from "@plannotator/shared/pr-provider";
+export type { PRRef, PRMetadata, PRContext, PRReviewFileComment, AzureDevOpsPRRef, AzureDevOpsPRMetadata } from "@plannotator/shared/pr-provider";
 export { prRefFromMetadata, getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo, getCliName, getCliInstallUrl } from "@plannotator/shared/pr-provider";
 export type { GithubPRMetadata } from "@plannotator/shared/pr-provider";
 

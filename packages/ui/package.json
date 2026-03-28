@@ -7,7 +7,8 @@
     "./utils/*": "./utils/*.ts",
     "./hooks/*": "./hooks/*.ts",
     "./types": "./types.ts",
-    "./theme": "./theme.css"
+    "./theme": "./theme.css",
+    "./config": "./config/index.ts"
   },
   "dependencies": {
     "@plannotator/shared": "workspace:*",
