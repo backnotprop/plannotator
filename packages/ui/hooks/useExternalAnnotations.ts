@@ -8,8 +8,8 @@
  * review editor uses CodeAnnotation. The hook is shape-agnostic;
  * it just serializes/deserializes JSON.
  *
- * Always active — no VS Code gate. Any running Plannotator session can
- * receive external annotations from any tool.
+ * Gated by an `enabled` option — callers pass their API-mode signal
+ * to avoid SSE/polling in static or demo contexts where there is no server.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';

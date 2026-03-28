@@ -186,6 +186,11 @@ const ReviewApp: React.FC = () => {
   const { editorAnnotations, deleteEditorAnnotation } = useEditorAnnotations();
 
   // External annotations (SSE-based, for any external tool)
+  // TODO: Replace !!origin with a dedicated isApiMode boolean (set on /api/diff success/failure).
+  // origin is an identity field, not a connectivity signal — the standalone dev server
+  // (apps/review/) doesn't set it, so external annotations are silently disabled there.
+  // The same !!origin proxy is used elsewhere in this file (draft hook, feedback guard, conditional UI)
+  // so this should be addressed as a broader refactor.
   const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<CodeAnnotation>({ enabled: !!origin });
 
   const allAnnotations = useMemo(
