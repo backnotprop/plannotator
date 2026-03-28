@@ -1,0 +1,17 @@
+{
+  "name": "plannotator",
+  "owner": {
+    "name": "backnotprop"
+  },
+  "metadata": {
+    "description": "Interactive Plan & Code Review plugins"
+  },
+  "plugins": [
+    {
+      "name": "plannotator-copilot",
+      "source": "./apps/copilot",
+      "description": "Interactive Plan & Code Review for GitHub Copilot CLI. Visual annotations, team sharing, structured feedback.",
+      "version": "0.14.5"
+    }
+  ]
+}

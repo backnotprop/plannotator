@@ -13,6 +13,7 @@
 
 import { isRemoteSession, getServerPort } from "./remote";
 import { getRepoInfo } from "./repo";
+import type { Origin } from "@plannotator/shared/agents";
 import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon } from "./shared-handlers";
 import { handleDoc, handleFileBrowserFiles } from "./reference-handlers";
 import { contentHash, deleteDraft } from "./draft";
@@ -36,7 +37,7 @@ export interface AnnotateServerOptions {
   /** HTML content to serve for the UI */
   htmlContent: string;
   /** Origin identifier for UI customization */
-  origin?: "opencode" | "claude-code" | "pi" | "codex";
+  origin?: Origin;
   /** UI mode: "annotate" for files, "annotate-last" for last agent message, "annotate-folder" for folders */
   mode?: "annotate" | "annotate-last" | "annotate-folder";
   /** Folder path when annotating a directory (used as projectRoot for file browser) */

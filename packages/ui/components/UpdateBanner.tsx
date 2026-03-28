@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import type { Origin } from '@plannotator/shared/agents';
 import { useUpdateCheck } from '../hooks/useUpdateCheck';
 import { isWindows } from '../utils/platform';
 
@@ -11,7 +12,7 @@ function getInstallCommand(isWSL: boolean): string {
 }
 
 interface UpdateBannerProps {
-  origin?: 'claude-code' | 'opencode' | 'pi' | 'codex' | null;
+  origin?: Origin | null;
   isWSL?: boolean;
 }
 

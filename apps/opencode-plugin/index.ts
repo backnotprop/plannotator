@@ -46,13 +46,21 @@ import {
   stripConflictingPlanModeRules,
 } from "./plan-mode";
 
-// @ts-ignore - Bun import attribute for text
-import indexHtml from "./plannotator.html" with { type: "text" };
-const htmlContent = indexHtml as unknown as string;
+// Lazy-load HTML at first use instead of embedding in the bundle.
+// The two SPA files are ~20 MB combined — inlining them as string literals
+// adds ~160ms to module parse time (see GitHub issue #410).
+let _planHtml: string | null = null;
+let _reviewHtml: string | null = null;
 
-// @ts-ignore - Bun import attribute for text
-import reviewHtml from "./review-editor.html" with { type: "text" };
-const reviewHtmlContent = reviewHtml as unknown as string;
+function getPlanHtml(): string {
+  if (!_planHtml) _planHtml = readFileSync(path.join(import.meta.dir, "..", "plannotator.html"), "utf-8");
+  return _planHtml;
+}
+
+function getReviewHtml(): string {
+  if (!_reviewHtml) _reviewHtml = readFileSync(path.join(import.meta.dir, "..", "review-editor.html"), "utf-8");
+  return _reviewHtml;
+}
 
 const DEFAULT_PLAN_TIMEOUT_SECONDS = 345_600; // 96 hours
 
@@ -128,6 +136,10 @@ Only write and submit a plan once you have sufficient context.
 // ── Plugin ────────────────────────────────────────────────────────────────
 
 export const PlannotatorPlugin: Plugin = async (ctx) => {
+  // Preload HTML in background — populates the sync cache before first use
+  Bun.file(path.join(import.meta.dir, "..", "plannotator.html")).text().then(h => { _planHtml = h; });
+  Bun.file(path.join(import.meta.dir, "..", "review-editor.html")).text().then(h => { _reviewHtml = h; });
+
   let cachedAgents: any[] | null = null;
 
   async function getSharingEnabled(): Promise<boolean> {
@@ -312,8 +324,8 @@ Do NOT proceed with implementation until your plan is approved.`);
 
       const deps: CommandDeps = {
         client: ctx.client,
-        htmlContent,
-        reviewHtmlContent,
+        htmlContent: getPlanHtml(),
+        reviewHtmlContent: getReviewHtml(),
         getSharingEnabled,
         getShareBaseUrl,
         directory: ctx.directory,
@@ -354,8 +366,8 @@ Do NOT proceed with implementation until your plan is approved.`);
 
       const deps: CommandDeps = {
         client: ctx.client,
-        htmlContent,
-        reviewHtmlContent,
+        htmlContent: getPlanHtml(),
+        reviewHtmlContent: getReviewHtml(),
         getSharingEnabled,
         getShareBaseUrl,
         directory: ctx.directory,
@@ -401,7 +413,7 @@ Do NOT proceed with implementation until your plan is approved.`);
             origin: "opencode",
             sharingEnabled,
             shareBaseUrl: getShareBaseUrl(),
-            htmlContent,
+            htmlContent: getPlanHtml(),
             opencodeClient: ctx.client,
             onReady: async (url, isRemote, port) => {
               handleServerReady(url, isRemote, port);

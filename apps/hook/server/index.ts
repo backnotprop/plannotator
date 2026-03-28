@@ -1,10 +1,10 @@
 /**
- * Plannotator CLI for Claude Code
+ * Plannotator CLI for Claude Code & Copilot CLI
  *
- * Supports five modes:
+ * Supports seven modes:
  *
  * 1. Plan Review (default, no args):
- *    - Spawned by ExitPlanMode hook
+ *    - Spawned by ExitPlanMode hook (Claude Code)
  *    - Reads hook event from stdin, extracts plan content
  *    - Serves UI, returns approve/deny decision to stdout
  *
@@ -27,6 +27,15 @@
  *    - Lists active Plannotator server sessions
  *    - `--open [N]` reopens a session in the browser
  *    - `--clean` removes stale session files
+ *
+ * 6. Copilot Plan (`plannotator copilot-plan`):
+ *    - Spawned by preToolUse hook (Copilot CLI)
+ *    - Intercepts exit_plan_mode, reads plan.md from session state
+ *    - Outputs permissionDecision JSON to stdout
+ *
+ * 7. Copilot Last (`plannotator copilot-last`):
+ *    - Annotate the last assistant message from a Copilot CLI session
+ *    - Parses events.jsonl from session state
  *
  * Global flags:
  *   --browser <name>   - Override which browser to open (e.g. "Google Chrome")
@@ -58,8 +67,10 @@ import { registerSession, unregisterSession, listSessions } from "@plannotator/s
 import { openBrowser } from "@plannotator/server/browser";
 import { detectProjectName } from "@plannotator/server/project";
 import { planDenyFeedback } from "@plannotator/shared/feedback-templates";
+import type { Origin } from "@plannotator/shared/agents";
 import { findSessionLogsForCwd, resolveSessionLogByPpid, findSessionLogsByAncestorWalk, getLastRenderedMessage, type RenderedMessage } from "./session-log";
 import { findCodexRolloutByThreadId, getLastCodexMessage } from "./codex-session";
+import { findCopilotPlanContent, findCopilotSessionForCwd, getLastCopilotMessage } from "./copilot-session";
 import path from "path";
 
 // Embed the built HTML at compile time
@@ -92,6 +103,13 @@ const shareBaseUrl = process.env.PLANNOTATOR_SHARE_URL || undefined;
 
 // Paste service URL for short URL sharing
 const pasteApiUrl = process.env.PLANNOTATOR_PASTE_URL || undefined;
+
+// Detect calling agent from environment variables set by agent runtimes.
+// Priority: Codex > Copilot CLI > Claude Code (default fallback)
+const detectedOrigin: Origin =
+  process.env.CODEX_THREAD_ID ? "codex" :
+  process.env.COPILOT_CLI ? "copilot-cli" :
+  "claude-code";
 
 if (args[0] === "sessions") {
   // ============================================
@@ -205,7 +223,7 @@ if (args[0] === "sessions") {
     rawPatch,
     gitRef,
     error: diffError,
-    origin: "claude-code",
+    origin: detectedOrigin,
     diffType: isPRMode ? undefined : "uncommitted",
     gitContext,
     prMetadata,
@@ -327,7 +345,7 @@ if (args[0] === "sessions") {
   const server = await startAnnotateServer({
     markdown,
     filePath: absolutePath,
-    origin: "claude-code",
+    origin: detectedOrigin,
     mode: annotateMode,
     folderPath,
     sharingEnabled,
@@ -446,7 +464,7 @@ if (args[0] === "sessions") {
   const server = await startAnnotateServer({
     markdown: lastMessage.text,
     filePath: "last-message",
-    origin: isCodex ? "codex" : "claude-code",
+    origin: detectedOrigin,
     mode: "annotate-last",
     sharingEnabled,
     shareBaseUrl,
@@ -489,7 +507,7 @@ if (args[0] === "sessions") {
 
   const server = await startPlannotatorServer({
     plan: "",
-    origin: "claude-code",
+    origin: detectedOrigin,
     mode: "archive",
     sharingEnabled,
     shareBaseUrl,
@@ -513,6 +531,156 @@ if (args[0] === "sessions") {
 
   await Bun.sleep(500);
   server.stop();
+  process.exit(0);
+
+} else if (args[0] === "copilot-plan") {
+  // ============================================
+  // COPILOT CLI PLAN INTERCEPTION MODE
+  // ============================================
+  //
+  // Called by preToolUse hook on EVERY tool call in Copilot CLI.
+  // Must filter quickly and only activate for exit_plan_mode.
+  // No output = allow the tool call to proceed.
+
+  const eventJson = await Bun.stdin.text();
+  let event: { toolName: string; toolArgs: string; cwd: string; timestamp: number; sessionId?: string };
+
+  try {
+    event = JSON.parse(eventJson);
+  } catch {
+    // Can't parse input — allow the tool call
+    process.exit(0);
+  }
+
+  // FILTER: Only intercept exit_plan_mode
+  if (event.toolName !== "exit_plan_mode") {
+    process.exit(0); // No output = allow
+  }
+
+  // Find plan.md content (sessionId primary, newest plan.md fallback)
+  const planContent = findCopilotPlanContent(event.sessionId);
+
+  if (!planContent) {
+    // No plan.md found — allow exit_plan_mode to proceed normally
+    process.exit(0);
+  }
+
+  const planProject = (await detectProjectName()) ?? "_unknown";
+
+  const server = await startPlannotatorServer({
+    plan: planContent,
+    origin: "copilot-cli",
+    sharingEnabled,
+    shareBaseUrl,
+    pasteApiUrl,
+    htmlContent: planHtmlContent,
+    onReady: async (url, isRemote, port) => {
+      handleServerReady(url, isRemote, port);
+
+      if (isRemote && sharingEnabled) {
+        await writeRemoteShareLink(planContent, shareBaseUrl, "review the plan", "plan only").catch(() => {});
+      }
+    },
+  });
+
+  registerSession({
+    pid: process.pid,
+    port: server.port,
+    url: server.url,
+    mode: "plan",
+    project: planProject,
+    startedAt: new Date().toISOString(),
+    label: `plan-${planProject}`,
+  });
+
+  const result = await server.waitForDecision();
+  await Bun.sleep(1500);
+  server.stop();
+
+  // Output Copilot CLI permission decision format
+  if (result.approved) {
+    console.log(JSON.stringify({
+      permissionDecision: "allow",
+    }));
+  } else {
+    const feedback = planDenyFeedback(
+      result.feedback || "",
+      "exit_plan_mode",
+    );
+    console.log(JSON.stringify({
+      permissionDecision: "deny",
+      permissionDecisionReason: feedback,
+    }));
+  }
+
+  process.exit(0);
+
+} else if (args[0] === "copilot-last") {
+  // ============================================
+  // COPILOT CLI ANNOTATE LAST MESSAGE MODE
+  // ============================================
+
+  const projectRoot = process.env.PLANNOTATOR_CWD || process.cwd();
+
+  if (process.env.PLANNOTATOR_DEBUG) {
+    console.error(`[DEBUG] Copilot CLI detected, finding session for CWD: ${projectRoot}`);
+  }
+
+  const sessionDir = findCopilotSessionForCwd(projectRoot);
+
+  if (!sessionDir) {
+    console.error("No Copilot CLI session found.");
+    process.exit(1);
+  }
+
+  if (process.env.PLANNOTATOR_DEBUG) {
+    console.error(`[DEBUG] Session dir: ${sessionDir}`);
+  }
+
+  const msg = getLastCopilotMessage(sessionDir);
+  if (!msg) {
+    console.error("No assistant message found in Copilot CLI session.");
+    process.exit(1);
+  }
+
+  if (process.env.PLANNOTATOR_DEBUG) {
+    console.error(`[DEBUG] Found message (${msg.text.length} chars)`);
+  }
+
+  const annotateProject = (await detectProjectName()) ?? "_unknown";
+
+  const server = await startAnnotateServer({
+    markdown: msg.text,
+    filePath: "last-message",
+    origin: "copilot-cli",
+    mode: "annotate-last",
+    sharingEnabled,
+    shareBaseUrl,
+    htmlContent: planHtmlContent,
+    onReady: async (url, isRemote, port) => {
+      handleAnnotateServerReady(url, isRemote, port);
+
+      if (isRemote && sharingEnabled) {
+        await writeRemoteShareLink(msg.text, shareBaseUrl, "annotate", "message only").catch(() => {});
+      }
+    },
+  });
+
+  registerSession({
+    pid: process.pid,
+    port: server.port,
+    url: server.url,
+    mode: "annotate",
+    project: annotateProject,
+    startedAt: new Date().toISOString(),
+    label: `annotate-last`,
+  });
+
+  const result = await server.waitForDecision();
+  await Bun.sleep(1500);
+  server.stop();
+
+  console.log(result.feedback || "No feedback provided.");
   process.exit(0);
 
 } else {
@@ -544,7 +712,7 @@ if (args[0] === "sessions") {
   // Start the plan review server
   const server = await startPlannotatorServer({
     plan: planContent,
-    origin: "claude-code",
+    origin: detectedOrigin,
     permissionMode,
     sharingEnabled,
     shareBaseUrl,

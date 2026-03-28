@@ -9,6 +9,7 @@
  *   PLANNOTATOR_ORIGIN - Origin identifier ("claude-code" or "opencode")
  */
 
+import type { Origin } from "@plannotator/shared/agents";
 import { resolve } from "path";
 import { isRemoteSession, getServerPort } from "./remote";
 import { openEditorDiff } from "./ide";
@@ -59,7 +60,7 @@ export interface ServerOptions {
   /** The plan markdown content */
   plan: string;
   /** Origin identifier (e.g., "claude-code", "opencode") */
-  origin: string;
+  origin: Origin;
   /** HTML content to serve for the UI */
   htmlContent: string;
   /** Current permission mode to preserve (Claude Code only) */

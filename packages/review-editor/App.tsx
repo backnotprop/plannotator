@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { type Origin, getAgentName } from '@plannotator/shared/agents';
 import { ThemeProvider, useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { ModeToggle } from '@plannotator/ui/components/ModeToggle';
 import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
@@ -44,7 +45,7 @@ interface DiffData {
   files: DiffFile[];
   rawPatch: string;
   gitRef: string;
-  origin?: 'opencode' | 'claude-code' | 'pi';
+  origin?: Origin;
   diffType?: string;
   gitContext?: GitContext;
   sharingEnabled?: boolean;
@@ -100,7 +101,7 @@ const ReviewApp: React.FC = () => {
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
   const [hideViewedFiles, setHideViewedFiles] = useState(false);
-  const [origin, setOrigin] = useState<'opencode' | 'claude-code' | 'pi' | null>(null);
+  const [origin, setOrigin] = useState<Origin | null>(null);
   const [gitUser, setGitUser] = useState<string | undefined>();
   const [isWSL, setIsWSL] = useState(false);
   const [diffType, setDiffType] = useState<string>('uncommitted');
@@ -148,6 +149,8 @@ const ReviewApp: React.FC = () => {
 
   const {
     searchQuery,
+    debouncedSearchQuery,
+    isSearchPending,
     isSearchOpen,
     activeSearchMatchId,
     activeSearchMatch,
@@ -352,7 +355,7 @@ const ReviewApp: React.FC = () => {
       }
 
       // Enter/F3 to step through search matches
-      if ((e.key === 'Enter' || e.key === 'F3') && searchMatches.length > 0 && !isTypingTarget(e.target)) {
+      if ((e.key === 'Enter' || e.key === 'F3') && searchMatches.length > 0 && !isSearchPending && !isTypingTarget(e.target)) {
         e.preventDefault();
         stepSearchMatch(e.shiftKey ? -1 : 1);
         return;
@@ -378,7 +381,7 @@ const ReviewApp: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showExportModal, showDestinationMenu, searchQuery, searchMatches, openSearch, stepSearchMatch, clearSearch, files, gitContext?.diffOptions]);
+  }, [showExportModal, showDestinationMenu, searchQuery, searchMatches, isSearchPending, openSearch, stepSearchMatch, clearSearch, files, gitContext?.diffOptions]);
 
   // Get annotations for active file
   const activeFileAnnotations = useMemo(() => {
@@ -397,7 +400,7 @@ const ReviewApp: React.FC = () => {
       .then((data: {
         rawPatch: string;
         gitRef: string;
-        origin?: 'opencode' | 'claude-code' | 'pi';
+        origin?: Origin;
         diffType?: string;
         gitContext?: GitContext;
         sharingEnabled?: boolean;
@@ -1363,6 +1366,7 @@ const ReviewApp: React.FC = () => {
                 currentBranch={gitContext?.currentBranch}
                 stagedFiles={stagedFiles}
                 searchQuery={searchQuery}
+                isSearchPending={isSearchPending}
                 searchInputRef={searchInputRef}
                 onSearchChange={handleSearchInputChange}
                 onSearchClear={clearSearch}
@@ -1415,7 +1419,7 @@ const ReviewApp: React.FC = () => {
                 onStage={() => stageFile(activeFile.path)}
                 canStage={canStageFiles}
                 stageError={stageError}
-                searchQuery={searchQuery}
+                searchQuery={isSearchPending ? '' : debouncedSearchQuery}
                 searchMatches={activeFileSearchMatches}
                 activeSearchMatchId={activeSearchMatchId}
                 activeSearchMatch={activeSearchMatch?.filePath === activeFile.path ? activeSearchMatch : null}
@@ -1589,10 +1593,10 @@ const ReviewApp: React.FC = () => {
                 ? `Your approval was submitted to ${platformLabel}.`
                 : `Your feedback was submitted to ${platformLabel}.`
               : submitted === 'approved'
-                ? `${origin === 'claude-code' ? 'Claude Code' : origin === 'opencode' ? 'OpenCode' : origin === 'pi' ? 'Pi' : 'Your agent'} will proceed with the changes.`
-                : `${origin === 'claude-code' ? 'Claude Code' : origin === 'opencode' ? 'OpenCode' : origin === 'pi' ? 'Pi' : 'Your agent'} will address your review feedback.`
+                ? `${getAgentName(origin)} will proceed with the changes.`
+                : `${getAgentName(origin)} will address your review feedback.`
           }
-          agentLabel={origin === 'claude-code' ? 'Claude Code' : origin === 'opencode' ? 'OpenCode' : origin === 'pi' ? 'Pi' : 'Your agent'}
+          agentLabel={getAgentName(origin)}
         />
 
         {/* Update notification */}

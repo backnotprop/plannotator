@@ -16,8 +16,10 @@ import { SuggestionModal } from './SuggestionModal';
 import { type ReviewSearchMatch } from '../utils/reviewSearch';
 import {
   applySearchHighlights,
+  clearSearchHighlights,
   getSearchRoots,
   retryScrollToSearchMatch,
+  swapActiveSearchHighlight,
 } from '../utils/reviewSearchHighlight';
 
 interface DiffViewerProps {
@@ -204,17 +206,33 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     return () => clearTimeout(timeoutId);
   }, [selectedAnnotationId]);
 
-  // Apply search highlights to diff lines (including inside shadow DOM)
+  // Apply search highlights to diff lines (including inside shadow DOM).
+  // The query is already debounced upstream (useReviewSearch), so this runs synchronously.
+  // activeSearchMatchId is NOT in deps — the swap effect handles that with O(1) updates.
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const frameId = requestAnimationFrame(() => {
-      const roots = getSearchRoots(containerRef.current!);
-      roots.forEach(root => applySearchHighlights(root, searchQuery, searchMatches, activeSearchMatchId));
-    });
+    const query = searchQuery;
+    const matches = searchMatches;
 
-    return () => cancelAnimationFrame(frameId);
-  }, [searchQuery, searchMatches, activeSearchMatchId, filePath, diffStyle, augmentedDiff]);
+    if (!query.trim() || matches.length === 0) {
+      const roots = getSearchRoots(containerRef.current);
+      roots.forEach(root => clearSearchHighlights(root));
+      return;
+    }
+
+    const roots = getSearchRoots(containerRef.current);
+    roots.forEach(root =>
+      applySearchHighlights(root, query, matches, activeSearchMatchId)
+    );
+  }, [searchQuery, searchMatches, filePath, diffStyle, augmentedDiff]);
+
+  // Swap active search highlight instantly when stepping between matches.
+  // This avoids a full rebuild just to change two elements' background color.
+  useEffect(() => {
+    if (!containerRef.current) return;
+    swapActiveSearchHighlight(containerRef.current, activeSearchMatchId);
+  }, [activeSearchMatchId]);
 
   // Scroll to active search match (with retry for lazy-rendered content)
   useEffect(() => {

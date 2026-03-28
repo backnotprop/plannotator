@@ -28,7 +28,7 @@ export function getSearchRoots(root: ParentNode): ParentNode[] {
   return roots;
 }
 
-function clearSearchHighlights(root: ParentNode) {
+export function clearSearchHighlights(root: ParentNode) {
   const marks = root.querySelectorAll('mark[data-review-search-match]');
   marks.forEach((mark) => {
     const parent = mark.parentNode;
@@ -66,6 +66,11 @@ function decorateSearchMatch(mark: HTMLElement, isActive: boolean) {
   mark.style.borderRadius = '3px';
   mark.style.padding = '0 1px';
   mark.style.boxShadow = isActive ? ACTIVE_MATCH_RING : PASSIVE_MATCH_RING;
+  if (isActive) {
+    mark.dataset.reviewSearchActive = '';
+  } else {
+    delete mark.dataset.reviewSearchActive;
+  }
 }
 
 function lineKey(match: ReviewSearchMatch): string {
@@ -148,6 +153,25 @@ export function applySearchHighlights(
       textNode = nextNode;
     }
   });
+}
+
+export function swapActiveSearchHighlight(
+  container: HTMLElement,
+  newActiveId: string | null,
+): void {
+  const roots = getSearchRoots(container);
+  for (const root of roots) {
+    const prev = root.querySelector('mark[data-review-search-active]') as HTMLElement | null;
+    if (prev) {
+      decorateSearchMatch(prev, false);
+    }
+    if (newActiveId) {
+      const next = root.querySelector(`mark[data-review-search-match="${newActiveId}"]`) as HTMLElement | null;
+      if (next) {
+        decorateSearchMatch(next, true);
+      }
+    }
+  }
 }
 
 export function scrollToSearchMatch(root: ParentNode, match: ReviewSearchMatch): boolean {

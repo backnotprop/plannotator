@@ -27,6 +27,7 @@ interface FileTreeProps {
   currentBranch?: string;
   stagedFiles?: Set<string>;
   searchQuery?: string;
+  isSearchPending?: boolean;
   searchInputRef?: React.RefObject<HTMLInputElement | null>;
   onSearchChange?: (value: string) => void;
   onSearchClear?: () => void;
@@ -58,6 +59,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   currentBranch,
   stagedFiles,
   searchQuery = '',
+  isSearchPending,
   searchInputRef,
   onSearchChange,
   onSearchClear,
@@ -166,7 +168,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
                   e.preventDefault();
                   return;
                 }
-                if (e.key === 'Enter' && searchMatches.length > 0) {
+                if (e.key === 'Enter' && searchMatches.length > 0 && !isSearchPending) {
                   e.preventDefault();
                   onStepSearchMatch?.(e.shiftKey ? -1 : 1);
                 }
@@ -184,7 +186,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
             />
             {searchQuery && (
               <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                {searchQuery.trim() && (
+                {searchQuery.trim() && !isSearchPending && (
                   <span className="text-[10px] text-muted-foreground/40 tabular-nums">
                     {searchMatches.length}
                   </span>
@@ -332,7 +334,11 @@ export const FileTree: React.FC<FileTreeProps> = ({
       {/* File tree or search results */}
       <div className="flex-1 overflow-y-auto p-2">
         {searchQuery.trim() ? (
-          searchGroups.length > 0 ? (
+          isSearchPending ? (
+            <div className="py-6 text-center text-xs text-muted-foreground/50">
+              Searching…
+            </div>
+          ) : searchGroups.length > 0 ? (
             searchGroups.map((group) => (
               <SearchFileGroup
                 key={group.filePath}
@@ -393,8 +399,9 @@ export const FileTree: React.FC<FileTreeProps> = ({
 // --- Search result components ---
 
 function highlightQuery(text: string, query: string) {
-  if (!query.trim()) return text;
-  const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+  const trimmed = query.trim();
+  if (!trimmed) return text;
+  const regex = new RegExp(`(${trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
   const parts = text.split(regex);
   // split with a capturing group puts matches at odd indices (1, 3, 5...)
   return parts.map((part, i) =>

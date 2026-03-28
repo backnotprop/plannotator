@@ -3,6 +3,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import type { Origin } from '@plannotator/shared/agents';
 import { getAgentSwitchSettings } from '../utils/agentSwitch';
 
 export interface Agent {
@@ -24,7 +25,7 @@ export interface UseAgentsResult {
  * Fetch available agents from OpenCode API
  * Only fetches when origin is 'opencode'
  */
-export function useAgents(origin: 'claude-code' | 'opencode' | 'pi' | 'codex' | null): UseAgentsResult {
+export function useAgents(origin: Origin | null): UseAgentsResult {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 

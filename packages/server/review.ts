@@ -10,6 +10,7 @@
  */
 
 import { isRemoteSession, getServerPort } from "./remote";
+import type { Origin } from "@plannotator/shared/agents";
 import { type DiffType, type GitContext, runGitDiff, getFileContentsForDiff, gitAddFile, gitResetFile, parseWorktreeDiffType, validateFilePath } from "./git";
 import { getRepoInfo } from "./repo";
 import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, type OpencodeClient } from "./shared-handlers";
@@ -40,7 +41,7 @@ export interface ReviewServerOptions {
   /** HTML content to serve for the UI */
   htmlContent: string;
   /** Origin identifier for UI customization */
-  origin?: "opencode" | "claude-code" | "pi";
+  origin?: Origin;
   /** Current diff type being displayed */
   diffType?: DiffType;
   /** Git context with branch info and available diff options */

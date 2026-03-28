@@ -53,6 +53,7 @@ Plannotator lets you privately share plans, annotations, and feedback with colle
 ## Install
 
 - [Claude Code](#install-for-claude-code)
+- [Copilot CLI](#install-for-copilot-cli)
 - [OpenCode](#install-for-opencode)
 - [Pi](#install-for-pi)
 - [Codex](#install-for-codex)
@@ -83,6 +84,35 @@ irm https://plannotator.ai/install.ps1 | iex
 ```
 
 See [apps/hook/README.md](apps/hook/README.md) for detailed installation instructions including a `manual hook` approach.
+
+---
+
+## Install for Copilot CLI
+
+**Install the `plannotator` command:**
+
+**macOS / Linux / WSL:**
+
+```bash
+curl -fsSL https://plannotator.ai/install.sh | bash
+```
+
+**Windows PowerShell:**
+
+```powershell
+irm https://plannotator.ai/install.ps1 | iex
+```
+
+**Then in Copilot CLI:**
+
+```
+/plugin marketplace add backnotprop/plannotator
+/plugin install plannotator-copilot@plannotator
+```
+
+Restart Copilot CLI after plugin install. Plan review activates automatically when you use plan mode (`Shift+Tab` to enter plan mode).
+
+See [apps/copilot/README.md](apps/copilot/README.md) for details.
 
 ---
 

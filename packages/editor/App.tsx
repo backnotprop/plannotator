@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { type Origin, getAgentName, getAgentBadge } from '@plannotator/shared/agents';
 import { parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, extractFrontmatter, wrapFeedbackForAgent, Frontmatter } from '@plannotator/ui/utils/parser';
 import { Viewer, ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
@@ -86,7 +87,7 @@ const App: React.FC = () => {
   });
   const [uiPrefs, setUiPrefs] = useState(() => getUIPreferences());
   const [isApiMode, setIsApiMode] = useState(false);
-  const [origin, setOrigin] = useState<'claude-code' | 'opencode' | 'pi' | 'codex' | null>(null);
+  const [origin, setOrigin] = useState<Origin | null>(null);
   const [gitUser, setGitUser] = useState<string | undefined>();
   const [isWSL, setIsWSL] = useState(false);
   const [globalAttachments, setGlobalAttachments] = useState<ImageAttachment[]>([]);
@@ -395,7 +396,7 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: 'claude-code' | 'opencode' | 'pi' | 'codex'; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive'; filePath?: string; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string } }) => {
+      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive'; filePath?: string; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string } }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
         // gitUser drives the "Use git name" button in Settings; stays undefined (button hidden) when unavailable
@@ -1004,13 +1005,7 @@ const App: React.FC = () => {
     return () => document.removeEventListener('pointerdown', handleClickOutside);
   }, [showExportDropdown]);
 
-  const agentName = useMemo(() => {
-    if (origin === 'opencode') return 'OpenCode';
-    if (origin === 'claude-code') return 'Claude Code';
-    if (origin === 'pi') return 'Pi';
-    if (origin === 'codex') return 'Codex';
-    return 'Coding Agent';
-  }, [origin]);
+  const agentName = useMemo(() => getAgentName(origin), [origin]);
 
   const planMaxWidth = useMemo(() => {
     const widths: Record<PlanWidth, number> = { compact: 832, default: 1040, wide: 1280 };
@@ -1041,13 +1036,7 @@ const App: React.FC = () => {
               v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0'}
             </a>
             {origin && (
-              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium hidden md:inline ${
-                origin === 'claude-code'
-                  ? 'bg-orange-500/15 text-orange-400'
-                  : origin === 'pi'
-                    ? 'bg-violet-500/15 text-violet-400'
-                    : 'bg-zinc-500/20 text-zinc-400'
-              }`}>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium hidden md:inline ${getAgentBadge(origin)}`}>
                 {agentName}
               </span>
             )}

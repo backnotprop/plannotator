@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "exports": {
+    "./agents": "./agents.ts",
     "./compress": "./compress.ts",
     "./crypto": "./crypto.ts",
     "./feedback-templates": "./feedback-templates.ts",
