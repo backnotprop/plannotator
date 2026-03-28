@@ -13,7 +13,7 @@ import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolst
 import { TaterSpriteRunning } from '@plannotator/ui/components/TaterSpriteRunning';
 import { TaterSpritePullup } from '@plannotator/ui/components/TaterSpritePullup';
 import { Settings } from '@plannotator/ui/components/Settings';
-import { useSharing } from '@plannotator/ui/hooks/useSharing';
+import { useSharing, getCallbackConfig } from '@plannotator/ui/hooks/useSharing';
 import { useAgents } from '@plannotator/ui/hooks/useAgents';
 import { useActiveSection } from '@plannotator/ui/hooks/useActiveSection';
 import { storage } from '@plannotator/ui/utils/storage';
@@ -924,6 +924,46 @@ const App: React.FC = () => {
     return output;
   }, [blocks, allAnnotations, globalAttachments, linkedDocHook.getDocAnnotations, editorAnnotations]);
 
+  // Bot callback config — read once from URL search params (?cb=&ct=)
+  const callbackConfig = React.useMemo(() => getCallbackConfig(), []);
+
+  const handleCallbackApprove = React.useCallback(async () => {
+    if (!callbackConfig) return;
+    try {
+      const res = await fetch(callbackConfig.callbackUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "approve", annotated_url: window.location.href, token: callbackConfig.token }),
+      });
+      if (res.status === 401) {
+        alert("Plan link expired — please request a new one from the bot.");
+      } else if (!res.ok) {
+        alert("Callback failed — please send the URL manually to the bot.");
+      }
+    } catch {
+      alert("Callback failed — please send the URL manually to the bot.");
+    }
+  }, [callbackConfig]);
+
+  const handleCallbackFeedback = React.useCallback(async () => {
+    if (!callbackConfig) return;
+    const annotatedUrl = window.location.href;
+    try {
+      const res = await fetch(callbackConfig.callbackUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "feedback", annotated_url: annotatedUrl, token: callbackConfig.token }),
+      });
+      if (res.status === 401) {
+        alert("Plan link expired — please request a new one from the bot.");
+      } else if (!res.ok) {
+        alert("Callback failed — please send the URL manually to the bot.");
+      }
+    } catch {
+      alert("Callback failed — please send the URL manually to the bot.");
+    }
+  }, [callbackConfig]);
+
   // Quick-save handlers for export dropdown and keyboard shortcut
   const handleDownloadAnnotations = () => {
     setShowExportDropdown(false);
@@ -1109,6 +1149,33 @@ const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-1 md:gap-2">
+            {/* Bot callback buttons — only shown when ?cb=&ct= params are present */}
+            {callbackConfig !== null && (
+              <>
+                <button
+                  onClick={handleCallbackFeedback}
+                  className="p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium transition-all bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 border border-blue-500/30"
+                  title="Send feedback to bot"
+                >
+                  <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                  </svg>
+                  <span className="hidden md:inline">💬 Send Feedback</span>
+                </button>
+                <button
+                  onClick={handleCallbackApprove}
+                  className="p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium transition-all bg-green-500/15 text-green-400 hover:bg-green-500/25 border border-green-500/30"
+                  title="Approve design and notify bot"
+                >
+                  <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span className="hidden md:inline">✅ Approve Design</span>
+                </button>
+                <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
+              </>
+            )}
+
             {isApiMode && !linkedDocHook.isActive && archive.archiveMode && (
               <>
                 <button

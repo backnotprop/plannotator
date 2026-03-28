@@ -29,6 +29,26 @@ export interface ImportResult {
   error?: string;
 }
 
+/**
+ * Parse callback configuration from URL search params.
+ * Embedded by the bot as ?cb=<encoded_callback_url>&ct=<token>
+ * before the # fragment.
+ */
+export interface CallbackConfig {
+  callbackUrl: string;
+  token: string;
+}
+
+export function getCallbackConfig(): CallbackConfig | null {
+  const params = new URLSearchParams(window.location.search);
+  const cb = params.get("cb");
+  const ct = params.get("ct");
+  if (cb && ct) {
+    return { callbackUrl: decodeURIComponent(cb), token: ct };
+  }
+  return null;
+}
+
 interface UseSharingResult {
   /** Whether the current session was loaded from a shared URL */
   isSharedSession: boolean;
