@@ -297,17 +297,6 @@ export const exportAnnotations = (blocks: Block[], annotations: any[], globalAtt
         output += `> I don't want this in the ${subject}.\n`;
         break;
 
-      case 'INSERTION':
-        output += `Add this\n`;
-        output += `\`\`\`\n${ann.text}\n\`\`\`\n`;
-        break;
-
-      case 'REPLACEMENT':
-        output += `Change this\n`;
-        output += `**From:**\n\`\`\`\n${ann.originalText}\n\`\`\`\n`;
-        output += `**To:**\n\`\`\`\n${ann.text}\n\`\`\`\n`;
-        break;
-
       case 'COMMENT':
         if (ann.isQuickLabel) {
           output += `[${ann.text}] Feedback on: "${ann.originalText}"\n`;
@@ -392,17 +381,6 @@ export const exportLinkedDocAnnotations = (
           output += `Remove this\n`;
           output += `\`\`\`\n${ann.originalText}\n\`\`\`\n`;
           output += `> I don't want this in the document.\n`;
-          break;
-
-        case 'INSERTION':
-          output += `Add this\n`;
-          output += `\`\`\`\n${ann.text}\n\`\`\`\n`;
-          break;
-
-        case 'REPLACEMENT':
-          output += `Change this\n`;
-          output += `**From:**\n\`\`\`\n${ann.originalText}\n\`\`\`\n`;
-          output += `**To:**\n\`\`\`\n${ann.text}\n\`\`\`\n`;
           break;
 
         case 'COMMENT':

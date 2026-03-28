@@ -110,7 +110,7 @@ interface PlanAnnotation {
   source?: string;
 }
 
-const VALID_PLAN_TYPES = ["DELETION", "INSERTION", "REPLACEMENT", "COMMENT", "GLOBAL_COMMENT"];
+const VALID_PLAN_TYPES = ["DELETION", "COMMENT", "GLOBAL_COMMENT"];
 
 export function transformPlanInput(
   body: unknown,

@@ -18,9 +18,7 @@ type ShareableImage = string | [string, string];
 // Minimal shareable annotation format: [type, originalText, text?, author?, images?, quickLabel?]
 export type ShareableAnnotation =
   | ['D', string, string | null, ShareableImage[]?]                    // Deletion: type, original, author, images
-  | ['R', string, string, string | null, ShareableImage[]?]            // Replacement: type, original, replacement, author, images
   | ['C', string, string, string | null, ShareableImage[]?, (1)?]      // Comment: type, original, comment, author, images, isQuickLabel
-  | ['I', string, string, string | null, ShareableImage[]?]            // Insertion: type, context, new text, author, images
   | ['G', string, string | null, ShareableImage[]?];                   // Global Comment: type, comment, author, images
 
 export interface SharePayload {
@@ -69,17 +67,15 @@ export function toShareable(annotations: Annotation[]): ShareableAnnotation[] {
       return ['G', ann.text || '', author, images] as ShareableAnnotation;
     }
 
-    const type = ann.type[0] as 'D' | 'R' | 'C' | 'I';
-
-    if (type === 'D') {
+    if (ann.type === AnnotationType.DELETION) {
       return ['D', ann.originalText, author, images] as ShareableAnnotation;
     }
 
-    // R, C, I all have text
-    if (type === 'C' && ann.isQuickLabel) {
+    // COMMENT
+    if (ann.isQuickLabel) {
       return ['C', ann.originalText, ann.text || '', author, images ?? undefined, 1] as ShareableAnnotation;
     }
-    return [type, ann.originalText, ann.text || '', author, images] as ShareableAnnotation;
+    return ['C', ann.originalText, ann.text || '', author, images] as ShareableAnnotation;
   });
 }
 
@@ -91,9 +87,7 @@ export function toShareable(annotations: Annotation[]): ShareableAnnotation[] {
 export function fromShareable(data: ShareableAnnotation[], diffContexts?: (string | null)[] | null): Annotation[] {
   const typeMap: Record<string, AnnotationType> = {
     'D': AnnotationType.DELETION,
-    'R': AnnotationType.REPLACEMENT,
     'C': AnnotationType.COMMENT,
-    'I': AnnotationType.INSERTION,
     'G': AnnotationType.GLOBAL_COMMENT,
   };
 

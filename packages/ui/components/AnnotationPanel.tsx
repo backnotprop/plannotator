@@ -298,26 +298,6 @@ const AnnotationCard: React.FC<{
         </svg>
       )
     },
-    [AnnotationType.INSERTION]: {
-      label: 'Insert',
-      color: 'text-secondary',
-      bg: 'bg-secondary/10',
-      icon: (
-        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-        </svg>
-      )
-    },
-    [AnnotationType.REPLACEMENT]: {
-      label: 'Replace',
-      color: 'text-primary',
-      bg: 'bg-primary/10',
-      icon: (
-        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-        </svg>
-      )
-    },
     [AnnotationType.COMMENT]: {
       label: 'Comment',
       color: 'text-accent',
