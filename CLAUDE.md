@@ -69,6 +69,15 @@ plannotator/
 └── legacy/                       # Old pre-monorepo code (reference only)
 ```
 
+## Server Runtimes
+
+There are two separate server implementations with the same API surface:
+
+- **Bun server** (`packages/server/`) — used by both Claude Code (`apps/hook/`) and OpenCode (`apps/opencode-plugin/`). These plugins import directly from `@plannotator/server`.
+- **Pi server** (`apps/pi-extension/server/`) — a standalone Node.js server for the Pi extension. It mirrors the Bun server's API but uses `node:http` primitives instead of Bun's `Request`/`Response` APIs.
+
+When adding or modifying server endpoints, both implementations must be updated. Runtime-agnostic logic (store, validation, types) lives in `packages/shared/` and is imported by both.
+
 ## Installation
 
 **Via plugin marketplace** (when repo is public):
@@ -194,6 +203,10 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/draft`          | GET/POST/DELETE | Auto-save annotation drafts to survive server crashes |
 | `/api/editor-annotations` | GET | List editor annotations (VS Code only) |
 | `/api/editor-annotation` | POST/DELETE | Add or remove an editor annotation (VS Code only) |
+| `/api/external-annotations/stream` | GET | SSE stream for real-time external annotations |
+| `/api/external-annotations` | GET | Snapshot of external annotations (polling fallback, `?since=N` for version gating) |
+| `/api/external-annotations` | POST | Add external annotations (single or batch `{ annotations: [...] }`) |
+| `/api/external-annotations` | DELETE | Remove by `?id=`, `?source=`, or clear all |
 
 ### Review Server (`packages/server/review.ts`)
 
@@ -214,6 +227,10 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/ai/abort` | POST | Abort the current query |
 | `/api/ai/permission` | POST | Respond to a permission request |
 | `/api/ai/sessions` | GET | List active sessions |
+| `/api/external-annotations/stream` | GET | SSE stream for real-time external annotations |
+| `/api/external-annotations` | GET | Snapshot of external annotations (polling fallback, `?since=N` for version gating) |
+| `/api/external-annotations` | POST | Add external annotations (single or batch `{ annotations: [...] }`) |
+| `/api/external-annotations` | DELETE | Remove by `?id=`, `?source=`, or clear all |
 
 ### Annotate Server (`packages/server/annotate.ts`)
 
@@ -224,6 +241,10 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/image`          | GET    | Serve image by path query param            |
 | `/api/upload`         | POST   | Upload image, returns `{ path, originalName }` |
 | `/api/draft`          | GET/POST/DELETE | Auto-save annotation drafts to survive server crashes |
+| `/api/external-annotations/stream` | GET | SSE stream for real-time external annotations |
+| `/api/external-annotations` | GET | Snapshot of external annotations (polling fallback, `?since=N` for version gating) |
+| `/api/external-annotations` | POST | Add external annotations (single or batch `{ annotations: [...] }`) |
+| `/api/external-annotations` | DELETE | Remove by `?id=`, `?source=`, or clear all |
 
 All servers use random ports locally or fixed port (`19432`) in remote mode.
 
@@ -269,8 +290,6 @@ When a user denies a plan and Claude resubmits, the UI shows what changed betwee
 ```typescript
 enum AnnotationType {
   DELETION = "DELETION",
-  INSERTION = "INSERTION",
-  REPLACEMENT = "REPLACEMENT",
   COMMENT = "COMMENT",
   GLOBAL_COMMENT = "GLOBAL_COMMENT",
 }
@@ -286,11 +305,12 @@ interface Annotation {
   startOffset: number;
   endOffset: number;
   type: AnnotationType;
-  text?: string; // For comment/replacement/insertion
+  text?: string; // For comment
   originalText: string; // The selected text
   createdA: number; // Timestamp
   author?: string; // Tater identity
   images?: ImageAttachment[]; // Attached images with names
+  source?: string; // External tool identifier (e.g., "eslint") — set when annotation comes from external API
   diffContext?: 'added' | 'removed' | 'modified'; // Set when annotation created in plan diff view
   startMeta?: { parentTagName; parentIndex; textOffset };
   endMeta?: { parentTagName; parentIndex; textOffset };
@@ -350,9 +370,7 @@ interface SharePayload {
 
 type ShareableAnnotation =
   | ["D", string, string | null, ShareableImage[]?] // [type, original, author, images?]
-  | ["R", string, string, string | null, ShareableImage[]?] // [type, original, replacement, author, images?]
   | ["C", string, string, string | null, ShareableImage[]?] // [type, original, comment, author, images?]
-  | ["I", string, string, string | null, ShareableImage[]?] // [type, context, newText, author, images?]
   | ["G", string, string | null, ShareableImage[]?]; // [type, comment, author, images?]
 ```
 

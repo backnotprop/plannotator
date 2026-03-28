@@ -330,7 +330,7 @@ const App: React.FC = () => {
   });
 
   const { editorAnnotations, deleteEditorAnnotation } = useEditorAnnotations();
-  const { externalAnnotations, deleteExternalAnnotation } = useExternalAnnotations<Annotation>({ enabled: isApiMode });
+  const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<Annotation>({ enabled: isApiMode });
 
   const allAnnotations = useMemo(
     () => [...annotations, ...externalAnnotations],
@@ -824,9 +824,11 @@ const App: React.FC = () => {
   };
 
   const handleEditAnnotation = (id: string, updates: Partial<Annotation>) => {
-    // External annotations (source-backed) are read-only — skip edit
     const ann = allAnnotations.find(a => a.id === id);
-    if (ann?.source) return;
+    if (ann?.source) {
+      updateExternalAnnotation(id, updates);
+      return;
+    }
     setAnnotations(prev => prev.map(a =>
       a.id === id ? { ...a, ...updates } : a
     ));

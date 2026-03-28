@@ -186,7 +186,7 @@ const ReviewApp: React.FC = () => {
   const { editorAnnotations, deleteEditorAnnotation } = useEditorAnnotations();
 
   // External annotations (SSE-based, for any external tool)
-  const { externalAnnotations, deleteExternalAnnotation } = useExternalAnnotations<CodeAnnotation>({ enabled: !!origin });
+  const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<CodeAnnotation>({ enabled: !!origin });
 
   const allAnnotations = useMemo(
     () => [...annotations, ...externalAnnotations],
@@ -517,18 +517,20 @@ const ReviewApp: React.FC = () => {
     suggestedCode?: string,
     originalCode?: string
   ) => {
-    // External annotations (source-backed) are read-only — skip edit
     const ann = allAnnotationsRef.current.find(a => a.id === id);
-    if (ann?.source) return;
+    const updates = {
+      ...(text !== undefined && { text }),
+      ...(suggestedCode !== undefined && { suggestedCode }),
+      ...(originalCode !== undefined && { originalCode }),
+    };
+    if (ann?.source) {
+      updateExternalAnnotation(id, updates);
+      return;
+    }
     setAnnotations(prev => prev.map(a =>
-      a.id === id ? {
-        ...a,
-        ...(text !== undefined && { text }),
-        ...(suggestedCode !== undefined && { suggestedCode }),
-        ...(originalCode !== undefined && { originalCode }),
-      } : a
+      a.id === id ? { ...a, ...updates } : a
     ));
-  }, []);
+  }, [updateExternalAnnotation]);
 
   const handleDeleteAnnotation = useCallback((id: string) => {
     const ann = allAnnotationsRef.current.find(a => a.id === id);

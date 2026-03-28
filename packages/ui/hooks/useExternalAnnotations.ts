@@ -21,6 +21,7 @@ const SNAPSHOT_URL = '/api/external-annotations';
 
 interface UseExternalAnnotationsReturn<T> {
   externalAnnotations: T[];
+  updateExternalAnnotation: (id: string, updates: Partial<T>) => void;
   deleteExternalAnnotation: (id: string) => void;
   clearExternalAnnotations: (source?: string) => void;
 }
@@ -157,5 +158,9 @@ export function useExternalAnnotations<T extends { id: string; source?: string }
     }
   }, []);
 
-  return { externalAnnotations: annotations, deleteExternalAnnotation, clearExternalAnnotations };
+  const updateExternalAnnotation = useCallback((id: string, updates: Partial<T>) => {
+    setAnnotations((prev) => prev.map((a) => (a.id === id ? { ...a, ...updates } : a)));
+  }, []);
+
+  return { externalAnnotations: annotations, updateExternalAnnotation, deleteExternalAnnotation, clearExternalAnnotations };
 }
