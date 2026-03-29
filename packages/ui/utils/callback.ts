@@ -17,7 +17,9 @@ export interface CallbackConfig {
   token: string;
 }
 
-export type ToastPayload = { type: 'success' | 'error'; message: string } | null;
+export interface ToastSuccess { readonly type: 'success'; readonly message: string }
+export interface ToastError   { readonly type: 'error';   readonly message: string }
+export type ToastPayload = ToastSuccess | ToastError | null;
 
 /**
  * Parse callback configuration from URL search params.
