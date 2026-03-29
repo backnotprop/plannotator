@@ -1,22 +1,37 @@
 /**
  * Auto-save annotation drafts to the server.
  *
- * Silently saves annotations on a debounced interval so they survive
- * server crashes. On mount, checks for an existing draft and exposes
- * banner state for the UI to offer restoration.
+ * Stores full Annotation[] objects directly (preserving all fields
+ * including `source`, `id`, offsets, and meta). On mount, checks for
+ * an existing draft and exposes banner state for the UI to offer restoration.
+ *
+ * Backward compatible: loads old tuple-serialized drafts via fromShareable().
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Annotation, ImageAttachment } from '../types';
-import { toShareable, toShareableImages, fromShareable, parseShareableImages } from '../utils/sharing';
+import { fromShareable, parseShareableImages } from '../utils/sharing';
+import type { ShareableAnnotation } from '../utils/sharing';
 
 const DEBOUNCE_MS = 500;
 
+/** New format: full objects. */
 interface DraftData {
-  a: unknown[];
+  annotations: Annotation[];
+  globalAttachments: ImageAttachment[];
+  ts: number;
+}
+
+/** Old format: compact tuples (for backward compat on load). */
+interface LegacyDraftData {
+  a: ShareableAnnotation[];
   g?: unknown[];
   d?: (string | null)[];
   ts: number;
+}
+
+function isLegacyDraft(data: unknown): data is LegacyDraftData {
+  return !!data && typeof data === 'object' && 'a' in data && Array.isArray((data as LegacyDraftData).a);
 }
 
 function formatTimeAgo(ts: number): string {
@@ -52,7 +67,7 @@ export function useAnnotationDraft({
   submitted,
 }: UseAnnotationDraftOptions): UseAnnotationDraftResult {
   const [draftBanner, setDraftBanner] = useState<{ count: number; timeAgo: string } | null>(null);
-  const draftDataRef = useRef<DraftData | null>(null);
+  const draftDataRef = useRef<{ annotations: Annotation[]; globalAttachments: ImageAttachment[] } | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasMountedRef = useRef(false);
 
@@ -65,11 +80,32 @@ export function useAnnotationDraft({
         if (!res.ok) return null;
         return res.json();
       })
-      .then((data: DraftData | null) => {
-        if (data?.a && Array.isArray(data.a) && data.a.length > 0) {
-          draftDataRef.current = data;
+      .then((data: DraftData | LegacyDraftData | null) => {
+        if (!data) {
+          hasMountedRef.current = true;
+          return;
+        }
+
+        let restoredAnnotations: Annotation[];
+        let restoredGlobal: ImageAttachment[];
+
+        if (isLegacyDraft(data)) {
+          // Old tuple format — deserialize via fromShareable
+          restoredAnnotations = data.a.length > 0 ? fromShareable(data.a, data.d) : [];
+          restoredGlobal = data.g ? (parseShareableImages(data.g as Parameters<typeof parseShareableImages>[0]) ?? []) : [];
+        } else if (Array.isArray(data.annotations) && data.annotations.length > 0) {
+          // New direct-object format
+          restoredAnnotations = data.annotations;
+          restoredGlobal = Array.isArray(data.globalAttachments) ? data.globalAttachments : [];
+        } else {
+          hasMountedRef.current = true;
+          return;
+        }
+
+        if (restoredAnnotations.length > 0) {
+          draftDataRef.current = { annotations: restoredAnnotations, globalAttachments: restoredGlobal };
           setDraftBanner({
-            count: data.a.length,
+            count: restoredAnnotations.length,
             timeAgo: formatTimeAgo(data.ts || 0),
           });
         }
@@ -89,12 +125,9 @@ export function useAnnotationDraft({
     if (timerRef.current) clearTimeout(timerRef.current);
 
     timerRef.current = setTimeout(() => {
-      const diffContexts = annotations.map(a => a.diffContext || null);
-      const hasDiffContexts = diffContexts.some(v => v !== null);
       const payload: DraftData = {
-        a: toShareable(annotations) as unknown[],
-        g: toShareableImages(globalAttachments) as unknown[] | undefined,
-        ...(hasDiffContexts ? { d: diffContexts } : {}),
+        annotations,
+        globalAttachments,
         ts: Date.now(),
       };
 
@@ -117,12 +150,9 @@ export function useAnnotationDraft({
     setDraftBanner(null);
     draftDataRef.current = null;
 
-    if (!data?.a) return { annotations: [], globalAttachments: [] };
+    if (!data) return { annotations: [], globalAttachments: [] };
 
-    const restored = fromShareable(data.a as Parameters<typeof fromShareable>[0], data.d);
-    const restoredGlobal = data.g ? (parseShareableImages(data.g as Parameters<typeof parseShareableImages>[0]) ?? []) : [];
-
-    return { annotations: restored, globalAttachments: restoredGlobal };
+    return data;
   }, []);
 
   const dismissDraft = useCallback(() => {
