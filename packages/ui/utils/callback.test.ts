@@ -1,15 +1,78 @@
 import { describe, test, expect, mock, beforeEach } from "bun:test";
-import { executeCallback } from "./callbackHttp";
-import { CallbackAction } from "../hooks/useSharing";
+import { getCallbackConfig, executeCallback, CallbackAction } from "./callback";
 
-const mockConfig = {
-  callbackUrl: "https://localhost:9456/plannotator-cb",
-  token: "tok-test",
-};
+// --- getCallbackConfig ---
+
+function loc(url: string): { search: string; hash: string } {
+  const parsed = new URL(url);
+  return { search: parsed.search, hash: parsed.hash };
+}
+
+describe("getCallbackConfig", () => {
+  test("returns null when no cb/ct params", () => {
+    expect(getCallbackConfig(loc("https://share.plannotator.ai/#abc123"))).toBeNull();
+  });
+
+  test("returns config with params before #", () => {
+    const result = getCallbackConfig(
+      loc("https://share.plannotator.ai/?cb=https%3A%2F%2Flocalhost%3A9456%2Fplannotator-cb&ct=tok-123#abc"),
+    );
+    expect(result).not.toBeNull();
+    expect(result!.callbackUrl).toBe("https://localhost:9456/plannotator-cb");
+    expect(result!.token).toBe("tok-123");
+  });
+
+  test("returns config with params after # fragment", () => {
+    const result = getCallbackConfig(
+      loc("https://share.plannotator.ai/#abc?cb=https%3A%2F%2Flocalhost%3A9456%2Fplannotator-cb&ct=tok-456"),
+    );
+    expect(result).not.toBeNull();
+    expect(result!.callbackUrl).toBe("https://localhost:9456/plannotator-cb");
+    expect(result!.token).toBe("tok-456");
+  });
+
+  test("returns null when only cb is present", () => {
+    expect(
+      getCallbackConfig(loc("https://share.plannotator.ai/?cb=https%3A%2F%2Flocalhost%3A9456%2Fcb")),
+    ).toBeNull();
+  });
+
+  test("returns null when only ct is present", () => {
+    expect(getCallbackConfig(loc("https://share.plannotator.ai/?ct=tok-789"))).toBeNull();
+  });
+
+  test("decodes encoded callback URL", () => {
+    const encoded = encodeURIComponent("https://bot.internal/plannotator-cb");
+    const result = getCallbackConfig(loc(`https://share.plannotator.ai/?cb=${encoded}&ct=tok-abc#hash`));
+    expect(result!.callbackUrl).toBe("https://bot.internal/plannotator-cb");
+  });
+
+  test("returns null when params are empty strings", () => {
+    expect(getCallbackConfig(loc("https://share.plannotator.ai/?cb=&ct="))).toBeNull();
+  });
+
+  test("partial params in hash — only cb, no ct", () => {
+    expect(
+      getCallbackConfig(loc("https://share.plannotator.ai/#abc?cb=https%3A%2F%2Flocalhost%3A9456%2Fcb")),
+    ).toBeNull();
+  });
+
+  test("K8s cluster URL decodes correctly", () => {
+    const k8sUrl = "http://plannotator-cb.svc.cluster.local:9456/callback";
+    const result = getCallbackConfig(
+      loc(`https://share.plannotator.ai/?cb=${encodeURIComponent(k8sUrl)}&ct=k8s-tok-xyz`),
+    );
+    expect(result!.callbackUrl).toBe(k8sUrl);
+    expect(result!.token).toBe("k8s-tok-xyz");
+  });
+});
+
+// --- executeCallback ---
+
+const mockConfig = { callbackUrl: "https://localhost:9456/plannotator-cb", token: "tok-test" };
 
 describe("executeCallback", () => {
   beforeEach(() => {
-    // Reset fetch mock before each test
     (globalThis as any).fetch = undefined;
   });
 

@@ -21,63 +21,12 @@ import {
   createShortShareUrl,
   loadFromPasteId,
 } from '../utils/sharing';
-import { type Option, some, none } from '../utils/option';
 
 export interface ImportResult {
   success: boolean;
   count: number;
   planTitle: string;
   error?: string;
-}
-
-/**
- * Parse callback configuration from URL search params.
- * Embedded by the bot as ?cb=<encoded_callback_url>&ct=<token>
- * before the # fragment.
- */
-/**
- * Actions the user can trigger via the in-Plannotator callback buttons.
- * Sent as the `action` field in the POST body to the bot's callback URL.
- */
-export enum CallbackAction {
-  Approve  = "approve",
-  Feedback = "feedback",
-}
-
-/**
- * Callback configuration embedded in the Plannotator URL by the bot.
- * Parsed from `?cb=<encoded_url>&ct=<token>` — present in both search
- * params and hash-embedded query strings.
- */
-export interface CallbackConfig {
-  callbackUrl: string;
-  token: string;
-}
-
-/** @internal — visible for testing; production code should omit the argument */
-export function getCallbackConfig(
-  loc: { readonly search: string; readonly hash: string } = window.location,
-): Option<CallbackConfig> {
-  // Check standard query string (before #)
-  const searchParams = new URLSearchParams(loc.search);
-  let cb = searchParams.get("cb");
-  let ct = searchParams.get("ct");
-
-  // Also check for query-style params embedded in the hash (after #...?)
-  if (!cb || !ct) {
-    const hash = loc.hash;
-    const qIdx = hash.indexOf("?");
-    if (qIdx !== -1) {
-      const hashParams = new URLSearchParams(hash.slice(qIdx + 1));
-      cb = cb ?? hashParams.get("cb");
-      ct = ct ?? hashParams.get("ct");
-    }
-  }
-
-  if (cb && ct) {
-    return some({ callbackUrl: decodeURIComponent(cb), token: ct });
-  }
-  return none;
 }
 
 interface UseSharingResult {
