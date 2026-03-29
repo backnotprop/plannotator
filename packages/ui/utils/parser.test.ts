@@ -100,4 +100,111 @@ describe("parseMarkdownToBlocks — code fences", () => {
     expect(blocks[0].language).toBe("ts");
     expect(blocks[0].content).toBe("");
   });
+
+  /**
+   * Indented code fences (e.g. inside list items in a plan) must close when
+   * the closing fence is equally indented. Before the fix, the closing fence
+   * regex required backticks at column 0, so indented ``` never matched and
+   * the code block swallowed everything to EOF.
+   */
+  test("indented closing fence closes the code block", () => {
+    const md = "- Replace with reads:\n  ```ts\n  const x = 1;\n  ```\n- Next item";
+    const blocks = parseMarkdownToBlocks(md);
+    const types = blocks.map((b) => b.type);
+    expect(types).toEqual(["list-item", "code", "list-item"]);
+    expect(blocks[1].content).toBe("  const x = 1;");
+    expect(blocks[2].content).toBe("Next item");
+  });
+
+  /**
+   * A closing fence with trailing text (e.g. ``` some comment) should still
+   * close the block. Before the fix, the regex required only whitespace after
+   * backticks, so trailing text caused the fence to swallow everything to EOF.
+   */
+  test("closing fence with trailing text still closes the block", () => {
+    const md = "```js\nconst x = 1;\n``` this is ignored\nafter";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("code");
+    expect(blocks[0].content).toBe("const x = 1;");
+    expect(blocks[1].type).toBe("paragraph");
+    expect(blocks[1].content).toBe("after");
+  });
+
+  test("deeply indented fence closes correctly", () => {
+    const md = "    ```py\n    print('hi')\n    ```\nafter";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks[0].type).toBe("code");
+    expect(blocks[0].language).toBe("py");
+    expect(blocks[0].content).toBe("    print('hi')");
+    expect(blocks[1].type).toBe("paragraph");
+    expect(blocks[1].content).toBe("after");
+  });
+});
+
+describe("parseMarkdownToBlocks — tables", () => {
+  test("pipe-delimited table parses correctly", () => {
+    const md = "| A | B |\n|---|---|\n| 1 | 2 |";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("table");
+  });
+
+  /**
+   * Prose containing pipe characters (e.g. TypeScript union types in inline
+   * code) must NOT be treated as a table. Before the fix, the regex
+   * matched any line with 2+ pipes.
+   */
+  test("paragraph with inline code containing pipes is not a table", () => {
+    const md = "The type is `'scroll' | 'wrap'` and supports `'a' | 'b' | 'c'` values.";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("paragraph");
+    expect(blocks[0].content).toBe(md);
+  });
+
+  test("paragraph with multiple pipes in prose is not a table", () => {
+    const md = "Use option A | B | C depending on context.";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("paragraph");
+  });
+
+  test("real-world plan: prose with union types is not a table", () => {
+    const md = "`@pierre/diffs` supports `overflow: 'scroll' | 'wrap'` plus options, but Plannotator doesn't expose any of them.";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("paragraph");
+  });
+});
+
+describe("parseMarkdownToBlocks — real-world plan regression", () => {
+  test("indented code fence inside list does not swallow rest of plan", () => {
+    const md = [
+      "### 5. Migrate App.tsx",
+      "",
+      "- **Remove** `useState` for `diffStyle`",
+      "- **Replace** with ConfigStore reads:",
+      "  ```ts",
+      "  const diffStyle = useConfigValue('diffStyle');",
+      "  ```",
+      "- **Update** toolbar toggle handler",
+      "",
+      "### 6. Update DiffViewer",
+    ].join("\n");
+    const blocks = parseMarkdownToBlocks(md);
+    const types = blocks.map((b) => b.type);
+    expect(types).toEqual([
+      "heading",      // ### 5. Migrate App.tsx
+      "list-item",    // - **Remove**
+      "list-item",    // - **Replace**
+      "code",         // ```ts ... ```
+      "list-item",    // - **Update**
+      "heading",      // ### 6. Update DiffViewer
+    ]);
+    expect(blocks[3].type).toBe("code");
+    expect(blocks[3].language).toBe("ts");
+    expect(blocks[4].type).toBe("list-item");
+    expect(blocks[5].type).toBe("heading");
+  });
 });
