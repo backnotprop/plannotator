@@ -929,11 +929,21 @@ const App: React.FC = () => {
   const callbackConfig = React.useMemo(() => getCallbackConfig(), []);
 
   const callCallback = React.useCallback(async (action: CallbackAction) => {
-    if (!callbackConfig) return;
-    const toast = await executeCallback(action, callbackConfig);
-    if (toast) setNoteSaveToast(toast);
-    setTimeout(() => setNoteSaveToast(null), 4000);
-  }, [callbackConfig]);
+    if (!callbackConfig || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const toast = await executeCallback(action, callbackConfig, shareUrl);
+      if (toast) {
+        setNoteSaveToast(toast);
+        setTimeout(() => setNoteSaveToast(null), 4000);
+        if (toast.type === 'success') {
+          setSubmitted(action === CallbackAction.Approve ? 'approved' : 'denied');
+        }
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [callbackConfig, isSubmitting, shareUrl]);
 
   const handleCallbackApprove = React.useCallback(() => callCallback(CallbackAction.Approve), [callCallback]);
   const handleCallbackFeedback = React.useCallback(() => callCallback(CallbackAction.Feedback), [callCallback]);

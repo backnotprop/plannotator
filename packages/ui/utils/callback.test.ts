@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
 import { getCallbackConfig, executeCallback, CallbackAction } from "./callback";
 
 // --- getCallbackConfig ---
@@ -57,7 +57,7 @@ describe("getCallbackConfig", () => {
     ).toBeNull();
   });
 
-  test("K8s cluster URL decodes correctly", () => {
+  test("K8s cluster URL (http) is accepted", () => {
     const k8sUrl = "http://plannotator-cb.svc.cluster.local:9456/callback";
     const result = getCallbackConfig(
       loc(`https://share.plannotator.ai/?cb=${encodeURIComponent(k8sUrl)}&ct=k8s-tok-xyz`),
@@ -65,48 +65,58 @@ describe("getCallbackConfig", () => {
     expect(result!.callbackUrl).toBe(k8sUrl);
     expect(result!.token).toBe("k8s-tok-xyz");
   });
+
+  test("rejects non-http/https schemes", () => {
+    expect(getCallbackConfig(loc(`https://share.plannotator.ai/?cb=${encodeURIComponent("file:///etc/passwd")}&ct=tok`))).toBeNull();
+    expect(getCallbackConfig(loc(`https://share.plannotator.ai/?cb=${encodeURIComponent("javascript:alert(1)")}&ct=tok`))).toBeNull();
+  });
+
+  test("rejects malformed URL", () => {
+    expect(getCallbackConfig(loc(`https://share.plannotator.ai/?cb=not-a-url&ct=tok`))).toBeNull();
+  });
 });
 
 // --- executeCallback ---
 
 const mockConfig = { callbackUrl: "https://localhost:9456/plannotator-cb", token: "tok-test" };
+const mockAnnotatedUrl = "https://share.plannotator.ai/#abc123";
+
+let originalFetch: typeof globalThis.fetch;
+beforeEach(() => { originalFetch = globalThis.fetch; });
+afterEach(() => { globalThis.fetch = originalFetch; });
 
 describe("executeCallback", () => {
-  beforeEach(() => {
-    (globalThis as any).fetch = undefined;
-  });
-
   test("approve: 200 response returns success toast", async () => {
     globalThis.fetch = mock(async () => new Response("{}", { status: 200 })) as any;
-    const result = await executeCallback(CallbackAction.Approve, mockConfig);
+    const result = await executeCallback(CallbackAction.Approve, mockConfig, mockAnnotatedUrl);
     expect(result?.type).toBe("success");
     expect(result?.message).toContain("approved");
   });
 
   test("feedback: 200 response returns success toast", async () => {
     globalThis.fetch = mock(async () => new Response("{}", { status: 200 })) as any;
-    const result = await executeCallback(CallbackAction.Feedback, mockConfig);
+    const result = await executeCallback(CallbackAction.Feedback, mockConfig, mockAnnotatedUrl);
     expect(result?.type).toBe("success");
     expect(result?.message).toContain("Feedback sent");
   });
 
   test("401 response returns expiry message", async () => {
     globalThis.fetch = mock(async () => new Response("{}", { status: 401 })) as any;
-    const result = await executeCallback(CallbackAction.Approve, mockConfig);
+    const result = await executeCallback(CallbackAction.Approve, mockConfig, mockAnnotatedUrl);
     expect(result?.type).toBe("error");
     expect(result?.message).toContain("expired");
   });
 
   test("500 response returns generic failure message", async () => {
     globalThis.fetch = mock(async () => new Response("{}", { status: 500 })) as any;
-    const result = await executeCallback(CallbackAction.Approve, mockConfig);
+    const result = await executeCallback(CallbackAction.Approve, mockConfig, mockAnnotatedUrl);
     expect(result?.type).toBe("error");
     expect(result?.message).toBe("Callback failed.");
   });
 
   test("network failure returns error toast", async () => {
     globalThis.fetch = mock(async () => { throw new Error("Network error"); }) as any;
-    const result = await executeCallback(CallbackAction.Approve, mockConfig);
+    const result = await executeCallback(CallbackAction.Approve, mockConfig, mockAnnotatedUrl);
     expect(result?.type).toBe("error");
     expect(result?.message).toBe("Callback failed.");
   });
@@ -117,10 +127,11 @@ describe("executeCallback", () => {
       capturedBody = init.body as string;
       return new Response("{}", { status: 200 });
     }) as any;
-    await executeCallback(CallbackAction.Approve, mockConfig);
+    await executeCallback(CallbackAction.Approve, mockConfig, mockAnnotatedUrl);
     const body = JSON.parse(capturedBody!);
     expect(body.action).toBe("approve");
     expect(body.token).toBe("tok-test");
+    expect(body.annotated_url).toBe(mockAnnotatedUrl);
   });
 
   test("POSTs correct JSON body for feedback", async () => {
@@ -129,9 +140,10 @@ describe("executeCallback", () => {
       capturedBody = init.body as string;
       return new Response("{}", { status: 200 });
     }) as any;
-    await executeCallback(CallbackAction.Feedback, mockConfig);
+    await executeCallback(CallbackAction.Feedback, mockConfig, mockAnnotatedUrl);
     const body = JSON.parse(capturedBody!);
     expect(body.action).toBe("feedback");
     expect(body.token).toBe("tok-test");
+    expect(body.annotated_url).toBe(mockAnnotatedUrl);
   });
 });
