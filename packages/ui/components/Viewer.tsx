@@ -69,6 +69,9 @@ interface ViewerProps {
   /** Label for the copy button (default: "Copy plan") */
   copyLabel?: string;
   archiveInfo?: { status: 'approved' | 'denied' | 'unknown'; timestamp: string; title: string } | null;
+  // Checkbox toggle props
+  onToggleCheckbox?: (blockId: string, checked: boolean) => void;
+  checkboxOverrides?: Map<string, boolean>;
 }
 
 export interface ViewerHandle {
@@ -137,6 +140,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   imageBaseDir,
   copyLabel,
   archiveInfo,
+  onToggleCheckbox,
+  checkboxOverrides,
 }, ref) => {
   const [copied, setCopied] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
@@ -572,7 +577,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           group.type === 'list-group' ? (
             <div key={group.key} data-pinpoint-group="list" className="py-1 -mx-2 px-2">
               {group.blocks.map(block => (
-                <BlockRenderer imageBaseDir={imageBaseDir} onImageClick={(src, alt) => setLightbox({ src, alt })} key={block.id} block={block} onOpenLinkedDoc={onOpenLinkedDoc} />
+                <BlockRenderer imageBaseDir={imageBaseDir} onImageClick={(src, alt) => setLightbox({ src, alt })} key={block.id} block={block} onOpenLinkedDoc={onOpenLinkedDoc} onToggleCheckbox={onToggleCheckbox} checkboxOverrides={checkboxOverrides} />
               ))}
             </div>
           ) : group.block.type === 'code' && isMermaidLanguage(group.block.language) ? (
@@ -610,7 +615,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               isHovered={inputMethod !== 'pinpoint' && hoveredCodeBlock?.block.id === group.block.id}
             />
           ) : (
-            <BlockRenderer imageBaseDir={imageBaseDir} onImageClick={(src, alt) => setLightbox({ src, alt })} key={group.block.id} block={group.block} onOpenLinkedDoc={onOpenLinkedDoc} />
+            <BlockRenderer imageBaseDir={imageBaseDir} onImageClick={(src, alt) => setLightbox({ src, alt })} key={group.block.id} block={group.block} onOpenLinkedDoc={onOpenLinkedDoc} onToggleCheckbox={onToggleCheckbox} checkboxOverrides={checkboxOverrides} />
           )
         )}
 
@@ -967,7 +972,14 @@ function groupBlocks(blocks: Block[]): RenderGroup[] {
   return groups;
 }
 
-const BlockRenderer: React.FC<{ block: Block; onOpenLinkedDoc?: (path: string) => void; imageBaseDir?: string; onImageClick?: (src: string, alt: string) => void }> = ({ block, onOpenLinkedDoc, imageBaseDir, onImageClick }) => {
+const BlockRenderer: React.FC<{
+  block: Block;
+  onOpenLinkedDoc?: (path: string) => void;
+  imageBaseDir?: string;
+  onImageClick?: (src: string, alt: string) => void;
+  onToggleCheckbox?: (blockId: string, checked: boolean) => void;
+  checkboxOverrides?: Map<string, boolean>;
+}> = ({ block, onOpenLinkedDoc, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides }) => {
   switch (block.type) {
     case 'heading':
       const Tag = `h${block.level || 1}` as keyof JSX.IntrinsicElements;
@@ -992,20 +1004,29 @@ const BlockRenderer: React.FC<{ block: Block; onOpenLinkedDoc?: (path: string) =
     case 'list-item': {
       const indent = (block.level || 0) * 1.25; // 1.25rem per level
       const isCheckbox = block.checked !== undefined;
+      const isChecked = checkboxOverrides?.has(block.id)
+        ? checkboxOverrides.get(block.id)!
+        : block.checked;
+      const isInteractive = isCheckbox && !!onToggleCheckbox;
       return (
         <div
           className="flex gap-3 my-1.5"
           data-block-id={block.id}
           style={{ marginLeft: `${indent}rem` }}
         >
-          <span className="select-none shrink-0 flex items-center">
+          <span
+            className={`select-none shrink-0 flex items-center${isInteractive ? ' cursor-pointer' : ''}`}
+            onClick={isInteractive ? (e) => { e.stopPropagation(); onToggleCheckbox!(block.id, !isChecked); } : undefined}
+            role={isInteractive ? 'checkbox' : undefined}
+            aria-checked={isInteractive ? isChecked : undefined}
+          >
             {isCheckbox ? (
-              block.checked ? (
+              isChecked ? (
                 <svg className="w-4 h-4 text-success" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               ) : (
-                <svg className="w-4 h-4 text-muted-foreground/50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <svg className={`w-4 h-4 text-muted-foreground/50${isInteractive ? ' hover:text-muted-foreground transition-colors' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                   <circle cx="12" cy="12" r="9" />
                 </svg>
               )
@@ -1015,7 +1036,7 @@ const BlockRenderer: React.FC<{ block: Block; onOpenLinkedDoc?: (path: string) =
               </span>
             )}
           </span>
-          <span className={`text-sm leading-relaxed ${isCheckbox && block.checked ? 'text-muted-foreground line-through' : 'text-foreground/90'}`}>
+          <span className={`text-sm leading-relaxed ${isCheckbox && isChecked ? 'text-muted-foreground line-through' : 'text-foreground/90'}`}>
             <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} />
           </span>
         </div>

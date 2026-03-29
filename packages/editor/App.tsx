@@ -58,6 +58,7 @@ import type { ArchivedPlan } from '@plannotator/ui/components/sidebar/ArchiveBro
 import { PlanDiffViewer } from '@plannotator/ui/components/plan-diff/PlanDiffViewer';
 import type { PlanDiffMode } from '@plannotator/ui/components/plan-diff/PlanDiffModeSwitcher';
 import { DEMO_PLAN_CONTENT } from './demoPlan';
+import { useCheckboxOverrides } from './hooks/useCheckboxOverrides';
 
 type NoteAutoSaveResults = {
   obsidian?: boolean;
@@ -824,16 +825,36 @@ const App: React.FC = () => {
     if (id && window.innerWidth < 768) setIsPanelOpen(true);
   }, []);
 
+  // Core annotation removal — highlight cleanup + state filter + selection clear
+  const removeAnnotation = (id: string) => {
+    viewerRef.current?.removeHighlight(id);
+    setAnnotations(prev => prev.filter(a => a.id !== id));
+    if (selectedAnnotationId === id) setSelectedAnnotationId(null);
+  };
+
+  // Interactive checkbox toggling with annotation tracking
+  const checkbox = useCheckboxOverrides({
+    blocks,
+    annotations,
+    addAnnotation: handleAddAnnotation,
+    removeAnnotation,
+  });
+
   const handleDeleteAnnotation = (id: string) => {
     const ann = allAnnotations.find(a => a.id === id);
+    // External annotations route to the SSE hook, not local state
     if (ann?.source) {
       deleteExternalAnnotation(id);
       if (selectedAnnotationId === id) setSelectedAnnotationId(null);
       return;
     }
-    viewerRef.current?.removeHighlight(id);
-    setAnnotations(prev => prev.filter(a => a.id !== id));
-    if (selectedAnnotationId === id) setSelectedAnnotationId(null);
+    // If this is a checkbox annotation, revert the visual override
+    if (id.startsWith('ann-checkbox-')) {
+      if (ann) {
+        checkbox.revertOverride(ann.blockId);
+      }
+    }
+    removeAnnotation(id);
   };
 
   const handleEditAnnotation = (id: string, updates: Partial<Annotation>) => {
@@ -1469,6 +1490,8 @@ const App: React.FC = () => {
                   imageBaseDir={imageBaseDir}
                   copyLabel={annotateSource === 'message' ? 'Copy message' : annotateSource === 'file' || annotateSource === 'folder' ? 'Copy file' : undefined}
                   archiveInfo={archive.currentInfo}
+                  onToggleCheckbox={checkbox.toggle}
+                  checkboxOverrides={checkbox.overrides}
                 />
               </div>
             </div>
