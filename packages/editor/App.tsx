@@ -14,6 +14,7 @@ import { TaterSpriteRunning } from '@plannotator/ui/components/TaterSpriteRunnin
 import { TaterSpritePullup } from '@plannotator/ui/components/TaterSpritePullup';
 import { Settings } from '@plannotator/ui/components/Settings';
 import { useSharing, getCallbackConfig } from '@plannotator/ui/hooks/useSharing';
+import { isSome } from '@plannotator/ui/utils/option';
 import { useAgents } from '@plannotator/ui/hooks/useAgents';
 import { useActiveSection } from '@plannotator/ui/hooks/useActiveSection';
 import { storage } from '@plannotator/ui/utils/storage';
@@ -928,15 +929,15 @@ const App: React.FC = () => {
   const callbackConfig = React.useMemo(() => getCallbackConfig(), []);
 
   const callCallback = React.useCallback(async (action: "approve" | "feedback") => {
-    if (!callbackConfig) return;
+    if (!isSome(callbackConfig)) return;
     const successMsg = action === "approve"
       ? "Plan approved! The bot will proceed to implementation."
       : "Feedback sent! The bot will re-plan with your annotations.";
     try {
-      const res = await fetch(callbackConfig.callbackUrl, {
+      const res = await fetch(callbackConfig.value.callbackUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, token: callbackConfig.token, annotated_url: window.location.href }),
+        body: JSON.stringify({ action, token: callbackConfig.value.token, annotated_url: window.location.href }),
       });
       if (!res.ok) {
         const msg = res.status === 401
@@ -1141,7 +1142,7 @@ const App: React.FC = () => {
 
           <div className="flex items-center gap-1 md:gap-2">
             {/* Bot callback buttons — only shown when ?cb=&ct= params are present */}
-            {callbackConfig !== null && (
+            {isSome(callbackConfig) && (
               <>
                 <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
                 <button
