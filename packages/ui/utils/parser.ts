@@ -179,7 +179,7 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
       const codeStartLine = currentLineNum;
       // Count backticks in opening fence to support nested fences (e.g. ```` wrapping ```)
       const fenceLen = trimmed.match(/^`+/)?.[0].length ?? 3;
-      const closingFence = new RegExp('^`{' + fenceLen + ',}\\s*$');
+      const closingFence = new RegExp('^\\s*`{' + fenceLen + ',}');
       // Extract language from fence (e.g., ```rust → "rust")
       const language = trimmed.slice(fenceLen).trim() || undefined;
       // Fast forward until end of code block
@@ -200,8 +200,8 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
       continue;
     }
 
-    // Tables (lines starting and containing |)
-    if (trimmed.startsWith('|') || (trimmed.includes('|') && trimmed.match(/^\|?.+\|.+\|?$/))) {
+    // Tables (lines starting with |)
+    if (trimmed.startsWith('|')) {
       flush();
       const tableStartLine = currentLineNum;
       const tableLines: string[] = [line];
@@ -209,8 +209,8 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
       // Collect all consecutive table lines
       while (i + 1 < lines.length) {
         const nextLine = lines[i + 1].trim();
-        // Continue if line has table structure (contains | and looks like table content)
-        if (nextLine.startsWith('|') || (nextLine.includes('|') && nextLine.match(/^\|?.+\|.+\|?$/))) {
+        // Continue if line starts with | (table row or separator)
+        if (nextLine.startsWith('|')) {
           i++;
           tableLines.push(lines[i]);
         } else {
