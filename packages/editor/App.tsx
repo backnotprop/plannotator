@@ -927,13 +927,16 @@ const App: React.FC = () => {
   // Bot callback config — read once from URL search params (?cb=&ct=)
   const callbackConfig = React.useMemo(() => getCallbackConfig(), []);
 
-  const handleCallbackApprove = React.useCallback(async () => {
+  const callCallback = React.useCallback(async (action: "approve" | "feedback") => {
     if (!callbackConfig) return;
+    const successMsg = action === "approve"
+      ? "Plan approved! The bot will proceed to implementation."
+      : "Feedback sent! The bot will re-plan with your annotations.";
     try {
       const res = await fetch(callbackConfig.callbackUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "approve", token: callbackConfig.token, annotated_url: window.location.href }),
+        body: JSON.stringify({ action, token: callbackConfig.token, annotated_url: window.location.href }),
       });
       if (!res.ok) {
         const msg = res.status === 401
@@ -941,7 +944,7 @@ const App: React.FC = () => {
           : "Callback failed.";
         setNoteSaveToast({ type: 'error', message: msg });
       } else {
-        setNoteSaveToast({ type: 'success', message: "Plan approved! The bot will proceed to implementation." });
+        setNoteSaveToast({ type: 'success', message: successMsg });
       }
     } catch {
       setNoteSaveToast({ type: 'error', message: "Callback failed." });
@@ -949,28 +952,8 @@ const App: React.FC = () => {
     setTimeout(() => setNoteSaveToast(null), 4000);
   }, [callbackConfig]);
 
-  const handleCallbackFeedback = React.useCallback(async () => {
-    if (!callbackConfig) return;
-    const annotatedUrl = window.location.href;
-    try {
-      const res = await fetch(callbackConfig.callbackUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "feedback", token: callbackConfig.token, annotated_url: annotatedUrl }),
-      });
-      if (!res.ok) {
-        const msg = res.status === 401
-          ? "Plan link expired — request a new one from the bot."
-          : "Callback failed.";
-        setNoteSaveToast({ type: 'error', message: msg });
-      } else {
-        setNoteSaveToast({ type: 'success', message: "Feedback sent! The bot will re-plan with your annotations." });
-      }
-    } catch {
-      setNoteSaveToast({ type: 'error', message: "Callback failed." });
-    }
-    setTimeout(() => setNoteSaveToast(null), 4000);
-  }, [callbackConfig]);
+  const handleCallbackApprove = React.useCallback(() => callCallback("approve"), [callCallback]);
+  const handleCallbackFeedback = React.useCallback(() => callCallback("feedback"), [callCallback]);
 
   // Quick-save handlers for export dropdown and keyboard shortcut
   const handleDownloadAnnotations = () => {
@@ -1160,6 +1143,7 @@ const App: React.FC = () => {
             {/* Bot callback buttons — only shown when ?cb=&ct= params are present */}
             {callbackConfig !== null && (
               <>
+                <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
                 <button
                   onClick={handleCallbackFeedback}
                   className="p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium transition-all bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 border border-blue-500/30"
@@ -1180,7 +1164,6 @@ const App: React.FC = () => {
                   </svg>
                   <span className="hidden md:inline">✅ Approve Design</span>
                 </button>
-                <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
               </>
             )}
 

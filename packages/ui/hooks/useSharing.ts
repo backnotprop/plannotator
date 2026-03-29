@@ -40,9 +40,22 @@ export interface CallbackConfig {
 }
 
 export function getCallbackConfig(): CallbackConfig | null {
-  const params = new URLSearchParams(window.location.search);
-  const cb = params.get("cb");
-  const ct = params.get("ct");
+  // Check standard query string (before #)
+  const searchParams = new URLSearchParams(window.location.search);
+  let cb = searchParams.get("cb");
+  let ct = searchParams.get("ct");
+
+  // Also check for query-style params embedded in the hash (after #...?)
+  if (!cb || !ct) {
+    const hash = window.location.hash;
+    const qIdx = hash.indexOf("?");
+    if (qIdx !== -1) {
+      const hashParams = new URLSearchParams(hash.slice(qIdx + 1));
+      cb = cb ?? hashParams.get("cb");
+      ct = ct ?? hashParams.get("ct");
+    }
+  }
+
   if (cb && ct) {
     return { callbackUrl: decodeURIComponent(cb), token: ct };
   }
