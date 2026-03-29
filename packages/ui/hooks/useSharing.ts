@@ -21,6 +21,7 @@ import {
   createShortShareUrl,
   loadFromPasteId,
 } from '../utils/sharing';
+import { type Option, some, none } from '../utils/option';
 
 export interface ImportResult {
   success: boolean;
@@ -39,15 +40,18 @@ export interface CallbackConfig {
   token: string;
 }
 
-export function getCallbackConfig(): CallbackConfig | null {
+/** @internal — visible for testing; production code should omit the argument */
+export function getCallbackConfig(
+  loc: { readonly search: string; readonly hash: string } = window.location,
+): Option<CallbackConfig> {
   // Check standard query string (before #)
-  const searchParams = new URLSearchParams(window.location.search);
+  const searchParams = new URLSearchParams(loc.search);
   let cb = searchParams.get("cb");
   let ct = searchParams.get("ct");
 
   // Also check for query-style params embedded in the hash (after #...?)
   if (!cb || !ct) {
-    const hash = window.location.hash;
+    const hash = loc.hash;
     const qIdx = hash.indexOf("?");
     if (qIdx !== -1) {
       const hashParams = new URLSearchParams(hash.slice(qIdx + 1));
@@ -57,9 +61,9 @@ export function getCallbackConfig(): CallbackConfig | null {
   }
 
   if (cb && ct) {
-    return { callbackUrl: decodeURIComponent(cb), token: ct };
+    return some({ callbackUrl: decodeURIComponent(cb), token: ct });
   }
-  return null;
+  return none;
 }
 
 interface UseSharingResult {
