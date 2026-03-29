@@ -113,9 +113,6 @@ const App: React.FC = () => {
   const [showExportDropdown, setShowExportDropdown] = useState(false);
   const [initialExportTab, setInitialExportTab] = useState<'share' | 'annotations' | 'notes'>();
   const [noteSaveToast, setNoteSaveToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-  // Plan diff state — memoize filtered annotation lists to avoid new references per render
-  const diffAnnotations = useMemo(() => annotations.filter(a => !!a.diffContext), [annotations]);
-  const viewerAnnotations = useMemo(() => annotations.filter(a => !a.diffContext), [annotations]);
   const [isPlanDiffActive, setIsPlanDiffActive] = useState(false);
   const [planDiffMode, setPlanDiffMode] = useState<PlanDiffMode>('clean');
   const [previousPlan, setPreviousPlan] = useState<string | null>(null);
@@ -290,6 +287,29 @@ const App: React.FC = () => {
   const headingCount = useMemo(() => blocks.filter(b => b.type === 'heading').length, [blocks]);
   const activeSection = useActiveSection(containerRef, headingCount);
 
+  const { editorAnnotations, deleteEditorAnnotation } = useEditorAnnotations();
+  const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<Annotation>({ enabled: isApiMode });
+
+  const allAnnotations = useMemo(
+    () => [...annotations, ...externalAnnotations],
+    [annotations, externalAnnotations]
+  );
+
+  // Plan diff state — memoize filtered annotation lists to avoid new references per render
+  const diffAnnotations = useMemo(() => allAnnotations.filter(a => !!a.diffContext), [allAnnotations]);
+  const viewerAnnotations = useMemo(() => allAnnotations.filter(a => !a.diffContext), [allAnnotations]);
+
+  // When SSE delivers external annotations, strip source-tagged annotations
+  // from local state (they were draft-restored placeholders, now superseded).
+  useEffect(() => {
+    if (externalAnnotations.length > 0) {
+      setAnnotations(prev => {
+        const cleaned = prev.filter(a => !a.source);
+        return cleaned.length === prev.length ? prev : cleaned;
+      });
+    }
+  }, [externalAnnotations]);
+
   // URL-based sharing
   const {
     isSharedSession,
@@ -308,7 +328,7 @@ const App: React.FC = () => {
     clearShareLoadError,
   } = useSharing(
     markdown,
-    annotations,
+    allAnnotations,
     globalAttachments,
     setMarkdown,
     setAnnotations,
@@ -323,20 +343,12 @@ const App: React.FC = () => {
 
   // Auto-save annotation drafts
   const { draftBanner, restoreDraft, dismissDraft } = useAnnotationDraft({
-    annotations,
+    annotations: allAnnotations,
     globalAttachments,
     isApiMode,
     isSharedSession,
     submitted: !!submitted,
   });
-
-  const { editorAnnotations, deleteEditorAnnotation } = useEditorAnnotations();
-  const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<Annotation>({ enabled: isApiMode });
-
-  const allAnnotations = useMemo(
-    () => [...annotations, ...externalAnnotations],
-    [annotations, externalAnnotations]
-  );
 
   const handleRestoreDraft = React.useCallback(() => {
     const { annotations: restored, globalAttachments: restoredGlobal } = restoreDraft();
@@ -796,7 +808,7 @@ const App: React.FC = () => {
   }, [
     showExport, showImport, showFeedbackPrompt, showClaudeCodeWarning, showAgentWarning,
     showPermissionModeSetup, pendingPasteImage,
-    submitted, isSubmitting, isApiMode, linkedDocHook.isActive, annotations.length, annotateMode,
+    submitted, isSubmitting, isApiMode, linkedDocHook.isActive, annotations.length, externalAnnotations.length, annotateMode,
     origin, getAgentWarning,
   ]);
 
@@ -1101,7 +1113,7 @@ const App: React.FC = () => {
                   <button
                     onClick={() => {
                       // Show warning for Claude Code users with annotations
-                      if (origin === 'claude-code' && annotations.length > 0) {
+                      if (origin === 'claude-code' && allAnnotations.length > 0) {
                         setShowClaudeCodeWarning(true);
                         return;
                       }
@@ -1122,7 +1134,7 @@ const App: React.FC = () => {
                     className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${
                       isSubmitting
                         ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
-                        : origin === 'claude-code' && annotations.length > 0
+                        : origin === 'claude-code' && allAnnotations.length > 0
                           ? 'bg-success/50 text-success-foreground/70 hover:bg-success hover:text-success-foreground'
                           : 'bg-success text-success-foreground hover:opacity-90'
                     }`}
@@ -1130,7 +1142,7 @@ const App: React.FC = () => {
                     <span className="md:hidden">{isSubmitting ? '...' : 'OK'}</span>
                     <span className="hidden md:inline">{isSubmitting ? 'Approving...' : 'Approve'}</span>
                   </button>
-                  {origin === 'claude-code' && annotations.length > 0 && (
+                  {origin === 'claude-code' && allAnnotations.length > 0 && (
                     <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
                       <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
                       <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
@@ -1497,7 +1509,7 @@ const App: React.FC = () => {
           shortUrlError={shortUrlError}
           onGenerateShortUrl={generateShortUrl}
           annotationsOutput={annotationsOutput}
-          annotationCount={annotations.length}
+          annotationCount={allAnnotations.length}
           taterSprite={taterMode ? <TaterSpritePullup /> : undefined}
           sharingEnabled={sharingEnabled}
           markdown={markdown}
@@ -1531,7 +1543,7 @@ const App: React.FC = () => {
             handleApprove();
           }}
           title="Annotations Won't Be Sent"
-          message={<>{agentName} doesn't yet support feedback on approval. Your {annotations.length} annotation{annotations.length !== 1 ? 's' : ''} will be lost.</>}
+          message={<>{agentName} doesn't yet support feedback on approval. Your {allAnnotations.length} annotation{allAnnotations.length !== 1 ? 's' : ''} will be lost.</>}
           subMessage={
             <>
               To send feedback, use <strong>Send Feedback</strong> instead.

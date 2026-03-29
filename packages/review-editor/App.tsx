@@ -171,20 +171,6 @@ const ReviewApp: React.FC = () => {
     clearPendingSelection,
   });
 
-  // Auto-save code annotation drafts
-  const { draftBanner, restoreDraft, dismissDraft } = useCodeAnnotationDraft({
-    annotations,
-    viewedFiles,
-    isApiMode: !!origin,
-    submitted: !!submitted,
-  });
-
-  const handleRestoreDraft = useCallback(() => {
-    const restored = restoreDraft();
-    if (restored.annotations.length > 0) setAnnotations(restored.annotations);
-    if (restored.viewedFiles.length > 0) setViewedFiles(new Set(restored.viewedFiles));
-  }, [restoreDraft]);
-
   // VS Code editor annotations (only polls when inside VS Code webview)
   const { editorAnnotations, deleteEditorAnnotation } = useEditorAnnotations();
 
@@ -202,6 +188,31 @@ const ReviewApp: React.FC = () => {
   );
   const allAnnotationsRef = useRef(allAnnotations);
   allAnnotationsRef.current = allAnnotations;
+
+  // When SSE delivers external annotations, strip source-tagged annotations
+  // from local state (they were draft-restored placeholders, now superseded).
+  useEffect(() => {
+    if (externalAnnotations.length > 0) {
+      setAnnotations(prev => {
+        const cleaned = prev.filter(a => !a.source);
+        return cleaned.length === prev.length ? prev : cleaned;
+      });
+    }
+  }, [externalAnnotations]);
+
+  // Auto-save code annotation drafts
+  const { draftBanner, restoreDraft, dismissDraft } = useCodeAnnotationDraft({
+    annotations: allAnnotations,
+    viewedFiles,
+    isApiMode: !!origin,
+    submitted: !!submitted,
+  });
+
+  const handleRestoreDraft = useCallback(() => {
+    const restored = restoreDraft();
+    if (restored.annotations.length > 0) setAnnotations(restored.annotations);
+    if (restored.viewedFiles.length > 0) setViewedFiles(new Set(restored.viewedFiles));
+  }, [restoreDraft]);
 
   // AI Chat
   const [aiAvailable, setAiAvailable] = useState(false);
