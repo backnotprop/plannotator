@@ -129,7 +129,18 @@ const ReviewApp: React.FC = () => {
   const [platformUser, setPlatformUser] = useState<string | null>(null);
   const [platformCommentDialog, setPlatformCommentDialog] = useState<{ action: 'approve' | 'comment' } | null>(null);
   const [platformGeneralComment, setPlatformGeneralComment] = useState('');
-  const [platformOpenPR, setPlatformOpenPR] = useState(() => storage.getItem('plannotator-github-open-pr') !== 'false');
+  const [platformOpenPR, setPlatformOpenPR] = useState(() => {
+    const platformSetting = storage.getItem('plannotator-platform-open-pr');
+    if (platformSetting !== null) return platformSetting !== 'false';
+
+    const legacyGitHubSetting = storage.getItem('plannotator-github-open-pr');
+    if (legacyGitHubSetting !== null) {
+      storage.setItem('plannotator-platform-open-pr', legacyGitHubSetting);
+      return legacyGitHubSetting !== 'false';
+    }
+
+    return true;
+  });
 
   // Derived: Platform mode is active when destination is platform AND we have PR/MR metadata
   const platformMode = reviewDestination === 'platform' && !!prMetadata;
@@ -1600,7 +1611,7 @@ const ReviewApp: React.FC = () => {
                   checked={platformOpenPR}
                   onChange={e => {
                     setPlatformOpenPR(e.target.checked);
-                    storage.setItem('plannotator-github-open-pr', String(e.target.checked));
+                    storage.setItem('plannotator-platform-open-pr', String(e.target.checked));
                   }}
                   className="rounded border-border"
                 />
