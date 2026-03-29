@@ -927,12 +927,12 @@ const parseTableContent = (content: string): { headers: string[]; rows: string[]
   if (lines.length === 0) return { headers: [], rows: [] };
 
   const parseRow = (line: string): string[] => {
-    // Remove leading/trailing pipes and split by |
+    // Remove leading/trailing pipes, split by unescaped |, then unescape \|
     return line
       .replace(/^\|/, '')
       .replace(/\|$/, '')
-      .split('|')
-      .map(cell => cell.trim());
+      .split(/(?<!\\)\|/)
+      .map(cell => cell.trim().replace(/\\\|/g, '|'));
   };
 
   const headers = parseRow(lines[0]);

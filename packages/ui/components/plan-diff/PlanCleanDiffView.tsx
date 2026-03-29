@@ -508,7 +508,7 @@ const SimpleBlockRenderer: React.FC<{ block: Block }> = ({ block }) => {
       const lines = block.content.split('\n').filter(line => line.trim());
       if (lines.length === 0) return null;
       const parseRow = (line: string): string[] =>
-        line.replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim());
+        line.replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map(cell => cell.trim().replace(/\\\|/g, '|'));
       const headers = parseRow(lines[0]);
       const rows: string[][] = [];
       for (let i = 1; i < lines.length; i++) {
