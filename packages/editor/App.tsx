@@ -291,25 +291,28 @@ const App: React.FC = () => {
   const { editorAnnotations, deleteEditorAnnotation } = useEditorAnnotations();
   const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<Annotation>({ enabled: isApiMode });
 
-  const allAnnotations = useMemo(
-    () => [...annotations, ...externalAnnotations],
-    [annotations, externalAnnotations]
-  );
+  // Merge local + SSE annotations, deduping draft-restored externals against
+  // live SSE versions. Prefer the SSE version when both exist (same source,
+  // type, and originalText). This avoids the timing issues of an effect-based
+  // cleanup — draft-restored externals persist until SSE actually re-delivers them.
+  const allAnnotations = useMemo(() => {
+    if (externalAnnotations.length === 0) return annotations;
+
+    const local = annotations.filter(a => {
+      if (!a.source) return true;
+      return !externalAnnotations.some(ext =>
+        ext.source === a.source &&
+        ext.type === a.type &&
+        ext.originalText === a.originalText
+      );
+    });
+
+    return [...local, ...externalAnnotations];
+  }, [annotations, externalAnnotations]);
 
   // Plan diff state — memoize filtered annotation lists to avoid new references per render
   const diffAnnotations = useMemo(() => allAnnotations.filter(a => !!a.diffContext), [allAnnotations]);
   const viewerAnnotations = useMemo(() => allAnnotations.filter(a => !a.diffContext), [allAnnotations]);
-
-  // When SSE delivers external annotations, strip source-tagged annotations
-  // from local state (they were draft-restored placeholders, now superseded).
-  useEffect(() => {
-    if (externalAnnotations.length > 0) {
-      setAnnotations(prev => {
-        const cleaned = prev.filter(a => !a.source);
-        return cleaned.length === prev.length ? prev : cleaned;
-      });
-    }
-  }, [externalAnnotations]);
 
   // URL-based sharing
   const {

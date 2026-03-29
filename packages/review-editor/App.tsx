@@ -182,23 +182,26 @@ const ReviewApp: React.FC = () => {
   // so this should be addressed as a broader refactor.
   const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<CodeAnnotation>({ enabled: !!origin });
 
-  const allAnnotations = useMemo(
-    () => [...annotations, ...externalAnnotations],
-    [annotations, externalAnnotations]
-  );
+  // Merge local + SSE annotations, deduping draft-restored externals against
+  // live SSE versions. Prefer the SSE version when both exist (same source,
+  // type, and originalText). This avoids the timing issues of an effect-based
+  // cleanup — draft-restored externals persist until SSE actually re-delivers them.
+  const allAnnotations = useMemo(() => {
+    if (externalAnnotations.length === 0) return annotations;
+
+    const local = annotations.filter(a => {
+      if (!a.source) return true;
+      return !externalAnnotations.some(ext =>
+        ext.source === a.source &&
+        ext.type === a.type &&
+        ext.originalText === a.originalText
+      );
+    });
+
+    return [...local, ...externalAnnotations];
+  }, [annotations, externalAnnotations]);
   const allAnnotationsRef = useRef(allAnnotations);
   allAnnotationsRef.current = allAnnotations;
-
-  // When SSE delivers external annotations, strip source-tagged annotations
-  // from local state (they were draft-restored placeholders, now superseded).
-  useEffect(() => {
-    if (externalAnnotations.length > 0) {
-      setAnnotations(prev => {
-        const cleaned = prev.filter(a => !a.source);
-        return cleaned.length === prev.length ? prev : cleaned;
-      });
-    }
-  }, [externalAnnotations]);
 
   // Auto-save code annotation drafts
   const { draftBanner, restoreDraft, dismissDraft } = useCodeAnnotationDraft({
