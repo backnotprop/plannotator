@@ -35,6 +35,11 @@ export interface ImportResult {
  * Embedded by the bot as ?cb=<encoded_callback_url>&ct=<token>
  * before the # fragment.
  */
+export const enum CallbackAction {
+  Approve  = "approve",
+  Feedback = "feedback",
+}
+
 export interface CallbackConfig {
   callbackUrl: string;
   token: string;

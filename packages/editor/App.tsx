@@ -13,7 +13,7 @@ import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolst
 import { TaterSpriteRunning } from '@plannotator/ui/components/TaterSpriteRunning';
 import { TaterSpritePullup } from '@plannotator/ui/components/TaterSpritePullup';
 import { Settings } from '@plannotator/ui/components/Settings';
-import { useSharing, getCallbackConfig } from '@plannotator/ui/hooks/useSharing';
+import { useSharing, getCallbackConfig, CallbackAction } from '@plannotator/ui/hooks/useSharing';
 import { isSome } from '@plannotator/ui/utils/option';
 import { executeCallback } from '@plannotator/ui/utils/callbackHttp';
 import { useAgents } from '@plannotator/ui/hooks/useAgents';
@@ -929,15 +929,15 @@ const App: React.FC = () => {
   // Bot callback config — read once from URL search params (?cb=&ct=)
   const callbackConfig = React.useMemo(() => getCallbackConfig(), []);
 
-  const callCallback = React.useCallback(async (action: "approve" | "feedback") => {
+  const callCallback = React.useCallback(async (action: CallbackAction) => {
     if (!isSome(callbackConfig)) return;
     const toast = await executeCallback(action, callbackConfig.value);
     if (toast) setNoteSaveToast(toast);
     setTimeout(() => setNoteSaveToast(null), 4000);
   }, [callbackConfig]);
 
-  const handleCallbackApprove = React.useCallback(() => callCallback("approve"), [callCallback]);
-  const handleCallbackFeedback = React.useCallback(() => callCallback("feedback"), [callCallback]);
+  const handleCallbackApprove = React.useCallback(() => callCallback(CallbackAction.Approve), [callCallback]);
+  const handleCallbackFeedback = React.useCallback(() => callCallback(CallbackAction.Feedback), [callCallback]);
 
   // Quick-save handlers for export dropdown and keyboard shortcut
   const handleDownloadAnnotations = () => {

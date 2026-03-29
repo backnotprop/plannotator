@@ -1,4 +1,5 @@
 import type { CallbackConfig } from '../hooks/useSharing';
+import { CallbackAction } from '../hooks/useSharing';
 
 export type ToastPayload = { type: 'success' | 'error'; message: string } | null;
 
@@ -9,10 +10,10 @@ export type ToastPayload = { type: 'success' | 'error'; message: string } | null
  * App.tsx wraps this in a useCallback to wire up toast state.
  */
 export async function executeCallback(
-  action: "approve" | "feedback",
+  action: CallbackAction,
   config: CallbackConfig,
 ): Promise<ToastPayload> {
-  const successMsg = action === "approve"
+  const successMsg = action === CallbackAction.Approve
     ? "Plan approved! The bot will proceed to implementation."
     : "Feedback sent! The bot will re-plan with your annotations.";
   try {
