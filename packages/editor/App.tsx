@@ -15,6 +15,7 @@ import { TaterSpritePullup } from '@plannotator/ui/components/TaterSpritePullup'
 import { Settings } from '@plannotator/ui/components/Settings';
 import { useSharing, getCallbackConfig } from '@plannotator/ui/hooks/useSharing';
 import { isSome } from '@plannotator/ui/utils/option';
+import { executeCallback } from '@plannotator/ui/utils/callbackHttp';
 import { useAgents } from '@plannotator/ui/hooks/useAgents';
 import { useActiveSection } from '@plannotator/ui/hooks/useActiveSection';
 import { storage } from '@plannotator/ui/utils/storage';
@@ -930,26 +931,8 @@ const App: React.FC = () => {
 
   const callCallback = React.useCallback(async (action: "approve" | "feedback") => {
     if (!isSome(callbackConfig)) return;
-    const successMsg = action === "approve"
-      ? "Plan approved! The bot will proceed to implementation."
-      : "Feedback sent! The bot will re-plan with your annotations.";
-    try {
-      const res = await fetch(callbackConfig.value.callbackUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, token: callbackConfig.value.token, annotated_url: window.location.href }),
-      });
-      if (!res.ok) {
-        const msg = res.status === 401
-          ? "Plan link expired — request a new one from the bot."
-          : "Callback failed.";
-        setNoteSaveToast({ type: 'error', message: msg });
-      } else {
-        setNoteSaveToast({ type: 'success', message: successMsg });
-      }
-    } catch {
-      setNoteSaveToast({ type: 'error', message: "Callback failed." });
-    }
+    const toast = await executeCallback(action, callbackConfig.value);
+    if (toast) setNoteSaveToast(toast);
     setTimeout(() => setNoteSaveToast(null), 4000);
   }, [callbackConfig]);
 
