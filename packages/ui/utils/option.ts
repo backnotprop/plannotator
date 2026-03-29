@@ -1,12 +1,17 @@
 /**
  * Minimal Option (Maybe) monad — avoids null/undefined in return types.
  */
+
+/** Discriminated union representing a value that may or may not be present. */
 export type Option<T> = Some<T> | None;
 
 export interface Some<T> { readonly _tag: "Some"; readonly value: T }
 export interface None   { readonly _tag: "None" }
 
+/** Wraps a value in an Option. */
 export const some = <T>(value: T): Some<T> => ({ _tag: "Some", value });
+
+/** The empty Option — represents absence of a value. */
 export const none: None = { _tag: "None" };
 
 export const isSome = <T>(opt: Option<T>): opt is Some<T> => opt._tag === "Some";

@@ -8,6 +8,10 @@ export type ToastPayload = { type: 'success' | 'error'; message: string } | null
  *
  * Pure function (no React deps) so it can be unit-tested without a DOM.
  * App.tsx wraps this in a useCallback to wire up toast state.
+ *
+ * @param action - The action to send (`CallbackAction.Approve` or `CallbackAction.Feedback`)
+ * @param config - Callback URL and single-use token from `getCallbackConfig()`
+ * @returns Toast payload to display, or `null` on success with no message needed
  */
 export async function executeCallback(
   action: CallbackAction,

@@ -35,11 +35,20 @@ export interface ImportResult {
  * Embedded by the bot as ?cb=<encoded_callback_url>&ct=<token>
  * before the # fragment.
  */
-export const enum CallbackAction {
+/**
+ * Actions the user can trigger via the in-Plannotator callback buttons.
+ * Sent as the `action` field in the POST body to the bot's callback URL.
+ */
+export enum CallbackAction {
   Approve  = "approve",
   Feedback = "feedback",
 }
 
+/**
+ * Callback configuration embedded in the Plannotator URL by the bot.
+ * Parsed from `?cb=<encoded_url>&ct=<token>` — present in both search
+ * params and hash-embedded query strings.
+ */
 export interface CallbackConfig {
   callbackUrl: string;
   token: string;
