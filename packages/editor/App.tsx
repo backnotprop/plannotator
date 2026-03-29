@@ -845,8 +845,10 @@ const App: React.FC = () => {
 
   const handleDeleteAnnotation = (id: string) => {
     const ann = allAnnotations.find(a => a.id === id);
-    // External annotations route to the SSE hook, not local state
-    if (ann?.source) {
+    // External annotations (live in SSE hook) route to the SSE hook, not local state.
+    // Check membership by ID — source alone is insufficient because share-imported
+    // and draft-restored annotations also carry source but live in local state.
+    if (ann?.source && externalAnnotations.some(e => e.id === id)) {
       deleteExternalAnnotation(id);
       if (selectedAnnotationId === id) setSelectedAnnotationId(null);
       return;
@@ -862,7 +864,7 @@ const App: React.FC = () => {
 
   const handleEditAnnotation = (id: string, updates: Partial<Annotation>) => {
     const ann = allAnnotations.find(a => a.id === id);
-    if (ann?.source) {
+    if (ann?.source && externalAnnotations.some(e => e.id === id)) {
       updateExternalAnnotation(id, updates);
       return;
     }

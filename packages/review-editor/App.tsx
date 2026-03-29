@@ -194,7 +194,10 @@ const ReviewApp: React.FC = () => {
       return !externalAnnotations.some(ext =>
         ext.source === a.source &&
         ext.type === a.type &&
-        ext.originalText === a.originalText
+        ext.filePath === a.filePath &&
+        ext.lineStart === a.lineStart &&
+        ext.lineEnd === a.lineEnd &&
+        ext.side === a.side
       );
     });
 
@@ -545,18 +548,18 @@ const ReviewApp: React.FC = () => {
       ...(suggestedCode !== undefined && { suggestedCode }),
       ...(originalCode !== undefined && { originalCode }),
     };
-    if (ann?.source) {
+    if (ann?.source && externalAnnotations.some(e => e.id === id)) {
       updateExternalAnnotation(id, updates);
       return;
     }
     setAnnotations(prev => prev.map(a =>
       a.id === id ? { ...a, ...updates } : a
     ));
-  }, [updateExternalAnnotation]);
+  }, [updateExternalAnnotation, externalAnnotations]);
 
   const handleDeleteAnnotation = useCallback((id: string) => {
     const ann = allAnnotationsRef.current.find(a => a.id === id);
-    if (ann?.source) {
+    if (ann?.source && externalAnnotations.some(e => e.id === id)) {
       deleteExternalAnnotation(id);
       if (selectedAnnotationId === id) setSelectedAnnotationId(null);
       return;
@@ -565,7 +568,7 @@ const ReviewApp: React.FC = () => {
     if (selectedAnnotationId === id) {
       setSelectedAnnotationId(null);
     }
-  }, [selectedAnnotationId, deleteExternalAnnotation]);
+  }, [selectedAnnotationId, deleteExternalAnnotation, externalAnnotations]);
 
   // Handle identity change - update author on existing annotations
   const handleIdentityChange = useCallback((oldIdentity: string, newIdentity: string) => {
