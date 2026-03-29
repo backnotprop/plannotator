@@ -13,7 +13,7 @@ export interface ReviewIterationDisplay {
   decision: "approved" | "denied";
   feedback: string;
   timestamp: string;
-  questions?: Array<{ question: string; context?: string }>;
+  questions?: Array<{ id: string; question: string; context?: string }>;
   answers?: Array<{ questionId: string; answer: string | string[] }>;
 }
 
@@ -132,7 +132,7 @@ export const ReviewHistory: React.FC<ReviewHistoryProps> = ({
                         <div className="space-y-1">
                           {iteration.questions.map((q, idx) => {
                             const answer = iteration.answers?.find(
-                              (a) => a.questionId === q.question
+                              (a) => a.questionId === q.id
                             );
                             return (
                               <div

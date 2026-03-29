@@ -1,7 +1,7 @@
 import type {
   ClarificationQuestion,
   QuestionAnswer,
-} from "@niceprompt/shared/questions";
+} from "@plannotator/shared/questions";
 
 /**
  * Question session management for the Plannotator server.

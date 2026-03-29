@@ -473,14 +473,18 @@ const App: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(answer),
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.answers) {
-          setClarificationAnswers(data.answers);
-        }
+      if (!res.ok) {
+        throw new Error('Failed to submit clarification answer');
+      }
+
+      const data = await res.json();
+      if (data.answers) {
+        setClarificationAnswers(data.answers);
       }
     } catch {
-      // Answer already saved optimistically in state
+      setClarificationAnswers(prev => prev.filter((existing) => existing.questionId !== answer.questionId));
+      setNoteSaveToast({ type: 'error', message: 'Failed to submit clarification answer' });
+      setTimeout(() => setNoteSaveToast(null), 3000);
     }
   }, []);
 
@@ -704,13 +708,20 @@ const App: React.FC = () => {
         body.feedback = annotationsOutput;
       }
 
-      await fetch('/api/approve', {
+      const res = await fetch('/api/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+
+      if (!res.ok) {
+        throw new Error('Failed to approve plan');
+      }
+
       setSubmitted('approved');
     } catch {
+      setNoteSaveToast({ type: 'error', message: 'Failed to approve plan' });
+      setTimeout(() => setNoteSaveToast(null), 3000);
       setIsSubmitting(false);
     }
   };
@@ -719,7 +730,7 @@ const App: React.FC = () => {
     setIsSubmitting(true);
     try {
       const planSaveSettings = getPlanSaveSettings();
-      await fetch('/api/deny', {
+      const res = await fetch('/api/deny', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -730,8 +741,15 @@ const App: React.FC = () => {
           },
         })
       });
+
+      if (!res.ok) {
+        throw new Error('Failed to send feedback');
+      }
+
       setSubmitted('denied');
     } catch {
+      setNoteSaveToast({ type: 'error', message: 'Failed to send feedback' });
+      setTimeout(() => setNoteSaveToast(null), 3000);
       setIsSubmitting(false);
     }
   };
@@ -740,7 +758,7 @@ const App: React.FC = () => {
   const handleAnnotateFeedback = async () => {
     setIsSubmitting(true);
     try {
-      await fetch('/api/feedback', {
+      const res = await fetch('/api/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -748,8 +766,15 @@ const App: React.FC = () => {
           annotations,
         }),
       });
+
+      if (!res.ok) {
+        throw new Error('Failed to send annotations');
+      }
+
       setSubmitted('denied'); // reuse 'denied' state for "feedback sent" overlay
     } catch {
+      setNoteSaveToast({ type: 'error', message: 'Failed to send annotations' });
+      setTimeout(() => setNoteSaveToast(null), 3000);
       setIsSubmitting(false);
     }
   };
