@@ -21,7 +21,8 @@ export type ExternalAnnotationEvent<T = unknown> =
   | { type: "snapshot"; annotations: T[] }
   | { type: "add"; annotations: T[] }
   | { type: "remove"; ids: string[] }
-  | { type: "clear"; source?: string };
+  | { type: "clear"; source?: string }
+  | { type: "update"; id: string; annotation: T };
 
 // ---------------------------------------------------------------------------
 // SSE helpers
@@ -272,6 +273,8 @@ export interface AnnotationStore<T extends StorableAnnotation> {
   remove(id: string): boolean;
   /** Remove all annotations from a specific source. Returns count removed. */
   clearBySource(source: string): number;
+  /** Update an annotation by ID. Returns the updated annotation, or null if not found. */
+  update(id: string, fields: Partial<T>): T | null;
   /** Remove all annotations. Returns count removed. */
   clearAll(): number;
   /** Get all annotations (snapshot). */
@@ -323,6 +326,16 @@ export function createAnnotationStore<T extends StorableAnnotation>(): Annotatio
       version++;
       emit({ type: "remove", ids: [id] });
       return true;
+    },
+
+    update(id, fields) {
+      const idx = annotations.findIndex((a) => a.id === id);
+      if (idx === -1) return null;
+      const merged = { ...annotations[idx], ...fields, id } as T;
+      annotations[idx] = merged;
+      version++;
+      emit({ type: "update", id, annotation: merged });
+      return merged;
     },
 
     clearBySource(source) {

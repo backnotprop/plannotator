@@ -69,6 +69,11 @@ export function useExternalAnnotations<T extends { id: string; source?: string }
                 : [],
             );
             break;
+          case 'update':
+            setAnnotations((prev) =>
+              prev.map((a) => a.id === parsed.id ? (parsed.annotation as T) : a),
+            );
+            break;
         }
       } catch {
         // Ignore malformed events (e.g., heartbeat comments)
@@ -158,8 +163,17 @@ export function useExternalAnnotations<T extends { id: string; source?: string }
     }
   }, []);
 
-  const updateExternalAnnotation = useCallback((id: string, updates: Partial<T>) => {
+  const updateExternalAnnotation = useCallback(async (id: string, updates: Partial<T>) => {
     setAnnotations((prev) => prev.map((a) => (a.id === id ? { ...a, ...updates } : a)));
+    try {
+      await fetch(`${SNAPSHOT_URL}?id=${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+    } catch {
+      // SSE will reconcile on next event
+    }
   }, []);
 
   return { externalAnnotations: annotations, updateExternalAnnotation, deleteExternalAnnotation, clearExternalAnnotations };

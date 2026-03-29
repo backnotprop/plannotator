@@ -144,6 +144,24 @@ export function createExternalAnnotationHandler(
         }
       }
 
+      // --- PATCH (update fields on a single annotation) ---
+      if (url.pathname === BASE && req.method === "PATCH") {
+        const id = url.searchParams.get("id");
+        if (!id) {
+          return Response.json({ error: "Missing ?id parameter" }, { status: 400 });
+        }
+        try {
+          const body = await req.json();
+          const updated = store.update(id, body as Partial<StorableAnnotation>);
+          if (!updated) {
+            return Response.json({ error: "Not found" }, { status: 404 });
+          }
+          return Response.json({ annotation: updated });
+        } catch {
+          return Response.json({ error: "Invalid JSON" }, { status: 400 });
+        }
+      }
+
       // --- DELETE (by id, by source, or clear all) ---
       if (url.pathname === BASE && req.method === "DELETE") {
         const id = url.searchParams.get("id");
