@@ -1,7 +1,7 @@
 /**
  * Plannotator CLI for Claude Code & Copilot CLI
  *
- * Supports seven modes:
+ * Supports nine modes:
  *
  * 1. Plan Review (default, no args):
  *    - Spawned by ExitPlanMode hook (Claude Code)
@@ -36,6 +36,16 @@
  * 7. Copilot Last (`plannotator copilot-last`):
  *    - Annotate the last assistant message from a Copilot CLI session
  *    - Parses events.jsonl from session state
+ *
+ * 8. Annotate Hook (`plannotator annotate-hook`):
+ *    - Spawned by PreToolUse hook when Bash(plannotator annotate *) fires
+ *    - Reads tool_input.command from stdin JSON, extracts file path
+ *    - Runs annotation server (same as mode 3), outputs PreToolUse deny decision
+ *
+ * 9. Review Hook (`plannotator review-hook`):
+ *    - Spawned by PreToolUse hook when Bash(plannotator review*) fires
+ *    - Reads tool_input.command from stdin JSON, extracts review args
+ *    - Runs review server (same as mode 2), outputs PreToolUse deny decision
  *
  * Global flags:
  *   --browser <name>   - Override which browser to open (e.g. "Google Chrome")
@@ -111,6 +121,234 @@ const detectedOrigin: Origin =
   process.env.COPILOT_CLI ? "copilot-cli" :
   "claude-code";
 
+/**
+ * Shared annotate server lifecycle.
+ * Used by both the `annotate` CLI subcommand and the `annotate-hook` PreToolUse handler.
+ *
+ * Resolves the file/folder, starts the annotation server, waits for user feedback,
+ * cleans up, and returns the feedback string.
+ */
+async function runAnnotateFlow(
+  filePath: string,
+  projectRoot: string,
+): Promise<string> {
+  // Strip @ prefix if present (Claude Code file reference syntax)
+  if (filePath.startsWith("@")) {
+    filePath = filePath.slice(1);
+  }
+
+  if (process.env.PLANNOTATOR_DEBUG) {
+    console.error(`[DEBUG] Project root: ${projectRoot}`);
+    console.error(`[DEBUG] File path arg: ${filePath}`);
+  }
+
+  // Check if the argument is a directory (folder annotation mode)
+  const resolvedArg = path.resolve(projectRoot, filePath);
+  let isFolder = false;
+  try {
+    isFolder = statSync(resolvedArg).isDirectory();
+  } catch {
+    // Not a directory, fall through to file resolution
+  }
+
+  let markdown: string;
+  let absolutePath: string;
+  let folderPath: string | undefined;
+  let annotateMode: "annotate" | "annotate-folder" = "annotate";
+
+  if (isFolder) {
+    if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED)) {
+      throw new Error(`No markdown files found in ${resolvedArg}`);
+    }
+    folderPath = resolvedArg;
+    absolutePath = resolvedArg;
+    markdown = "";
+    annotateMode = "annotate-folder";
+    console.error(`Folder: ${resolvedArg}`);
+  } else {
+    const resolved = resolveMarkdownFile(filePath, projectRoot);
+
+    if (resolved.kind === "ambiguous") {
+      const matches = resolved.matches.map((m) => `  ${m}`).join("\n");
+      throw new Error(
+        `Ambiguous filename "${resolved.input}" — found ${resolved.matches.length} matches:\n${matches}`
+      );
+    }
+    if (resolved.kind === "not_found") {
+      throw new Error(`File not found: ${resolved.input}`);
+    }
+
+    absolutePath = resolved.path;
+    markdown = await Bun.file(absolutePath).text();
+    console.error(`Resolved: ${absolutePath}`);
+  }
+
+  const annotateProject = (await detectProjectName()) ?? "_unknown";
+
+  const server = await startAnnotateServer({
+    markdown,
+    filePath: absolutePath,
+    origin: detectedOrigin,
+    mode: annotateMode,
+    folderPath,
+    sharingEnabled,
+    shareBaseUrl,
+    pasteApiUrl,
+    htmlContent: planHtmlContent,
+    onReady: async (url, isRemote, port) => {
+      handleAnnotateServerReady(url, isRemote, port);
+
+      if (isRemote && sharingEnabled && markdown) {
+        await writeRemoteShareLink(
+          markdown,
+          shareBaseUrl,
+          "annotate",
+          "document only"
+        ).catch(() => {});
+      }
+    },
+  });
+
+  registerSession({
+    pid: process.pid,
+    port: server.port,
+    url: server.url,
+    mode: "annotate",
+    project: annotateProject,
+    startedAt: new Date().toISOString(),
+    label: folderPath
+      ? `annotate-${path.basename(folderPath)}`
+      : `annotate-${path.basename(absolutePath)}`,
+  });
+
+  const result = await server.waitForDecision();
+  await Bun.sleep(1500);
+  server.stop();
+
+  return result.feedback || "No feedback provided.";
+}
+
+/**
+ * Shared review server lifecycle.
+ * Used by both the `review` CLI subcommand and the `review-hook` PreToolUse handler.
+ *
+ * Runs git diff (or fetches PR), starts the review server, waits for user feedback,
+ * cleans up, and returns the feedback string.
+ */
+async function runReviewFlow(
+  reviewArg: string | undefined,
+  projectRoot: string,
+): Promise<string> {
+  const isPRMode =
+    reviewArg?.startsWith("http://") || reviewArg?.startsWith("https://");
+
+  let rawPatch: string;
+  let gitRef: string;
+  let diffError: string | undefined;
+  let gitContext: Awaited<ReturnType<typeof getGitContext>> | undefined;
+  let prMetadata:
+    | Awaited<ReturnType<typeof fetchPR>>["metadata"]
+    | undefined;
+
+  if (isPRMode) {
+    const prRef = parsePRUrl(reviewArg!);
+    if (!prRef) {
+      throw new Error(
+        `Invalid PR/MR URL: ${reviewArg}\nSupported formats:\n  GitHub: https://github.com/owner/repo/pull/123\n  GitLab: https://gitlab.com/group/project/-/merge_requests/42`
+      );
+    }
+
+    const cliName = getCliName(prRef);
+    const cliUrl = getCliInstallUrl(prRef);
+
+    try {
+      await checkPRAuth(prRef);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("not found") || msg.includes("ENOENT")) {
+        throw new Error(
+          `${cliName === "gh" ? "GitHub" : "GitLab"} CLI (${cliName}) is not installed.\nInstall it from ${cliUrl}`
+        );
+      }
+      throw err;
+    }
+
+    console.error(
+      `Fetching ${getMRLabel(prRef)} ${getMRNumberLabel(prRef)} from ${getDisplayRepo(prRef)}...`
+    );
+    try {
+      const pr = await fetchPR(prRef);
+      rawPatch = pr.rawPatch;
+      gitRef = `${getMRLabel(prRef)} ${getMRNumberLabel(prRef)}`;
+      prMetadata = pr.metadata;
+    } catch (err) {
+      throw new Error(
+        err instanceof Error ? err.message : "Failed to fetch PR"
+      );
+    }
+  } else {
+    gitContext = await getGitContext();
+    const diffResult = await runGitDiff("uncommitted", gitContext.defaultBranch);
+    rawPatch = diffResult.patch;
+    gitRef = diffResult.label;
+    diffError = diffResult.error;
+  }
+
+  const reviewProject = (await detectProjectName()) ?? "_unknown";
+
+  const server = await startReviewServer({
+    rawPatch,
+    gitRef,
+    error: diffError,
+    origin: detectedOrigin,
+    diffType: isPRMode ? undefined : "uncommitted",
+    gitContext,
+    prMetadata,
+    sharingEnabled,
+    shareBaseUrl,
+    htmlContent: reviewHtmlContent,
+    onReady: async (url, isRemote, port) => {
+      handleReviewServerReady(url, isRemote, port);
+
+      if (isRemote && sharingEnabled && rawPatch) {
+        await writeRemoteShareLink(
+          rawPatch,
+          shareBaseUrl,
+          "review changes",
+          "diff only"
+        ).catch(() => {});
+      }
+    },
+  });
+
+  registerSession({
+    pid: process.pid,
+    port: server.port,
+    url: server.url,
+    mode: "review",
+    project: reviewProject,
+    startedAt: new Date().toISOString(),
+    label: isPRMode
+      ? `${getMRLabel(prMetadata!).toLowerCase()}-review-${getDisplayRepo(prMetadata!)}${getMRNumberLabel(prMetadata!)}`
+      : `review-${reviewProject}`,
+  });
+
+  const result = await server.waitForDecision();
+  await Bun.sleep(1500);
+  server.stop();
+
+  if (result.approved) {
+    return "Code review completed — no changes requested.";
+  }
+
+  let feedback = result.feedback;
+  if (!isPRMode) {
+    feedback +=
+      "\n\nThe reviewer has identified issues above. You must address all of them.";
+  }
+  return feedback;
+}
+
 if (args[0] === "sessions") {
   // ============================================
   // SESSION DISCOVERY MODE
@@ -161,111 +399,14 @@ if (args[0] === "sessions") {
   // CODE REVIEW MODE
   // ============================================
 
-  const urlArg = args[1];
-  const isPRMode = urlArg?.startsWith("http://") || urlArg?.startsWith("https://");
+  const projectRoot = process.env.PLANNOTATOR_CWD || process.cwd();
 
-  let rawPatch: string;
-  let gitRef: string;
-  let diffError: string | undefined;
-  let gitContext: Awaited<ReturnType<typeof getGitContext>> | undefined;
-  let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
-
-  if (isPRMode) {
-    // --- PR Review Mode ---
-    const prRef = parsePRUrl(urlArg);
-    if (!prRef) {
-      console.error(`Invalid PR/MR URL: ${urlArg}`);
-      console.error("Supported formats:");
-      console.error("  GitHub: https://github.com/owner/repo/pull/123");
-      console.error("  GitLab: https://gitlab.com/group/project/-/merge_requests/42");
-      process.exit(1);
-    }
-
-    const cliName = getCliName(prRef);
-    const cliUrl = getCliInstallUrl(prRef);
-
-    try {
-      await checkPRAuth(prRef);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("not found") || msg.includes("ENOENT")) {
-        console.error(`${cliName === "gh" ? "GitHub" : "GitLab"} CLI (${cliName}) is not installed.`);
-        console.error(`Install it from ${cliUrl}`);
-      } else {
-        console.error(msg);
-      }
-      process.exit(1);
-    }
-
-    console.error(`Fetching ${getMRLabel(prRef)} ${getMRNumberLabel(prRef)} from ${getDisplayRepo(prRef)}...`);
-    try {
-      const pr = await fetchPR(prRef);
-      rawPatch = pr.rawPatch;
-      gitRef = `${getMRLabel(prRef)} ${getMRNumberLabel(prRef)}`;
-      prMetadata = pr.metadata;
-    } catch (err) {
-      console.error(err instanceof Error ? err.message : "Failed to fetch PR");
-      process.exit(1);
-    }
-  } else {
-    // --- Local Review Mode ---
-    gitContext = await getGitContext();
-    const diffResult = await runGitDiff("uncommitted", gitContext.defaultBranch);
-    rawPatch = diffResult.patch;
-    gitRef = diffResult.label;
-    diffError = diffResult.error;
-  }
-
-  const reviewProject = (await detectProjectName()) ?? "_unknown";
-
-  // Start review server (even if empty - user can switch diff types in local mode)
-  const server = await startReviewServer({
-    rawPatch,
-    gitRef,
-    error: diffError,
-    origin: detectedOrigin,
-    diffType: isPRMode ? undefined : "uncommitted",
-    gitContext,
-    prMetadata,
-    sharingEnabled,
-    shareBaseUrl,
-    htmlContent: reviewHtmlContent,
-    onReady: async (url, isRemote, port) => {
-      handleReviewServerReady(url, isRemote, port);
-
-      if (isRemote && sharingEnabled && rawPatch) {
-        await writeRemoteShareLink(rawPatch, shareBaseUrl, "review changes", "diff only").catch(() => {});
-      }
-    },
-  });
-
-  registerSession({
-    pid: process.pid,
-    port: server.port,
-    url: server.url,
-    mode: "review",
-    project: reviewProject,
-    startedAt: new Date().toISOString(),
-    label: isPRMode ? `${getMRLabel(prMetadata!).toLowerCase()}-review-${getDisplayRepo(prMetadata!)}${getMRNumberLabel(prMetadata!)}` : `review-${reviewProject}`,
-  });
-
-  // Wait for user feedback
-  const result = await server.waitForDecision();
-
-  // Give browser time to receive response and update UI
-  await Bun.sleep(1500);
-
-  // Cleanup
-  server.stop();
-
-  // Output feedback (captured by slash command)
-  if (result.approved) {
-    console.log("Code review completed — no changes requested.");
-  } else {
-    console.log(result.feedback);
-    if (!isPRMode) {
-      console.log("\nThe reviewer has identified issues above. You must address all of them.");
-    }
+  try {
+    const feedback = await runReviewFlow(args[1], projectRoot);
+    console.log(feedback);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
   }
   process.exit(0);
 
@@ -274,114 +415,109 @@ if (args[0] === "sessions") {
   // ANNOTATE MODE
   // ============================================
 
-  let filePath = args[1];
+  const filePath = args[1];
   if (!filePath) {
     console.error("Usage: plannotator annotate <file.md | folder/>");
     process.exit(1);
   }
 
-  // Strip @ prefix if present (Claude Code file reference syntax)
-  if (filePath.startsWith("@")) {
-    filePath = filePath.slice(1);
-  }
-
-  // Use PLANNOTATOR_CWD if set (original working directory before script cd'd)
   const projectRoot = process.env.PLANNOTATOR_CWD || process.cwd();
 
-  if (process.env.PLANNOTATOR_DEBUG) {
-    console.error(`[DEBUG] Project root: ${projectRoot}`);
-    console.error(`[DEBUG] File path arg: ${filePath}`);
-  }
-
-  // Check if the argument is a directory (folder annotation mode)
-  const resolvedArg = path.resolve(projectRoot, filePath);
-  let isFolder = false;
   try {
-    isFolder = statSync(resolvedArg).isDirectory();
+    const feedback = await runAnnotateFlow(filePath, projectRoot);
+    console.log(feedback);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+  process.exit(0);
+
+} else if (args[0] === "annotate-hook") {
+  // ============================================
+  // ANNOTATE HOOK MODE (PreToolUse)
+  // ============================================
+  // Invoked by PreToolUse hook — reads stdin JSON, runs annotation server,
+  // outputs PreToolUse deny decision with feedback.
+
+  const { parseHookStdin, formatPreToolUseDeny } = await import("./hook-stdin");
+
+  let stdinText: string;
+  try {
+    stdinText = await Bun.stdin.text();
   } catch {
-    // Not a directory, fall through to file resolution
+    console.error("Failed to read stdin");
+    process.exit(1);
   }
 
-  let markdown: string;
-  let absolutePath: string;
-  let folderPath: string | undefined;
-  let annotateMode: "annotate" | "annotate-folder" = "annotate";
-
-  if (isFolder) {
-    // Folder annotation mode
-    if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED)) {
-      console.error(`No markdown files found in ${resolvedArg}`);
-      process.exit(1);
-    }
-    folderPath = resolvedArg;
-    absolutePath = resolvedArg;
-    markdown = "";
-    annotateMode = "annotate-folder";
-    console.error(`Folder: ${resolvedArg}`);
-  } else {
-    // Single file annotation mode
-    const resolved = resolveMarkdownFile(filePath, projectRoot);
-
-    if (resolved.kind === "ambiguous") {
-      console.error(`Ambiguous filename "${resolved.input}" — found ${resolved.matches.length} matches:`);
-      for (const match of resolved.matches) {
-        console.error(`  ${match}`);
-      }
-      process.exit(1);
-    }
-    if (resolved.kind === "not_found") {
-      console.error(`File not found: ${resolved.input}`);
-      process.exit(1);
-    }
-
-    absolutePath = resolved.path;
-    markdown = await Bun.file(absolutePath).text();
-    console.error(`Resolved: ${absolutePath}`);
+  let hookInput: ReturnType<typeof parseHookStdin>;
+  try {
+    hookInput = parseHookStdin(stdinText);
+  } catch (err) {
+    console.error(
+      `Failed to parse hook stdin: ${err instanceof Error ? err.message : err}`
+    );
+    process.exit(1);
   }
 
-  const annotateProject = (await detectProjectName()) ?? "_unknown";
+  // Extract file path: strip "plannotator annotate " prefix from the command
+  const commandArgs = hookInput.command.replace(/^plannotator\s+annotate\s+/, "").trim();
+  if (!commandArgs) {
+    console.error("No file path found in hook command");
+    process.exit(1);
+  }
 
-  // Start the annotate server (reuses plan editor HTML)
-  const server = await startAnnotateServer({
-    markdown,
-    filePath: absolutePath,
-    origin: detectedOrigin,
-    mode: annotateMode,
-    folderPath,
-    sharingEnabled,
-    shareBaseUrl,
-    pasteApiUrl,
-    htmlContent: planHtmlContent,
-    onReady: async (url, isRemote, port) => {
-      handleAnnotateServerReady(url, isRemote, port);
+  const projectRoot = hookInput.cwd;
 
-      if (isRemote && sharingEnabled && markdown) {
-        await writeRemoteShareLink(markdown, shareBaseUrl, "annotate", "document only").catch(() => {});
-      }
-    },
-  });
+  try {
+    const feedback = await runAnnotateFlow(commandArgs, projectRoot);
+    console.log(formatPreToolUseDeny(feedback));
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+  process.exit(0);
 
-  registerSession({
-    pid: process.pid,
-    port: server.port,
-    url: server.url,
-    mode: "annotate",
-    project: annotateProject,
-    startedAt: new Date().toISOString(),
-    label: folderPath ? `annotate-${path.basename(folderPath)}` : `annotate-${path.basename(absolutePath)}`,
-  });
+} else if (args[0] === "review-hook") {
+  // ============================================
+  // REVIEW HOOK MODE (PreToolUse)
+  // ============================================
+  // Invoked by PreToolUse hook — reads stdin JSON, runs review server,
+  // outputs PreToolUse deny decision with feedback.
 
-  // Wait for user feedback
-  const result = await server.waitForDecision();
+  const { parseHookStdin, formatPreToolUseDeny } = await import("./hook-stdin");
 
-  // Give browser time to receive response and update UI
-  await Bun.sleep(1500);
+  let stdinText: string;
+  try {
+    stdinText = await Bun.stdin.text();
+  } catch {
+    console.error("Failed to read stdin");
+    process.exit(1);
+  }
 
-  // Cleanup
-  server.stop();
+  let hookInput: ReturnType<typeof parseHookStdin>;
+  try {
+    hookInput = parseHookStdin(stdinText);
+  } catch (err) {
+    console.error(
+      `Failed to parse hook stdin: ${err instanceof Error ? err.message : err}`
+    );
+    process.exit(1);
+  }
 
-  // Output feedback (captured by slash command)
-  console.log(result.feedback || "No feedback provided.");
+  // Extract review arg: strip "plannotator review " prefix from the command
+  // May be a PR URL or empty (local diff)
+  const commandArgs = hookInput.command.replace(/^plannotator\s+review\s*/, "").trim();
+  const reviewArg = commandArgs || undefined;
+
+  const projectRoot = hookInput.cwd;
+
+  try {
+    const feedback = await runReviewFlow(reviewArg, projectRoot);
+    console.log(formatPreToolUseDeny(feedback));
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
   process.exit(0);
 
 } else if (args[0] === "annotate-last" || args[0] === "last") {
