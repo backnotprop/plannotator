@@ -755,3 +755,30 @@ diffs-container {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* Custom diff font overrides — user-level, must come last to win over element styles.
+   Variables are set on :root by App.tsx when the user picks a custom font/size. */
+.review-comment-markdown .inline-code,
+.review-comment-markdown .inline-code-block,
+.review-comment-markdown .inline-code-block code,
+.export-code-block,
+.suggestion-block-code code,
+.suggestion-modal-original,
+.suggestion-modal-original code,
+.suggestion-diff,
+.ai-markdown code {
+  font-family: var(--diff-font-override, var(--font-mono)) !important;
+}
+
+/* Font size override — only takes effect when --diff-font-size-override is set on :root */
+:root[style*="--diff-font-size-override"] .review-comment-markdown .inline-code,
+:root[style*="--diff-font-size-override"] .review-comment-markdown .inline-code-block,
+:root[style*="--diff-font-size-override"] .review-comment-markdown .inline-code-block code,
+:root[style*="--diff-font-size-override"] .export-code-block,
+:root[style*="--diff-font-size-override"] .suggestion-block-code code,
+:root[style*="--diff-font-size-override"] .suggestion-modal-original,
+:root[style*="--diff-font-size-override"] .suggestion-modal-original code,
+:root[style*="--diff-font-size-override"] .suggestion-diff,
+:root[style*="--diff-font-size-override"] .ai-markdown code {
+  font-size: var(--diff-font-size-override) !important;
+}

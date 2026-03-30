@@ -17,6 +17,8 @@ export interface DiffOptions {
   lineDiffType?: 'word-alt' | 'word' | 'char' | 'none';
   showLineNumbers?: boolean;
   showDiffBackground?: boolean;
+  fontFamily?: string;
+  fontSize?: string;
 }
 
 export interface PlannotatorConfig {

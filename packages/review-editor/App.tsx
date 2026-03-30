@@ -14,6 +14,7 @@ import { RepoIcon } from '@plannotator/ui/components/RepoIcon';
 import { PullRequestIcon } from '@plannotator/ui/components/PullRequestIcon';
 import { getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo } from '@plannotator/shared/pr-provider';
 import { configStore, useConfigValue } from '@plannotator/ui/config';
+import { loadDiffFont } from '@plannotator/ui/utils/diffFonts';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { getAIProviderSettings, saveAIProviderSettings, getPreferredModel } from '@plannotator/ui/utils/aiProvider';
 import { AISetupDialog } from '@plannotator/ui/components/AISetupDialog';
@@ -101,6 +102,24 @@ const ReviewApp: React.FC = () => {
   const diffLineDiffType = useConfigValue('diffLineDiffType');
   const diffShowLineNumbers = useConfigValue('diffShowLineNumbers');
   const diffShowBackground = useConfigValue('diffShowBackground');
+  const diffFontFamily = useConfigValue('diffFontFamily');
+  const diffFontSize = useConfigValue('diffFontSize');
+
+  // Load custom diff font and override --font-mono for surrounding review elements
+  useEffect(() => {
+    if (diffFontFamily) {
+      loadDiffFont(diffFontFamily);
+      document.documentElement.style.setProperty('--diff-font-override', `'${diffFontFamily}', monospace`);
+    } else {
+      document.documentElement.style.removeProperty('--diff-font-override');
+    }
+    if (diffFontSize) {
+      document.documentElement.style.setProperty('--diff-font-size-override', diffFontSize);
+    } else {
+      document.documentElement.style.removeProperty('--diff-font-size-override');
+    }
+  }, [diffFontFamily, diffFontSize]);
+
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
@@ -1443,6 +1462,8 @@ const ReviewApp: React.FC = () => {
                 lineDiffType={diffLineDiffType}
                 disableLineNumbers={!diffShowLineNumbers}
                 disableBackground={!diffShowBackground}
+                fontFamily={diffFontFamily || undefined}
+                fontSize={diffFontSize || undefined}
                 annotations={activeFileAnnotations}
                 selectedAnnotationId={selectedAnnotationId}
                 pendingSelection={pendingSelection}

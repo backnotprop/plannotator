@@ -124,6 +124,30 @@ export const SETTINGS = {
     },
     toServer: (v: boolean) => ({ diffOptions: { showDiffBackground: v } }),
   },
+
+  diffFontFamily: {
+    defaultValue: '' as string, // empty = theme default
+    fromCookie: () => storage.getItem('plannotator-diff-font-family') || undefined,
+    toCookie: (v: string) => storage.setItem('plannotator-diff-font-family', v),
+    serverKey: 'diffOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = (sc.diffOptions as Record<string, unknown> | undefined)?.fontFamily;
+      return typeof v === 'string' ? v : undefined;
+    },
+    toServer: (v: string) => ({ diffOptions: { fontFamily: v } }),
+  },
+
+  diffFontSize: {
+    defaultValue: '' as string, // empty = theme default
+    fromCookie: () => storage.getItem('plannotator-diff-font-size') || undefined,
+    toCookie: (v: string) => storage.setItem('plannotator-diff-font-size', v),
+    serverKey: 'diffOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = (sc.diffOptions as Record<string, unknown> | undefined)?.fontSize;
+      return typeof v === 'string' ? v : undefined;
+    },
+    toServer: (v: string) => ({ diffOptions: { fontSize: v } }),
+  },
 } satisfies Record<string, SettingDef<unknown>>;
 
 export type SettingsMap = typeof SETTINGS;

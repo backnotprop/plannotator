@@ -32,6 +32,8 @@ interface DiffViewerProps {
   lineDiffType?: 'word-alt' | 'word' | 'char' | 'none';
   disableLineNumbers?: boolean;
   disableBackground?: boolean;
+  fontFamily?: string;
+  fontSize?: string;
   annotations: CodeAnnotation[];
   selectedAnnotationId: string | null;
   pendingSelection: SelectedLineRange | null;
@@ -73,6 +75,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   lineDiffType,
   disableLineNumbers,
   disableBackground,
+  fontFamily,
+  fontSize,
   annotations,
   selectedAnnotationId,
   pendingSelection,
@@ -360,6 +364,13 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       const fg = styles.getPropertyValue('--foreground').trim();
       const muted = styles.getPropertyValue('--muted').trim();
       if (!bg || !fg) return;
+
+      const fontCSS = fontFamily || fontSize ? `
+          pre, code, [data-line-content], [data-column-number] {
+            ${fontFamily ? `font-family: '${fontFamily}', monospace !important;` : ''}
+            ${fontSize ? `font-size: ${fontSize} !important;` : ''}
+          }` : '';
+
       setPierreTheme({
         type: resolvedMode,
         css: `
@@ -378,10 +389,11 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           [data-diff-type='split'][data-overflow='scroll'] {
             grid-template-columns: var(--split-left, 1fr) var(--split-right, 1fr) !important;
           }
+          ${fontCSS}
         `,
       });
     });
-  }, [resolvedMode, colorTheme]);
+  }, [resolvedMode, colorTheme, fontFamily, fontSize]);
 
   return (
     <div className="h-full flex flex-col">

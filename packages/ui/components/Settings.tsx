@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import type { Origin } from '@plannotator/shared/agents';
 import { configStore, useConfigValue } from '../config';
+import { loadDiffFont } from '../utils/diffFonts';
 import { TaterSpritePullup } from './TaterSpritePullup';
 import { getIdentity, regenerateIdentity, setCustomIdentity } from '../utils/identity';
 import { GitUser } from '../icons/GitUser';
@@ -88,6 +89,19 @@ interface SettingsProps {
 
 // --- Review-mode Display tab (diff display options) ---
 
+const DIFF_FONT_OPTIONS = [
+  { value: '', label: 'Theme Default' },
+  { value: 'Fira Code', label: 'Fira Code' },
+  { value: 'Hack', label: 'Hack' },
+  { value: 'IBM Plex Mono', label: 'IBM Plex Mono' },
+  { value: 'Inconsolata', label: 'Inconsolata' },
+  { value: 'JetBrains Mono', label: 'JetBrains Mono' },
+  { value: 'Red Hat Mono', label: 'Red Hat Mono' },
+  { value: 'Roboto Mono', label: 'Roboto Mono' },
+  { value: 'Source Code Pro', label: 'Source Code Pro' },
+  { value: 'Atkinson Hyperlegible Mono', label: 'Atkinson Hyperlegible' },
+];
+
 const DIFF_STYLE_OPTIONS = [
   { value: 'split' as const, label: 'Split' },
   { value: 'unified' as const, label: 'Unified' },
@@ -169,9 +183,78 @@ const ReviewDisplayTab: React.FC = () => {
   const diffLineDiffType = useConfigValue('diffLineDiffType');
   const diffShowLineNumbers = useConfigValue('diffShowLineNumbers');
   const diffShowBackground = useConfigValue('diffShowBackground');
+  const diffFontFamily = useConfigValue('diffFontFamily');
+  const diffFontSize = useConfigValue('diffFontSize');
+
+  // Load font for the preview swatch
+  useEffect(() => {
+    if (diffFontFamily) loadDiffFont(diffFontFamily);
+  }, [diffFontFamily]);
 
   return (
     <>
+      {/* Font Family */}
+      <div className="space-y-2">
+        <div>
+          <div className="text-sm font-medium">Code Font</div>
+          <div className="text-xs text-muted-foreground">Font family for diff code lines</div>
+        </div>
+        <select
+          value={diffFontFamily}
+          onChange={(e) => configStore.set('diffFontFamily', e.target.value)}
+          className="w-full px-3 py-1.5 text-sm rounded-md bg-muted/50 border border-border text-foreground"
+          style={diffFontFamily ? { fontFamily: `'${diffFontFamily}', monospace` } : undefined}
+        >
+          {DIFF_FONT_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+        {diffFontFamily && (
+          <div
+            className="text-xs text-muted-foreground px-1 py-1 rounded bg-muted/30 font-mono"
+            style={{ fontFamily: `'${diffFontFamily}', monospace` }}
+          >
+            Preview: const x = fn(42);
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-border" />
+
+      {/* Font Size */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-sm font-medium">Code Font Size</div>
+            <div className="text-xs text-muted-foreground">Font size for diff code lines</div>
+          </div>
+          <div className="text-xs tabular-nums text-muted-foreground min-w-[4ch] text-right">
+            {diffFontSize || 'Auto'}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="range"
+            min={8}
+            max={24}
+            step={1}
+            value={diffFontSize ? parseInt(diffFontSize) : 13}
+            onChange={(e) => configStore.set('diffFontSize', `${e.target.value}px`)}
+            className="flex-1 h-1.5 accent-primary cursor-pointer"
+          />
+          {diffFontSize && (
+            <button
+              onClick={() => configStore.set('diffFontSize', '')}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="border-t border-border" />
+
       {/* Diff Style */}
       <div className="space-y-2">
         <div>
