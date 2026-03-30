@@ -368,7 +368,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       const fontCSS = fontFamily || fontSize ? `
           pre, code, [data-line-content], [data-column-number] {
             ${fontFamily ? `font-family: '${fontFamily}', monospace !important;` : ''}
-            ${fontSize ? `font-size: ${fontSize} !important;` : ''}
+            ${fontSize ? `font-size: ${fontSize} !important; line-height: 1.5 !important;` : ''}
           }` : '';
 
       setPierreTheme({
