@@ -11,6 +11,30 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "plannotator annotate-hook",
+            "if": "Bash(plannotator annotate *)",
+            "timeout": 345600
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "plannotator review-hook",
+            "if": "Bash(plannotator review*)",
+            "timeout": 345600
+          }
+        ]
+      }
     ]
   }
 }
