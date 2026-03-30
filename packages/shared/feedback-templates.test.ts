@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { planDenyFeedback } from "./feedback-templates";
+import { planDenyFeedback, planApproveFeedback } from "./feedback-templates";
 
 describe("feedback-templates", () => {
   /**
@@ -62,4 +62,46 @@ describe("feedback-templates", () => {
     expect(result).toContain("plannotator_submit_plan");
   });
 
+});
+
+describe("context anchoring", () => {
+  /**
+   * On denial, the agent must be instructed to maintain a Decisions Log
+   * so that rejected approaches are documented and not re-proposed.
+   */
+  test("plan deny includes context anchoring instructions", () => {
+    const result = planDenyFeedback("some feedback");
+    expect(result).toContain("Decisions Log");
+    expect(result).toContain("Rejected:");
+    expect(result).toContain("cross-session memory");
+  });
+
+  /**
+   * On approval, the agent must be reminded to reference the Decisions Log
+   * during implementation — closing the context anchoring loop.
+   */
+  test("plan approve includes Decisions Log reminder", () => {
+    const result = planApproveFeedback();
+    expect(result).toContain("Plan approved");
+    expect(result).toContain("Decisions Log");
+  });
+
+  /**
+   * Approval with notes must include both the user's notes and the
+   * Decisions Log reminder — neither should displace the other.
+   */
+  test("plan approve with notes includes both notes and Decisions Log reminder", () => {
+    const result = planApproveFeedback("Use the adapter pattern here.");
+    expect(result).toContain("Implementation Notes");
+    expect(result).toContain("Use the adapter pattern here.");
+    expect(result).toContain("Decisions Log");
+  });
+
+  /**
+   * Approval with saved path must surface the file path.
+   */
+  test("plan approve with savedPath includes the path", () => {
+    const result = planApproveFeedback(undefined, "/tmp/plans/auth.md");
+    expect(result).toContain("/tmp/plans/auth.md");
+  });
 });
