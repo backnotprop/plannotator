@@ -127,7 +127,7 @@ export async function startAnnotateServer(
       server = Bun.serve({
         port: configuredPort,
 
-        async fetch(req) {
+        async fetch(req, server) {
           const url = new URL(req.url);
 
           // API: Get plan content (reuse /api/plan so the plan editor UI works)
@@ -195,7 +195,9 @@ export async function startAnnotateServer(
           }
 
           // API: External annotations (SSE-based, for any external tool)
-          const externalResponse = await externalAnnotations.handle(req, url);
+          const externalResponse = await externalAnnotations.handle(req, url, {
+            disableIdleTimeout: () => server.timeout(req, 0),
+          });
           if (externalResponse) return externalResponse;
 
           // API: Submit annotation feedback

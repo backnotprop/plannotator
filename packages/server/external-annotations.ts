@@ -28,7 +28,11 @@ export type { ExternalAnnotationEvent } from "@plannotator/shared/external-annot
 // ---------------------------------------------------------------------------
 
 export interface ExternalAnnotationHandler {
-  handle: (req: Request, url: URL) => Promise<Response | null>;
+  handle: (
+    req: Request,
+    url: URL,
+    options?: { disableIdleTimeout?: () => void },
+  ) => Promise<Response | null>;
 }
 
 // ---------------------------------------------------------------------------
@@ -64,9 +68,15 @@ export function createExternalAnnotationHandler(
   });
 
   return {
-    async handle(req: Request, url: URL): Promise<Response | null> {
+    async handle(
+      req: Request,
+      url: URL,
+      options?: { disableIdleTimeout?: () => void },
+    ): Promise<Response | null> {
       // --- SSE stream ---
       if (url.pathname === STREAM && req.method === "GET") {
+        options?.disableIdleTimeout?.();
+
         let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
         let ctrl: ReadableStreamDefaultController;
 

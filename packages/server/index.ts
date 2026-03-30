@@ -202,7 +202,7 @@ export async function startPlannotatorServer(
       server = Bun.serve({
         port: configuredPort,
 
-        async fetch(req) {
+        async fetch(req, server) {
           const url = new URL(req.url);
 
           // API: Get a specific plan version from history
@@ -367,7 +367,9 @@ export async function startPlannotatorServer(
           if (editorResponse) return editorResponse;
 
           // API: External annotations (SSE-based, for any external tool)
-          const externalResponse = await externalAnnotations?.handle(req, url);
+          const externalResponse = await externalAnnotations?.handle(req, url, {
+            disableIdleTimeout: () => server.timeout(req, 0),
+          });
           if (externalResponse) return externalResponse;
 
           // API: Save to notes (decoupled from approve/deny)
