@@ -111,6 +111,113 @@ const detectedOrigin: Origin =
   process.env.COPILOT_CLI ? "copilot-cli" :
   "claude-code";
 
+/**
+ * Shared annotate server lifecycle.
+ * Used by both the `annotate` CLI subcommand and the `annotate-hook` PreToolUse handler.
+ *
+ * Resolves the file/folder, starts the annotation server, waits for user feedback,
+ * cleans up, and returns the feedback string.
+ */
+async function runAnnotateFlow(
+  filePath: string,
+  projectRoot: string,
+): Promise<string> {
+  // Strip @ prefix if present (Claude Code file reference syntax)
+  if (filePath.startsWith("@")) {
+    filePath = filePath.slice(1);
+  }
+
+  if (process.env.PLANNOTATOR_DEBUG) {
+    console.error(`[DEBUG] Project root: ${projectRoot}`);
+    console.error(`[DEBUG] File path arg: ${filePath}`);
+  }
+
+  // Check if the argument is a directory (folder annotation mode)
+  const resolvedArg = path.resolve(projectRoot, filePath);
+  let isFolder = false;
+  try {
+    isFolder = statSync(resolvedArg).isDirectory();
+  } catch {
+    // Not a directory, fall through to file resolution
+  }
+
+  let markdown: string;
+  let absolutePath: string;
+  let folderPath: string | undefined;
+  let annotateMode: "annotate" | "annotate-folder" = "annotate";
+
+  if (isFolder) {
+    if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED)) {
+      throw new Error(`No markdown files found in ${resolvedArg}`);
+    }
+    folderPath = resolvedArg;
+    absolutePath = resolvedArg;
+    markdown = "";
+    annotateMode = "annotate-folder";
+    console.error(`Folder: ${resolvedArg}`);
+  } else {
+    const resolved = resolveMarkdownFile(filePath, projectRoot);
+
+    if (resolved.kind === "ambiguous") {
+      const matches = resolved.matches.map((m) => `  ${m}`).join("\n");
+      throw new Error(
+        `Ambiguous filename "${resolved.input}" — found ${resolved.matches.length} matches:\n${matches}`
+      );
+    }
+    if (resolved.kind === "not_found") {
+      throw new Error(`File not found: ${resolved.input}`);
+    }
+
+    absolutePath = resolved.path;
+    markdown = await Bun.file(absolutePath).text();
+    console.error(`Resolved: ${absolutePath}`);
+  }
+
+  const annotateProject = (await detectProjectName()) ?? "_unknown";
+
+  const server = await startAnnotateServer({
+    markdown,
+    filePath: absolutePath,
+    origin: detectedOrigin,
+    mode: annotateMode,
+    folderPath,
+    sharingEnabled,
+    shareBaseUrl,
+    pasteApiUrl,
+    htmlContent: planHtmlContent,
+    onReady: async (url, isRemote, port) => {
+      handleAnnotateServerReady(url, isRemote, port);
+
+      if (isRemote && sharingEnabled && markdown) {
+        await writeRemoteShareLink(
+          markdown,
+          shareBaseUrl,
+          "annotate",
+          "document only"
+        ).catch(() => {});
+      }
+    },
+  });
+
+  registerSession({
+    pid: process.pid,
+    port: server.port,
+    url: server.url,
+    mode: "annotate",
+    project: annotateProject,
+    startedAt: new Date().toISOString(),
+    label: folderPath
+      ? `annotate-${path.basename(folderPath)}`
+      : `annotate-${path.basename(absolutePath)}`,
+  });
+
+  const result = await server.waitForDecision();
+  await Bun.sleep(1500);
+  server.stop();
+
+  return result.feedback || "No feedback provided.";
+}
+
 if (args[0] === "sessions") {
   // ============================================
   // SESSION DISCOVERY MODE
@@ -274,114 +381,21 @@ if (args[0] === "sessions") {
   // ANNOTATE MODE
   // ============================================
 
-  let filePath = args[1];
+  const filePath = args[1];
   if (!filePath) {
     console.error("Usage: plannotator annotate <file.md | folder/>");
     process.exit(1);
   }
 
-  // Strip @ prefix if present (Claude Code file reference syntax)
-  if (filePath.startsWith("@")) {
-    filePath = filePath.slice(1);
-  }
-
-  // Use PLANNOTATOR_CWD if set (original working directory before script cd'd)
   const projectRoot = process.env.PLANNOTATOR_CWD || process.cwd();
 
-  if (process.env.PLANNOTATOR_DEBUG) {
-    console.error(`[DEBUG] Project root: ${projectRoot}`);
-    console.error(`[DEBUG] File path arg: ${filePath}`);
-  }
-
-  // Check if the argument is a directory (folder annotation mode)
-  const resolvedArg = path.resolve(projectRoot, filePath);
-  let isFolder = false;
   try {
-    isFolder = statSync(resolvedArg).isDirectory();
-  } catch {
-    // Not a directory, fall through to file resolution
+    const feedback = await runAnnotateFlow(filePath, projectRoot);
+    console.log(feedback);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
   }
-
-  let markdown: string;
-  let absolutePath: string;
-  let folderPath: string | undefined;
-  let annotateMode: "annotate" | "annotate-folder" = "annotate";
-
-  if (isFolder) {
-    // Folder annotation mode
-    if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED)) {
-      console.error(`No markdown files found in ${resolvedArg}`);
-      process.exit(1);
-    }
-    folderPath = resolvedArg;
-    absolutePath = resolvedArg;
-    markdown = "";
-    annotateMode = "annotate-folder";
-    console.error(`Folder: ${resolvedArg}`);
-  } else {
-    // Single file annotation mode
-    const resolved = resolveMarkdownFile(filePath, projectRoot);
-
-    if (resolved.kind === "ambiguous") {
-      console.error(`Ambiguous filename "${resolved.input}" — found ${resolved.matches.length} matches:`);
-      for (const match of resolved.matches) {
-        console.error(`  ${match}`);
-      }
-      process.exit(1);
-    }
-    if (resolved.kind === "not_found") {
-      console.error(`File not found: ${resolved.input}`);
-      process.exit(1);
-    }
-
-    absolutePath = resolved.path;
-    markdown = await Bun.file(absolutePath).text();
-    console.error(`Resolved: ${absolutePath}`);
-  }
-
-  const annotateProject = (await detectProjectName()) ?? "_unknown";
-
-  // Start the annotate server (reuses plan editor HTML)
-  const server = await startAnnotateServer({
-    markdown,
-    filePath: absolutePath,
-    origin: detectedOrigin,
-    mode: annotateMode,
-    folderPath,
-    sharingEnabled,
-    shareBaseUrl,
-    pasteApiUrl,
-    htmlContent: planHtmlContent,
-    onReady: async (url, isRemote, port) => {
-      handleAnnotateServerReady(url, isRemote, port);
-
-      if (isRemote && sharingEnabled && markdown) {
-        await writeRemoteShareLink(markdown, shareBaseUrl, "annotate", "document only").catch(() => {});
-      }
-    },
-  });
-
-  registerSession({
-    pid: process.pid,
-    port: server.port,
-    url: server.url,
-    mode: "annotate",
-    project: annotateProject,
-    startedAt: new Date().toISOString(),
-    label: folderPath ? `annotate-${path.basename(folderPath)}` : `annotate-${path.basename(absolutePath)}`,
-  });
-
-  // Wait for user feedback
-  const result = await server.waitForDecision();
-
-  // Give browser time to receive response and update UI
-  await Bun.sleep(1500);
-
-  // Cleanup
-  server.stop();
-
-  // Output feedback (captured by slash command)
-  console.log(result.feedback || "No feedback provided.");
   process.exit(0);
 
 } else if (args[0] === "annotate-last" || args[0] === "last") {
