@@ -9,6 +9,19 @@ export interface PlanDenyFeedbackOptions {
   planFilePath?: string;
 }
 
+export const planApproveFeedback = (
+  notes?: string,
+  savedPath?: string,
+): string => {
+  const savedNote = savedPath ? `\nSaved to: ${savedPath}` : "";
+  const notesSection = notes
+    ? `\n\n## Implementation Notes\n\nThe user approved your plan but added the following notes to consider during implementation:\n\n${notes}\n\nProceed with implementation, incorporating these notes where applicable.`
+    : "";
+  const decisionsLogNote = `\n\nIf your plan contains a \`## Decisions Log\`, keep it as a reference during implementation — it documents the rejected alternatives that shaped this design.`;
+
+  return `Plan approved!${savedNote}${notesSection}${decisionsLogNote}`;
+};
+
 export const planDenyFeedback = (
   feedback: string,
   toolName: string = "ExitPlanMode",

@@ -40,7 +40,7 @@ import {
   handleArchiveCommand,
   type CommandDeps,
 } from "./commands";
-import { planDenyFeedback } from "@plannotator/shared/feedback-templates";
+import { planDenyFeedback, planApproveFeedback } from "@plannotator/shared/feedback-templates";
 import {
   normalizeEditPermission,
   stripConflictingPlanModeRules,
@@ -473,20 +473,7 @@ Do NOT proceed with implementation until your plan is approved.`);
               }
             }
 
-            if (result.feedback) {
-              return `Plan approved with notes!
-${result.savedPath ? `Saved to: ${result.savedPath}` : ""}
-
-## Implementation Notes
-
-The user approved your plan but added the following notes to consider during implementation:
-
-${result.feedback}
-
-Proceed with implementation, incorporating these notes where applicable.`;
-            }
-
-            return `Plan approved!${result.savedPath ? ` Saved to: ${result.savedPath}` : ""}`;
+            return planApproveFeedback(result.feedback, result.savedPath);
           } else {
             return planDenyFeedback(result.feedback || "", "submit_plan", {
               planFilePath: sourceFilePath,
