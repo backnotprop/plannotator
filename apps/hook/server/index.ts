@@ -1,7 +1,7 @@
 /**
  * Plannotator CLI for Claude Code & Copilot CLI
  *
- * Supports seven modes:
+ * Supports nine modes:
  *
  * 1. Plan Review (default, no args):
  *    - Spawned by ExitPlanMode hook (Claude Code)
@@ -36,6 +36,16 @@
  * 7. Copilot Last (`plannotator copilot-last`):
  *    - Annotate the last assistant message from a Copilot CLI session
  *    - Parses events.jsonl from session state
+ *
+ * 8. Annotate Hook (`plannotator annotate-hook`):
+ *    - Spawned by PreToolUse hook when Bash(plannotator annotate *) fires
+ *    - Reads tool_input.command from stdin JSON, extracts file path
+ *    - Runs annotation server (same as mode 3), outputs PreToolUse deny decision
+ *
+ * 9. Review Hook (`plannotator review-hook`):
+ *    - Spawned by PreToolUse hook when Bash(plannotator review*) fires
+ *    - Reads tool_input.command from stdin JSON, extracts review args
+ *    - Runs review server (same as mode 2), outputs PreToolUse deny decision
  *
  * Global flags:
  *   --browser <name>   - Override which browser to open (e.g. "Google Chrome")
