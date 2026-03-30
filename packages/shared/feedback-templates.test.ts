@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { planDenyFeedback, planApproveFeedback } from "./feedback-templates";
+import { planDenyFeedback, planApproveFeedback, DECISIONS_LOG_NOTE } from "./feedback-templates";
 
 describe("feedback-templates", () => {
   /**
@@ -87,14 +87,36 @@ describe("context anchoring", () => {
   });
 
   /**
-   * Approval with notes must include both the user's notes and the
-   * Decisions Log reminder — neither should displace the other.
+   * Approval with notes must signal "with notes" in the header so the
+   * agent knows content follows, and include both the notes and the
+   * Decisions Log reminder.
    */
   test("plan approve with notes includes both notes and Decisions Log reminder", () => {
     const result = planApproveFeedback("Use the adapter pattern here.");
+    expect(result).toContain("Plan approved with notes!");
     expect(result).toContain("Implementation Notes");
     expect(result).toContain("Use the adapter pattern here.");
     expect(result).toContain("Decisions Log");
+  });
+
+  /**
+   * Approval without notes should NOT say "with notes".
+   */
+  test("plan approve without notes does not include 'with notes' in header", () => {
+    const result = planApproveFeedback();
+    expect(result).toContain("Plan approved!");
+    expect(result).not.toContain("with notes");
+  });
+
+  /**
+   * DECISIONS_LOG_NOTE is exported as a named constant so Pi and other
+   * integrations that compose their own approval messages can include it
+   * without duplicating the text.
+   */
+  test("DECISIONS_LOG_NOTE is a non-empty string containing 'Decisions Log'", () => {
+    expect(typeof DECISIONS_LOG_NOTE).toBe("string");
+    expect(DECISIONS_LOG_NOTE.length).toBeGreaterThan(0);
+    expect(DECISIONS_LOG_NOTE).toContain("Decisions Log");
   });
 
   /**

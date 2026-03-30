@@ -9,17 +9,23 @@ export interface PlanDenyFeedbackOptions {
   planFilePath?: string;
 }
 
+/**
+ * Appended to all approval messages so the agent knows to carry the
+ * Decisions Log forward into implementation.
+ */
+export const DECISIONS_LOG_NOTE = `\n\nIf your plan contains a \`## Decisions Log\`, keep it as a reference during implementation — it documents the rejected alternatives that shaped this design.`;
+
 export const planApproveFeedback = (
   notes?: string,
   savedPath?: string,
 ): string => {
+  const header = `Plan approved${notes ? " with notes" : ""}!`;
   const savedNote = savedPath ? `\nSaved to: ${savedPath}` : "";
   const notesSection = notes
     ? `\n\n## Implementation Notes\n\nThe user approved your plan but added the following notes to consider during implementation:\n\n${notes}\n\nProceed with implementation, incorporating these notes where applicable.`
     : "";
-  const decisionsLogNote = `\n\nIf your plan contains a \`## Decisions Log\`, keep it as a reference during implementation — it documents the rejected alternatives that shaped this design.`;
 
-  return `Plan approved!${savedNote}${notesSection}${decisionsLogNote}`;
+  return `${header}${savedNote}${notesSection}${DECISIONS_LOG_NOTE}`;
 };
 
 export const planDenyFeedback = (
@@ -31,7 +37,7 @@ export const planDenyFeedback = (
     ? `- Your plan is saved at: ${options.planFilePath}\n  You can edit this file to make targeted changes, then pass its path to ${toolName}.\n`
     : "";
 
-  const contextAnchoringInstructions = `\n## Context Anchoring\n\nBefore revising your plan:\n1. Add (or update) a \`## Decisions Log\` section at the bottom of the plan.\n2. For each rejected approach from this feedback, add an entry:\n   - **Rejected:** [brief description of the rejected approach]  **Why:** [reason from this feedback]\n3. Do NOT re-propose approaches already listed in the Decisions Log — it is your cross-session memory.\n`;
+  const contextAnchoringInstructions = `\n## Context Anchoring\n\nBefore revising your plan:\n1. Add (or update) a \`## Decisions Log\` section at the bottom of the plan.\n2. For each rejected approach from this feedback, add an entry:\n   - **Rejected:** [brief description of the rejected approach]  **Why:** [reason from this feedback]\n3. Once added, do NOT re-propose approaches listed in the Decisions Log — it is your cross-session memory.\n`;
 
   return `YOUR PLAN WAS NOT APPROVED.\n\nYou MUST revise the plan to address ALL of the feedback below before calling ${toolName} again.\n\nRules:\n${planFileRule}- Do not resubmit the same plan unchanged.\n- Do NOT change the plan title (first # heading) unless the user explicitly asks you to.\n${contextAnchoringInstructions}\n${feedback || "Plan changes requested"}`;
 };

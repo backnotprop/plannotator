@@ -34,7 +34,7 @@ import {
 	markCompletedSteps,
 	parseChecklist,
 } from "./generated/checklist.js";
-import { planDenyFeedback } from "./generated/feedback-templates.js";
+import { planDenyFeedback, DECISIONS_LOG_NOTE } from "./generated/feedback-templates.js";
 import { hasMarkdownFiles } from "./generated/resolve-file.js";
 import { FILE_BROWSER_EXCLUDED } from "./generated/reference-common.js";
 import { openBrowser } from "./server/network.js";
@@ -666,7 +666,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 						content: [
 							{
 								type: "text",
-								text: `Plan approved with notes! You now have full tool access (read, bash, edit, write). Execute the plan in ${planFilePath}. ${doneMsg}\n\n## Implementation Notes\n\nThe user approved your plan but added the following notes to consider during implementation:\n\n${result.feedback}\n\nProceed with implementation, incorporating these notes where applicable.`,
+								text: `Plan approved with notes! You now have full tool access (read, bash, edit, write). Execute the plan in ${planFilePath}. ${doneMsg}\n\n## Implementation Notes\n\nThe user approved your plan but added the following notes to consider during implementation:\n\n${result.feedback}\n\nProceed with implementation, incorporating these notes where applicable.${DECISIONS_LOG_NOTE}`,
 							},
 						],
 						details: { approved: true, feedback: result.feedback },
@@ -677,7 +677,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 					content: [
 						{
 							type: "text",
-							text: `Plan approved. You now have full tool access (read, bash, edit, write). Execute the plan in ${planFilePath}. ${doneMsg}`,
+							text: `Plan approved. You now have full tool access (read, bash, edit, write). Execute the plan in ${planFilePath}. ${doneMsg}${DECISIONS_LOG_NOTE}`,
 						},
 					],
 					details: { approved: true },
