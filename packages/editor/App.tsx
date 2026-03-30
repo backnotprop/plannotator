@@ -930,7 +930,7 @@ const App: React.FC = () => {
   const callbackConfig = React.useMemo(() => getCallbackConfig(), []);
 
   const callCallback = React.useCallback(async (action: CallbackAction) => {
-    if (!callbackConfig || isSubmitting) return;
+    if (!callbackConfig || isSubmitting || !shareUrl) return;
     setIsSubmitting(true);
     try {
       const toast = await executeCallback(action, callbackConfig, shareUrl);
@@ -1140,13 +1140,13 @@ const App: React.FC = () => {
                 <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
                 <FeedbackButton
                   onClick={handleCallbackFeedback}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || !shareUrl}
                   isLoading={isSubmitting}
                   title="Send feedback to bot"
                 />
                 <ApproveButton
                   onClick={handleCallbackApprove}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || !shareUrl}
                   isLoading={isSubmitting}
                   title="Approve design and notify bot"
                 />

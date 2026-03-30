@@ -182,7 +182,8 @@ export async function generateShareUrl(
  * Returns null if no valid hash or parsing fails
  */
 export async function parseShareHash(): Promise<SharePayload | null> {
-  const hash = window.location.hash.slice(1); // Remove leading #
+  const raw = window.location.hash.slice(1); // Remove leading #
+  const hash = raw.split('?')[0]; // Strip callback params (?cb=...&ct=...)
 
   if (!hash) {
     return null;

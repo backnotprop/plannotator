@@ -71,6 +71,17 @@ describe("getCallbackConfig", () => {
     expect(getCallbackConfig(loc(`https://share.plannotator.ai/?cb=${encodeURIComponent("javascript:alert(1)")}&ct=tok`))).toBeNull();
   });
 
+  test("preserves percent-encoded chars in callback URL query params", () => {
+    const presignedUrl =
+      "https://s3.amazonaws.com/bucket/cb?X-Amz-Signature=abc%2Bdef%2Fghi%3D";
+    const result = getCallbackConfig(
+      loc(`https://share.plannotator.ai/?cb=${encodeURIComponent(presignedUrl)}&ct=tok-presigned`),
+    );
+    expect(result).not.toBeNull();
+    expect(result!.callbackUrl).toBe(presignedUrl);
+    expect(result!.token).toBe("tok-presigned");
+  });
+
   test("rejects malformed URL", () => {
     expect(getCallbackConfig(loc(`https://share.plannotator.ai/?cb=not-a-url&ct=tok`))).toBeNull();
   });

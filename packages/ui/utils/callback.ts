@@ -50,15 +50,14 @@ export function getCallbackConfig(
 
   if (!cb || !ct) return null;
 
-  const decoded = decodeURIComponent(cb);
   try {
-    const { protocol } = new URL(decoded);
+    const { protocol } = new URL(cb);
     if (protocol !== "https:" && protocol !== "http:") return null;
   } catch {
     return null; // malformed URL
   }
 
-  return { callbackUrl: decoded, token: ct };
+  return { callbackUrl: cb, token: ct };
 }
 
 /**
