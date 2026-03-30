@@ -23,6 +23,11 @@ Used during plan review (`ExitPlanMode` hook).
 | `/api/upload` | POST | Upload an image, returns `{ path, originalName }` |
 | `/api/obsidian/vaults` | GET | Detect available Obsidian vaults |
 | `/api/save-notes` | POST | Save plan to Obsidian/Bear on demand |
+| `/api/external-annotations/stream` | GET | SSE stream for real-time external annotations |
+| `/api/external-annotations` | GET | Snapshot of external annotations (`?since=N` for version gating) |
+| `/api/external-annotations` | POST | Add external annotations (single or batch) |
+| `/api/external-annotations` | PATCH | Update annotation fields (`?id=`) |
+| `/api/external-annotations` | DELETE | Remove by `?id=`, `?source=`, or clear all |
 
 ### GET `/api/plan`
 
@@ -74,6 +79,11 @@ Used during code review (`/plannotator-review`).
 | `/api/feedback` | POST | Submit review feedback |
 | `/api/image` | GET | Serve a local image by path |
 | `/api/upload` | POST | Upload an image attachment |
+| `/api/external-annotations/stream` | GET | SSE stream for real-time external annotations |
+| `/api/external-annotations` | GET | Snapshot of external annotations (`?since=N` for version gating) |
+| `/api/external-annotations` | POST | Add external annotations (single or batch) |
+| `/api/external-annotations` | PATCH | Update annotation fields (`?id=`) |
+| `/api/external-annotations` | DELETE | Remove by `?id=`, `?source=`, or clear all |
 
 ### GET `/api/diff`
 
@@ -109,6 +119,11 @@ Used during file annotation (`/plannotator-annotate`).
 | `/api/feedback` | POST | Submit annotation feedback |
 | `/api/image` | GET | Serve a local image by path |
 | `/api/upload` | POST | Upload an image attachment |
+| `/api/external-annotations/stream` | GET | SSE stream for real-time external annotations |
+| `/api/external-annotations` | GET | Snapshot of external annotations (`?since=N` for version gating) |
+| `/api/external-annotations` | POST | Add external annotations (single or batch) |
+| `/api/external-annotations` | PATCH | Update annotation fields (`?id=`) |
+| `/api/external-annotations` | DELETE | Remove by `?id=`, `?source=`, or clear all |
 
 ### GET `/api/plan`
 
@@ -172,3 +187,45 @@ Returns:
 Or: `{ "error": "Paste not found or expired" }` (404)
 
 Cached for 1 hour (`Cache-Control: public, max-age=3600`).
+
+## External annotations
+
+Available on all three servers (plan, review, annotate). See the [External Annotations API](/docs/integrations/external-annotations-api/) guide for a full overview.
+
+### POST `/api/external-annotations`
+
+Single annotation:
+
+```json
+{
+  "source": "eslint",
+  "type": "concern",
+  "filePath": "src/utils.ts",
+  "lineStart": 10,
+  "lineEnd": 12,
+  "text": "Possible null reference"
+}
+```
+
+Batch:
+
+```json
+{
+  "annotations": [
+    { "source": "eslint", "type": "concern", "filePath": "src/a.ts", "lineStart": 5, "lineEnd": 5, "text": "Unused variable" },
+    { "source": "eslint", "type": "concern", "filePath": "src/b.ts", "lineStart": 12, "lineEnd": 14, "text": "Missing error handling" }
+  ]
+}
+```
+
+Returns: `{ "ids": ["<uuid>", ...] }` (201 Created)
+
+### DELETE `/api/external-annotations`
+
+Remove a single annotation: `DELETE /api/external-annotations?id=<uuid>`
+
+Remove all annotations from a source: `DELETE /api/external-annotations?source=eslint`
+
+Clear all: `DELETE /api/external-annotations`
+
+Returns: `{ "ok": true, "removed": <count> }`
