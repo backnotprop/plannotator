@@ -18,5 +18,7 @@ export const planDenyFeedback = (
     ? `- Your plan is saved at: ${options.planFilePath}\n  You can edit this file to make targeted changes, then pass its path to ${toolName}.\n`
     : "";
 
-  return `YOUR PLAN WAS NOT APPROVED.\n\nYou MUST revise the plan to address ALL of the feedback below before calling ${toolName} again.\n\nRules:\n${planFileRule}- Do not resubmit the same plan unchanged.\n- Do NOT change the plan title (first # heading) unless the user explicitly asks you to.\n\n${feedback || "Plan changes requested"}`;
+  const contextAnchoringInstructions = `\n## Context Anchoring\n\nBefore revising your plan:\n1. Add (or update) a \`## Decisions Log\` section at the bottom of the plan.\n2. For each rejected approach from this feedback, add an entry:\n   - **Rejected:** [brief description of the rejected approach]  **Why:** [reason from this feedback]\n3. Do NOT re-propose approaches already listed in the Decisions Log — it is your cross-session memory.\n`;
+
+  return `YOUR PLAN WAS NOT APPROVED.\n\nYou MUST revise the plan to address ALL of the feedback below before calling ${toolName} again.\n\nRules:\n${planFileRule}- Do not resubmit the same plan unchanged.\n- Do NOT change the plan title (first # heading) unless the user explicitly asks you to.\n${contextAnchoringInstructions}\n${feedback || "Plan changes requested"}`;
 };
