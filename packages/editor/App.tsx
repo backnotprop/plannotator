@@ -1135,7 +1135,7 @@ const App: React.FC = () => {
 
           <div className="flex items-center gap-1 md:gap-2">
             {/* Bot callback buttons — only shown when ?cb=&ct= params are present */}
-            {callbackConfig && !isApiMode && (
+            {callbackConfig && !isApiMode && isSharedSession && (
               <>
                 <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
                 <FeedbackButton
