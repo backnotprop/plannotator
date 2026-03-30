@@ -247,6 +247,7 @@ export async function startReviewServer(
     try {
       server = Bun.serve({
         port: configuredPort,
+        idleTimeout: 0,
 
         async fetch(req) {
           const url = new URL(req.url);
