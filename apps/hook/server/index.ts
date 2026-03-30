@@ -422,6 +422,94 @@ if (args[0] === "sessions") {
   }
   process.exit(0);
 
+} else if (args[0] === "annotate-hook") {
+  // ============================================
+  // ANNOTATE HOOK MODE (PreToolUse)
+  // ============================================
+  // Invoked by PreToolUse hook — reads stdin JSON, runs annotation server,
+  // outputs PreToolUse deny decision with feedback.
+
+  const { parseHookStdin, formatPreToolUseDeny } = await import("./hook-stdin");
+
+  let stdinText: string;
+  try {
+    stdinText = await Bun.stdin.text();
+  } catch {
+    console.error("Failed to read stdin");
+    process.exit(1);
+  }
+
+  let hookInput: ReturnType<typeof parseHookStdin>;
+  try {
+    hookInput = parseHookStdin(stdinText);
+  } catch (err) {
+    console.error(
+      `Failed to parse hook stdin: ${err instanceof Error ? err.message : err}`
+    );
+    process.exit(1);
+  }
+
+  // Extract file path: strip "plannotator annotate " prefix from the command
+  const commandArgs = hookInput.command.replace(/^plannotator\s+annotate\s+/, "").trim();
+  if (!commandArgs) {
+    console.error("No file path found in hook command");
+    process.exit(1);
+  }
+
+  const projectRoot = hookInput.cwd;
+
+  try {
+    const feedback = await runAnnotateFlow(commandArgs, projectRoot);
+    console.log(formatPreToolUseDeny(feedback));
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+  process.exit(0);
+
+} else if (args[0] === "review-hook") {
+  // ============================================
+  // REVIEW HOOK MODE (PreToolUse)
+  // ============================================
+  // Invoked by PreToolUse hook — reads stdin JSON, runs review server,
+  // outputs PreToolUse deny decision with feedback.
+
+  const { parseHookStdin, formatPreToolUseDeny } = await import("./hook-stdin");
+
+  let stdinText: string;
+  try {
+    stdinText = await Bun.stdin.text();
+  } catch {
+    console.error("Failed to read stdin");
+    process.exit(1);
+  }
+
+  let hookInput: ReturnType<typeof parseHookStdin>;
+  try {
+    hookInput = parseHookStdin(stdinText);
+  } catch (err) {
+    console.error(
+      `Failed to parse hook stdin: ${err instanceof Error ? err.message : err}`
+    );
+    process.exit(1);
+  }
+
+  // Extract review arg: strip "plannotator review " prefix from the command
+  // May be a PR URL or empty (local diff)
+  const commandArgs = hookInput.command.replace(/^plannotator\s+review\s*/, "").trim();
+  const reviewArg = commandArgs || undefined;
+
+  const projectRoot = hookInput.cwd;
+
+  try {
+    const feedback = await runReviewFlow(reviewArg, projectRoot);
+    console.log(formatPreToolUseDeny(feedback));
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+  process.exit(0);
+
 } else if (args[0] === "annotate-last" || args[0] === "last") {
   // ============================================
   // ANNOTATE LAST MESSAGE MODE
