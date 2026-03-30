@@ -4,6 +4,7 @@ import { ThemeProvider, useTheme } from '@plannotator/ui/components/ThemeProvide
 import { ModeToggle } from '@plannotator/ui/components/ModeToggle';
 import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
 import { Settings } from '@plannotator/ui/components/Settings';
+import { FeedbackButton, ApproveButton } from '@plannotator/ui/components/ToolbarButtons';
 import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
 import { storage } from '@plannotator/ui/utils/storage';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
@@ -1242,7 +1243,7 @@ const ReviewApp: React.FC = () => {
                 )}
 
                 {/* Send Feedback button — always the same label */}
-                <button
+                <FeedbackButton
                   onClick={() => {
                     if (platformMode) {
                       setPlatformGeneralComment('');
@@ -1255,28 +1256,16 @@ const ReviewApp: React.FC = () => {
                     isSendingFeedback || isApproving || isPlatformActioning ||
                     (!platformMode && totalAnnotationCount === 0)
                   }
-                  className={`p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium transition-all ${
-                    isSendingFeedback || isApproving || isPlatformActioning
-                      ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
-                      : !platformMode && totalAnnotationCount === 0
-                        ? 'opacity-50 cursor-not-allowed bg-accent/10 text-accent/50'
-                        : 'bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30'
-                  }`}
+                  isLoading={isSendingFeedback || isPlatformActioning}
+                  muted={!platformMode && totalAnnotationCount === 0 && !isSendingFeedback && !isApproving && !isPlatformActioning}
+                  label={platformMode ? 'Post Comments' : 'Send Feedback'}
+                  loadingLabel={platformMode ? 'Posting...' : 'Sending...'}
                   title={!platformMode && totalAnnotationCount === 0 ? "Add annotations to send feedback" : "Send feedback"}
-                >
-                  <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                  </svg>
-                  <span className="hidden md:inline">{
-                    isSendingFeedback || isPlatformActioning
-                      ? (platformMode ? 'Posting...' : 'Sending...')
-                      : (platformMode ? 'Post Comments' : 'Send Feedback')
-                  }</span>
-                </button>
+                />
 
                 {/* Approve button — always the same label */}
                 <div className="relative group/approve">
-                  <button
+                  <ApproveButton
                     onClick={() => {
                       if (platformMode) {
                         if (platformUser && prMetadata?.author === platformUser) return;
@@ -1294,24 +1283,15 @@ const ReviewApp: React.FC = () => {
                       isSendingFeedback || isApproving || isPlatformActioning ||
                       (platformMode && !!platformUser && prMetadata?.author === platformUser)
                     }
-                    className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${
-                      isSendingFeedback || isApproving || isPlatformActioning
-                        ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
-                        : platformMode && platformUser && prMetadata?.author === platformUser
-                          ? 'opacity-40 cursor-not-allowed bg-muted text-muted-foreground'
-                          : !platformMode && totalAnnotationCount > 0
-                            ? 'bg-success/50 text-success-foreground/70 hover:bg-success hover:text-success-foreground'
-                            : 'bg-success text-success-foreground hover:opacity-90'
-                    }`}
+                    isLoading={isApproving}
+                    dimmed={!platformMode && totalAnnotationCount > 0}
+                    muted={platformMode && !!platformUser && prMetadata?.author === platformUser && !isSendingFeedback && !isApproving && !isPlatformActioning}
                     title={
                       platformMode && platformUser && prMetadata?.author === platformUser
                         ? `You can't approve your own ${mrLabel}`
                         : "Approve - no changes needed"
                     }
-                  >
-                    <span className="md:hidden">{isApproving ? '...' : 'OK'}</span>
-                    <span className="hidden md:inline">{isApproving ? 'Approving...' : 'Approve'}</span>
-                  </button>
+                  />
                   {/* Tooltip: own PR warning OR annotations-lost warning */}
                   {platformMode && platformUser && prMetadata?.author === platformUser ? (
                     <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-48 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
