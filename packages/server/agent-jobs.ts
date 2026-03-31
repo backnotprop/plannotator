@@ -139,7 +139,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
         entry.info.status = exitCode === 0 ? "done" : "failed";
 
         // Capture stderr on failure
-        if (exitCode !== 0 && proc?.stderr) {
+        if (exitCode !== 0 && proc?.stderr && typeof proc.stderr !== "number") {
           try {
             const stderr = await new Response(proc.stderr).text();
             entry.info.error = stderr.slice(-500);
