@@ -36,6 +36,7 @@ import {
 } from "../generated/review-core.js";
 
 import { createEditorAnnotationHandler } from "./annotations.js";
+import { createAgentJobHandler } from "./agent-jobs.js";
 import { createExternalAnnotationHandler } from "./external-annotations.js";
 import {
 	handleDraftRequest,
@@ -145,10 +146,25 @@ export async function startReviewServer(options: {
 		: getRepoInfo();
 	const editorAnnotations = createEditorAnnotationHandler();
 	const externalAnnotations = createExternalAnnotationHandler("review");
+
 	let currentPatch = options.rawPatch;
 	let currentGitRef = options.gitRef;
 	let currentDiffType: DiffType = options.diffType || "uncommitted";
 	let currentError = options.error;
+
+	// Agent jobs — background process manager (late-binds serverUrl via getter)
+	let serverUrl = "";
+	const agentJobs = createAgentJobHandler({
+		mode: "review",
+		getServerUrl: () => serverUrl,
+		getCwd: () => {
+			if (currentDiffType.startsWith("worktree:")) {
+				const parsed = parseWorktreeDiffType(currentDiffType);
+				if (parsed) return parsed.path;
+			}
+			return options.gitContext?.cwd ?? process.cwd();
+		},
+	});
 	const sharingEnabled =
 		options.sharingEnabled ?? process.env.PLANNOTATOR_SHARE !== "disabled";
 	const shareBaseUrl =
@@ -519,6 +535,8 @@ export async function startReviewServer(options: {
 			return;
 		} else if (await externalAnnotations.handle(req, res, url)) {
 			return;
+		} else if (await agentJobs.handle(req, res, url)) {
+			return;
 		} else if (aiEndpoints && url.pathname.startsWith("/api/ai/")) {
 			const handler = aiEndpoints[url.pathname];
 			if (handler) {
@@ -568,13 +586,16 @@ export async function startReviewServer(options: {
 	});
 
 	const { port, portSource } = await listenOnPort(server);
+	serverUrl = `http://localhost:${port}`;
+	process.on("exit", () => agentJobs.killAll());
 
 	return {
 		port,
 		portSource,
-		url: `http://localhost:${port}`,
+		url: serverUrl,
 		waitForDecision: () => decisionPromise,
 		stop: () => {
+			agentJobs.killAll();
 			aiSessionManager?.disposeAll();
 			aiRegistry?.disposeAll();
 			server.close();
