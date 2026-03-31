@@ -75,9 +75,23 @@ export async function isWSL(): Promise<boolean> {
  *
  * Fails silently if browser can't be opened
  */
-export async function openBrowser(url: string): Promise<boolean> {
+export function shouldTryRemoteBrowserFallback(isRemote: boolean): boolean {
+  return isRemote && !process.env.PLANNOTATOR_BROWSER && !process.env.BROWSER;
+}
+
+export async function openBrowser(
+  url: string,
+  options?: { isRemote?: boolean }
+): Promise<boolean> {
   try {
     const browser = process.env.PLANNOTATOR_BROWSER || process.env.BROWSER;
+    if (shouldTryRemoteBrowserFallback(options?.isRemote ?? false)) {
+      const openedViaIpc = await tryVscodeIpc(url);
+      if (openedViaIpc) {
+        return true;
+      }
+    }
+
     const platform = process.platform;
     const wsl = await isWSL();
 

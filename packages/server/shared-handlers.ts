@@ -135,11 +135,11 @@ export function handleFavicon(): Response {
   });
 }
 
-/** Open browser for local sessions or when a custom handler (e.g. VS Code extension) is configured. */
+/** Attempt to open the browser for the session URL. */
 export async function handleServerReady(
   url: string,
   isRemote: boolean,
   _port: number,
 ): Promise<void> {
-  await openBrowser(url);
+  await openBrowser(url, { isRemote });
 }

@@ -12,7 +12,7 @@ All Plannotator environment variables and their defaults.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PLANNOTATOR_REMOTE` | auto-detect | Set to `1` or `true` to force remote mode. Uses fixed port and skips browser auto-open. |
+| `PLANNOTATOR_REMOTE` | auto-detect | Set to `1` or `true` to force remote mode, `0` or `false` to force local mode, or leave unset to auto-detect via `SSH_TTY` / `SSH_CONNECTION`. Uses a fixed port in remote mode; browser-opening behavior depends on the environment. |
 | `PLANNOTATOR_PORT` | random (local) / `19432` (remote) | Fixed server port. When not set, local sessions use a random port; remote sessions default to `19432`. |
 | `PLANNOTATOR_BROWSER` | system default | Custom browser to open the UI in. macOS: app name or path. Linux/Windows: executable path. Can also be a script. Takes priority over `BROWSER`. Also settable per-invocation with `--browser`. |
 | `BROWSER` | (none) | Standard env var for specifying a browser. VS Code sets this automatically in devcontainers. Used as fallback when `PLANNOTATOR_BROWSER` is not set. |
@@ -46,11 +46,11 @@ When running your own paste service binary, these variables configure it:
 
 ## Remote mode behavior
 
-When `PLANNOTATOR_REMOTE=1` or SSH is detected:
+When remote mode is forced with `PLANNOTATOR_REMOTE=1` / `true`, or SSH is detected while `PLANNOTATOR_REMOTE` is unset:
 
 - Server binds to `PLANNOTATOR_PORT` (default `19432`) instead of a random port
-- Browser auto-open is skipped
-- The URL is printed to stderr for manual access
+- Browser-opening behavior depends on the environment and configured browser handler
+- In headless setups, you may need to open the forwarded URL manually
 
 ### Legacy SSH detection
 
@@ -61,7 +61,7 @@ These environment variables are still detected for backwards compatibility:
 | `SSH_TTY` | Set by SSH when a TTY is allocated |
 | `SSH_CONNECTION` | Set by SSH with connection details |
 
-If either is present, Plannotator enables remote mode automatically. Prefer `PLANNOTATOR_REMOTE=1` for explicit control.
+If either is present, Plannotator enables remote mode automatically when `PLANNOTATOR_REMOTE` is unset. Set `PLANNOTATOR_REMOTE=1` / `true` to force remote mode or `0` / `false` to force local mode.
 
 ## Port resolution order
 

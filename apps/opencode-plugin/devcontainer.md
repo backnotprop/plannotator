@@ -18,7 +18,7 @@ Add these to your `devcontainer.json`:
 
 | Variable | Purpose |
 |----------|---------|
-| `PLANNOTATOR_REMOTE=1` | Tells Plannotator not to open a browser (required in containers) |
+| `PLANNOTATOR_REMOTE=1` | Forces remote mode for container-friendly port/browser handling (required in containers) |
 | `PLANNOTATOR_PORT=9999` | Fixed port for the UI (required for port forwarding) |
 
 Both are required. Just setting the port isn't enough.
@@ -35,7 +35,7 @@ Ensure port 9999 (or your chosen port) is forwarded to your host. In VS Code dev
 4. Open `http://localhost:9999` in your host browser
 5. Approve or deny the plan
 
-**Note:** There's no browser auto-open or notification in remote mode. You'll need to manually navigate to the URL when you see the agent call `submit_plan`.
+**Note:** Browser opening depends on your container/browser setup. If nothing opens automatically, navigate to the forwarded URL manually when you see the agent call `submit_plan`.
 
 ## OpenCode Web
 
@@ -49,7 +49,7 @@ Ensure port 9999 (or your chosen port) is forwarded to your host. In VS Code dev
 
 ## Legacy Support
 
-If your environment already has `SSH_TTY` or `SSH_CONNECTION` set (common in SSH sessions), Plannotator will detect remote mode automatically. The `PLANNOTATOR_REMOTE` env var is preferred for Docker/devcontainer setups where those aren't present.
+If your environment already has `SSH_TTY` or `SSH_CONNECTION` set (common in SSH sessions), Plannotator will detect remote mode automatically when `PLANNOTATOR_REMOTE` is unset. You can also force local mode with `PLANNOTATOR_REMOTE=false` or `0`.
 
 ## Troubleshooting
 

@@ -75,14 +75,14 @@ When Claude Code calls `ExitPlanMode`, this hook intercepts and:
 
 | Variable | Description |
 |----------|-------------|
-| `PLANNOTATOR_REMOTE` | Set to `1` for remote mode (devcontainer, SSH). Uses fixed port and skips browser open. |
+| `PLANNOTATOR_REMOTE` | Set to `1` / `true` for remote mode, `0` / `false` for local mode, or leave unset for SSH auto-detection. Uses a fixed port in remote mode; browser-opening behavior depends on the environment. |
 | `PLANNOTATOR_PORT` | Fixed port to use. Default: random locally, `19432` for remote sessions. |
 | `PLANNOTATOR_BROWSER` | Custom browser to open plans in. macOS: app name or path. Linux/Windows: executable path. |
 | `PLANNOTATOR_SHARE_URL` | Custom share portal URL for self-hosting. Default: `https://share.plannotator.ai`. |
 
 ## Remote / Devcontainer Usage
 
-When running Claude Code in a remote environment (SSH, devcontainer, WSL), set these environment variables:
+When running Claude Code in a remote environment (SSH, devcontainer, WSL), set `PLANNOTATOR_REMOTE=1` (or `true`) and these environment variables:
 
 ```bash
 export PLANNOTATOR_REMOTE=1
@@ -91,7 +91,7 @@ export PLANNOTATOR_PORT=9999  # Choose a port you'll forward
 
 This tells Plannotator to:
 - Use a fixed port instead of a random one (so you can set up port forwarding)
-- Skip auto-opening the browser (since you'll open it manually on your local machine)
+- Use remote-friendly port/browser handling for forwarded environments
 - Print the URL to the terminal for you to access
 
 **Port forwarding in VS Code devcontainers:** The port should be automatically forwarded. Check the "Ports" tab.

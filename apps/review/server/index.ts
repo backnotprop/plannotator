@@ -11,7 +11,7 @@
  *   bun apps/review/server/index.ts HEAD~5..HEAD  # Commit range
  *
  * Environment variables:
- *   PLANNOTATOR_REMOTE - Set to "1" or "true" for remote mode
+ *   PLANNOTATOR_REMOTE - Set to "1"/"true" for remote, "0"/"false" for local
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
  */
 
@@ -70,7 +70,7 @@ const server = await startReviewServer({
     handleReviewServerReady(url, isRemote, port);
     console.error(`Code review at ${url}`);
     if (isRemote) {
-      console.error(`(Remote mode - manually open the URL above)`);
+      console.error(`(Remote mode detected — if no browser opens automatically, use the URL above)`);
     }
   },
 });

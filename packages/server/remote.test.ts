@@ -46,6 +46,32 @@ describe("isRemoteSession", () => {
     expect(isRemoteSession()).toBe(true);
   });
 
+  test("false when PLANNOTATOR_REMOTE=0", () => {
+    clearEnv();
+    process.env.PLANNOTATOR_REMOTE = "0";
+    expect(isRemoteSession()).toBe(false);
+  });
+
+  test("false when PLANNOTATOR_REMOTE=false", () => {
+    clearEnv();
+    process.env.PLANNOTATOR_REMOTE = "false";
+    expect(isRemoteSession()).toBe(false);
+  });
+
+  test("PLANNOTATOR_REMOTE=false overrides SSH_TTY", () => {
+    clearEnv();
+    process.env.PLANNOTATOR_REMOTE = "false";
+    process.env.SSH_TTY = "/dev/pts/0";
+    expect(isRemoteSession()).toBe(false);
+  });
+
+  test("PLANNOTATOR_REMOTE=0 overrides SSH_CONNECTION", () => {
+    clearEnv();
+    process.env.PLANNOTATOR_REMOTE = "0";
+    process.env.SSH_CONNECTION = "192.168.1.1 12345 192.168.1.2 22";
+    expect(isRemoteSession()).toBe(false);
+  });
+
   test("true when SSH_TTY is set (legacy)", () => {
     clearEnv();
     process.env.SSH_TTY = "/dev/pts/0";
@@ -69,6 +95,13 @@ describe("getServerPort", () => {
     clearEnv();
     process.env.PLANNOTATOR_REMOTE = "1";
     expect(getServerPort()).toBe(19432);
+  });
+
+  test("returns 0 when PLANNOTATOR_REMOTE=false overrides SSH", () => {
+    clearEnv();
+    process.env.PLANNOTATOR_REMOTE = "false";
+    process.env.SSH_TTY = "/dev/pts/0";
+    expect(getServerPort()).toBe(0);
   });
 
   test("explicit PLANNOTATOR_PORT overrides everything", () => {

@@ -11,12 +11,29 @@ const DEFAULT_REMOTE_PORT = 19432;
 
 /**
  * Check if running in a remote session (SSH, devcontainer, etc.)
- * Honors PLANNOTATOR_REMOTE env var, or detects SSH_TTY/SSH_CONNECTION.
+ * Honors PLANNOTATOR_REMOTE as a tri-state override, or detects SSH_TTY/SSH_CONNECTION.
  */
-function isRemoteSession(): boolean {
+function getRemoteOverride(): boolean | null {
 	const remote = process.env.PLANNOTATOR_REMOTE;
+	if (remote === undefined) {
+		return null;
+	}
+
 	if (remote === "1" || remote?.toLowerCase() === "true") {
 		return true;
+	}
+
+	if (remote === "0" || remote?.toLowerCase() === "false") {
+		return false;
+	}
+
+	return null;
+}
+
+export function isRemoteSession(): boolean {
+	const remoteOverride = getRemoteOverride();
+	if (remoteOverride !== null) {
+		return remoteOverride;
 	}
 	// Legacy SSH detection
 	if (process.env.SSH_TTY || process.env.SSH_CONNECTION) {
@@ -32,7 +49,7 @@ function isRemoteSession(): boolean {
  * - Local sessions use random port
  * Returns { port, portSource } so caller can notify user if needed.
  */
-function getServerPort(): {
+export function getServerPort(): {
 	port: number;
 	portSource: "env" | "remote-default" | "random";
 } {
@@ -98,7 +115,7 @@ export async function listenOnPort(
 
 /**
  * Open URL in system browser (Node-compatible, no Bun $ dependency).
- * Honors PLANNOTATOR_BROWSER and BROWSER env vars, matching packages/server/browser.ts.
+ * Honors PLANNOTATOR_BROWSER and BROWSER env vars.
  * Returns { opened: true } if browser was opened, { opened: false, isRemote: true, url } if remote session.
  */
 export function openBrowser(url: string): {
