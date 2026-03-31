@@ -17,6 +17,7 @@ import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraft
 import { contentHash, deleteDraft } from "./draft";
 import { createEditorAnnotationHandler } from "./editor-annotations";
 import { createExternalAnnotationHandler } from "./external-annotations";
+import { createAgentJobHandler } from "./agent-jobs";
 import { saveConfig, detectGitUser, getServerConfig } from "./config";
 import { type PRMetadata, type PRReviewFileComment, fetchPRFileContent, fetchPRContext, submitPRReview, fetchPRViewedFiles, markPRFilesViewed, getPRUser, prRefFromMetadata, getDisplayRepo, getMRLabel, getMRNumberLabel } from "./pr";
 import { createAIEndpoints, ProviderRegistry, SessionManager, createProvider, type AIEndpoints, type PiSDKConfig } from "@plannotator/ai";
@@ -98,6 +99,14 @@ export async function startReviewServer(
   const draftKey = contentHash(options.rawPatch);
   const editorAnnotations = createEditorAnnotationHandler();
   const externalAnnotations = createExternalAnnotationHandler("review");
+
+  // Agent jobs — background process manager (late-binds serverUrl via getter)
+  let serverUrl = "";
+  const agentJobs = createAgentJobHandler({
+    mode: "review",
+    getServerUrl: () => serverUrl,
+    getCwd: () => gitContext?.cwd ?? process.cwd(),
+  });
 
   // Mutable state for diff switching
   let currentPatch = options.rawPatch;
@@ -448,6 +457,12 @@ export async function startReviewServer(
           });
           if (externalResponse) return externalResponse;
 
+          // API: Agent jobs (background review agents)
+          const agentResponse = await agentJobs.handle(req, url, {
+            disableIdleTimeout: () => server.timeout(req, 0),
+          });
+          if (agentResponse) return agentResponse;
+
           // API: Submit review feedback
           if (url.pathname === "/api/feedback" && req.method === "POST") {
             try {
@@ -570,7 +585,8 @@ export async function startReviewServer(
   }
 
   const port = server.port!;
-  const serverUrl = `http://localhost:${port}`;
+  serverUrl = `http://localhost:${port}`;
+  process.on("exit", () => agentJobs.killAll());
 
   // Notify caller that server is ready
   if (onReady) {
@@ -583,6 +599,7 @@ export async function startReviewServer(
     isRemote,
     waitForDecision: () => decisionPromise,
     stop: () => {
+      agentJobs.killAll();
       aiSessionManager.disposeAll();
       aiRegistry.disposeAll();
       server.stop();
