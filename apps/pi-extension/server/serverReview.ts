@@ -587,7 +587,8 @@ export async function startReviewServer(options: {
 
 	const { port, portSource } = await listenOnPort(server);
 	serverUrl = `http://localhost:${port}`;
-	process.once("exit", () => agentJobs.killAll());
+	const exitHandler = () => agentJobs.killAll();
+	process.once("exit", exitHandler);
 
 	return {
 		port,
@@ -595,6 +596,7 @@ export async function startReviewServer(options: {
 		url: serverUrl,
 		waitForDecision: () => decisionPromise,
 		stop: () => {
+			process.removeListener("exit", exitHandler);
 			agentJobs.killAll();
 			aiSessionManager?.disposeAll();
 			aiRegistry?.disposeAll();

@@ -57,6 +57,8 @@ export function useAgentJobs(
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
+    receivedSnapshotRef.current = false;
+    fallbackRef.current = false;
 
     // --- SSE primary transport ---
     const es = new EventSource(STREAM_URL);
@@ -82,7 +84,8 @@ export function useAgentJobs(
             );
             break;
           case 'jobs:cleared':
-            setJobs([]);
+            // No-op: killAll() already broadcasts individual job:completed events
+            // for each killed job, so the UI updates incrementally.
             break;
         }
       } catch {

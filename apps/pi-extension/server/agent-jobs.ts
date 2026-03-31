@@ -320,7 +320,6 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 			// --- DELETE /api/agents/jobs (kill all) ---
 			if (url.pathname === JOBS && req.method === "DELETE") {
 				const count = killAll();
-				if (count > 0) broadcast({ type: "jobs:cleared" });
 				json(res, { ok: true, killed: count });
 				return true;
 			}

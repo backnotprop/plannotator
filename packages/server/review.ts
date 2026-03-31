@@ -592,7 +592,8 @@ export async function startReviewServer(
 
   const port = server.port!;
   serverUrl = `http://localhost:${port}`;
-  process.once("exit", () => agentJobs.killAll());
+  const exitHandler = () => agentJobs.killAll();
+  process.once("exit", exitHandler);
 
   // Notify caller that server is ready
   if (onReady) {
@@ -605,6 +606,7 @@ export async function startReviewServer(
     isRemote,
     waitForDecision: () => decisionPromise,
     stop: () => {
+      process.removeListener("exit", exitHandler);
       agentJobs.killAll();
       aiSessionManager.disposeAll();
       aiRegistry.disposeAll();
