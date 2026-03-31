@@ -12,11 +12,14 @@ import { PRCommentsTab } from './PRCommentsTab';
 import { PRChecksTab } from './PRChecksTab';
 import { AITab } from './AITab';
 import { SparklesIcon } from './SparklesIcon';
+import { ReviewAgentsIcon } from './ReviewAgentsIcon';
+import { AgentsTab } from '@plannotator/ui/components/AgentsTab';
 import type { PRMetadata } from '@plannotator/shared/pr-provider';
 import type { AIChatEntry } from '../hooks/useAIChat';
+import type { AgentJobInfo, AgentCapabilities } from '@plannotator/ui/types';
 import type { DiffFile } from '../types';
 
-type ReviewPanelTab = 'annotations' | 'ai' | 'summary' | 'comments' | 'checks';
+type ReviewPanelTab = 'annotations' | 'ai' | 'agents' | 'summary' | 'comments' | 'checks';
 
 interface ReviewPanelProps {
   isOpen: boolean;
@@ -48,6 +51,13 @@ interface ReviewPanelProps {
   aiConfig?: { providerId: string | null; model: string | null; reasoningEffort?: string | null };
   onAIConfigChange?: (config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => void;
   hasAISession?: boolean;
+  // Agent props
+  agentJobs?: AgentJobInfo[];
+  agentCapabilities?: AgentCapabilities | null;
+  onAgentLaunch?: (params: { provider?: string; command?: string[]; label?: string }) => void;
+  onAgentKillJob?: (id: string) => void;
+  onAgentKillAll?: () => void;
+  externalAnnotations?: Array<{ source?: string }>;
 }
 
 const SuggestionPreview: React.FC<{ code: string; originalCode?: string; language?: string }> = ({ code, originalCode, language }) => {
@@ -147,11 +157,19 @@ export const ReviewPanel: React.FC<ReviewPanelProps> = ({
   aiConfig,
   onAIConfigChange,
   hasAISession,
+  agentJobs,
+  agentCapabilities,
+  onAgentLaunch,
+  onAgentKillJob,
+  onAgentKillAll,
+  externalAnnotations,
 }) => {
   const totalCount = annotations.length + (editorAnnotations?.length ?? 0);
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<ReviewPanelTab>('annotations');
   const hasPRTabs = !!prMetadata;
+  const hasAgents = !!agentCapabilities?.available;
+  const runningAgentCount = (agentJobs ?? []).filter(j => j.status === 'running' || j.status === 'starting').length;
 
   // Allow parent to control the active tab (e.g., switch to AI tab on ask)
   useEffect(() => {
@@ -213,11 +231,16 @@ export const ReviewPanel: React.FC<ReviewPanelProps> = ({
         <div className="px-3 flex items-center border-b border-border/50" style={{ height: 'var(--panel-header-h)' }}>
           <div className="flex items-center gap-2 w-full">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              {activeTab === 'annotations' ? 'Annotations' : activeTab === 'ai' ? 'AI' : activeTab === 'summary' ? 'Summary' : activeTab === 'comments' ? 'Comments' : 'Checks'}
+              {activeTab === 'annotations' ? 'Annotations' : activeTab === 'ai' ? 'AI' : activeTab === 'agents' ? 'Review Agents' : activeTab === 'summary' ? 'Summary' : activeTab === 'comments' ? 'Comments' : 'Checks'}
             </h2>
             {activeTab === 'annotations' && totalCount > 0 && (
               <span className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
                 {totalCount}
+              </span>
+            )}
+            {activeTab === 'agents' && (agentJobs?.length ?? 0) > 0 && (
+              <span className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
+                {agentJobs!.length}
               </span>
             )}
             {activeTab === 'ai' && aiMessages.length > 0 && (
@@ -256,6 +279,24 @@ export const ReviewPanel: React.FC<ReviewPanelProps> = ({
                   <SparklesIcon className="w-3.5 h-3.5" />
                   {aiMessages.length > 0 && activeTab !== 'ai' && (
                     <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-primary" />
+                  )}
+                </button>
+              )}
+
+              {/* Agents tab (visible when agent capabilities available) */}
+              {hasAgents && (
+                <button
+                  onClick={() => handleTabChange('agents')}
+                  className={`relative flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors ${
+                    activeTab === 'agents'
+                      ? 'bg-primary/10 text-primary'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                  }`}
+                  title="Review Agents"
+                >
+                  <ReviewAgentsIcon />
+                  {runningAgentCount > 0 && activeTab !== 'agents' && (
+                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-primary animate-pulse" />
                   )}
                 </button>
               )}
@@ -415,8 +456,20 @@ export const ReviewPanel: React.FC<ReviewPanelProps> = ({
             />
           )}
 
+          {/* Agents tab */}
+          {activeTab === 'agents' && (
+            <AgentsTab
+              jobs={agentJobs ?? []}
+              capabilities={agentCapabilities ?? null}
+              onLaunch={onAgentLaunch ?? (() => {})}
+              onKillJob={onAgentKillJob ?? (() => {})}
+              onKillAll={onAgentKillAll ?? (() => {})}
+              externalAnnotations={externalAnnotations ?? []}
+            />
+          )}
+
           {/* PR tabs — loading / error / content */}
-          {activeTab !== 'annotations' && activeTab !== 'ai' && (
+          {activeTab !== 'annotations' && activeTab !== 'ai' && activeTab !== 'agents' && (
             <>
               {isPRContextLoading && (
                 <div className="flex items-center justify-center h-40">

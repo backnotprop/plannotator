@@ -29,6 +29,7 @@ import { extractLinesFromPatch } from './utils/patchParser';
 import { isTypingTarget, useReviewSearch } from './hooks/useReviewSearch';
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
 import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotations';
+import { useAgentJobs } from '@plannotator/ui/hooks/useAgentJobs';
 import { exportEditorAnnotations } from '@plannotator/ui/utils/parser';
 import { ResizeHandle } from '@plannotator/ui/components/ResizeHandle';
 import { DiffViewer } from './components/DiffViewer';
@@ -215,6 +216,7 @@ const ReviewApp: React.FC = () => {
   // The same !!origin proxy is used elsewhere in this file (draft hook, feedback guard, conditional UI)
   // so this should be addressed as a broader refactor.
   const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<CodeAnnotation>({ enabled: !!origin });
+  const agentJobs = useAgentJobs({ enabled: !!origin });
 
   // Merge local + SSE annotations, deduping draft-restored externals against
   // live SSE versions. Prefer the SSE version when both exist (same source,
@@ -1568,6 +1570,12 @@ const ReviewApp: React.FC = () => {
             aiConfig={aiConfig}
             onAIConfigChange={handleAIConfigChange}
             hasAISession={!!aiChat.sessionId}
+            agentJobs={agentJobs.jobs}
+            agentCapabilities={agentJobs.capabilities}
+            onAgentLaunch={agentJobs.launchJob}
+            onAgentKillJob={agentJobs.killJob}
+            onAgentKillAll={agentJobs.killAll}
+            externalAnnotations={externalAnnotations}
           />
         </div>
 

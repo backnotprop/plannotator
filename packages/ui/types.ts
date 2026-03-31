@@ -138,3 +138,11 @@ export type { EditorAnnotation } from '@plannotator/shared/types';
 export type {
   ExternalAnnotationEvent,
 } from '@plannotator/shared/external-annotation';
+
+export type {
+  AgentJobInfo,
+  AgentJobEvent,
+  AgentJobStatus,
+  AgentCapability,
+  AgentCapabilities,
+} from '@plannotator/shared/agent-jobs';
