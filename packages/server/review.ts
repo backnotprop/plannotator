@@ -100,19 +100,25 @@ export async function startReviewServer(
   const editorAnnotations = createEditorAnnotationHandler();
   const externalAnnotations = createExternalAnnotationHandler("review");
 
-  // Agent jobs — background process manager (late-binds serverUrl via getter)
-  let serverUrl = "";
-  const agentJobs = createAgentJobHandler({
-    mode: "review",
-    getServerUrl: () => serverUrl,
-    getCwd: () => gitContext?.cwd ?? process.cwd(),
-  });
-
   // Mutable state for diff switching
   let currentPatch = options.rawPatch;
   let currentGitRef = options.gitRef;
   let currentDiffType: DiffType = options.diffType || "uncommitted";
   let currentError = options.error;
+
+  // Agent jobs — background process manager (late-binds serverUrl via getter)
+  let serverUrl = "";
+  const agentJobs = createAgentJobHandler({
+    mode: "review",
+    getServerUrl: () => serverUrl,
+    getCwd: () => {
+      if (currentDiffType.startsWith("worktree:")) {
+        const parsed = parseWorktreeDiffType(currentDiffType);
+        if (parsed) return parsed.path;
+      }
+      return gitContext?.cwd ?? process.cwd();
+    },
+  });
 
   // AI provider setup (graceful — AI features degrade if SDK unavailable)
   const aiRegistry = new ProviderRegistry();

@@ -116,7 +116,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
     try {
       proc = Bun.spawn(command, {
         cwd: getCwd(),
-        stdout: "pipe",
+        stdout: "ignore",
         stderr: "pipe",
         env: {
           ...process.env,
@@ -129,8 +129,24 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
       jobs.set(id, { info, proc });
       broadcast({ type: "job:started", job: { ...info } });
 
+      // Drain stderr continuously to prevent pipe-full deadlock
+      let stderrBuf = "";
+      if (proc.stderr && typeof proc.stderr !== "number") {
+        (async () => {
+          try {
+            const reader = proc!.stderr as ReadableStream;
+            for await (const chunk of reader) {
+              const text = typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+              stderrBuf = (stderrBuf + text).slice(-500);
+            }
+          } catch {
+            // Stream closed or already consumed
+          }
+        })();
+      }
+
       // Monitor process exit
-      proc.exited.then(async (exitCode) => {
+      proc.exited.then((exitCode) => {
         const entry = jobs.get(id);
         if (!entry || isTerminalStatus(entry.info.status)) return;
 
@@ -138,14 +154,8 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
         entry.info.exitCode = exitCode;
         entry.info.status = exitCode === 0 ? "done" : "failed";
 
-        // Capture stderr on failure
-        if (exitCode !== 0 && proc?.stderr && typeof proc.stderr !== "number") {
-          try {
-            const stderr = await new Response(proc.stderr).text();
-            entry.info.error = stderr.slice(-500);
-          } catch {
-            // stderr may already be consumed
-          }
+        if (exitCode !== 0 && stderrBuf) {
+          entry.info.error = stderrBuf;
         }
 
         broadcast({ type: "job:completed", job: { ...entry.info } });

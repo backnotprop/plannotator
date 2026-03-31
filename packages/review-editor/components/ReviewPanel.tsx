@@ -182,7 +182,7 @@ export const ReviewPanel: React.FC<ReviewPanelProps> = ({
   const handleTabChange = (tab: ReviewPanelTab) => {
     setActiveTab(tab);
     onTabChange?.(tab);
-    if (tab !== 'annotations' && tab !== 'ai' && !prContext && !isPRContextLoading) {
+    if (tab !== 'annotations' && tab !== 'ai' && tab !== 'agents' && !prContext && !isPRContextLoading) {
       fetchContext();
     }
   };
