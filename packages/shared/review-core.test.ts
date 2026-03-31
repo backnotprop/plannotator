@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import {
@@ -86,6 +86,31 @@ describe("review-core", () => {
     expect(result.patch).toContain("diff --git a/tracked.txt b/tracked.txt");
     expect(result.patch).toContain("diff --git a/untracked.txt b/untracked.txt");
     expect(result.patch).toContain("+++ b/untracked.txt");
+  });
+
+  test("uncommitted diff includes untracked files when CWD is a subdirectory", async () => {
+    const repoDir = initRepo();
+
+    mkdirSync(join(repoDir, "packages", "infra", "lib"), { recursive: true });
+    writeFileSync(join(repoDir, "packages", "infra", "lib", "Stack.ts"), "new stack\n", "utf-8");
+
+    writeFileSync(join(repoDir, "root-new.txt"), "root untracked\n", "utf-8");
+    mkdirSync(join(repoDir, ".github", "workflows"), { recursive: true });
+    writeFileSync(join(repoDir, ".github", "workflows", "ci.yml"), "name: CI\n", "utf-8");
+
+    writeFileSync(join(repoDir, "tracked.txt"), "after\n", "utf-8");
+
+    // Runtime whose default CWD is a subdirectory (simulates a hook process
+    // that inherits an agent CWD inside a monorepo package)
+    const subCwd = join(repoDir, "packages", "infra");
+    const runtime = makeRuntime(subCwd);
+
+    const result = await runGitDiff(runtime, "uncommitted", "main");
+
+    expect(result.patch).toContain("diff --git a/tracked.txt b/tracked.txt");
+    expect(result.patch).toContain("diff --git a/packages/infra/lib/Stack.ts b/packages/infra/lib/Stack.ts");
+    expect(result.patch).toContain("diff --git a/root-new.txt b/root-new.txt");
+    expect(result.patch).toContain("diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml");
   });
 
   test("unstaged diff includes untracked files", async () => {

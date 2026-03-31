@@ -174,9 +174,20 @@ async function getUntrackedFileDiffs(
   dstPrefix = "b/",
   cwd?: string,
 ): Promise<string> {
+  // git ls-files scopes to the CWD subtree and returns CWD-relative paths,
+  // unlike git diff HEAD which always covers the full repo with root-relative
+  // paths.  Resolve the repo root so untracked files from the entire repo are
+  // included and their paths match the tracked-diff output.
+  const toplevelResult = await runtime.runGit(
+    ["rev-parse", "--show-toplevel"],
+    { cwd },
+  );
+  const rootCwd =
+    toplevelResult.exitCode === 0 ? toplevelResult.stdout.trim() : cwd;
+
   const lsResult = await runtime.runGit(
     ["ls-files", "--others", "--exclude-standard"],
-    { cwd },
+    { cwd: rootCwd },
   );
   if (lsResult.exitCode !== 0) return "";
 
@@ -199,7 +210,7 @@ async function getUntrackedFileDiffs(
           "/dev/null",
           file,
         ],
-        { cwd },
+        { cwd: rootCwd },
       );
       return diffResult.stdout;
     }),
