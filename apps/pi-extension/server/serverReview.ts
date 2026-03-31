@@ -587,7 +587,7 @@ export async function startReviewServer(options: {
 
 	const { port, portSource } = await listenOnPort(server);
 	serverUrl = `http://localhost:${port}`;
-	process.on("exit", () => agentJobs.killAll());
+	process.once("exit", () => agentJobs.killAll());
 
 	return {
 		port,

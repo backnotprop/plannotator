@@ -288,6 +288,15 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
           const command = rawCommand.filter((c: unknown): c is string => typeof c === "string");
           const label = typeof body.label === "string" ? body.label : `${provider} agent`;
 
+          // Validate provider is a known, available capability
+          const cap = capabilities.find((c) => c.id === provider);
+          if (!cap || !cap.available) {
+            return Response.json(
+              { error: `Unknown or unavailable provider: ${provider}` },
+              { status: 400 },
+            );
+          }
+
           if (command.length === 0) {
             return Response.json(
               { error: 'Missing "command" array' },
@@ -318,6 +327,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
       // --- DELETE /api/agents/jobs (kill all) ---
       if (url.pathname === JOBS && req.method === "DELETE") {
         const count = killAll();
+        if (count > 0) broadcast({ type: "jobs:cleared" });
         return Response.json({ ok: true, killed: count });
       }
 

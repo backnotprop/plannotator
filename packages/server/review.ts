@@ -592,7 +592,7 @@ export async function startReviewServer(
 
   const port = server.port!;
   serverUrl = `http://localhost:${port}`;
-  process.on("exit", () => agentJobs.killAll());
+  process.once("exit", () => agentJobs.killAll());
 
   // Notify caller that server is ready
   if (onReady) {

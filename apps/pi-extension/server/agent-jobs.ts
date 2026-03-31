@@ -37,7 +37,8 @@ const CAPABILITIES = `${BASE}/capabilities`;
 
 function whichCmd(cmd: string): boolean {
 	try {
-		execFileSync("which", [cmd], { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+		const bin = process.platform === "win32" ? "where" : "which";
+		execFileSync(bin, [cmd], { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
 		return true;
 	} catch {
 		return false;
@@ -280,6 +281,13 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 					const command = rawCommand.filter((c: unknown): c is string => typeof c === "string");
 					const label = typeof body.label === "string" ? body.label : `${provider} agent`;
 
+					// Validate provider is a known, available capability
+					const cap = capabilities.find((c) => c.id === provider);
+					if (!cap || !cap.available) {
+						json(res, { error: `Unknown or unavailable provider: ${provider}` }, 400);
+						return true;
+					}
+
 					if (command.length === 0) {
 						json(res, { error: 'Missing "command" array' }, 400);
 						return true;
@@ -312,6 +320,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 			// --- DELETE /api/agents/jobs (kill all) ---
 			if (url.pathname === JOBS && req.method === "DELETE") {
 				const count = killAll();
+				if (count > 0) broadcast({ type: "jobs:cleared" });
 				json(res, { ok: true, killed: count });
 				return true;
 			}
