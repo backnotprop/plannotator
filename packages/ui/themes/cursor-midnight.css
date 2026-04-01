@@ -1,0 +1,34 @@
+/* Cursor Midnight — single dark-only theme */
+.theme-cursor-midnight,
+.theme-cursor-midnight.light {
+  --background: #1e2127;
+  --foreground: #D8DEE9;
+  --card: #272c36;
+  --card-foreground: #D8DEE9;
+  --popover: #20242c;
+  --popover-foreground: #D8DEE9;
+  --primary: #88C0D0;
+  --primary-foreground: #1d2128;
+  --secondary: #434C5E;
+  --secondary-foreground: #D8DEE9;
+  --muted: #272c36;
+  --muted-foreground: #7b88a1;
+  --accent: #8FBCBB;
+  --accent-foreground: #1d2128;
+  --destructive: #BF616A;
+  --destructive-foreground: #ECEFF4;
+  --border: #3a4050;
+  --input: #272c36;
+  --ring: #88C0D0;
+  --success: #A3BE8C;
+  --success-foreground: #1d2128;
+  --warning: #EBCB8B;
+  --warning-foreground: #1d2128;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas, monospace;
+  --radius: 0.5rem;
+
+  --code-bg: #191c22;
+  --focus-highlight: #8FBCBB;
+}

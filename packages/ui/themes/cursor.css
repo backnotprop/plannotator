@@ -1,0 +1,62 @@
+/* Code Fork — dark + light, based on Cursor's default themes */
+.theme-cursor {
+  --background: #181818;
+  --foreground: #E4E4E4;
+  --card: #1e1e1e;
+  --card-foreground: #E4E4E4;
+  --popover: #141414;
+  --popover-foreground: #E4E4E4;
+  --primary: #81A1C1;
+  --primary-foreground: #141414;
+  --secondary: #2a2a2a;
+  --secondary-foreground: #E4E4E4;
+  --muted: #252525;
+  --muted-foreground: #a0a0a0;
+  --accent: #88C0D0;
+  --accent-foreground: #141414;
+  --destructive: #E34671;
+  --destructive-foreground: #E4E4E4;
+  --border: #333333;
+  --input: #252525;
+  --ring: #81A1C1;
+  --success: #3FA266;
+  --success-foreground: #141414;
+  --warning: #D2943E;
+  --warning-foreground: #141414;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas, monospace;
+  --radius: 0.5rem;
+
+  --code-bg: #141414;
+  --focus-highlight: #88C0D0;
+}
+
+.theme-cursor.light {
+  --background: #FCFCFC;
+  --foreground: #141414;
+  --card: #F3F3F3;
+  --card-foreground: #141414;
+  --popover: #F3F3F3;
+  --popover-foreground: #141414;
+  --primary: #3C7CAB;
+  --primary-foreground: #FCFCFC;
+  --secondary: #E8E8E8;
+  --secondary-foreground: #141414;
+  --muted: #EDEDED;
+  --muted-foreground: #6a6a6a;
+  --accent: #4C7F8C;
+  --accent-foreground: #FCFCFC;
+  --destructive: #CF2D56;
+  --destructive-foreground: #FCFCFC;
+  --border: #DDDDDD;
+  --input: #EDEDED;
+  --ring: #3C7CAB;
+  --success: #1F8A65;
+  --success-foreground: #FCFCFC;
+  --warning: #C08532;
+  --warning-foreground: #141414;
+
+  --code-bg: #F3F3F3;
+  --focus-highlight: #3C7CAB;
+}

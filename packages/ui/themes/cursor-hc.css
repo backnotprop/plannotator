@@ -1,0 +1,34 @@
+/* Clean Contrast — single dark-only theme */
+.theme-cursor-hc,
+.theme-cursor-hc.light {
+  --background: #0A0A0A;
+  --foreground: #D8DEE9;
+  --card: #1a1a1a;
+  --card-foreground: #ECEFF4;
+  --popover: #1a1a1a;
+  --popover-foreground: #ECEFF4;
+  --primary: #88C0D0;
+  --primary-foreground: #000000;
+  --secondary: #434C5E;
+  --secondary-foreground: #ECEFF4;
+  --muted: #2A2A2A;
+  --muted-foreground: #CCCCCC;
+  --accent: #EBCB8B;
+  --accent-foreground: #000000;
+  --destructive: #BF616A;
+  --destructive-foreground: #ECEFF4;
+  --border: #404040;
+  --input: #2A2A2A;
+  --ring: #88C0D0;
+  --success: #A3BE8C;
+  --success-foreground: #000000;
+  --warning: #EBCB8B;
+  --warning-foreground: #000000;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas, monospace;
+  --radius: 0.5rem;
+
+  --code-bg: #1a1a1a;
+  --focus-highlight: #88C0D0;
+}

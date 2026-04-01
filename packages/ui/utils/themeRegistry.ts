@@ -69,6 +69,26 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     },
   },
   {
+    id: 'cursor-hc',
+    name: 'Clean Contrast',
+    builtIn: true,
+    modeSupport: 'dark-only',
+    colors: {
+      dark: { primary: '#88C0D0', secondary: '#434C5E', accent: '#EBCB8B', background: '#0A0A0A', foreground: '#D8DEE9' },
+      light: { primary: '#88C0D0', secondary: '#434C5E', accent: '#EBCB8B', background: '#0A0A0A', foreground: '#D8DEE9' },
+    },
+  },
+  {
+    id: 'cursor',
+    name: 'Code Fork',
+    builtIn: true,
+    modeSupport: 'both',
+    colors: {
+      dark: { primary: '#81A1C1', secondary: '#2a2a2a', accent: '#88C0D0', background: '#181818', foreground: '#E4E4E4' },
+      light: { primary: '#3C7CAB', secondary: '#E8E8E8', accent: '#4C7F8C', background: '#FCFCFC', foreground: '#141414' },
+    },
+  },
+  {
     id: 'doom-64',
     name: 'Doom 64',
     builtIn: true,
@@ -106,6 +126,16 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     colors: {
       dark: { primary: '#ffd866', secondary: '#5b595c', accent: '#78dce8', background: '#2d2a2e', foreground: '#fcfcfa' },
       light: { primary: '#ffd866', secondary: '#5b595c', accent: '#78dce8', background: '#2d2a2e', foreground: '#fcfcfa' },
+    },
+  },
+  {
+    id: 'cursor-midnight',
+    name: 'Midnight',
+    builtIn: true,
+    modeSupport: 'dark-only',
+    colors: {
+      dark: { primary: '#88C0D0', secondary: '#434C5E', accent: '#8FBCBB', background: '#1e2127', foreground: '#D8DEE9' },
+      light: { primary: '#88C0D0', secondary: '#434C5E', accent: '#8FBCBB', background: '#1e2127', foreground: '#D8DEE9' },
     },
   },
   {
