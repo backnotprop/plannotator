@@ -131,7 +131,7 @@
     },
     "apps/vscode-extension": {
       "name": "plannotator-webview",
-      "version": "0.16.4",
+      "version": "0.16.5",
       "devDependencies": {
         "@types/bun": "latest",
         "@types/vscode": "^1.85.0",

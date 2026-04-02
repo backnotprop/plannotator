@@ -231,7 +231,6 @@ import AnnoReplace from './AnnoReplace.astro';
     };
 
     var installBlock = document.getElementById('install-block');
-    var detailWrap = document.getElementById('install-detail-wrap');
     var linkEl = document.getElementById('install-link');
 
     function setAgent(btn) {
@@ -268,7 +267,7 @@ import AnnoReplace from './AnnoReplace.astro';
       }
 
       // Handle marketplace link
-      if (linkEl) linkEl.remove();
+      if (linkEl) { linkEl.remove(); linkEl = null; }
       if (config.link) {
         var a = document.createElement('a');
         a.id = 'install-link';
