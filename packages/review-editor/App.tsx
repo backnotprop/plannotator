@@ -116,6 +116,7 @@ const ReviewApp: React.FC = () => {
   const [submitted, setSubmitted] = useState<'approved' | 'feedback' | false>(false);
   const [showApproveWarning, setShowApproveWarning] = useState(false);
   const [sharingEnabled, setSharingEnabled] = useState(true);
+  const [spawnMode, setSpawnMode] = useState(false);
   const [repoInfo, setRepoInfo] = useState<{ display: string; branch?: string } | null>(null);
 
   useEffect(() => {
@@ -442,6 +443,7 @@ const ReviewApp: React.FC = () => {
         error?: string;
         isWSL?: boolean;
         serverConfig?: { displayName?: string; gitUser?: string };
+        spawn?: boolean;
       }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
@@ -471,6 +473,7 @@ const ReviewApp: React.FC = () => {
         }
         if (data.error) setDiffError(data.error);
         if (data.isWSL) setIsWSL(true);
+        if (data.spawn) setSpawnMode(true);
       })
       .catch(() => {
         // Not in API mode - use demo content
@@ -1270,7 +1273,7 @@ const ReviewApp: React.FC = () => {
                   <span className="hidden md:inline">{
                     isSendingFeedback || isPlatformActioning
                       ? (platformMode ? 'Posting...' : 'Sending...')
-                      : (platformMode ? 'Post Comments' : 'Send Feedback')
+                      : spawnMode ? 'Send to Claude' : (platformMode ? 'Post Comments' : 'Send Feedback')
                   }</span>
                 </button>
 
@@ -1278,6 +1281,10 @@ const ReviewApp: React.FC = () => {
                 <div className="relative group/approve">
                   <button
                     onClick={() => {
+                      if (spawnMode) {
+                        window.close();
+                        return;
+                      }
                       if (platformMode) {
                         if (platformUser && prMetadata?.author === platformUser) return;
                         setPlatformGeneralComment('');
@@ -1310,7 +1317,7 @@ const ReviewApp: React.FC = () => {
                     }
                   >
                     <span className="md:hidden">{isApproving ? '...' : 'OK'}</span>
-                    <span className="hidden md:inline">{isApproving ? 'Approving...' : 'Approve'}</span>
+                    <span className="hidden md:inline">{isApproving ? (spawnMode ? 'Dismissing...' : 'Approving...') : (spawnMode ? 'Dismiss' : 'Approve - no changes needed')}</span>
                   </button>
                   {/* Tooltip: own PR warning OR annotations-lost warning */}
                   {platformMode && platformUser && prMetadata?.author === platformUser ? (

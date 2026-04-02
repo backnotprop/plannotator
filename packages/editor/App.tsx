@@ -95,6 +95,7 @@ const App: React.FC = () => {
   const [isWSL, setIsWSL] = useState(false);
   const [globalAttachments, setGlobalAttachments] = useState<ImageAttachment[]>([]);
   const [annotateMode, setAnnotateMode] = useState(false);
+  const [spawnMode, setSpawnMode] = useState(false);
   const [annotateSource, setAnnotateSource] = useState<'file' | 'message' | 'folder' | null>(null);
   const [imageBaseDir, setImageBaseDir] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
@@ -416,7 +417,7 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive'; filePath?: string; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string } }) => {
+      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive'; filePath?: string; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string }; spawn?: boolean }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
         // gitUser drives the "Use git name" button in Settings; stays undefined (button hidden) when unavailable
@@ -438,6 +439,7 @@ const App: React.FC = () => {
         if (data.mode === 'annotate' || data.mode === 'annotate-last' || data.mode === 'annotate-folder') {
           setAnnotateMode(true);
         }
+        if (data.spawn) setSpawnMode(true);
         if (data.mode === 'annotate-folder') {
           sidebar.open('files');
         }
@@ -1155,17 +1157,22 @@ const App: React.FC = () => {
                       ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
                       : 'bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30'
                   }`}
-                  title={annotateMode ? (allAnnotations.length > 0 || editorAnnotations.length > 0 || linkedDocHook.docAnnotationCount > 0 ? 'Send Annotations' : 'Done') : 'Send Feedback'}
+                  title={spawnMode ? 'Send to Claude' : annotateMode ? (allAnnotations.length > 0 || editorAnnotations.length > 0 || linkedDocHook.docAnnotationCount > 0 ? 'Send Annotations' : 'Done') : 'Send Feedback'}
                 >
                   <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                   </svg>
-                  <span className="hidden md:inline">{isSubmitting ? 'Sending...' : annotateMode ? (allAnnotations.length > 0 || editorAnnotations.length > 0 || linkedDocHook.docAnnotationCount > 0 ? 'Send Annotations' : 'Done') : 'Send Feedback'}</span>
+                  <span className="hidden md:inline">{isSubmitting ? 'Sending...' : spawnMode ? 'Send to Claude' : annotateMode ? (allAnnotations.length > 0 || editorAnnotations.length > 0 || linkedDocHook.docAnnotationCount > 0 ? 'Send Annotations' : 'Done') : 'Send Feedback'}</span>
                 </button>
 
-                {!annotateMode && <div className="relative group/approve">
+                {(!annotateMode || spawnMode) && <div className="relative group/approve">
                   <button
                     onClick={() => {
+                      if (spawnMode) {
+                        window.close();
+                        return;
+                      }
+
                       // Show warning for Claude Code users with annotations
                       if (origin === 'claude-code' && allAnnotations.length > 0) {
                         setShowClaudeCodeWarning(true);
@@ -1194,7 +1201,7 @@ const App: React.FC = () => {
                     }`}
                   >
                     <span className="md:hidden">{isSubmitting ? '...' : 'OK'}</span>
-                    <span className="hidden md:inline">{isSubmitting ? 'Approving...' : 'Approve'}</span>
+                    <span className="hidden md:inline">{isSubmitting ? (spawnMode ? 'Dismissing...' : 'Approving...') : (spawnMode ? 'Dismiss' : 'Approve')}</span>
                   </button>
                   {origin === 'claude-code' && allAnnotations.length > 0 && (
                     <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
