@@ -545,7 +545,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           </div>
         </div>
 
-      {toolbar.toolbarState && (
+      {toolbar.toolbarState && !toolbar.showCodeModal && (
         <AnnotationToolbar
           toolbarState={toolbar.toolbarState}
           toolbarRef={toolbar.toolbarRef}
