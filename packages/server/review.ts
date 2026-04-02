@@ -11,7 +11,7 @@
 
 import { isRemoteSession, getServerPort } from "./remote";
 import type { Origin } from "@plannotator/shared/agents";
-import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, gitAddFile, gitResetFile, parseWorktreeDiffType, validateFilePath, isP4DiffType } from "./vcs";
+import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath } from "./vcs";
 import { getRepoInfo } from "./repo";
 import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft } from "./draft";
@@ -112,11 +112,7 @@ export async function startReviewServer(
     mode: "review",
     getServerUrl: () => serverUrl,
     getCwd: () => {
-      if (currentDiffType.startsWith("worktree:")) {
-        const parsed = parseWorktreeDiffType(currentDiffType);
-        if (parsed) return parsed.path;
-      }
-      return gitContext?.cwd ?? process.cwd();
+      return resolveVcsCwd(currentDiffType, gitContext?.cwd) ?? process.cwd();
     },
   });
 
@@ -198,11 +194,7 @@ export async function startReviewServer(
       registry: aiRegistry,
       sessionManager: aiSessionManager,
       getCwd: () => {
-        if (currentDiffType.startsWith("worktree:")) {
-          const parsed = parseWorktreeDiffType(currentDiffType);
-          if (parsed) return parsed.path;
-        }
-        return gitContext?.cwd ?? process.cwd();
+        return resolveVcsCwd(currentDiffType, gitContext?.cwd) ?? process.cwd();
       },
     });
   }
@@ -380,11 +372,11 @@ export async function startReviewServer(
             return Response.json(result);
           }
 
-          // API: Git add / reset (stage / unstage) a file (disabled in PR mode and P4)
+          // API: Stage / unstage a file (disabled when VCS doesn't support it)
           if (url.pathname === "/api/git-add" && req.method === "POST") {
-            if (isPRMode || isP4DiffType(currentDiffType)) {
+            if (isPRMode || !canStageFiles(currentDiffType)) {
               return Response.json(
-                { error: isPRMode ? "Not available for PR reviews" : "Staging not available for Perforce" },
+                { error: "Staging not available" },
                 { status: 400 },
               );
             }
@@ -394,25 +386,17 @@ export async function startReviewServer(
                 return Response.json({ error: "Missing filePath" }, { status: 400 });
               }
 
-              // Determine cwd for worktree support
-              let cwd: string | undefined;
-              if (currentDiffType.startsWith("worktree:")) {
-                const parsed = parseWorktreeDiffType(currentDiffType);
-                if (parsed) cwd = parsed.path;
-              }
-              if (!cwd) {
-                cwd = gitContext?.cwd;
-              }
+              const cwd = resolveVcsCwd(currentDiffType, gitContext?.cwd);
 
               if (body.undo) {
-                await gitResetFile(body.filePath, cwd);
+                await unstageFile(currentDiffType, body.filePath, cwd);
               } else {
-                await gitAddFile(body.filePath, cwd);
+                await stageFile(currentDiffType, body.filePath, cwd);
               }
 
               return Response.json({ ok: true });
             } catch (err) {
-              const message = err instanceof Error ? err.message : "Failed to git add";
+              const message = err instanceof Error ? err.message : "Failed to stage file";
               return Response.json({ error: message }, { status: 500 });
             }
           }
