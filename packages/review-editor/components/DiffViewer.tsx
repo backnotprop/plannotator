@@ -555,6 +555,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           setSuggestedCode={toolbar.setSuggestedCode}
           showSuggestedCode={toolbar.showSuggestedCode}
           setShowSuggestedCode={toolbar.setShowSuggestedCode}
+          selectedOriginalCode={toolbar.selectedOriginalCode}
           setShowCodeModal={toolbar.setShowCodeModal}
           isEditing={!!toolbar.editingAnnotationId}
           onSubmit={toolbar.handleSubmitAnnotation}
