@@ -29,6 +29,8 @@ export type { ExternalAnnotationEvent } from "@plannotator/shared/external-annot
 
 export interface ExternalAnnotationHandler {
   handle: (req: Request, url: URL) => Promise<Response | null>;
+  /** Close all SSE subscriber streams. Call before stopping the server. */
+  dispose: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -64,6 +66,13 @@ export function createExternalAnnotationHandler(
   });
 
   return {
+    dispose() {
+      for (const controller of subscribers) {
+        try { controller.close(); } catch { /* already closed */ }
+      }
+      subscribers.clear();
+    },
+
     async handle(req: Request, url: URL): Promise<Response | null> {
       // --- SSE stream ---
       if (url.pathname === STREAM && req.method === "GET") {

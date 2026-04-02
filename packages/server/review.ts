@@ -249,7 +249,7 @@ export async function startReviewServer(
     try {
       server = Bun.serve({
         port: configuredPort,
-        idleTimeout: 255, // seconds; suppress Bun's 10s default timeout warning on shutdown
+
 
         async fetch(req) {
           const url = new URL(req.url);
@@ -594,6 +594,7 @@ export async function startReviewServer(
     isRemote,
     waitForDecision: () => decisionPromise,
     stop: () => {
+      externalAnnotations?.dispose();
       aiSessionManager.disposeAll();
       aiRegistry.disposeAll();
       server.stop();
