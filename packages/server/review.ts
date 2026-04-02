@@ -56,6 +56,8 @@ export interface ReviewServerOptions {
   opencodeClient?: OpencodeClient;
   /** PR metadata when reviewing a pull request (PR mode) */
   prMetadata?: PRMetadata;
+  /** Whether the UI is in standalone spawn mode (changes button labels) */
+  spawn?: boolean;
 }
 
 export interface ReviewServerResult {
@@ -92,7 +94,7 @@ const RETRY_DELAY_MS = 500;
 export async function startReviewServer(
   options: ReviewServerOptions
 ): Promise<ReviewServerResult> {
-  const { htmlContent, origin, gitContext, sharingEnabled = true, shareBaseUrl, onReady, prMetadata } = options;
+  const { htmlContent, origin, gitContext, sharingEnabled = true, shareBaseUrl, onReady, prMetadata, spawn } = options;
 
   const isPRMode = !!prMetadata;
   const draftKey = contentHash(options.rawPatch);
@@ -267,6 +269,7 @@ export async function startReviewServer(
               ...(isPRMode && initialViewedFiles.length > 0 && { viewedFiles: initialViewedFiles }),
               ...(currentError && { error: currentError }),
               serverConfig: getServerConfig(gitUser),
+              spawn,
             });
           }
 

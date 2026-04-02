@@ -50,6 +50,8 @@ export interface AnnotateServerOptions {
   pasteApiUrl?: string;
   /** Called when server starts with the URL, remote status, and port */
   onReady?: (url: string, isRemote: boolean, port: number) => void;
+  /** Whether the UI is in standalone spawn mode (changes button labels) */
+  spawn?: boolean;
 }
 
 export interface AnnotateServerResult {
@@ -95,6 +97,7 @@ export async function startAnnotateServer(
     shareBaseUrl,
     pasteApiUrl,
     onReady,
+    spawn,
   } = options;
 
   const isRemote = isRemoteSession();
@@ -144,6 +147,7 @@ export async function startAnnotateServer(
               projectRoot: folderPath || process.cwd(),
               isWSL: wslFlag,
               serverConfig: getServerConfig(gitUser),
+              spawn,
             });
           }
 
