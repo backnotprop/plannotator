@@ -130,7 +130,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
 
   const tree = useMemo(() => buildFileTree(files), [files]);
 
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set(getAllFolderPaths(tree)));
   const [prevTree, setPrevTree] = useState(tree);
 
   // Expand all folders when tree changes (initial render + diff switch)
