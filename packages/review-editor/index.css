@@ -755,3 +755,107 @@ diffs-container {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* PR inline comment (displayed in diff view) */
+.pr-inline-comment {
+  margin: 0.25rem 0.5rem;
+  padding: 0.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  border-left: 2px solid oklch(from var(--primary) l c h / 0.4);
+  background: oklch(from var(--muted) l c h / 0.3);
+  font-size: 0.6875rem;
+}
+
+.pr-inline-comment-header {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--muted-foreground);
+  margin-bottom: 0.25rem;
+  font-size: 0.625rem;
+}
+
+.pr-inline-comment-author {
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+.pr-inline-comment-body {
+  color: oklch(from var(--foreground) l c h / 0.9);
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.pr-inline-comment-reply-btn {
+  display: inline-block;
+  margin-top: 0.25rem;
+  font-size: 0.625rem;
+  color: var(--primary);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.pr-inline-comment-reply-btn:hover {
+  text-decoration: underline;
+}
+
+.pr-inline-comment-reply-form {
+  margin-top: 0.5rem;
+}
+
+.pr-inline-comment-textarea {
+  width: 100%;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--background);
+  padding: 0.375rem;
+  font-size: 0.6875rem;
+  color: var(--foreground);
+  resize: none;
+  font-family: inherit;
+}
+
+.pr-inline-comment-textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px oklch(from var(--primary) l c h / 0.3);
+}
+
+.pr-inline-comment-reply-actions {
+  display: flex;
+  gap: 0.375rem;
+  margin-top: 0.25rem;
+}
+
+.pr-inline-comment-btn-add {
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 0.625rem;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+}
+
+.pr-inline-comment-btn-add:hover {
+  opacity: 0.9;
+}
+
+.pr-inline-comment-btn-cancel {
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 0.625rem;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+}
+
+.pr-inline-comment-btn-cancel:hover {
+  background: oklch(from var(--muted) l c h / 0.8);
+}

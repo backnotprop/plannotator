@@ -5,14 +5,13 @@ import { EditorAnnotationCard } from '@plannotator/ui/components/EditorAnnotatio
 import { HighlightedCode } from './HighlightedCode';
 import { detectLanguage } from '../utils/detectLanguage';
 import { renderInlineMarkdown } from '../utils/renderInlineMarkdown';
-import { usePRContext } from '../hooks/usePRContext';
 import { formatRelativeTime } from '../utils/formatRelativeTime';
 import { PRSummaryTab } from './PRSummaryTab';
 import { PRCommentsTab } from './PRCommentsTab';
 import { PRChecksTab } from './PRChecksTab';
 import { AITab } from './AITab';
 import { SparklesIcon } from './SparklesIcon';
-import type { PRMetadata } from '@plannotator/shared/pr-provider';
+import type { PRMetadata, PRContext } from '@plannotator/shared/pr-provider';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import type { DiffFile } from '../types';
 
@@ -31,6 +30,10 @@ interface ReviewPanelProps {
   editorAnnotations?: EditorAnnotation[];
   onDeleteEditorAnnotation?: (id: string) => void;
   prMetadata?: PRMetadata | null;
+  prContext?: PRContext | null;
+  isPRContextLoading?: boolean;
+  prContextError?: string | null;
+  onFetchPRContext?: () => void;
   // AI props
   aiAvailable?: boolean;
   aiMessages?: AIChatEntry[];
@@ -131,6 +134,10 @@ export const ReviewPanel: React.FC<ReviewPanelProps> = ({
   editorAnnotations,
   onDeleteEditorAnnotation,
   prMetadata,
+  prContext = null,
+  isPRContextLoading = false,
+  prContextError = null,
+  onFetchPRContext,
   aiAvailable = false,
   aiMessages = [],
   isAICreatingSession = false,
@@ -158,14 +165,12 @@ export const ReviewPanel: React.FC<ReviewPanelProps> = ({
     if (activeTabOverride) setActiveTab(activeTabOverride);
   }, [activeTabOverride]);
 
-  const { prContext, isLoading: isPRContextLoading, error: prContextError, fetchContext } = usePRContext(prMetadata ?? null);
-
   // Fetch PR context on first click of a PR tab
   const handleTabChange = (tab: ReviewPanelTab) => {
     setActiveTab(tab);
     onTabChange?.(tab);
     if (tab !== 'annotations' && tab !== 'ai' && !prContext && !isPRContextLoading) {
-      fetchContext();
+      onFetchPRContext?.();
     }
   };
 
@@ -427,7 +432,7 @@ export const ReviewPanel: React.FC<ReviewPanelProps> = ({
                 <div className="p-4 text-center">
                   <p className="text-xs text-destructive">{prContextError}</p>
                   <button
-                    onClick={() => fetchContext()}
+                    onClick={() => onFetchPRContext?.()}
                     className="mt-2 text-xs text-primary hover:underline"
                   >
                     Retry

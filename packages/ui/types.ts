@@ -95,11 +95,13 @@ export interface DiffAnnotationMetadata {
   originalCode?: string;
   author?: string;
   // AI marker fields (set when kind === 'ai-marker')
-  kind?: 'annotation' | 'ai-marker';
+  kind?: 'annotation' | 'ai-marker' | 'pr-comment';
   questionId?: string;
   promptPreview?: string;
   hasResponse?: boolean;
   isStreaming?: boolean;
+  // PR inline comment fields (set when kind === 'pr-comment')
+  prComment?: import('@plannotator/shared/pr-provider').PRInlineComment;
 }
 
 export interface SelectedLineRange {

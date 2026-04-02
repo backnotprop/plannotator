@@ -21,6 +21,7 @@ import { CodeAnnotation, CodeAnnotationType, SelectedLineRange } from '@plannota
 import { useResizablePanel } from '@plannotator/ui/hooks/useResizablePanel';
 import { useCodeAnnotationDraft } from '@plannotator/ui/hooks/useCodeAnnotationDraft';
 import { useGitAdd } from './hooks/useGitAdd';
+import { usePRContext } from './hooks/usePRContext';
 import { generateId } from './utils/generateId';
 import { useAIChat } from './hooks/useAIChat';
 import { extractLinesFromPatch } from './utils/patchParser';
@@ -157,6 +158,50 @@ const ReviewApp: React.FC = () => {
   const displayRepo = prMetadata ? getDisplayRepo(prMetadata) : '';
 
   const identity = useConfigValue('displayName');
+
+  // PR context (inline comments, checks, reviews, etc.) — lifted from ReviewPanel
+  // so inline comments can flow to DiffViewer too
+  const { prContext, isLoading: isPRContextLoading, error: prContextError, fetchContext: fetchPRContext } = usePRContext(prMetadata);
+
+  // Eagerly fetch PR context when PR metadata is available so inline comments
+  // appear in the diff without requiring the user to click a sidebar tab first
+  useEffect(() => {
+    if (prMetadata) fetchPRContext();
+  }, [prMetadata, fetchPRContext]);
+
+  // Inline comments for the active file
+  const activeFilePRComments = useMemo(() => {
+    const activeFile = files[activeFileIndex];
+    if (!activeFile || !prContext?.inlineComments) return [];
+    return prContext.inlineComments.filter(c => c.path === activeFile.path);
+  }, [files, activeFileIndex, prContext?.inlineComments]);
+
+  // Handle responding to a PR inline comment by creating a CodeAnnotation
+  const handleRespondToPRComment = useCallback((commentId: number, response: string) => {
+    const comment = prContext?.inlineComments?.find(c => c.id === commentId);
+    if (!comment) return;
+
+    const newAnnotation: CodeAnnotation = {
+      id: generateId(),
+      type: 'comment',
+      filePath: comment.path,
+      lineStart: comment.line ?? 0,
+      lineEnd: comment.line ?? 0,
+      side: comment.side === 'LEFT' ? 'old' : 'new',
+      text: response,
+      createdAt: Date.now(),
+      author: identity,
+      prComment: {
+        id: comment.id,
+        author: comment.author,
+        body: comment.body,
+        path: comment.path,
+        line: comment.line ?? undefined,
+      },
+    };
+
+    setAnnotations(prev => [...prev, newAnnotation]);
+  }, [prContext?.inlineComments, identity]);
 
   const clearPendingSelection = useCallback(() => {
     setPendingSelection(null);
@@ -1497,6 +1542,8 @@ const ReviewApp: React.FC = () => {
                 aiMessages={aiMessagesForCurrentFile}
                 onClickAIMarker={handleClickAIMarker}
                 aiHistoryMessages={aiHistoryForSelection}
+                prInlineComments={activeFilePRComments}
+                onRespondToPRComment={handleRespondToPRComment}
               />
             ) : (
               <div className="h-full flex items-center justify-center">
@@ -1558,6 +1605,10 @@ const ReviewApp: React.FC = () => {
             editorAnnotations={editorAnnotations}
             onDeleteEditorAnnotation={deleteEditorAnnotation}
             prMetadata={prMetadata}
+            prContext={prContext}
+            isPRContextLoading={isPRContextLoading}
+            prContextError={prContextError}
+            onFetchPRContext={fetchPRContext}
             aiAvailable={aiAvailable}
             aiMessages={aiChat.messages}
             isAICreatingSession={aiChat.isCreatingSession}
