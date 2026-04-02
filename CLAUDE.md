@@ -11,7 +11,7 @@ plannotator/
 │   │   ├── .claude-plugin/plugin.json
 │   │   ├── commands/             # Slash commands (plannotator-review.md, plannotator-annotate.md)
 │   │   ├── hooks/hooks.json      # PermissionRequest hook config
-│   │   ├── server/index.ts       # Entry point (plan + review + annotate + archive subcommands)
+│   │   ├── server/index.ts       # Entry point (plan + review + annotate + archive + standalone plan subcommands)
 │   │   └── dist/                 # Built single-file apps (index.html, review.html)
 │   ├── opencode-plugin/          # OpenCode plugin
 │   │   ├── commands/             # Slash commands (plannotator-review.md, plannotator-annotate.md)
@@ -40,6 +40,7 @@ plannotator/
 │   │   ├── storage.ts            # Re-exports from @plannotator/shared/storage
 │   │   ├── share-url.ts          # Server-side share URL generation for remote sessions
 │   │   ├── remote.ts             # isRemoteSession(), getServerPort()
+│   │   ├── spawn.ts              # isSpawnMode(), spawnClaudeSession()
 │   │   ├── browser.ts            # openBrowser()
 │   │   ├── draft.ts              # Re-exports from @plannotator/shared/draft
 │   │   ├── integrations.ts       # Obsidian, Bear integrations
@@ -102,6 +103,7 @@ claude --plugin-dir ./apps/hook
 | `PLANNOTATOR_SHARE` | Set to `disabled` to turn off URL sharing entirely. Default: enabled. |
 | `PLANNOTATOR_SHARE_URL` | Custom base URL for share links (self-hosted portal). Default: `https://share.plannotator.ai`. |
 | `PLANNOTATOR_PASTE_URL` | Base URL of the paste service API for short URL sharing. Default: `https://plannotator-paste.plannotator.workers.dev`. |
+| `PLANNOTATOR_SPAWN` | Set to `1` or `true` to enable spawn mode. Feedback spawns a new `claude` session instead of writing hook output. |
 
 **Legacy:** `SSH_TTY` and `SSH_CONNECTION` are still detected. Prefer `PLANNOTATOR_REMOTE=1` for explicit control.
 
@@ -400,6 +402,36 @@ Uses cookies (not localStorage) because each hook invocation runs on a random po
 ## Syntax Highlighting
 
 Code blocks use bundled `highlight.js`. Language is extracted from fence (```rust) and applied as `language-{lang}`class. Each block highlighted individually via`hljs.highlightElement()`.
+
+## Standalone Mode
+
+Plannotator can run independently of hooks, opening a review UI and spawning a new `claude` session with the feedback:
+
+```bash
+# Plan review from file
+plannotator plan ./roadmap.md --spawn
+
+# Plan review from archive
+plannotator plan --archive --spawn
+
+# Plan review from stdin
+cat plan.md | plannotator plan - --spawn
+
+# Code review with spawn
+plannotator review --spawn
+plannotator review https://github.com/org/repo/pull/42 --spawn
+
+# Annotate with spawn
+plannotator annotate ./notes.md --spawn
+
+# Or set env var instead of --spawn flag
+export PLANNOTATOR_SPAWN=1
+plannotator plan ./roadmap.md
+```
+
+Without `--spawn`, the `plan` subcommand prints feedback to stdout. The `review` and `annotate` subcommands behave as before (stdout for slash commands, hook JSON for hook subcommands).
+
+When reviewing a PR URL, inline review comments from GitHub are displayed on the diff and can be responded to with annotations.
 
 ## Requirements
 
