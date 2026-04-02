@@ -147,4 +147,32 @@ describe("exportReviewFeedback", () => {
     const headingMatches = result.match(/^# /gm) || [];
     expect(headingMatches).toHaveLength(1);
   });
+
+  it("exports PR comment responses", () => {
+    const annotations: CodeAnnotation[] = [
+      {
+        id: "1",
+        type: "comment",
+        filePath: "src/auth.ts",
+        lineStart: 42,
+        lineEnd: 42,
+        side: "new",
+        text: "Yes, we should add rate limiting here.",
+        createdAt: Date.now(),
+        prComment: {
+          id: 123,
+          author: "reviewer",
+          body: "Should we add rate limiting here?",
+          path: "src/auth.ts",
+          line: 42,
+        },
+      },
+    ];
+
+    const result = exportReviewFeedback(annotations);
+    expect(result).toContain("## PR Comment Responses");
+    expect(result).toContain("@reviewer on src/auth.ts:42");
+    expect(result).toContain("> Should we add rate limiting here?");
+    expect(result).toContain("Yes, we should add rate limiting here.");
+  });
 });

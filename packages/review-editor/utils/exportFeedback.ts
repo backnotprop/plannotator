@@ -79,5 +79,20 @@ export function exportReviewFeedback(
     }
   }
 
+  // Export PR comment responses
+  const commentResponses = annotations.filter((a) => a.prComment);
+  if (commentResponses.length > 0) {
+    output += "## PR Comment Responses\n\n";
+    for (const ann of commentResponses) {
+      const pc = ann.prComment!;
+      const location = pc.path && pc.line ? ` on ${pc.path}:${pc.line}` : "";
+      output += `### @${pc.author}${location}\n`;
+      output += `> ${pc.body.split("\n").join("\n> ")}\n\n`;
+      if (ann.text) {
+        output += `${ann.text}\n\n`;
+      }
+    }
+  }
+
   return output;
 }

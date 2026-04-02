@@ -76,6 +76,14 @@ export interface CodeAnnotation {
   createdAt: number;
   author?: string;
   source?: string; // External tool identifier (e.g., "eslint") — set when annotation comes from external API
+  /** PR comment this annotation responds to */
+  prComment?: {
+    id: number;
+    author: string;
+    body: string;
+    path?: string;
+    line?: number;
+  };
 }
 
 // For @pierre/diffs integration
