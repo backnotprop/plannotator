@@ -133,6 +133,7 @@ export interface PRContext {
   reviews: PRReview[];
   checks: PRCheck[];
   linkedIssues: PRLinkedIssue[];
+  inlineComments?: PRInlineComment[];
 }
 
 export interface PRReviewFileComment {
@@ -142,6 +143,24 @@ export interface PRReviewFileComment {
   body: string;
   start_line?: number;
   start_side?: "LEFT" | "RIGHT";
+}
+
+/** An existing inline review comment on a PR diff */
+export interface PRInlineComment {
+  id: number;
+  author: string;
+  body: string;
+  path: string;
+  line: number | null;
+  side: "LEFT" | "RIGHT";
+  createdAt: string;
+  url: string;
+  /** The review this comment belongs to (if any) */
+  inReplyToId?: number;
+  /** Start line for multi-line comments */
+  startLine?: number;
+  /** Original line for outdated comments */
+  originalLine?: number;
 }
 
 // --- Label Helpers ---

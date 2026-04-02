@@ -4,7 +4,7 @@
  * All functions use the `gh` CLI via the PRRuntime abstraction.
  */
 
-import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, CommandResult } from "./pr-provider";
+import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, PRInlineComment, CommandResult } from "./pr-provider";
 import { encodeApiFilePath } from "./pr-provider";
 
 // GitHub-specific PRRef shape (used internally)
@@ -160,6 +160,34 @@ function parseGhPRContext(raw: Record<string, unknown>): PRContext {
   };
 }
 
+/** Fetch inline review comments on a GitHub PR diff */
+export async function fetchGhInlineComments(
+  runtime: PRRuntime,
+  ref: GhPRRef,
+): Promise<PRInlineComment[]> {
+  const result = await runtime.runCommand("gh", [
+    "api",
+    `repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/comments`,
+    "--paginate",
+    "--jq",
+    '[.[] | {id: .id, author: .user.login, body: .body, path: .path, line: .line, side: .side, createdAt: .created_at, url: .html_url, inReplyToId: .in_reply_to_id, startLine: .start_line, originalLine: .original_line}]',
+  ]);
+
+  if (result.exitCode !== 0) {
+    return []; // Non-fatal: inline comments are supplementary
+  }
+
+  try {
+    // gh --paginate with --jq may return multiple JSON arrays (one per page)
+    const raw = result.stdout.trim();
+    if (!raw) return [];
+    const arrays = raw.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    return arrays.flat();
+  } catch {
+    return [];
+  }
+}
+
 export async function fetchGhPRContext(
   runtime: PRRuntime,
   ref: GhPRRef,
@@ -179,7 +207,12 @@ export async function fetchGhPRContext(
   }
 
   const raw = JSON.parse(result.stdout) as Record<string, unknown>;
-  return parseGhPRContext(raw);
+  const context = parseGhPRContext(raw);
+
+  // Fetch inline review comments (supplementary, non-fatal)
+  context.inlineComments = await fetchGhInlineComments(runtime, ref);
+
+  return context;
 }
 
 // --- File Content ---
