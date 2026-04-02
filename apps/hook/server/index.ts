@@ -138,6 +138,7 @@ const detectedOrigin: Origin =
 async function runAnnotateFlow(
   filePath: string,
   projectRoot: string,
+  spawn?: boolean,
 ): Promise<string> {
   // Strip @ prefix if present (Claude Code file reference syntax)
   if (filePath.startsWith("@")) {
@@ -201,6 +202,7 @@ async function runAnnotateFlow(
     sharingEnabled,
     shareBaseUrl,
     pasteApiUrl,
+    spawn,
     htmlContent: planHtmlContent,
     onReady: async (url, isRemote, port) => {
       handleAnnotateServerReady(url, isRemote, port);
@@ -245,6 +247,7 @@ async function runAnnotateFlow(
 async function runReviewFlow(
   reviewArg: string | undefined,
   projectRoot: string,
+  spawn?: boolean,
 ): Promise<string> {
   const isPRMode =
     reviewArg?.startsWith("http://") || reviewArg?.startsWith("https://");
@@ -313,6 +316,7 @@ async function runReviewFlow(
     prMetadata,
     sharingEnabled,
     shareBaseUrl,
+    spawn,
     htmlContent: reviewHtmlContent,
     onReady: async (url, isRemote, port) => {
       handleReviewServerReady(url, isRemote, port);
@@ -409,7 +413,18 @@ if (args[0] === "sessions") {
   const projectRoot = process.env.PLANNOTATOR_CWD || process.cwd();
 
   try {
-    const feedback = await runReviewFlow(args[1], projectRoot);
+    const feedback = await runReviewFlow(args[1], projectRoot, spawnFlag);
+
+    if (spawnFlag && feedback) {
+      const prompt = [
+        "# Code Review Feedback\n",
+        feedback,
+        "\n\nPlease address the review feedback above.",
+      ].join("\n");
+      const exitCode = await spawnClaudeSession(projectRoot, prompt);
+      process.exit(exitCode);
+    }
+
     console.log(feedback);
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
@@ -431,7 +446,18 @@ if (args[0] === "sessions") {
   const projectRoot = process.env.PLANNOTATOR_CWD || process.cwd();
 
   try {
-    const feedback = await runAnnotateFlow(filePath, projectRoot);
+    const feedback = await runAnnotateFlow(filePath, projectRoot, spawnFlag);
+
+    if (spawnFlag && feedback) {
+      const prompt = [
+        "# Annotation Feedback\n",
+        feedback,
+        "\n\nPlease address the annotations above.",
+      ].join("\n");
+      const exitCode = await spawnClaudeSession(projectRoot, prompt);
+      process.exit(exitCode);
+    }
+
     console.log(feedback);
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
