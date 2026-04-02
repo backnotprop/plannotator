@@ -232,11 +232,7 @@ if !ERRORLEVEL! equ 0 (
     ) else (
         set "CLAUDE_SKILLS_DIR=%USERPROFILE%\.claude\skills"
     )
-    if defined XDG_CONFIG_HOME (
-        set "AGENTS_SKILLS_DIR=%XDG_CONFIG_HOME%\agents\skills"
-    ) else (
-        set "AGENTS_SKILLS_DIR=%USERPROFILE%\.config\agents\skills"
-    )
+    set "AGENTS_SKILLS_DIR=%USERPROFILE%\.agents\skills"
     set "SKILLS_TMP=%TEMP%\plannotator-skills-%RANDOM%"
     mkdir "!SKILLS_TMP!" >nul 2>&1
 

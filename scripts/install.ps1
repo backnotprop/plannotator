@@ -220,7 +220,7 @@ Write-Host "Installed /plannotator-last command to $opencodeCommandsDir\plannota
 # Install skills (requires git)
 if (Get-Command git -ErrorAction SilentlyContinue) {
     $claudeSkillsDir = if ($env:CLAUDE_CONFIG_DIR) { "$env:CLAUDE_CONFIG_DIR\skills" } else { "$env:USERPROFILE\.claude\skills" }
-    $agentsSkillsDir = if ($env:XDG_CONFIG_HOME) { "$env:XDG_CONFIG_HOME\agents\skills" } else { "$env:USERPROFILE\.config\agents\skills" }
+    $agentsSkillsDir = "$env:USERPROFILE\.agents\skills"
     $skillsTmp = Join-Path ([System.IO.Path]::GetTempPath()) "plannotator-skills-$(Get-Random)"
     New-Item -ItemType Directory -Force -Path $skillsTmp | Out-Null
 

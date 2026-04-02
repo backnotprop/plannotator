@@ -216,7 +216,7 @@ echo "Installed /plannotator-last command to ${OPENCODE_COMMANDS_DIR}/plannotato
 # Install skills (requires git)
 if command -v git &>/dev/null; then
     CLAUDE_SKILLS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills"
-    AGENTS_SKILLS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/agents/skills"
+    AGENTS_SKILLS_DIR="$HOME/.agents/skills"
     skills_tmp=$(mktemp -d)
 
     if git clone --depth 1 --filter=blob:none --sparse \
