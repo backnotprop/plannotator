@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/icon.png" alt="Plannotator for VS Code" width="128" />
+  <img src="https://d17ygohy796f9l.cloudfront.net/vscode/icon.png" alt="Plannotator for VS Code" width="128" />
 </p>
 
 <h1 align="center">Plannotator</h1>
