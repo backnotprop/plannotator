@@ -63,7 +63,7 @@ import {
   startAnnotateServer,
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
-import { getGitContext, runGitDiff } from "@plannotator/server/git";
+import { type DiffType, getVcsContext, runVcsDiff } from "@plannotator/server/vcs";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getCliInstallUrl, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
 import { resolveMarkdownFile, hasMarkdownFiles } from "@plannotator/shared/resolve-file";
@@ -190,8 +190,9 @@ if (args[0] === "sessions") {
   let rawPatch: string;
   let gitRef: string;
   let diffError: string | undefined;
-  let gitContext: Awaited<ReturnType<typeof getGitContext>> | undefined;
+  let gitContext: Awaited<ReturnType<typeof getVcsContext>> | undefined;
   let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
+  let initialDiffType: DiffType | undefined;
 
   if (isPRMode) {
     // --- PR Review Mode ---
@@ -232,8 +233,9 @@ if (args[0] === "sessions") {
     }
   } else {
     // --- Local Review Mode ---
-    gitContext = await getGitContext();
-    const diffResult = await runGitDiff("uncommitted", gitContext.defaultBranch);
+    gitContext = await getVcsContext();
+    initialDiffType = gitContext.vcsType === "p4" ? "p4-default" : "uncommitted";
+    const diffResult = await runVcsDiff(initialDiffType, gitContext.defaultBranch);
     rawPatch = diffResult.patch;
     gitRef = diffResult.label;
     diffError = diffResult.error;
@@ -247,7 +249,7 @@ if (args[0] === "sessions") {
     gitRef,
     error: diffError,
     origin: detectedOrigin,
-    diffType: isPRMode ? undefined : "uncommitted",
+    diffType: isPRMode ? undefined : (initialDiffType ?? "uncommitted"),
     gitContext,
     prMetadata,
     sharingEnabled,

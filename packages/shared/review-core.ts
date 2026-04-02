@@ -13,7 +13,9 @@ export type DiffType =
   | "unstaged"
   | "last-commit"
   | "branch"
-  | `worktree:${string}`;
+  | `worktree:${string}`
+  | "p4-default"
+  | `p4-changelist:${string}`;
 
 export interface DiffOption {
   id: string;
@@ -32,6 +34,7 @@ export interface GitContext {
   diffOptions: DiffOption[];
   worktrees: WorktreeInfo[];
   cwd?: string;
+  vcsType?: "git" | "p4";
 }
 
 export interface DiffResult {
@@ -509,4 +512,18 @@ export async function gitResetFile(
 ): Promise<void> {
   validateFilePath(filePath);
   await ensureGitSuccess(runtime, ["reset", "HEAD", "--", filePath], cwd);
+}
+
+export function parseP4DiffType(
+  diffType: string,
+): { changelist: string | "default" } | null {
+  if (diffType === "p4-default") return { changelist: "default" };
+  if (diffType.startsWith("p4-changelist:")) {
+    return { changelist: diffType.slice("p4-changelist:".length) };
+  }
+  return null;
+}
+
+export function isP4DiffType(diffType: string): boolean {
+  return parseP4DiffType(diffType) !== null;
 }

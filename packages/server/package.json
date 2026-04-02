@@ -13,6 +13,8 @@
     "./browser": "./browser.ts",
     "./storage": "./storage.ts",
     "./git": "./git.ts",
+    "./p4": "./p4.ts",
+    "./vcs": "./vcs.ts",
     "./repo": "./repo.ts",
     "./share-url": "./share-url.ts",
     "./sessions": "./sessions.ts",
