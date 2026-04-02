@@ -80,6 +80,15 @@ import AnnoReplace from './AnnoReplace.astro';
           <img src="/assets/icon-pi.svg" alt="" class="w-4 h-4 icon-pi" />
           <span>Pi</span>
         </button>
+        <button
+          class="agent-btn"
+          data-agent="vscode"
+          data-command="curl -fsSL https://plannotator.ai/install.sh | bash"
+          data-video=""
+        >
+          <img src="/assets/icon-vscode.svg" alt="" class="w-4 h-4" />
+          <span>VS Code</span>
+        </button>
       </div>
 
       <!-- Install command block (desktop only) -->
@@ -207,17 +216,42 @@ import AnnoReplace from './AnnoReplace.astro';
       },
       pi: {
         detail: 'Or try without installing: pi -e npm:@plannotator/pi-extension'
+      },
+      vscode: {
+        detail: 'Then install the VS Code extension for an integrated experience:',
+        steps: [
+          '/plugin marketplace add backnotprop/plannotator',
+          'Restart Claude Code to activate hooks'
+        ],
+        link: {
+          text: 'Install VS Code Extension from Marketplace',
+          url: 'https://marketplace.visualstudio.com/items?itemName=backnotprop.plannotator-webview'
+        }
       }
     };
+
+    var installBlock = document.getElementById('install-block');
+    var detailWrap = document.getElementById('install-detail-wrap');
+    var linkEl = document.getElementById('install-link');
 
     function setAgent(btn) {
       buttons.forEach(function(b) { b.classList.remove('active'); });
       btn.classList.add('active');
       commandEl.textContent = btn.dataset.command;
-      if (videoLink) videoLink.href = btn.dataset.video;
+      if (videoLink) {
+        if (btn.dataset.video) {
+          videoLink.href = btn.dataset.video;
+          videoLink.style.display = '';
+        } else {
+          videoLink.style.display = 'none';
+        }
+      }
 
       var config = agents[btn.dataset.agent] || {};
       detailEl.textContent = config.detail || '';
+
+      // Show install command block
+      installBlock.style.display = '';
 
       // Clear all steps completely, then rebuild
       var allSteps = [step1El, step2El, step3El];
@@ -231,6 +265,20 @@ import AnnoReplace from './AnnoReplace.astro';
         }
       } else {
         stepsEl.classList.add('hidden');
+      }
+
+      // Handle marketplace link
+      if (linkEl) linkEl.remove();
+      if (config.link) {
+        var a = document.createElement('a');
+        a.id = 'install-link';
+        a.href = config.link.url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.className = 'mt-3 text-sm hidden sm:inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors';
+        a.innerHTML = config.link.text + ' <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>';
+        installBlock.parentNode.insertBefore(a, installBlock.nextSibling);
+        linkEl = a;
       }
     }
 

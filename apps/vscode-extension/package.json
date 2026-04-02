@@ -2,10 +2,10 @@
   "name": "plannotator-webview",
   "displayName": "Plannotator",
   "description": "Opens Plannotator plan reviews inside VS Code tabs instead of an external browser",
-  "version": "0.5.2",
-  "private": true,
+  "version": "0.16.5",
   "publisher": "backnotprop",
   "license": "MIT",
+  "homepage": "https://plannotator.ai",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/backnotprop/plannotator.git",
@@ -15,14 +15,17 @@
     "url": "https://github.com/backnotprop/plannotator/issues"
   },
   "icon": "images/icon.png",
-  "categories": ["Other"],
+  "galleryBanner": {
+    "color": "#1e1e2e",
+    "theme": "dark"
+  },
+  "categories": ["AI"],
   "keywords": ["plannotator", "plan review", "claude", "ai", "webview"],
   "engines": {
     "vscode": "^1.85.0"
   },
   "extensionKind": ["workspace", "ui"],
   "main": "./dist/extension.cjs",
-  "type": "module",
   "activationEvents": [
     "onStartupFinished"
   ],
@@ -101,7 +104,7 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@types/vscode": "^1.85.0",
-    "@vscode/vsce": "^3.0.0",
+    "@vscode/vsce": "^3.7.1",
     "esbuild": "^0.24.0",
     "typescript": "^5.0.0"
   }
