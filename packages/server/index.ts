@@ -203,6 +203,7 @@ export async function startPlannotatorServer(
     try {
       server = Bun.serve({
         port: configuredPort,
+        idleTimeout: 255, // seconds; suppress Bun's 10s default timeout warning on shutdown
 
         async fetch(req) {
           const url = new URL(req.url);
