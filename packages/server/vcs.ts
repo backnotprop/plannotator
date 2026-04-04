@@ -33,6 +33,13 @@ import {
   getP4FileContentsForDiff,
 } from "./p4";
 
+import {
+  detectGitButlerRepo,
+  getGitButlerContext,
+  runGitButlerDiff,
+  getGitButlerFileContents,
+} from "./gitbutler";
+
 // --- VCS Provider interface ---
 
 export interface VcsProvider {
@@ -143,18 +150,44 @@ const p4Provider: VcsProvider = {
   // P4 has no staging concept — stageFile/unstageFile intentionally omitted
 };
 
+// --- GitButler provider ---
+
+const gitbutlerProvider: VcsProvider = {
+  id: "gitbutler",
+
+  detect: detectGitButlerRepo,
+
+  ownsDiffType(diffType: string): boolean {
+    return diffType.startsWith("gitbutler:");
+  },
+
+  getContext: getGitButlerContext,
+
+  runDiff(diffType: DiffType, _defaultBranch: string, cwd?: string) {
+    return runGitButlerDiff(diffType, cwd);
+  },
+
+  getFileContents(diffType, defaultBranch, filePath, oldPath?, cwd?) {
+    return getGitButlerFileContents(diffType, defaultBranch, filePath, oldPath, cwd);
+  },
+
+  // No stageFile/unstageFile — GitButler manages its own staging via `but stage`
+};
+
 // --- Provider registry ---
 
 /** Providers in detection priority order. First match wins. */
-const providers: VcsProvider[] = [gitProvider, p4Provider];
+const providers: VcsProvider[] = [gitbutlerProvider, gitProvider, p4Provider];
 
 // Re-export types consumers need
 export type {
   DiffType,
   DiffOption,
+  FileMeta,
   GitContext,
   WorktreeInfo,
-} from "./git";
+  VirtualBranchInfo,
+} from "@plannotator/shared/review-core";
 
 export { parseWorktreeDiffType, validateFilePath, runtime as gitRuntime } from "./git";
 

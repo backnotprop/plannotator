@@ -12,6 +12,7 @@ export interface EditorAnnotation {
 // Git review types shared between server and client
 export type {
   DiffOption,
+  FileMeta,
   WorktreeInfo,
   GitContext,
 } from "./review-core";

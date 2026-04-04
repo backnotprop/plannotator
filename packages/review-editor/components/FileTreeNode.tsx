@@ -1,5 +1,6 @@
 import React from 'react';
 import type { FileTreeNode as TreeNode } from '../utils/buildFileTree';
+import type { FileMeta } from '../types';
 
 interface FileTreeNodeProps {
   node: TreeNode;
@@ -13,6 +14,7 @@ interface FileTreeNodeProps {
   hideViewedFiles: boolean;
   getAnnotationCount: (filePath: string) => number;
   stagedFiles?: Set<string>;
+  fileMeta?: Record<string, FileMeta>;
 }
 
 function hasVisibleChildren(
@@ -44,6 +46,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
   hideViewedFiles,
   getAnnotationCount,
   stagedFiles,
+  fileMeta,
 }) => {
   const paddingLeft = 4 + node.depth * 8;
 
@@ -92,6 +95,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
             hideViewedFiles={hideViewedFiles}
             getAnnotationCount={getAnnotationCount}
             stagedFiles={stagedFiles}
+            fileMeta={fileMeta}
           />
         ))}
       </>
@@ -103,6 +107,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
   const isViewed = viewedFiles.has(node.path);
   const isStaged = stagedFiles?.has(node.path) ?? false;
   const annotationCount = getAnnotationCount(node.path);
+  const meta = fileMeta?.[node.path];
 
   if (hideViewedFiles && isViewed && !isActive) {
     return null;
@@ -141,6 +146,27 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
         {isStaged && (
           <span className="text-primary font-medium" title="Staged (git add)">+</span>
         )}
+        {meta && (meta.lane || meta.lanes) && (() => {
+          const srcChar = meta.source === 'committed' ? 'C' : meta.source === 'uncommitted' ? 'S' : meta.source === 'mixed' ? 'M' : null;
+          const srcWord = meta.source === 'committed' ? 'committed' : meta.source === 'uncommitted' ? 'staged' : meta.source === 'mixed' ? 'committed + staged' : null;
+          const srcColor = meta.source === 'committed' ? 'text-blue-400' : meta.source === 'uncommitted' ? 'text-orange-400' : meta.source === 'mixed' ? 'text-purple-400' : 'text-muted-foreground/60';
+          const laneLabel = meta.lanes ? `${meta.lanes.length} lanes` : meta.lane ?? null;
+          const hoverTitle = (() => {
+            if (meta.laneDetails && meta.laneDetails.length > 1) {
+              return meta.laneDetails
+                .map((d) => `${d.source === 'committed' ? 'committed' : 'staged'} to ${d.lane}`)
+                .join(', ');
+            }
+            if (srcWord && laneLabel) return `${srcWord} to ${meta.lanes ? meta.lanes.join(', ') : laneLabel}`;
+            if (srcWord) return srcWord;
+            if (meta.lanes) return meta.lanes.join(', ');
+            return undefined;
+          })();
+          const displayLabel = [srcChar, laneLabel].filter(Boolean).join(' · ');
+          return displayLabel ? (
+            <span title={hoverTitle} className={`font-medium leading-none ${srcColor}`}>{displayLabel}</span>
+          ) : null;
+        })()}
         {annotationCount > 0 && (
           <span className="text-primary font-medium">{annotationCount}</span>
         )}

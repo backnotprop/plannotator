@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(but --help)",
+      "Bash(but diff:*)",
+      "Bash(but branch:*)",
+      "Bash(but status:*)",
+      "Bash(but show:*)"
+    ]
+  }
+}

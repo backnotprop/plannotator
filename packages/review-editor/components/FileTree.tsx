@@ -4,7 +4,7 @@ import type { DiffOption, WorktreeInfo } from '@plannotator/shared/types';
 import { buildFileTree, getAncestorPaths, getAllFolderPaths } from '../utils/buildFileTree';
 import { FileTreeNodeItem } from './FileTreeNode';
 import { getReviewSearchSideLabel, type ReviewSearchFileGroup, type ReviewSearchMatch } from '../utils/reviewSearch';
-import type { DiffFile } from '../types';
+import type { DiffFile, FileMeta } from '../types';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 
 interface FileTreeProps {
@@ -27,6 +27,8 @@ interface FileTreeProps {
   activeWorktreePath?: string | null;
   onSelectWorktree?: (path: string | null) => void;
   currentBranch?: string;
+  vcsType?: string;
+  fileMeta?: Record<string, FileMeta>;
   stagedFiles?: Set<string>;
   onCopyRawDiff?: () => void;
   canCopyRawDiff?: boolean;
@@ -66,6 +68,8 @@ export const FileTree: React.FC<FileTreeProps> = ({
   activeWorktreePath,
   onSelectWorktree,
   currentBranch,
+  vcsType,
+  fileMeta,
   stagedFiles,
   onCopyRawDiff,
   canCopyRawDiff = false,
@@ -391,6 +395,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
               hideViewedFiles={hideViewedFiles}
               getAnnotationCount={getAnnotationCount}
               stagedFiles={stagedFiles}
+              fileMeta={fileMeta}
             />
           ))
         )}

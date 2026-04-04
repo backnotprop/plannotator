@@ -16,7 +16,8 @@ export type DiffType =
   | "merge-base"
   | `worktree:${string}`
   | "p4-default"
-  | `p4-changelist:${string}`;
+  | `p4-changelist:${string}`
+  | `gitbutler:${string}`;
 
 export interface DiffOption {
   id: string;
@@ -29,19 +30,33 @@ export interface WorktreeInfo {
   head: string;
 }
 
+export interface VirtualBranchInfo {
+  id: string;
+  name: string;
+}
+
 export interface GitContext {
   currentBranch: string;
   defaultBranch: string;
   diffOptions: DiffOption[];
   worktrees: WorktreeInfo[];
   cwd?: string;
-  vcsType?: "git" | "p4";
+  vcsType?: "git" | "p4" | "gitbutler";
+  virtualBranches?: VirtualBranchInfo[];
+}
+
+export interface FileMeta {
+  source?: "committed" | "uncommitted" | "mixed";
+  lane?: string;
+  lanes?: string[];
+  laneDetails?: Array<{ lane: string; source: "committed" | "uncommitted" }>;
 }
 
 export interface DiffResult {
   patch: string;
   label: string;
   error?: string;
+  fileMeta?: Record<string, FileMeta>;
 }
 
 export interface GitCommandResult {

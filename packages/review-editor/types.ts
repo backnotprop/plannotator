@@ -5,3 +5,5 @@ export interface DiffFile {
   additions: number;
   deletions: number;
 }
+
+export type { FileMeta } from "@plannotator/shared/types";

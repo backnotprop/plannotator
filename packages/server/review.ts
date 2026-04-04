@@ -11,7 +11,7 @@
 
 import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
 import type { Origin } from "@plannotator/shared/agents";
-import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath } from "./vcs";
+import { type DiffType, type FileMeta, type GitContext, runVcsDiff, getVcsFileContentsForDiff, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath } from "./vcs";
 import { getRepoInfo } from "./repo";
 import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft } from "./draft";
@@ -53,6 +53,8 @@ export interface ReviewServerOptions {
   gitRef: string;
   /** Error message if git diff failed */
   error?: string;
+  /** Per-file metadata (source, lane) for GitButler diffs */
+  fileMeta?: Record<string, FileMeta>;
   /** HTML content to serve for the UI */
   htmlContent: string;
   /** Origin identifier for UI customization */
@@ -125,6 +127,7 @@ export async function startReviewServer(
   let currentGitRef = options.gitRef;
   let currentDiffType: DiffType = options.diffType || "uncommitted";
   let currentError = options.error;
+  let currentFileMeta: Record<string, FileMeta> | undefined = options.fileMeta;
 
   // Agent jobs — background process manager (late-binds serverUrl via getter)
   let serverUrl = "";
@@ -370,6 +373,7 @@ export async function startReviewServer(
               ...(isPRMode && { prMetadata, platformUser }),
               ...(isPRMode && initialViewedFiles.length > 0 && { viewedFiles: initialViewedFiles }),
               ...(currentError && { error: currentError }),
+              ...(currentFileMeta && { fileMeta: currentFileMeta }),
               serverConfig: getServerConfig(gitUser),
             });
           }
@@ -404,12 +408,14 @@ export async function startReviewServer(
               currentGitRef = result.label;
               currentDiffType = newDiffType;
               currentError = result.error;
+              currentFileMeta = result.fileMeta;
 
               return Response.json({
                 rawPatch: currentPatch,
                 gitRef: currentGitRef,
                 diffType: currentDiffType,
                 ...(currentError && { error: currentError }),
+                ...(currentFileMeta && { fileMeta: currentFileMeta }),
               });
             } catch (err) {
               const message =

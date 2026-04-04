@@ -63,7 +63,7 @@ import {
   startAnnotateServer,
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
-import { type DiffType, getVcsContext, runVcsDiff, gitRuntime } from "@plannotator/server/vcs";
+import { type DiffType, type FileMeta, getVcsContext, runVcsDiff, gitRuntime } from "@plannotator/server/vcs";
 import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { urlToMarkdown } from "@plannotator/shared/url-to-markdown";
@@ -216,6 +216,7 @@ if (args[0] === "sessions") {
   let initialDiffType: DiffType | undefined;
   let agentCwd: string | undefined;
   let worktreeCleanup: (() => void | Promise<void>) | undefined;
+  let initialFileMeta: Record<string, FileMeta> | undefined;
 
   if (isPRMode) {
     // --- PR Review Mode ---
@@ -388,11 +389,12 @@ if (args[0] === "sessions") {
   } else {
     // --- Local Review Mode ---
     gitContext = await getVcsContext();
-    initialDiffType = gitContext.vcsType === "p4" ? "p4-default" : resolveDefaultDiffType(loadConfig());
+    initialDiffType = gitContext.vcsType === "p4" ? "p4-default" : gitContext.vcsType === "gitbutler" ? "gitbutler:workspace" : resolveDefaultDiffType(loadConfig());
     const diffResult = await runVcsDiff(initialDiffType, gitContext.defaultBranch);
     rawPatch = diffResult.patch;
     gitRef = diffResult.label;
     diffError = diffResult.error;
+    initialFileMeta = diffResult.fileMeta;
   }
 
   const reviewProject = (await detectProjectName()) ?? "_unknown";
@@ -402,6 +404,7 @@ if (args[0] === "sessions") {
     rawPatch,
     gitRef,
     error: diffError,
+    fileMeta: initialFileMeta,
     origin: detectedOrigin,
     diffType: gitContext ? (initialDiffType ?? "unstaged") : undefined,
     gitContext,

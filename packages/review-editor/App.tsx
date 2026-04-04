@@ -55,7 +55,7 @@ import {
   REVIEW_PR_COMMENTS_PANEL_ID,
   REVIEW_PR_CHECKS_PANEL_ID,
 } from './dock/reviewPanelTypes';
-import type { DiffFile } from './types';
+import type { DiffFile, FileMeta } from './types';
 import type { DiffOption, WorktreeInfo, GitContext } from '@plannotator/shared/types';
 import type { PRMetadata } from '@plannotator/shared/pr-provider';
 import { altKey } from '@plannotator/ui/utils/platform';
@@ -155,6 +155,7 @@ const ReviewApp: React.FC = () => {
   const [gitUser, setGitUser] = useState<string | undefined>();
   const [isWSL, setIsWSL] = useState(false);
   const [diffType, setDiffType] = useState<string>('uncommitted');
+  const [fileMeta, setFileMeta] = useState<Record<string, FileMeta> | null>(null);
   const [gitContext, setGitContext] = useState<GitContext | null>(null);
   const [agentCwd, setAgentCwd] = useState<string | null>(null);
   const [isLoadingDiff, setIsLoadingDiff] = useState(false);
@@ -656,6 +657,7 @@ const ReviewApp: React.FC = () => {
         setFiles(apiFiles);
         if (data.origin) setOrigin(data.origin);
         if (data.diffType) setDiffType(data.diffType);
+        if (data.fileMeta) setFileMeta(data.fileMeta);
         if (data.gitContext) setGitContext(data.gitContext);
         if (data.agentCwd) setAgentCwd(data.agentCwd);
         if (data.sharingEnabled !== undefined) setSharingEnabled(data.sharingEnabled);
@@ -912,6 +914,7 @@ const ReviewApp: React.FC = () => {
       setDiffData(prev => prev ? { ...prev, rawPatch: data.rawPatch, gitRef: data.gitRef, diffType: data.diffType } : prev);
       setFiles(nextFiles);
       setDiffType(data.diffType);
+      setFileMeta(data.fileMeta ?? null);
       setActiveFileIndex(0);
       setPendingSelection(null);
       setDiffError(data.error || null);
@@ -1662,6 +1665,8 @@ const ReviewApp: React.FC = () => {
                 activeWorktreePath={activeWorktreePath}
                 onSelectWorktree={handleWorktreeSwitch}
                 currentBranch={gitContext?.currentBranch}
+                vcsType={gitContext?.vcsType}
+                fileMeta={fileMeta ?? undefined}
                 stagedFiles={stagedFiles}
                 onCopyRawDiff={handleCopyDiff}
                 canCopyRawDiff={!!diffData?.rawPatch}
