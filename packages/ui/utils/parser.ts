@@ -78,6 +78,7 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
   let currentType: Block['type'] = 'paragraph';
   let currentLevel = 0;
   let bufferStartLine = 1; // Track the start line of the current buffer
+  let lastLineWasBlank = false;
 
   const flush = () => {
     if (buffer.length > 0) {
@@ -98,6 +99,8 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
     const line = lines[i];
     const trimmed = line.trim();
     const currentLineNum = i + 1; // 1-based index
+    const prevLineWasBlank = lastLineWasBlank;
+    lastLineWasBlank = false;
 
     // Headings
     if (trimmed.startsWith('#')) {
@@ -232,6 +235,18 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
     if (trimmed === '') {
       flush();
       currentType = 'paragraph';
+      lastLineWasBlank = true;
+      continue;
+    }
+    // List continuation: indented line after a list item merges into it
+    if (
+      !prevLineWasBlank &&
+      buffer.length === 0 &&
+      blocks.length > 0 &&
+      blocks[blocks.length - 1].type === 'list-item' &&
+      /^\s+/.test(line)
+    ) {
+      blocks[blocks.length - 1].content += '\n' + trimmed;
       continue;
     }
 

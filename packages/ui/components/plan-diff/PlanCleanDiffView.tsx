@@ -589,7 +589,19 @@ const InlineMarkdown: React.FC<{ text: string }> = ({ text }) => {
   let key = 0;
 
   while (remaining.length > 0) {
-    let match = remaining.match(/^\*\*(.+?)\*\*/);
+    // Hard line break: two+ trailing spaces + newline, or backslash + newline
+    let match = remaining.match(/ {2,}\n|\\\n/);
+    if (match && match.index !== undefined) {
+      const before = remaining.slice(0, match.index);
+      if (before) {
+        parts.push(<InlineMarkdown key={key++} text={before} />);
+      }
+      parts.push(<br key={key++} />);
+      remaining = remaining.slice(match.index + match[0].length);
+      continue;
+    }
+
+    match = remaining.match(/^\*\*(.+?)\*\*/);
     if (match) {
       parts.push(
         <strong key={key++} className="font-semibold">
@@ -638,7 +650,7 @@ const InlineMarkdown: React.FC<{ text: string }> = ({ text }) => {
       continue;
     }
 
-    const nextSpecial = remaining.slice(1).search(/[*`[]/);
+    const nextSpecial = remaining.slice(1).search(/[*`\[!]/);
     if (nextSpecial === -1) {
       parts.push(remaining);
       break;

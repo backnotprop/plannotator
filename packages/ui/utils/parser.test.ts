@@ -208,3 +208,69 @@ describe("parseMarkdownToBlocks — real-world plan regression", () => {
     expect(blocks[5].type).toBe("heading");
   });
 });
+
+describe("parseMarkdownToBlocks — list continuation lines", () => {
+  test("indented continuation line merges into preceding list item", () => {
+    const md = "- First item with text\n  that continues here\n- Second item";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("list-item");
+    expect(blocks[0].content).toBe("First item with text\nthat continues here");
+    expect(blocks[1].type).toBe("list-item");
+    expect(blocks[1].content).toBe("Second item");
+  });
+
+  test("multiple continuation lines merge into one list item", () => {
+    const md = "- Line one\n  line two\n  line three\n- Next";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("list-item");
+    expect(blocks[0].content).toBe("Line one\nline two\nline three");
+  });
+
+  test("non-indented line after list item starts a new paragraph", () => {
+    const md = "- Item\nNot indented";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("list-item");
+    expect(blocks[1].type).toBe("paragraph");
+    expect(blocks[1].content).toBe("Not indented");
+  });
+
+  test("blank line between list item and indented text prevents merging", () => {
+    const md = "- Item\n\n  Indented paragraph";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("list-item");
+    expect(blocks[1].type).toBe("paragraph");
+  });
+
+  test("continuation does not swallow nested list items", () => {
+    const md = "- Parent\n  - Child\n- Sibling";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(3);
+    expect(blocks[0].type).toBe("list-item");
+    expect(blocks[0].content).toBe("Parent");
+    expect(blocks[1].type).toBe("list-item");
+    expect(blocks[1].content).toBe("Child");
+    expect(blocks[2].type).toBe("list-item");
+    expect(blocks[2].content).toBe("Sibling");
+  });
+
+  test("continuation works when list item follows a blank line", () => {
+    const md = "Some paragraph\n\n- Item with continuation\n  that continues here";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("paragraph");
+    expect(blocks[1].type).toBe("list-item");
+    expect(blocks[1].content).toBe("Item with continuation\nthat continues here");
+  });
+
+  test("block-level elements after list items are not swallowed", () => {
+    const md = "- Item\n# Heading";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("list-item");
+    expect(blocks[1].type).toBe("heading");
+  });
+});
