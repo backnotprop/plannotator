@@ -771,20 +771,8 @@ const InlineMarkdown: React.FC<{ text: string; onOpenLinkedDoc?: (path: string) 
   let key = 0;
 
   while (remaining.length > 0) {
-    // Hard line break: two+ trailing spaces + newline, or backslash + newline
-    let match = remaining.match(/ {2,}\n|\\\n/);
-    if (match && match.index !== undefined) {
-      const before = remaining.slice(0, match.index);
-      if (before) {
-        parts.push(<InlineMarkdown key={key++} text={before} onOpenLinkedDoc={onOpenLinkedDoc} imageBaseDir={imageBaseDir} onImageClick={onImageClick} />);
-      }
-      parts.push(<br key={key++} />);
-      remaining = remaining.slice(match.index + match[0].length);
-      continue;
-    }
-
-    // Bold: **text**
-    match = remaining.match(/^\*\*(.+?)\*\*/);
+    // Bold: **text** ([\s\S]+? allows matching across hard line breaks)
+    let match = remaining.match(/^\*\*([\s\S]+?)\*\*/);
     if (match) {
       parts.push(<strong key={key++} className="font-semibold"><InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={match[1]} onOpenLinkedDoc={onOpenLinkedDoc} /></strong>);
       remaining = remaining.slice(match[0].length);
@@ -792,7 +780,7 @@ const InlineMarkdown: React.FC<{ text: string; onOpenLinkedDoc?: (path: string) 
     }
 
     // Italic: *text*
-    match = remaining.match(/^\*(.+?)\*/);
+    match = remaining.match(/^\*([\s\S]+?)\*/);
     if (match) {
       parts.push(<em key={key++}><InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={match[1]} onOpenLinkedDoc={onOpenLinkedDoc} /></em>);
       remaining = remaining.slice(match[0].length);
@@ -917,6 +905,18 @@ const InlineMarkdown: React.FC<{ text: string; onOpenLinkedDoc?: (path: string) 
         );
       }
       remaining = remaining.slice(match[0].length);
+      continue;
+    }
+
+    // Hard line break: two+ trailing spaces + newline, or backslash + newline
+    match = remaining.match(/ {2,}\n|\\\n/);
+    if (match && match.index !== undefined) {
+      const before = remaining.slice(0, match.index);
+      if (before) {
+        parts.push(<InlineMarkdown key={key++} text={before} onOpenLinkedDoc={onOpenLinkedDoc} imageBaseDir={imageBaseDir} onImageClick={onImageClick} />);
+      }
+      parts.push(<br key={key++} />);
+      remaining = remaining.slice(match.index + match[0].length);
       continue;
     }
 
