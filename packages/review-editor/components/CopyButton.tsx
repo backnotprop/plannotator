@@ -1,25 +1,25 @@
 import type React from 'react';
 import { useState } from 'react';
+import { CopyIcon } from '../icons/CopyIcon';
+import { CheckIcon } from '../icons/CheckIcon';
+import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
 
 interface CopyButtonProps {
   text: string;
   className?: string;
+  variant?: 'overlay' | 'inline';
 }
 
 /** Hover-reveal copy button with "Copied" flash. Parent needs className="group relative". */
-export const CopyButton: React.FC<CopyButtonProps> = ({ text, className = '' }) => {
-  const [copied, setCopied] = useState(false);
+export const CopyButton: React.FC<CopyButtonProps> = ({ text, className = '', variant = 'overlay' }) => {
+  const { copied, copy } = useCopyToClipboard(text, 2000);
 
   const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Clipboard API may not be available
-    }
+    copy();
   };
+
+  const iconSize = variant === 'inline' ? 'w-3 h-3' : 'w-4 h-4';
 
   return (
     <button
@@ -27,15 +27,12 @@ export const CopyButton: React.FC<CopyButtonProps> = ({ text, className = '' }) 
       onClick={handleCopy}
       className={`absolute top-1.5 right-1.5 p-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground hover:bg-muted ${className}`}
       title={copied ? 'Copied!' : 'Copy'}
+      aria-label={copied ? 'Copied!' : 'Copy'}
     >
       {copied ? (
-        <svg aria-hidden="true" className="w-3 h-3 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-        </svg>
+        <CheckIcon className={`${iconSize} text-success`} aria-hidden="true" />
       ) : (
-        <svg aria-hidden="true" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-        </svg>
+        <CopyIcon className={iconSize} aria-hidden="true" />
       )}
     </button>
   );
