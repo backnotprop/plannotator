@@ -328,6 +328,9 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                                       {annotation.lineStart === annotation.lineEnd
                                         ? `L${annotation.lineStart}`
                                         : `L${annotation.lineStart}-${annotation.lineEnd}`}
+                                      {annotation.tokenText && (
+                                        <span className="ml-1 text-primary/70">{`\`${annotation.tokenText.length > 20 ? annotation.tokenText.slice(0, 17) + '...' : annotation.tokenText}\``}</span>
+                                      )}
                                     </span>
                                   )}
                                   {annotation.author && (

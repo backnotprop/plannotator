@@ -1,7 +1,8 @@
 import React, { useMemo, useRef, useEffect, useLayoutEffect, useCallback, useState } from 'react';
 import { FileDiff, type DiffLineAnnotation } from '@pierre/diffs/react';
 import { getSingularPatch, processFile } from '@pierre/diffs';
-import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata } from '@plannotator/ui/types';
+import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata, TokenAnnotationMeta } from '@plannotator/ui/types';
+import type { DiffTokenEventBaseProps } from '@pierre/diffs';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { storage } from '@plannotator/ui/utils/storage';
@@ -37,6 +38,9 @@ interface PierreDiffContentProps {
   onLineSelectionEnd: (range: SelectedLineRange | null) => void;
   renderAnnotation: (annotation: { side: string; lineNumber: number; metadata?: DiffAnnotationMetadata }) => React.ReactNode;
   renderHoverUtility: (getHoveredLine: () => { lineNumber: number; side: 'deletions' | 'additions' } | undefined) => React.ReactNode;
+  onTokenClick?: (props: DiffTokenEventBaseProps, event: MouseEvent) => void;
+  onTokenEnter?: (props: DiffTokenEventBaseProps, event: PointerEvent) => void;
+  onTokenLeave?: (props: DiffTokenEventBaseProps, event: PointerEvent) => void;
 }
 
 const PierreDiffContent = React.memo(({
@@ -54,6 +58,9 @@ const PierreDiffContent = React.memo(({
   onLineSelectionEnd,
   renderAnnotation,
   renderHoverUtility,
+  onTokenClick,
+  onTokenEnter,
+  onTokenLeave,
 }: PierreDiffContentProps) => {
   return (
     <FileDiff
@@ -72,6 +79,9 @@ const PierreDiffContent = React.memo(({
         enableLineSelection: true,
         enableHoverUtility: true,
         onLineSelectionEnd,
+        onTokenClick,
+        onTokenEnter,
+        onTokenLeave,
       }}
       lineAnnotations={mergedAnnotations}
       selectedLines={pendingSelection || undefined}
@@ -94,7 +104,10 @@ const PierreDiffContent = React.memo(({
   prev.pendingSelection === next.pendingSelection &&
   prev.onLineSelectionEnd === next.onLineSelectionEnd &&
   prev.renderAnnotation === next.renderAnnotation &&
-  prev.renderHoverUtility === next.renderHoverUtility
+  prev.renderHoverUtility === next.renderHoverUtility &&
+  prev.onTokenClick === next.onTokenClick &&
+  prev.onTokenEnter === next.onTokenEnter &&
+  prev.onTokenLeave === next.onTokenLeave
 ));
 
 interface DiffViewerProps {
@@ -114,7 +127,7 @@ interface DiffViewerProps {
   selectedAnnotationId: string | null;
   pendingSelection: SelectedLineRange | null;
   onLineSelection: (range: SelectedLineRange | null) => void;
-  onAddAnnotation: (type: CodeAnnotationType, text?: string, suggestedCode?: string, originalCode?: string) => void;
+  onAddAnnotation: (type: CodeAnnotationType, text?: string, suggestedCode?: string, originalCode?: string, tokenMeta?: TokenAnnotationMeta) => void;
   onAddFileComment: (text: string) => void;
   onEditAnnotation: (id: string, text?: string, suggestedCode?: string, originalCode?: string) => void;
   onSelectAnnotation: (id: string | null) => void;
@@ -441,6 +454,19 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     );
   }, [toolbar.handleLineSelectionEnd]);
 
+  // Token interaction handlers (code area clicks)
+  const handleTokenClick = useCallback((props: DiffTokenEventBaseProps, event: MouseEvent) => {
+    toolbar.handleTokenClick(props, event);
+  }, [toolbar.handleTokenClick]);
+
+  const handleTokenEnter = useCallback((props: DiffTokenEventBaseProps) => {
+    props.tokenElement.classList.add('pn-token-hover');
+  }, []);
+
+  const handleTokenLeave = useCallback((props: DiffTokenEventBaseProps) => {
+    props.tokenElement.classList.remove('pn-token-hover');
+  }, []);
+
   // Inject resolved colors into @pierre/diffs shadow DOM.
   // CSS custom properties don't cross the shadow boundary, so we read computed
   // values and pass them via unsafeCSS. Single state object avoids split renders.
@@ -452,6 +478,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       const bg = styles.getPropertyValue('--background').trim();
       const fg = styles.getPropertyValue('--foreground').trim();
       const muted = styles.getPropertyValue('--muted').trim();
+      const primary = styles.getPropertyValue('--primary').trim();
       if (!bg || !fg) return;
 
       const fontCSS = fontFamily || fontSize ? `
@@ -485,6 +512,13 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           [data-diff-type='split'][data-overflow='scroll'] > [data-code][data-deletions] [data-content],
           [data-diff-type='split'][data-overflow='scroll'] > [data-code][data-additions] [data-content] {
             min-width: 0 !important;
+          }
+          .pn-token-hover {
+            text-decoration: underline;
+            text-decoration-color: ${primary || 'oklch(0.70 0.20 280)'};
+            text-decoration-thickness: 1.5px;
+            text-underline-offset: 2px;
+            cursor: pointer;
           }
           ${fontCSS}
         `,
@@ -543,6 +577,9 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
               onLineSelectionEnd={toolbar.handleLineSelectionEnd}
               renderAnnotation={renderAnnotation}
               renderHoverUtility={renderHoverUtility}
+              onTokenClick={handleTokenClick}
+              onTokenEnter={handleTokenEnter}
+              onTokenLeave={handleTokenLeave}
             />
           </div>
         </div>

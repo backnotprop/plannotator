@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { ToolbarState } from '../hooks/useAnnotationToolbar';
 import { useTabIndent } from '../hooks/useTabIndent';
-import { formatLineRange } from '../utils/formatLineRange';
+import { formatLineRange, formatTokenContext } from '../utils/formatLineRange';
 import { AskAIInput } from './AskAIInput';
 import { SparklesIcon } from './SparklesIcon';
 import type { AIChatEntry } from '../hooks/useAIChat';
@@ -116,7 +116,11 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
         <div className="w-80">
           <div className="flex items-center justify-between mb-2" {...dragHandleProps}>
             <span className="text-xs text-muted-foreground">
-              {isEditing ? 'Edit annotation' : formatLineRange(toolbarState.range.start, toolbarState.range.end)}
+              {isEditing
+                ? 'Edit annotation'
+                : toolbarState.tokenSelection
+                  ? formatTokenContext(toolbarState.tokenSelection)
+                  : formatLineRange(toolbarState.range.start, toolbarState.range.end)}
             </span>
             <button
               onClick={onCancel}

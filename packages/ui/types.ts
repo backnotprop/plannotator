@@ -73,11 +73,21 @@ export interface CodeAnnotation {
   text?: string;
   suggestedCode?: string;
   originalCode?: string; // Original selected lines for suggestion diff
+  charStart?: number; // Character offset within lineStart (token-level selection)
+  charEnd?: number; // Character offset within lineEnd (token-level selection)
+  tokenText?: string; // Selected token/span text (token-level selection)
   createdAt: number;
   author?: string;
   source?: string; // External tool identifier (e.g., "eslint") — set when annotation comes from external API
   severity?: 'important' | 'nit' | 'pre_existing'; // Agent review severity (Claude)
   reasoning?: string; // Validation chain — how the issue was confirmed (Claude)
+}
+
+/** Token-level metadata passed from selection to annotation creation. */
+export interface TokenAnnotationMeta {
+  charStart: number;
+  charEnd: number;
+  tokenText: string;
 }
 
 /** Severity display styles — shared between agent detail panel and inline diff annotations. */

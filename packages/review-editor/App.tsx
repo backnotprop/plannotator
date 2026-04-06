@@ -18,7 +18,7 @@ import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/u
 import { getAIProviderSettings, saveAIProviderSettings, getPreferredModel } from '@plannotator/ui/utils/aiProvider';
 import { AISetupDialog } from '@plannotator/ui/components/AISetupDialog';
 import { needsAISetup } from '@plannotator/ui/utils/aiSetup';
-import { CodeAnnotation, CodeAnnotationType, SelectedLineRange } from '@plannotator/ui/types';
+import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, TokenAnnotationMeta } from '@plannotator/ui/types';
 import { useResizablePanel } from '@plannotator/ui/hooks/useResizablePanel';
 import { useCodeAnnotationDraft } from '@plannotator/ui/hooks/useCodeAnnotationDraft';
 import { useGitAdd } from './hooks/useGitAdd';
@@ -687,7 +687,8 @@ const ReviewApp: React.FC = () => {
     type: CodeAnnotationType,
     text?: string,
     suggestedCode?: string,
-    originalCode?: string
+    originalCode?: string,
+    tokenMeta?: TokenAnnotationMeta
   ) => {
     if (!pendingSelection || !files[activeFileIndex]) return;
 
@@ -706,6 +707,11 @@ const ReviewApp: React.FC = () => {
       text,
       suggestedCode,
       originalCode,
+      ...(tokenMeta && {
+        charStart: tokenMeta.charStart,
+        charEnd: tokenMeta.charEnd,
+        tokenText: tokenMeta.tokenText,
+      }),
       createdAt: Date.now(),
       author: identity,
     };

@@ -65,7 +65,8 @@ export function exportReviewFeedback(
         ? `Line ${ann.lineStart}`
         : `Lines ${ann.lineStart}-${ann.lineEnd}`;
 
-      output += `### ${lineRange} (${ann.side})\n`;
+      const tokenSuffix = ann.tokenText ? ` — \`${ann.tokenText}\`` : '';
+      output += `### ${lineRange} (${ann.side})${tokenSuffix}\n`;
 
       if (ann.text) {
         output += `${ann.text}\n`;

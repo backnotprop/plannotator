@@ -1,11 +1,26 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { CodeAnnotation, SelectedLineRange, CodeAnnotationType } from '@plannotator/ui/types';
+import { CodeAnnotation, SelectedLineRange, CodeAnnotationType, TokenAnnotationMeta } from '@plannotator/ui/types';
 import { useDismissOnOutsideAndEscape } from '@plannotator/ui/hooks/useDismissOnOutsideAndEscape';
 import { extractLinesFromPatch } from '../utils/patchParser';
+import type { DiffTokenEventBaseProps } from '@pierre/diffs';
+
+export interface TokenMeta {
+  lineNumber: number;
+  charStart: number;
+  charEnd: number;
+  tokenText: string;
+  side: 'deletions' | 'additions';
+}
+
+export interface TokenSelection {
+  anchor: TokenMeta;
+  fullText: string;
+}
 
 export interface ToolbarState {
   position: { top: number; left: number };
   range: SelectedLineRange;
+  tokenSelection?: TokenSelection;
 }
 
 interface UseAnnotationToolbarArgs {
@@ -13,7 +28,7 @@ interface UseAnnotationToolbarArgs {
   filePath: string;
   isFocused: boolean;
   onLineSelection: (range: SelectedLineRange | null) => void;
-  onAddAnnotation: (type: CodeAnnotationType, text?: string, suggestedCode?: string, originalCode?: string) => void;
+  onAddAnnotation: (type: CodeAnnotationType, text?: string, suggestedCode?: string, originalCode?: string, tokenMeta?: TokenAnnotationMeta) => void;
   onEditAnnotation: (id: string, text?: string, suggestedCode?: string, originalCode?: string) => void;
 }
 
@@ -38,6 +53,7 @@ function draftKey(filePath: string, range: SelectedLineRange): string {
 export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelection, onAddAnnotation, onEditAnnotation }: UseAnnotationToolbarArgs) {
   const toolbarRef = useRef<HTMLDivElement>(null);
   const lastMousePosition = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const tokenAnchorRef = useRef<TokenMeta | null>(null);
 
   const [toolbarState, setToolbarState] = useState<ToolbarState | null>(null);
   const [commentText, setCommentText] = useState('');
@@ -94,6 +110,11 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
     return () => saveDraft();
   }, [saveDraft]);
 
+  // Clear token anchor on file switch
+  useEffect(() => {
+    tokenAnchorRef.current = null;
+  }, [filePath]);
+
   const resetForm = useCallback(() => {
     setToolbarState(null);
     setCommentText('');
@@ -109,19 +130,15 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
     lastMousePosition.current = { x: e.clientX, y: e.clientY };
   }, []);
 
-  // Handle line selection end
-  const handleLineSelectionEnd = useCallback((range: SelectedLineRange | null) => {
-    if (!range) {
-      setToolbarState(null);
-      onLineSelection(null);
-      return;
-    }
-
-    // Save current draft before switching
+  // Shared: save current draft, restore form for new range, set toolbar state, notify parent
+  const openToolbar = useCallback((
+    range: SelectedLineRange,
+    position: { top: number; left: number },
+    tokenSelection?: TokenSelection,
+  ) => {
     saveDraft();
     setEditingAnnotationId(null);
 
-    // Restore draft for new range or start fresh
     const draft = draftStore.get(draftKey(filePath, range));
     if (draft) {
       setCommentText(draft.commentText);
@@ -133,18 +150,10 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
       setShowSuggestedCode(false);
     }
 
-    const mousePos = lastMousePosition.current;
-    setToolbarState({
-      position: {
-        top: mousePos.y + 10,
-        left: mousePos.x,
-      },
-      range,
-    });
+    setToolbarState({ position, range, tokenSelection });
     currentDraftKeyRef.current = draftKey(filePath, range);
     restoreDraftKeyByFilePath.delete(filePath);
 
-    // Pre-extract original code from selected lines
     const side = range.side === 'additions' ? 'new' : 'old';
     const start = Math.min(range.start, range.end);
     const end = Math.max(range.start, range.end);
@@ -152,6 +161,20 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
 
     onLineSelection(range);
   }, [patch, filePath, onLineSelection, saveDraft]);
+
+  // Handle line selection end (gutter clicks)
+  const handleLineSelectionEnd = useCallback((range: SelectedLineRange | null) => {
+    tokenAnchorRef.current = null;
+
+    if (!range) {
+      setToolbarState(null);
+      onLineSelection(null);
+      return;
+    }
+
+    const mousePos = lastMousePosition.current;
+    openToolbar(range, { top: mousePos.y + 10, left: mousePos.x });
+  }, [onLineSelection, openToolbar]);
 
   // Handle annotation submission (create or update)
   const handleSubmitAnnotation = useCallback(() => {
@@ -166,7 +189,13 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
     if (editingAnnotationId) {
       onEditAnnotation(editingAnnotationId, text, code, original);
     } else {
-      onAddAnnotation('comment', text, code, original);
+      const tokenSel = toolbarState.tokenSelection;
+      const tokenMeta = tokenSel ? {
+        charStart: tokenSel.anchor.charStart,
+        charEnd: tokenSel.anchor.charEnd,
+        tokenText: tokenSel.fullText,
+      } : undefined;
+      onAddAnnotation('comment', text, code, original, tokenMeta);
     }
 
     clearDraft();
@@ -251,6 +280,35 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
     }
   }, [filePath, isFocused, onLineSelection, patch]);
 
+  // Handle single token click — opens toolbar for one token
+  const handleTokenClick = useCallback((props: DiffTokenEventBaseProps, event: MouseEvent) => {
+    const clickedToken: TokenMeta = {
+      lineNumber: props.lineNumber,
+      charStart: props.lineCharStart,
+      charEnd: props.lineCharEnd,
+      tokenText: props.tokenText,
+      side: props.side,
+    };
+
+    // Same token clicked twice → deselect
+    const anchor = tokenAnchorRef.current;
+    if (anchor && anchor.lineNumber === clickedToken.lineNumber
+      && anchor.charStart === clickedToken.charStart
+      && anchor.side === clickedToken.side) {
+      tokenAnchorRef.current = null;
+      setToolbarState(null);
+      onLineSelection(null);
+      return;
+    }
+
+    tokenAnchorRef.current = clickedToken;
+    openToolbar(
+      { start: clickedToken.lineNumber, end: clickedToken.lineNumber, side: clickedToken.side },
+      { top: event.clientY + 10, left: event.clientX },
+      { anchor: clickedToken, fullText: clickedToken.tokenText },
+    );
+  }, [onLineSelection, openToolbar]);
+
   return {
     // State
     toolbarState,
@@ -271,6 +329,7 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
     // Handlers
     handleMouseMove,
     handleLineSelectionEnd,
+    handleTokenClick,
     handleSubmitAnnotation,
     handleDismiss,
     handleCancel,
