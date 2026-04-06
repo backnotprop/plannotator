@@ -32,7 +32,7 @@ async function runP4(
     proc.exited,
   ]);
 
-  return { stdout, stderr, exitCode };
+  return { stdout: stdout.replace(/\r\n/g, "\n"), stderr, exitCode };
 }
 
 // --- Path helpers ---
@@ -248,7 +248,7 @@ async function getNewFileDiff(
 ): Promise<string> {
   try {
     const content = await Bun.file(localPath).text();
-    const lines = content.split("\n");
+    const lines = content.replace(/\r\n/g, "\n").split("\n");
     const header = [
       `diff --git a/${relativePath} b/${relativePath}`,
       "new file mode 100644",
@@ -274,23 +274,37 @@ async function batchResolveDepotPaths(
   const result = new Map<string, { localPath: string; relativePath: string }>();
   if (depotPaths.length === 0) return result;
 
-  const whereResult = await runP4(["where", ...depotPaths], { cwd });
+  // Use -ztag for structured output — avoids fragile index-based parsing
+  // that breaks with stream depots, overlays, or unmapped path error lines
+  const whereResult = await runP4(["-ztag", "where", ...depotPaths], { cwd });
   if (whereResult.exitCode !== 0) return result;
 
-  const outputLines = whereResult.stdout.trim().split("\n");
-  for (let i = 0; i < outputLines.length && i < depotPaths.length; i++) {
-    const whereOutput = outputLines[i];
-    const rootIdx = whereOutput.indexOf(normalizePath(normalizedRoot).length > 0 ? normalizedRoot : "NOMATCH");
-    // Find the local path by looking for the client root
-    const clientRootBackslash = normalizedRoot.replace(/\//g, "\\");
-    const bsIdx = whereOutput.indexOf(clientRootBackslash);
-    const fwIdx = whereOutput.indexOf(normalizedRoot);
-    const idx = bsIdx !== -1 ? bsIdx : fwIdx;
-    if (idx === -1) continue;
+  let currentDepot = "";
+  let currentPath = "";
 
-    const localPath = normalizePath(whereOutput.slice(idx));
+  for (const line of whereResult.stdout.split("\n")) {
+    const tagMatch = line.match(/^\.\.\. (\w+) (.+)/);
+    if (!tagMatch) {
+      if (currentDepot && currentPath) {
+        const localPath = normalizePath(currentPath);
+        const relativePath = toRelativePath(localPath, normalizedRoot);
+        result.set(currentDepot, { localPath, relativePath });
+      }
+      currentDepot = "";
+      currentPath = "";
+      continue;
+    }
+
+    const [, field, value] = tagMatch;
+    if (field === "depotFile") currentDepot = value;
+    if (field === "path") currentPath = value;
+  }
+
+  // Handle last record (no trailing blank line)
+  if (currentDepot && currentPath) {
+    const localPath = normalizePath(currentPath);
     const relativePath = toRelativePath(localPath, normalizedRoot);
-    result.set(depotPaths[i], { localPath, relativePath });
+    result.set(currentDepot, { localPath, relativePath });
   }
 
   return result;
