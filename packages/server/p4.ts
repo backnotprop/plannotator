@@ -32,7 +32,9 @@ async function runP4(
     proc.exited,
   ]);
 
-  return { stdout, stderr, exitCode };
+  // P4 on Windows outputs \r\n line endings; normalise to \n so that
+  // callers splitting on "\n" don't get stray \r characters in paths.
+  return { stdout: stdout.replace(/\r\n/g, "\n"), stderr, exitCode };
 }
 
 // --- Path helpers ---
