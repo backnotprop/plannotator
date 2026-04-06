@@ -39,6 +39,7 @@ interface Draft {
   showSuggestedCode: boolean;
   range: SelectedLineRange;
   position: { top: number; left: number };
+  tokenSelection?: TokenSelection;
 }
 
 const draftStore = new Map<string, Draft>();
@@ -84,6 +85,7 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
         ...form,
         range,
         position: toolbarStateRef.current?.position ?? { top: 0, left: 0 },
+        tokenSelection: toolbarStateRef.current?.tokenSelection,
       });
       currentDraftKeyRef.current = key;
     } else {
@@ -268,6 +270,7 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
       setToolbarState({
         position: draft.position,
         range: draft.range,
+        tokenSelection: draft.tokenSelection,
       });
       currentDraftKeyRef.current = key;
       restoreDraftKeyByFilePath.delete(filePath);
