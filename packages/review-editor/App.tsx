@@ -1667,6 +1667,7 @@ const ReviewApp: React.FC = () => {
                 currentBranch={gitContext?.currentBranch}
                 vcsType={gitContext?.vcsType}
                 fileMeta={fileMeta ?? undefined}
+                hideLaneLabel={diffType.startsWith('gitbutler:') && (diffType.match(/:/g)?.length ?? 0) >= 2}
                 stagedFiles={stagedFiles}
                 onCopyRawDiff={handleCopyDiff}
                 canCopyRawDiff={!!diffData?.rawPatch}

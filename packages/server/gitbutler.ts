@@ -88,10 +88,27 @@ export async function getGitButlerContext(cwd?: string): Promise<GitContext> {
       const status = JSON.parse(statusResult.stdout) as ButStatusJson;
       for (const stack of status.stacks ?? []) {
         if (!stack.cliId) continue;
-        // Use the topmost branch name as the display label for the stack
-        const label = stack.branches?.[0]?.name ?? stack.cliId;
-        virtualBranches.push({ id: stack.cliId, name: label });
-        diffOptions.push({ id: `gitbutler:${stack.cliId}`, label });
+        const branches = stack.branches ?? [];
+        const topBranchName = branches[0]?.name ?? stack.cliId;
+        virtualBranches.push({ id: stack.cliId, name: topBranchName });
+
+        if (branches.length > 1) {
+          // Multi-branch stack: show a combined stack option + individual branch options
+          diffOptions.push({
+            id: `gitbutler:${stack.cliId}`,
+            label: `Stack: ${topBranchName} (${branches.length})`,
+          });
+          for (const branch of branches) {
+            if (!branch.cliId || !branch.name) continue;
+            diffOptions.push({
+              id: `gitbutler:${stack.cliId}:${branch.cliId}`,
+              label: `  › ${branch.name}`,
+            });
+          }
+        } else {
+          // Single-branch stack: show as a plain branch option
+          diffOptions.push({ id: `gitbutler:${stack.cliId}`, label: topBranchName });
+        }
       }
     } catch {
       // ignore JSON parse errors — workspace option still available
@@ -205,12 +222,12 @@ export async function runGitButlerDiff(
   diffType: DiffType,
   cwd?: string,
 ): Promise<DiffResult> {
-  const target =
+  const rawTarget =
     diffType === "gitbutler:workspace"
       ? null
       : (diffType as string).slice("gitbutler:".length);
 
-  if (!target) {
+  if (!rawTarget) {
     // Workspace: diff from merge base (includes committed lane changes + working tree changes)
     const status = await getButStatus(cwd);
     const mergeBase = status.mergeBase?.commitId;
@@ -234,15 +251,16 @@ export async function runGitButlerDiff(
       .filter((c) => c.changeType === "added")
       .map((c) => c.filePath);
 
-    // Committed files per branch (for lane attribution)
-    const committedByLane = await Promise.all(
-      (status.stacks ?? []).map(async (stack) => {
-        const laneName = stack.branches?.[0]?.name ?? stack.cliId ?? "unknown";
-        const committed = (
-          await Promise.all((stack.branches ?? []).map((b) => b.cliId ? butDiffChanges(b.cliId, cwd) : Promise.resolve([])))
-        ).flat();
-        return { laneName, paths: committed.map((c) => c.path) };
-      }),
+    // Committed files per individual branch (for accurate lane attribution)
+    const committedByBranch = await Promise.all(
+      (status.stacks ?? []).flatMap((stack) =>
+        (stack.branches ?? [])
+          .filter((b): b is ButBranch & { cliId: string; name: string } => Boolean(b.cliId && b.name))
+          .map(async (branch) => {
+            const changes = await butDiffChanges(branch.cliId, cwd);
+            return { branchName: branch.name, paths: changes.map((c) => c.path) };
+          })
+      ),
     );
 
     const [untrackedPatches] = await Promise.all([
@@ -278,9 +296,9 @@ export async function runGitButlerDiff(
         addDetail(c.filePath, { lane: laneName, source: "uncommitted" });
       }
     }
-    for (const { laneName, paths } of committedByLane) {
+    for (const { branchName, paths } of committedByBranch) {
       for (const p of paths) {
-        addDetail(p, { lane: laneName, source: "committed" });
+        addDetail(p, { lane: branchName, source: "committed" });
       }
     }
     const fileMeta: Record<string, FileMeta> = {};
@@ -299,7 +317,30 @@ export async function runGitButlerDiff(
     return { patch, label: "Workspace (all changes)", fileMeta };
   }
 
-  // Per-lane: combine uncommitted (stack) + committed (branch) diffs for full picture
+  // Determine whether this is a per-stack or individual-branch diff
+  const colonIdx = rawTarget.indexOf(":");
+  const isIndividualBranch = colonIdx > -1;
+
+  if (isIndividualBranch) {
+    // Individual branch: gitbutler:{stackId}:{branchId} — show only that branch's commits
+    const stackId = rawTarget.slice(0, colonIdx);
+    const branchId = rawTarget.slice(colonIdx + 1);
+
+    const status = await getButStatus(cwd);
+    const stack = status.stacks?.find((s) => s.cliId === stackId);
+    const branch = stack?.branches?.find((b) => b.cliId === branchId);
+    const branchLabel = branch?.name ?? branchId;
+
+    const committedChanges = await butDiffChanges(branchId, cwd);
+
+    const fileMeta: Record<string, FileMeta> = {};
+    for (const c of committedChanges) fileMeta[c.path] = { source: "committed", lane: branchLabel };
+
+    return { patch: buildUnifiedPatch(committedChanges), label: branchLabel, fileMeta };
+  }
+
+  // Per-stack: combine uncommitted (stack) + committed (all branches) diffs for full picture
+  const target = rawTarget;
   const status = await getButStatus(cwd);
   const stack = status.stacks?.find((s) => s.cliId === target);
   const branchCliIds = stack?.branches?.map((b) => b.cliId).filter(Boolean) as string[] ?? [];
@@ -312,13 +353,41 @@ export async function runGitButlerDiff(
   const allCommittedChanges = committedChangeSets.flat();
   const merged = mergeChanges(uncommittedChanges, allCommittedChanges);
 
-  const stackLabel = stack?.branches?.[0]?.name ?? target;
+  const branches = stack?.branches ?? [];
+  const stackLabel = branches.length > 1
+    ? `Stack: ${branches[0]?.name ?? target} (${branches.length})`
+    : (branches[0]?.name ?? target);
+
+  const branchNameById = new Map<string, string>(
+    branches
+      .filter((b): b is ButBranch & { cliId: string; name: string } => Boolean(b.cliId && b.name))
+      .map((b) => [b.cliId, b.name])
+  );
+
+  type LaneDetail = { lane: string; source: "committed" | "uncommitted" };
+  const stackFileDetails = new Map<string, LaneDetail[]>();
+  const addStackDetail = (path: string, detail: LaneDetail) => {
+    const arr = stackFileDetails.get(path) ?? [];
+    if (!arr.some((d) => d.lane === detail.lane && d.source === detail.source)) arr.push(detail);
+    stackFileDetails.set(path, arr);
+  };
+
+  for (const c of uncommittedChanges) addStackDetail(c.path, { lane: stackLabel, source: "uncommitted" });
+
+  for (let i = 0; i < branchCliIds.length; i++) {
+    const branchName = branchNameById.get(branchCliIds[i]) ?? branchCliIds[i];
+    for (const c of committedChangeSets[i]) addStackDetail(c.path, { lane: branchName, source: "committed" });
+  }
+
   const fileMeta: Record<string, FileMeta> = {};
-  for (const c of uncommittedChanges) fileMeta[c.path] = { source: "uncommitted", lane: stackLabel };
-  for (const c of allCommittedChanges) {
-    fileMeta[c.path] = fileMeta[c.path]
-      ? { source: "mixed", lane: stackLabel }
-      : { source: "committed", lane: stackLabel };
+  for (const [path, details] of stackFileDetails) {
+    const lanes = [...new Set(details.map((d) => d.lane))];
+    const sources = [...new Set(details.map((d) => d.source))];
+    const source: FileMeta["source"] =
+      sources.length === 1 ? (sources[0] as "committed" | "uncommitted") : "mixed";
+    fileMeta[path] = lanes.length > 1
+      ? { source, lanes, laneDetails: details }
+      : { source, lane: lanes[0] };
   }
 
   return { patch: buildUnifiedPatch(merged), label: stackLabel, fileMeta };

@@ -15,6 +15,7 @@ interface FileTreeNodeProps {
   getAnnotationCount: (filePath: string) => number;
   stagedFiles?: Set<string>;
   fileMeta?: Record<string, FileMeta>;
+  hideLaneLabel?: boolean;
 }
 
 function hasVisibleChildren(
@@ -47,6 +48,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
   getAnnotationCount,
   stagedFiles,
   fileMeta,
+  hideLaneLabel,
 }) => {
   const paddingLeft = 4 + node.depth * 8;
 
@@ -96,6 +98,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
             getAnnotationCount={getAnnotationCount}
             stagedFiles={stagedFiles}
             fileMeta={fileMeta}
+            hideLaneLabel={hideLaneLabel}
           />
         ))}
       </>
@@ -162,7 +165,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
             if (meta.lanes) return meta.lanes.join(', ');
             return undefined;
           })();
-          const displayLabel = [srcChar, laneLabel].filter(Boolean).join(' · ');
+          const displayLabel = [srcChar, hideLaneLabel ? null : laneLabel].filter(Boolean).join(' · ');
           return displayLabel ? (
             <span title={hoverTitle} className={`font-medium leading-none ${srcColor}`}>{displayLabel}</span>
           ) : null;

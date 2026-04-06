@@ -29,6 +29,7 @@ interface FileTreeProps {
   currentBranch?: string;
   vcsType?: string;
   fileMeta?: Record<string, FileMeta>;
+  hideLaneLabel?: boolean;
   stagedFiles?: Set<string>;
   onCopyRawDiff?: () => void;
   canCopyRawDiff?: boolean;
@@ -70,6 +71,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   currentBranch,
   vcsType,
   fileMeta,
+  hideLaneLabel,
   stagedFiles,
   onCopyRawDiff,
   canCopyRawDiff = false,
@@ -396,6 +398,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
               getAnnotationCount={getAnnotationCount}
               stagedFiles={stagedFiles}
               fileMeta={fileMeta}
+              hideLaneLabel={hideLaneLabel}
             />
           ))
         )}
