@@ -63,7 +63,7 @@ import {
   startAnnotateServer,
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
-import { type DiffType, getVcsContext, runVcsDiff, gitRuntime } from "@plannotator/server/vcs";
+import { type DiffType, getVcsContext, runVcsDiff, gitRuntime, detectVcs } from "@plannotator/server/vcs";
 import { fetchRef, createWorktree, removeWorktree, ensureObjectAvailable } from "@plannotator/shared/worktree";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getCliInstallUrl, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
@@ -967,10 +967,19 @@ if (args[0] === "sessions") {
   // Cleanup
   server.stop();
 
+  // Check if working directory has version control (git or p4)
+  const noVcsMessage = await (async () => {
+    if (!result.approved) return "";
+    const provider = await detectVcs();
+    if (await provider.detect()) return "";
+    return "\n\n[Note: No version control detected in this directory. Before making changes, ask the user if they want to initialize git to enable change tracking.]";
+  })();
+
   // Output decision in the appropriate format for the harness
   if (isGemini) {
     if (result.approved) {
-      console.log(result.feedback ? JSON.stringify({ systemMessage: result.feedback }) : "{}");
+      const systemMessage = (result.feedback || "") + noVcsMessage;
+      console.log(systemMessage ? JSON.stringify({ systemMessage }) : "{}");
     } else {
       console.log(
         JSON.stringify({
@@ -1000,6 +1009,7 @@ if (args[0] === "sessions") {
             decision: {
               behavior: "allow",
               ...(updatedPermissions.length > 0 && { updatedPermissions }),
+              ...(noVcsMessage && { message: noVcsMessage.trim() }),
             },
           },
         })
