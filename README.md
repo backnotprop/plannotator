@@ -83,39 +83,7 @@ irm https://plannotator.ai/install.ps1 | iex
 & ([scriptblock]::Create((irm https://plannotator.ai/install.ps1))) -Version v0.17.1
 ```
 
-### Verifying your install
-
-Every released binary ships with a SHA256 sidecar (verified automatically on every install) and a [SLSA build provenance](https://slsa.dev/) attestation signed via Sigstore. The SHA256 check is mandatory; provenance verification is optional and only needed if you want a cryptographic link from the binary back to the exact commit and workflow run that built it.
-
-If you want to verify provenance manually, install [GitHub CLI](https://cli.github.com) and run:
-
-```bash
-# macOS / Linux
-gh attestation verify ~/.local/bin/plannotator --repo backnotprop/plannotator
-
-# Windows (PowerShell installer)
-gh attestation verify "$env:LOCALAPPDATA\plannotator\plannotator.exe" --repo backnotprop/plannotator
-
-# Windows (cmd installer)
-gh attestation verify "%USERPROFILE%\.local\bin\plannotator.exe" --repo backnotprop/plannotator
-```
-
-This requires `gh auth login`. For air-gapped or no-auth environments, see GitHub's docs on [verifying attestations offline](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/verifying-attestations-offline).
-
-To make the installer run provenance verification automatically on every upgrade (opt-in):
-
-```bash
-# One-shot
-curl -fsSL https://plannotator.ai/install.sh | bash -s -- --verify-attestation
-
-# Persistent via env var
-export PLANNOTATOR_VERIFY_ATTESTATION=1
-
-# Persistent via config file
-echo '{ "verifyAttestation": true }' > ~/.plannotator/config.json
-```
-
-Precedence: CLI flag > env var > config file > default (off). When enabled, the installer requires `gh` installed and authenticated; otherwise it hard-fails. See [the full docs](https://plannotator.ai/docs/getting-started/installation/#verifying-your-install) for details.
+Every released binary ships with a SHA256 sidecar (verified automatically on every install) and a [SLSA build provenance](https://slsa.dev/) attestation signed via Sigstore. For manual verification commands and opt-in auto-verification during upgrades, see the [installation docs](https://plannotator.ai/docs/getting-started/installation/#verifying-your-install).
 
 **Then in Claude Code:**
 

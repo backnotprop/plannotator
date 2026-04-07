@@ -133,10 +133,28 @@ jobs:
         run: |
           # Regression guard for the review finding that install.cmd silently
           # reinterpreted typoed flags as version strings. A leading-dash token
-          # that doesn't match a known flag must now produce a non-zero exit.
+          # that doesn't match a known flag must now produce a non-zero exit
+          # AND emit "Unknown option:" on stderr — the latter is the real
+          # discriminator between the guard triggering and some other failure
+          # mode (network, gh auth, pre-PR release without an attestation)
+          # that also happens to exit non-zero.
+          #
+          # `--verify-attesttion` below is INTENTIONALLY MISSPELLED. Do not
+          # "correct" it during a typo sweep — the valid spelling is a real
+          # flag and would bypass this guard. The stderr assertion below
+          # would catch the drift, but the comment is the first line of
+          # defense for future maintainers.
+          $stderrFile = New-TemporaryFile
           $p = Start-Process -Wait -PassThru -NoNewWindow cmd `
-            -ArgumentList '/c','scripts\install.cmd --verify-attesttion'
+            -ArgumentList '/c','scripts\install.cmd --verify-attesttion' `
+            -RedirectStandardError $stderrFile.FullName
+          $stderr = Get-Content $stderrFile.FullName -Raw -ErrorAction SilentlyContinue
+          Remove-Item $stderrFile.FullName -ErrorAction SilentlyContinue
+
           if ($p.ExitCode -eq 0) {
-            throw "install.cmd should have rejected --verify-attesttion but exited 0"
+            throw "install.cmd should have rejected --verify-attesttion but exited 0. stderr: $stderr"
           }
-          Write-Host "✓ Unknown flag rejected with exit code $($p.ExitCode)"
+          if ($stderr -notmatch 'Unknown option:') {
+            throw "install.cmd exited $($p.ExitCode) but not via the unknown-flag guard. Expected 'Unknown option:' in stderr but got: $stderr"
+          }
+          Write-Host "✓ Unknown flag rejected with exit code $($p.ExitCode) via the unknown-flag guard"

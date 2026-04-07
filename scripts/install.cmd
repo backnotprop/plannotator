@@ -35,9 +35,17 @@ if /i "%~1"=="--skip-attestation" (
 REM Reject any other dash-prefixed token as an unknown option, so a typoed
 REM flag like --verify-attesttion fails fast instead of being interpreted as
 REM a version tag (which would 404 on releases/download/v--verify-attesttion/...).
-echo %~1 | findstr /b "[-]" >nul
-if !ERRORLEVEL! equ 0 (
-    echo Unknown option: %~1 >&2
+REM
+REM Uses a variable-assigned substring test instead of `echo %~1 | findstr`
+REM because unquoted %~1 in an echo pipe lets cmd.exe interpret shell
+REM metacharacters (& | > <) in the argument before the pipe runs. Assigning
+REM to a `set "VAR=%~1"` literal-quoted form preserves metacharacters safely,
+REM and delayed-expansion substring (!VAR:~0,1!) avoids the subprocess entirely.
+REM The error-message echo also quotes "%~1" for the same reason — echoing an
+REM unquoted arg containing `&` would re-trigger metacharacter interpretation.
+set "CURRENT_ARG=%~1"
+if "!CURRENT_ARG:~0,1!"=="-" (
+    echo Unknown option: "%~1" >&2
     echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] >&2
     exit /b 1
 )
@@ -174,7 +182,7 @@ if "!VERIFY_ATTESTATION!"=="1" (
         REM message (auth, network, missing attestation, etc.) can be
         REM surfaced on failure instead of a generic "verification failed"
         REM with no diagnostic detail. Matches install.sh / install.ps1.
-        gh attestation verify "!TEMP_FILE!" --repo !REPO! > "%TEMP%\gh-output.txt" 2>&1
+        gh attestation verify "!TEMP_FILE!" --repo "!REPO!" > "%TEMP%\gh-output.txt" 2>&1
         if !ERRORLEVEL! neq 0 (
             type "%TEMP%\gh-output.txt" >&2
             del "%TEMP%\gh-output.txt"
