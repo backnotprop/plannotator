@@ -302,6 +302,24 @@ describe("install shared behavior", () => {
     expect(cmdScript).not.toMatch(/%TEMP%\\plannotator-!TAG!\.exe/);
   });
 
+  test("install.cmd escapes ! in Claude Code slash command echoes", () => {
+    // Regression guard: under setlocal enabledelayedexpansion, an unmatched
+    // `!` in an echo line is silently stripped from the written file. The
+    // Claude Code slash command format requires a `!` prefix before the
+    // backtick-delimited shell invocation — without it, the command file
+    // is a functional no-op. install.sh and install.ps1 write the `!`
+    // correctly via their respective literal-string idioms; install.cmd
+    // must use `^!` to escape it from delayed expansion. The Gemini
+    // section of install.cmd already does this correctly — the Claude
+    // Code section didn't until this fix.
+    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    expect(cmdScript).toContain("echo ^!`plannotator review $ARGUMENTS`");
+    expect(cmdScript).toContain("echo ^!`plannotator annotate $ARGUMENTS`");
+    expect(cmdScript).toContain("echo ^!`plannotator annotate-last`");
+    // And the unescaped forms must be gone
+    expect(cmdScript).not.toMatch(/^echo !`plannotator/m);
+  });
+
   test("install.cmd uses substring test (not echo|findstr) for v-prefix normalization", () => {
     // Regression guard: `echo !TAG! | findstr /b "v"` pipes an unquoted
     // expanded variable, re-exposing cmd metacharacters (& | > <) in

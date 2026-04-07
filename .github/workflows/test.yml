@@ -146,6 +146,34 @@ jobs:
 
           Write-Host "✓ Gemini settings.json merge verified (issue #506 regression guard)"
 
+      - name: Verify Claude Code slash command files contain the shell-invocation prefix
+        shell: pwsh
+        run: |
+          # Regression guard: install.cmd previously wrote `echo !`plannotator
+          # review $ARGUMENTS`` (note the unescaped `!`) under
+          # setlocal enabledelayedexpansion, which silently stripped the `!`
+          # from the written .md file. Without the `!` prefix, Claude Code
+          # renders the backtick block as inline markdown code and the slash
+          # command is a silent no-op when invoked — the install appears
+          # successful but the command does nothing.
+          #
+          # install.sh and install.ps1 already write the `!` correctly via
+          # single-quoted heredocs / here-strings. This step checks that
+          # install.cmd now matches (via `echo ^!`) and catches future
+          # regressions of the same class.
+          $cmdDir = "$env:USERPROFILE\.claude\commands"
+          foreach ($file in @("plannotator-review.md", "plannotator-annotate.md", "plannotator-last.md")) {
+            $path = Join-Path $cmdDir $file
+            if (-not (Test-Path $path)) {
+              throw "Expected slash command file missing: $path"
+            }
+            $content = Get-Content $path -Raw
+            if ($content -notmatch '!`plannotator') {
+              throw "Slash command file $file is missing the '!' shell-invocation prefix. Content: $content"
+            }
+          }
+          Write-Host "✓ All three Claude Code slash command files contain the '!' prefix"
+
       - name: Unknown flag is rejected with non-zero exit
         shell: pwsh
         run: |
