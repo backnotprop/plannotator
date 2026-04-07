@@ -1,11 +1,11 @@
-import React from 'react';
+import type { ReactNode } from 'react';
 
 /**
- * Renders simple inline markdown: `code`, **bold**, *italic*, and
+ * Renders simple inline markdown: `code`, **bold**, *italic*, _italic_, and
  * fenced code blocks (```...```). Enough for review comments.
  */
-export function renderInlineMarkdown(text: string): React.ReactNode[] {
-  const nodes: React.ReactNode[] = [];
+export function renderInlineMarkdown(text: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
   let key = 0;
 
   // Split by fenced code blocks first
@@ -32,12 +32,12 @@ export function renderInlineMarkdown(text: string): React.ReactNode[] {
   return nodes;
 }
 
-function renderInline(text: string, startKey: number): React.ReactNode[] {
-  const nodes: React.ReactNode[] = [];
+function renderInline(text: string, startKey: number): ReactNode[] {
+  const nodes: ReactNode[] = [];
   let key = startKey;
 
-  // Match inline patterns: [text](url), `code`, **bold**, *italic*, bare URLs
-  const regex = /(\[([^\]]+)\]\((https?:\/\/[^)]+)\)|`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|https?:\/\/[^\s<)\]]+)/g;
+  // Match inline patterns: [text](url), `code`, **bold**, *italic*, _italic_, bare URLs
+  const regex = /(\[([^\]]+)\]\((https?:\/\/[^)]+)\)|`[^`]+`|\*\*[^*]+\*\*|(^|[^\w])_([^_\s](?:[\s\S]*?[^_\s])?)_(?!\w)|\*[^*]+\*|https?:\/\/[^\s<)\]]+)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
@@ -59,6 +59,11 @@ function renderInline(text: string, startKey: number): React.ReactNode[] {
       nodes.push(<code key={key++} className="inline-code">{token.slice(1, -1)}</code>);
     } else if (token.startsWith('**')) {
       nodes.push(<strong key={key++}>{token.slice(2, -2)}</strong>);
+    } else if (token.startsWith('_') || (match[4] && match[5])) {
+      const prefix = match[4] || '';
+      const italicText = match[5];
+      if (prefix) nodes.push(prefix);
+      nodes.push(<em key={key++}>{italicText}</em>);
     } else if (token.startsWith('*')) {
       nodes.push(<em key={key++}>{token.slice(1, -1)}</em>);
     } else if (token.startsWith('http')) {

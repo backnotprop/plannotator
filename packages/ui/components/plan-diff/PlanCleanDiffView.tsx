@@ -587,6 +587,7 @@ const InlineMarkdown: React.FC<{ text: string }> = ({ text }) => {
   const parts: React.ReactNode[] = [];
   let remaining = text;
   let key = 0;
+  let previousChar = "";
 
   while (remaining.length > 0) {
     // Bold: **text** ([\s\S]+? allows matching across hard line breaks)
@@ -598,14 +599,26 @@ const InlineMarkdown: React.FC<{ text: string }> = ({ text }) => {
         </strong>
       );
       remaining = remaining.slice(match[0].length);
+      previousChar = match[0][match[0].length - 1] || previousChar;
       continue;
     }
 
-    // Italic: *text*
+    // Italic: *text* or _text_ (avoid intraword underscores)
     match = remaining.match(/^\*([\s\S]+?)\*/);
     if (match) {
       parts.push(<em key={key++}><InlineMarkdown text={match[1]} /></em>);
       remaining = remaining.slice(match[0].length);
+      previousChar = match[0][match[0].length - 1] || previousChar;
+      continue;
+    }
+
+    match = !/\w/.test(previousChar)
+      ? remaining.match(/^_([^_\s](?:[\s\S]*?[^_\s])?)_(?!\w)/)
+      : null;
+    if (match) {
+      parts.push(<em key={key++}><InlineMarkdown text={match[1]} /></em>);
+      remaining = remaining.slice(match[0].length);
+      previousChar = match[0][match[0].length - 1] || previousChar;
       continue;
     }
 
@@ -620,6 +633,7 @@ const InlineMarkdown: React.FC<{ text: string }> = ({ text }) => {
         </code>
       );
       remaining = remaining.slice(match[0].length);
+      previousChar = match[0][match[0].length - 1] || previousChar;
       continue;
     }
 
@@ -637,6 +651,7 @@ const InlineMarkdown: React.FC<{ text: string }> = ({ text }) => {
         </a>
       );
       remaining = remaining.slice(match[0].length);
+      previousChar = match[0][match[0].length - 1] || previousChar;
       continue;
     }
 
@@ -649,16 +664,20 @@ const InlineMarkdown: React.FC<{ text: string }> = ({ text }) => {
       }
       parts.push(<br key={key++} />);
       remaining = remaining.slice(match.index + match[0].length);
+      previousChar = "\n";
       continue;
     }
 
-    const nextSpecial = remaining.slice(1).search(/[*`\[!]/);
+    const nextSpecial = remaining.slice(1).search(/[\*_`\[!]/);
     if (nextSpecial === -1) {
       parts.push(remaining);
+      previousChar = remaining[remaining.length - 1] || previousChar;
       break;
     } else {
-      parts.push(remaining.slice(0, nextSpecial + 1));
+      const plainText = remaining.slice(0, nextSpecial + 1);
+      parts.push(plainText);
       remaining = remaining.slice(nextSpecial + 1);
+      previousChar = plainText[plainText.length - 1] || previousChar;
     }
   }
 

@@ -763,12 +763,13 @@ const ImageLightbox: React.FC<{ src: string; alt: string; onClose: () => void }>
 };
 
 /**
- * Renders inline markdown: **bold**, *italic*, `code`, [links](url)
+ * Renders inline markdown: **bold**, *italic*, _italic_, `code`, [links](url)
  */
 const InlineMarkdown: React.FC<{ text: string; onOpenLinkedDoc?: (path: string) => void; imageBaseDir?: string; onImageClick?: (src: string, alt: string) => void }> = ({ text, onOpenLinkedDoc, imageBaseDir, onImageClick }) => {
   const parts: React.ReactNode[] = [];
   let remaining = text;
   let key = 0;
+  let previousChar = '';
 
   while (remaining.length > 0) {
     // Bold: **text** ([\s\S]+? allows matching across hard line breaks)
@@ -776,14 +777,26 @@ const InlineMarkdown: React.FC<{ text: string; onOpenLinkedDoc?: (path: string) 
     if (match) {
       parts.push(<strong key={key++} className="font-semibold"><InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={match[1]} onOpenLinkedDoc={onOpenLinkedDoc} /></strong>);
       remaining = remaining.slice(match[0].length);
+      previousChar = match[0][match[0].length - 1] || previousChar;
       continue;
     }
 
-    // Italic: *text*
+    // Italic: *text* or _text_ (avoid intraword underscores)
     match = remaining.match(/^\*([\s\S]+?)\*/);
     if (match) {
       parts.push(<em key={key++}><InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={match[1]} onOpenLinkedDoc={onOpenLinkedDoc} /></em>);
       remaining = remaining.slice(match[0].length);
+      previousChar = match[0][match[0].length - 1] || previousChar;
+      continue;
+    }
+
+    match = !/\w/.test(previousChar)
+      ? remaining.match(/^_([^_\s](?:[\s\S]*?[^_\s])?)_(?!\w)/)
+      : null;
+    if (match) {
+      parts.push(<em key={key++}><InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={match[1]} onOpenLinkedDoc={onOpenLinkedDoc} /></em>);
+      remaining = remaining.slice(match[0].length);
+      previousChar = match[0][match[0].length - 1] || previousChar;
       continue;
     }
 
@@ -796,6 +809,7 @@ const InlineMarkdown: React.FC<{ text: string; onOpenLinkedDoc?: (path: string) 
         </code>
       );
       remaining = remaining.slice(match[0].length);
+      previousChar = match[0][match[0].length - 1] || previousChar;
       continue;
     }
 
@@ -830,6 +844,7 @@ const InlineMarkdown: React.FC<{ text: string; onOpenLinkedDoc?: (path: string) 
         );
       }
       remaining = remaining.slice(match[0].length);
+      previousChar = match[0][match[0].length - 1] || previousChar;
       continue;
     }
 
@@ -850,6 +865,7 @@ const InlineMarkdown: React.FC<{ text: string; onOpenLinkedDoc?: (path: string) 
         />
       );
       remaining = remaining.slice(match[0].length);
+      previousChar = match[0][match[0].length - 1] || previousChar;
       continue;
     }
 
@@ -905,6 +921,7 @@ const InlineMarkdown: React.FC<{ text: string; onOpenLinkedDoc?: (path: string) 
         );
       }
       remaining = remaining.slice(match[0].length);
+      previousChar = match[0][match[0].length - 1] || previousChar;
       continue;
     }
 
@@ -917,17 +934,21 @@ const InlineMarkdown: React.FC<{ text: string; onOpenLinkedDoc?: (path: string) 
       }
       parts.push(<br key={key++} />);
       remaining = remaining.slice(match.index + match[0].length);
+      previousChar = '\n';
       continue;
     }
 
     // Find next special character or consume one regular character
-    const nextSpecial = remaining.slice(1).search(/[\*`\[!]/);
+    const nextSpecial = remaining.slice(1).search(/[\*_`\[!]/);
     if (nextSpecial === -1) {
       parts.push(remaining);
+      previousChar = remaining[remaining.length - 1] || previousChar;
       break;
     } else {
-      parts.push(remaining.slice(0, nextSpecial + 1));
+      const plainText = remaining.slice(0, nextSpecial + 1);
+      parts.push(plainText);
       remaining = remaining.slice(nextSpecial + 1);
+      previousChar = plainText[plainText.length - 1] || previousChar;
     }
   }
 
