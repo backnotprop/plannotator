@@ -30,3 +30,113 @@ jobs:
 
       - name: Run tests
         run: bun test
+
+  install-cmd-windows:
+    # End-to-end integration test for scripts/install.cmd on real cmd.exe.
+    # The unit tests in scripts/install.test.ts are file-content string checks
+    # that run on Linux and never exercise cmd's delayed-expansion parser or
+    # the embedded `node -e` Gemini merge — exactly where issue #506 lived.
+    # This job runs install.cmd end-to-end on Windows with a seeded ~/.gemini
+    # settings.json fixture so the Gemini merge path actually executes and
+    # any regression of #506 (or similar cmd-parser bugs) fails CI.
+    name: install.cmd (Windows integration)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Seed fake ~/.gemini/settings.json with pre-existing hook
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.gemini" | Out-Null
+          # Fixture mirrors the shape of a real Gemini settings.json (top-level
+          # `hooks.BeforeTool` array plus unrelated sibling keys) but uses only
+          # obviously-fake values. Must NOT contain the literal string
+          # "plannotator" anywhere — install.cmd's Gemini block is gated on
+          # `findstr /c:"plannotator"` returning non-zero and would otherwise
+          # skip the merge entirely.
+          $fixture = @'
+          {
+            "theme": "ci-fixture-theme",
+            "hooks": {
+              "BeforeTool": [
+                {
+                  "matcher": "ci-fixture-existing-matcher",
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "ci-fixture-existing-command",
+                      "timeout": 1000
+                    }
+                  ]
+                }
+              ]
+            },
+            "general": {
+              "ciFixtureSentinel": true
+            }
+          }
+          '@
+          Set-Content -Path "$env:USERPROFILE\.gemini\settings.json" -Value $fixture -NoNewline
+
+      - name: Run install.cmd end-to-end
+        shell: cmd
+        run: scripts\install.cmd v0.17.1 --skip-attestation
+
+      - name: Verify Gemini settings.json was merged correctly
+        shell: pwsh
+        run: |
+          $path = "$env:USERPROFILE\.gemini\settings.json"
+          if (-not (Test-Path $path)) { throw "settings.json missing after install" }
+
+          # Must still parse as JSON after the merge (regression for #506,
+          # where cmd's delayed expansion corrupted the embedded node script
+          # and left settings.json in a broken state).
+          $s = Get-Content $path -Raw | ConvertFrom-Json
+
+          # The plannotator hook must have been added.
+          $plannotatorEntries = $s.hooks.BeforeTool | Where-Object {
+            $_.matcher -eq 'exit_plan_mode'
+          }
+          if (-not $plannotatorEntries) {
+            throw "plannotator hook was not added to BeforeTool"
+          }
+          $planCmd = $plannotatorEntries[0].hooks | Where-Object {
+            $_.command -eq 'plannotator'
+          }
+          if (-not $planCmd) {
+            throw "plannotator command entry missing inside the new hook"
+          }
+
+          # The pre-existing (fixture) hook must have survived the merge.
+          # The original buggy JS was `if(!s.hooks.BeforeTool)s.hooks.BeforeTool=[]`
+          # which — after cmd ate the `!` — wiped existing arrays. The fix
+          # (`s.hooks.BeforeTool = s.hooks.BeforeTool || []`) must preserve them.
+          $fixtureHook = $s.hooks.BeforeTool | Where-Object {
+            $_.matcher -eq 'ci-fixture-existing-matcher'
+          }
+          if (-not $fixtureHook) {
+            throw "pre-existing hook was wiped — merge clobbered existing data"
+          }
+
+          # Unrelated top-level keys must survive the merge.
+          if ($s.theme -ne 'ci-fixture-theme') {
+            throw "unrelated top-level field 'theme' was mangled"
+          }
+          if ($s.general.ciFixtureSentinel -ne $true) {
+            throw "unrelated top-level field 'general' was mangled"
+          }
+
+          Write-Host "✓ Gemini settings.json merge verified (issue #506 regression guard)"
+
+      - name: Unknown flag is rejected with non-zero exit
+        shell: pwsh
+        run: |
+          # Regression guard for the review finding that install.cmd silently
+          # reinterpreted typoed flags as version strings. A leading-dash token
+          # that doesn't match a known flag must now produce a non-zero exit.
+          $p = Start-Process -Wait -PassThru -NoNewWindow cmd `
+            -ArgumentList '/c','scripts\install.cmd --verify-attesttion'
+          if ($p.ExitCode -eq 0) {
+            throw "install.cmd should have rejected --verify-attesttion but exited 0"
+          }
+          Write-Host "✓ Unknown flag rejected with exit code $($p.ExitCode)"
