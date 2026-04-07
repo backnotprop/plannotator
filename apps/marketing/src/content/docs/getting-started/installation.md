@@ -15,22 +15,78 @@ Install the `plannotator` command so your agent can use it.
 **macOS / Linux / WSL:**
 
 ```bash
+# Latest release
 curl -fsSL https://plannotator.ai/install.sh | bash
+
+# Pin to a specific reviewed version
+curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version v0.17.1
 ```
 
 **Windows PowerShell:**
 
 ```powershell
+# Latest release
 irm https://plannotator.ai/install.ps1 | iex
+
+# Pin to a specific reviewed version
+& ([scriptblock]::Create((irm https://plannotator.ai/install.ps1))) -Version v0.17.1
 ```
 
 **Windows CMD:**
 
 ```cmd
 curl -fsSL https://plannotator.ai/install.cmd -o install.cmd && install.cmd && del install.cmd
+
+REM Pin to a specific reviewed version
+curl -fsSL https://plannotator.ai/install.cmd -o install.cmd && install.cmd --version v0.17.1 && del install.cmd
 ```
 
 The install script respects `CLAUDE_CONFIG_DIR` if set, placing hooks in your custom config directory instead of `~/.claude`.
+
+### Verifying your install
+
+Every released binary is accompanied by a SHA256 sidecar (verified automatically on every install) and a [SLSA build provenance](https://slsa.dev/) attestation signed via Sigstore and recorded in the public transparency log. The attestation cryptographically ties the binary to the exact commit and GitHub Actions workflow that built it.
+
+**Manual verification (recommended for one-off audits):**
+
+```bash
+# Uses GitHub's attestation API — requires `gh auth login`
+gh attestation verify ~/.local/bin/plannotator --repo backnotprop/plannotator
+```
+
+Or verify offline with cosign (no GitHub login required):
+
+```bash
+cosign verify-blob \
+  --certificate-identity-regexp 'https://github.com/backnotprop/plannotator/.github/workflows/release.yml@.*' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  ~/.local/bin/plannotator
+```
+
+**Automatic verification during install/upgrade (opt-in):**
+
+Provenance verification is **off by default** in the installer — the same default every major `curl | bash` installer uses (rustup, brew, bun, deno, helm). SHA256 verification always runs. To have the installer additionally run `gh attestation verify` on every upgrade, enable it via any of the three mechanisms below. Precedence is CLI flag > env var > config file > default.
+
+1. **Per-install flag** (one-shot, explicit):
+   ```bash
+   curl -fsSL https://plannotator.ai/install.sh | bash -s -- --verify-attestation
+   ```
+   PowerShell: `... -VerifyAttestation`. Windows cmd: `install.cmd --verify-attestation`.
+
+2. **Environment variable** (persist in your shell RC):
+   ```bash
+   export PLANNOTATOR_VERIFY_ATTESTATION=1
+   ```
+   Scoped to whichever shell sessions export it. Follows the same `PLANNOTATOR_*` convention as `PLANNOTATOR_REMOTE`, `PLANNOTATOR_PORT`, etc.
+
+3. **Config file** (persist shell-agnostic):
+   ```bash
+   mkdir -p ~/.plannotator
+   echo '{ "verifyAttestation": true }' > ~/.plannotator/config.json
+   ```
+   Or merge into an existing `~/.plannotator/config.json`. This applies regardless of which shell launches the installer — useful for GUI-launched terminals on macOS or `install.cmd` run from Explorer on Windows. Managed easily by dotfiles / Ansible / other provisioning tools.
+
+When enabled, the installer requires `gh` CLI installed and authenticated (`gh auth login`). If `gh` is missing or the check fails, the install hard-fails so you don't silently skip verification you asked for. To force-skip for a single install, pass `--skip-attestation` (bash/cmd) or `-SkipAttestation` (PowerShell).
 
 ## Claude Code
 

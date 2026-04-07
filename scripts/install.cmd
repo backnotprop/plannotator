@@ -3,9 +3,40 @@ setlocal enabledelayedexpansion
 
 REM Plannotator Windows CMD Bootstrap Script
 
-REM Parse command line argument
+REM Parse command line arguments
+set "VERSION=latest"
+REM Three-layer opt-in for SLSA provenance verification.
+REM Precedence: CLI flag > env var > %USERPROFILE%\.plannotator\config.json > default.
+REM -1 = flag not set (fall through); 0 = disable; 1 = enable.
+set "VERIFY_ATTESTATION_FLAG=-1"
+
+:parse_args
+if "%~1"=="" goto args_done
+if /i "%~1"=="--version" (
+    if "%~2"=="" (
+        echo --version requires an argument >&2
+        exit /b 1
+    )
+    set "VERSION=%~2"
+    shift
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--verify-attestation" (
+    set "VERIFY_ATTESTATION_FLAG=1"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--skip-attestation" (
+    set "VERIFY_ATTESTATION_FLAG=0"
+    shift
+    goto parse_args
+)
+REM Positional form: install.cmd v0.17.1 (legacy interface)
 set "VERSION=%~1"
-if "!VERSION!"=="" set "VERSION=latest"
+shift
+goto parse_args
+:args_done
 
 set "REPO=backnotprop/plannotator"
 set "INSTALL_DIR=%USERPROFILE%\.local\bin"
@@ -103,6 +134,53 @@ if /i "!ACTUAL_CHECKSUM!" neq "!EXPECTED_CHECKSUM!" (
     echo Checksum verification failed >&2
     del "!TEMP_FILE!"
     exit /b 1
+)
+
+REM Resolve SLSA build-provenance verification opt-in.
+REM Precedence: CLI flag > env var > config.json > default (off).
+set "VERIFY_ATTESTATION=0"
+
+REM Layer 3: config file (lowest precedence of the opt-in sources).
+if exist "%USERPROFILE%\.plannotator\config.json" (
+    findstr /r /c:"\"verifyAttestation\"[ 	]*:[ 	]*true" "%USERPROFILE%\.plannotator\config.json" >nul 2>&1
+    if !ERRORLEVEL! equ 0 set "VERIFY_ATTESTATION=1"
+)
+
+REM Layer 2: env var (overrides config file).
+if /i "!PLANNOTATOR_VERIFY_ATTESTATION!"=="1"    set "VERIFY_ATTESTATION=1"
+if /i "!PLANNOTATOR_VERIFY_ATTESTATION!"=="true" set "VERIFY_ATTESTATION=1"
+if /i "!PLANNOTATOR_VERIFY_ATTESTATION!"=="yes"  set "VERIFY_ATTESTATION=1"
+if /i "!PLANNOTATOR_VERIFY_ATTESTATION!"=="0"    set "VERIFY_ATTESTATION=0"
+if /i "!PLANNOTATOR_VERIFY_ATTESTATION!"=="false" set "VERIFY_ATTESTATION=0"
+if /i "!PLANNOTATOR_VERIFY_ATTESTATION!"=="no"   set "VERIFY_ATTESTATION=0"
+
+REM Layer 1: CLI flag (overrides everything).
+if "!VERIFY_ATTESTATION_FLAG!"=="1" set "VERIFY_ATTESTATION=1"
+if "!VERIFY_ATTESTATION_FLAG!"=="0" set "VERIFY_ATTESTATION=0"
+
+if "!VERIFY_ATTESTATION!"=="1" (
+    where gh >nul 2>&1
+    if !ERRORLEVEL! equ 0 (
+        gh attestation verify "!TEMP_FILE!" --repo !REPO! >nul 2>&1
+        if !ERRORLEVEL! neq 0 (
+            echo Attestation verification failed! >&2
+            echo The binary's SHA256 matched, but no valid signed provenance was found >&2
+            echo for !REPO!. Refusing to install. >&2
+            del "!TEMP_FILE!"
+            exit /b 1
+        )
+        echo [OK] verified build provenance ^(SLSA^)
+    ) else (
+        echo verifyAttestation is enabled but gh CLI was not found. >&2
+        echo Install https://cli.github.com ^(and run 'gh auth login'^), >&2
+        echo or unset PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation >&2
+        echo from %USERPROFILE%\.plannotator\config.json / pass --skip-attestation. >&2
+        del "!TEMP_FILE!"
+        exit /b 1
+    )
+) else (
+    echo SHA256 verified. For build provenance verification, see
+    echo https://plannotator.ai/docs/getting-started/installation/#verifying-your-install
 )
 
 REM Install binary
@@ -305,7 +383,7 @@ echo }
             if !ERRORLEVEL! equ 0 (
                 set "GEMINI_SETTINGS_PATH=%USERPROFILE%\.gemini\settings.json"
                 set "GEMINI_SETTINGS_FWD=!GEMINI_SETTINGS_PATH:\=/!"
-                node -e "const fs=require('fs');const s=JSON.parse(fs.readFileSync('!GEMINI_SETTINGS_FWD!','utf8'));if(!s.hooks)s.hooks={};if(!s.hooks.BeforeTool)s.hooks.BeforeTool=[];s.hooks.BeforeTool.push({matcher:'exit_plan_mode',hooks:[{type:'command',command:'plannotator',timeout:345600}]});fs.writeFileSync('!GEMINI_SETTINGS_FWD!',JSON.stringify(s,null,2)+'\n');"
+                node -e "const fs=require('fs');const s=JSON.parse(fs.readFileSync('!GEMINI_SETTINGS_FWD!','utf8'));s.hooks=s.hooks||{};s.hooks.BeforeTool=s.hooks.BeforeTool||[];s.hooks.BeforeTool.push({matcher:'exit_plan_mode',hooks:[{type:'command',command:'plannotator',timeout:345600}]});fs.writeFileSync('!GEMINI_SETTINGS_FWD!',JSON.stringify(s,null,2)+'\n');"
                 echo Added plannotator hook to !GEMINI_SETTINGS_PATH!
             ) else (
                 echo.

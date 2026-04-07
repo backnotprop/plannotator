@@ -1,4 +1,10 @@
 # Plannotator Windows Installer
+param(
+    [string]$Version = "latest",
+    [switch]$VerifyAttestation,
+    [switch]$SkipAttestation
+)
+
 $ErrorActionPreference = "Stop"
 
 $repo = "backnotprop/plannotator"
@@ -28,13 +34,22 @@ foreach ($oldPath in $oldLocations) {
     }
 }
 
-Write-Host "Fetching latest version..."
-$release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest"
-$latestTag = $release.tag_name
+if ($Version -eq "latest") {
+    Write-Host "Fetching latest version..."
+    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest"
+    $latestTag = $release.tag_name
 
-if (-not $latestTag) {
-    Write-Error "Failed to fetch latest version"
-    exit 1
+    if (-not $latestTag) {
+        Write-Error "Failed to fetch latest version"
+        exit 1
+    }
+} else {
+    # Normalize: auto-prefix v if missing (matches install.cmd behaviour)
+    if ($Version -like "v*") {
+        $latestTag = $Version
+    } else {
+        $latestTag = "v$Version"
+    }
 }
 
 Write-Host "Installing plannotator $latestTag..."
@@ -66,6 +81,61 @@ if ($actualChecksum -ne $expectedChecksum) {
     Remove-Item $tmpFile -Force
     Write-Error "Checksum verification failed!"
     exit 1
+}
+
+# Resolve SLSA build-provenance verification opt-in.
+# Precedence: CLI flag > env var > ~/.plannotator/config.json > default (off).
+$verifyAttestationResolved = $false
+
+# Layer 3: config file (lowest precedence of the opt-in sources).
+$configPath = "$env:USERPROFILE\.plannotator\config.json"
+if (Test-Path $configPath) {
+    try {
+        $cfg = Get-Content $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        # Strict check: only a real JSON `true` (parsed as [bool]$true) opts in.
+        # A stringified "true", a number, etc. do not — matches install.sh, which
+        # greps for a literal boolean.
+        if ($cfg.verifyAttestation -is [bool] -and $cfg.verifyAttestation) {
+            $verifyAttestationResolved = $true
+        }
+    } catch {
+        # Malformed config — ignore, fall through to other layers.
+    }
+}
+
+# Layer 2: env var (overrides config file).
+$envVerify = $env:PLANNOTATOR_VERIFY_ATTESTATION
+if ($envVerify) {
+    if ($envVerify -match '^(1|true|yes)$') {
+        $verifyAttestationResolved = $true
+    } elseif ($envVerify -match '^(0|false|no)$') {
+        $verifyAttestationResolved = $false
+    }
+}
+
+# Layer 1: CLI flags win. -SkipAttestation beats -VerifyAttestation if both passed.
+if ($VerifyAttestation) { $verifyAttestationResolved = $true }
+if ($SkipAttestation)   { $verifyAttestationResolved = $false }
+
+if ($verifyAttestationResolved) {
+    if (Get-Command gh -ErrorAction SilentlyContinue) {
+        $verifyOutput = & gh attestation verify $tmpFile --repo $repo 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✓ verified build provenance (SLSA)"
+        } else {
+            Write-Host $verifyOutput
+            Remove-Item $tmpFile -Force
+            Write-Error "Attestation verification failed! The binary's SHA256 matched, but no valid signed provenance was found for $repo. Refusing to install."
+            exit 1
+        }
+    } else {
+        Remove-Item $tmpFile -Force
+        Write-Error "verifyAttestation is enabled but gh CLI was not found. Install https://cli.github.com (and run 'gh auth login'), or unset PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation from $configPath / pass -SkipAttestation."
+        exit 1
+    }
+} else {
+    Write-Host "SHA256 verified. For build provenance verification, see"
+    Write-Host "https://plannotator.ai/docs/getting-started/installation/#verifying-your-install"
 }
 
 Move-Item -Force $tmpFile "$installDir\plannotator.exe"

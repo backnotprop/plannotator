@@ -166,4 +166,93 @@ describe("install.cmd", () => {
     expect(script).toContain("plannotator-annotate.md");
     expect(script).toContain("plannotator-last.md");
   });
+
+  test("Gemini settings merge uses || idiom (issue #506 regression)", () => {
+    // cmd's delayed expansion parser eats `!` operators in `node -e "..."`
+    // blocks, turning `if(!s.hooks)` into a broken variable expansion and
+    // crashing node. The merge script must use `x = x || {}` instead, which
+    // contains no `!` chars. See backnotprop/plannotator#506.
+    expect(script).toContain("s.hooks=s.hooks||{}");
+    expect(script).toContain("s.hooks.BeforeTool=s.hooks.BeforeTool||[]");
+    expect(script).not.toContain("if(!s.hooks)");
+    expect(script).not.toContain("if(!s.hooks.BeforeTool)");
+  });
+
+  test("attestation verification is off by default with three-layer opt-in", () => {
+    // Layer 3: config file read (verifyAttestation appears inside a
+    // findstr pattern with escaped quotes; assert the key + findstr
+    // separately rather than the quoted form)
+    expect(script).toContain("%USERPROFILE%\\.plannotator\\config.json");
+    expect(script).toContain("verifyAttestation");
+    expect(script).toContain("findstr");
+    // Layer 2: env var
+    expect(script).toContain("PLANNOTATOR_VERIFY_ATTESTATION");
+    // Layer 1: CLI flags
+    expect(script).toContain("--verify-attestation");
+    expect(script).toContain("--skip-attestation");
+    // Enforcement: hard-fail when opted in but gh missing
+    expect(script).toContain("gh CLI was not found");
+  });
+});
+
+describe("install shared behavior", () => {
+  const sh = readFileSync(join(scriptsDir, "install.sh"), "utf-8");
+  const ps = readFileSync(join(scriptsDir, "install.ps1"), "utf-8");
+
+  test("install.sh has three-layer opt-in resolution", () => {
+    // Layer 3: config file via grep against the flat JSON boolean
+    expect(sh).toContain("$HOME/.plannotator/config.json");
+    expect(sh).toContain('"verifyAttestation"');
+    // Layer 2: env var parsing
+    expect(sh).toContain("PLANNOTATOR_VERIFY_ATTESTATION");
+    // Layer 1: CLI flags with sentinel
+    expect(sh).toContain("--verify-attestation");
+    expect(sh).toContain("--skip-attestation");
+    expect(sh).toContain("VERIFY_ATTESTATION_FLAG");
+    // Enforcement
+    expect(sh).toContain("gh CLI was not found");
+  });
+
+  test("install.ps1 has three-layer opt-in resolution", () => {
+    // Layer 3: config file via ConvertFrom-Json
+    expect(ps).toContain("$env:USERPROFILE\\.plannotator\\config.json");
+    expect(ps).toContain("ConvertFrom-Json");
+    expect(ps).toContain("$cfg.verifyAttestation");
+    // Layer 2: env var
+    expect(ps).toContain("PLANNOTATOR_VERIFY_ATTESTATION");
+    // Layer 1: CLI flags
+    expect(ps).toContain("[switch]$VerifyAttestation");
+    expect(ps).toContain("[switch]$SkipAttestation");
+    // Enforcement
+    expect(ps).toContain("gh CLI was not found");
+  });
+
+  test("install.sh gates gh verification behind verify_attestation guard", () => {
+    // When the opt-in is off, the installer must print the SHA256-only info
+    // line and must not invoke gh.
+    expect(sh).toContain('if [ "$verify_attestation" -eq 1 ]; then');
+    expect(sh).toContain("SHA256 verified");
+    // The executable `gh attestation verify "$tmp_file"` call (not the
+    // mention in the --help usage block) must live inside the guarded branch.
+    const guardIdx = sh.indexOf('if [ "$verify_attestation" -eq 1 ]');
+    const execIdx = sh.indexOf('gh attestation verify "$tmp_file"');
+    expect(guardIdx).toBeGreaterThan(-1);
+    expect(execIdx).toBeGreaterThan(guardIdx);
+  });
+});
+
+describe("PlannotatorConfig schema", () => {
+  test("exports verifyAttestation field", () => {
+    const configTs = readFileSync(
+      join(scriptsDir, "..", "packages", "shared", "config.ts"),
+      "utf-8",
+    );
+    expect(configTs).toContain("verifyAttestation?: boolean");
+    // Confirm it's part of the PlannotatorConfig interface, not unrelated code.
+    const match = configTs.match(
+      /export interface PlannotatorConfig \{([\s\S]*?)\n\}/
+    );
+    expect(match).toBeTruthy();
+    expect(match![1]).toContain("verifyAttestation?: boolean");
+  });
 });

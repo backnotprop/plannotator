@@ -66,14 +66,52 @@ Plannotator lets you privately share plans, annotations, and feedback with colle
 **macOS / Linux / WSL:**
 
 ```bash
+# Latest release
 curl -fsSL https://plannotator.ai/install.sh | bash
+
+# Pin to a specific reviewed version
+curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version v0.17.1
 ```
 
 **Windows PowerShell:**
 
 ```powershell
+# Latest release
 irm https://plannotator.ai/install.ps1 | iex
+
+# Pin to a specific reviewed version
+& ([scriptblock]::Create((irm https://plannotator.ai/install.ps1))) -Version v0.17.1
 ```
+
+### Verifying your install
+
+Every released binary ships with a SHA256 sidecar (verified automatically on every install) and a [SLSA build provenance](https://slsa.dev/) attestation signed via Sigstore. To verify provenance manually:
+
+```bash
+# Online (requires `gh auth login`)
+gh attestation verify ~/.local/bin/plannotator --repo backnotprop/plannotator
+
+# Offline (no GitHub login required)
+cosign verify-blob \
+  --certificate-identity-regexp 'https://github.com/backnotprop/plannotator/.github/workflows/release.yml@.*' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  ~/.local/bin/plannotator
+```
+
+To make the installer run provenance verification automatically on every upgrade (opt-in):
+
+```bash
+# One-shot
+curl -fsSL https://plannotator.ai/install.sh | bash -s -- --verify-attestation
+
+# Persistent via env var
+export PLANNOTATOR_VERIFY_ATTESTATION=1
+
+# Persistent via config file
+echo '{ "verifyAttestation": true }' > ~/.plannotator/config.json
+```
+
+Precedence: CLI flag > env var > config file > default (off). When enabled, the installer requires `gh` installed and authenticated; otherwise it hard-fails. See [the full docs](https://plannotator.ai/docs/getting-started/installation/#verifying-your-install) for details.
 
 **Then in Claude Code:**
 

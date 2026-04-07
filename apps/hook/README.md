@@ -8,18 +8,46 @@ Install the `plannotator` command so Claude Code can use it:
 
 **macOS / Linux / WSL:**
 ```bash
+# Latest release
 curl -fsSL https://plannotator.ai/install.sh | bash
+
+# Pin to a specific reviewed version
+curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version v0.17.1
 ```
 
 **Windows PowerShell:**
 ```powershell
+# Latest release
 irm https://plannotator.ai/install.ps1 | iex
+
+# Pin to a specific reviewed version
+& ([scriptblock]::Create((irm https://plannotator.ai/install.ps1))) -Version v0.17.1
 ```
 
 **Windows CMD:**
 ```cmd
 curl -fsSL https://plannotator.ai/install.cmd -o install.cmd && install.cmd && del install.cmd
+
+REM Pin to a specific reviewed version
+curl -fsSL https://plannotator.ai/install.cmd -o install.cmd && install.cmd --version v0.17.1 && del install.cmd
 ```
+
+### Verifying your install
+
+Released binaries ship with SHA256 sidecars (verified automatically on every install) and [SLSA build provenance](https://slsa.dev/) attestations signed via Sigstore. Manual verification:
+
+```bash
+# Online (requires `gh auth login`)
+gh attestation verify ~/.local/bin/plannotator --repo backnotprop/plannotator
+
+# Offline (no GitHub login required)
+cosign verify-blob \
+  --certificate-identity-regexp 'https://github.com/backnotprop/plannotator/.github/workflows/release.yml@.*' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  ~/.local/bin/plannotator
+```
+
+Provenance verification is **off by default** in the installer. Enable auto-verification on every upgrade by passing `--verify-attestation` (bash/cmd) or `-VerifyAttestation` (PowerShell), exporting `PLANNOTATOR_VERIFY_ATTESTATION=1`, or setting `{ "verifyAttestation": true }` in `~/.plannotator/config.json`. When enabled, the installer requires `gh` installed and authenticated — see [the full docs](https://plannotator.ai/docs/getting-started/installation/#verifying-your-install).
 
 ---
 

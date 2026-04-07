@@ -4,6 +4,80 @@ set -e
 REPO="backnotprop/plannotator"
 INSTALL_DIR="$HOME/.local/bin"
 
+VERSION="latest"
+# Three-layer opt-in for SLSA build-provenance verification.
+# Precedence: CLI flag > env var > ~/.plannotator/config.json > default (off).
+# -1 = flag not set yet (fall through to lower layers); 0 = disable; 1 = enable.
+VERIFY_ATTESTATION_FLAG=-1
+
+usage() {
+    cat <<'USAGE'
+Usage: install.sh [--version <tag>] [--verify-attestation | --skip-attestation] [--help]
+       install.sh <tag>
+
+Options:
+  --version <tag>        Install a specific version (e.g. v0.17.1 or 0.17.1).
+                         Defaults to the latest GitHub release.
+  --verify-attestation   Require SLSA build-provenance verification via
+                         `gh attestation verify`. Fails the install if gh is
+                         not available or the check does not pass.
+  --skip-attestation     Force-skip provenance verification even if enabled
+                         via env var or ~/.plannotator/config.json.
+  -h, --help             Show this help and exit.
+
+Provenance verification is off by default. Enable it by any of:
+  - passing --verify-attestation
+  - exporting PLANNOTATOR_VERIFY_ATTESTATION=1
+  - setting { "verifyAttestation": true } in ~/.plannotator/config.json
+
+Examples:
+  curl -fsSL https://plannotator.ai/install.sh | bash
+  curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version v0.17.1
+  curl -fsSL https://plannotator.ai/install.sh | bash -s -- --verify-attestation
+  bash install.sh v0.17.1
+USAGE
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --version)
+            if [ -z "${2:-}" ]; then
+                echo "--version requires an argument" >&2
+                usage >&2
+                exit 1
+            fi
+            VERSION="$2"
+            shift 2
+            ;;
+        --version=*)
+            VERSION="${1#--version=}"
+            shift
+            ;;
+        --verify-attestation)
+            VERIFY_ATTESTATION_FLAG=1
+            shift
+            ;;
+        --skip-attestation)
+            VERIFY_ATTESTATION_FLAG=0
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        -*)
+            echo "Unknown option: $1" >&2
+            usage >&2
+            exit 1
+            ;;
+        *)
+            # Positional form: install.sh v0.17.1 (matches install.cmd interface)
+            VERSION="$1"
+            shift
+            ;;
+    esac
+done
+
 case "$(uname -s)" in
     Darwin) os="darwin" ;;
     Linux)  os="linux" ;;
@@ -27,12 +101,20 @@ if [ -n "$USERPROFILE" ]; then
     echo "Cleaned up old Windows install locations"
 fi
 
-echo "Fetching latest version..."
-latest_tag=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
+if [ "$VERSION" = "latest" ]; then
+    echo "Fetching latest version..."
+    latest_tag=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
 
-if [ -z "$latest_tag" ]; then
-    echo "Failed to fetch latest version" >&2
-    exit 1
+    if [ -z "$latest_tag" ]; then
+        echo "Failed to fetch latest version" >&2
+        exit 1
+    fi
+else
+    # Normalize: auto-prefix v if missing (matches install.cmd behaviour)
+    case "$VERSION" in
+        v*) latest_tag="$VERSION" ;;
+        *)  latest_tag="v$VERSION" ;;
+    esac
 fi
 
 echo "Installing plannotator ${latest_tag}..."
@@ -57,6 +139,54 @@ if [ "$actual_checksum" != "$expected_checksum" ]; then
     echo "Checksum verification failed!" >&2
     rm -f "$tmp_file"
     exit 1
+fi
+
+# Resolve SLSA build-provenance verification opt-in.
+# Precedence: CLI flag > env var > ~/.plannotator/config.json > default (off).
+verify_attestation=0
+
+# Layer 3: config file (lowest precedence of the opt-in sources).
+# Crude grep against a flat boolean — PlannotatorConfig has no nested
+# verifyAttestation, so false positives are not a concern.
+if [ -f "$HOME/.plannotator/config.json" ]; then
+    if grep -q '"verifyAttestation"[[:space:]]*:[[:space:]]*true' "$HOME/.plannotator/config.json" 2>/dev/null; then
+        verify_attestation=1
+    fi
+fi
+
+# Layer 2: env var (overrides config file).
+case "${PLANNOTATOR_VERIFY_ATTESTATION:-}" in
+    1|true|yes|TRUE|YES|True|Yes) verify_attestation=1 ;;
+    0|false|no|FALSE|NO|False|No) verify_attestation=0 ;;
+esac
+
+# Layer 1: CLI flag (overrides everything).
+if [ "$VERIFY_ATTESTATION_FLAG" -ne -1 ]; then
+    verify_attestation="$VERIFY_ATTESTATION_FLAG"
+fi
+
+if [ "$verify_attestation" -eq 1 ]; then
+    if command -v gh >/dev/null 2>&1; then
+        if gh attestation verify "$tmp_file" --repo "$REPO" >/dev/null 2>&1; then
+            echo "✓ verified build provenance (SLSA)"
+        else
+            echo "Attestation verification failed!" >&2
+            echo "The binary's SHA256 matched, but no valid signed provenance was found" >&2
+            echo "for ${REPO}. Refusing to install." >&2
+            rm -f "$tmp_file"
+            exit 1
+        fi
+    else
+        echo "verifyAttestation is enabled but gh CLI was not found." >&2
+        echo "Install https://cli.github.com (and run 'gh auth login')," >&2
+        echo "or unset PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation from" >&2
+        echo "~/.plannotator/config.json / pass --skip-attestation." >&2
+        rm -f "$tmp_file"
+        exit 1
+    fi
+else
+    echo "SHA256 verified. For build provenance verification, see"
+    echo "https://plannotator.ai/docs/getting-started/installation/#verifying-your-install"
 fi
 
 # Remove old binary first (handles Windows .exe and locked file issues)

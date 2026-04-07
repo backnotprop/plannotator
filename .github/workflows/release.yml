@@ -15,8 +15,7 @@ on:
         default: true
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 env:
   DRY_RUN: ${{ !(startsWith(github.ref, 'refs/tags/') || inputs.dry-run == 'false') }}
@@ -47,6 +46,10 @@ jobs:
   build:
     needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -100,6 +103,22 @@ jobs:
 
           bun build apps/paste-service/targets/bun.ts --compile --target=bun-windows-x64 --outfile plannotator-paste-win32-x64.exe
           sha256sum plannotator-paste-win32-x64.exe > plannotator-paste-win32-x64.exe.sha256
+
+      - name: Generate SLSA build provenance attestation
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: |
+            plannotator-darwin-arm64
+            plannotator-darwin-x64
+            plannotator-linux-x64
+            plannotator-linux-arm64
+            plannotator-win32-x64.exe
+            plannotator-paste-darwin-arm64
+            plannotator-paste-darwin-x64
+            plannotator-paste-linux-x64
+            plannotator-paste-linux-arm64
+            plannotator-paste-win32-x64.exe
 
       - name: Upload artifacts
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0

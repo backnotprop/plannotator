@@ -189,8 +189,11 @@ If anything is missing, fix it before proceeding to Phase 4. Common fixes:
    - Runs tests
    - Cross-compiles binaries for 5 platforms (macOS ARM64/x64, Linux x64/ARM64, Windows x64)
    - Compiles paste service binaries (same 5 platforms)
+   - Generates SLSA build provenance attestations for all 10 binaries via `actions/attest-build-provenance` (signed through Sigstore, recorded in Rekor)
    - Creates the GitHub Release with all binaries attached
    - Publishes `@plannotator/opencode` and `@plannotator/pi-extension` to npm with provenance
+
+   **Note on immutable releases:** The repo has GitHub Immutable Releases enabled, so once the `v*` tag is pushed and the release is created, the tag→commit and tag→asset bindings are permanent. You cannot delete and re-create a tag to "fix" a bad release — you must ship a new version. Release notes remain editable (see step 5), but everything else is locked.
 
 4. **Monitor the pipeline:**
    Watch the release workflow run until it completes:
