@@ -119,7 +119,12 @@ if ($SkipAttestation)   { $verifyAttestationResolved = $false }
 
 if ($verifyAttestationResolved) {
     if (Get-Command gh -ErrorAction SilentlyContinue) {
-        $verifyOutput = & gh attestation verify $tmpFile --repo $repo 2>&1
+        # Constrain verification to the exact tag + signing workflow — see
+        # install.sh comment for rationale.
+        $verifyOutput = & gh attestation verify $tmpFile `
+            --repo $repo `
+            --source-ref "refs/tags/$latestTag" `
+            --signer-workflow "backnotprop/plannotator/.github/workflows/release.yml" 2>&1
         if ($LASTEXITCODE -eq 0) {
             Write-Host "✓ verified build provenance (SLSA)"
         } else {

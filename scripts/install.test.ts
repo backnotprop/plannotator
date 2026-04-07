@@ -227,6 +227,30 @@ describe("install shared behavior", () => {
     expect(ps).toContain("gh CLI was not found");
   });
 
+  test("all installers constrain attestation verify to tag + signer workflow", () => {
+    // Every `gh attestation verify` call must pass --source-ref and
+    // --signer-workflow, not just --repo. Without --source-ref a
+    // misattached asset from a different release would pass; without
+    // --signer-workflow an attestation from an unrelated workflow in
+    // the same repo would pass. GitHub's own docs recommend both.
+    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+
+    for (const [name, script] of [["install.sh", sh], ["install.ps1", ps], ["install.cmd", cmdScript]] as const) {
+      if (!script.includes("--source-ref")) {
+        throw new Error(`${name} missing --source-ref constraint on gh attestation verify`);
+      }
+      if (!script.includes("refs/tags/")) {
+        throw new Error(`${name} --source-ref does not reference refs/tags/`);
+      }
+      if (!script.includes("--signer-workflow")) {
+        throw new Error(`${name} missing --signer-workflow constraint on gh attestation verify`);
+      }
+      if (!script.includes(".github/workflows/release.yml")) {
+        throw new Error(`${name} --signer-workflow does not reference release.yml`);
+      }
+    }
+  });
+
   test("install.sh gates gh verification behind verify_attestation guard", () => {
     // When the opt-in is off, the installer must print the SHA256-only info
     // line and must not invoke gh.

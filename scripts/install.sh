@@ -170,7 +170,15 @@ if [ "$verify_attestation" -eq 1 ]; then
         # Capture combined output so we can surface gh's actual error message
         # (auth, network, missing attestation, etc.) on failure instead of a
         # generic "verification failed" with no diagnostic detail.
-        if gh_output=$(gh attestation verify "$tmp_file" --repo "$REPO" 2>&1); then
+        # Constrain verification to the exact tag + signing workflow — not
+        # just "built by somewhere in this repo". --source-ref pins the
+        # git ref the attestation was produced from; --signer-workflow pins
+        # the workflow file that signed it. Together they prevent accepting
+        # a misattached asset or an attestation from an unrelated workflow.
+        if gh_output=$(gh attestation verify "$tmp_file" \
+            --repo "$REPO" \
+            --source-ref "refs/tags/${latest_tag}" \
+            --signer-workflow "backnotprop/plannotator/.github/workflows/release.yml" 2>&1); then
             echo "✓ verified build provenance (SLSA)"
         else
             echo "$gh_output" >&2
