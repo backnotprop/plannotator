@@ -16,6 +16,9 @@ import type { ViewerHandle } from '../components/Viewer';
  * - Annotations with `diffContext` are skipped (diff view owns those).
  * - On plan markdown change the applied set is cleared so re-rendered blocks
  *   get re-highlighted.
+ * - Callers can invoke the returned `reset()` to force a full re-apply — used
+ *   by the share-import path in App.tsx after it calls `clearAllHighlights()`,
+ *   which would otherwise leave our bookkeeping stale against a wiped DOM.
  * - Disabled state no-ops WITHOUT clearing the applied set. This preserves the
  *   bookkeeping while the Viewer DOM is hidden (diff view / linked doc) so that
  *   any SSE removals that arrive while hidden are correctly reconciled when the
