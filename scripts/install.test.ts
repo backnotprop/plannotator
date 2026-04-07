@@ -92,8 +92,23 @@ describe("install.ps1", () => {
     expect(script).toContain("UTF8.GetString");
   });
 
-  test("detects ARM64 architecture", () => {
+  test("ARM64 Windows falls back to x64 binary via Windows emulation", () => {
+    // We don't ship a native ARM64 Windows binary — release.yml builds
+    // only bun-windows-x64 — so install.ps1 must not select arm64 and
+    // then 404 on a non-existent binary. Instead, always set $arch=x64
+    // on 64-bit Windows and print a notice when ARM64 is detected so
+    // users know they're running via emulation.
+    //
+    // Verify three things:
+    //   1. ARM64 is still detected (for the notice)
+    //   2. $arch is hardcoded to "x64" on 64-bit systems
+    //   3. The old `"arm64"` literal is not present as an $arch value
     expect(script).toContain('"ARM64"');
+    expect(script).toContain('$arch = "x64"');
+    expect(script).toContain("runs via Windows emulation");
+    // The previous code had `{ "arm64" } else { "x64" }` — make sure the
+    // arm64 branch is gone so we can't regress to a 404 install.
+    expect(script).not.toMatch(/{\s*"arm64"\s*}/);
   });
 
   test("adds to PATH via environment variable", () => {

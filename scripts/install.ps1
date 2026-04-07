@@ -18,9 +18,19 @@ if ($VerifyAttestation -and $SkipAttestation) {
 $repo = "backnotprop/plannotator"
 $installDir = "$env:LOCALAPPDATA\plannotator"
 
-# Detect architecture
-$arch = if ([Environment]::Is64BitOperatingSystem) {
-    if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
+# Detect architecture. We don't currently ship a native ARM64 Windows
+# binary — the release pipeline only builds bun-windows-x64. Windows 11
+# runs x64 binaries on ARM64 via emulation, so fall back to x64 on ARM64
+# hosts rather than hard-failing with a 404 on a binary we don't publish.
+# install.cmd already (accidentally) does the same thing by hardcoding
+# its PLATFORM to win32-x64; this brings install.ps1 into parity so both
+# Windows installer paths produce a working install on ARM64.
+# Native ARM64 Windows builds tracked as a follow-up.
+if ([Environment]::Is64BitOperatingSystem) {
+    if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
+        Write-Host "ARM64 Windows detected — installing x64 binary (runs via Windows emulation)."
+    }
+    $arch = "x64"
 } else {
     Write-Error "32-bit Windows is not supported"
     exit 1
