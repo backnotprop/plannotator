@@ -170,14 +170,21 @@ if "!VERIFY_ATTESTATION_FLAG!"=="0" set "VERIFY_ATTESTATION=0"
 if "!VERIFY_ATTESTATION!"=="1" (
     where gh >nul 2>&1
     if !ERRORLEVEL! equ 0 (
-        gh attestation verify "!TEMP_FILE!" --repo !REPO! >nul 2>&1
+        REM Capture combined output to a temp file so gh's actual error
+        REM message (auth, network, missing attestation, etc.) can be
+        REM surfaced on failure instead of a generic "verification failed"
+        REM with no diagnostic detail. Matches install.sh / install.ps1.
+        gh attestation verify "!TEMP_FILE!" --repo !REPO! > "%TEMP%\gh-output.txt" 2>&1
         if !ERRORLEVEL! neq 0 (
+            type "%TEMP%\gh-output.txt" >&2
+            del "%TEMP%\gh-output.txt"
             echo Attestation verification failed! >&2
             echo The binary's SHA256 matched, but no valid signed provenance was found >&2
             echo for !REPO!. Refusing to install. >&2
             del "!TEMP_FILE!"
             exit /b 1
         )
+        del "%TEMP%\gh-output.txt"
         echo [OK] verified build provenance ^(SLSA^)
     ) else (
         echo verifyAttestation is enabled but gh CLI was not found. >&2
