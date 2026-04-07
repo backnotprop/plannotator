@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import {
   ActionMenu,
   ActionMenuDivider,
@@ -46,10 +46,7 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
   bearConfigured,
   octarineConfigured,
 }) => {
-  const { theme, resolvedMode, setTheme } = useTheme();
-  const activeTheme = useMemo<'light' | 'dark'>(() => {
-    return theme === 'system' ? resolvedMode : theme;
-  }, [resolvedMode, theme]);
+  const { theme, setTheme } = useTheme();
 
   const anyNotesAppConfigured =
     isApiMode && (obsidianConfigured || bearConfigured || octarineConfigured);
@@ -78,7 +75,7 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
           <div className="px-3 py-2 space-y-1.5">
             <ActionMenuSectionLabel>Theme</ActionMenuSectionLabel>
             <div className="flex items-center gap-1 rounded-lg bg-muted/50 p-0.5">
-              {(['light', 'dark'] as const).map((mode) => (
+              {(['light', 'dark', 'system'] as const).map((mode) => (
                 <button
                   key={mode}
                   onClick={() => {
@@ -86,12 +83,12 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
                     setTheme(mode);
                   }}
                   className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
-                    activeTheme === mode
+                    theme === mode
                       ? 'bg-background text-foreground shadow-sm'
                       : 'text-muted-foreground hover:text-foreground'
                   }`}
                 >
-                  {mode === 'light' ? <SunIcon /> : <MoonIcon />}
+                  {mode === 'light' ? <SunIcon /> : mode === 'dark' ? <MoonIcon /> : <SystemIcon />}
                   <span className="capitalize">{mode}</span>
                 </button>
               ))}
@@ -310,5 +307,12 @@ const SunIcon = () => (
 const MoonIcon = () => (
   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3c-.18.57-.21 1.19-.21 1.82A8 8 0 0019.18 13c.63 0 1.25-.03 1.82-.21z" />
+  </svg>
+);
+
+const SystemIcon = () => (
+  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <rect x="3" y="4" width="18" height="12" rx="2" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M8 20h8M12 16v4" />
   </svg>
 );
