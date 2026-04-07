@@ -49,6 +49,7 @@ plannotator/
 │   ├── ui/                       # Shared React components + theme
 │   │   ├── theme.css             # Single source of truth for color tokens + Tailwind bridge
 │   │   ├── components/           # Viewer, Toolbar, Settings, etc.
+│   │   │   ├── icons/            # Shared SVG icon components (themeIcons, etc.)
 │   │   │   ├── plan-diff/        # PlanDiffBadge, PlanDiffViewer, clean/raw diff views
 │   │   │   └── sidebar/          # SidebarContainer, SidebarTabs, VersionBrowser, ArchiveBrowser
 │   │   ├── utils/                # parser.ts, sharing.ts, storage.ts, planSave.ts, agentSwitch.ts, planDiffEngine.ts, planAgentInstructions.ts
