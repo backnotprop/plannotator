@@ -45,23 +45,24 @@ The install script respects `CLAUDE_CONFIG_DIR` if set, placing hooks in your cu
 
 ### Verifying your install
 
-Every released binary is accompanied by a SHA256 sidecar (verified automatically on every install) and a [SLSA build provenance](https://slsa.dev/) attestation signed via Sigstore and recorded in the public transparency log. The attestation cryptographically ties the binary to the exact commit and GitHub Actions workflow that built it.
+Every released binary is accompanied by a SHA256 sidecar (verified automatically on every install) and a [SLSA build provenance](https://slsa.dev/) attestation signed via Sigstore and recorded in the public transparency log. The SHA256 check is mandatory and always runs. Provenance verification is **optional** — it's only needed if you want a cryptographic link from the binary back to the exact commit and workflow run that built it.
 
 **Manual verification (recommended for one-off audits):**
 
+This requires the [GitHub CLI](https://cli.github.com) to be installed and authenticated (`gh auth login`):
+
 ```bash
-# Uses GitHub's attestation API — requires `gh auth login`
+# macOS / Linux
 gh attestation verify ~/.local/bin/plannotator --repo backnotprop/plannotator
+
+# Windows (PowerShell installer)
+gh attestation verify "$env:LOCALAPPDATA\plannotator\plannotator.exe" --repo backnotprop/plannotator
+
+# Windows (cmd installer)
+gh attestation verify "%USERPROFILE%\.local\bin\plannotator.exe" --repo backnotprop/plannotator
 ```
 
-Or verify offline with cosign (no GitHub login required):
-
-```bash
-cosign verify-blob \
-  --certificate-identity-regexp 'https://github.com/backnotprop/plannotator/.github/workflows/release.yml@.*' \
-  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  ~/.local/bin/plannotator
-```
+For air-gapped or no-auth environments, see GitHub's docs on [verifying attestations offline](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/verifying-attestations-offline) (uses `gh attestation download` to fetch the bundle once, then verifies offline against it).
 
 **Automatic verification during install/upgrade (opt-in):**
 

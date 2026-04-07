@@ -32,6 +32,15 @@ if /i "%~1"=="--skip-attestation" (
     shift
     goto parse_args
 )
+REM Reject any other dash-prefixed token as an unknown option, so a typoed
+REM flag like --verify-attesttion fails fast instead of being interpreted as
+REM a version tag (which would 404 on releases/download/v--verify-attesttion/...).
+echo %~1 | findstr /b "[-]" >nul
+if !ERRORLEVEL! equ 0 (
+    echo Unknown option: %~1 >&2
+    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] >&2
+    exit /b 1
+)
 REM Positional form: install.cmd v0.17.1 (legacy interface)
 set "VERSION=%~1"
 shift

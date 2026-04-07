@@ -167,9 +167,13 @@ fi
 
 if [ "$verify_attestation" -eq 1 ]; then
     if command -v gh >/dev/null 2>&1; then
-        if gh attestation verify "$tmp_file" --repo "$REPO" >/dev/null 2>&1; then
+        # Capture combined output so we can surface gh's actual error message
+        # (auth, network, missing attestation, etc.) on failure instead of a
+        # generic "verification failed" with no diagnostic detail.
+        if gh_output=$(gh attestation verify "$tmp_file" --repo "$REPO" 2>&1); then
             echo "✓ verified build provenance (SLSA)"
         else
+            echo "$gh_output" >&2
             echo "Attestation verification failed!" >&2
             echo "The binary's SHA256 matched, but no valid signed provenance was found" >&2
             echo "for ${REPO}. Refusing to install." >&2

@@ -85,18 +85,22 @@ irm https://plannotator.ai/install.ps1 | iex
 
 ### Verifying your install
 
-Every released binary ships with a SHA256 sidecar (verified automatically on every install) and a [SLSA build provenance](https://slsa.dev/) attestation signed via Sigstore. To verify provenance manually:
+Every released binary ships with a SHA256 sidecar (verified automatically on every install) and a [SLSA build provenance](https://slsa.dev/) attestation signed via Sigstore. The SHA256 check is mandatory; provenance verification is optional and only needed if you want a cryptographic link from the binary back to the exact commit and workflow run that built it.
+
+If you want to verify provenance manually, install [GitHub CLI](https://cli.github.com) and run:
 
 ```bash
-# Online (requires `gh auth login`)
+# macOS / Linux
 gh attestation verify ~/.local/bin/plannotator --repo backnotprop/plannotator
 
-# Offline (no GitHub login required)
-cosign verify-blob \
-  --certificate-identity-regexp 'https://github.com/backnotprop/plannotator/.github/workflows/release.yml@.*' \
-  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  ~/.local/bin/plannotator
+# Windows (PowerShell installer)
+gh attestation verify "$env:LOCALAPPDATA\plannotator\plannotator.exe" --repo backnotprop/plannotator
+
+# Windows (cmd installer)
+gh attestation verify "%USERPROFILE%\.local\bin\plannotator.exe" --repo backnotprop/plannotator
 ```
+
+This requires `gh auth login`. For air-gapped or no-auth environments, see GitHub's docs on [verifying attestations offline](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/verifying-attestations-offline).
 
 To make the installer run provenance verification automatically on every upgrade (opt-in):
 

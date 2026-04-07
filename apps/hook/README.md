@@ -34,18 +34,22 @@ curl -fsSL https://plannotator.ai/install.cmd -o install.cmd && install.cmd --ve
 
 ### Verifying your install
 
-Released binaries ship with SHA256 sidecars (verified automatically on every install) and [SLSA build provenance](https://slsa.dev/) attestations signed via Sigstore. Manual verification:
+Released binaries ship with SHA256 sidecars (verified automatically on every install) and [SLSA build provenance](https://slsa.dev/) attestations signed via Sigstore. The SHA256 check is mandatory and runs on every install — provenance verification is optional and only needed if you want a cryptographic link from the binary back to the source commit and workflow run.
+
+To verify provenance manually, install [GitHub CLI](https://cli.github.com), run `gh auth login`, then:
 
 ```bash
-# Online (requires `gh auth login`)
+# macOS / Linux
 gh attestation verify ~/.local/bin/plannotator --repo backnotprop/plannotator
 
-# Offline (no GitHub login required)
-cosign verify-blob \
-  --certificate-identity-regexp 'https://github.com/backnotprop/plannotator/.github/workflows/release.yml@.*' \
-  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  ~/.local/bin/plannotator
+# Windows (PowerShell installer)
+gh attestation verify "$env:LOCALAPPDATA\plannotator\plannotator.exe" --repo backnotprop/plannotator
+
+# Windows (cmd installer)
+gh attestation verify "%USERPROFILE%\.local\bin\plannotator.exe" --repo backnotprop/plannotator
 ```
+
+For air-gapped or no-auth environments, see GitHub's docs on [verifying attestations offline](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/verifying-attestations-offline).
 
 Provenance verification is **off by default** in the installer. Enable auto-verification on every upgrade by passing `--verify-attestation` (bash/cmd) or `-VerifyAttestation` (PowerShell), exporting `PLANNOTATOR_VERIFY_ATTESTATION=1`, or setting `{ "verifyAttestation": true }` in `~/.plannotator/config.json`. When enabled, the installer requires `gh` installed and authenticated — see [the full docs](https://plannotator.ai/docs/getting-started/installation/#verifying-your-install).
 
