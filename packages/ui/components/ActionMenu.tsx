@@ -62,6 +62,7 @@ interface ActionMenuItemProps {
   onClick: () => void;
   icon: React.ReactNode;
   label: string;
+  subtitle?: string;
   badge?: React.ReactNode;
 }
 
@@ -69,6 +70,7 @@ export const ActionMenuItem: React.FC<ActionMenuItemProps> = ({
   onClick,
   icon,
   label,
+  subtitle,
   badge,
 }) => (
   <button
@@ -76,7 +78,14 @@ export const ActionMenuItem: React.FC<ActionMenuItemProps> = ({
     className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-muted"
   >
     <span className="text-muted-foreground">{icon}</span>
-    <span className="flex-1">{label}</span>
+    {subtitle ? (
+      <span className="flex flex-1 flex-col gap-0.5">
+        <span>{label}</span>
+        <span className="text-[10px] text-muted-foreground">{subtitle}</span>
+      </span>
+    ) : (
+      <span className="flex-1">{label}</span>
+    )}
     {badge}
   </button>
 );

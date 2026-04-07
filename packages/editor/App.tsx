@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { type Origin, getAgentName, getAgentBadge } from '@plannotator/shared/agents';
+import { type Origin, getAgentName } from '@plannotator/shared/agents';
 import { parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, extractFrontmatter, wrapFeedbackForAgent, Frontmatter } from '@plannotator/ui/utils/parser';
 import { Viewer, ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
@@ -8,7 +8,6 @@ import { ImportModal } from '@plannotator/ui/components/ImportModal';
 import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
 import { Annotation, Block, EditorMode, type InputMethod, type ImageAttachment } from '@plannotator/ui/types';
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
-import { ModeToggle } from '@plannotator/ui/components/ModeToggle';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
 import { StickyHeaderLane } from '@plannotator/ui/components/StickyHeaderLane';
 import { TaterSpriteRunning } from '@plannotator/ui/components/TaterSpriteRunning';
@@ -34,13 +33,12 @@ import { getEditorMode, saveEditorMode } from '@plannotator/ui/utils/editorMode'
 import { getInputMethod, saveInputMethod } from '@plannotator/ui/utils/inputMethod';
 import { useInputMethodSwitch } from '@plannotator/ui/hooks/useInputMethodSwitch';
 import { usePrintMode } from '@plannotator/ui/hooks/usePrintMode';
-import { modKey } from '@plannotator/ui/utils/platform';
 import { useResizablePanel } from '@plannotator/ui/hooks/useResizablePanel';
 import { ResizeHandle } from '@plannotator/ui/components/ResizeHandle';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { ScrollViewportContext } from '@plannotator/ui/hooks/useScrollViewport';
 import { useOverlayViewport } from '@plannotator/ui/hooks/useOverlayViewport';
-import { MobileMenu } from '@plannotator/ui/components/MobileMenu';
+import { PlanHeaderMenu } from '@plannotator/ui/components/PlanHeaderMenu';
 import {
   getPermissionModeSettings,
   needsPermissionModeSetup,
@@ -120,7 +118,6 @@ const App: React.FC = () => {
     document.title = repoInfo ? `${repoInfo.display} · Plannotator` : "Plannotator";
   }, [repoInfo]);
 
-  const [showExportDropdown, setShowExportDropdown] = useState(false);
   const [initialExportTab, setInitialExportTab] = useState<'share' | 'annotations' | 'notes'>();
   const [noteSaveToast, setNoteSaveToast] = useState<ToastPayload>(null);
   const [isPlanDiffActive, setIsPlanDiffActive] = useState(false);
@@ -1066,7 +1063,6 @@ const App: React.FC = () => {
 
   // Quick-save handlers for export dropdown and keyboard shortcut
   const handleDownloadAnnotations = () => {
-    setShowExportDropdown(false);
     const blob = new Blob([annotationsOutput], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1079,7 +1075,6 @@ const App: React.FC = () => {
   };
 
   const handleQuickSaveToNotes = async (target: 'obsidian' | 'bear' | 'octarine') => {
-    setShowExportDropdown(false);
     const body: { obsidian?: object; bear?: object; octarine?: object } = {};
 
     if (target === 'obsidian') {
@@ -1128,6 +1123,40 @@ const App: React.FC = () => {
       }
     } catch {
       setNoteSaveToast({ type: 'error', message: 'Save failed' });
+    }
+    setTimeout(() => setNoteSaveToast(null), 3000);
+  };
+
+  // Agent Instructions — copy a clipboard payload telling external agents how to
+  // POST annotations to this session's /api/external-annotations endpoint.
+  // STUB: instruction body is placeholder; the URL and plan content are real.
+  const handleCopyAgentInstructions = async () => {
+    const origin = window.location.origin;
+    const payload = `# Plannotator — External Annotations
+
+POST your annotations to:
+  ${origin}/api/external-annotations
+
+[STUB: full protocol instructions go here in a follow-up]
+
+# Current plan
+${markdown}
+`;
+    try {
+      await navigator.clipboard.writeText(payload);
+      setNoteSaveToast({ type: 'success', message: 'Agent instructions copied' });
+    } catch {
+      setNoteSaveToast({ type: 'error', message: 'Failed to copy' });
+    }
+    setTimeout(() => setNoteSaveToast(null), 3000);
+  };
+
+  const handleCopyShareLink = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setNoteSaveToast({ type: 'success', message: 'Share link copied' });
+    } catch {
+      setNoteSaveToast({ type: 'error', message: 'Failed to copy' });
     }
     setTimeout(() => setNoteSaveToast(null), 3000);
   };
@@ -1198,19 +1227,6 @@ const App: React.FC = () => {
     showPermissionModeSetup, pendingPasteImage, submitted,
   ]);
 
-  // Close export dropdown on click outside
-  useEffect(() => {
-    if (!showExportDropdown) return;
-    const handleClickOutside = (e: PointerEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target.closest('[data-export-dropdown]')) {
-        setShowExportDropdown(false);
-      }
-    };
-    document.addEventListener('pointerdown', handleClickOutside);
-    return () => document.removeEventListener('pointerdown', handleClickOutside);
-  }, [showExportDropdown]);
-
   const agentName = useMemo(() => getAgentName(origin), [origin]);
 
   const planMaxWidth = useMemo(() => {
@@ -1233,19 +1249,6 @@ const App: React.FC = () => {
             >
               <span className="text-sm font-semibold tracking-tight">Plannotator</span>
             </a>
-            <a
-              href="https://github.com/backnotprop/plannotator/releases"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-muted-foreground font-mono opacity-60 hidden md:inline hover:opacity-100 transition-opacity"
-            >
-              v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0'}
-            </a>
-            {origin && (
-              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium hidden md:inline ${getAgentBadge(origin)}`}>
-                {agentName}
-              </span>
-            )}
           </div>
 
           <div className="flex items-center gap-1 md:gap-2">
@@ -1290,7 +1293,7 @@ const App: React.FC = () => {
               </>
             )}
 
-            {isApiMode && !linkedDocHook.isActive && !archive.archiveMode && (
+            {isApiMode && (!linkedDocHook.isActive || annotateMode) && !archive.archiveMode && (
               <>
                 <FeedbackButton
                   onClick={() => {
@@ -1348,165 +1351,53 @@ const App: React.FC = () => {
               </>
             )}
 
-            {/* Desktop buttons — hidden on mobile */}
-            <div className="hidden md:flex items-center gap-2">
-              <ModeToggle />
-              {!linkedDocHook.isActive && <Settings taterMode={taterMode} onTaterModeChange={handleTaterModeChange} onIdentityChange={handleIdentityChange} origin={origin} onUIPreferencesChange={setUiPrefs} externalOpen={mobileSettingsOpen} onExternalClose={() => setMobileSettingsOpen(false)} gitUser={gitUser} />}
+            {/* Annotations panel toggle — top-level header button */}
+            <button
+              onClick={() => setIsPanelOpen(!isPanelOpen)}
+              className={`p-1.5 rounded-md text-xs font-medium transition-all ${
+                isPanelOpen
+                  ? 'bg-primary/15 text-primary'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+              }`}
+              title={isPanelOpen ? 'Hide annotations' : 'Show annotations'}
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+              </svg>
+            </button>
 
-              <button
-                onClick={() => setIsPanelOpen(!isPanelOpen)}
-                className={`p-1.5 rounded-md text-xs font-medium transition-all ${
-                  isPanelOpen
-                    ? 'bg-primary/15 text-primary'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                }`}
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-                </svg>
-              </button>
-
-              <div className="relative flex" data-export-dropdown>
-                <button
-                  onClick={() => { setInitialExportTab(undefined); setShowExport(true); }}
-                  className="px-2.5 py-1 rounded-l-md text-xs font-medium bg-muted hover:bg-muted/80 transition-colors"
-                  title="Export"
-                >
-                  Export
-                </button>
-                <button
-                  onClick={() => setShowExportDropdown(prev => !prev)}
-                  className="px-1.5 rounded-r-md text-xs bg-muted hover:bg-muted/80 border-l border-border/50 transition-colors flex items-center"
-                  title="Quick save options"
-                >
-                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-
-                {showExportDropdown && (
-                  <div className="absolute top-full right-0 mt-1 w-48 bg-popover border border-border rounded-lg shadow-xl z-50 py-1">
-                    {sharingEnabled && (
-                      <button
-                        onClick={async () => {
-                          setShowExportDropdown(false);
-                          try {
-                            await navigator.clipboard.writeText(shareUrl);
-                            setNoteSaveToast({ type: 'success', message: 'Share link copied' });
-                          } catch {
-                            setNoteSaveToast({ type: 'error', message: 'Failed to copy' });
-                          }
-                          setTimeout(() => setNoteSaveToast(null), 3000);
-                        }}
-                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors flex items-center gap-2"
-                      >
-                        <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                        </svg>
-                        Copy Share Link
-                      </button>
-                    )}
-                    <button
-                      onClick={handleDownloadAnnotations}
-                      className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors flex items-center gap-2"
-                    >
-                      <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                      </svg>
-                      Download Annotations
-                    </button>
-                    <button
-                      onClick={() => { setShowExportDropdown(false); window.print(); }}
-                      className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors flex items-center gap-2"
-                    >
-                      <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-                      </svg>
-                      Print Plan
-                      <span className="ml-auto text-[10px] text-muted-foreground/60">{modKey}+P</span>
-                    </button>
-                    <div className="my-1 border-t border-border" />
-                    {isApiMode && isObsidianConfigured() && (
-                      <button
-                        onClick={() => handleQuickSaveToNotes('obsidian')}
-                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors flex items-center gap-2"
-                      >
-                        <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-                        </svg>
-                        Save to Obsidian
-                      </button>
-                    )}
-                    {isApiMode && getBearSettings().enabled && (
-                      <button
-                        onClick={() => handleQuickSaveToNotes('bear')}
-                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors flex items-center gap-2"
-                      >
-                        <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-                        </svg>
-                        Save to Bear
-                      </button>
-                    )}
-                    {isApiMode && isOctarineConfigured() && (
-                      <button
-                        onClick={() => handleQuickSaveToNotes('octarine')}
-                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors flex items-center gap-2"
-                      >
-                        <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-                        </svg>
-                        Save to Octarine
-                      </button>
-                    )}
-                    {isApiMode && !isObsidianConfigured() && !getBearSettings().enabled && !isOctarineConfigured() && (
-                      <div className="px-3 py-2 text-[10px] text-muted-foreground">
-                        No notes apps configured.
-                      </div>
-                    )}
-                    {sharingEnabled && (
-                      <>
-                        <div className="my-1 border-t border-border" />
-                        <button
-                          onClick={() => {
-                            setShowExportDropdown(false);
-                            setShowImport(true);
-                          }}
-                          className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors flex items-center gap-2"
-                        >
-                          <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3" />
-                          </svg>
-                          Import Review
-                        </button>
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
+            {/* Settings dialog (controlled, button hidden — opened from PlanHeaderMenu) */}
+            <div className="hidden">
+              <Settings
+                taterMode={taterMode}
+                onTaterModeChange={handleTaterModeChange}
+                onIdentityChange={handleIdentityChange}
+                origin={origin}
+                onUIPreferencesChange={setUiPrefs}
+                externalOpen={mobileSettingsOpen}
+                onExternalClose={() => setMobileSettingsOpen(false)}
+                gitUser={gitUser}
+              />
             </div>
 
-            {/* Mobile hamburger menu */}
-            <MobileMenu
-              className="md:hidden"
-              isPanelOpen={isPanelOpen}
-              onTogglePanel={() => setIsPanelOpen(!isPanelOpen)}
-              annotationCount={allAnnotations.length + editorAnnotations.length}
-              onOpenExport={() => { setInitialExportTab(undefined); setShowExport(true); }}
+            <PlanHeaderMenu
+              appVersion={typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0'}
               onOpenSettings={() => setMobileSettingsOpen(true)}
+              onOpenExport={() => { setInitialExportTab(undefined); setShowExport(true); }}
+              onCopyAgentInstructions={handleCopyAgentInstructions}
               onDownloadAnnotations={handleDownloadAnnotations}
-              onCopyShareLink={async () => {
-                try {
-                  await navigator.clipboard.writeText(shareUrl);
-                  setNoteSaveToast({ type: 'success', message: 'Share link copied' });
-                } catch {
-                  setNoteSaveToast({ type: 'error', message: 'Failed to copy' });
-                }
-                setTimeout(() => setNoteSaveToast(null), 3000);
-              }}
-              onOpenImport={() => setShowImport(true)}
               onPrint={() => window.print()}
+              onCopyShareLink={handleCopyShareLink}
+              onOpenImport={() => setShowImport(true)}
+              onSaveToObsidian={() => handleQuickSaveToNotes('obsidian')}
+              onSaveToBear={() => handleQuickSaveToNotes('bear')}
+              onSaveToOctarine={() => handleQuickSaveToNotes('octarine')}
               sharingEnabled={sharingEnabled}
+              isApiMode={isApiMode}
+              agentInstructionsEnabled={isApiMode && !archive.archiveMode && !annotateMode}
+              obsidianConfigured={isObsidianConfigured()}
+              bearConfigured={getBearSettings().enabled}
+              octarineConfigured={isOctarineConfigured()}
             />
           </div>
         </header>
