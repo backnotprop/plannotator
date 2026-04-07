@@ -261,8 +261,10 @@ describe("install shared behavior", () => {
     // "System.Object[]" instead of the actual gh diagnostic — silently
     // hiding exactly the error message this code path is supposed to
     // surface. Must be normalized via Out-String first.
+    // Tighter assertion: the Out-String must be wired specifically on
+    // the $verifyOutput path, not just present somewhere in the file.
+    expect(ps).toMatch(/\$verifyOutput\s*\|\s*Out-String/);
     expect(ps).toContain("[Console]::Error.WriteLine");
-    expect(ps).toContain("Out-String");
     expect(ps).not.toContain("Write-Host $verifyOutput");
   });
 
@@ -283,17 +285,20 @@ describe("install shared behavior", () => {
     expect(ps).toMatch(/\$VerifyAttestation -and \$SkipAttestation/);
   });
 
-  test("install.cmd uses randomized temp paths for release.json and binary download", () => {
-    // Regression guard: fixed temp filenames (%TEMP%\release.json,
-    // %TEMP%\plannotator-<tag>.exe) collide between concurrent invocations
-    // and allow a same-user pre-placed symlink to redirect curl's output.
-    // The GH_OUTPUT temp file already uses %RANDOM%; the other two must
-    // match that pattern.
+  test("install.cmd uses randomized temp paths for all curl downloads", () => {
+    // Regression guard: fixed temp filenames collide between concurrent
+    // invocations and allow same-user symlink pre-placement to redirect
+    // curl's output. Every `-o` target in install.cmd must use %RANDOM%.
+    // Covers release.json, the binary itself, the checksum sidecar, and
+    // the gh attestation output capture.
     const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
     expect(cmdScript).toContain("plannotator-release-%RANDOM%.json");
     expect(cmdScript).toContain("plannotator-%RANDOM%.exe");
-    // And the fixed paths must be gone
+    expect(cmdScript).toContain("plannotator-checksum-%RANDOM%.txt");
+    expect(cmdScript).toContain("plannotator-gh-%RANDOM%.txt");
+    // And every fixed-path variant must be gone
     expect(cmdScript).not.toContain("%TEMP%\\release.json");
+    expect(cmdScript).not.toContain("%TEMP%\\checksum.txt");
     expect(cmdScript).not.toMatch(/%TEMP%\\plannotator-!TAG!\.exe/);
   });
 

@@ -160,8 +160,10 @@ if !ERRORLEVEL! neq 0 (
     exit /b 1
 )
 
-REM Download checksum
-curl -fsSL "!CHECKSUM_URL!" -o "%TEMP%\checksum.txt"
+REM Download checksum to a randomized temp path for the same reason as
+REM the binary download above (concurrent collision + symlink pre-placement).
+set "CHECKSUM_FILE=%TEMP%\plannotator-checksum-%RANDOM%.txt"
+curl -fsSL "!CHECKSUM_URL!" -o "!CHECKSUM_FILE!"
 if !ERRORLEVEL! neq 0 (
     echo Failed to download checksum >&2
     del "!TEMP_FILE!"
@@ -169,9 +171,9 @@ if !ERRORLEVEL! neq 0 (
 )
 
 REM Extract expected checksum (first field)
-set /p EXPECTED_CHECKSUM=<"%TEMP%\checksum.txt"
+set /p EXPECTED_CHECKSUM=<"!CHECKSUM_FILE!"
 for /f "tokens=1" %%i in ("!EXPECTED_CHECKSUM!") do set "EXPECTED_CHECKSUM=%%i"
-del "%TEMP%\checksum.txt"
+del "!CHECKSUM_FILE!"
 
 REM Verify checksum using certutil
 set "ACTUAL_CHECKSUM="
