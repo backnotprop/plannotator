@@ -57,6 +57,7 @@ import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations
 import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotations';
 import { useExternalAnnotationHighlights } from '@plannotator/ui/hooks/useExternalAnnotationHighlights';
 import { buildPlanAgentInstructions } from '@plannotator/ui/utils/planAgentInstructions';
+import { hasNewSettings, markNewSettingsSeen } from '@plannotator/ui/utils/newSettingsHint';
 import { useFileBrowser } from '@plannotator/ui/hooks/useFileBrowser';
 import { isVaultBrowserEnabled } from '@plannotator/ui/utils/obsidian';
 import { isFileBrowserEnabled, getFileBrowserSettings } from '@plannotator/ui/utils/fileBrowser';
@@ -88,6 +89,7 @@ const App: React.FC = () => {
   const [agentWarningMessage, setAgentWarningMessage] = useState('');
   const [isPanelOpen, setIsPanelOpen] = useState(() => window.innerWidth >= 768);
   const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false);
+  const [hasNewSettingsHints, setHasNewSettingsHints] = useState(() => hasNewSettings());
   const [editorMode, setEditorMode] = useState<EditorMode>(getEditorMode);
   const [inputMethod, setInputMethod] = useState<InputMethod>(getInputMethod);
   const [taterMode, setTaterMode] = useState(() => {
@@ -1374,7 +1376,14 @@ const App: React.FC = () => {
 
             <PlanHeaderMenu
               appVersion={typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0'}
-              onOpenSettings={() => setMobileSettingsOpen(true)}
+              hasNewSettingsHints={hasNewSettingsHints}
+              onOpenSettings={() => {
+                if (hasNewSettingsHints) {
+                  markNewSettingsSeen();
+                  setHasNewSettingsHints(false);
+                }
+                setMobileSettingsOpen(true);
+              }}
               onOpenExport={() => { setInitialExportTab(undefined); setShowExport(true); }}
               onCopyAgentInstructions={handleCopyAgentInstructions}
               onDownloadAnnotations={handleDownloadAnnotations}
