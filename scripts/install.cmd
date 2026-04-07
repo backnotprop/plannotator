@@ -331,7 +331,7 @@ echo ---
 echo.
 echo ## Code Review Feedback
 echo.
-echo ^!`plannotator review $ARGUMENTS`
+echo ^^!`plannotator review $ARGUMENTS`
 echo.
 echo ## Your task
 echo.
@@ -348,7 +348,7 @@ echo ---
 echo.
 echo ## Markdown Annotations
 echo.
-echo ^!`plannotator annotate $ARGUMENTS`
+echo ^^!`plannotator annotate $ARGUMENTS`
 echo.
 echo ## Your task
 echo.
@@ -365,7 +365,7 @@ echo ---
 echo.
 echo ## Message Annotations
 echo.
-echo ^!`plannotator annotate-last`
+echo ^^!`plannotator annotate-last`
 echo.
 echo ## Your task
 echo.
@@ -479,7 +479,7 @@ echo description = "Open interactive code review for current changes or a PR URL
 echo prompt = """
 echo ## Code Review Feedback
 echo.
-echo ^!{plannotator review {{args}}}
+echo ^^!{plannotator review {{args}}}
 echo.
 echo ## Your task
 echo.
@@ -492,7 +492,7 @@ echo description = "Open interactive annotation UI for a markdown file or folder
 echo prompt = """
 echo ## Markdown Annotations
 echo.
-echo ^!{plannotator annotate {{args}}}
+echo ^^!{plannotator annotate {{args}}}
 echo.
 echo ## Your task
 echo.

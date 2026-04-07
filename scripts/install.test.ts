@@ -302,22 +302,31 @@ describe("install shared behavior", () => {
     expect(cmdScript).not.toMatch(/%TEMP%\\plannotator-!TAG!\.exe/);
   });
 
-  test("install.cmd escapes ! in Claude Code slash command echoes", () => {
-    // Regression guard: under setlocal enabledelayedexpansion, an unmatched
-    // `!` in an echo line is silently stripped from the written file. The
-    // Claude Code slash command format requires a `!` prefix before the
-    // backtick-delimited shell invocation — without it, the command file
-    // is a functional no-op. install.sh and install.ps1 write the `!`
-    // correctly via their respective literal-string idioms; install.cmd
-    // must use `^!` to escape it from delayed expansion. The Gemini
-    // section of install.cmd already does this correctly — the Claude
-    // Code section didn't until this fix.
+  test("install.cmd double-escapes ! in Claude Code and Gemini slash command echoes", () => {
+    // Regression guard: under setlocal enabledelayedexpansion, preserving a
+    // literal `!` through both cmd parser phases requires `^^!`, not `^!`.
+    // Phase 1 consumes one caret (`^^` → `^`), Phase 2 consumes the second
+    // (`^!` → `!`). A single `^!` gets converted to `!` by Phase 1 and then
+    // stripped by Phase 2 because it's an unmatched delayed-expansion
+    // reference — yielding a written file with no `!` at all. This was
+    // caught by the Windows CI integration step reading back the generated
+    // command files, after an earlier "fix" with single-caret escape
+    // silently continued to drop the prefix.
+    //
+    // Also covers the Gemini section, which used the same incorrect
+    // single-caret escape and was equally broken (but had no CI coverage).
     const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
-    expect(cmdScript).toContain("echo ^!`plannotator review $ARGUMENTS`");
-    expect(cmdScript).toContain("echo ^!`plannotator annotate $ARGUMENTS`");
-    expect(cmdScript).toContain("echo ^!`plannotator annotate-last`");
-    // And the unescaped forms must be gone
+    // Claude Code slash commands (three files)
+    expect(cmdScript).toContain("echo ^^!`plannotator review $ARGUMENTS`");
+    expect(cmdScript).toContain("echo ^^!`plannotator annotate $ARGUMENTS`");
+    expect(cmdScript).toContain("echo ^^!`plannotator annotate-last`");
+    // Gemini slash commands (two files)
+    expect(cmdScript).toContain("echo ^^!{plannotator review {{args}}}");
+    expect(cmdScript).toContain("echo ^^!{plannotator annotate {{args}}}");
+    // And the single-caret and unescaped forms must be gone
     expect(cmdScript).not.toMatch(/^echo !`plannotator/m);
+    expect(cmdScript).not.toMatch(/^echo \^!`plannotator/m);
+    expect(cmdScript).not.toMatch(/^echo \^!{plannotator/m);
   });
 
   test("install.cmd uses substring test (not echo|findstr) for v-prefix normalization", () => {
