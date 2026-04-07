@@ -195,6 +195,20 @@ If anything is missing, fix it before proceeding to Phase 4. Common fixes:
 
    **Note on immutable releases:** The repo has GitHub Immutable Releases enabled, so once the `v*` tag is pushed and the release is created, the tag→commit and tag→asset bindings are permanent. You cannot delete and re-create a tag to "fix" a bad release — you must ship a new version. Release notes remain editable (see step 5), but everything else is locked.
 
+   **⚠️ One-time `MIN_ATTESTED_VERSION` bump — only for the first attested release (v0.18.0 expected):**
+
+   The three installers (`scripts/install.sh`, `scripts/install.ps1`, `scripts/install.cmd`) each hardcode a `MIN_ATTESTED_VERSION` constant. This constant exists to reject `--verify-attestation` / `PLANNOTATOR_VERIFY_ATTESTATION=1` / `verifyAttestation: true` requests for any release that predates provenance support, with a clean error pointing the user at `--skip-attestation` or pinning to a newer version. Otherwise users would see a cryptic `gh attestation verify: no attestations found` error.
+
+   Before shipping the first attested release, verify `MIN_ATTESTED_VERSION` in all three installers matches the version you're about to cut:
+
+   ```bash
+   grep -n "MIN_ATTESTED_VERSION" scripts/install.sh scripts/install.ps1 scripts/install.cmd
+   ```
+
+   Expected value: the exact tag you're releasing (e.g. `v0.18.0`). If the release version is different from the currently-hardcoded value, bump it in all three files **in the same commit as the version bump** so the installers on `plannotator.ai` (served from `main`) activate the constant at the same moment the first attested release becomes fetchable.
+
+   After the first attested release has shipped, this constant does NOT need to be bumped on subsequent releases. It is a floor, not a moving target — leave it at whatever the first attested version was.
+
 4. **Monitor the pipeline:**
    Watch the release workflow run until it completes:
    ```bash

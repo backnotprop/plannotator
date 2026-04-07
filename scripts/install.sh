@@ -4,6 +4,24 @@ set -e
 REPO="backnotprop/plannotator"
 INSTALL_DIR="$HOME/.local/bin"
 
+# First plannotator release that carries SLSA build-provenance attestations.
+# Releases before this tag were cut before release.yml added the
+# `actions/attest-build-provenance` step, so `gh attestation verify` will
+# fail with "no attestations found" for them regardless of authenticity.
+# When provenance verification is enabled (via flag, env var, or
+# ~/.plannotator/config.json), the installer compares the resolved tag
+# against this constant and fails fast with a clear message instead of
+# downloading a binary, running SHA256, and then hitting a cryptic gh
+# failure. Bumped once at the first attested release via the release skill.
+MIN_ATTESTED_VERSION="v0.18.0"
+
+# Compare two vMAJOR.MINOR.PATCH tags. Returns 0 (success) if $1 >= $2.
+# Uses `sort -V` (version sort) which handles minor/patch width correctly
+# unlike plain lexicographic comparison (e.g. v0.9.0 vs v0.10.0).
+version_ge() {
+    [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n 1)" = "$1" ]
+}
+
 VERSION="latest"
 # Tracks whether a version was explicitly set via --version or positional.
 # Used to reject mixing --version <tag> with a stray positional token,
@@ -20,7 +38,8 @@ Usage: install.sh [--version <tag>] [--verify-attestation | --skip-attestation] 
        install.sh <tag>
 
 Options:
-  --version <tag>        Install a specific version (e.g. v0.17.1 or 0.17.1).
+  --version <tag>        Install a specific version (e.g. vX.Y.Z or X.Y.Z;
+                         see https://github.com/backnotprop/plannotator/releases).
                          Defaults to the latest GitHub release.
   --verify-attestation   Require SLSA build-provenance verification via
                          `gh attestation verify`. Fails the install if gh is
@@ -36,9 +55,9 @@ Provenance verification is off by default. Enable it by any of:
 
 Examples:
   curl -fsSL https://plannotator.ai/install.sh | bash
-  curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version v0.17.1
+  curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version vX.Y.Z
   curl -fsSL https://plannotator.ai/install.sh | bash -s -- --verify-attestation
-  bash install.sh v0.17.1
+  bash install.sh vX.Y.Z
 USAGE
 }
 
@@ -163,29 +182,11 @@ fi
 
 echo "Installing plannotator ${latest_tag}..."
 
-binary_url="https://github.com/${REPO}/releases/download/${latest_tag}/${binary_name}"
-checksum_url="${binary_url}.sha256"
-
-mkdir -p "$INSTALL_DIR"
-
-tmp_file=$(mktemp)
-curl -fsSL -o "$tmp_file" "$binary_url"
-
-expected_checksum=$(curl -fsSL "$checksum_url" | cut -d' ' -f1)
-
-if [ "$(uname -s)" = "Darwin" ]; then
-    actual_checksum=$(shasum -a 256 "$tmp_file" | cut -d' ' -f1)
-else
-    actual_checksum=$(sha256sum "$tmp_file" | cut -d' ' -f1)
-fi
-
-if [ "$actual_checksum" != "$expected_checksum" ]; then
-    echo "Checksum verification failed!" >&2
-    rm -f "$tmp_file"
-    exit 1
-fi
-
-# Resolve SLSA build-provenance verification opt-in.
+# Resolve SLSA build-provenance verification opt-in BEFORE the download so we
+# can fail fast without wasting bandwidth if the requested tag predates
+# provenance support. The three layers (config file, env var, CLI flag) are
+# all cheap to check — no reason to defer this past the arg parse.
+#
 # Precedence: CLI flag > env var > ~/.plannotator/config.json > default (off).
 verify_attestation=0
 
@@ -209,7 +210,50 @@ if [ "$VERIFY_ATTESTATION_FLAG" -ne -1 ]; then
     verify_attestation="$VERIFY_ATTESTATION_FLAG"
 fi
 
+# Pre-flight: if verification is requested, reject tags older than the first
+# attested release before we download anything. This catches both explicit
+# `--version <old-tag>` and implicit `latest`-resolves-to-old-tag cases with
+# a clean, actionable error — no cryptic `gh: no attestations found` after
+# a wasted download.
 if [ "$verify_attestation" -eq 1 ]; then
+    if ! version_ge "$latest_tag" "$MIN_ATTESTED_VERSION"; then
+        echo "Provenance verification was requested, but ${latest_tag} predates" >&2
+        echo "plannotator's attestation support. The first release carrying signed" >&2
+        echo "build provenance is ${MIN_ATTESTED_VERSION}. Options:" >&2
+        echo "  - Pin to ${MIN_ATTESTED_VERSION} or later: --version ${MIN_ATTESTED_VERSION}" >&2
+        echo "  - Install without provenance verification: --skip-attestation" >&2
+        echo "  - Or unset PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation" >&2
+        echo "    from ~/.plannotator/config.json" >&2
+        exit 1
+    fi
+fi
+
+binary_url="https://github.com/${REPO}/releases/download/${latest_tag}/${binary_name}"
+checksum_url="${binary_url}.sha256"
+
+mkdir -p "$INSTALL_DIR"
+
+tmp_file=$(mktemp)
+curl -fsSL -o "$tmp_file" "$binary_url"
+
+expected_checksum=$(curl -fsSL "$checksum_url" | cut -d' ' -f1)
+
+if [ "$(uname -s)" = "Darwin" ]; then
+    actual_checksum=$(shasum -a 256 "$tmp_file" | cut -d' ' -f1)
+else
+    actual_checksum=$(sha256sum "$tmp_file" | cut -d' ' -f1)
+fi
+
+if [ "$actual_checksum" != "$expected_checksum" ]; then
+    echo "Checksum verification failed!" >&2
+    rm -f "$tmp_file"
+    exit 1
+fi
+
+if [ "$verify_attestation" -eq 1 ]; then
+    # $verify_attestation was resolved before the download; MIN_ATTESTED_VERSION
+    # pre-flight already ran and rejected old tags. At this point we know
+    # the tag is attested and gh should find a bundle.
     if command -v gh >/dev/null 2>&1; then
         # Capture combined output so we can surface gh's actual error message
         # (auth, network, missing attestation, etc.) on failure instead of a

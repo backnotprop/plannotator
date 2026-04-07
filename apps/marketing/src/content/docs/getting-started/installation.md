@@ -19,7 +19,7 @@ Install the `plannotator` command so your agent can use it.
 curl -fsSL https://plannotator.ai/install.sh | bash
 
 # Pin to a specific reviewed version
-curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version v0.17.1
+curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version vX.Y.Z
 ```
 
 **Windows PowerShell:**
@@ -29,7 +29,7 @@ curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version v0.17.1
 irm https://plannotator.ai/install.ps1 | iex
 
 # Pin to a specific reviewed version
-& ([scriptblock]::Create((irm https://plannotator.ai/install.ps1))) -Version v0.17.1
+& ([scriptblock]::Create((irm https://plannotator.ai/install.ps1))) -Version vX.Y.Z
 ```
 
 **Windows CMD:**
@@ -38,7 +38,7 @@ irm https://plannotator.ai/install.ps1 | iex
 curl -fsSL https://plannotator.ai/install.cmd -o install.cmd && install.cmd && del install.cmd
 
 REM Pin to a specific reviewed version
-curl -fsSL https://plannotator.ai/install.cmd -o install.cmd && install.cmd --version v0.17.1 && del install.cmd
+curl -fsSL https://plannotator.ai/install.cmd -o install.cmd && install.cmd --version vX.Y.Z && del install.cmd
 ```
 
 The install script respects `CLAUDE_CONFIG_DIR` if set, placing hooks in your custom config directory instead of `~/.claude`.

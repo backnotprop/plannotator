@@ -317,6 +317,44 @@ describe("install shared behavior", () => {
     expect(cmdScript).not.toMatch(/%TEMP%\\plannotator-!TAG!\.exe/);
   });
 
+  test("all installers hardcode MIN_ATTESTED_VERSION and guard verification against older tags", () => {
+    // Releases cut before this PR added `actions/attest-build-provenance`
+    // to release.yml have no attestations. Running `gh attestation verify`
+    // against them fails with "no attestations found" — a cryptic error
+    // that doesn't explain the user's actual problem (old version, no
+    // provenance support). Each installer now hardcodes a
+    // MIN_ATTESTED_VERSION constant and rejects verification requests
+    // for older tags BEFORE downloading the binary, with a clean error
+    // telling the user how to recover.
+    //
+    // The constant is bumped once by the release skill at the first
+    // attested release and then left alone as a permanent floor.
+    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+
+    // install.sh
+    expect(sh).toContain('MIN_ATTESTED_VERSION="v0.18.0"');
+    expect(sh).toContain("version_ge");
+    expect(sh).toContain("predates");
+    // install.ps1
+    expect(ps).toContain('$minAttestedVersion = "v0.18.0"');
+    expect(ps).toContain("[version]");
+    expect(ps).toContain("predates");
+    // install.cmd
+    expect(cmdScript).toContain('set "MIN_ATTESTED_VERSION=v0.18.0"');
+    expect(cmdScript).toContain("powershell -NoProfile -Command");
+    expect(cmdScript).toContain("predates");
+  });
+
+  test("install.sh and help text use vX.Y.Z placeholder not v0.17.1", () => {
+    // Regression guard: the docs and --help text previously used v0.17.1
+    // as a concrete pinned-version example. That tag predates provenance
+    // support, so any user copy-pasting the example and enabling
+    // verification would hit a hard failure. Replaced with a generic
+    // vX.Y.Z placeholder across all user-facing docs.
+    expect(sh).not.toContain("--version v0.17.1");
+    expect(sh).not.toContain("bash install.sh v0.17.1");
+  });
+
   test("install.cmd double-escapes ! in Claude Code and Gemini slash command echoes", () => {
     // Regression guard: under setlocal enabledelayedexpansion, preserving a
     // literal `!` through both cmd parser phases requires `^^!`, not `^!`.

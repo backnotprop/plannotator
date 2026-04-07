@@ -70,7 +70,7 @@ Plannotator lets you privately share plans, annotations, and feedback with colle
 curl -fsSL https://plannotator.ai/install.sh | bash
 
 # Pin to a specific reviewed version
-curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version v0.17.1
+curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version vX.Y.Z
 ```
 
 **Windows PowerShell:**
@@ -80,7 +80,7 @@ curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version v0.17.1
 irm https://plannotator.ai/install.ps1 | iex
 
 # Pin to a specific reviewed version
-& ([scriptblock]::Create((irm https://plannotator.ai/install.ps1))) -Version v0.17.1
+& ([scriptblock]::Create((irm https://plannotator.ai/install.ps1))) -Version vX.Y.Z
 ```
 
 Every released binary ships with a SHA256 sidecar (verified automatically on every install) and a [SLSA build provenance](https://slsa.dev/) attestation signed via Sigstore. For manual verification commands and opt-in auto-verification during upgrades, see the [installation docs](https://plannotator.ai/docs/getting-started/installation/#verifying-your-install).

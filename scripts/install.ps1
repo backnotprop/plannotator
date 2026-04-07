@@ -18,6 +18,11 @@ if ($VerifyAttestation -and $SkipAttestation) {
 $repo = "backnotprop/plannotator"
 $installDir = "$env:LOCALAPPDATA\plannotator"
 
+# First plannotator release that carries SLSA build-provenance attestations.
+# See scripts/install.sh for the full explanation — this constant is bumped
+# once at the first attested release via the release skill.
+$minAttestedVersion = "v0.18.0"
+
 # Detect architecture. We don't currently ship a native ARM64 Windows
 # binary — the release pipeline only builds bun-windows-x64. Windows 11
 # runs x64 binaries on ARM64 via emulation, so fall back to x64 on ARM64
@@ -136,6 +141,27 @@ if ($VerifyAttestation) { $verifyAttestationResolved = $true }
 if ($SkipAttestation)   { $verifyAttestationResolved = $false }
 
 if ($verifyAttestationResolved) {
+    # Pre-flight: reject the verification request before downloading if the
+    # resolved tag predates provenance support. Uses PowerShell's [version]
+    # class for proper numeric comparison (unlike lexicographic string cmp
+    # which gets v0.9.0 vs v0.10.0 backwards).
+    try {
+        $resolvedVersion = [version]($latestTag -replace '^v', '')
+        $minVersion = [version]($minAttestedVersion -replace '^v', '')
+    } catch {
+        Remove-Item $tmpFile -Force
+        Write-Error "Could not parse version tags for provenance check: latest=$latestTag min=$minAttestedVersion"
+        exit 1
+    }
+    if ($resolvedVersion -lt $minVersion) {
+        Remove-Item $tmpFile -Force
+        [Console]::Error.WriteLine("Provenance verification was requested, but $latestTag predates plannotator's attestation support.")
+        [Console]::Error.WriteLine("The first release carrying signed build provenance is $minAttestedVersion. Options:")
+        [Console]::Error.WriteLine("  - Pin to $minAttestedVersion or later: -Version $minAttestedVersion")
+        [Console]::Error.WriteLine("  - Install without provenance verification: -SkipAttestation")
+        [Console]::Error.WriteLine("  - Or unset PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation from $configPath")
+        exit 1
+    }
     if (Get-Command gh -ErrorAction SilentlyContinue) {
         # Constrain verification to the exact tag + signing workflow — see
         # install.sh comment for rationale.
