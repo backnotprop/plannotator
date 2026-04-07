@@ -144,6 +144,16 @@ export function transformPlanInput(
       return { error: `annotations[${i}] DELETION type requires non-empty "originalText" field` };
     }
 
+    // COMMENT requires originalText so the renderer can pin it to a phrase.
+    // External agents that want sidebar-only feedback should use GLOBAL_COMMENT
+    // instead — without a phrase to anchor to, a COMMENT renders as an empty
+    // quote bubble in the sidebar and exports as `Feedback on: ""`.
+    if (type === "COMMENT" && (typeof obj.originalText !== "string" || obj.originalText.length === 0)) {
+      return {
+        error: `annotations[${i}] COMMENT requires non-empty "originalText" field. Use GLOBAL_COMMENT for sidebar-only feedback.`,
+      };
+    }
+
     annotations.push({
       id: crypto.randomUUID(),
       blockId: "external",
