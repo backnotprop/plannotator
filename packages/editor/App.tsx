@@ -390,7 +390,7 @@ const App: React.FC = () => {
   // Drive DOM highlights for SSE-delivered external annotations. Disabled
   // while a linked doc overlay is open (Viewer DOM is hidden) and while the
   // plan diff view is active (diff view has its own annotation surface).
-  useExternalAnnotationHighlights({
+  const { reset: resetExternalHighlights } = useExternalAnnotationHighlights({
     viewerRef,
     externalAnnotations,
     enabled: isApiMode && !linkedDocHook.isActive && !isPlanDiffActive,
@@ -484,10 +484,13 @@ const App: React.FC = () => {
         viewerRef.current?.clearAllHighlights();
         viewerRef.current?.applySharedAnnotations(pendingSharedAnnotations.filter(a => !a.diffContext));
         clearPendingSharedAnnotations();
+        // `clearAllHighlights` wiped live external SSE highlights too;
+        // tell the external-highlight bookkeeper to re-apply them.
+        resetExternalHighlights();
       }, 100);
       return () => clearTimeout(timer);
     }
-  }, [pendingSharedAnnotations, clearPendingSharedAnnotations]);
+  }, [pendingSharedAnnotations, clearPendingSharedAnnotations, resetExternalHighlights]);
 
   const handleTaterModeChange = (enabled: boolean) => {
     setTaterMode(enabled);

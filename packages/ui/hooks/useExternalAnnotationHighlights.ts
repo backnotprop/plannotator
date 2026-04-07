@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Annotation } from '../types';
 import { AnnotationType } from '../types';
 import type { ViewerHandle } from '../components/Viewer';
@@ -27,12 +27,16 @@ export function useExternalAnnotationHighlights(params: {
   enabled: boolean;
   /** Bump to force a full re-apply (e.g. plan markdown changed and blocks re-rendered). */
   planKey: string;
-}) {
+}): { reset: () => void } {
   const { viewerRef, externalAnnotations, enabled, planKey } = params;
 
   // Tracks annotation IDs currently materialized as DOM highlights, along
   // with a fingerprint so updates trigger remove+reapply.
   const appliedRef = useRef<Map<string, string>>(new Map());
+
+  // Bumped to force the main effect to treat every current external as a
+  // fresh application target — used by `reset()` below.
+  const [resetCount, setResetCount] = useState(0);
 
   // Clear tracking when plan content changes — the Viewer re-parses blocks
   // and wipes marks, so our bookkeeping is stale.
@@ -49,7 +53,6 @@ export function useExternalAnnotationHighlights(params: {
     const eligible = externalAnnotations.filter(
       a => a.type !== AnnotationType.GLOBAL_COMMENT && !a.diffContext && a.originalText,
     );
-    const nextIds = new Set(eligible.map(a => a.id));
     const applied = appliedRef.current;
 
     // Removals: previously applied but no longer present, or fingerprint changed.
@@ -75,14 +78,23 @@ export function useExternalAnnotationHighlights(params: {
       const v = viewerRef.current;
       if (!v) return;
       v.applySharedAnnotations(toAdd);
-      toAdd.forEach(a => {
-        // Only track if it actually still belongs to the current set.
-        if (nextIds.has(a.id)) applied.set(a.id, fingerprint(a));
-      });
+      toAdd.forEach(a => applied.set(a.id, fingerprint(a)));
     }, 100);
 
     return () => clearTimeout(timer);
-  }, [externalAnnotations, enabled, planKey, viewerRef]);
+    // viewerRef is a stable ref object and intentionally omitted from deps.
+  }, [externalAnnotations, enabled, planKey, resetCount]);
+
+  // Forget everything we've tracked and force a full re-apply on the next
+  // effect run. Callers invoke this after an external action has wiped the
+  // Viewer DOM out from under us (e.g. `clearAllHighlights()` during share
+  // import) so live externals get repainted.
+  const reset = useCallback(() => {
+    appliedRef.current.clear();
+    setResetCount(c => c + 1);
+  }, []);
+
+  return { reset };
 }
 
 function fingerprint(a: Annotation): string {
