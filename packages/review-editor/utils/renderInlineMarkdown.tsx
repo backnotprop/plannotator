@@ -37,7 +37,7 @@ function renderInline(text: string, startKey: number): React.ReactNode[] {
   let key = startKey;
 
   // Match inline patterns: [text](url), `code`, **bold**, *italic*, _italic_, bare URLs
-  const regex = /(\[([^\]]+)\]\((https?:\/\/[^)]+)\)|`[^`]+`|\*\*[^*]+\*\*|(^|[^\w])_([^_\s](?:[\s\S]*?[^_\s])?)_(?!\w)|\*[^*]+\*|https?:\/\/[^\s<)\]]+)/g;
+  const regex = /(\[([^\]]+)\]\((https?:\/\/[^)]+)\)|`[^`]+`|\*\*[^*]+\*\*|(?<!\w)_([^_\s](?:[\s\S]*?[^_\s])?)_(?!\w)|\*[^*]+\*|https?:\/\/[^\s<)\]]+)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
@@ -59,10 +59,8 @@ function renderInline(text: string, startKey: number): React.ReactNode[] {
       nodes.push(<code key={key++} className="inline-code">{token.slice(1, -1)}</code>);
     } else if (token.startsWith('**')) {
       nodes.push(<strong key={key++}>{token.slice(2, -2)}</strong>);
-    } else if (token.startsWith('_') || (match[4] && match[5])) {
-      const prefix = match[4] || '';
-      const italicText = match[5];
-      if (prefix) nodes.push(prefix);
+    } else if (token.startsWith('_')) {
+      const italicText = match[4];
       nodes.push(<em key={key++}>{italicText}</em>);
     } else if (token.startsWith('*')) {
       nodes.push(<em key={key++}>{token.slice(1, -1)}</em>);

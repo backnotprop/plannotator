@@ -28,4 +28,18 @@ describe("renderInlineMarkdown", () => {
     expect(renderInlineMarkdown("foo_bar_baz")).toEqual(["foo_bar_baz"]);
     expect(renderInlineMarkdown("__init__")).toEqual(["__init__"]);
   });
+
+  it("renders underscore emphasis after other inline tokens", () => {
+    const boldNodes = renderInlineMarkdown("**bold**_italic_");
+    expect(types(boldNodes)).toEqual(["strong", "em"]);
+    expect((boldNodes[1] as { type: string; props: { children?: unknown } }).props.children).toBe("italic");
+
+    const codeNodes = renderInlineMarkdown("`code`_italic_");
+    expect(types(codeNodes)).toEqual(["code", "em"]);
+    expect((codeNodes[1] as { type: string; props: { children?: unknown } }).props.children).toBe("italic");
+
+    const linkNodes = renderInlineMarkdown("[link](https://example.com)_italic_");
+    expect(types(linkNodes)).toEqual(["a", "em"]);
+    expect((linkNodes[1] as { type: string; props: { children?: unknown } }).props.children).toBe("italic");
+  });
 });
