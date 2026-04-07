@@ -551,7 +551,11 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const [quickLabelsState, setQuickLabelsState] = useState<QuickLabel[]>([]);
   const [editingTipIndex, setEditingTipIndex] = useState<number | null>(null);
   const [editingTipValue, setEditingTipValue] = useState('');
-  const [showNewHints, setShowNewHints] = useState(() => hasNewSettings());
+  // Captured at mount so future hint markers (e.g. `{showNewHints && <Badge>}`)
+  // stay visible for the duration of the dialog session even after
+  // markNewSettingsSeen() runs on open. Bump CURRENT_HINT_VERSION in
+  // newSettingsHint.ts when adding new highlighted settings.
+  const [showNewHints] = useState(() => hasNewSettings());
   const [aiProvider, setAiProvider] = useState<string | null>(null);
   const [fileBrowserSettings, setFileBrowserSettings] = useState<FileBrowserSettings>({ enabled: false, directories: [] });
   const [newDirPath, setNewDirPath] = useState('');
