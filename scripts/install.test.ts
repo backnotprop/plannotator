@@ -227,6 +227,36 @@ describe("install shared behavior", () => {
     expect(ps).toContain("gh CLI was not found");
   });
 
+  test("install.sh/cmd reject dash-prefixed --version values and positional overwrites", () => {
+    // Regression guard for PR #512 review cycle 4 findings:
+    //   - `install.sh --version --verify-attestation` used to set VERSION
+    //     to the flag name and then 404 on download
+    //   - `install.sh --version v1.0.0 stray` used to silently overwrite
+    //     VERSION with "stray"
+    // Same pair of bugs existed in install.cmd. Both scripts now track
+    // VERSION_EXPLICIT and dash-check the value after --version.
+    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+
+    // install.sh
+    expect(sh).toContain("VERSION_EXPLICIT=0");
+    expect(sh).toContain('echo "--version requires a tag value, got flag:');
+    expect(sh).toContain('echo "Unexpected positional argument:');
+
+    // install.cmd
+    expect(cmdScript).toContain('set "VERSION_EXPLICIT=0"');
+    expect(cmdScript).toContain("--version requires a tag value, got flag:");
+    expect(cmdScript).toContain("Unexpected positional argument:");
+  });
+
+  test("install.ps1 writes gh error output to stderr, not Write-Host", () => {
+    // Regression guard: Write-Host goes to PowerShell's Information stream
+    // and is silently dropped when CI pipelines capture stderr. Use the
+    // native stderr handle instead. See install.sh:177 and install.cmd for
+    // the equivalent stderr writes.
+    expect(ps).toContain("[Console]::Error.WriteLine($verifyOutput)");
+    expect(ps).not.toContain("Write-Host $verifyOutput");
+  });
+
   test("all installers constrain attestation verify to tag + signer workflow", () => {
     // Every `gh attestation verify` call must pass --source-ref and
     // --signer-workflow, not just --repo. Without --source-ref a

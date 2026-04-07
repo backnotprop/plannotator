@@ -5,6 +5,10 @@ REPO="backnotprop/plannotator"
 INSTALL_DIR="$HOME/.local/bin"
 
 VERSION="latest"
+# Tracks whether a version was explicitly set via --version or positional.
+# Used to reject mixing --version <tag> with a stray positional token,
+# which would otherwise silently overwrite the earlier value and 404.
+VERSION_EXPLICIT=0
 # Three-layer opt-in for SLSA build-provenance verification.
 # Precedence: CLI flag > env var > ~/.plannotator/config.json > default (off).
 # -1 = flag not set yet (fall through to lower layers); 0 = disable; 1 = enable.
@@ -46,11 +50,33 @@ while [ $# -gt 0 ]; do
                 usage >&2
                 exit 1
             fi
+            case "$2" in
+                -*)
+                    echo "--version requires a tag value, got flag: $2" >&2
+                    usage >&2
+                    exit 1
+                    ;;
+            esac
             VERSION="$2"
+            VERSION_EXPLICIT=1
             shift 2
             ;;
         --version=*)
-            VERSION="${1#--version=}"
+            value="${1#--version=}"
+            if [ -z "$value" ]; then
+                echo "--version requires an argument" >&2
+                usage >&2
+                exit 1
+            fi
+            case "$value" in
+                -*)
+                    echo "--version requires a tag value, got flag: $value" >&2
+                    usage >&2
+                    exit 1
+                    ;;
+            esac
+            VERSION="$value"
+            VERSION_EXPLICIT=1
             shift
             ;;
         --verify-attestation)
@@ -71,8 +97,16 @@ while [ $# -gt 0 ]; do
             exit 1
             ;;
         *)
-            # Positional form: install.sh v0.17.1 (matches install.cmd interface)
+            # Positional form: install.sh v0.17.1 (matches install.cmd interface).
+            # Reject if --version was already passed — silent overwrite is worse
+            # than a clean usage error.
+            if [ "$VERSION_EXPLICIT" -eq 1 ]; then
+                echo "Unexpected positional argument: $1 (version already set)" >&2
+                usage >&2
+                exit 1
+            fi
             VERSION="$1"
+            VERSION_EXPLICIT=1
             shift
             ;;
     esac

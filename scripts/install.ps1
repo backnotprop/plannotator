@@ -128,7 +128,10 @@ if ($verifyAttestationResolved) {
         if ($LASTEXITCODE -eq 0) {
             Write-Host "✓ verified build provenance (SLSA)"
         } else {
-            Write-Host $verifyOutput
+            # Write to stderr directly — Write-Host goes to PowerShell's
+            # Information stream, which is silently dropped when callers
+            # redirect stderr for error reporting in CI/CD pipelines.
+            [Console]::Error.WriteLine($verifyOutput)
             Remove-Item $tmpFile -Force
             Write-Error "Attestation verification failed! The binary's SHA256 matched, but no valid signed provenance was found for $repo. Refusing to install."
             exit 1

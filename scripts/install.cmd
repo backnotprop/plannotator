@@ -5,6 +5,9 @@ REM Plannotator Windows CMD Bootstrap Script
 
 REM Parse command line arguments
 set "VERSION=latest"
+REM Tracks whether a version was explicitly set via --version or positional.
+REM Used to reject mixing --version <tag> with a stray positional token.
+set "VERSION_EXPLICIT=0"
 REM Three-layer opt-in for SLSA provenance verification.
 REM Precedence: CLI flag > env var > %USERPROFILE%\.plannotator\config.json > default.
 REM -1 = flag not set (fall through); 0 = disable; 1 = enable.
@@ -17,7 +20,15 @@ if /i "%~1"=="--version" (
         echo --version requires an argument >&2
         exit /b 1
     )
+    REM Reject dash-prefixed values — prevents `install.cmd --version
+    REM --skip-attestation` from silently setting VERSION=--skip-attestation.
+    set "NEXT_ARG=%~2"
+    if "!NEXT_ARG:~0,1!"=="-" (
+        echo --version requires a tag value, got flag: "%~2" >&2
+        exit /b 1
+    )
     set "VERSION=%~2"
+    set "VERSION_EXPLICIT=1"
     shift
     shift
     goto parse_args
@@ -49,8 +60,15 @@ if "!CURRENT_ARG:~0,1!"=="-" (
     echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] >&2
     exit /b 1
 )
-REM Positional form: install.cmd v0.17.1 (legacy interface)
+REM Positional form: install.cmd v0.17.1 (legacy interface).
+REM Reject if --version was already passed — silent overwrite is worse
+REM than a clean usage error.
+if "!VERSION_EXPLICIT!"=="1" (
+    echo Unexpected positional argument: "%~1" ^(version already set^) >&2
+    exit /b 1
+)
 set "VERSION=%~1"
+set "VERSION_EXPLICIT=1"
 shift
 goto parse_args
 :args_done

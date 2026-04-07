@@ -49,17 +49,26 @@ Every released binary is accompanied by a SHA256 sidecar (verified automatically
 
 **Manual verification (recommended for one-off audits):**
 
-This requires the [GitHub CLI](https://cli.github.com) to be installed and authenticated (`gh auth login`):
+This requires the [GitHub CLI](https://cli.github.com) to be installed and authenticated (`gh auth login`). Replace `vX.Y.Z` with the tag of the version you installed — pinning the source ref and signer workflow is what gives you the "exact commit and workflow run" guarantee described above; `--repo` alone only proves the artifact was built by _some_ workflow in our repository.
 
 ```bash
 # macOS / Linux
-gh attestation verify ~/.local/bin/plannotator --repo backnotprop/plannotator
+gh attestation verify ~/.local/bin/plannotator \
+  --repo backnotprop/plannotator \
+  --source-ref refs/tags/vX.Y.Z \
+  --signer-workflow backnotprop/plannotator/.github/workflows/release.yml
 
 # Windows (PowerShell installer)
-gh attestation verify "$env:LOCALAPPDATA\plannotator\plannotator.exe" --repo backnotprop/plannotator
+gh attestation verify "$env:LOCALAPPDATA\plannotator\plannotator.exe" `
+  --repo backnotprop/plannotator `
+  --source-ref refs/tags/vX.Y.Z `
+  --signer-workflow backnotprop/plannotator/.github/workflows/release.yml
 
 # Windows (cmd installer)
-gh attestation verify "%USERPROFILE%\.local\bin\plannotator.exe" --repo backnotprop/plannotator
+gh attestation verify "%USERPROFILE%\.local\bin\plannotator.exe" ^
+  --repo backnotprop/plannotator ^
+  --source-ref refs/tags/vX.Y.Z ^
+  --signer-workflow backnotprop/plannotator/.github/workflows/release.yml
 ```
 
 For air-gapped or no-auth environments, see GitHub's docs on [verifying attestations offline](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/verifying-attestations-offline) (uses `gh attestation download` to fetch the bundle once, then verifies offline against it).
