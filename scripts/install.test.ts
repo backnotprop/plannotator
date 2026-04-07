@@ -248,13 +248,63 @@ describe("install shared behavior", () => {
     expect(cmdScript).toContain("Unexpected positional argument:");
   });
 
-  test("install.ps1 writes gh error output to stderr, not Write-Host", () => {
-    // Regression guard: Write-Host goes to PowerShell's Information stream
-    // and is silently dropped when CI pipelines capture stderr. Use the
-    // native stderr handle instead. See install.sh:177 and install.cmd for
-    // the equivalent stderr writes.
-    expect(ps).toContain("[Console]::Error.WriteLine($verifyOutput)");
+  test("install.ps1 writes gh error output to stderr via Out-String", () => {
+    // Regression guard 1: Write-Host goes to PowerShell's Information
+    // stream and is silently dropped when CI pipelines capture stderr.
+    // Use the native stderr handle instead. See install.sh:177 and
+    // install.cmd for the equivalent stderr writes.
+    //
+    // Regression guard 2: `& gh ... 2>&1` captures multi-line output as
+    // an object[] array. Passing the array directly to
+    // [Console]::Error.WriteLine binds to the WriteLine(object) overload,
+    // calls ToString() on the array, and yields the literal
+    // "System.Object[]" instead of the actual gh diagnostic — silently
+    // hiding exactly the error message this code path is supposed to
+    // surface. Must be normalized via Out-String first.
+    expect(ps).toContain("[Console]::Error.WriteLine");
+    expect(ps).toContain("Out-String");
     expect(ps).not.toContain("Write-Host $verifyOutput");
+  });
+
+  test("all installers reject --verify-attestation + --skip-attestation together", () => {
+    // Regression guard: passing both flags used to behave inconsistently
+    // across the three installers (bash/cmd took last-wins by command-
+    // line order; ps1 took a fixed SkipAttestation-always-wins). No sane
+    // user passes both, so the right behavior is to reject the ambiguous
+    // combination upfront with a clean "mutually exclusive" error.
+    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+
+    // install.sh — guards in both --verify-attestation and --skip-attestation arms
+    expect(sh).toContain("mutually exclusive");
+    // install.cmd — same guard in both arms
+    expect(cmdScript).toContain("mutually exclusive");
+    // install.ps1 — one guard right after param block
+    expect(ps).toContain("mutually exclusive");
+    expect(ps).toMatch(/\$VerifyAttestation -and \$SkipAttestation/);
+  });
+
+  test("install.cmd uses randomized temp paths for release.json and binary download", () => {
+    // Regression guard: fixed temp filenames (%TEMP%\release.json,
+    // %TEMP%\plannotator-<tag>.exe) collide between concurrent invocations
+    // and allow a same-user pre-placed symlink to redirect curl's output.
+    // The GH_OUTPUT temp file already uses %RANDOM%; the other two must
+    // match that pattern.
+    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    expect(cmdScript).toContain("plannotator-release-%RANDOM%.json");
+    expect(cmdScript).toContain("plannotator-%RANDOM%.exe");
+    // And the fixed paths must be gone
+    expect(cmdScript).not.toContain("%TEMP%\\release.json");
+    expect(cmdScript).not.toMatch(/%TEMP%\\plannotator-!TAG!\.exe/);
+  });
+
+  test("install.cmd uses substring test (not echo|findstr) for v-prefix normalization", () => {
+    // Regression guard: `echo !TAG! | findstr /b "v"` pipes an unquoted
+    // expanded variable, re-exposing cmd metacharacters (& | > <) in
+    // the value before the pipe parses. Must use the safe substring
+    // test pattern used elsewhere in the script.
+    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    expect(cmdScript).toContain('if not "!TAG:~0,1!"=="v"');
+    expect(cmdScript).not.toContain("echo !TAG! | findstr");
   });
 
   test("all installers constrain attestation verify to tag + signer workflow", () => {

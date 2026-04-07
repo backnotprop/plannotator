@@ -80,6 +80,24 @@ jobs:
 
       - name: Run install.cmd end-to-end
         shell: cmd
+        # v0.17.1 is pinned intentionally. This test needs a real binary
+        # to download so it can exercise install.cmd end-to-end — SHA256
+        # verification, skills sparse-checkout, and (critically) the
+        # embedded `node -e` Gemini merge path that was the site of
+        # issue #506. Using `latest` would couple the Windows regression
+        # test to whatever version is currently released, so a bad
+        # release would retroactively break CI on every branch.
+        #
+        # v0.17.1 was the current release when the test was added and is
+        # locked in place by GitHub Immutable Releases. If you ever need
+        # to bump it (e.g. this version becomes too old to represent the
+        # install flow we care about), verify the replacement has:
+        #   - plannotator-win32-x64.exe attached
+        #   - plannotator-win32-x64.exe.sha256 attached
+        #   - the install.cmd and packages/shared/ layout your branch
+        #     under test expects to find in apps/skills/
+        # A missing or mismatched release asset surfaces as a curl 404
+        # in this step with no obvious connection to the test's purpose.
         run: scripts\install.cmd v0.17.1 --skip-attestation
 
       - name: Verify Gemini settings.json was merged correctly

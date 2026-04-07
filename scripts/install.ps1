@@ -7,6 +7,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Reject mutually-exclusive flag combinations upfront. Passing both is
+# almost always a typo or wrapper-script misconfiguration; guessing which
+# one the user meant is worse than failing fast.
+if ($VerifyAttestation -and $SkipAttestation) {
+    [Console]::Error.WriteLine("-VerifyAttestation and -SkipAttestation are mutually exclusive. Pass one or the other.")
+    exit 1
+}
+
 $repo = "backnotprop/plannotator"
 $installDir = "$env:LOCALAPPDATA\plannotator"
 
@@ -131,7 +139,14 @@ if ($verifyAttestationResolved) {
             # Write to stderr directly — Write-Host goes to PowerShell's
             # Information stream, which is silently dropped when callers
             # redirect stderr for error reporting in CI/CD pipelines.
-            [Console]::Error.WriteLine($verifyOutput)
+            #
+            # `& gh ... 2>&1` captures multi-line output as an object[]
+            # array. Passing the array directly to [Console]::Error.WriteLine
+            # binds to the WriteLine(object) overload, which calls ToString()
+            # on the array and yields the useless literal "System.Object[]".
+            # Out-String normalizes the array back into a single formatted
+            # string so the actual gh diagnostic is visible.
+            [Console]::Error.WriteLine(($verifyOutput | Out-String).TrimEnd())
             Remove-Item $tmpFile -Force
             Write-Error "Attestation verification failed! The binary's SHA256 matched, but no valid signed provenance was found for $repo. Refusing to install."
             exit 1

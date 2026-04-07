@@ -80,10 +80,20 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         --verify-attestation)
+            if [ "$VERIFY_ATTESTATION_FLAG" = "0" ]; then
+                echo "--verify-attestation and --skip-attestation are mutually exclusive" >&2
+                usage >&2
+                exit 1
+            fi
             VERIFY_ATTESTATION_FLAG=1
             shift
             ;;
         --skip-attestation)
+            if [ "$VERIFY_ATTESTATION_FLAG" = "1" ]; then
+                echo "--skip-attestation and --verify-attestation are mutually exclusive" >&2
+                usage >&2
+                exit 1
+            fi
             VERIFY_ATTESTATION_FLAG=0
             shift
             ;;

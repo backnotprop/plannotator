@@ -34,11 +34,19 @@ if /i "%~1"=="--version" (
     goto parse_args
 )
 if /i "%~1"=="--verify-attestation" (
+    if "!VERIFY_ATTESTATION_FLAG!"=="0" (
+        echo --verify-attestation and --skip-attestation are mutually exclusive >&2
+        exit /b 1
+    )
     set "VERIFY_ATTESTATION_FLAG=1"
     shift
     goto parse_args
 )
 if /i "%~1"=="--skip-attestation" (
+    if "!VERIFY_ATTESTATION_FLAG!"=="1" (
+        echo --skip-attestation and --verify-attestation are mutually exclusive >&2
+        exit /b 1
+    )
     set "VERIFY_ATTESTATION_FLAG=0"
     shift
     goto parse_args
@@ -102,20 +110,23 @@ REM Get version to install
 if /i "!VERSION!"=="latest" (
     echo Fetching latest version...
 
-    REM Download release info and extract tag_name
-    curl -fsSL "https://api.github.com/repos/!REPO!/releases/latest" -o "%TEMP%\release.json"
+    REM Download release info to a randomized temp file so concurrent
+    REM invocations don't collide and a same-user pre-placed symlink at
+    REM a predictable path can't redirect curl's output.
+    set "RELEASE_JSON=%TEMP%\plannotator-release-%RANDOM%.json"
+    curl -fsSL "https://api.github.com/repos/!REPO!/releases/latest" -o "!RELEASE_JSON!"
     if !ERRORLEVEL! neq 0 (
         echo Failed to get latest version >&2
         exit /b 1
     )
 
     REM Extract tag_name from JSON
-    for /f "tokens=2 delims=:," %%i in ('findstr /c:"\"tag_name\"" "%TEMP%\release.json"') do (
+    for /f "tokens=2 delims=:," %%i in ('findstr /c:"\"tag_name\"" "!RELEASE_JSON!"') do (
         set "TAG=%%i"
         set "TAG=!TAG: =!"
         set "TAG=!TAG:"=!"
     )
-    del "%TEMP%\release.json"
+    del "!RELEASE_JSON!"
 
     if "!TAG!"=="" (
         echo Failed to parse version >&2
@@ -123,9 +134,11 @@ if /i "!VERSION!"=="latest" (
     )
 ) else (
     set "TAG=!VERSION!"
-    REM Add v prefix if not present
-    echo !TAG! | findstr /b "v" >nul
-    if !ERRORLEVEL! neq 0 set "TAG=v!TAG!"
+    REM Add v prefix if not present. Use a substring test rather than
+    REM piping the expanded variable through findstr — an unquoted echo
+    REM pipe re-exposes cmd metacharacters (& | > <) in the value before
+    REM the pipe runs. Matches the safe pattern used in the arg parser.
+    if not "!TAG:~0,1!"=="v" set "TAG=v!TAG!"
 )
 
 echo Installing plannotator !TAG!...
@@ -134,8 +147,12 @@ set "BINARY_NAME=plannotator-!PLATFORM!.exe"
 set "BINARY_URL=https://github.com/!REPO!/releases/download/!TAG!/!BINARY_NAME!"
 set "CHECKSUM_URL=!BINARY_URL!.sha256"
 
-REM Download binary
-set "TEMP_FILE=%TEMP%\plannotator-!TAG!.exe"
+REM Download binary to a randomized temp path so concurrent invocations
+REM don't collide and a same-user pre-placed symlink at a predictable
+REM path can't redirect where curl writes the downloaded executable.
+REM The SHA256 check would pass regardless (content is authentic), but
+REM the install destination would be corrupted.
+set "TEMP_FILE=%TEMP%\plannotator-%RANDOM%.exe"
 curl -fsSL "!BINARY_URL!" -o "!TEMP_FILE!"
 if !ERRORLEVEL! neq 0 (
     echo Failed to download binary >&2
