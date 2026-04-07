@@ -53,6 +53,7 @@ import { useAnnotationDraft } from '@plannotator/ui/hooks/useAnnotationDraft';
 import { useArchive } from '@plannotator/ui/hooks/useArchive';
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
 import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotations';
+import { useExternalAnnotationHighlights } from '@plannotator/ui/hooks/useExternalAnnotationHighlights';
 import { useFileBrowser } from '@plannotator/ui/hooks/useFileBrowser';
 import { isVaultBrowserEnabled } from '@plannotator/ui/utils/obsidian';
 import { isFileBrowserEnabled, getFileBrowserSettings } from '@plannotator/ui/utils/fileBrowser';
@@ -385,6 +386,16 @@ const App: React.FC = () => {
 
   const { editorAnnotations, deleteEditorAnnotation } = useEditorAnnotations();
   const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<Annotation>({ enabled: isApiMode });
+
+  // Drive DOM highlights for SSE-delivered external annotations. Disabled
+  // while a linked doc overlay is open (Viewer DOM is hidden) and while the
+  // plan diff view is active (diff view has its own annotation surface).
+  useExternalAnnotationHighlights({
+    viewerRef,
+    externalAnnotations,
+    enabled: isApiMode && !linkedDocHook.isActive && !isPlanDiffActive,
+    planKey: markdown,
+  });
 
   // Merge local + SSE annotations, deduping draft-restored externals against
   // live SSE versions. Prefer the SSE version when both exist (same source,
