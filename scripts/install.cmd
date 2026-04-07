@@ -148,6 +148,55 @@ if /i "!VERSION!"=="latest" (
 
 echo Installing plannotator !TAG!...
 
+REM Resolve SLSA build-provenance verification opt-in BEFORE the download so
+REM we can fail fast without wasting bandwidth if the requested tag predates
+REM provenance support. Precedence: CLI flag > env var > config.json > default.
+set "VERIFY_ATTESTATION=0"
+
+REM Layer 3: config file (lowest precedence of the opt-in sources).
+if exist "%USERPROFILE%\.plannotator\config.json" (
+    findstr /r /c:"\"verifyAttestation\"[ 	]*:[ 	]*true" "%USERPROFILE%\.plannotator\config.json" >nul 2>&1
+    if !ERRORLEVEL! equ 0 set "VERIFY_ATTESTATION=1"
+)
+
+REM Layer 2: env var (overrides config file).
+if /i "!PLANNOTATOR_VERIFY_ATTESTATION!"=="1"    set "VERIFY_ATTESTATION=1"
+if /i "!PLANNOTATOR_VERIFY_ATTESTATION!"=="true" set "VERIFY_ATTESTATION=1"
+if /i "!PLANNOTATOR_VERIFY_ATTESTATION!"=="yes"  set "VERIFY_ATTESTATION=1"
+if /i "!PLANNOTATOR_VERIFY_ATTESTATION!"=="0"    set "VERIFY_ATTESTATION=0"
+if /i "!PLANNOTATOR_VERIFY_ATTESTATION!"=="false" set "VERIFY_ATTESTATION=0"
+if /i "!PLANNOTATOR_VERIFY_ATTESTATION!"=="no"   set "VERIFY_ATTESTATION=0"
+
+REM Layer 1: CLI flag (overrides everything).
+if "!VERIFY_ATTESTATION_FLAG!"=="1" set "VERIFY_ATTESTATION=1"
+if "!VERIFY_ATTESTATION_FLAG!"=="0" set "VERIFY_ATTESTATION=0"
+
+REM Pre-flight: reject verification requests for tags older than the first
+REM attested release BEFORE downloading. Critical security point: the version
+REM comparison uses $env:TAG_NUM / $env:MIN_NUM instead of interpolating
+REM !TAG_NUM! / !MIN_NUM! into the PowerShell command string. Interpolation
+REM would let a crafted --version value break out of the single-quoted literal
+REM and execute arbitrary PowerShell (e.g. --version "0.18.0'; calc; '0.18.0"
+REM would run Calculator). $env: reads the raw string; PowerShell never parses
+REM the value as code. [version] cast throws on invalid input, catch swallows,
+REM VERSION_OK stays empty, and the guard rejects — safe fail.
+if "!VERIFY_ATTESTATION!"=="1" (
+    set "TAG_NUM=!TAG:v=!"
+    set "MIN_NUM=!MIN_ATTESTED_VERSION:v=!"
+    set "VERSION_OK="
+    for /f "delims=" %%i in ('powershell -NoProfile -Command "try { if ([version]$env:TAG_NUM -ge [version]$env:MIN_NUM) { 'yes' } } catch {}"') do set "VERSION_OK=%%i"
+    if not "!VERSION_OK!"=="yes" (
+        echo Provenance verification was requested, but !TAG! predates >&2
+        echo plannotator's attestation support. The first release carrying >&2
+        echo signed build provenance is !MIN_ATTESTED_VERSION!. Options: >&2
+        echo   - Pin to !MIN_ATTESTED_VERSION! or later: --version !MIN_ATTESTED_VERSION! >&2
+        echo   - Install without provenance verification: --skip-attestation >&2
+        echo   - Or unset PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation >&2
+        echo     from %USERPROFILE%\.plannotator\config.json >&2
+        exit /b 1
+    )
+)
+
 set "BINARY_NAME=plannotator-!PLATFORM!.exe"
 set "BINARY_URL=https://github.com/!REPO!/releases/download/!TAG!/!BINARY_NAME!"
 set "CHECKSUM_URL=!BINARY_URL!.sha256"
@@ -195,48 +244,10 @@ if /i "!ACTUAL_CHECKSUM!" neq "!EXPECTED_CHECKSUM!" (
     exit /b 1
 )
 
-REM Resolve SLSA build-provenance verification opt-in.
-REM Precedence: CLI flag > env var > config.json > default (off).
-set "VERIFY_ATTESTATION=0"
-
-REM Layer 3: config file (lowest precedence of the opt-in sources).
-if exist "%USERPROFILE%\.plannotator\config.json" (
-    findstr /r /c:"\"verifyAttestation\"[ 	]*:[ 	]*true" "%USERPROFILE%\.plannotator\config.json" >nul 2>&1
-    if !ERRORLEVEL! equ 0 set "VERIFY_ATTESTATION=1"
-)
-
-REM Layer 2: env var (overrides config file).
-if /i "!PLANNOTATOR_VERIFY_ATTESTATION!"=="1"    set "VERIFY_ATTESTATION=1"
-if /i "!PLANNOTATOR_VERIFY_ATTESTATION!"=="true" set "VERIFY_ATTESTATION=1"
-if /i "!PLANNOTATOR_VERIFY_ATTESTATION!"=="yes"  set "VERIFY_ATTESTATION=1"
-if /i "!PLANNOTATOR_VERIFY_ATTESTATION!"=="0"    set "VERIFY_ATTESTATION=0"
-if /i "!PLANNOTATOR_VERIFY_ATTESTATION!"=="false" set "VERIFY_ATTESTATION=0"
-if /i "!PLANNOTATOR_VERIFY_ATTESTATION!"=="no"   set "VERIFY_ATTESTATION=0"
-
-REM Layer 1: CLI flag (overrides everything).
-if "!VERIFY_ATTESTATION_FLAG!"=="1" set "VERIFY_ATTESTATION=1"
-if "!VERIFY_ATTESTATION_FLAG!"=="0" set "VERIFY_ATTESTATION=0"
-
 if "!VERIFY_ATTESTATION!"=="1" (
-    REM Pre-flight: reject the verification request before downloading if
-    REM the resolved tag predates provenance support. Uses PowerShell's
-    REM [version] class for proper semver comparison. Windows 10+ ships
-    REM powershell.exe always, so this doesn't add a runtime dependency.
-    set "TAG_NUM=!TAG:v=!"
-    set "MIN_NUM=!MIN_ATTESTED_VERSION:v=!"
-    set "VERSION_OK="
-    for /f "delims=" %%i in ('powershell -NoProfile -Command "try { if ([version]'!TAG_NUM!' -ge [version]'!MIN_NUM!') { 'yes' } } catch {}"') do set "VERSION_OK=%%i"
-    if not "!VERSION_OK!"=="yes" (
-        echo Provenance verification was requested, but !TAG! predates >&2
-        echo plannotator's attestation support. The first release carrying >&2
-        echo signed build provenance is !MIN_ATTESTED_VERSION!. Options: >&2
-        echo   - Pin to !MIN_ATTESTED_VERSION! or later: --version !MIN_ATTESTED_VERSION! >&2
-        echo   - Install without provenance verification: --skip-attestation >&2
-        echo   - Or unset PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation >&2
-        echo     from %USERPROFILE%\.plannotator\config.json >&2
-        del "!TEMP_FILE!"
-        exit /b 1
-    )
+    REM VERIFY_ATTESTATION was resolved before the download; MIN_ATTESTED_VERSION
+    REM pre-flight already ran and rejected older tags. At this point we know
+    REM the tag is attested and gh should find a bundle.
     where gh >nul 2>&1
     if !ERRORLEVEL! equ 0 (
         REM Capture combined output to a randomized temp file so gh's

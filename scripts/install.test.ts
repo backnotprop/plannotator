@@ -317,6 +317,56 @@ describe("install shared behavior", () => {
     expect(cmdScript).not.toMatch(/%TEMP%\\plannotator-!TAG!\.exe/);
   });
 
+  test("all installers resolve verification + pre-flight BEFORE downloading the binary", () => {
+    // Regression guard: earlier revisions of install.ps1 and install.cmd
+    // resolved the three-layer verification opt-in and ran the
+    // MIN_ATTESTED_VERSION pre-flight AFTER the curl download, meaning
+    // users hit the failure only after wasting a full binary download.
+    // install.sh always pre-flighted correctly; the other two drifted.
+    //
+    // This test uses indexOf to assert the resolution block appears
+    // textually BEFORE the download line in each installer.
+    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+
+    // install.sh: resolution before curl -o
+    const shResolve = sh.indexOf("verify_attestation=0");
+    const shDownload = sh.indexOf('curl -fsSL -o "$tmp_file"');
+    expect(shResolve).toBeGreaterThan(-1);
+    expect(shDownload).toBeGreaterThan(-1);
+    expect(shResolve).toBeLessThan(shDownload);
+
+    // install.ps1: resolution before Invoke-WebRequest -OutFile $tmpFile
+    const psResolve = ps.indexOf("$verifyAttestationResolved = $false");
+    const psDownload = ps.indexOf("Invoke-WebRequest -Uri $binaryUrl -OutFile $tmpFile");
+    expect(psResolve).toBeGreaterThan(-1);
+    expect(psDownload).toBeGreaterThan(-1);
+    expect(psResolve).toBeLessThan(psDownload);
+
+    // install.cmd: resolution before curl -o "!TEMP_FILE!"
+    const cmdResolve = cmdScript.indexOf('set "VERIFY_ATTESTATION=0"');
+    const cmdDownload = cmdScript.indexOf('curl -fsSL "!BINARY_URL!" -o "!TEMP_FILE!"');
+    expect(cmdResolve).toBeGreaterThan(-1);
+    expect(cmdDownload).toBeGreaterThan(-1);
+    expect(cmdResolve).toBeLessThan(cmdDownload);
+  });
+
+  test("install.cmd version pre-flight uses $env: vars, not interpolated cmd vars", () => {
+    // Regression guard for PowerShell command injection via --version.
+    // Earlier revision interpolated `!TAG_NUM!` and `!MIN_NUM!` directly
+    // into a PowerShell -Command string between single quotes. A crafted
+    // --version like "0.18.0'; calc; '0.18.0" would break out of the
+    // literal and execute arbitrary PowerShell. Fix: pass the values via
+    // environment variables ($env:TAG_NUM, $env:MIN_NUM). PowerShell
+    // reads env var values as raw strings and never parses them as code;
+    // the [version] cast throws on invalid input and catch swallows it.
+    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    expect(cmdScript).toContain("$env:TAG_NUM");
+    expect(cmdScript).toContain("$env:MIN_NUM");
+    // The vulnerable interpolation form must be gone.
+    expect(cmdScript).not.toContain("[version]'!TAG_NUM!'");
+    expect(cmdScript).not.toContain("[version]'!MIN_NUM!'");
+  });
+
   test("all installers hardcode MIN_ATTESTED_VERSION and guard verification against older tags", () => {
     // Releases cut before this PR added `actions/attest-build-provenance`
     // to release.yml have no attestations. Running `gh attestation verify`

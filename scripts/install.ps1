@@ -77,37 +77,9 @@ if ($Version -eq "latest") {
 
 Write-Host "Installing plannotator $latestTag..."
 
-$binaryUrl = "https://github.com/$repo/releases/download/$latestTag/$binaryName"
-$checksumUrl = "$binaryUrl.sha256"
-
-# Create install directory
-New-Item -ItemType Directory -Force -Path $installDir | Out-Null
-
-$tmpFile = [System.IO.Path]::GetTempFileName()
-
-# Use -UseBasicParsing to avoid security prompts and ensure consistent behavior
-Invoke-WebRequest -Uri $binaryUrl -OutFile $tmpFile -UseBasicParsing
-
-# Verify checksum
-# Note: In Windows PowerShell 5.1, Invoke-WebRequest returns .Content as byte[] for non-HTML responses.
-# We must handle both byte[] (PS 5.1) and string (PS 7+) for cross-version compatibility.
-$checksumResponse = Invoke-WebRequest -Uri $checksumUrl -UseBasicParsing
-if ($checksumResponse.Content -is [byte[]]) {
-    $checksumContent = [System.Text.Encoding]::UTF8.GetString($checksumResponse.Content)
-} else {
-    $checksumContent = $checksumResponse.Content
-}
-$expectedChecksum = $checksumContent.Split(" ")[0].Trim().ToLower()
-$actualChecksum = (Get-FileHash -Path $tmpFile -Algorithm SHA256).Hash.ToLower()
-
-if ($actualChecksum -ne $expectedChecksum) {
-    Remove-Item $tmpFile -Force
-    Write-Error "Checksum verification failed!"
-    exit 1
-}
-
-# Resolve SLSA build-provenance verification opt-in.
-# Precedence: CLI flag > env var > ~/.plannotator/config.json > default (off).
+# Resolve SLSA build-provenance verification opt-in BEFORE the download so we
+# can fail fast without wasting bandwidth if the requested tag predates
+# provenance support. Precedence: CLI flag > env var > config file > default.
 $verifyAttestationResolved = $false
 
 # Layer 3: config file (lowest precedence of the opt-in sources).
@@ -140,21 +112,19 @@ if ($envVerify) {
 if ($VerifyAttestation) { $verifyAttestationResolved = $true }
 if ($SkipAttestation)   { $verifyAttestationResolved = $false }
 
+# Pre-flight: if verification is requested, reject tags older than the first
+# attested release before we download anything. Uses PowerShell's [version]
+# class for proper numeric comparison (lexicographic string cmp gets
+# v0.9.0 vs v0.10.0 backwards).
 if ($verifyAttestationResolved) {
-    # Pre-flight: reject the verification request before downloading if the
-    # resolved tag predates provenance support. Uses PowerShell's [version]
-    # class for proper numeric comparison (unlike lexicographic string cmp
-    # which gets v0.9.0 vs v0.10.0 backwards).
     try {
         $resolvedVersion = [version]($latestTag -replace '^v', '')
         $minVersion = [version]($minAttestedVersion -replace '^v', '')
     } catch {
-        Remove-Item $tmpFile -Force
         Write-Error "Could not parse version tags for provenance check: latest=$latestTag min=$minAttestedVersion"
         exit 1
     }
     if ($resolvedVersion -lt $minVersion) {
-        Remove-Item $tmpFile -Force
         [Console]::Error.WriteLine("Provenance verification was requested, but $latestTag predates plannotator's attestation support.")
         [Console]::Error.WriteLine("The first release carrying signed build provenance is $minAttestedVersion. Options:")
         [Console]::Error.WriteLine("  - Pin to $minAttestedVersion or later: -Version $minAttestedVersion")
@@ -162,6 +132,41 @@ if ($verifyAttestationResolved) {
         [Console]::Error.WriteLine("  - Or unset PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation from $configPath")
         exit 1
     }
+}
+
+$binaryUrl = "https://github.com/$repo/releases/download/$latestTag/$binaryName"
+$checksumUrl = "$binaryUrl.sha256"
+
+# Create install directory
+New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+
+$tmpFile = [System.IO.Path]::GetTempFileName()
+
+# Use -UseBasicParsing to avoid security prompts and ensure consistent behavior
+Invoke-WebRequest -Uri $binaryUrl -OutFile $tmpFile -UseBasicParsing
+
+# Verify checksum
+# Note: In Windows PowerShell 5.1, Invoke-WebRequest returns .Content as byte[] for non-HTML responses.
+# We must handle both byte[] (PS 5.1) and string (PS 7+) for cross-version compatibility.
+$checksumResponse = Invoke-WebRequest -Uri $checksumUrl -UseBasicParsing
+if ($checksumResponse.Content -is [byte[]]) {
+    $checksumContent = [System.Text.Encoding]::UTF8.GetString($checksumResponse.Content)
+} else {
+    $checksumContent = $checksumResponse.Content
+}
+$expectedChecksum = $checksumContent.Split(" ")[0].Trim().ToLower()
+$actualChecksum = (Get-FileHash -Path $tmpFile -Algorithm SHA256).Hash.ToLower()
+
+if ($actualChecksum -ne $expectedChecksum) {
+    Remove-Item $tmpFile -Force
+    Write-Error "Checksum verification failed!"
+    exit 1
+}
+
+if ($verifyAttestationResolved) {
+    # $verifyAttestationResolved was decided before the download and the
+    # MIN_ATTESTED_VERSION pre-flight already rejected older tags. At this
+    # point we know the tag is attested and gh should find a bundle.
     if (Get-Command gh -ErrorAction SilentlyContinue) {
         # Constrain verification to the exact tag + signing workflow — see
         # install.sh comment for rationale.
