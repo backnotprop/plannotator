@@ -1,11 +1,11 @@
-import type { ReactNode } from 'react';
+import React from 'react';
 
 /**
  * Renders simple inline markdown: `code`, **bold**, *italic*, _italic_, and
  * fenced code blocks (```...```). Enough for review comments.
  */
-export function renderInlineMarkdown(text: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
+export function renderInlineMarkdown(text: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
   let key = 0;
 
   // Split by fenced code blocks first
@@ -32,8 +32,8 @@ export function renderInlineMarkdown(text: string): ReactNode[] {
   return nodes;
 }
 
-function renderInline(text: string, startKey: number): ReactNode[] {
-  const nodes: ReactNode[] = [];
+function renderInline(text: string, startKey: number): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
   let key = startKey;
 
   // Match inline patterns: [text](url), `code`, **bold**, *italic*, _italic_, bare URLs
