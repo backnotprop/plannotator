@@ -56,6 +56,7 @@ import { useArchive } from '@plannotator/ui/hooks/useArchive';
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
 import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotations';
 import { useExternalAnnotationHighlights } from '@plannotator/ui/hooks/useExternalAnnotationHighlights';
+import { buildPlanAgentInstructions } from '@plannotator/ui/utils/planAgentInstructions';
 import { useFileBrowser } from '@plannotator/ui/hooks/useFileBrowser';
 import { isVaultBrowserEnabled } from '@plannotator/ui/utils/obsidian';
 import { isFileBrowserEnabled, getFileBrowserSettings } from '@plannotator/ui/utils/fileBrowser';
@@ -1127,21 +1128,12 @@ const App: React.FC = () => {
     setTimeout(() => setNoteSaveToast(null), 3000);
   };
 
-  // Agent Instructions — copy a clipboard payload telling external agents how to
-  // POST annotations to this session's /api/external-annotations endpoint.
-  // STUB: instruction body is placeholder; the URL and plan content are real.
+  // Agent Instructions — copy a clipboard payload teaching external agents
+  // (Claude Code, Codex, etc.) how to POST annotations into this session via
+  // /api/external-annotations. The instruction body lives in a separate module
+  // (utils/agentInstructions.ts) so it's easy to edit independently of UI code.
   const handleCopyAgentInstructions = async () => {
-    const origin = window.location.origin;
-    const payload = `# Plannotator — External Annotations
-
-POST your annotations to:
-  ${origin}/api/external-annotations
-
-[STUB: full protocol instructions go here in a follow-up]
-
-# Current plan
-${markdown}
-`;
+    const payload = buildPlanAgentInstructions(window.location.origin);
     try {
       await navigator.clipboard.writeText(payload);
       setNoteSaveToast({ type: 'success', message: 'Agent instructions copied' });
