@@ -43,7 +43,14 @@ curl -s ${origin}/api/plan | jq -r .plan
 
 **Line numbers do not apply and cannot be referenced.** The renderer pins your comments to the plan by matching the \`originalText\` field as a verbatim substring of the rendered text. Quote the exact phrase, never say "line 12."
 
-## Posting an annotation
+## Two kinds of comment
+
+You have exactly two shapes to choose from:
+
+- **Inline comment** — pinned to a specific phrase in the plan. The matched phrase gets a yellow highlight in the rendered plan and the comment appears in the sidebar. Use this for feedback about a particular sentence, step, or block.
+- **Global comment** — not tied to any phrase. Sidebar entry only. Use this for high-level feedback like "this plan is missing a rollback section" or "the ordering of steps 3 and 4 should be swapped."
+
+## Posting an inline comment
 
 \`\`\`sh
 curl -s ${origin}/api/external-annotations \\
@@ -56,7 +63,21 @@ curl -s ${origin}/api/external-annotations \\
   }'
 \`\`\`
 
-Response on success: \`201 {"ids": ["<uuid>"]}\`. On validation failure: \`400 {"error": "..."}\`.
+\`originalText\` must be a verbatim substring of the plan body. Pick something unique enough that it appears once — longer is safer than shorter. If the substring doesn't match anything in the rendered plan, the comment silently falls back to sidebar-only.
+
+## Posting a global comment
+
+\`\`\`sh
+curl -s ${origin}/api/external-annotations \\
+  -H 'Content-Type: application/json' \\
+  -d '{
+    "source": "claude-code",
+    "type": "GLOBAL_COMMENT",
+    "text": "Missing a rollback section. Steps 3 and 4 should also be swapped."
+  }'
+\`\`\`
+
+Both endpoints return \`201 {"ids": ["<uuid>"]}\` on success, \`400 {"error": "..."}\` on validation failure.
 
 ### Fields
 
@@ -64,18 +85,9 @@ Response on success: \`201 {"ids": ["<uuid>"]}\`. On validation failure: \`400 {
 |---|---|---|
 | \`source\` | yes | Stable identifier for *you* (e.g. \`"claude-code"\`, \`"codex"\`, \`"my-linter"\`). Reuse the same value for every annotation you post — it lets you clean up your own later. Pick something specific enough that it won't collide with other tools running against the same session. |
 | \`text\` | yes | The comment body the user will read. |
-| \`type\` | no | \`"COMMENT"\`, \`"DELETION"\`, or \`"GLOBAL_COMMENT"\`. Defaults to \`"GLOBAL_COMMENT"\`. |
-| \`originalText\` | depends | A verbatim substring of the plan body. **Required** for \`"DELETION"\`. **Optional** for \`"COMMENT"\` — including it turns on inline highlighting, omitting it gives you a sidebar-only entry. **Not used** for \`"GLOBAL_COMMENT"\` — leave it out. |
+| \`type\` | yes | \`"COMMENT"\` for inline, \`"GLOBAL_COMMENT"\` for sidebar-only. |
+| \`originalText\` | for \`COMMENT\` | A verbatim substring of the plan body. Required when \`type\` is \`"COMMENT"\`. Omit for \`"GLOBAL_COMMENT"\`. |
 | \`author\` | no | Human-readable label shown next to the comment (e.g. \`"Claude Opus"\`). |
-
-### Choosing a type
-
-- **\`COMMENT\` with \`originalText\`** — yellow inline highlight on the matched phrase + sidebar entry. Use for specific feedback tied to a particular phrase.
-- **\`COMMENT\` without \`originalText\`** — sidebar only. Use when the comment doesn't pin to one phrase.
-- **\`DELETION\` with \`originalText\`** — strikethrough on the matched phrase + sidebar entry. Use to suggest removing wording. \`originalText\` is mandatory here.
-- **\`GLOBAL_COMMENT\`** — sidebar only, not tied to any phrase. Use for high-level feedback like "this plan is missing a rollback section."
-
-If \`originalText\` doesn't match anything in the rendered plan, the annotation silently degrades to sidebar-only. Pick substrings that are unique — longer is safer than shorter.
 
 ## Batching
 
@@ -85,8 +97,8 @@ curl -s ${origin}/api/external-annotations \\
   -d '{
     "annotations": [
       {"source": "claude-code", "type": "COMMENT", "text": "Missing error case.", "originalText": "open the file"},
-      {"source": "claude-code", "type": "DELETION", "text": "Dead code.", "originalText": "legacy fallback path"},
-      {"source": "claude-code", "type": "GLOBAL_COMMENT", "text": "Overall structure looks good."}
+      {"source": "claude-code", "type": "COMMENT", "text": "This assumes the cache is warm — flag it.", "originalText": "look up the user in the cache"},
+      {"source": "claude-code", "type": "GLOBAL_COMMENT", "text": "Overall structure looks good. Add a rollback section."}
     ]
   }'
 \`\`\`
