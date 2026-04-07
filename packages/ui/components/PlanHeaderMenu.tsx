@@ -6,6 +6,7 @@ import {
   ActionMenuSectionLabel,
 } from './ActionMenu';
 import { useTheme } from './ThemeProvider';
+import { SunIcon, MoonIcon, SystemIcon } from './icons/themeIcons';
 
 interface PlanHeaderMenuProps {
   appVersion: string;
@@ -297,22 +298,3 @@ const NoteIcon = () => (
   </svg>
 );
 
-const SunIcon = () => (
-  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25M12 18.75V21M3 12h2.25M18.75 12H21M5.636 5.636l1.591 1.591M16.773 16.773l1.591 1.591M5.636 18.364l1.591-1.591M16.773 7.227l1.591-1.591" />
-    <circle cx="12" cy="12" r="3.25" />
-  </svg>
-);
-
-const MoonIcon = () => (
-  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3c-.18.57-.21 1.19-.21 1.82A8 8 0 0019.18 13c.63 0 1.25-.03 1.82-.21z" />
-  </svg>
-);
-
-const SystemIcon = () => (
-  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <rect x="3" y="4" width="18" height="12" rx="2" />
-    <path strokeLinecap="round" strokeLinejoin="round" d="M8 20h8M12 16v4" />
-  </svg>
-);
