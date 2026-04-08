@@ -214,6 +214,43 @@ describe("pi review server", () => {
     }
   });
 
+  test("exit endpoint resolves decision with exit flag", async () => {
+    const homeDir = makeTempDir("plannotator-pi-home-");
+    const repoDir = initRepo();
+    process.env.HOME = homeDir;
+    process.chdir(repoDir);
+    process.env.PLANNOTATOR_PORT = String(await reservePort());
+
+    const gitContext = await getGitContext();
+    const diff = await runGitDiff("uncommitted", gitContext.defaultBranch);
+
+    const server = await startReviewServer({
+      rawPatch: diff.patch,
+      gitRef: diff.label,
+      error: diff.error,
+      diffType: "uncommitted",
+      gitContext,
+      origin: "pi",
+      htmlContent: "<!doctype html><html><body>review</body></html>",
+    });
+
+    try {
+      const exitResponse = await fetch(`${server.url}/api/exit`, { method: "POST" });
+      expect(exitResponse.status).toBe(200);
+      expect(await exitResponse.json()).toEqual({ ok: true });
+
+      await expect(server.waitForDecision()).resolves.toEqual({
+        exit: true,
+        approved: false,
+        feedback: "",
+        annotations: [],
+        agentSwitch: undefined,
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
   test("git-add endpoint stages and unstages files in review mode", async () => {
     const homeDir = makeTempDir("plannotator-pi-home-");
     const repoDir = initRepo();

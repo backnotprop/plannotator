@@ -25,7 +25,7 @@ const ChatBubbleIcon = () => (
 // ---------------------------------------------------------------------------
 
 interface CompletionOverlayProps {
-  submitted: 'approved' | 'denied' | 'feedback' | null | false;
+  submitted: 'approved' | 'denied' | 'feedback' | 'exited' | null | false;
   title: string;
   subtitle: string;
   agentLabel: string;

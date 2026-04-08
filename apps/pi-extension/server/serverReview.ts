@@ -95,6 +95,7 @@ export interface ReviewServerResult {
 		feedback: string;
 		annotations: unknown[];
 		agentSwitch?: string;
+		exit?: boolean;
 	}>;
 	stop: () => void;
 }
@@ -285,12 +286,14 @@ export async function startReviewServer(options: {
 		feedback: string;
 		annotations: unknown[];
 		agentSwitch?: string;
+		exit?: boolean;
 	}) => void;
 	const decisionPromise = new Promise<{
 		approved: boolean;
 		feedback: string;
 		annotations: unknown[];
 		agentSwitch?: string;
+		exit?: boolean;
 	}>((r) => {
 		resolveDecision = r;
 	});
@@ -680,6 +683,10 @@ export async function startReviewServer(options: {
 				return;
 			}
 			json(res, { error: "Not found" }, 404);
+		} else if (url.pathname === "/api/exit" && req.method === "POST") {
+			deleteDraft(draftKey);
+			resolveDecision({ approved: false, feedback: '', annotations: [], exit: true });
+			json(res, { ok: true });
 		} else if (url.pathname === "/api/feedback" && req.method === "POST") {
 			try {
 				const body = await parseBody(req);

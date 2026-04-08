@@ -4,6 +4,7 @@ import { ThemeProvider, useTheme } from '@plannotator/ui/components/ThemeProvide
 import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
 import { Settings } from '@plannotator/ui/components/Settings';
 import { FeedbackButton, ApproveButton } from '@plannotator/ui/components/ToolbarButtons';
+import { PiReviewActions } from './components/PiReviewActions';
 import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
 import { storage } from '@plannotator/ui/utils/storage';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
@@ -158,7 +159,8 @@ const ReviewApp: React.FC = () => {
   const [diffError, setDiffError] = useState<string | null>(null);
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
-  const [submitted, setSubmitted] = useState<'approved' | 'feedback' | false>(false);
+  const [isExiting, setIsExiting] = useState(false);
+  const [submitted, setSubmitted] = useState<'approved' | 'feedback' | 'exited' | false>(false);
   const [showApproveWarning, setShowApproveWarning] = useState(false);
   const [sharingEnabled, setSharingEnabled] = useState(true);
   const [repoInfo, setRepoInfo] = useState<{ display: string; branch?: string } | null>(null);
@@ -1089,6 +1091,22 @@ const ReviewApp: React.FC = () => {
     }
   }, [totalAnnotationCount, feedbackMarkdown, allAnnotations]);
 
+  // Exit review session without sending any feedback
+  const handleExit = useCallback(async () => {
+    setIsExiting(true);
+    try {
+      const res = await fetch('/api/exit', { method: 'POST' });
+      if (res.ok) {
+        setSubmitted('exited');
+      } else {
+        throw new Error('Failed to exit');
+      }
+    } catch (error) {
+      console.error('Failed to exit review:', error);
+      setIsExiting(false);
+    }
+  }, []);
+
   // Approve without feedback (LGTM)
   const handleApprove = useCallback(async () => {
     setIsApproving(true);
@@ -1279,7 +1297,7 @@ const ReviewApp: React.FC = () => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       if (showExportModal || showNoAnnotationsDialog || showApproveWarning) return;
-      if (submitted || isSendingFeedback || isApproving || isPlatformActioning) return;
+      if (submitted || isSendingFeedback || isApproving || isExiting || isPlatformActioning) return;
       if (!origin) return; // Demo mode
 
       e.preventDefault();
@@ -1499,73 +1517,92 @@ const ReviewApp: React.FC = () => {
                   </div>
                 )}
 
-                {/* Send Feedback button — always the same label */}
-                <FeedbackButton
-                  onClick={() => {
-                    if (platformMode) {
-                      setPlatformGeneralComment('');
-                      setPlatformCommentDialog({ action: 'comment' });
-                    } else {
-                      handleSendFeedback();
-                    }
-                  }}
-                  disabled={
-                    isSendingFeedback || isApproving || isPlatformActioning ||
-                    (!platformMode && totalAnnotationCount === 0)
-                  }
-                  isLoading={isSendingFeedback || isPlatformActioning}
-                  muted={!platformMode && totalAnnotationCount === 0 && !isSendingFeedback && !isApproving && !isPlatformActioning}
-                  label={platformMode ? 'Post Comments' : 'Send Feedback'}
-                  shortLabel={platformMode ? 'Post' : 'Send'}
-                  loadingLabel={platformMode ? 'Posting...' : 'Sending...'}
-                  shortLoadingLabel={platformMode ? 'Posting...' : 'Sending...'}
-                  title={!platformMode && totalAnnotationCount === 0 ? "Add annotations to send feedback" : "Send feedback"}
-                />
-
-                {/* Approve button — always the same label */}
-                <div className="relative group/approve">
-                  <ApproveButton
-                    onClick={() => {
-                      if (platformMode) {
-                        if (platformUser && prMetadata?.author === platformUser) return;
-                        setPlatformGeneralComment('');
-                        setPlatformCommentDialog({ action: 'approve' });
-                      } else {
-                        if (totalAnnotationCount > 0) {
-                          setShowApproveWarning(true);
-                        } else {
-                          handleApprove();
-                        }
-                      }
-                    }}
-                    disabled={
-                      isSendingFeedback || isApproving || isPlatformActioning ||
-                      (platformMode && !!platformUser && prMetadata?.author === platformUser)
-                    }
-                    isLoading={isApproving}
-                    dimmed={!platformMode && totalAnnotationCount > 0}
-                    muted={platformMode && !!platformUser && prMetadata?.author === platformUser && !isSendingFeedback && !isApproving && !isPlatformActioning}
-                    title={
-                      platformMode && platformUser && prMetadata?.author === platformUser
-                        ? `You can't approve your own ${mrLabel}`
-                        : "Approve - no changes needed"
-                    }
+                {/* Pi agent mode: Exit/SendFeedback flip + Approve */}
+                {origin === 'pi' && !platformMode ? (
+                  <PiReviewActions
+                    totalAnnotationCount={totalAnnotationCount}
+                    isSendingFeedback={isSendingFeedback}
+                    isApproving={isApproving}
+                    isExiting={isExiting}
+                    onSendFeedback={handleSendFeedback}
+                    onApprove={() => totalAnnotationCount > 0 ? setShowApproveWarning(true) : handleApprove()}
+                    onExit={handleExit}
                   />
-                  {/* Tooltip: own PR warning OR annotations-lost warning */}
-                  {platformMode && platformUser && prMetadata?.author === platformUser ? (
-                    <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-48 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
-                      <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
-                      <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
-                      You can't approve your own {mrLabel === 'MR' ? 'merge request' : 'pull request'} on {platformLabel}.
+                ) : !platformMode ? (
+                  <>
+                    {/* Other agent mode: muted Send Feedback + Approve (original behavior) */}
+                    <FeedbackButton
+                      onClick={handleSendFeedback}
+                      disabled={isSendingFeedback || isApproving || totalAnnotationCount === 0}
+                      isLoading={isSendingFeedback}
+                      muted={totalAnnotationCount === 0 && !isSendingFeedback && !isApproving}
+                      label="Send Feedback"
+                      shortLabel="Send"
+                      loadingLabel="Sending..."
+                      title={totalAnnotationCount === 0 ? "Add annotations to send feedback" : "Send feedback"}
+                    />
+                    <div className="relative group/approve">
+                      <ApproveButton
+                        onClick={() => totalAnnotationCount > 0 ? setShowApproveWarning(true) : handleApprove()}
+                        disabled={isSendingFeedback || isApproving}
+                        isLoading={isApproving}
+                        dimmed={totalAnnotationCount > 0}
+                        title="Approve - no changes needed"
+                      />
+                      {totalAnnotationCount > 0 && (
+                        <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
+                          <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
+                          <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
+                          Your {totalAnnotationCount} annotation{totalAnnotationCount !== 1 ? 's' : ''} won't be sent if you approve.
+                        </div>
+                      )}
                     </div>
-                  ) : !platformMode && totalAnnotationCount > 0 ? (
-                    <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
-                      <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
-                      <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
-                      Your {totalAnnotationCount} annotation{totalAnnotationCount !== 1 ? 's' : ''} won't be sent if you approve.
+                  </>
+                ) : (
+                  <>
+                    {/* Platform mode: Post Comments + Approve */}
+                    <FeedbackButton
+                      onClick={() => {
+                        setPlatformGeneralComment('');
+                        setPlatformCommentDialog({ action: 'comment' });
+                      }}
+                      disabled={isSendingFeedback || isApproving || isPlatformActioning}
+                      isLoading={isSendingFeedback || isPlatformActioning}
+                      label="Post Comments"
+                      shortLabel="Post"
+                      loadingLabel="Posting..."
+                      shortLoadingLabel="Posting..."
+                      title="Send feedback"
+                    />
+                    <div className="relative group/approve">
+                      <ApproveButton
+                        onClick={() => {
+                          if (platformUser && prMetadata?.author === platformUser) return;
+                          setPlatformGeneralComment('');
+                          setPlatformCommentDialog({ action: 'approve' });
+                        }}
+                        disabled={
+                          isSendingFeedback || isApproving || isPlatformActioning ||
+                          (!!platformUser && prMetadata?.author === platformUser)
+                        }
+                        isLoading={isApproving}
+                        muted={!!platformUser && prMetadata?.author === platformUser && !isSendingFeedback && !isApproving && !isPlatformActioning}
+                        title={
+                          platformUser && prMetadata?.author === platformUser
+                            ? `You can't approve your own ${mrLabel}`
+                            : "Approve - no changes needed"
+                        }
+                      />
+                      {platformUser && prMetadata?.author === platformUser && (
+                        <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-48 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
+                          <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
+                          <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
+                          You can't approve your own {mrLabel === 'MR' ? 'merge request' : 'pull request'} on {platformLabel}.
+                        </div>
+                      )}
                     </div>
-                  ) : null}
-                </div>
+                  </>
+                )}
               </>
             ) : (
               <button
@@ -1878,18 +1915,24 @@ const ReviewApp: React.FC = () => {
           }}
         />
 
-        {/* Completion overlay - shown after approve/feedback */}
+        {/* Completion overlay - shown after approve/feedback/exit */}
         <CompletionOverlay
           submitted={submitted}
-          title={submitted === 'approved' ? 'Changes Approved' : 'Feedback Sent'}
+          title={
+            submitted === 'approved' ? 'Changes Approved'
+            : submitted === 'exited' ? 'Session Closed'
+            : 'Feedback Sent'
+          }
           subtitle={
-            platformMode
-              ? submitted === 'approved'
-                ? `Your approval was submitted to ${platformLabel}.`
-                : `Your feedback was submitted to ${platformLabel}.`
-              : submitted === 'approved'
-                ? `${getAgentName(origin)} will proceed with the changes.`
-                : `${getAgentName(origin)} will address your review feedback.`
+            submitted === 'exited'
+              ? 'Review session closed without feedback.'
+              : platformMode
+                ? submitted === 'approved'
+                  ? `Your approval was submitted to ${platformLabel}.`
+                  : `Your feedback was submitted to ${platformLabel}.`
+                : submitted === 'approved'
+                  ? `${getAgentName(origin)} will proceed with the changes.`
+                  : `${getAgentName(origin)} will address your review feedback.`
           }
           agentLabel={getAgentName(origin)}
         />

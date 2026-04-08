@@ -90,6 +90,7 @@ export interface ReviewServerResult {
     feedback: string;
     annotations: unknown[];
     agentSwitch?: string;
+    exit?: boolean;
   }>;
   /** Stop the server */
   stop: () => void;
@@ -329,12 +330,14 @@ export async function startReviewServer(
     feedback: string;
     annotations: unknown[];
     agentSwitch?: string;
+    exit?: boolean;
   }) => void;
   const decisionPromise = new Promise<{
     approved: boolean;
     feedback: string;
     annotations: unknown[];
     agentSwitch?: string;
+    exit?: boolean;
   }>((resolve) => {
     resolveDecision = resolve;
   });
@@ -559,6 +562,13 @@ export async function startReviewServer(
             disableIdleTimeout: () => server.timeout(req, 0),
           });
           if (agentResponse) return agentResponse;
+
+          // API: Exit review session without feedback (Pi agent mode)
+          if (url.pathname === "/api/exit" && req.method === "POST") {
+            deleteDraft(draftKey);
+            resolveDecision({ approved: false, feedback: "", annotations: [], exit: true });
+            return Response.json({ ok: true });
+          }
 
           // API: Submit review feedback
           if (url.pathname === "/api/feedback" && req.method === "POST") {
