@@ -430,10 +430,14 @@ describe("install shared behavior", () => {
     // This test extracts the value from each file via a regex anchored
     // on the assignment form (not just any mention of the string) and
     // asserts all three match.
+    // Line-anchored regexes (/m) so a future comment that happens to
+    // contain the assignment form doesn't false-match and shadow the
+    // real declaration. All three current assignments are flush-left
+    // at the top of their respective files.
     const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
-    const shMatch = sh.match(/MIN_ATTESTED_VERSION="(v\d+\.\d+\.\d+)"/);
-    const psMatch = ps.match(/\$minAttestedVersion\s*=\s*"(v\d+\.\d+\.\d+)"/);
-    const cmdMatch = cmdScript.match(/set "MIN_ATTESTED_VERSION=(v\d+\.\d+\.\d+)"/);
+    const shMatch = sh.match(/^MIN_ATTESTED_VERSION="(v\d+\.\d+\.\d+)"/m);
+    const psMatch = ps.match(/^\$minAttestedVersion\s*=\s*"(v\d+\.\d+\.\d+)"/m);
+    const cmdMatch = cmdScript.match(/^set "MIN_ATTESTED_VERSION=(v\d+\.\d+\.\d+)"/m);
     expect(shMatch, "install.sh missing MIN_ATTESTED_VERSION assignment").toBeTruthy();
     expect(psMatch, "install.ps1 missing $minAttestedVersion assignment").toBeTruthy();
     expect(cmdMatch, "install.cmd missing MIN_ATTESTED_VERSION assignment").toBeTruthy();
