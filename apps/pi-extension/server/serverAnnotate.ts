@@ -15,7 +15,13 @@ import { html, json, parseBody, requestUrl } from "./helpers.js";
 import { listenOnPort } from "./network.js";
 
 import { getRepoInfo } from "./project.js";
-import { handleDocRequest, handleFileBrowserRequest } from "./reference.js";
+import {
+	handleDocRequest,
+	handleFileBrowserRequest,
+	handleObsidianVaultsRequest,
+	handleObsidianFilesRequest,
+	handleObsidianDocRequest,
+} from "./reference.js";
 import { createExternalAnnotationHandler } from "./external-annotations.js";
 
 export interface AnnotateServerResult {
@@ -106,6 +112,12 @@ export async function startAnnotateServer(options: {
 				url.searchParams.set("base", dirname(resolvePath(options.filePath)));
 			}
 			handleDocRequest(res, url);
+		} else if (url.pathname === "/api/obsidian/vaults") {
+			handleObsidianVaultsRequest(res);
+		} else if (url.pathname === "/api/reference/obsidian/files" && req.method === "GET") {
+			handleObsidianFilesRequest(res, url);
+		} else if (url.pathname === "/api/reference/obsidian/doc" && req.method === "GET") {
+			handleObsidianDocRequest(res, url);
 		} else if (url.pathname === "/api/reference/files" && req.method === "GET") {
 			handleFileBrowserRequest(res, url);
 		} else if (url.pathname === "/favicon.svg") {
