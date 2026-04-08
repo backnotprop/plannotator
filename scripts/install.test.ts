@@ -95,9 +95,15 @@ describe("install.ps1", () => {
   test("install.ps1 selects native arm64 binary on ARM64 Windows", () => {
     // release.yml now builds bun-windows-arm64 (stable since Bun v1.3.10),
     // so ARM64 hosts get a native binary instead of running the x64 build
-    // via Windows emulation. install.ps1 must detect PROCESSOR_ARCHITECTURE
+    // via Windows emulation. install.ps1 must detect host architecture
     // and set $arch accordingly so the downloaded binary matches the host.
+    //
+    // Must check BOTH PROCESSOR_ARCHITECTURE and PROCESSOR_ARCHITEW6432 —
+    // the latter is set only in 32-bit processes via WoW64 and reflects
+    // the host architecture. A 32-bit PowerShell on ARM64 Windows should
+    // still get the native arm64 binary. Matches install.cmd's detection.
     expect(script).toContain("PROCESSOR_ARCHITECTURE");
+    expect(script).toContain("PROCESSOR_ARCHITEW6432");
     expect(script).toContain('"ARM64"');
     expect(script).toContain('$arch = "arm64"');
     expect(script).toContain('$arch = "x64"');

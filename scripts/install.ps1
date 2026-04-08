@@ -26,14 +26,27 @@ $minAttestedVersion = "v0.17.2"
 # Detect architecture. Native ARM64 Windows binaries are built from
 # bun-windows-arm64 (stable since Bun v1.3.10), so ARM64 hosts get a
 # native binary — no Windows x86-64 emulation tax.
-if ([Environment]::Is64BitOperatingSystem) {
-    if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
-        $arch = "arm64"
-    } else {
-        $arch = "x64"
-    }
-} else {
+#
+# PROCESSOR_ARCHITECTURE reports the architecture the current PowerShell
+# process is running under. PROCESSOR_ARCHITEW6432 is set only in 32-bit
+# processes running via WoW64 and reflects the HOST architecture. Prefer
+# the latter when present so a 32-bit PowerShell on ARM64 Windows still
+# selects the native arm64 binary. Matches install.cmd's detection.
+if (-not [Environment]::Is64BitOperatingSystem) {
     Write-Error "32-bit Windows is not supported"
+    exit 1
+}
+$hostArch = if ($env:PROCESSOR_ARCHITEW6432) {
+    $env:PROCESSOR_ARCHITEW6432
+} else {
+    $env:PROCESSOR_ARCHITECTURE
+}
+if ($hostArch -eq "ARM64") {
+    $arch = "arm64"
+} elseif ($hostArch -eq "AMD64") {
+    $arch = "x64"
+} else {
+    Write-Error "Unsupported Windows architecture: $hostArch"
     exit 1
 }
 
