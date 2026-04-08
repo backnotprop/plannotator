@@ -979,8 +979,15 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 		}
 
 		if (phase === "idle") {
-			await restoreSavedState(ctx);
-			savedState = null;
+			if (savedState) {
+				await restoreSavedState(ctx);
+				savedState = null;
+			} else {
+				// Strip planning-only tools on fresh sessions where savedState is null.
+				// Without this, plannotator_submit_plan stays in the active tool set
+				// even though plan mode hasn't been activated. See #387.
+				pi.setActiveTools(stripPlanningOnlyTools(pi.getActiveTools()));
+			}
 		} else if (phase === "planning" || phase === "executing") {
 			await applyPhaseConfig(ctx, { restoreSavedState: true });
 		}
