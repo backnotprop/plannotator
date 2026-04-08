@@ -233,6 +233,7 @@ jobs:
           # single-quoted heredocs / here-strings. This step checks that
           # install.cmd now matches (via `echo ^!`) and catches future
           # regressions of the same class.
+          # Claude Code slash commands — `.md` files with `!`\`plannotator ...\`` invocation syntax
           $cmdDir = "$env:USERPROFILE\.claude\commands"
           foreach ($file in @("plannotator-review.md", "plannotator-annotate.md", "plannotator-last.md")) {
             $path = Join-Path $cmdDir $file
@@ -245,6 +246,26 @@ jobs:
             }
           }
           Write-Host "✓ All three Claude Code slash command files contain the '!' prefix"
+
+          # Gemini slash commands — `.toml` files with `!{plannotator ...}` invocation syntax.
+          # Same `^^!` cmd-escape class as the Claude Code files. The earlier integration
+          # step seeded `~/.gemini/settings.json`, so install.cmd's Gemini block fired and
+          # wrote these two files alongside the Claude Code ones. They use a different
+          # invocation form (`!{...}` instead of `!\`...\``) but the regression risk is
+          # identical — a future revision that drops a `^` from the echo would silently
+          # produce broken Gemini commands.
+          $geminiDir = "$env:USERPROFILE\.gemini\commands"
+          foreach ($file in @("plannotator-review.toml", "plannotator-annotate.toml")) {
+            $path = Join-Path $geminiDir $file
+            if (-not (Test-Path $path)) {
+              throw "Expected Gemini command file missing: $path"
+            }
+            $content = Get-Content $path -Raw
+            if ($content -notmatch '!\{plannotator') {
+              throw "Gemini command file $file is missing the '!' shell-invocation prefix. Content: $content"
+            }
+          }
+          Write-Host "✓ Both Gemini slash command files contain the '!' prefix"
 
       - name: Unknown flag is rejected with non-zero exit
         shell: pwsh

@@ -255,6 +255,11 @@ set "CHECKSUM_FILE=%TEMP%\plannotator-checksum-%RANDOM%.txt"
 curl -fsSL "!CHECKSUM_URL!" -o "!CHECKSUM_FILE!"
 if !ERRORLEVEL! neq 0 (
     echo Failed to download checksum >&2
+    REM curl -o creates the output file before receiving data, so a
+    REM network failure or HTTP error leaves a 0-byte/partial file
+    REM at CHECKSUM_FILE. Clean it up to match the discipline used
+    REM for TEMP_FILE elsewhere in this script.
+    if exist "!CHECKSUM_FILE!" del "!CHECKSUM_FILE!"
     del "!TEMP_FILE!"
     exit /b 1
 )
