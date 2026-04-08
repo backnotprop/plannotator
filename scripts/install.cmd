@@ -68,7 +68,7 @@ if "!CURRENT_ARG:~0,1!"=="-" (
     echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] >&2
     exit /b 1
 )
-REM Positional form: install.cmd v0.17.1 (legacy interface).
+REM Positional form: install.cmd vX.Y.Z (legacy interface).
 REM Reject if --version was already passed — silent overwrite is worse
 REM than a clean usage error.
 if "!VERSION_EXPLICIT!"=="1" (

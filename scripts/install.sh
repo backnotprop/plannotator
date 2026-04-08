@@ -126,7 +126,7 @@ while [ $# -gt 0 ]; do
             exit 1
             ;;
         *)
-            # Positional form: install.sh v0.17.1 (matches install.cmd interface).
+            # Positional form: install.sh vX.Y.Z (matches install.cmd interface).
             # Reject if --version was already passed — silent overwrite is worse
             # than a clean usage error.
             if [ "$VERSION_EXPLICIT" -eq 1 ]; then
