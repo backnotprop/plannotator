@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
 import { Block, Annotation, AnnotationType, EditorMode, type InputMethod, type ImageAttachment, type ActionsLabelMode } from '../types';
-import { Frontmatter } from '../utils/parser';
+import { Frontmatter, computeListIndices } from '../utils/parser';
 import { AnnotationToolbar } from './AnnotationToolbar';
 import { FloatingQuickLabelPicker } from './FloatingQuickLabelPicker';
 
@@ -530,11 +530,25 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         {!frontmatter && blocks.length > 0 && blocks[0].type !== 'heading' && <div className="mt-4" />}
         {groupBlocks(blocks).map(group =>
           group.type === 'list-group' ? (
-            <div key={group.key} data-pinpoint-group="list" className="py-1 -mx-2 px-2">
-              {group.blocks.map(block => (
-                <BlockRenderer imageBaseDir={imageBaseDir} onImageClick={(src, alt) => setLightbox({ src, alt })} key={block.id} block={block} onOpenLinkedDoc={onOpenLinkedDoc} onToggleCheckbox={onToggleCheckbox} checkboxOverrides={checkboxOverrides} />
-              ))}
-            </div>
+            (() => {
+              const indices = computeListIndices(group.blocks);
+              return (
+                <div key={group.key} data-pinpoint-group="list" className="py-1 -mx-2 px-2">
+                  {group.blocks.map((block, i) => (
+                    <BlockRenderer
+                      imageBaseDir={imageBaseDir}
+                      onImageClick={(src, alt) => setLightbox({ src, alt })}
+                      key={block.id}
+                      block={block}
+                      orderedIndex={indices[i]}
+                      onOpenLinkedDoc={onOpenLinkedDoc}
+                      onToggleCheckbox={onToggleCheckbox}
+                      checkboxOverrides={checkboxOverrides}
+                    />
+                  ))}
+                </div>
+              );
+            })()
           ) : group.block.type === 'code' && isMermaidLanguage(group.block.language) ? (
             <MermaidBlock key={group.block.id} block={group.block} />
           ) : group.block.type === 'code' && isGraphvizLanguage(group.block.language) ? (
@@ -967,7 +981,8 @@ const BlockRenderer: React.FC<{
   onImageClick?: (src: string, alt: string) => void;
   onToggleCheckbox?: (blockId: string, checked: boolean) => void;
   checkboxOverrides?: Map<string, boolean>;
-}> = ({ block, onOpenLinkedDoc, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides }) => {
+  orderedIndex?: number | null;
+}> = ({ block, onOpenLinkedDoc, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex }) => {
   switch (block.type) {
     case 'heading':
       const Tag = `h${block.level || 1}` as React.ElementType;
@@ -1018,6 +1033,10 @@ const BlockRenderer: React.FC<{
                   <circle cx="12" cy="12" r="9" />
                 </svg>
               )
+            ) : block.ordered && orderedIndex != null ? (
+              <span className="text-primary/60 tabular-nums text-right" style={{ minWidth: '1.5rem' }}>
+                {orderedIndex}.
+              </span>
             ) : (
               <span className="text-primary/60">
                 {(block.level || 0) === 0 ? '•' : (block.level || 0) === 1 ? '◦' : '▪'}
