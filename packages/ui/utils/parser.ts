@@ -169,18 +169,27 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
       continue;
     }
 
-    // Blockquotes
+    // Blockquotes — consecutive `>` lines merge into one block (CommonMark).
+    // A blank line breaks the blockquote so the next `>` starts a fresh one.
     if (trimmed.startsWith('>')) {
-       // Check if previous was blockquote, if so, merge? No, separate for now
-       flush();
-       blocks.push({
-         id: `block-${currentId++}`,
-         type: 'blockquote',
-         content: trimmed.replace(/^>\s*/, ''),
-         order: currentId,
-         startLine: currentLineNum
-       });
-       continue;
+      flush();
+      const stripped = trimmed.replace(/^>\s*/, '');
+      if (
+        !prevLineWasBlank &&
+        blocks.length > 0 &&
+        blocks[blocks.length - 1].type === 'blockquote'
+      ) {
+        blocks[blocks.length - 1].content += '\n' + stripped;
+      } else {
+        blocks.push({
+          id: `block-${currentId++}`,
+          type: 'blockquote',
+          content: stripped,
+          order: currentId,
+          startLine: currentLineNum
+        });
+      }
+      continue;
     }
     
     // Code blocks (naive)

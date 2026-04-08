@@ -381,6 +381,52 @@ describe("parseMarkdownToBlocks — ordered lists", () => {
   });
 });
 
+describe("parseMarkdownToBlocks — blockquotes", () => {
+  test("consecutive '>' lines merge into one blockquote block", () => {
+    const md = "> line one\n> line two\n> line three";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("blockquote");
+    expect(blocks[0].content).toBe("line one\nline two\nline three");
+  });
+
+  test("blank line between '>' lines starts a new blockquote block", () => {
+    const md = "> first\n\n> second";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("blockquote");
+    expect(blocks[0].content).toBe("first");
+    expect(blocks[1].type).toBe("blockquote");
+    expect(blocks[1].content).toBe("second");
+  });
+
+  test("blockquote followed by paragraph does not absorb the paragraph", () => {
+    const md = "> quote\nparagraph";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("blockquote");
+    expect(blocks[0].content).toBe("quote");
+    expect(blocks[1].type).toBe("paragraph");
+  });
+
+  test("paragraph followed by blockquote does not merge", () => {
+    const md = "intro\n> quote";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("paragraph");
+    expect(blocks[1].type).toBe("blockquote");
+    expect(blocks[1].content).toBe("quote");
+  });
+
+  test("single-line blockquote still produces one block", () => {
+    const md = "> just one";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("blockquote");
+    expect(blocks[0].content).toBe("just one");
+  });
+});
+
 describe("computeListIndices", () => {
   test("all unordered → all null", () => {
     const blocks = [li(0, false), li(0, false), li(0, false)];
