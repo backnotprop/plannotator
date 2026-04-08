@@ -50,7 +50,6 @@ import { deriveImageName } from '@plannotator/ui/components/AttachmentsButton';
 import { useSidebar } from '@plannotator/ui/hooks/useSidebar';
 import { usePlanDiff, type VersionInfo } from '@plannotator/ui/hooks/usePlanDiff';
 import { useLinkedDoc } from '@plannotator/ui/hooks/useLinkedDoc';
-import { useVaultBrowser } from '@plannotator/ui/hooks/useVaultBrowser';
 import { useAnnotationDraft } from '@plannotator/ui/hooks/useAnnotationDraft';
 import { useArchive } from '@plannotator/ui/hooks/useArchive';
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
@@ -226,43 +225,16 @@ const App: React.FC = () => {
     setMarkdown, setAnnotations, setSelectedAnnotationId, setSubmitted,
   });
 
-  // Obsidian vault browser
-  const vaultBrowser = useVaultBrowser();
-
-  const showVaultTab = useMemo(() => isVaultBrowserEnabled(), [uiPrefs]);
-  const vaultPath = useMemo(() => {
-    if (!showVaultTab) return '';
-    const settings = getObsidianSettings();
-    return getEffectiveVaultPath(settings);
-  }, [showVaultTab, uiPrefs]);
-
-  // Clear active file when vault browser is disabled
-  useEffect(() => {
-    if (!showVaultTab) vaultBrowser.setActiveFile(null);
-  }, [showVaultTab]);
-
-  // Auto-fetch vault tree when vault tab is first opened
-  useEffect(() => {
-    if (sidebar.activeTab === 'vault' && showVaultTab && vaultPath && vaultBrowser.tree.length === 0 && !vaultBrowser.isLoading) {
-      vaultBrowser.fetchTree(vaultPath);
-    }
-  }, [sidebar.activeTab, showVaultTab, vaultPath]);
-
-  const buildVaultDocUrl = React.useCallback(
-    (vp: string) => (path: string) =>
-      `/api/reference/obsidian/doc?vaultPath=${encodeURIComponent(vp)}&path=${encodeURIComponent(path)}`,
-    []
-  );
-
-  // Vault file selection: open via linked doc system with vault endpoint
-  const handleVaultFileSelect = React.useCallback((relativePath: string) => {
-    linkedDocHook.open(relativePath, buildVaultDocUrl(vaultPath));
-    vaultBrowser.setActiveFile(relativePath);
-  }, [vaultPath, linkedDocHook, vaultBrowser, buildVaultDocUrl]);
-
-  // Markdown file browser
+  // Markdown file browser (also handles vault dirs via isVault flag)
   const fileBrowser = useFileBrowser();
-  const showFilesTab = useMemo(() => !!projectRoot || isFileBrowserEnabled(), [projectRoot, uiPrefs]);
+  const vaultPath = useMemo(() => {
+    if (!isVaultBrowserEnabled()) return '';
+    return getEffectiveVaultPath(getObsidianSettings());
+  }, [uiPrefs]);
+  const showFilesTab = useMemo(
+    () => !!projectRoot || isFileBrowserEnabled() || isVaultBrowserEnabled(),
+    [projectRoot, uiPrefs]
+  );
   const fileBrowserDirs = useMemo(() => {
     const projectDirs = projectRoot ? [projectRoot] : [];
     const userDirs = isFileBrowserEnabled()
@@ -277,29 +249,39 @@ const App: React.FC = () => {
   }, [showFilesTab]);
 
   useEffect(() => {
-    if (sidebar.activeTab === 'files' && showFilesTab && fileBrowserDirs.length > 0) {
-      const loadedPaths = fileBrowser.dirs.map((d) => d.path);
-      const needsFetch = fileBrowserDirs.length !== loadedPaths.length
-        || fileBrowserDirs.some((d) => !loadedPaths.includes(d));
-      if (needsFetch) {
-        fileBrowser.fetchAll(fileBrowserDirs);
+    if (sidebar.activeTab === 'files' && showFilesTab) {
+      // Load regular dirs
+      if (fileBrowserDirs.length > 0) {
+        const regularLoaded = fileBrowser.dirs.filter(d => !d.isVault).map(d => d.path);
+        const needsRegular = fileBrowserDirs.some(d => !regularLoaded.includes(d))
+          || regularLoaded.some(d => !fileBrowserDirs.includes(d));
+        if (needsRegular) fileBrowser.fetchAll(fileBrowserDirs);
+      }
+      // Load vault dir (appended after regular dirs)
+      if (vaultPath && !fileBrowser.dirs.find(d => d.isVault && d.path === vaultPath)) {
+        fileBrowser.addVaultDir(vaultPath);
       }
     }
-  }, [sidebar.activeTab, showFilesTab, fileBrowserDirs]);
+  }, [sidebar.activeTab, showFilesTab, fileBrowserDirs, vaultPath]);
 
   // File browser file selection: open via linked doc system
+  // For vault dirs (isVault), use the Obsidian doc endpoint; otherwise use generic /api/doc
   const handleFileBrowserSelect = React.useCallback((absolutePath: string, dirPath: string) => {
-    const buildUrl = (path: string) =>
-      `/api/doc?path=${encodeURIComponent(path)}&base=${encodeURIComponent(dirPath)}`;
+    const dirState = fileBrowser.dirs.find(d => d.path === dirPath);
+    const buildUrl = dirState?.isVault
+      ? (path: string) => `/api/reference/obsidian/doc?vaultPath=${encodeURIComponent(dirPath)}&path=${encodeURIComponent(path)}`
+      : (path: string) => `/api/doc?path=${encodeURIComponent(path)}&base=${encodeURIComponent(dirPath)}`;
     linkedDocHook.open(absolutePath, buildUrl, 'files');
     fileBrowser.setActiveFile(absolutePath);
-    vaultBrowser.setActiveFile(null);
   }, [linkedDocHook, fileBrowser]);
 
-  // Route linked doc opens through vault/file browser endpoint when viewing one of those files
+  // Route linked doc opens through the correct endpoint based on current context
   const handleOpenLinkedDoc = React.useCallback((docPath: string) => {
-    if (vaultBrowser.activeFile && vaultPath) {
-      linkedDocHook.open(docPath, buildVaultDocUrl(vaultPath));
+    const activeDirState = fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath);
+    if (activeDirState?.isVault && fileBrowser.activeDirPath) {
+      linkedDocHook.open(docPath, (path) =>
+        `/api/reference/obsidian/doc?vaultPath=${encodeURIComponent(fileBrowser.activeDirPath!)}&path=${encodeURIComponent(path)}`
+      );
     } else if (fileBrowser.activeFile && fileBrowser.activeDirPath) {
       // When viewing a file browser doc, resolve links relative to current file's directory
       const baseDir = linkedDocHook.filepath?.replace(/\/[^/]+$/, '') || fileBrowser.activeDirPath;
@@ -319,15 +301,14 @@ const App: React.FC = () => {
         linkedDocHook.open(docPath);
       }
     }
-  }, [vaultBrowser.activeFile, vaultPath, fileBrowser.activeFile, fileBrowser.activeDirPath, linkedDocHook, buildVaultDocUrl, imageBaseDir]);
+  }, [fileBrowser.dirs, fileBrowser.activeDirPath, fileBrowser.activeFile, linkedDocHook, imageBaseDir]);
 
-  // Wrap linked doc back to also clear vault/file browser active file
+  // Wrap linked doc back to also clear file browser active file
   const handleLinkedDocBack = React.useCallback(() => {
     linkedDocHook.back();
-    vaultBrowser.setActiveFile(null);
     fileBrowser.setActiveFile(null);
     archive.clearSelection();
-  }, [linkedDocHook, vaultBrowser, fileBrowser, archive]);
+  }, [linkedDocHook, fileBrowser, archive]);
 
   // Derive annotation counts per file from linked doc cache (includes active doc's live state)
   const allAnnotationCounts = useMemo(() => {
@@ -339,33 +320,20 @@ const App: React.FC = () => {
     return counts;
   }, [linkedDocHook.getDocAnnotations, annotations, globalAttachments]);
 
-  // FileBrowser counts: only files under file browser directories
+  // FileBrowser counts: all files under any loaded dir (regular + vault)
   const fileAnnotationCounts = useMemo(() => {
-    if (fileBrowserDirs.length === 0) return allAnnotationCounts;
+    const allDirPaths = fileBrowser.dirs.map(d => d.path);
+    if (allDirPaths.length === 0) return allAnnotationCounts;
     const counts = new Map<string, number>();
     for (const [fp, count] of allAnnotationCounts) {
-      if (fileBrowserDirs.some(dir => fp.startsWith(dir + '/'))) {
+      if (allDirPaths.some(dir => fp.startsWith(dir + '/'))) {
         counts.set(fp, count);
       }
     }
     return counts;
-  }, [allAnnotationCounts, fileBrowserDirs]);
-
-  // VaultBrowser uses relative paths — strip vaultPath prefix for lookup
-  const vaultAnnotationCounts = useMemo(() => {
-    if (!vaultPath) return new Map<string, number>();
-    const prefix = vaultPath.endsWith('/') ? vaultPath : vaultPath + '/';
-    const counts = new Map<string, number>();
-    for (const [fp, count] of allAnnotationCounts) {
-      if (fp.startsWith(prefix)) {
-        counts.set(fp.slice(prefix.length), count);
-      }
-    }
-    return counts;
-  }, [allAnnotationCounts, vaultPath]);
+  }, [allAnnotationCounts, fileBrowser.dirs]);
 
   const hasFileAnnotations = fileAnnotationCounts.size > 0;
-  const hasVaultAnnotations = vaultAnnotationCounts.size > 0;
 
   // Annotations in other files (not the current view) — for the right panel "+N" indicator
   const otherFileAnnotations = useMemo(() => {
@@ -387,9 +355,9 @@ const App: React.FC = () => {
   const handleFlashAnnotatedFiles = React.useCallback(() => {
     const filePaths = new Set(allAnnotationCounts.keys());
     if (filePaths.size === 0) return;
-    // Open sidebar to the relevant tab so the flash is visible
-    if (!sidebar.isOpen || (sidebar.activeTab !== 'files' && sidebar.activeTab !== 'vault')) {
-      sidebar.open(hasVaultAnnotations && !hasFileAnnotations ? 'vault' : 'files');
+    // Open sidebar to the files tab so the flash is visible
+    if (!sidebar.isOpen || sidebar.activeTab !== 'files') {
+      sidebar.open('files');
     }
     // Cancel any pending clear from a previous flash
     if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
@@ -399,28 +367,13 @@ const App: React.FC = () => {
       setHighlightedFiles(filePaths);
       flashTimerRef.current = setTimeout(() => setHighlightedFiles(undefined), 1200);
     });
-  }, [allAnnotationCounts, sidebar, hasVaultAnnotations, hasFileAnnotations]);
-
-  // Derive vault-relative highlighted files for VaultBrowser
-  const vaultHighlightedFiles = useMemo(() => {
-    if (!highlightedFiles || !vaultPath) return undefined;
-    const prefix = vaultPath.endsWith('/') ? vaultPath : vaultPath + '/';
-    const relative = new Set<string>();
-    for (const fp of highlightedFiles) {
-      if (fp.startsWith(prefix)) relative.add(fp.slice(prefix.length));
-    }
-    return relative.size > 0 ? relative : undefined;
-  }, [highlightedFiles, vaultPath]);
+  }, [allAnnotationCounts, sidebar, hasFileAnnotations]);
 
   // Context-aware back label for linked doc navigation
   const backLabel = annotateSource === 'folder' ? 'file list'
     : annotateSource === 'file' ? 'file'
     : annotateSource === 'message' ? 'message'
     : 'plan';
-
-  const handleVaultFetchTree = React.useCallback(() => {
-    vaultBrowser.fetchTree(vaultPath);
-  }, [vaultBrowser, vaultPath]);
 
   // Track active section for TOC highlighting
   const headingCount = useMemo(() => blocks.filter(b => b.type === 'heading').length, [blocks]);
@@ -1457,10 +1410,9 @@ const App: React.FC = () => {
               activeTab={sidebar.activeTab}
               onToggleTab={sidebar.toggleTab}
               hasDiff={planDiff.hasPreviousVersion}
+              showVersionsTab={versionInfo !== null && versionInfo.totalVersions > 1}
               showFilesTab={showFilesTab && !archive.archiveMode}
-              showVaultTab={showVaultTab}
               hasFileAnnotations={hasFileAnnotations}
-              hasVaultAnnotations={hasVaultAnnotations}
               className="hidden lg:flex absolute left-0 top-0 z-10"
             />
           )}
@@ -1489,15 +1441,8 @@ const App: React.FC = () => {
                 fileBrowser={fileBrowser}
                 onFilesSelectFile={handleFileBrowserSelect}
                 onFilesFetchAll={() => fileBrowser.fetchAll(fileBrowserDirs)}
-                showVaultTab={showVaultTab && !archive.archiveMode}
-                vaultPath={vaultPath}
-                vaultBrowser={vaultBrowser}
-                vaultAnnotationCounts={vaultAnnotationCounts}
-                vaultHighlightedFiles={vaultHighlightedFiles}
-                onVaultSelectFile={handleVaultFileSelect}
-                onVaultFetchTree={handleVaultFetchTree}
                 hasFileAnnotations={hasFileAnnotations}
-                hasVaultAnnotations={hasVaultAnnotations}
+                showVersionsTab={versionInfo !== null && versionInfo.totalVersions > 1}
                 versionInfo={versionInfo}
                 versions={planDiff.versions}
                 selectedBaseVersion={planDiff.diffBaseVersion}
@@ -1540,9 +1485,10 @@ const App: React.FC = () => {
               {/* Sticky header lane — ghost bar that pins the toolstrip +
                   badges at top: 12px once the user scrolls. Invisible at top
                   of doc; original toolstrip/badges remain the source of
-                  truth there. Hidden in plan diff, archive, linked-doc mode,
-                  or when sticky actions are disabled. */}
-              {!isPlanDiffActive && !archive.archiveMode && !linkedDocHook.isActive && uiPrefs.stickyActionsEnabled && (
+                  truth there. Hidden in plan diff or archive mode, or when
+                  sticky actions are disabled. remountToken re-anchors the
+                  ResizeObserver when Viewer swaps content (linked docs). */}
+              {!isPlanDiffActive && !archive.archiveMode && uiPrefs.stickyActionsEnabled && (
                 <StickyHeaderLane
                   inputMethod={inputMethod}
                   onInputMethodChange={handleInputMethodChange}
@@ -1630,7 +1576,7 @@ const App: React.FC = () => {
                   showDemoBadge={!isApiMode && !isLoadingShared && !isSharedSession}
                   maxWidth={planMaxWidth}
                   onOpenLinkedDoc={handleOpenLinkedDoc}
-                  linkedDocInfo={linkedDocHook.isActive ? { filepath: linkedDocHook.filepath!, onBack: handleLinkedDocBack, label: vaultBrowser.activeFile ? 'Vault File' : fileBrowser.activeFile ? 'File' : undefined, backLabel } : null}
+                  linkedDocInfo={linkedDocHook.isActive ? { filepath: linkedDocHook.filepath!, onBack: handleLinkedDocBack, label: fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath)?.isVault ? 'Vault File' : fileBrowser.activeFile ? 'File' : undefined, backLabel } : null}
                   imageBaseDir={imageBaseDir}
                   copyLabel={annotateSource === 'message' ? 'Copy message' : annotateSource === 'file' || annotateSource === 'folder' ? 'Copy file' : undefined}
                   archiveInfo={archive.currentInfo}

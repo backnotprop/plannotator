@@ -1,7 +1,7 @@
 /**
  * SidebarContainer — Shared sidebar shell
  *
- * Houses the Table of Contents, Version Browser, Vault Browser, and Archive Browser views.
+ * Houses the Table of Contents, Version Browser, File Browser, and Archive Browser views.
  * Tab bar at top switches between them.
  */
 
@@ -9,11 +9,9 @@ import React from "react";
 import type { SidebarTab } from "../../hooks/useSidebar";
 import type { Block, Annotation } from "../../types";
 import type { VersionInfo, VersionEntry } from "../../hooks/usePlanDiff";
-import type { UseVaultBrowserReturn } from "../../hooks/useVaultBrowser";
 import type { UseFileBrowserReturn } from "../../hooks/useFileBrowser";
 import { TableOfContents } from "../TableOfContents";
 import { VersionBrowser } from "./VersionBrowser";
-import { VaultBrowser } from "./VaultBrowser";
 import { FileBrowser } from "./FileBrowser";
 import { ArchiveBrowser, type ArchivedPlan } from "./ArchiveBrowser";
 import { OverlayScrollArea } from "../OverlayScrollArea";
@@ -38,15 +36,8 @@ interface SidebarContainerProps {
   fileBrowser?: UseFileBrowserReturn;
   onFilesSelectFile?: (absolutePath: string, dirPath: string) => void;
   onFilesFetchAll?: () => void;
-  // Vault Browser props
-  showVaultTab?: boolean;
-  vaultPath?: string;
-  vaultBrowser?: UseVaultBrowserReturn;
-  vaultAnnotationCounts?: Map<string, number>;
-  vaultHighlightedFiles?: Set<string>;
-  onVaultSelectFile?: (relativePath: string) => void;
-  onVaultFetchTree?: () => void;
   // Version Browser props
+  showVersionsTab?: boolean;
   versionInfo: VersionInfo | null;
   versions: VersionEntry[];
   selectedBaseVersion: number | null;
@@ -60,7 +51,6 @@ interface SidebarContainerProps {
   onFetchVersions: () => void;
   // Annotation indicators
   hasFileAnnotations?: boolean;
-  hasVaultAnnotations?: boolean;
   // Archive Browser props
   showArchiveTab?: boolean;
   archivePlans: ArchivedPlan[];
@@ -87,13 +77,7 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
   fileBrowser,
   onFilesSelectFile,
   onFilesFetchAll,
-  showVaultTab,
-  vaultPath,
-  vaultBrowser,
-  vaultAnnotationCounts,
-  vaultHighlightedFiles,
-  onVaultSelectFile,
-  onVaultFetchTree,
+  showVersionsTab,
   versionInfo,
   versions,
   selectedBaseVersion,
@@ -106,7 +90,6 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
   fetchingVersion,
   onFetchVersions,
   hasFileAnnotations,
-  hasVaultAnnotations,
   showArchiveTab,
   archivePlans,
   selectedArchiveFile,
@@ -140,26 +123,28 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
           }
           label="Contents"
         />
-        <TabButton
-          active={activeTab === "versions"}
-          onClick={() => onTabChange("versions")}
-          icon={
-            <svg
-              className="w-3 h-3"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-            </svg>
-          }
-          label="Versions"
-        />
+        {showVersionsTab && (
+          <TabButton
+            active={activeTab === "versions"}
+            onClick={() => onTabChange("versions")}
+            icon={
+              <svg
+                className="w-3 h-3"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+            }
+            label="Versions"
+          />
+        )}
         {showFilesTab && (
           <TabButton
             active={activeTab === "files"}
@@ -181,29 +166,6 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
             }
             label="Files"
             badge={hasFileAnnotations}
-          />
-        )}
-        {showVaultTab && (
-          <TabButton
-            active={activeTab === "vault"}
-            onClick={() => onTabChange("vault")}
-            icon={
-              <svg
-                className="w-3 h-3"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-                />
-              </svg>
-            }
-            label="Vault"
-            badge={hasVaultAnnotations}
           />
         )}
         {showArchiveTab && (
@@ -291,21 +253,6 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
             onFetchAll={onFilesFetchAll ?? (() => {})}
             annotationCounts={fileAnnotationCounts}
             highlightedFiles={highlightedFiles}
-          />
-        )}
-        {activeTab === "vault" && showVaultTab && vaultPath && vaultBrowser && (
-          <VaultBrowser
-            vaultPath={vaultPath}
-            tree={vaultBrowser.tree}
-            isLoading={vaultBrowser.isLoading}
-            error={vaultBrowser.error}
-            expandedFolders={vaultBrowser.expandedFolders}
-            onToggleFolder={vaultBrowser.toggleFolder}
-            onSelectFile={onVaultSelectFile ?? (() => {})}
-            activeFile={vaultBrowser.activeFile}
-            onFetchTree={onVaultFetchTree ?? (() => {})}
-            annotationCounts={vaultAnnotationCounts}
-            highlightedFiles={vaultHighlightedFiles}
           />
         )}
         {activeTab === "archive" && showArchiveTab && (
