@@ -33,8 +33,11 @@ $minAttestedVersion = "v0.17.2"
 # the latter when present so a 32-bit PowerShell on ARM64 Windows still
 # selects the native arm64 binary. Matches install.cmd's detection.
 if (-not [Environment]::Is64BitOperatingSystem) {
+    # Write-Error under $ErrorActionPreference = "Stop" (set at the top
+    # of this file) raises a terminating error that exits the process
+    # with code 1. No explicit `exit 1` needed here — it would be
+    # unreachable. Same applies to every other Write-Error in this file.
     Write-Error "32-bit Windows is not supported"
-    exit 1
 }
 $hostArch = if ($env:PROCESSOR_ARCHITEW6432) {
     $env:PROCESSOR_ARCHITEW6432
@@ -47,7 +50,6 @@ if ($hostArch -eq "ARM64") {
     $arch = "x64"
 } else {
     Write-Error "Unsupported Windows architecture: $hostArch"
-    exit 1
 }
 
 $platform = "win32-$arch"
@@ -73,7 +75,6 @@ if ($Version -eq "latest") {
 
     if (-not $latestTag) {
         Write-Error "Failed to fetch latest version"
-        exit 1
     }
 } else {
     # Normalize: auto-prefix v if missing (matches install.cmd behaviour)
@@ -144,8 +145,9 @@ if ($verifyAttestationResolved) {
         $resolvedVersion = [version]($latestTag -replace '^v', '')
         $minVersion = [version]($minAttestedVersion -replace '^v', '')
     } catch {
+        # Write-Error under Stop raises a new terminating error that
+        # propagates past this catch and exits the script with code 1.
         Write-Error "Could not parse version tags for provenance check: latest=$latestTag min=$minAttestedVersion"
-        exit 1
     }
     if ($resolvedVersion -lt $minVersion) {
         [Console]::Error.WriteLine("Provenance verification was requested, but $latestTag predates plannotator's attestation support.")
@@ -183,7 +185,6 @@ $actualChecksum = (Get-FileHash -Path $tmpFile -Algorithm SHA256).Hash.ToLower()
 if ($actualChecksum -ne $expectedChecksum) {
     Remove-Item $tmpFile -Force
     Write-Error "Checksum verification failed!"
-    exit 1
 }
 
 if ($verifyAttestationResolved) {
@@ -213,12 +214,10 @@ if ($verifyAttestationResolved) {
             [Console]::Error.WriteLine(($verifyOutput | Out-String).TrimEnd())
             Remove-Item $tmpFile -Force
             Write-Error "Attestation verification failed! The binary's SHA256 matched, but no valid signed provenance was found for $repo. Refusing to install."
-            exit 1
         }
     } else {
         Remove-Item $tmpFile -Force
         Write-Error "verifyAttestation is enabled but gh CLI was not found. Install https://cli.github.com (and run 'gh auth login'), or unset PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation from $configPath / pass -SkipAttestation."
-        exit 1
     }
 } else {
     Write-Host "SHA256 verified. For build provenance verification, see"
@@ -383,21 +382,34 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
 
     try {
         git clone --depth 1 --filter=blob:none --sparse "https://github.com/$repo.git" --branch $latestTag "$skillsTmp\repo" 2>$null
-        Push-Location "$skillsTmp\repo"
-        git sparse-checkout set apps/skills 2>$null
+        # git is a native executable — it does not throw under
+        # $ErrorActionPreference=Stop on non-zero exit. Guard with
+        # Test-Path so we only Push-Location if the clone actually
+        # produced a repo directory.
+        if (Test-Path "$skillsTmp\repo") {
+            Push-Location "$skillsTmp\repo"
+            # Inner try/finally guarantees Pop-Location runs exactly once
+            # after a successful Push-Location, regardless of whether the
+            # copy operations below throw. The naive pattern (Pop-Location
+            # only on the success path) leaks the location stack if a
+            # PS-native cmdlet (Copy-Item etc.) throws under Stop.
+            try {
+                git sparse-checkout set apps/skills 2>$null
 
-        if (Test-Path "apps\skills") {
-            $items = Get-ChildItem "apps\skills" -ErrorAction SilentlyContinue
-            if ($items) {
-                New-Item -ItemType Directory -Force -Path $claudeSkillsDir | Out-Null
-                New-Item -ItemType Directory -Force -Path $agentsSkillsDir | Out-Null
-                Copy-Item -Recurse -Force "apps\skills\*" $claudeSkillsDir
-                Copy-Item -Recurse -Force "apps\skills\*" $agentsSkillsDir
-                Write-Host "Installed skills to $claudeSkillsDir\ and $agentsSkillsDir\"
+                if (Test-Path "apps\skills") {
+                    $items = Get-ChildItem "apps\skills" -ErrorAction SilentlyContinue
+                    if ($items) {
+                        New-Item -ItemType Directory -Force -Path $claudeSkillsDir | Out-Null
+                        New-Item -ItemType Directory -Force -Path $agentsSkillsDir | Out-Null
+                        Copy-Item -Recurse -Force "apps\skills\*" $claudeSkillsDir
+                        Copy-Item -Recurse -Force "apps\skills\*" $agentsSkillsDir
+                        Write-Host "Installed skills to $claudeSkillsDir\ and $agentsSkillsDir\"
+                    }
+                }
+            } finally {
+                Pop-Location
             }
         }
-
-        Pop-Location
     } catch {
         Write-Host "Skipping skills install (git sparse-checkout failed)"
     }

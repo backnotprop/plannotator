@@ -416,6 +416,35 @@ describe("install shared behavior", () => {
     expect(ps).toMatch(/\$latestTag -match '-'/);
   });
 
+  test("all three installers hardcode the SAME MIN_ATTESTED_VERSION value", () => {
+    // Cross-file consistency guard: the constant is triplicated across
+    // install.sh, install.ps1, install.cmd with no shared source of
+    // truth. A future bump that updates only one or two of the three
+    // files would silently ship divergent behavior — each installer
+    // would enforce a different floor. The per-file tests below check
+    // that each file contains the literal "v0.17.2" individually, but
+    // that doesn't catch drift where all three are internally consistent
+    // with themselves but differ from each other (e.g., sh says v0.17.3,
+    // ps says v0.17.2, cmd says v0.17.3).
+    //
+    // This test extracts the value from each file via a regex anchored
+    // on the assignment form (not just any mention of the string) and
+    // asserts all three match.
+    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    const shMatch = sh.match(/MIN_ATTESTED_VERSION="(v\d+\.\d+\.\d+)"/);
+    const psMatch = ps.match(/\$minAttestedVersion\s*=\s*"(v\d+\.\d+\.\d+)"/);
+    const cmdMatch = cmdScript.match(/set "MIN_ATTESTED_VERSION=(v\d+\.\d+\.\d+)"/);
+    expect(shMatch, "install.sh missing MIN_ATTESTED_VERSION assignment").toBeTruthy();
+    expect(psMatch, "install.ps1 missing $minAttestedVersion assignment").toBeTruthy();
+    expect(cmdMatch, "install.cmd missing MIN_ATTESTED_VERSION assignment").toBeTruthy();
+    const values = new Set([shMatch![1], psMatch![1], cmdMatch![1]]);
+    if (values.size !== 1) {
+      throw new Error(
+        `MIN_ATTESTED_VERSION drift across installers: sh=${shMatch![1]}, ps=${psMatch![1]}, cmd=${cmdMatch![1]}. All three must match.`
+      );
+    }
+  });
+
   test("all installers hardcode MIN_ATTESTED_VERSION and guard verification against older tags", () => {
     // Releases cut before this PR added `actions/attest-build-provenance`
     // to release.yml have no attestations. Running `gh attestation verify`

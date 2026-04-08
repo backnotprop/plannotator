@@ -32,7 +32,7 @@ REM Pin to a specific reviewed version
 curl -fsSL https://plannotator.ai/install.cmd -o install.cmd && install.cmd --version vX.Y.Z && del install.cmd
 ```
 
-Released binaries ship with SHA256 sidecars (verified automatically on every install) and [SLSA build provenance](https://slsa.dev/) attestations signed via Sigstore. For manual verification commands and the opt-in auto-verification flags, see the [installation docs](https://plannotator.ai/docs/getting-started/installation/#verifying-your-install).
+Released binaries ship with SHA256 sidecars and [SLSA build provenance](https://slsa.dev/) attestations from v0.17.2 onwards. See the [installation docs](https://plannotator.ai/docs/getting-started/installation/#verifying-your-install) for the supported-version matrix and verification commands.
 
 ---
 

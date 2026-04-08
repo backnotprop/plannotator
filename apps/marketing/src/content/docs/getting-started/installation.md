@@ -43,6 +43,13 @@ curl -fsSL https://plannotator.ai/install.cmd -o install.cmd && install.cmd --ve
 
 The install script respects `CLAUDE_CONFIG_DIR` if set, placing hooks in your custom config directory instead of `~/.claude`.
 
+**Supported versions:** version pinning is fully supported from **v0.17.2 onwards**. v0.17.2 is the first release to ship native ARM64 Windows binaries and SLSA build-provenance attestations; earlier tags were published before either existed. Pinning to a pre-v0.17.2 tag may work for default installs on macOS, Linux, and x64 Windows, but:
+
+- ARM64 Windows hosts will get a 404 (no native ARM64 binary exists in older releases).
+- Provenance verification (`--verify-attestation` and friends) will be rejected by the installer's pre-flight floor.
+
+If you need a specific pre-v0.17.2 version, install without `--version` and `--verify-attestation` flags; otherwise, pin to v0.17.2 or later.
+
 ### Verifying your install
 
 Every released binary is accompanied by a SHA256 sidecar (verified automatically on every install) and a [SLSA build provenance](https://slsa.dev/) attestation signed via Sigstore and recorded in the public transparency log. The SHA256 check is mandatory and always runs. Provenance verification is **optional** — it's only needed if you want a cryptographic link from the binary back to the exact commit and workflow run that built it.

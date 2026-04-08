@@ -83,7 +83,7 @@ irm https://plannotator.ai/install.ps1 | iex
 & ([scriptblock]::Create((irm https://plannotator.ai/install.ps1))) -Version vX.Y.Z
 ```
 
-Every released binary ships with a SHA256 sidecar (verified automatically on every install) and a [SLSA build provenance](https://slsa.dev/) attestation signed via Sigstore. For manual verification commands and opt-in auto-verification during upgrades, see the [installation docs](https://plannotator.ai/docs/getting-started/installation/#verifying-your-install).
+Every released binary ships with a SHA256 sidecar (verified automatically on every install). Version pinning, native ARM64 Windows, and [SLSA provenance](https://slsa.dev/) are supported from v0.17.2 onwards — see the [installation docs](https://plannotator.ai/docs/getting-started/installation/#verifying-your-install) for details.
 
 **Then in Claude Code:**
 
