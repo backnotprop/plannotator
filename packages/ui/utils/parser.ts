@@ -169,17 +169,39 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
       continue;
     }
 
-    // Blockquotes — consecutive `>` lines merge into one block (CommonMark).
-    // A blank line breaks the blockquote so the next `>` starts a fresh one.
+    // Blockquotes — consecutive `>` lines merge into one block so wrapped
+    // paragraph quotes render as a single continuous quote box. A blank line
+    // breaks the blockquote so the next `>` starts a fresh one.
+    //
+    // Exception: if the stripped content starts with a block-level marker
+    // (list item, heading, code fence, nested blockquote) we do NOT merge.
+    // Our flat block model can't render a list-inside-a-quote as an actual
+    // nested list, so merging would flatten the markers into run-on inline
+    // text. Leaving them as separate blockquote blocks preserves each line's
+    // visual identity (a stacked-box layout) — imperfect but legible. A
+    // proper recursive blockquote parser is tracked as a follow-up.
     if (trimmed.startsWith('>')) {
       flush();
       const stripped = trimmed.replace(/^>\s*/, '');
+      // List markers require trailing whitespace to avoid matching inline
+      // text like "-hyphen" or "1.5 seconds"; headings, code fences, and
+      // nested blockquote markers don't require it (``` can be followed
+      // directly by a language tag, # can start a dense heading).
+      const blockMarkerRe = /^(?:(?:\*|-|\d+\.)\s|#|```|>)/;
+      const hasBlockMarker = blockMarkerRe.test(stripped);
+      const prevBlock = blocks.length > 0 ? blocks[blocks.length - 1] : null;
+      // Don't merge into a previous blockquote whose content itself starts
+      // with a block marker — otherwise a `> some text` line following a
+      // `> 1. item` line would get glued onto the list-item block.
+      const prevIsMarkerQuote =
+        prevBlock?.type === 'blockquote' && blockMarkerRe.test(prevBlock.content);
       if (
+        !hasBlockMarker &&
+        !prevIsMarkerQuote &&
         !prevLineWasBlank &&
-        blocks.length > 0 &&
-        blocks[blocks.length - 1].type === 'blockquote'
+        prevBlock?.type === 'blockquote'
       ) {
-        blocks[blocks.length - 1].content += '\n' + stripped;
+        prevBlock.content += '\n' + stripped;
       } else {
         blocks.push({
           id: `block-${currentId++}`,

@@ -426,6 +426,77 @@ describe("parseMarkdownToBlocks — blockquotes", () => {
     expect(blocks[0].content).toBe("just one");
   });
 
+  test("quoted ordered list does NOT merge — each '> N.' line stays as its own block", () => {
+    // Regression guard for review comment #7. Merging would flatten the
+    // markers into run-on inline text; keeping them as separate blockquote
+    // blocks preserves each line's visual identity.
+    const md = "> 1. First item\n> 2. Second item\n> 3. Third item";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(3);
+    expect(blocks[0].type).toBe("blockquote");
+    expect(blocks[0].content).toBe("1. First item");
+    expect(blocks[1].type).toBe("blockquote");
+    expect(blocks[1].content).toBe("2. Second item");
+    expect(blocks[2].type).toBe("blockquote");
+    expect(blocks[2].content).toBe("3. Third item");
+  });
+
+  test("quoted unordered list does NOT merge", () => {
+    const md = "> - First\n> - Second\n> - Third";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(3);
+    expect(blocks.every(b => b.type === "blockquote")).toBe(true);
+    expect(blocks.map(b => b.content)).toEqual(["- First", "- Second", "- Third"]);
+  });
+
+  test("quoted heading does NOT merge into previous blockquote", () => {
+    const md = "> intro text\n> # Heading inside quote\n> more text";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(3);
+    expect(blocks[0].content).toBe("intro text");
+    expect(blocks[1].content).toBe("# Heading inside quote");
+    expect(blocks[2].content).toBe("more text");
+  });
+
+  test("quoted code fence line does NOT merge", () => {
+    const md = "> some prose\n> ```js\n> more prose";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(3);
+    expect(blocks[0].content).toBe("some prose");
+    expect(blocks[1].content).toBe("```js");
+    expect(blocks[2].content).toBe("more prose");
+  });
+
+  test("nested blockquote (> >) does NOT merge into the outer quote", () => {
+    const md = "> outer quote\n> > nested quote\n> back to outer";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(3);
+    expect(blocks[0].content).toBe("outer quote");
+    expect(blocks[1].content).toBe("> nested quote");
+    expect(blocks[2].content).toBe("back to outer");
+  });
+
+  test("wrapped prose quote still merges (regression guard for the merge fix)", () => {
+    // This is the case the merge fix was added for — a single logical
+    // paragraph wrapped across multiple source lines. Must still merge.
+    const md = "> This is a long quoted paragraph\n> that wraps across several\n> source lines for readability.";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("blockquote");
+    expect(blocks[0].content).toBe(
+      "This is a long quoted paragraph\nthat wraps across several\nsource lines for readability."
+    );
+  });
+
+  test("prose quote followed by a quoted list: prose merges, list lines stay separate", () => {
+    const md = "> intro prose\n> that wraps here\n> 1. first step\n> 2. second step";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(3);
+    expect(blocks[0].content).toBe("intro prose\nthat wraps here");
+    expect(blocks[1].content).toBe("1. first step");
+    expect(blocks[2].content).toBe("2. second step");
+  });
+
   test("multi-paragraph blockquote encodes paragraph break as double newline", () => {
     // The empty `>` line sits between two quoted paragraphs. We merge all
     // three `>` lines into one block, but the blank `>` becomes an empty
