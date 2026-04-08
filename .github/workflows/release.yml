@@ -46,10 +46,15 @@ jobs:
   build:
     needs: test
     runs-on: ubuntu-latest
+    # Build job has NO id-token / attestations permissions. Compilation
+    # itself doesn't need OIDC minting — those capabilities live in the
+    # separate `attest` job below, which only runs on tag pushes. This
+    # ensures PR dry-runs (which exercise `bun install` + compile) never
+    # have OIDC minting available, closing the narrow-but-real
+    # "trusted-contributor compromise lets a malicious build step mint
+    # a repo-identity OIDC token" attack surface.
     permissions:
       contents: read
-      id-token: write
-      attestations: write
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -104,8 +109,39 @@ jobs:
           bun build apps/paste-service/targets/bun.ts --compile --target=bun-windows-x64 --outfile plannotator-paste-win32-x64.exe
           sha256sum plannotator-paste-win32-x64.exe > plannotator-paste-win32-x64.exe.sha256
 
+      - name: Upload artifacts
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: binaries
+          path: |
+            plannotator-*
+            !*.ts
+
+  attest:
+    # Isolated attestation job — runs on tag pushes only and holds the
+    # OIDC minting + attestations-write capabilities that the build job
+    # used to have. Splitting this out means PR builds and non-tag pushes
+    # never get id-token: write granted, closing the trusted-contributor
+    # compromise window where a malicious build step could mint a
+    # repo-identity OIDC token. The attestation is produced against the
+    # same binaries the build job uploaded; attest-build-provenance
+    # publishes the signed bundle to GitHub's attestation store, so the
+    # release job downstream doesn't need any new artifact handling.
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Download binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: binaries
+
       - name: Generate SLSA build provenance attestation
-        if: startsWith(github.ref, 'refs/tags/')
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-path: |
@@ -120,16 +156,12 @@ jobs:
             plannotator-paste-linux-arm64
             plannotator-paste-win32-x64.exe
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-        with:
-          name: binaries
-          path: |
-            plannotator-*
-            !*.ts
-
   release:
-    needs: build
+    # Depends on `attest` so the signed provenance exists before the
+    # GitHub Release is published — otherwise there'd be a window where
+    # users could pull the binary and `gh attestation verify` would
+    # race-fail. `needs: attest` implicitly requires `build` too.
+    needs: attest
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:

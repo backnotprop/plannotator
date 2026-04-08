@@ -173,6 +173,19 @@ jobs:
           #     allowed arbitrary PS execution via --version)
           #   - the `[version] -ge` comparison returning false
           #   - the "predates" error message block
+          $installedBinary = "$env:USERPROFILE\.local\bin\plannotator.exe"
+
+          # Capture the currently-installed binary's hash BEFORE running
+          # the rejection test. The earlier Gemini-merge integration step
+          # installed v0.17.1 at this path; we use the captured hash as
+          # a baseline so we can prove the rejected invocation left it
+          # untouched (no wasted download, no overwrite).
+          if (-not (Test-Path $installedBinary)) {
+            throw "Expected $installedBinary to exist from the earlier install.cmd step, but it's missing. Cannot baseline the preservation check."
+          }
+          $baselineHash = (Get-FileHash $installedBinary -Algorithm SHA256).Hash
+          $baselineWriteTime = (Get-Item $installedBinary).LastWriteTime
+
           $stderrFile = New-TemporaryFile
           $p = Start-Process -Wait -PassThru -NoNewWindow cmd `
             -ArgumentList '/c','scripts\install.cmd v0.17.1 --verify-attestation' `
@@ -186,15 +199,24 @@ jobs:
           if ($stderr -notmatch 'predates') {
             throw "install.cmd rejected with exit $($p.ExitCode), but not via the pre-flight guard. Expected 'predates' in stderr, got: $stderr"
           }
-          # Additional safety: make sure the binary was NOT downloaded
-          # (pre-flight should run before any curl call). install.cmd
-          # installs to %USERPROFILE%\.local\bin\plannotator.exe — that
-          # path should have been left alone by the rejected invocation.
-          # Note: the previous Gemini-merge integration step DID install
-          # v0.17.1, so this only validates that this run didn't overwrite
-          # it with a newer (nonexistent) download. We check that the
-          # file we see is still the v0.17.1 binary from the earlier step.
+
+          # Assert the pre-flight ran BEFORE any download / install step.
+          # If the binary's hash or mtime changed, something downloaded
+          # and moved a new file into place — meaning the pre-flight
+          # rejection happened late (after the download step) instead
+          # of early (before it). Catches future regressions that re-
+          # introduce the post-download pre-flight pattern.
+          $postHash = (Get-FileHash $installedBinary -Algorithm SHA256).Hash
+          $postWriteTime = (Get-Item $installedBinary).LastWriteTime
+          if ($postHash -ne $baselineHash) {
+            throw "Binary at $installedBinary was overwritten during the rejected --verify-attestation run. Baseline SHA256 $baselineHash, post SHA256 $postHash. The pre-flight must run before any download."
+          }
+          if ($postWriteTime -ne $baselineWriteTime) {
+            throw "Binary at $installedBinary had its LastWriteTime modified during the rejected --verify-attestation run. Baseline $baselineWriteTime, post $postWriteTime."
+          }
+
           Write-Host "✓ MIN_ATTESTED_VERSION pre-flight rejected v0.17.1 via the expected code path"
+          Write-Host "✓ Installed binary was preserved (SHA256 and LastWriteTime both unchanged)"
 
       - name: Verify Claude Code slash command files contain the shell-invocation prefix
         shell: pwsh

@@ -108,7 +108,9 @@ if ($envVerify) {
     }
 }
 
-# Layer 1: CLI flags win. -SkipAttestation beats -VerifyAttestation if both passed.
+# Layer 1: CLI flags win. -VerifyAttestation and -SkipAttestation are
+# mutually exclusive and already rejected together at the top of this
+# script (lines ~13-16), so at most one of these branches can fire.
 if ($VerifyAttestation) { $verifyAttestationResolved = $true }
 if ($SkipAttestation)   { $verifyAttestationResolved = $false }
 

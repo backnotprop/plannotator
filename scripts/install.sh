@@ -449,20 +449,32 @@ if command -v git &>/dev/null; then
     AGENTS_SKILLS_DIR="$HOME/.agents/skills"
     skills_tmp=$(mktemp -d)
 
-    if git clone --depth 1 --filter=blob:none --sparse \
-        "https://github.com/${REPO}.git" --branch "$latest_tag" "$skills_tmp/repo" 2>/dev/null && \
-        cd "$skills_tmp/repo" && git sparse-checkout set apps/skills 2>/dev/null; then
-
-        if [ -d "apps/skills" ] && [ "$(ls -A apps/skills 2>/dev/null)" ]; then
-            mkdir -p "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR"
-            cp -r apps/skills/* "$CLAUDE_SKILLS_DIR/"
-            cp -r apps/skills/* "$AGENTS_SKILLS_DIR/"
-            echo "Installed skills to ${CLAUDE_SKILLS_DIR}/ and ${AGENTS_SKILLS_DIR}/"
-        fi
-
-        cd - >/dev/null
+    # Wrap the cd-bearing block in a subshell so any `cd` is scoped to
+    # the subshell and can't leave the parent script with a dangling CWD.
+    # Previous version chained `cd` inside an `&&` condition, and if
+    # sparse-checkout failed the else branch ran without restoring the
+    # directory — then `rm -rf "$skills_tmp"` below executed while the
+    # shell's CWD was still inside the directory being deleted. No
+    # production failure (subsequent code uses absolute paths) but
+    # structurally incorrect. install.ps1 and install.cmd use
+    # Push-Location/pushd for the same logic; a subshell is bash's
+    # equivalent — the parent shell's CWD is inherited in, and any
+    # cd inside the subshell disappears when the subshell exits.
+    if (
+        cd "$skills_tmp" &&
+        git clone --depth 1 --filter=blob:none --sparse \
+            "https://github.com/${REPO}.git" --branch "$latest_tag" repo 2>/dev/null &&
+        cd repo &&
+        git sparse-checkout set apps/skills 2>/dev/null &&
+        [ -d "apps/skills" ] &&
+        [ "$(ls -A apps/skills 2>/dev/null)" ] &&
+        mkdir -p "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR" &&
+        cp -r apps/skills/* "$CLAUDE_SKILLS_DIR/" &&
+        cp -r apps/skills/* "$AGENTS_SKILLS_DIR/"
+    ); then
+        echo "Installed skills to ${CLAUDE_SKILLS_DIR}/ and ${AGENTS_SKILLS_DIR}/"
     else
-        echo "Skipping skills install (git sparse-checkout failed)"
+        echo "Skipping skills install (git sparse-checkout failed or apps/skills empty)"
     fi
 
     rm -rf "$skills_tmp"
