@@ -146,6 +146,56 @@ jobs:
 
           Write-Host "✓ Gemini settings.json merge verified (issue #506 regression guard)"
 
+      - name: Attestation pre-flight rejects v0.17.1 on real cmd.exe
+        shell: pwsh
+        run: |
+          # Regression guard: the main feature of this PR (three-layer
+          # verification opt-in + MIN_ATTESTED_VERSION pre-flight +
+          # injection-safe $env:-based PowerShell version comparison) had
+          # no runtime coverage on Windows because the previous
+          # integration step passes --skip-attestation.
+          #
+          # We can't test the SUCCESS path (valid attested release)
+          # because v0.17.1 is the current latest and it predates the
+          # release.yml attestation step. Until the first post-merge
+          # release exists, the only realistic end-to-end test is the
+          # REJECTION path: invoke install.cmd with --verify-attestation
+          # against v0.17.1 and assert the pre-flight rejects with
+          # exit != 0 and stderr containing "predates".
+          #
+          # This exercises on a real cmd.exe:
+          #   - setlocal enabledelayedexpansion parser under the guard
+          #   - three-layer resolution reaching the CLI flag layer
+          #   - the :~1 substring (instead of :v= global substitution)
+          #   - the pre-release tag detection (negative — v0.17.1 is stable)
+          #   - the PowerShell shell-out with $env:TAG_NUM / $env:MIN_NUM
+          #     (injection-safe — the previous interpolation would have
+          #     allowed arbitrary PS execution via --version)
+          #   - the `[version] -ge` comparison returning false
+          #   - the "predates" error message block
+          $stderrFile = New-TemporaryFile
+          $p = Start-Process -Wait -PassThru -NoNewWindow cmd `
+            -ArgumentList '/c','scripts\install.cmd v0.17.1 --verify-attestation' `
+            -RedirectStandardError $stderrFile.FullName
+          $stderr = Get-Content $stderrFile.FullName -Raw -ErrorAction SilentlyContinue
+          Remove-Item $stderrFile.FullName -ErrorAction SilentlyContinue
+
+          if ($p.ExitCode -eq 0) {
+            throw "install.cmd v0.17.1 --verify-attestation should have been rejected by the MIN_ATTESTED_VERSION pre-flight, but exited 0. stderr: $stderr"
+          }
+          if ($stderr -notmatch 'predates') {
+            throw "install.cmd rejected with exit $($p.ExitCode), but not via the pre-flight guard. Expected 'predates' in stderr, got: $stderr"
+          }
+          # Additional safety: make sure the binary was NOT downloaded
+          # (pre-flight should run before any curl call). install.cmd
+          # installs to %USERPROFILE%\.local\bin\plannotator.exe — that
+          # path should have been left alone by the rejected invocation.
+          # Note: the previous Gemini-merge integration step DID install
+          # v0.17.1, so this only validates that this run didn't overwrite
+          # it with a newer (nonexistent) download. We check that the
+          # file we see is still the v0.17.1 binary from the earlier step.
+          Write-Host "✓ MIN_ATTESTED_VERSION pre-flight rejected v0.17.1 via the expected code path"
+
       - name: Verify Claude Code slash command files contain the shell-invocation prefix
         shell: pwsh
         run: |

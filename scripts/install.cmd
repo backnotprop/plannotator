@@ -181,8 +181,37 @@ REM would run Calculator). $env: reads the raw string; PowerShell never parses
 REM the value as code. [version] cast throws on invalid input, catch swallows,
 REM VERSION_OK stays empty, and the guard rejects — safe fail.
 if "!VERIFY_ATTESTATION!"=="1" (
-    set "TAG_NUM=!TAG:v=!"
-    set "MIN_NUM=!MIN_ATTESTED_VERSION:v=!"
+    REM Strip the leading `v` via substring-from-index-1. cmd's `:str=repl`
+    REM substitution is GLOBAL, not anchored — `!TAG:v=!` would remove every
+    REM `v` in the string, not just the leading one, so a hypothetical tag
+    REM like `v1.0.0-rev2` would become `1.0.0-re2` and break the [version]
+    REM cast. TAG is guaranteed to start with `v` by the normalization step
+    REM above, so `:~1` (drop first char) is equivalent to stripping the
+    REM leading prefix.
+    set "TAG_NUM=!TAG:~1!"
+    set "MIN_NUM=!MIN_ATTESTED_VERSION:~1!"
+
+    REM Detect pre-release / build-metadata tags (e.g. v0.18.0-rc1) BEFORE
+    REM handing the value to PowerShell. [System.Version] doesn't support
+    REM semver prerelease suffixes and would throw inside the try/catch,
+    REM leaving VERSION_OK empty and surfacing a misleading "predates
+    REM attestation support" error. install.sh handles these correctly via
+    REM `sort -V`; Windows doesn't have a built-in semver comparator, so
+    REM we reject explicitly with an accurate diagnosis instead of silently
+    REM misclassifying the failure.
+    REM
+    REM Uses native cmd substitution `!VAR:-=!` to check for `-` presence —
+    REM no subshell, no metacharacter risk. If removing `-` changes the
+    REM string, the original contained a `-`.
+    if not "!TAG_NUM!"=="!TAG_NUM:-=!" (
+        echo Pre-release tags like !TAG! aren't currently supported for >&2
+        echo provenance verification on Windows. [System.Version] doesn't >&2
+        echo parse semver prerelease suffixes. Options: >&2
+        echo   - Install without provenance verification: --skip-attestation >&2
+        echo   - Pin to a stable release tag ^(no `-rc`, `-beta`, etc.^) >&2
+        exit /b 1
+    )
+
     set "VERSION_OK="
     for /f "delims=" %%i in ('powershell -NoProfile -Command "try { if ([version]$env:TAG_NUM -ge [version]$env:MIN_NUM) { 'yes' } } catch {}"') do set "VERSION_OK=%%i"
     if not "!VERSION_OK!"=="yes" (

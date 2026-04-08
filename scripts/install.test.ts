@@ -367,6 +367,41 @@ describe("install shared behavior", () => {
     expect(cmdScript).not.toContain("[version]'!MIN_NUM!'");
   });
 
+  test("install.cmd strips leading v via substring, not global substitution", () => {
+    // Regression guard: cmd's `!VAR:str=repl!` is GLOBAL, not anchored,
+    // so `!TAG:v=!` removes every `v` in the tag — for hypothetical
+    // tags with internal v's (e.g. v1.0.0-rev2 → 1.0.0-re2) this
+    // produces an invalid version string. Use `!TAG:~1!` (substring
+    // from index 1) instead, which is equivalent to stripping the
+    // leading `v` because TAG is guaranteed to start with `v` by the
+    // upstream normalization.
+    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    expect(cmdScript).toContain('set "TAG_NUM=!TAG:~1!"');
+    expect(cmdScript).toContain('set "MIN_NUM=!MIN_ATTESTED_VERSION:~1!"');
+    // The global-substitution form must be gone from the pre-flight block.
+    expect(cmdScript).not.toContain('set "TAG_NUM=!TAG:v=!"');
+    expect(cmdScript).not.toContain('set "MIN_NUM=!MIN_ATTESTED_VERSION:v=!"');
+  });
+
+  test("both Windows installers reject pre-release tags with a dedicated error", () => {
+    // Regression guard: [System.Version] (used by both Windows installers
+    // for the pre-flight comparison) throws on semver prerelease suffixes
+    // like v0.18.0-rc1. Earlier revisions let the throw be swallowed by
+    // catch blocks and surfaced misleading diagnoses:
+    //   install.cmd: "predates attestation support" (wrong — it's unparseable)
+    //   install.ps1: "Could not parse version tags" (accurate but cryptic)
+    // Both now detect the `-` in the tag BEFORE attempting the cast and
+    // emit a dedicated "pre-release tags aren't currently supported"
+    // error that points users at --skip-attestation or a stable tag.
+    // install.sh handles these correctly via `sort -V` and doesn't need
+    // the pre-check.
+    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    expect(cmdScript).toContain("Pre-release tags");
+    expect(cmdScript).toContain('if not "!TAG_NUM!"=="!TAG_NUM:-=!"');
+    expect(ps).toContain("Pre-release tags");
+    expect(ps).toMatch(/\$latestTag -match '-'/);
+  });
+
   test("all installers hardcode MIN_ATTESTED_VERSION and guard verification against older tags", () => {
     // Releases cut before this PR added `actions/attest-build-provenance`
     // to release.yml have no attestations. Running `gh attestation verify`

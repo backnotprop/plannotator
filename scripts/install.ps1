@@ -117,6 +117,18 @@ if ($SkipAttestation)   { $verifyAttestationResolved = $false }
 # class for proper numeric comparison (lexicographic string cmp gets
 # v0.9.0 vs v0.10.0 backwards).
 if ($verifyAttestationResolved) {
+    # Pre-release and build-metadata tags (e.g. v0.18.0-rc1) are not
+    # supported by [System.Version] — the cast throws on any `-` suffix.
+    # install.sh handles these correctly via `sort -V`; Windows has no
+    # built-in semver comparator, so we detect and reject explicitly
+    # with an accurate error rather than surfacing a confusing "could
+    # not parse" message from the catch block below.
+    if ($latestTag -match '-') {
+        [Console]::Error.WriteLine("Pre-release tags like $latestTag aren't currently supported for provenance verification on Windows. [System.Version] doesn't parse semver prerelease suffixes. Options:")
+        [Console]::Error.WriteLine("  - Install without provenance verification: -SkipAttestation")
+        [Console]::Error.WriteLine("  - Pin to a stable release tag (no -rc, -beta, etc.)")
+        exit 1
+    }
     try {
         $resolvedVersion = [version]($latestTag -replace '^v', '')
         $minVersion = [version]($minAttestedVersion -replace '^v', '')
