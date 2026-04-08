@@ -248,6 +248,11 @@ const App: React.FC = () => {
     if (!showFilesTab) fileBrowser.setActiveFile(null);
   }, [showFilesTab]);
 
+  // When vault is disabled, prune any stale vault dirs immediately
+  useEffect(() => {
+    if (!vaultPath) fileBrowser.clearVaultDirs();
+  }, [vaultPath]);
+
   useEffect(() => {
     if (sidebar.activeTab === 'files' && showFilesTab) {
       // Load regular dirs
@@ -257,8 +262,9 @@ const App: React.FC = () => {
           || regularLoaded.some(d => !fileBrowserDirs.includes(d));
         if (needsRegular) fileBrowser.fetchAll(fileBrowserDirs);
       }
-      // Load vault dir (appended after regular dirs)
-      if (vaultPath && !fileBrowser.dirs.find(d => d.isVault && d.path === vaultPath)) {
+      // Load vault dir; addVaultDir atomically replaces any existing vault entry so
+      // switching vault paths never accumulates stale sections
+      if (vaultPath && !fileBrowser.dirs.find(d => d.isVault && d.path === vaultPath && !d.error)) {
         fileBrowser.addVaultDir(vaultPath);
       }
     }
@@ -1441,6 +1447,7 @@ const App: React.FC = () => {
                 fileBrowser={fileBrowser}
                 onFilesSelectFile={handleFileBrowserSelect}
                 onFilesFetchAll={() => fileBrowser.fetchAll(fileBrowserDirs)}
+                onFilesRetryVaultDir={(vaultPath) => fileBrowser.addVaultDir(vaultPath)}
                 hasFileAnnotations={hasFileAnnotations}
                 showVersionsTab={versionInfo !== null && versionInfo.totalVersions > 1}
                 versionInfo={versionInfo}

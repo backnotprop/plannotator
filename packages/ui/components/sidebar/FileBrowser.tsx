@@ -20,6 +20,7 @@ interface FileBrowserProps {
   onSelectFile: (absolutePath: string, dirPath: string) => void;
   activeFile: string | null;
   onFetchAll: () => void;
+  onRetryVaultDir?: (vaultPath: string) => void;
   annotationCounts?: Map<string, number>;
   highlightedFiles?: Set<string>;
 }
@@ -191,6 +192,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
   onSelectFile,
   activeFile,
   onFetchAll,
+  onRetryVaultDir,
   annotationCounts,
   highlightedFiles,
 }) => {
@@ -243,7 +245,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                 onToggleFolder={onToggleFolder}
                 onSelectFile={onSelectFile}
                 activeFile={activeFile}
-                onRetry={onFetchAll}
+                onRetry={dir.isVault && onRetryVaultDir ? () => onRetryVaultDir(dir.path) : onFetchAll}
                 annotationCounts={annotationCounts}
                 highlightedFiles={highlightedFiles}
               />

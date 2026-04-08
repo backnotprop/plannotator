@@ -29,6 +29,7 @@ export interface UseFileBrowserReturn {
   fetchTree: (dirPath: string) => void;
   fetchAll: (directories: string[]) => void;
   addVaultDir: (vaultPath: string) => void;
+  clearVaultDirs: () => void;
   activeFile: string | null;
   activeDirPath: string | null;
   setActiveFile: (path: string | null) => void;
@@ -119,12 +120,17 @@ export function useFileBrowser(): UseFileBrowserReturn {
     [fetchTree]
   );
 
+  const clearVaultDirs = useCallback(() => {
+    setDirs((prev) => prev.filter((d) => !d.isVault));
+  }, []);
+
   const addVaultDir = useCallback(async (vaultPath: string) => {
     const name = vaultPath.split("/").pop() || vaultPath;
 
+    // Atomically replace any existing vault dirs (handles vault path change without accumulating stale entries)
     setDirs((prev) => {
-      if (prev.find((d) => d.path === vaultPath)) return prev;
-      return [...prev, { path: vaultPath, name, tree: [], isLoading: true, error: null, isVault: true }];
+      const nonVaultDirs = prev.filter((d) => !d.isVault);
+      return [...nonVaultDirs, { path: vaultPath, name, tree: [], isLoading: true, error: null, isVault: true }];
     });
 
     try {
@@ -186,6 +192,7 @@ export function useFileBrowser(): UseFileBrowserReturn {
     fetchTree,
     fetchAll,
     addVaultDir,
+    clearVaultDirs,
     activeFile,
     activeDirPath: activeFile ? (dirs.find((d) => activeFile.startsWith(d.path + "/"))?.path ?? null) : null,
     setActiveFile,

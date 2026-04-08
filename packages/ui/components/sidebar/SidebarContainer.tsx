@@ -36,6 +36,7 @@ interface SidebarContainerProps {
   fileBrowser?: UseFileBrowserReturn;
   onFilesSelectFile?: (absolutePath: string, dirPath: string) => void;
   onFilesFetchAll?: () => void;
+  onFilesRetryVaultDir?: (vaultPath: string) => void;
   // Version Browser props
   showVersionsTab?: boolean;
   versionInfo: VersionInfo | null;
@@ -77,6 +78,7 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
   fileBrowser,
   onFilesSelectFile,
   onFilesFetchAll,
+  onFilesRetryVaultDir,
   showVersionsTab,
   versionInfo,
   versions,
@@ -251,6 +253,7 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
             onSelectFile={onFilesSelectFile ?? (() => {})}
             activeFile={fileBrowser.activeFile}
             onFetchAll={onFilesFetchAll ?? (() => {})}
+            onRetryVaultDir={onFilesRetryVaultDir}
             annotationCounts={fileAnnotationCounts}
             highlightedFiles={highlightedFiles}
           />
