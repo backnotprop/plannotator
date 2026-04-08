@@ -131,7 +131,8 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
     }
 
     // List Items (Simple detection)
-    if (trimmed.match(/^(\*|-|\d+\.)\s/)) {
+    const listMatch = trimmed.match(/^(\*|-|(\d+)\.)\s/);
+    if (listMatch) {
       flush(); // Treat each list item as a separate block for easier annotation
       // Calculate indentation level from leading whitespace
       const leadingWhitespace = line.match(/^(\s*)/)?.[1] || '';
@@ -139,8 +140,12 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
       const spaceCount = leadingWhitespace.replace(/\t/g, '  ').length;
       const listLevel = Math.floor(spaceCount / 2);
 
+      // Distinguish numeric markers (\d+.) from bullet markers (* / -)
+      const ordered = listMatch[2] !== undefined;
+      const orderedStart = ordered ? parseInt(listMatch[2]!, 10) : undefined;
+
       // Remove list marker
-      let content = trimmed.replace(/^(\*|-|\d+\.)\s/, '');
+      let content = trimmed.slice(listMatch[0].length);
 
       // Check for checkbox syntax: [ ] or [x] or [X]
       let checked: boolean | undefined = undefined;
@@ -156,6 +161,8 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
         content,
         level: listLevel,
         checked,
+        ordered: ordered || undefined,
+        orderedStart,
         order: currentId,
         startLine: currentLineNum
       });
@@ -260,6 +267,49 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
   flush(); // Final flush
 
   return blocks;
+};
+
+/**
+ * Compute the display index for each list item in a contiguous list group.
+ *
+ * Returns a parallel array where each entry is either:
+ *   - a positive integer (the numeral to render for an ordered item), or
+ *   - null (the item is unordered, render a bullet symbol).
+ *
+ * Semantics:
+ *   - A run of consecutive ordered items at the same level increments
+ *     sequentially. The first item in a run uses its `orderedStart` (the
+ *     number from the source markdown); subsequent items renumber from there
+ *     so `1. / 2. / 5.` renders as 1, 2, 3 (matches CommonMark).
+ *   - An unordered item at level L breaks the ordered streak at L. The next
+ *     ordered item at L restarts from its own `orderedStart`.
+ *   - Visiting a level shallower than the current one truncates deeper-level
+ *     state, so re-entering that depth later starts fresh. Top-level numbering
+ *     continues across nested children of any kind.
+ */
+export const computeListIndices = (blocks: Block[]): (number | null)[] => {
+  const counters: number[] = [];
+  const lastOrderedAtLevel: boolean[] = [];
+
+  return blocks.map(block => {
+    const lvl = block.level || 0;
+    // Sibling change at any deeper level resets those levels.
+    counters.length = lvl + 1;
+    lastOrderedAtLevel.length = lvl + 1;
+
+    if (!block.ordered) {
+      lastOrderedAtLevel[lvl] = false;
+      return null;
+    }
+
+    if (lastOrderedAtLevel[lvl]) {
+      counters[lvl] = (counters[lvl] ?? 0) + 1;
+    } else {
+      counters[lvl] = block.orderedStart ?? 1;
+    }
+    lastOrderedAtLevel[lvl] = true;
+    return counters[lvl];
+  });
 };
 
 /** Wrap feedback output with the deny preamble for pasting into agent sessions */

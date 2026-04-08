@@ -1,5 +1,18 @@
 import { describe, test, expect } from "bun:test";
-import { parseMarkdownToBlocks } from "./parser";
+import { parseMarkdownToBlocks, computeListIndices } from "./parser";
+import type { Block } from "../types";
+
+/** Tiny factory for list-item blocks used by computeListIndices tests. */
+const li = (level: number, ordered: boolean, orderedStart?: number): Block => ({
+  id: `b${Math.random()}`,
+  type: "list-item",
+  content: "",
+  level,
+  ordered: ordered || undefined,
+  orderedStart,
+  order: 0,
+  startLine: 1,
+});
 
 describe("parseMarkdownToBlocks — code fences", () => {
   /**
@@ -272,5 +285,198 @@ describe("parseMarkdownToBlocks — list continuation lines", () => {
     expect(blocks).toHaveLength(2);
     expect(blocks[0].type).toBe("list-item");
     expect(blocks[1].type).toBe("heading");
+  });
+});
+
+describe("parseMarkdownToBlocks — ordered lists", () => {
+  test("numeric markers produce ordered list items with orderedStart", () => {
+    const md = "1. first\n2. second";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("list-item");
+    expect(blocks[0].ordered).toBe(true);
+    expect(blocks[0].orderedStart).toBe(1);
+    expect(blocks[0].content).toBe("first");
+    expect(blocks[1].ordered).toBe(true);
+    expect(blocks[1].orderedStart).toBe(2);
+    expect(blocks[1].content).toBe("second");
+  });
+
+  test("ordered list can start at an arbitrary number", () => {
+    const md = "5. five\n6. six";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].orderedStart).toBe(5);
+    expect(blocks[1].orderedStart).toBe(6);
+  });
+
+  test("bullet markers stay unordered (no ordered flag)", () => {
+    const md = "- a\n* b";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].ordered).toBeUndefined();
+    expect(blocks[0].orderedStart).toBeUndefined();
+    expect(blocks[1].ordered).toBeUndefined();
+  });
+
+  test("mixed bullet/numeric/bullet run preserves per-item ordered flag", () => {
+    const md = "- a\n1. b\n- c";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(3);
+    expect(blocks[0].ordered).toBeUndefined();
+    expect(blocks[1].ordered).toBe(true);
+    expect(blocks[1].orderedStart).toBe(1);
+    expect(blocks[2].ordered).toBeUndefined();
+  });
+
+  test("nested ordered item inside an unordered parent keeps its ordered flag", () => {
+    const md = "- parent\n  1. child\n  2. child two";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(3);
+    expect(blocks[0].ordered).toBeUndefined();
+    expect(blocks[0].level).toBe(0);
+    expect(blocks[1].ordered).toBe(true);
+    expect(blocks[1].level).toBe(1);
+    expect(blocks[1].orderedStart).toBe(1);
+    expect(blocks[2].ordered).toBe(true);
+    expect(blocks[2].level).toBe(1);
+    expect(blocks[2].orderedStart).toBe(2);
+  });
+
+  test("continuation line on an ordered item merges into content and preserves ordered flag", () => {
+    const md = "1. first item\n   continuation\n2. second";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].ordered).toBe(true);
+    expect(blocks[0].content).toBe("first item\ncontinuation");
+    expect(blocks[1].ordered).toBe(true);
+    expect(blocks[1].orderedStart).toBe(2);
+  });
+
+  test("numeric checkbox sets both ordered and checked", () => {
+    const md = "1. [ ] todo task\n2. [x] done task";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].ordered).toBe(true);
+    expect(blocks[0].checked).toBe(false);
+    expect(blocks[0].content).toBe("todo task");
+    expect(blocks[1].ordered).toBe(true);
+    expect(blocks[1].checked).toBe(true);
+    expect(blocks[1].content).toBe("done task");
+  });
+
+  test("'1.5 second' is not parsed as a list item (no whitespace after the dot)", () => {
+    const md = "1.5 second response time";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("paragraph");
+    expect(blocks[0].ordered).toBeUndefined();
+  });
+
+  test("heading branch wins over list branch for '### 1. Foo'", () => {
+    const md = "### 1. Foo";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("heading");
+  });
+});
+
+describe("computeListIndices", () => {
+  test("all unordered → all null", () => {
+    const blocks = [li(0, false), li(0, false), li(0, false)];
+    expect(computeListIndices(blocks)).toEqual([null, null, null]);
+  });
+
+  test("simple ordered run numbers sequentially from orderedStart of first item", () => {
+    const blocks = [li(0, true, 1), li(0, true, 2), li(0, true, 3)];
+    expect(computeListIndices(blocks)).toEqual([1, 2, 3]);
+  });
+
+  test("ordered run starting at 5 numbers from 5", () => {
+    const blocks = [li(0, true, 5), li(0, true, 6)];
+    expect(computeListIndices(blocks)).toEqual([5, 6]);
+  });
+
+  test("renumbering ignores subsequent orderedStart values (CommonMark)", () => {
+    // Source markdown `1. / 2. / 99.` should render as 1, 2, 3
+    const blocks = [li(0, true, 1), li(0, true, 2), li(0, true, 99)];
+    expect(computeListIndices(blocks)).toEqual([1, 2, 3]);
+  });
+
+  test("unordered item breaks the ordered streak; next ordered restarts from its orderedStart", () => {
+    const blocks = [
+      li(0, true, 1),
+      li(0, true, 2),
+      li(0, false),
+      li(0, true, 1),
+    ];
+    expect(computeListIndices(blocks)).toEqual([1, 2, null, 1]);
+  });
+
+  test("unordered nested children do not break top-level numbering", () => {
+    // 1. a
+    //   - bullet
+    //   - bullet
+    // 2. b
+    const blocks = [
+      li(0, true, 1),
+      li(1, false),
+      li(1, false),
+      li(0, true, 2),
+    ];
+    expect(computeListIndices(blocks)).toEqual([1, null, null, 2]);
+  });
+
+  test("nested ordered sublists number independently and reset between siblings", () => {
+    // 1. a
+    //   1. a.1
+    //   2. a.2
+    // 2. b
+    //   1. b.1
+    const blocks = [
+      li(0, true, 1),
+      li(1, true, 1),
+      li(1, true, 2),
+      li(0, true, 2),
+      li(1, true, 1),
+    ];
+    expect(computeListIndices(blocks)).toEqual([1, 1, 2, 2, 1]);
+  });
+
+  test("ordered sublist after an unordered sub-bullet restarts from its source orderedStart", () => {
+    // 1. a
+    //   - bullet
+    //   2. honored as 2 because the source said `2.`
+    const blocks = [
+      li(0, true, 1),
+      li(1, false),
+      li(1, true, 2),
+    ];
+    expect(computeListIndices(blocks)).toEqual([1, null, 2]);
+  });
+
+  test("mixed sub-bullets between ordered top-level items keep top-level streak alive", () => {
+    // 1. a
+    //   - sub
+    // 2. b
+    //   - sub
+    // 3. c
+    const blocks = [
+      li(0, true, 1),
+      li(1, false),
+      li(0, true, 2),
+      li(1, false),
+      li(0, true, 3),
+    ];
+    expect(computeListIndices(blocks)).toEqual([1, null, 2, null, 3]);
+  });
+
+  test("empty input returns empty array", () => {
+    expect(computeListIndices([])).toEqual([]);
+  });
+
+  test("single ordered item with no orderedStart defaults to 1", () => {
+    const blocks = [{ ...li(0, true), orderedStart: undefined }];
+    expect(computeListIndices(blocks)).toEqual([1]);
   });
 });

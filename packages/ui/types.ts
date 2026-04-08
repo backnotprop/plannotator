@@ -58,6 +58,8 @@ export interface Block {
   level?: number; // For headings (1-6) or list indentation
   language?: string; // For code blocks (e.g., 'rust', 'typescript')
   checked?: boolean; // For checkbox list items (true = checked, false = unchecked, undefined = not a checkbox)
+  ordered?: boolean; // For list items: true when source marker was \d+.
+  orderedStart?: number; // For ordered list items: integer parsed from the marker (e.g. 5 for "5.")
   order: number; // Sorting order
   startLine: number; // 1-based line number in source
 }
