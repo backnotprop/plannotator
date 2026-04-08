@@ -93,6 +93,10 @@ jobs:
           bun build apps/hook/server/index.ts --compile --target=bun-windows-x64 --outfile plannotator-win32-x64.exe
           sha256sum plannotator-win32-x64.exe > plannotator-win32-x64.exe.sha256
 
+          # Windows ARM64 (native, via bun-windows-arm64 — stable since Bun v1.3.10)
+          bun build apps/hook/server/index.ts --compile --target=bun-windows-arm64 --outfile plannotator-win32-arm64.exe
+          sha256sum plannotator-win32-arm64.exe > plannotator-win32-arm64.exe.sha256
+
           # Paste service binaries
           bun build apps/paste-service/targets/bun.ts --compile --target=bun-darwin-arm64 --outfile plannotator-paste-darwin-arm64
           sha256sum plannotator-paste-darwin-arm64 > plannotator-paste-darwin-arm64.sha256
@@ -108,6 +112,9 @@ jobs:
 
           bun build apps/paste-service/targets/bun.ts --compile --target=bun-windows-x64 --outfile plannotator-paste-win32-x64.exe
           sha256sum plannotator-paste-win32-x64.exe > plannotator-paste-win32-x64.exe.sha256
+
+          bun build apps/paste-service/targets/bun.ts --compile --target=bun-windows-arm64 --outfile plannotator-paste-win32-arm64.exe
+          sha256sum plannotator-paste-win32-arm64.exe > plannotator-paste-win32-arm64.exe.sha256
 
       - name: Upload artifacts
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
@@ -150,11 +157,13 @@ jobs:
             plannotator-linux-x64
             plannotator-linux-arm64
             plannotator-win32-x64.exe
+            plannotator-win32-arm64.exe
             plannotator-paste-darwin-arm64
             plannotator-paste-darwin-x64
             plannotator-paste-linux-x64
             plannotator-paste-linux-arm64
             plannotator-paste-win32-x64.exe
+            plannotator-paste-win32-arm64.exe
 
   release:
     # Depends on `attest` so the signed provenance exists before the

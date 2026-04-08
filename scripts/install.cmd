@@ -83,23 +83,29 @@ goto parse_args
 
 set "REPO=backnotprop/plannotator"
 set "INSTALL_DIR=%USERPROFILE%\.local\bin"
-set "PLATFORM=win32-x64"
 
 REM First plannotator release that carries SLSA build-provenance attestations.
 REM See scripts/install.sh for the full explanation — this constant is
 REM bumped once at the first attested release via the release skill.
 set "MIN_ATTESTED_VERSION=v0.17.2"
 
-REM Check for 64-bit Windows
-if /i "%PROCESSOR_ARCHITECTURE%"=="AMD64" goto :arch_valid
-if /i "%PROCESSOR_ARCHITECTURE%"=="ARM64" goto :arch_valid
-if /i "%PROCESSOR_ARCHITEW6432%"=="AMD64" goto :arch_valid
-if /i "%PROCESSOR_ARCHITEW6432%"=="ARM64" goto :arch_valid
+REM Detect architecture. Native ARM64 Windows binaries are built from
+REM bun-windows-arm64 (stable since Bun v1.3.10), so ARM64 hosts get a
+REM native binary — no Windows x86-64 emulation tax. PROCESSOR_ARCHITECTURE
+REM reports the architecture the current cmd.exe process is running under;
+REM PROCESSOR_ARCHITEW6432 is set only in 32-bit processes running via
+REM WoW64 and reflects the host architecture (covers the edge case of a
+REM 32-bit tool launching install.cmd on an ARM64 machine).
+set "PLATFORM="
+if /i "%PROCESSOR_ARCHITECTURE%"=="AMD64"    set "PLATFORM=win32-x64"
+if /i "%PROCESSOR_ARCHITECTURE%"=="ARM64"    set "PLATFORM=win32-arm64"
+if /i "%PROCESSOR_ARCHITEW6432%"=="AMD64"    set "PLATFORM=win32-x64"
+if /i "%PROCESSOR_ARCHITEW6432%"=="ARM64"    set "PLATFORM=win32-arm64"
 
-echo Plannotator does not support 32-bit Windows. >&2
-exit /b 1
-
-:arch_valid
+if "!PLATFORM!"=="" (
+    echo Plannotator does not support 32-bit Windows. >&2
+    exit /b 1
+)
 
 REM Check for curl availability
 curl --version >nul 2>&1

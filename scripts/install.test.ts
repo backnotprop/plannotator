@@ -92,23 +92,18 @@ describe("install.ps1", () => {
     expect(script).toContain("UTF8.GetString");
   });
 
-  test("ARM64 Windows falls back to x64 binary via Windows emulation", () => {
-    // We don't ship a native ARM64 Windows binary — release.yml builds
-    // only bun-windows-x64 — so install.ps1 must not select arm64 and
-    // then 404 on a non-existent binary. Instead, always set $arch=x64
-    // on 64-bit Windows and print a notice when ARM64 is detected so
-    // users know they're running via emulation.
-    //
-    // Verify three things:
-    //   1. ARM64 is still detected (for the notice)
-    //   2. $arch is hardcoded to "x64" on 64-bit systems
-    //   3. The old `"arm64"` literal is not present as an $arch value
+  test("install.ps1 selects native arm64 binary on ARM64 Windows", () => {
+    // release.yml now builds bun-windows-arm64 (stable since Bun v1.3.10),
+    // so ARM64 hosts get a native binary instead of running the x64 build
+    // via Windows emulation. install.ps1 must detect PROCESSOR_ARCHITECTURE
+    // and set $arch accordingly so the downloaded binary matches the host.
+    expect(script).toContain("PROCESSOR_ARCHITECTURE");
     expect(script).toContain('"ARM64"');
+    expect(script).toContain('$arch = "arm64"');
     expect(script).toContain('$arch = "x64"');
-    expect(script).toContain("runs via Windows emulation");
-    // The previous code had `{ "arm64" } else { "x64" }` — make sure the
-    // arm64 branch is gone so we can't regress to a 404 install.
-    expect(script).not.toMatch(/{\s*"arm64"\s*}/);
+    // The emulation-fallback workaround from earlier cycles must be gone
+    // now that native ARM64 binaries ship.
+    expect(script).not.toContain("runs via Windows emulation");
   });
 
   test("adds to PATH via environment variable", () => {
@@ -162,6 +157,19 @@ describe("install.cmd", () => {
     expect(script).toContain("AMD64");
     expect(script).toContain("ARM64");
     expect(script).toContain("PROCESSOR_ARCHITEW6432"); // WoW64 detection
+  });
+
+  test("install.cmd selects platform based on PROCESSOR_ARCHITECTURE", () => {
+    // Earlier revisions hardcoded `set "PLATFORM=win32-x64"` regardless
+    // of host architecture, so ARM64 Windows machines silently received
+    // the x64 binary (working via emulation, but slower). Now that
+    // release.yml ships a native bun-windows-arm64 build, the script
+    // must branch on PROCESSOR_ARCHITECTURE / PROCESSOR_ARCHITEW6432
+    // and set PLATFORM to win32-arm64 when appropriate.
+    expect(script).toContain('set "PLATFORM=win32-x64"');
+    expect(script).toContain('set "PLATFORM=win32-arm64"');
+    // The old unconditional hardcode must be gone.
+    expect(script).not.toMatch(/^set "PLATFORM=win32-x64"$/m);
   });
 
   test("warns about duplicate hooks", () => {

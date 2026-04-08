@@ -23,19 +23,15 @@ $installDir = "$env:LOCALAPPDATA\plannotator"
 # once at the first attested release via the release skill.
 $minAttestedVersion = "v0.17.2"
 
-# Detect architecture. We don't currently ship a native ARM64 Windows
-# binary — the release pipeline only builds bun-windows-x64. Windows 11
-# runs x64 binaries on ARM64 via emulation, so fall back to x64 on ARM64
-# hosts rather than hard-failing with a 404 on a binary we don't publish.
-# install.cmd already (accidentally) does the same thing by hardcoding
-# its PLATFORM to win32-x64; this brings install.ps1 into parity so both
-# Windows installer paths produce a working install on ARM64.
-# Native ARM64 Windows builds tracked as a follow-up.
+# Detect architecture. Native ARM64 Windows binaries are built from
+# bun-windows-arm64 (stable since Bun v1.3.10), so ARM64 hosts get a
+# native binary — no Windows x86-64 emulation tax.
 if ([Environment]::Is64BitOperatingSystem) {
     if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
-        Write-Host "ARM64 Windows detected — installing x64 binary (runs via Windows emulation)."
+        $arch = "arm64"
+    } else {
+        $arch = "x64"
     }
-    $arch = "x64"
 } else {
     Write-Error "32-bit Windows is not supported"
     exit 1
