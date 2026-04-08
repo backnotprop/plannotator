@@ -187,9 +187,9 @@ If anything is missing, fix it before proceeding to Phase 4. Common fixes:
 
 3. **The pipeline handles everything else:**
    - Runs tests
-   - Cross-compiles binaries for 5 platforms (macOS ARM64/x64, Linux x64/ARM64, Windows x64)
-   - Compiles paste service binaries (same 5 platforms)
-   - Generates SLSA build provenance attestations for all 10 binaries via `actions/attest-build-provenance` (signed through Sigstore, recorded in Rekor)
+   - Cross-compiles binaries for 6 platforms (macOS ARM64/x64, Linux x64/ARM64, Windows x64/ARM64)
+   - Compiles paste service binaries (same 6 platforms)
+   - Generates SLSA build provenance attestations for all 12 binaries via `actions/attest-build-provenance` (signed through Sigstore, recorded in Rekor)
    - Creates the GitHub Release with all binaries attached
    - Publishes `@plannotator/opencode` and `@plannotator/pi-extension` to npm with provenance
 
