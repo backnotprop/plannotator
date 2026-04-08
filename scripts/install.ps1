@@ -21,7 +21,7 @@ $installDir = "$env:LOCALAPPDATA\plannotator"
 # First plannotator release that carries SLSA build-provenance attestations.
 # See scripts/install.sh for the full explanation — this constant is bumped
 # once at the first attested release via the release skill.
-$minAttestedVersion = "v0.18.0"
+$minAttestedVersion = "v0.17.2"
 
 # Detect architecture. We don't currently ship a native ARM64 Windows
 # binary — the release pipeline only builds bun-windows-x64. Windows 11

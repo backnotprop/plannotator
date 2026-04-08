@@ -88,7 +88,7 @@ set "PLATFORM=win32-x64"
 REM First plannotator release that carries SLSA build-provenance attestations.
 REM See scripts/install.sh for the full explanation — this constant is
 REM bumped once at the first attested release via the release skill.
-set "MIN_ATTESTED_VERSION=v0.18.0"
+set "MIN_ATTESTED_VERSION=v0.17.2"
 
 REM Check for 64-bit Windows
 if /i "%PROCESSOR_ARCHITECTURE%"=="AMD64" goto :arch_valid

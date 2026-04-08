@@ -13,7 +13,7 @@ INSTALL_DIR="$HOME/.local/bin"
 # against this constant and fails fast with a clear message instead of
 # downloading a binary, running SHA256, and then hitting a cryptic gh
 # failure. Bumped once at the first attested release via the release skill.
-MIN_ATTESTED_VERSION="v0.18.0"
+MIN_ATTESTED_VERSION="v0.17.2"
 
 # Compare two vMAJOR.MINOR.PATCH tags. Returns 0 (success) if $1 >= $2.
 # Uses `sort -V` (version sort) which handles minor/patch width correctly

@@ -417,15 +417,15 @@ describe("install shared behavior", () => {
     const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
 
     // install.sh
-    expect(sh).toContain('MIN_ATTESTED_VERSION="v0.18.0"');
+    expect(sh).toContain('MIN_ATTESTED_VERSION="v0.17.2"');
     expect(sh).toContain("version_ge");
     expect(sh).toContain("predates");
     // install.ps1
-    expect(ps).toContain('$minAttestedVersion = "v0.18.0"');
+    expect(ps).toContain('$minAttestedVersion = "v0.17.2"');
     expect(ps).toContain("[version]");
     expect(ps).toContain("predates");
     // install.cmd
-    expect(cmdScript).toContain('set "MIN_ATTESTED_VERSION=v0.18.0"');
+    expect(cmdScript).toContain('set "MIN_ATTESTED_VERSION=v0.17.2"');
     expect(cmdScript).toContain("powershell -NoProfile -Command");
     expect(cmdScript).toContain("predates");
   });
