@@ -4,6 +4,7 @@ import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
 import { Block, Annotation, AnnotationType, EditorMode, type InputMethod, type ImageAttachment, type ActionsLabelMode } from '../types';
 import { Frontmatter, computeListIndices } from '../utils/parser';
+import { ListMarker } from './ListMarker';
 import { AnnotationToolbar } from './AnnotationToolbar';
 import { FloatingQuickLabelPicker } from './FloatingQuickLabelPicker';
 
@@ -994,15 +995,23 @@ const BlockRenderer: React.FC<{
 
       return <Tag className={styles} data-block-id={block.id} data-block-type="heading"><InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} /></Tag>;
 
-    case 'blockquote':
+    case 'blockquote': {
+      // Content may span multiple merged `>` lines. Split on blank-line
+      // paragraph breaks so `> a\n>\n> b` renders as two <p> children.
+      const paragraphs = block.content.split(/\n\n+/);
       return (
         <blockquote
           className="border-l-2 border-primary/50 pl-4 my-4 text-muted-foreground italic"
           data-block-id={block.id}
         >
-          <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} />
+          {paragraphs.map((para, i) => (
+            <p key={i} className={i > 0 ? 'mt-2' : ''}>
+              <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={para} onOpenLinkedDoc={onOpenLinkedDoc} />
+            </p>
+          ))}
         </blockquote>
       );
+    }
 
     case 'list-item': {
       const indent = (block.level || 0) * 1.25; // 1.25rem per level
@@ -1017,32 +1026,14 @@ const BlockRenderer: React.FC<{
           data-block-id={block.id}
           style={{ marginLeft: `${indent}rem` }}
         >
-          <span
-            className={`select-none shrink-0 flex items-center${isInteractive ? ' cursor-pointer' : ''}`}
-            onClick={isInteractive ? (e) => { e.stopPropagation(); onToggleCheckbox!(block.id, !isChecked); } : undefined}
-            role={isInteractive ? 'checkbox' : undefined}
-            aria-checked={isInteractive ? isChecked : undefined}
-          >
-            {isCheckbox ? (
-              isChecked ? (
-                <svg className="w-4 h-4 text-success" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              ) : (
-                <svg className={`w-4 h-4 text-muted-foreground/50${isInteractive ? ' hover:text-muted-foreground transition-colors' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <circle cx="12" cy="12" r="9" />
-                </svg>
-              )
-            ) : block.ordered && orderedIndex != null ? (
-              <span className="text-primary/60 tabular-nums text-right" style={{ minWidth: '1.5rem' }}>
-                {orderedIndex}.
-              </span>
-            ) : (
-              <span className="text-primary/60">
-                {(block.level || 0) === 0 ? '•' : (block.level || 0) === 1 ? '◦' : '▪'}
-              </span>
-            )}
-          </span>
+          <ListMarker
+            level={block.level || 0}
+            ordered={block.ordered}
+            orderedIndex={orderedIndex}
+            checked={isChecked}
+            interactive={isInteractive}
+            onToggle={isInteractive ? () => onToggleCheckbox!(block.id, !isChecked) : undefined}
+          />
           <span className={`text-sm leading-relaxed ${isCheckbox && isChecked ? 'text-muted-foreground line-through' : 'text-foreground/90'}`}>
             <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} />
           </span>

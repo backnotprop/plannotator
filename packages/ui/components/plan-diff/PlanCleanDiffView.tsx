@@ -8,7 +8,8 @@
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import hljs from "highlight.js";
-import { parseMarkdownToBlocks } from "../../utils/parser";
+import { parseMarkdownToBlocks, computeListIndices } from "../../utils/parser";
+import { ListMarker } from "../ListMarker";
 import type { Block, Annotation, EditorMode, ImageAttachment } from "../../types";
 import { AnnotationType } from "../../types";
 import type { PlanDiffBlock } from "../../utils/planDiffEngine";
@@ -409,17 +410,29 @@ const MarkdownChunk: React.FC<{ content: string }> = ({ content }) => {
     () => parseMarkdownToBlocks(content),
     [content]
   );
+  // Compute ordered-list display indices across the entire chunk so every
+  // list-item gets the right numeral even though we don't group here.
+  // Non-list blocks pass through as `null` and act as streak-breaks — same
+  // behavior as the main Viewer's per-group counter.
+  const orderedIndices = React.useMemo(
+    () => computeListIndices(blocks),
+    [blocks]
+  );
 
   return (
     <>
-      {blocks.map((block) => (
-        <SimpleBlockRenderer key={block.id} block={block} />
+      {blocks.map((block, i) => (
+        <SimpleBlockRenderer
+          key={block.id}
+          block={block}
+          orderedIndex={orderedIndices[i]}
+        />
       ))}
     </>
   );
 };
 
-const SimpleBlockRenderer: React.FC<{ block: Block }> = ({ block }) => {
+const SimpleBlockRenderer: React.FC<{ block: Block; orderedIndex?: number | null }> = ({ block, orderedIndex }) => {
   switch (block.type) {
     case "heading": {
       const Tag = `h${block.level || 1}` as keyof React.JSX.IntrinsicElements;
@@ -437,12 +450,20 @@ const SimpleBlockRenderer: React.FC<{ block: Block }> = ({ block }) => {
       );
     }
 
-    case "blockquote":
+    case "blockquote": {
+      // Split on blank-line paragraph breaks so merged `> a\n>\n> b`
+      // renders as two <p> children instead of collapsing to one line.
+      const paragraphs = block.content.split(/\n\n+/);
       return (
         <blockquote className="border-l-2 border-primary/50 pl-4 my-4 text-muted-foreground italic">
-          <InlineMarkdown text={block.content} />
+          {paragraphs.map((para, i) => (
+            <p key={i} className={i > 0 ? "mt-2" : ""}>
+              <InlineMarkdown text={para} />
+            </p>
+          ))}
         </blockquote>
       );
+    }
 
     case "list-item": {
       const indent = (block.level || 0) * 1.25;
@@ -452,43 +473,12 @@ const SimpleBlockRenderer: React.FC<{ block: Block }> = ({ block }) => {
           className="flex gap-3 my-1.5"
           style={{ marginLeft: `${indent}rem` }}
         >
-          <span className="select-none shrink-0 flex items-center">
-            {isCheckbox ? (
-              block.checked ? (
-                <svg
-                  className="w-4 h-4 text-success"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2.5}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-              ) : (
-                <svg
-                  className="w-4 h-4 text-muted-foreground/50"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <circle cx="12" cy="12" r="9" />
-                </svg>
-              )
-            ) : (
-              <span className="text-primary/60">
-                {(block.level || 0) === 0
-                  ? "\u2022"
-                  : (block.level || 0) === 1
-                    ? "\u25E6"
-                    : "\u25AA"}
-              </span>
-            )}
-          </span>
+          <ListMarker
+            level={block.level || 0}
+            ordered={block.ordered}
+            orderedIndex={orderedIndex}
+            checked={block.checked}
+          />
           <span
             className={`text-sm leading-relaxed ${isCheckbox && block.checked ? "text-muted-foreground line-through" : "text-foreground/90"}`}
           >

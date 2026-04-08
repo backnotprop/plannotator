@@ -425,6 +425,22 @@ describe("parseMarkdownToBlocks — blockquotes", () => {
     expect(blocks[0].type).toBe("blockquote");
     expect(blocks[0].content).toBe("just one");
   });
+
+  test("multi-paragraph blockquote encodes paragraph break as double newline", () => {
+    // The empty `>` line sits between two quoted paragraphs. We merge all
+    // three `>` lines into one block, but the blank `>` becomes an empty
+    // string, leaving a `\n\n` in the content so the renderer can split on
+    // paragraph breaks and emit two <p> children.
+    const md = "> first paragraph\n>\n> second paragraph";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("blockquote");
+    expect(blocks[0].content).toBe("first paragraph\n\nsecond paragraph");
+    expect(blocks[0].content.split(/\n\n+/)).toEqual([
+      "first paragraph",
+      "second paragraph",
+    ]);
+  });
 });
 
 describe("computeListIndices", () => {
