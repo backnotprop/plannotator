@@ -3,8 +3,8 @@ import { type Origin, getAgentName } from '@plannotator/shared/agents';
 import { ThemeProvider, useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
 import { Settings } from '@plannotator/ui/components/Settings';
-import { FeedbackButton, ApproveButton } from '@plannotator/ui/components/ToolbarButtons';
-import { PiReviewActions } from './components/PiReviewActions';
+import { FeedbackButton, ApproveButton, ExitButton } from '@plannotator/ui/components/ToolbarButtons';
+import { AgentReviewActions } from './components/AgentReviewActions';
 import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
 import { storage } from '@plannotator/ui/utils/storage';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
@@ -162,6 +162,7 @@ const ReviewApp: React.FC = () => {
   const [isExiting, setIsExiting] = useState(false);
   const [submitted, setSubmitted] = useState<'approved' | 'feedback' | 'exited' | false>(false);
   const [showApproveWarning, setShowApproveWarning] = useState(false);
+  const [showExitWarning, setShowExitWarning] = useState(false);
   const [sharingEnabled, setSharingEnabled] = useState(true);
   const [repoInfo, setRepoInfo] = useState<{ display: string; branch?: string } | null>(null);
 
@@ -1296,7 +1297,7 @@ const ReviewApp: React.FC = () => {
 
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      if (showExportModal || showNoAnnotationsDialog || showApproveWarning) return;
+      if (showExportModal || showNoAnnotationsDialog || showApproveWarning || showExitWarning) return;
       if (submitted || isSendingFeedback || isApproving || isExiting || isPlatformActioning) return;
       if (!origin) return; // Demo mode
 
@@ -1325,9 +1326,9 @@ const ReviewApp: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
-    showExportModal, showNoAnnotationsDialog, showApproveWarning,
+    showExportModal, showNoAnnotationsDialog, showApproveWarning, showExitWarning,
     platformCommentDialog, platformGeneralComment,
-    submitted, isSendingFeedback, isApproving, isPlatformActioning,
+    submitted, isSendingFeedback, isApproving, isExiting, isPlatformActioning,
     origin, platformMode, platformUser, prMetadata, totalAnnotationCount,
     handleApprove, handleSendFeedback, handlePlatformAction
   ]);
@@ -1517,50 +1518,25 @@ const ReviewApp: React.FC = () => {
                   </div>
                 )}
 
-                {/* Pi agent mode: Exit/SendFeedback flip + Approve */}
-                {origin === 'pi' && !platformMode ? (
-                  <PiReviewActions
+                {/* Agent mode: Close/SendFeedback flip + Approve */}
+                {!platformMode ? (
+                  <AgentReviewActions
                     totalAnnotationCount={totalAnnotationCount}
                     isSendingFeedback={isSendingFeedback}
                     isApproving={isApproving}
                     isExiting={isExiting}
                     onSendFeedback={handleSendFeedback}
                     onApprove={() => totalAnnotationCount > 0 ? setShowApproveWarning(true) : handleApprove()}
-                    onExit={handleExit}
+                    onExit={() => totalAnnotationCount > 0 ? setShowExitWarning(true) : handleExit()}
                   />
-                ) : !platformMode ? (
-                  <>
-                    {/* Other agent mode: muted Send Feedback + Approve (original behavior) */}
-                    <FeedbackButton
-                      onClick={handleSendFeedback}
-                      disabled={isSendingFeedback || isApproving || totalAnnotationCount === 0}
-                      isLoading={isSendingFeedback}
-                      muted={totalAnnotationCount === 0 && !isSendingFeedback && !isApproving}
-                      label="Send Feedback"
-                      shortLabel="Send"
-                      loadingLabel="Sending..."
-                      title={totalAnnotationCount === 0 ? "Add annotations to send feedback" : "Send feedback"}
-                    />
-                    <div className="relative group/approve">
-                      <ApproveButton
-                        onClick={() => totalAnnotationCount > 0 ? setShowApproveWarning(true) : handleApprove()}
-                        disabled={isSendingFeedback || isApproving}
-                        isLoading={isApproving}
-                        dimmed={totalAnnotationCount > 0}
-                        title="Approve - no changes needed"
-                      />
-                      {totalAnnotationCount > 0 && (
-                        <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
-                          <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
-                          <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
-                          Your {totalAnnotationCount} annotation{totalAnnotationCount !== 1 ? 's' : ''} won't be sent if you approve.
-                        </div>
-                      )}
-                    </div>
-                  </>
                 ) : (
                   <>
-                    {/* Platform mode: Post Comments + Approve */}
+                    {/* Platform mode: Close + Post Comments + Approve */}
+                    <ExitButton
+                      onClick={() => totalAnnotationCount > 0 ? setShowExitWarning(true) : handleExit()}
+                      disabled={isSendingFeedback || isApproving || isExiting || isPlatformActioning}
+                      isLoading={isExiting}
+                    />
                     <FeedbackButton
                       onClick={() => {
                         setPlatformGeneralComment('');
@@ -1900,6 +1876,22 @@ const ReviewApp: React.FC = () => {
           message={<>You have {totalAnnotationCount} annotation{totalAnnotationCount !== 1 ? 's' : ''} that will be lost if you approve.</>}
           subMessage="To send your feedback, use Send Feedback instead."
           confirmText="Approve Anyway"
+          cancelText="Cancel"
+          variant="warning"
+          showCancel
+        />
+
+        <ConfirmDialog
+          isOpen={showExitWarning}
+          onClose={() => setShowExitWarning(false)}
+          onConfirm={() => {
+            setShowExitWarning(false);
+            handleExit();
+          }}
+          title="Annotations Won't Be Sent"
+          message={<>You have {totalAnnotationCount} annotation{totalAnnotationCount !== 1 ? 's' : ''} that will be lost if you close.</>}
+          subMessage="To send your feedback, use Send Feedback instead."
+          confirmText="Close Anyway"
           cancelText="Cancel"
           variant="warning"
           showCancel

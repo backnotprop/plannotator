@@ -97,12 +97,14 @@ interface ExitButtonProps {
   onClick: () => void;
   disabled?: boolean;
   isLoading?: boolean;
+  title?: string;
 }
 
 export const ExitButton: React.FC<ExitButtonProps> = ({
   onClick,
   disabled = false,
   isLoading = false,
+  title = 'Close session without sending feedback',
 }) => (
   <button
     onClick={onClick}
@@ -112,7 +114,7 @@ export const ExitButton: React.FC<ExitButtonProps> = ({
         ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
         : 'bg-muted text-muted-foreground hover:bg-muted/80'
     }`}
-    title="Close review session without sending feedback"
+    title={title}
   >
     <span className="md:hidden">{isLoading ? '...' : '✕'}</span>
     <span className="hidden md:inline">{isLoading ? 'Closing...' : 'Close'}</span>

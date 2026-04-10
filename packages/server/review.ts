@@ -563,7 +563,7 @@ export async function startReviewServer(
           });
           if (agentResponse) return agentResponse;
 
-          // API: Exit review session without feedback (Pi agent mode)
+          // API: Exit review session without feedback
           if (url.pathname === "/api/exit" && req.method === "POST") {
             deleteDraft(draftKey);
             resolveDecision({ approved: false, feedback: "", annotations: [], exit: true });

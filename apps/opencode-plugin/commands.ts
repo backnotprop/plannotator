@@ -103,6 +103,10 @@ export async function handleReviewCommand(
   await Bun.sleep(1500);
   server.stop();
 
+  if (result.exit) {
+    return;
+  }
+
   if (result.feedback) {
     // @ts-ignore - Event properties contain sessionID
     const sessionId = event.properties?.sessionID;
@@ -180,6 +184,10 @@ export async function handleAnnotateCommand(
   const result = await server.waitForDecision();
   await Bun.sleep(1500);
   server.stop();
+
+  if (result.exit) {
+    return;
+  }
 
   if (result.feedback) {
     // @ts-ignore - Event properties contain sessionID
@@ -265,6 +273,10 @@ export async function handleAnnotateLastCommand(
   const result = await server.waitForDecision();
   await Bun.sleep(1500);
   server.stop();
+
+  if (result.exit) {
+    return null;
+  }
 
   return result.feedback || null;
 }

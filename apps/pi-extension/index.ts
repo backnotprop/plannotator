@@ -347,7 +347,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 				const prUrl = args?.trim() || undefined;
 				const isPRReview = prUrl?.startsWith("http://") || prUrl?.startsWith("https://");
 				const result = await openCodeReview(ctx, { prUrl });
-				if (result.feedback) {
+				if (result.exit) {
+					ctx.ui.notify("Code review session closed.", "info");
+				} else if (result.feedback) {
 					if (result.approved) {
 						pi.sendUserMessage(
 							`# Code Review\n\nCode review completed — no changes requested.`,
@@ -424,7 +426,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 
 			try {
 				const result = await openMarkdownAnnotation(ctx, absolutePath, markdown, mode ?? "annotate", folderPath);
-				if (result.feedback) {
+				if (result.exit) {
+					ctx.ui.notify("Annotation session closed.", "info");
+				} else if (result.feedback) {
 					const header = isFolder
 						? `# Markdown Annotations\n\nFolder: ${absolutePath}\n\n`
 						: `# Markdown Annotations\n\nFile: ${absolutePath}\n\n`;
@@ -464,7 +468,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 
 			try {
 				const result = await openLastMessageAnnotation(ctx, lastText);
-				if (result.feedback) {
+				if (result.exit) {
+					ctx.ui.notify("Annotation session closed.", "info");
+				} else if (result.feedback) {
 					pi.sendUserMessage(
 						`# Message Annotations\n\n${result.feedback}\n\nPlease address the annotation feedback above.`,
 					);

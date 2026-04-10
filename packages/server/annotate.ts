@@ -63,6 +63,7 @@ export interface AnnotateServerResult {
   waitForDecision: () => Promise<{
     feedback: string;
     annotations: unknown[];
+    exit?: boolean;
   }>;
   /** Stop the server */
   stop: () => void;
@@ -111,10 +112,12 @@ export async function startAnnotateServer(
   let resolveDecision: (result: {
     feedback: string;
     annotations: unknown[];
+    exit?: boolean;
   }) => void;
   const decisionPromise = new Promise<{
     feedback: string;
     annotations: unknown[];
+    exit?: boolean;
   }>((resolve) => {
     resolveDecision = resolve;
   });
@@ -216,6 +219,13 @@ export async function startAnnotateServer(
             disableIdleTimeout: () => server.timeout(req, 0),
           });
           if (externalResponse) return externalResponse;
+
+          // API: Exit annotation session without feedback
+          if (url.pathname === "/api/exit" && req.method === "POST") {
+            deleteDraft(draftKey);
+            resolveDecision({ feedback: "", annotations: [], exit: true });
+            return Response.json({ ok: true });
+          }
 
           // API: Submit annotation feedback
           if (url.pathname === "/api/feedback" && req.method === "POST") {

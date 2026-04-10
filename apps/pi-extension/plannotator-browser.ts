@@ -165,7 +165,7 @@ export async function openPlanReviewBrowser(
 export async function openCodeReview(
 	ctx: ExtensionContext,
 	options: { cwd?: string; defaultBranch?: string; diffType?: DiffType; prUrl?: string } = {},
-): Promise<{ approved: boolean; feedback?: string; annotations?: unknown[]; agentSwitch?: string }> {
+): Promise<{ approved: boolean; feedback?: string; annotations?: unknown[]; agentSwitch?: string; exit?: boolean }> {
 	if (!ctx.hasUI || !reviewHtmlContent) {
 		throw new Error("Plannotator code review browser is unavailable in this session.");
 	}
@@ -367,7 +367,7 @@ export async function openMarkdownAnnotation(
 	markdown: string,
 	mode: AnnotateMode,
 	folderPath?: string,
-): Promise<{ feedback: string }> {
+): Promise<{ feedback: string; exit?: boolean }> {
 	if (!ctx.hasUI || !planHtmlContent) {
 		throw new Error("Plannotator annotation browser is unavailable in this session.");
 	}
@@ -402,7 +402,7 @@ export async function openMarkdownAnnotation(
 export async function openLastMessageAnnotation(
 	ctx: ExtensionContext,
 	lastText: string,
-): Promise<{ feedback: string }> {
+): Promise<{ feedback: string; exit?: boolean }> {
 	return openMarkdownAnnotation(ctx, "last-message", lastText, "annotate-last");
 }
 

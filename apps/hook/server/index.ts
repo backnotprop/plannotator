@@ -431,7 +431,9 @@ if (args[0] === "sessions") {
   server.stop();
 
   // Output feedback (captured by slash command)
-  if (result.approved) {
+  if (result.exit) {
+    console.log("Review session closed without feedback.");
+  } else if (result.approved) {
     console.log("Code review completed — no changes requested.");
   } else {
     console.log(result.feedback);
@@ -553,7 +555,11 @@ if (args[0] === "sessions") {
   server.stop();
 
   // Output feedback (captured by slash command)
-  console.log(result.feedback || "No feedback provided.");
+  if (result.exit) {
+    console.log("Annotation session closed without feedback.");
+  } else {
+    console.log(result.feedback || "No feedback provided.");
+  }
   process.exit(0);
 
 } else if (args[0] === "annotate-last" || args[0] === "last") {
@@ -667,7 +673,11 @@ if (args[0] === "sessions") {
 
   server.stop();
 
-  console.log(result.feedback || "No feedback provided.");
+  if (result.exit) {
+    console.log("Annotation session closed without feedback.");
+  } else {
+    console.log(result.feedback || "No feedback provided.");
+  }
   process.exit(0);
 
 } else if (args[0] === "archive") {
@@ -852,7 +862,11 @@ if (args[0] === "sessions") {
   await Bun.sleep(1500);
   server.stop();
 
-  console.log(result.feedback || "No feedback provided.");
+  if (result.exit) {
+    console.log("Annotation session closed without feedback.");
+  } else {
+    console.log(result.feedback || "No feedback provided.");
+  }
   process.exit(0);
 
 } else if (args[0] === "improve-context") {

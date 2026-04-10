@@ -28,7 +28,7 @@ export interface AnnotateServerResult {
 	port: number;
 	portSource: "env" | "remote-default" | "random";
 	url: string;
-	waitForDecision: () => Promise<{ feedback: string; annotations: unknown[] }>;
+	waitForDecision: () => Promise<{ feedback: string; annotations: unknown[]; exit?: boolean }>;
 	stop: () => void;
 }
 
@@ -54,10 +54,12 @@ export async function startAnnotateServer(options: {
 	let resolveDecision!: (result: {
 		feedback: string;
 		annotations: unknown[];
+		exit?: boolean;
 	}) => void;
 	const decisionPromise = new Promise<{
 		feedback: string;
 		annotations: unknown[];
+		exit?: boolean;
 	}>((r) => {
 		resolveDecision = r;
 	});
@@ -122,6 +124,10 @@ export async function startAnnotateServer(options: {
 			handleFileBrowserRequest(res, url);
 		} else if (url.pathname === "/favicon.svg") {
 			handleFavicon(res);
+		} else if (url.pathname === "/api/exit" && req.method === "POST") {
+			deleteDraft(draftKey);
+			resolveDecision({ feedback: "", annotations: [], exit: true });
+			json(res, { ok: true });
 		} else if (url.pathname === "/api/feedback" && req.method === "POST") {
 			try {
 				const body = await parseBody(req);

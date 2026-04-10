@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { type Origin, getAgentName } from '@plannotator/shared/agents';
 import { parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, extractFrontmatter, wrapFeedbackForAgent, Frontmatter } from '@plannotator/ui/utils/parser';
 import { Viewer, ViewerHandle } from '@plannotator/ui/components/Viewer';
@@ -13,7 +13,7 @@ import { StickyHeaderLane } from '@plannotator/ui/components/StickyHeaderLane';
 import { TaterSpriteRunning } from '@plannotator/ui/components/TaterSpriteRunning';
 import { TaterSpritePullup } from '@plannotator/ui/components/TaterSpritePullup';
 import { Settings } from '@plannotator/ui/components/Settings';
-import { FeedbackButton, ApproveButton } from '@plannotator/ui/components/ToolbarButtons';
+import { FeedbackButton, ApproveButton, ExitButton } from '@plannotator/ui/components/ToolbarButtons';
 import { useSharing } from '@plannotator/ui/hooks/useSharing';
 import { getCallbackConfig, CallbackAction, executeCallback, type ToastPayload } from '@plannotator/ui/utils/callback';
 import { useAgents } from '@plannotator/ui/hooks/useAgents';
@@ -84,6 +84,7 @@ const App: React.FC = () => {
   const [showImport, setShowImport] = useState(false);
   const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
   const [showClaudeCodeWarning, setShowClaudeCodeWarning] = useState(false);
+  const [showExitWarning, setShowExitWarning] = useState(false);
   const [showAgentWarning, setShowAgentWarning] = useState(false);
   const [agentWarningMessage, setAgentWarningMessage] = useState('');
   const [isPanelOpen, setIsPanelOpen] = useState(() => window.innerWidth >= 768);
@@ -136,7 +137,8 @@ const App: React.FC = () => {
   const [imageBaseDir, setImageBaseDir] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState<'approved' | 'denied' | null>(null);
+  const [isExiting, setIsExiting] = useState(false);
+  const [submitted, setSubmitted] = useState<'approved' | 'denied' | 'exited' | null>(null);
   const [pendingPasteImage, setPendingPasteImage] = useState<{ file: File; blobUrl: string; initialName: string } | null>(null);
   const [showPermissionModeSetup, setShowPermissionModeSetup] = useState(false);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
@@ -865,6 +867,21 @@ const App: React.FC = () => {
     }
   };
 
+  // Exit annotation session without sending feedback
+  const handleAnnotateExit = useCallback(async () => {
+    setIsExiting(true);
+    try {
+      const res = await fetch('/api/exit', { method: 'POST' });
+      if (res.ok) {
+        setSubmitted('exited');
+      } else {
+        throw new Error('Failed to exit');
+      }
+    } catch {
+      setIsExiting(false);
+    }
+  }, []);
+
   // Global keyboard shortcuts (Cmd/Ctrl+Enter to submit)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -877,10 +894,10 @@ const App: React.FC = () => {
 
       // Don't intercept if any modal is open
       if (showExport || showImport || showFeedbackPrompt || showClaudeCodeWarning ||
-          showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
+          showExitWarning || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
 
-      // Don't intercept if already submitted or submitting
-      if (submitted || isSubmitting) return;
+      // Don't intercept if already submitted, submitting, or exiting
+      if (submitted || isSubmitting || isExiting) return;
 
       // Don't intercept in demo/share mode (no API)
       if (!isApiMode) return;
@@ -920,9 +937,9 @@ const App: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
-    showExport, showImport, showFeedbackPrompt, showClaudeCodeWarning, showAgentWarning,
+    showExport, showImport, showFeedbackPrompt, showClaudeCodeWarning, showExitWarning, showAgentWarning,
     showPermissionModeSetup, pendingPasteImage,
-    submitted, isSubmitting, isApiMode, linkedDocHook.isActive, annotations.length, externalAnnotations.length, annotateMode,
+    submitted, isSubmitting, isExiting, isApiMode, linkedDocHook.isActive, annotations.length, externalAnnotations.length, annotateMode,
     origin, getAgentWarning,
   ]);
 
@@ -1153,7 +1170,7 @@ const App: React.FC = () => {
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
       if (showExport || showFeedbackPrompt || showClaudeCodeWarning ||
-          showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
+          showExitWarning || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
 
       if (submitted || !isApiMode) return;
 
@@ -1181,7 +1198,7 @@ const App: React.FC = () => {
     window.addEventListener('keydown', handleSaveShortcut);
     return () => window.removeEventListener('keydown', handleSaveShortcut);
   }, [
-    showExport, showFeedbackPrompt, showClaudeCodeWarning, showAgentWarning,
+    showExport, showFeedbackPrompt, showClaudeCodeWarning, showExitWarning, showAgentWarning,
     showPermissionModeSetup, pendingPasteImage,
     submitted, isApiMode, markdown, annotationsOutput,
   ]);
@@ -1195,7 +1212,7 @@ const App: React.FC = () => {
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
       if (showExport || showFeedbackPrompt || showClaudeCodeWarning ||
-          showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
+          showExitWarning || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
 
       if (submitted) return;
 
@@ -1206,7 +1223,7 @@ const App: React.FC = () => {
     window.addEventListener('keydown', handlePrintShortcut);
     return () => window.removeEventListener('keydown', handlePrintShortcut);
   }, [
-    showExport, showFeedbackPrompt, showClaudeCodeWarning, showAgentWarning,
+    showExport, showFeedbackPrompt, showClaudeCodeWarning, showExitWarning, showAgentWarning,
     showPermissionModeSetup, pendingPasteImage, submitted,
   ]);
 
@@ -1278,27 +1295,44 @@ const App: React.FC = () => {
 
             {isApiMode && (!linkedDocHook.isActive || annotateMode) && !archive.archiveMode && (
               <>
-                <FeedbackButton
-                  onClick={() => {
-                    if (annotateMode) {
-                      handleAnnotateFeedback();
-                      return;
-                    }
-                    const docAnnotations = linkedDocHook.getDocAnnotations();
-                    const hasDocAnnotations = Array.from(docAnnotations.values()).some(
-                      (d) => d.annotations.length > 0 || d.globalAttachments.length > 0
-                    );
-                    if (allAnnotations.length === 0 && editorAnnotations.length === 0 && !hasDocAnnotations) {
-                      setShowFeedbackPrompt(true);
-                    } else {
-                      handleDeny();
-                    }
-                  }}
-                  disabled={isSubmitting}
-                  isLoading={isSubmitting}
-                  label={annotateMode ? (allAnnotations.length > 0 || editorAnnotations.length > 0 || linkedDocHook.docAnnotationCount > 0 ? 'Send Annotations' : 'Done') : 'Send Feedback'}
-                  title={annotateMode ? (allAnnotations.length > 0 || editorAnnotations.length > 0 || linkedDocHook.docAnnotationCount > 0 ? 'Send Annotations' : 'Done') : 'Send Feedback'}
-                />
+                {annotateMode ? (
+                  // Annotate mode: Close always visible, Send Annotations when annotations exist
+                  <>
+                    <ExitButton
+                      onClick={() => (allAnnotations.length > 0 || editorAnnotations.length > 0 || linkedDocHook.docAnnotationCount > 0) ? setShowExitWarning(true) : handleAnnotateExit()}
+                      disabled={isSubmitting || isExiting}
+                      isLoading={isExiting}
+                    />
+                    {(allAnnotations.length > 0 || editorAnnotations.length > 0 || linkedDocHook.docAnnotationCount > 0) && (
+                      <FeedbackButton
+                        onClick={handleAnnotateFeedback}
+                        disabled={isSubmitting || isExiting}
+                        isLoading={isSubmitting}
+                        label="Send Annotations"
+                        title="Send Annotations"
+                      />
+                    )}
+                  </>
+                ) : (
+                  // Plan mode: Send Feedback
+                  <FeedbackButton
+                    onClick={() => {
+                      const docAnnotations = linkedDocHook.getDocAnnotations();
+                      const hasDocAnnotations = Array.from(docAnnotations.values()).some(
+                        (d) => d.annotations.length > 0 || d.globalAttachments.length > 0
+                      );
+                      if (allAnnotations.length === 0 && editorAnnotations.length === 0 && !hasDocAnnotations) {
+                        setShowFeedbackPrompt(true);
+                      } else {
+                        handleDeny();
+                      }
+                    }}
+                    disabled={isSubmitting}
+                    isLoading={isSubmitting}
+                    label="Send Feedback"
+                    title="Send Feedback"
+                  />
+                )}
 
                 {!annotateMode && <div className="relative group/approve">
                   <ApproveButton
@@ -1685,6 +1719,23 @@ const App: React.FC = () => {
           showCancel
         />
 
+        {/* Exit with annotations warning dialog */}
+        <ConfirmDialog
+          isOpen={showExitWarning}
+          onClose={() => setShowExitWarning(false)}
+          onConfirm={() => {
+            setShowExitWarning(false);
+            handleAnnotateExit();
+          }}
+          title="Annotations Won't Be Sent"
+          message={<>You have {allAnnotations.length + editorAnnotations.length + linkedDocHook.docAnnotationCount} annotation{(allAnnotations.length + editorAnnotations.length + linkedDocHook.docAnnotationCount) !== 1 ? 's' : ''} that will be lost if you close.</>}
+          subMessage="To send your annotations, use Send Annotations instead."
+          confirmText="Close Anyway"
+          cancelText="Cancel"
+          variant="warning"
+          showCancel
+        />
+
         {/* OpenCode agent not found warning dialog */}
         <ConfirmDialog
           isOpen={showAgentWarning}
@@ -1730,15 +1781,23 @@ const App: React.FC = () => {
         {/* Completion overlay - shown after approve/deny */}
         <CompletionOverlay
           submitted={submitted}
-          title={archive.archiveMode ? 'Archive Closed' : submitted === 'approved' ? 'Plan Approved' : annotateMode ? 'Annotations Sent' : 'Feedback Sent'}
+          title={
+            archive.archiveMode ? 'Archive Closed'
+            : submitted === 'exited' ? 'Session Closed'
+            : submitted === 'approved' ? 'Plan Approved'
+            : annotateMode ? 'Annotations Sent'
+            : 'Feedback Sent'
+          }
           subtitle={
-            archive.archiveMode
-              ? 'You can reopen with plannotator archive.'
-              : submitted === 'approved'
-                ? `${agentName} will proceed with the implementation.`
-                : annotateMode
-                  ? `${agentName} will address your annotations on the ${annotateSource === 'message' ? 'message' : annotateSource === 'folder' ? 'files' : 'file'}.`
-                  : `${agentName} will revise the plan based on your annotations.`
+            submitted === 'exited'
+              ? 'Annotation session closed without feedback.'
+              : archive.archiveMode
+                ? 'You can reopen with plannotator archive.'
+                : submitted === 'approved'
+                  ? `${agentName} will proceed with the implementation.`
+                  : annotateMode
+                    ? `${agentName} will address your annotations on the ${annotateSource === 'message' ? 'message' : annotateSource === 'folder' ? 'files' : 'file'}.`
+                    : `${agentName} will revise the plan based on your annotations.`
           }
           agentLabel={agentName}
         />

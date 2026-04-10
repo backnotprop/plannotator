@@ -1,7 +1,7 @@
 import React from 'react';
 import { FeedbackButton, ApproveButton, ExitButton } from '@plannotator/ui/components/ToolbarButtons';
 
-interface PiReviewActionsProps {
+interface AgentReviewActionsProps {
   totalAnnotationCount: number;
   isSendingFeedback: boolean;
   isApproving: boolean;
@@ -12,7 +12,7 @@ interface PiReviewActionsProps {
 }
 
 /**
- * Toolbar actions for Pi agent mode.
+ * Toolbar actions for agent review mode (all non-platform origins).
  *
  * The left button flips based on whether there are annotations:
  *   No annotations → [Close]  [Approve]
@@ -22,7 +22,7 @@ interface PiReviewActionsProps {
  * - Send Feedback: primary action when annotations exist
  * - Approve: LGTM; dimmed when annotations exist (they won't be sent)
  */
-export const PiReviewActions: React.FC<PiReviewActionsProps> = ({
+export const AgentReviewActions: React.FC<AgentReviewActionsProps> = ({
   totalAnnotationCount,
   isSendingFeedback,
   isApproving,
@@ -36,7 +36,13 @@ export const PiReviewActions: React.FC<PiReviewActionsProps> = ({
 
   return (
     <>
-      {hasAnnotations ? (
+      <ExitButton
+        onClick={onExit}
+        disabled={busy}
+        isLoading={isExiting}
+      />
+
+      {hasAnnotations && (
         <FeedbackButton
           onClick={onSendFeedback}
           disabled={busy}
@@ -45,12 +51,6 @@ export const PiReviewActions: React.FC<PiReviewActionsProps> = ({
           shortLabel="Send"
           loadingLabel="Sending..."
           title="Send feedback"
-        />
-      ) : (
-        <ExitButton
-          onClick={onExit}
-          disabled={busy}
-          isLoading={isExiting}
         />
       )}
 
