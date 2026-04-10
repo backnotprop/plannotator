@@ -11,7 +11,7 @@
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
  */
 
-import { isRemoteSession, getServerPort } from "./remote";
+import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
 import { getRepoInfo } from "./repo";
 import type { Origin } from "@plannotator/shared/agents";
 import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon } from "./shared-handlers";
@@ -131,6 +131,7 @@ export async function startAnnotateServer(
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       server = Bun.serve({
+        hostname: getServerHostname(),
         port: configuredPort,
 
         async fetch(req, server) {

@@ -11,7 +11,7 @@
 
 import type { Origin } from "@plannotator/shared/agents";
 import { resolve } from "path";
-import { isRemoteSession, getServerPort } from "./remote";
+import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
 import { openEditorDiff } from "./ide";
 import {
   saveToObsidian,
@@ -200,6 +200,7 @@ export async function startPlannotatorServer(
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       server = Bun.serve({
+        hostname: getServerHostname(),
         port: configuredPort,
 
         async fetch(req, server) {

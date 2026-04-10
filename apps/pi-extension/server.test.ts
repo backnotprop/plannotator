@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +10,7 @@ const tempDirs: string[] = [];
 const originalCwd = process.cwd();
 const originalHome = process.env.HOME;
 const originalPort = process.env.PLANNOTATOR_PORT;
+const originalPath = process.env.PATH;
 
 function makeTempDir(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -37,6 +38,14 @@ function initRepo(): string {
   git(repoDir, ["commit", "-m", "initial"]);
 
   return repoDir;
+}
+
+function installFakeCli(name: string): void {
+  const dir = makeTempDir(`plannotator-${name}-cli-`);
+  const path = join(dir, name);
+  writeFileSync(path, "#!/bin/sh\nexit 0\n", "utf-8");
+  chmodSync(path, 0o755);
+  process.env.PATH = [dir, originalPath].filter(Boolean).join(":");
 }
 
 function reservePort(): Promise<number> {
@@ -74,6 +83,11 @@ afterEach(() => {
     delete process.env.PLANNOTATOR_PORT;
   } else {
     process.env.PLANNOTATOR_PORT = originalPort;
+  }
+  if (originalPath === undefined) {
+    delete process.env.PATH;
+  } else {
+    process.env.PATH = originalPath;
   }
 
   for (const dir of tempDirs.splice(0)) {
@@ -246,6 +260,63 @@ describe("pi review server", () => {
         annotations: [],
         agentSwitch: undefined,
       });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("requires the review session token to launch agent jobs", async () => {
+    const homeDir = makeTempDir("plannotator-pi-home-");
+    const repoDir = initRepo();
+    installFakeCli("codex");
+    process.env.HOME = homeDir;
+    process.chdir(repoDir);
+    process.env.PLANNOTATOR_PORT = String(await reservePort());
+
+    writeFileSync(join(repoDir, "tracked.txt"), "after\n", "utf-8");
+
+    const gitContext = await getGitContext();
+    const diff = await runGitDiff("uncommitted", gitContext.defaultBranch);
+
+    const server = await startReviewServer({
+      rawPatch: diff.patch,
+      gitRef: diff.label,
+      error: diff.error,
+      diffType: "uncommitted",
+      gitContext,
+      origin: "pi",
+      htmlContent: "<!doctype html><html><body>review</body></html>",
+    });
+
+    try {
+      const diffResponse = await fetch(`${server.url}/api/diff`);
+      const diffPayload = await diffResponse.json() as { agentJobToken?: string };
+      expect(diffPayload.agentJobToken).toBeTruthy();
+
+      const unauthorized = await fetch(`${server.url}/api/agents/jobs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: "codex",
+          command: ["/usr/bin/true"],
+          label: "Injected",
+        }),
+      });
+      expect(unauthorized.status).toBe(403);
+
+      const authorized = await fetch(`${server.url}/api/agents/jobs`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Plannotator-Agent-Token": diffPayload.agentJobToken!,
+        },
+        body: JSON.stringify({
+          provider: "codex",
+          command: ["/usr/bin/true"],
+          label: "Injected",
+        }),
+      });
+      expect(authorized.status).toBe(201);
     } finally {
       server.stop();
     }

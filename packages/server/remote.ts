@@ -9,6 +9,7 @@
  */
 
 const DEFAULT_REMOTE_PORT = 19432;
+const LOOPBACK_HOST = "127.0.0.1";
 
 function getRemoteOverride(): boolean | null {
   const remote = process.env.PLANNOTATOR_REMOTE;
@@ -62,4 +63,14 @@ export function getServerPort(): number {
 
   // Remote sessions use fixed port for port forwarding; local uses random
   return isRemoteSession() ? DEFAULT_REMOTE_PORT : 0;
+}
+
+/**
+ * Bind review servers to loopback only.
+ *
+ * Remote workflows still work via SSH/devcontainer port forwarding, but the
+ * server no longer accepts direct LAN requests by default.
+ */
+export function getServerHostname(): string {
+  return LOOPBACK_HOST;
 }
