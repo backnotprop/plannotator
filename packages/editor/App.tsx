@@ -1299,11 +1299,11 @@ const App: React.FC = () => {
                   // Annotate mode: Close always visible, Send Annotations when annotations exist
                   <>
                     <ExitButton
-                      onClick={() => (allAnnotations.length > 0 || editorAnnotations.length > 0 || linkedDocHook.docAnnotationCount > 0) ? setShowExitWarning(true) : handleAnnotateExit()}
+                      onClick={() => (allAnnotations.length > 0 || editorAnnotations.length > 0 || linkedDocHook.docAnnotationCount > 0 || globalAttachments.length > 0) ? setShowExitWarning(true) : handleAnnotateExit()}
                       disabled={isSubmitting || isExiting}
                       isLoading={isExiting}
                     />
-                    {(allAnnotations.length > 0 || editorAnnotations.length > 0 || linkedDocHook.docAnnotationCount > 0) && (
+                    {(allAnnotations.length > 0 || editorAnnotations.length > 0 || linkedDocHook.docAnnotationCount > 0 || globalAttachments.length > 0) && (
                       <FeedbackButton
                         onClick={handleAnnotateFeedback}
                         disabled={isSubmitting || isExiting}
@@ -1728,7 +1728,7 @@ const App: React.FC = () => {
             handleAnnotateExit();
           }}
           title="Annotations Won't Be Sent"
-          message={<>You have {allAnnotations.length + editorAnnotations.length + linkedDocHook.docAnnotationCount} annotation{(allAnnotations.length + editorAnnotations.length + linkedDocHook.docAnnotationCount) !== 1 ? 's' : ''} that will be lost if you close.</>}
+          message={<>You have {allAnnotations.length + editorAnnotations.length + linkedDocHook.docAnnotationCount + globalAttachments.length} annotation{(allAnnotations.length + editorAnnotations.length + linkedDocHook.docAnnotationCount + globalAttachments.length) !== 1 ? 's' : ''} that will be lost if you close.</>}
           subMessage="To send your annotations, use Send Annotations instead."
           confirmText="Close Anyway"
           cancelText="Cancel"
