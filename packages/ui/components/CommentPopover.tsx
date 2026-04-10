@@ -5,6 +5,11 @@ import { AttachmentsButton } from './AttachmentsButton';
 import { submitHint } from '../utils/platform';
 import { useDraggable } from '../hooks/useDraggable';
 
+export interface CommentDraftState {
+  hasContent: boolean;
+  hadContentEver: boolean;
+}
+
 interface CommentPopoverProps {
   /** Element to anchor the popover near (re-reads position on scroll) */
   anchorEl: HTMLElement;
@@ -18,6 +23,8 @@ interface CommentPopoverProps {
   onSubmit: (text: string, images?: ImageAttachment[]) => void;
   /** Called when popover is closed/cancelled */
   onClose: () => void;
+  /** Reports whether the draft has content now, or has ever had content */
+  onDraftStateChange?: (state: CommentDraftState) => void;
 }
 
 const MAX_POPOVER_WIDTH = 384;
@@ -45,6 +52,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   initialText = '',
   onSubmit,
   onClose,
+  onDraftStateChange,
 }) => {
   const [mode, setMode] = useState<'popover' | 'dialog'>('popover');
   const [text, setText] = useState(initialText);
@@ -52,6 +60,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   const [position, setPosition] = useState<{ top: number; left: number; flipAbove: boolean; width: number } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const hadContentEverRef = useRef(initialText.trim().length > 0);
   const { dragPosition, dragHandleProps, wasDragged, reset: resetDrag } = useDraggable(popoverRef);
 
   // Reset drag when anchor changes (new annotation) or mode switches
@@ -86,6 +95,15 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     }, 0);
     return () => clearTimeout(id);
   }, [mode]);
+
+  useEffect(() => {
+    const hasContent = text.trim().length > 0 || images.length > 0;
+    if (hasContent) hadContentEverRef.current = true;
+    onDraftStateChange?.({
+      hasContent,
+      hadContentEver: hadContentEverRef.current,
+    });
+  }, [images.length, onDraftStateChange, text]);
 
   // Click-outside for popover mode
   useEffect(() => {
@@ -144,6 +162,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
         {/* Dialog card */}
         <div
           ref={popoverRef}
+          data-comment-popover-root
           className="relative w-full max-w-xl bg-popover border border-border rounded-xl shadow-2xl flex flex-col"
           style={{
             animation: 'comment-dialog-in 0.15s ease-out',
@@ -226,6 +245,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   return createPortal(
     <div
       ref={popoverRef}
+      data-comment-popover-root
       className="fixed z-[100] bg-popover border border-border rounded-xl shadow-2xl flex flex-col"
       style={dragPosition
         ? { top: dragPosition.top, left: dragPosition.left, width: position.width }

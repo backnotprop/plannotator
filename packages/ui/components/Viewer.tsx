@@ -25,7 +25,7 @@ class ToolbarErrorBoundary extends React.Component<
     return this.props.children;
   }
 }
-import { CommentPopover } from './CommentPopover';
+import { CommentPopover, type CommentDraftState } from './CommentPopover';
 import { TaterSpriteSitting } from './TaterSpriteSitting';
 import { AttachmentsButton } from './AttachmentsButton';
 import { GraphvizBlock } from './GraphvizBlock';
@@ -86,6 +86,7 @@ export interface ViewerHandle {
   removeHighlight: (id: string) => void;
   clearAllHighlights: () => void;
   applySharedAnnotations: (annotations: Annotation[]) => void;
+  dismissUndoableTransientState: () => boolean;
 }
 
 /**
@@ -176,6 +177,14 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     isGlobal: boolean;
     codeBlock?: { block: Block; element: HTMLElement };
   } | null>(null);
+  const [hookCommentDraftState, setHookCommentDraftState] = useState<CommentDraftState>({
+    hasContent: false,
+    hadContentEver: false,
+  });
+  const [viewerCommentDraftState, setViewerCommentDraftState] = useState<CommentDraftState>({
+    hasContent: false,
+    hadContentEver: false,
+  });
   // Viewer-specific quick label state (code blocks)
   const [codeBlockQuickLabelPicker, setCodeBlockQuickLabelPicker] = useState<{
     anchorEl: HTMLElement;
@@ -184,6 +193,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const stickySentinelRef = useRef<HTMLDivElement>(null);
   const [isStuck, setIsStuck] = useState(false);
+
+  const handleViewerCommentClose = useCallback(() => {
+    setViewerCommentPopover(null);
+  }, []);
 
   // Shared annotation infrastructure via hook
   const {
@@ -210,6 +223,18 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     selectedAnnotationId,
     mode,
   });
+
+  useEffect(() => {
+    if (!hookCommentPopover) {
+      setHookCommentDraftState({ hasContent: false, hadContentEver: false });
+    }
+  }, [hookCommentPopover]);
+
+  useEffect(() => {
+    if (!viewerCommentPopover) {
+      setViewerCommentDraftState({ hasContent: false, hadContentEver: false });
+    }
+  }, [viewerCommentPopover]);
 
   // Refs for code block annotation path
   const onAddAnnotationRef = useRef(onAddAnnotation);
@@ -327,7 +352,47 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     },
     clearAllHighlights,
     applySharedAnnotations: applyAnnotations,
-  }), [hookRemoveHighlight, clearAllHighlights, applyAnnotations, blocks]);
+    dismissUndoableTransientState: () => {
+      if (hookCommentPopover) {
+        if (hookCommentDraftState.hadContentEver) return false;
+        hookCommentClose();
+        return true;
+      }
+
+      if (viewerCommentPopover) {
+        if (viewerCommentDraftState.hadContentEver) return false;
+        handleViewerCommentClose();
+        return true;
+      }
+
+      if (hookQuickLabelPicker) {
+        hookQuickLabelPickerDismiss();
+        return true;
+      }
+
+      if (toolbarState) {
+        handleToolbarClose();
+        return true;
+      }
+
+      return false;
+    },
+  }), [
+    applyAnnotations,
+    blocks,
+    clearAllHighlights,
+    handleToolbarClose,
+    handleViewerCommentClose,
+    hookCommentClose,
+    hookCommentDraftState.hadContentEver,
+    hookCommentPopover,
+    hookQuickLabelPicker,
+    hookQuickLabelPickerDismiss,
+    hookRemoveHighlight,
+    toolbarState,
+    viewerCommentDraftState.hadContentEver,
+    viewerCommentPopover,
+  ]);
 
   // --- Viewer-specific: code block annotation ---
 
@@ -434,10 +499,6 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 
     setViewerCommentPopover(null);
   };
-
-  const handleViewerCommentClose = useCallback(() => {
-    setViewerCommentPopover(null);
-  }, []);
 
   return (
     <div className="relative z-50 w-full" style={maxWidth ? { maxWidth } : { maxWidth: 832 }}>
@@ -648,6 +709,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             initialText={hookCommentPopover.initialText}
             onSubmit={hookCommentSubmit}
             onClose={hookCommentClose}
+            onDraftStateChange={setHookCommentDraftState}
           />
         )}
         {viewerCommentPopover && (
@@ -658,6 +720,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             initialText={viewerCommentPopover.initialText}
             onSubmit={handleViewerCommentSubmit}
             onClose={handleViewerCommentClose}
+            onDraftStateChange={setViewerCommentDraftState}
           />
         )}
 

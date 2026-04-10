@@ -60,6 +60,7 @@ import { hasNewSettings, markNewSettingsSeen } from '@plannotator/ui/utils/newSe
 import { useFileBrowser } from '@plannotator/ui/hooks/useFileBrowser';
 import { isVaultBrowserEnabled } from '@plannotator/ui/utils/obsidian';
 import { isFileBrowserEnabled, getFileBrowserSettings } from '@plannotator/ui/utils/fileBrowser';
+import { findLastUndoRemovableAnnotation } from '@plannotator/ui/utils/annotationUndo';
 import { SidebarTabs } from '@plannotator/ui/components/sidebar/SidebarTabs';
 import { SidebarContainer } from '@plannotator/ui/components/sidebar/SidebarContainer';
 import type { ArchivedPlan } from '@plannotator/ui/components/sidebar/ArchiveBrowser';
@@ -988,6 +989,53 @@ const App: React.FC = () => {
     }
     removeAnnotation(id);
   };
+
+  useEffect(() => {
+    const handleUndoShortcut = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      if (e.key.toLowerCase() !== 'z') return;
+
+      if (showExport || showImport || showFeedbackPrompt || showClaudeCodeWarning ||
+          showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
+
+      if (submitted || isSubmitting) return;
+
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      const isTextField = tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable;
+      const isCommentPopoverTarget = !!target?.closest?.('[data-comment-popover-root]');
+      if (isTextField && !isCommentPopoverTarget) return;
+
+      if (viewerRef.current?.dismissUndoableTransientState()) {
+        e.preventDefault();
+        return;
+      }
+
+      if (isCommentPopoverTarget) return;
+      if (isTextField) return;
+
+      const lastUndoableAnnotation = findLastUndoRemovableAnnotation(annotations);
+      if (!lastUndoableAnnotation) return;
+
+      e.preventDefault();
+      handleDeleteAnnotation(lastUndoableAnnotation.id);
+    };
+
+    window.addEventListener('keydown', handleUndoShortcut);
+    return () => window.removeEventListener('keydown', handleUndoShortcut);
+  }, [
+    annotations,
+    handleDeleteAnnotation,
+    isSubmitting,
+    pendingPasteImage,
+    showAgentWarning,
+    showClaudeCodeWarning,
+    showExport,
+    showFeedbackPrompt,
+    showImport,
+    showPermissionModeSetup,
+    submitted,
+  ]);
 
   const handleEditAnnotation = (id: string, updates: Partial<Annotation>) => {
     const ann = allAnnotations.find(a => a.id === id);
