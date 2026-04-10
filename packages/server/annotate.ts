@@ -15,7 +15,17 @@ import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
 import { getRepoInfo } from "./repo";
 import type { Origin } from "@plannotator/shared/agents";
 import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon } from "./shared-handlers";
-import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc } from "./reference-handlers";
+import {
+  handleDoc,
+  handleDocExists,
+  handleFileBrowserFiles,
+  handleObsidianVaults,
+  handleObsidianFiles,
+  handleObsidianDoc,
+  handleRoamTest,
+  handleRoamPages,
+  handleRoamDoc,
+} from "./reference-handlers";
 import { warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash, deleteDraft } from "./draft";
 import { createExternalAnnotationHandler } from "./external-annotations";
@@ -257,6 +267,21 @@ export async function startAnnotateServer(
           // API: Read an Obsidian vault document
           if (url.pathname === "/api/reference/obsidian/doc" && req.method === "GET") {
             return handleObsidianDoc(req);
+          }
+
+          // API: Test Roam local API connectivity
+          if (url.pathname === "/api/roam/test" && req.method === "GET") {
+            return handleRoamTest(req);
+          }
+
+          // API: List Roam pages
+          if (url.pathname === "/api/reference/roam/pages" && req.method === "GET") {
+            return handleRoamPages(req);
+          }
+
+          // API: Read a Roam page by uid
+          if (url.pathname === "/api/reference/roam/doc" && req.method === "GET") {
+            return handleRoamDoc(req);
           }
 
           // API: List markdown files in a directory as a tree

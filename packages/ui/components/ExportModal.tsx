@@ -10,6 +10,7 @@ import React, { useState, useEffect } from 'react';
 import { getObsidianSettings, getEffectiveVaultPath } from '../utils/obsidian';
 import { getBearSettings } from '../utils/bear';
 import { getOctarineSettings } from '../utils/octarine';
+import { getRoamSettings } from '../utils/roam';
 import { wrapFeedbackForAgent } from '../utils/parser';
 import { OverlayScrollArea } from './OverlayScrollArea';
 
@@ -37,7 +38,7 @@ interface ExportModalProps {
 
 type Tab = 'share' | 'annotations' | 'notes';
 
-type SaveTarget = 'obsidian' | 'bear' | 'octarine';
+type SaveTarget = 'obsidian' | 'bear' | 'octarine' | 'roam';
 type SaveStatus = 'idle' | 'saving' | 'success' | 'error';
 
 export const ExportModal: React.FC<ExportModalProps> = ({
@@ -60,7 +61,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const defaultTab = initialTab || (sharingEnabled ? 'share' : 'annotations');
   const [activeTab, setActiveTab] = useState<Tab>(defaultTab);
   const [copied, setCopied] = useState<'short' | 'full' | 'annotations' | false>(false);
-  const [saveStatus, setSaveStatus] = useState<Record<SaveTarget, SaveStatus>>({ obsidian: 'idle', bear: 'idle', octarine: 'idle' });
+  const [saveStatus, setSaveStatus] = useState<Record<SaveTarget, SaveStatus>>({ obsidian: 'idle', bear: 'idle', octarine: 'idle', roam: 'idle' });
   const [saveErrors, setSaveErrors] = useState<Record<string, string>>({});
 
   // Reset tab when modal opens
@@ -73,7 +74,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   // Reset save status when modal opens
   useEffect(() => {
     if (isOpen) {
-      setSaveStatus({ obsidian: 'idle', bear: 'idle', octarine: 'idle' });
+      setSaveStatus({ obsidian: 'idle', bear: 'idle', octarine: 'idle', roam: 'idle' });
       setSaveErrors({});
     }
   }, [isOpen]);
@@ -84,10 +85,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const obsidianSettings = getObsidianSettings();
   const bearSettings = getBearSettings();
   const octarineSettings = getOctarineSettings();
+  const roamSettings = getRoamSettings();
   const effectiveVaultPath = getEffectiveVaultPath(obsidianSettings);
   const isObsidianReady = obsidianSettings.enabled && effectiveVaultPath.trim().length > 0;
   const isBearReady = bearSettings.enabled;
   const isOctarineReady = octarineSettings.enabled && octarineSettings.workspace.trim().length > 0;
+  const isRoamReady = roamSettings.enabled && roamSettings.graphName.trim().length > 0 && roamSettings.token.trim().length > 0;
 
   const handleCopy = async (text: string, which: 'short' | 'full' | 'annotations') => {
     try {
@@ -124,7 +127,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     setSaveStatus(prev => ({ ...prev, [target]: 'saving' }));
     setSaveErrors(prev => { const next = { ...prev }; delete next[target]; return next; });
 
-    const body: { obsidian?: object; bear?: object; octarine?: object } = {};
+    const body: { obsidian?: object; bear?: object; octarine?: object; roam?: object } = {};
 
     if (target === 'obsidian') {
       body.obsidian = {
@@ -143,6 +146,19 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         plan: markdown,
         workspace: octarineSettings.workspace,
         folder: octarineSettings.folder || 'plannotator',
+      };
+    }
+    if (target === 'roam') {
+      body.roam = {
+        graphName: roamSettings.graphName,
+        graphType: roamSettings.graphType,
+        token: roamSettings.token,
+        port: roamSettings.port || 3333,
+        plan: markdown,
+        saveLocation: roamSettings.saveLocation,
+        dailyNoteParent: roamSettings.dailyNoteParent,
+        ...(roamSettings.titleFormat && { titleFormat: roamSettings.titleFormat }),
+        ...(roamSettings.titleSeparator && roamSettings.titleSeparator !== 'space' && { titleSeparator: roamSettings.titleSeparator }),
       };
     }
 
@@ -172,10 +188,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     if (isObsidianReady) targets.push('obsidian');
     if (isBearReady) targets.push('bear');
     if (isOctarineReady) targets.push('octarine');
+    if (isRoamReady) targets.push('roam');
     await Promise.all(targets.map(t => handleSaveToNotes(t)));
   };
 
-  const readyCount = [isObsidianReady, isBearReady, isOctarineReady].filter(Boolean).length;
+  const readyCount = [isObsidianReady, isBearReady, isOctarineReady, isRoamReady].filter(Boolean).length;
 
   // Determine which tabs to show
   const showTabs = sharingEnabled || showNotesTab;
@@ -501,12 +518,57 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 )}
               </div>
 
+              {/* Roam */}
+              <div className="border border-border rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${isRoamReady ? 'bg-success' : 'bg-muted-foreground/30'}`} />
+                    <span className="text-sm font-medium">Roam</span>
+                  </div>
+                  {isRoamReady ? (
+                    <button
+                      onClick={() => handleSaveToNotes('roam')}
+                      disabled={saveStatus.roam === 'saving'}
+                      className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                        saveStatus.roam === 'success'
+                          ? 'bg-success/15 text-success'
+                          : saveStatus.roam === 'error'
+                            ? 'bg-destructive/15 text-destructive'
+                            : saveStatus.roam === 'saving'
+                              ? 'bg-muted text-muted-foreground opacity-50'
+                              : 'bg-primary text-primary-foreground hover:opacity-90'
+                      }`}
+                    >
+                      {saveStatus.roam === 'saving' ? 'Saving...'
+                        : saveStatus.roam === 'success' ? 'Saved'
+                        : saveStatus.roam === 'error' ? 'Failed'
+                        : 'Save'}
+                    </button>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">Not configured</span>
+                  )}
+                </div>
+                {isRoamReady && (
+                  <div className="text-[10px] text-muted-foreground/70">
+                    {roamSettings.graphName} ({roamSettings.graphType}) · {roamSettings.saveLocation === 'daily-note' ? `today's Daily Note -> ${roamSettings.dailyNoteParent}` : 'new page'}
+                  </div>
+                )}
+                {!isRoamReady && (
+                  <div className="text-[10px] text-muted-foreground/70">
+                    Enable in Settings &gt; Saving &gt; Roam
+                  </div>
+                )}
+                {saveErrors.roam && (
+                  <div className="text-[10px] text-destructive">{saveErrors.roam}</div>
+                )}
+              </div>
+
               {/* Save All button */}
               {readyCount >= 2 && (
                 <div className="flex justify-end">
                   <button
                     onClick={handleSaveAll}
-                    disabled={saveStatus.obsidian === 'saving' || saveStatus.bear === 'saving' || saveStatus.octarine === 'saving'}
+                    disabled={saveStatus.obsidian === 'saving' || saveStatus.bear === 'saving' || saveStatus.octarine === 'saving' || saveStatus.roam === 'saving'}
                     className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
                   >
                     Save All

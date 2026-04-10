@@ -20,7 +20,7 @@ interface FileBrowserProps {
   onSelectFile: (absolutePath: string, dirPath: string) => void;
   activeFile: string | null;
   onFetchAll: () => void;
-  onRetryVaultDir?: (vaultPath: string) => void;
+  onRetryVaultDir?: (dirPath: string) => void;
   annotationCounts?: Map<string, number>;
   highlightedFiles?: Set<string>;
 }
@@ -217,6 +217,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
       )}
       {dirs.map((dir) => {
         const isCollapsed = collapsedDirs.has(dir.path);
+        const sourceLabel = dir.source === "roam" ? "Roam" : dir.source === "obsidian" ? "Obsidian" : null;
         return (
           <div key={dir.path}>
             <button
@@ -233,7 +234,12 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
               >
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
               </svg>
-              {dir.isVault && <ObsidianIconRaw className="w-[11px] h-[13px] flex-shrink-0 opacity-70" />}
+              {dir.source === "obsidian" && <ObsidianIconRaw className="w-[11px] h-[13px] flex-shrink-0 opacity-70" />}
+              {sourceLabel && (
+                <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                  {sourceLabel}
+                </span>
+              )}
               <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider truncate">
                 {dir.name}
               </div>
@@ -245,7 +251,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                 onToggleFolder={onToggleFolder}
                 onSelectFile={onSelectFile}
                 activeFile={activeFile}
-                onRetry={dir.isVault && onRetryVaultDir ? () => onRetryVaultDir(dir.path) : onFetchAll}
+                onRetry={dir.source !== "files" && onRetryVaultDir ? () => onRetryVaultDir(dir.path) : onFetchAll}
                 annotationCounts={annotationCounts}
                 highlightedFiles={highlightedFiles}
               />

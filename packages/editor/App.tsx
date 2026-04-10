@@ -27,9 +27,10 @@ import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay'
 import { useUpdateCheck } from '@plannotator/ui/hooks/useUpdateCheck';
 import { PlanAIAnnouncementDialog } from '@plannotator/ui/components/PlanAIAnnouncementDialog';
 import { LookAndFeelAnnouncementDialog } from '@plannotator/ui/components/LookAndFeelAnnouncementDialog';
-import { getObsidianSettings, getEffectiveVaultPath, isObsidianConfigured, CUSTOM_PATH_SENTINEL } from '@plannotator/ui/utils/obsidian';
+import { getObsidianSettings, getEffectiveVaultPath, isObsidianConfigured, CUSTOM_PATH_SENTINEL, isVaultBrowserEnabled } from '@plannotator/ui/utils/obsidian';
 import { getBearSettings } from '@plannotator/ui/utils/bear';
 import { getOctarineSettings, isOctarineConfigured } from '@plannotator/ui/utils/octarine';
+import { getRoamSettings, isRoamBrowserEnabled, isRoamConfigured } from '@plannotator/ui/utils/roam';
 import { getDefaultNotesApp } from '@plannotator/ui/utils/defaultNotesApp';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { getPlanSaveSettings } from '@plannotator/ui/utils/planSave';
@@ -72,7 +73,6 @@ import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotat
 import { useExternalAnnotationHighlights } from '@plannotator/ui/hooks/useExternalAnnotationHighlights';
 import { buildPlanAgentInstructions } from '@plannotator/ui/utils/planAgentInstructions';
 import { useFileBrowser } from '@plannotator/ui/hooks/useFileBrowser';
-import { isVaultBrowserEnabled } from '@plannotator/ui/utils/obsidian';
 import { isFileBrowserEnabled, getFileBrowserSettings } from '@plannotator/ui/utils/fileBrowser';
 import { generateId } from '@plannotator/ui/utils/generateId';
 import { SidebarTabs } from '@plannotator/ui/components/sidebar/SidebarTabs';
@@ -110,6 +110,7 @@ type NoteAutoSaveResults = {
   obsidian?: boolean;
   bear?: boolean;
   octarine?: boolean;
+  roam?: boolean;
 };
 
 type MessageAnnotationState = {
@@ -560,15 +561,20 @@ const App: React.FC = () => {
     }
   }, [canUseWideMode, exitWideMode, wideModeType]);
 
-  // Markdown file browser (also handles vault dirs via isVault flag)
+  // Markdown file browser (regular files, Obsidian, and Roam sources)
   const fileBrowser = useFileBrowser();
   const vaultPath = useMemo(() => {
     if (!isVaultBrowserEnabled()) return '';
     return getEffectiveVaultPath(getObsidianSettings());
   }, [uiPrefs]);
+  const roamSettings = useMemo(() => getRoamSettings(), [uiPrefs, mobileSettingsOpen]);
+  const roamDirPath = useMemo(() => {
+    if (!isRoamBrowserEnabled()) return '';
+    return `roam:${roamSettings.graphType}:${roamSettings.graphName}`;
+  }, [roamSettings]);
   const showFilesTab = useMemo(
-    () => !!projectRoot || isFileBrowserEnabled() || isVaultBrowserEnabled(),
-    [projectRoot, uiPrefs]
+    () => !!projectRoot || isFileBrowserEnabled() || isVaultBrowserEnabled() || isRoamBrowserEnabled(),
+    [projectRoot, uiPrefs, roamDirPath, mobileSettingsOpen]
   );
   const fileBrowserDirs = useMemo(() => {
     const projectDirs = projectRoot ? [projectRoot] : [];
@@ -583,27 +589,32 @@ const App: React.FC = () => {
     if (!showFilesTab) fileBrowser.setActiveFile(null);
   }, [showFilesTab]);
 
-  // When vault is disabled, prune any stale vault dirs immediately
+  // When optional sources are disabled, prune any stale source dirs immediately
   useEffect(() => {
-    if (!vaultPath) fileBrowser.clearVaultDirs();
-  }, [vaultPath]);
+    if (!vaultPath) fileBrowser.clearSource('obsidian');
+  }, [vaultPath, fileBrowser]);
+
+  useEffect(() => {
+    if (!roamDirPath) fileBrowser.clearSource('roam');
+  }, [roamDirPath, fileBrowser]);
 
   useEffect(() => {
     if (sidebar.activeTab === 'files' && showFilesTab) {
       // Load regular dirs
       if (fileBrowserDirs.length > 0) {
-        const regularLoaded = fileBrowser.dirs.filter(d => !d.isVault).map(d => d.path);
+        const regularLoaded = fileBrowser.dirs.filter(d => d.source === 'files').map(d => d.path);
         const needsRegular = fileBrowserDirs.some(d => !regularLoaded.includes(d))
           || regularLoaded.some(d => !fileBrowserDirs.includes(d));
         if (needsRegular) fileBrowser.fetchAll(fileBrowserDirs);
       }
-      // Load vault dir; addVaultDir atomically replaces any existing vault entry so
-      // switching vault paths never accumulates stale sections
-      if (vaultPath && !fileBrowser.dirs.find(d => d.isVault && d.path === vaultPath && !d.error)) {
-        fileBrowser.addVaultDir(vaultPath);
+      if (vaultPath && !fileBrowser.dirs.find(d => d.source === 'obsidian' && d.path === vaultPath && !d.error)) {
+        fileBrowser.addObsidianDir(vaultPath);
+      }
+      if (roamDirPath && !fileBrowser.dirs.find(d => d.source === 'roam' && d.path === roamDirPath && !d.error)) {
+        fileBrowser.addRoamDir(roamSettings);
       }
     }
-  }, [sidebar.activeTab, showFilesTab, fileBrowserDirs, vaultPath]);
+  }, [sidebar.activeTab, showFilesTab, fileBrowserDirs, vaultPath, roamDirPath, roamSettings, fileBrowser]);
 
   const buildCurrentMessageState = React.useCallback((): MessageAnnotationState | null => {
     if (annotateSource !== 'message' || !selectedMessageId) return null;
@@ -712,9 +723,14 @@ const App: React.FC = () => {
 
   const handleFileBrowserSelect = React.useCallback((absolutePath: string, dirPath: string) => {
     const dirState = fileBrowser.dirs.find(d => d.path === dirPath);
-    const buildUrl = dirState?.isVault
-      ? (path: string) => `/api/reference/obsidian/doc?vaultPath=${encodeURIComponent(dirPath)}&path=${encodeURIComponent(path)}`
-      : (path: string) => `/api/doc?path=${encodeURIComponent(path)}&base=${encodeURIComponent(dirPath)}${convertHtml ? '&convert=1' : ''}`;
+    const buildUrl = dirState?.source === 'obsidian'
+      ? (path: string) => `/api/reference/obsidian/doc?vaultPath=${encodeURIComponent(dirPath)}&path=${encodeURIComponent(path.startsWith(`${dirPath}/`) ? path.slice(dirPath.length + 1) : path)}`
+      : dirState?.source === 'roam' && dirState.roamMeta
+        ? (path: string) => {
+            const uid = path.startsWith(`${dirPath}/`) ? path.slice(dirPath.length + 1) : path;
+            return `/api/reference/roam/doc?graphName=${encodeURIComponent(dirState.roamMeta!.graphName)}&graphType=${encodeURIComponent(dirState.roamMeta!.graphType)}&port=${encodeURIComponent(String(dirState.roamMeta!.port))}&token=${encodeURIComponent(dirState.roamMeta!.token)}&uid=${encodeURIComponent(uid)}`;
+          }
+        : (path: string) => `/api/doc?path=${encodeURIComponent(path)}&base=${encodeURIComponent(dirPath)}${convertHtml ? '&convert=1' : ''}`;
     linkedDocHook.open(absolutePath, buildUrl, 'files');
     fileBrowser.setActiveFile(absolutePath);
   }, [linkedDocHook, fileBrowser, convertHtml]);
@@ -722,10 +738,17 @@ const App: React.FC = () => {
   // Route linked doc opens through the correct endpoint based on current context
   const handleOpenLinkedDoc = React.useCallback((docPath: string) => {
     const activeDirState = fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath);
-    if (activeDirState?.isVault && fileBrowser.activeDirPath) {
+    if (activeDirState?.source === 'obsidian' && fileBrowser.activeDirPath) {
       linkedDocHook.open(docPath, (path) =>
-        `/api/reference/obsidian/doc?vaultPath=${encodeURIComponent(fileBrowser.activeDirPath!)}&path=${encodeURIComponent(path)}`
+        `/api/reference/obsidian/doc?vaultPath=${encodeURIComponent(fileBrowser.activeDirPath!)}&path=${encodeURIComponent(path.startsWith(`${fileBrowser.activeDirPath!}/`) ? path.slice(fileBrowser.activeDirPath!.length + 1) : path)}`
       );
+    } else if (activeDirState?.source === 'roam' && activeDirState.roamMeta) {
+      linkedDocHook.open(docPath, (path) => {
+        const uid = path.startsWith(`${fileBrowser.activeDirPath!}/`)
+          ? path.slice(fileBrowser.activeDirPath!.length + 1)
+          : path;
+        return `/api/reference/roam/doc?graphName=${encodeURIComponent(activeDirState.roamMeta!.graphName)}&graphType=${encodeURIComponent(activeDirState.roamMeta!.graphType)}&port=${encodeURIComponent(String(activeDirState.roamMeta!.port))}&token=${encodeURIComponent(activeDirState.roamMeta!.token)}&uid=${encodeURIComponent(uid)}`;
+      });
     } else if (fileBrowser.activeFile && fileBrowser.activeDirPath) {
       // When viewing a file browser doc, resolve links relative to current file's directory
       const baseDir = linkedDocHook.filepath?.replace(/\/[^/]+$/, '') || fileBrowser.activeDirPath;
@@ -1188,7 +1211,7 @@ const App: React.FC = () => {
     if (!isApiMode || !markdown || isSharedSession || annotateMode || archive.archiveMode) return;
     if (autoSaveAttempted.current) return;
 
-    const body: { obsidian?: object; bear?: object; octarine?: object } = {};
+    const body: { obsidian?: object; bear?: object; octarine?: object; roam?: object } = {};
     const targets: string[] = [];
 
     const obsSettings = getObsidianSettings();
@@ -1226,6 +1249,22 @@ const App: React.FC = () => {
       targets.push('Octarine');
     }
 
+    const roamSettings = getRoamSettings();
+    if (roamSettings.autoSave && isRoamConfigured()) {
+      body.roam = {
+        graphName: roamSettings.graphName,
+        graphType: roamSettings.graphType,
+        token: roamSettings.token,
+        port: roamSettings.port || 3333,
+        plan: markdown,
+        saveLocation: roamSettings.saveLocation,
+        dailyNoteParent: roamSettings.dailyNoteParent,
+        ...(roamSettings.titleFormat && { titleFormat: roamSettings.titleFormat }),
+        ...(roamSettings.titleSeparator && roamSettings.titleSeparator !== 'space' && { titleSeparator: roamSettings.titleSeparator }),
+      };
+      targets.push('Roam');
+    }
+
     if (targets.length === 0) return;
     autoSaveAttempted.current = true;
 
@@ -1240,6 +1279,7 @@ const App: React.FC = () => {
           ...(body.obsidian ? { obsidian: Boolean(data.results?.obsidian?.success) } : {}),
           ...(body.bear ? { bear: Boolean(data.results?.bear?.success) } : {}),
           ...(body.octarine ? { octarine: Boolean(data.results?.octarine?.success) } : {}),
+          ...(body.roam ? { roam: Boolean(data.results?.roam?.success) } : {}),
         };
         autoSaveResultsRef.current = results;
 
@@ -1323,13 +1363,14 @@ const App: React.FC = () => {
       const obsidianSettings = getObsidianSettings();
       const bearSettings = getBearSettings();
       const octarineSettings = getOctarineSettings();
+      const roamSettings = getRoamSettings();
       const planSaveSettings = getPlanSaveSettings();
-      const autoSaveResults = bearSettings.autoSave && autoSavePromiseRef.current
+      const autoSaveResults = (bearSettings.autoSave || roamSettings.autoSave) && autoSavePromiseRef.current
         ? await autoSavePromiseRef.current
         : autoSaveResultsRef.current;
 
       // Build request body - include integrations if enabled
-      const body: { obsidian?: object; bear?: object; octarine?: object; feedback?: string; agentSwitch?: string; planSave?: { enabled: boolean; customPath?: string }; permissionMode?: string } = {};
+      const body: { obsidian?: object; bear?: object; octarine?: object; roam?: object; feedback?: string; agentSwitch?: string; planSave?: { enabled: boolean; customPath?: string }; permissionMode?: string } = {};
 
       // Include permission mode for Claude Code
       if (origin === 'claude-code') {
@@ -1373,6 +1414,22 @@ const App: React.FC = () => {
           plan: markdown,
           workspace: octarineSettings.workspace,
           folder: octarineSettings.folder || 'plannotator',
+        };
+      }
+
+      // Roam creates a new page/container each time, so don't send it again on approve
+      // if the arrival auto-save already succeeded.
+      if (isRoamConfigured() && !(roamSettings.autoSave && autoSaveResults.roam)) {
+        body.roam = {
+          graphName: roamSettings.graphName,
+          graphType: roamSettings.graphType,
+          token: roamSettings.token,
+          port: roamSettings.port || 3333,
+          plan: markdown,
+          saveLocation: roamSettings.saveLocation,
+          dailyNoteParent: roamSettings.dailyNoteParent,
+          ...(roamSettings.titleFormat && { titleFormat: roamSettings.titleFormat }),
+          ...(roamSettings.titleSeparator && roamSettings.titleSeparator !== 'space' && { titleSeparator: roamSettings.titleSeparator }),
         };
       }
 
@@ -1949,8 +2006,8 @@ const App: React.FC = () => {
     toast.success('Downloaded annotations');
   };
 
-  const handleQuickSaveToNotes = async (target: 'obsidian' | 'bear' | 'octarine') => {
-    const body: { obsidian?: object; bear?: object; octarine?: object } = {};
+  const handleQuickSaveToNotes = async (target: 'obsidian' | 'bear' | 'octarine' | 'roam') => {
+    const body: { obsidian?: object; bear?: object; octarine?: object; roam?: object } = {};
 
     if (target === 'obsidian') {
       const s = getObsidianSettings();
@@ -1981,8 +2038,28 @@ const App: React.FC = () => {
         folder: os.folder || 'plannotator',
       };
     }
+    if (target === 'roam') {
+      const rs = getRoamSettings();
+      body.roam = {
+        graphName: rs.graphName,
+        graphType: rs.graphType,
+        token: rs.token,
+        port: rs.port || 3333,
+        plan: markdown,
+        saveLocation: rs.saveLocation,
+        dailyNoteParent: rs.dailyNoteParent,
+        ...(rs.titleFormat && { titleFormat: rs.titleFormat }),
+        ...(rs.titleSeparator && rs.titleSeparator !== 'space' && { titleSeparator: rs.titleSeparator }),
+      };
+    }
 
-    const targetName = target === 'obsidian' ? 'Obsidian' : target === 'bear' ? 'Bear' : 'Octarine';
+    const targetName = target === 'obsidian'
+      ? 'Obsidian'
+      : target === 'bear'
+        ? 'Bear'
+        : target === 'octarine'
+          ? 'Octarine'
+          : 'Roam';
     try {
       const res = await fetch('/api/save-notes', {
         method: 'POST',
@@ -2045,6 +2122,7 @@ const App: React.FC = () => {
       const obsOk = isObsidianConfigured();
       const bearOk = getBearSettings().enabled;
       const octOk = isOctarineConfigured();
+      const roamOk = isRoamConfigured();
 
       if (defaultApp === 'download') {
         handleDownloadAnnotations();
@@ -2054,6 +2132,8 @@ const App: React.FC = () => {
         handleQuickSaveToNotes('bear');
       } else if (defaultApp === 'octarine' && octOk) {
         handleQuickSaveToNotes('octarine');
+      } else if (defaultApp === 'roam' && roamOk) {
+        handleQuickSaveToNotes('roam');
       } else {
         setInitialExportTab('notes');
         setShowExport(true);
@@ -2185,6 +2265,7 @@ const App: React.FC = () => {
   const handleSaveToObsidian = useCallback(() => headerHandlersRef.current.handleQuickSaveToNotes('obsidian'), []);
   const handleSaveToOctarine = useCallback(() => headerHandlersRef.current.handleQuickSaveToNotes('octarine'), []);
   const handleSaveToBear = useCallback(() => headerHandlersRef.current.handleQuickSaveToNotes('bear'), []);
+  const handleSaveToRoam = useCallback(() => headerHandlersRef.current.handleQuickSaveToNotes('roam'), []);
 
   const planMaxWidth = useMemo(() => {
     const widths: Record<PlanWidth, number> = { compact: 832, default: 1040, wide: 1280 };
@@ -2283,6 +2364,7 @@ const App: React.FC = () => {
           onSaveToObsidian={handleSaveToObsidian}
           onSaveToBear={handleSaveToBear}
           onSaveToOctarine={handleSaveToOctarine}
+          onSaveToRoam={handleSaveToRoam}
           appVersion={typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0'}
           updateInfo={updateInfo}
           isWSL={isWSL}
@@ -2290,6 +2372,7 @@ const App: React.FC = () => {
           obsidianConfigured={isObsidianConfigured()}
           bearConfigured={getBearSettings().enabled}
           octarineConfigured={isOctarineConfigured()}
+          roamConfigured={isRoamConfigured()}
         />
 
         {/* Linked document error banner */}
@@ -2349,7 +2432,24 @@ const App: React.FC = () => {
                 fileBrowser={fileBrowser}
                 onFilesSelectFile={handleFileBrowserSelect}
                 onFilesFetchAll={() => fileBrowser.fetchAll(fileBrowserDirs)}
-                onFilesRetryVaultDir={(vaultPath) => fileBrowser.addVaultDir(vaultPath)}
+                onFilesRetryVaultDir={(dirPath) => {
+                  const dir = fileBrowser.dirs.find(d => d.path === dirPath);
+                  if (dir?.source === 'obsidian') fileBrowser.addObsidianDir(dirPath);
+                  else if (dir?.source === 'roam' && dir.roamMeta) {
+                    fileBrowser.addRoamDir({
+                      enabled: true,
+                      graphName: dir.roamMeta.graphName,
+                      graphType: dir.roamMeta.graphType,
+                      token: dir.roamMeta.token,
+                      port: dir.roamMeta.port,
+                      titleSeparator: 'space',
+                      saveLocation: 'page',
+                      dailyNoteParent: '[[Plannotator Plans]]',
+                      autoSave: false,
+                      referenceBrowserEnabled: true,
+                    });
+                  }
+                }}
                 hasFileAnnotations={hasFileAnnotations}
                 showVersionsTab={versionInfo !== null && versionInfo.totalVersions > 1}
                 versionInfo={versionInfo}
@@ -2568,7 +2668,17 @@ const App: React.FC = () => {
                     maxWidth={annotateReaderMaxWidth}
                     onOpenLinkedDoc={handleOpenLinkedDoc}
                     onOpenCodeFile={codeFilePopout.open}
-                    linkedDocInfo={linkedDocHook.isActive ? { filepath: linkedDocHook.filepath!, onBack: handleLinkedDocBack, label: fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath)?.isVault ? 'Vault File' : fileBrowser.activeFile ? 'File' : undefined, backLabel } : null}
+                    linkedDocInfo={linkedDocHook.isActive ? {
+                      filepath: linkedDocHook.filepath!,
+                      onBack: handleLinkedDocBack,
+                      label: (() => {
+                        const activeDir = fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath);
+                        if (activeDir?.source === 'obsidian') return 'Vault File';
+                        if (activeDir?.source === 'roam') return 'Roam Page';
+                        return fileBrowser.activeFile ? 'File' : undefined;
+                      })(),
+                      backLabel,
+                    } : null}
                     imageBaseDir={imageBaseDir}
                     codePathBaseDir={activeDocBaseDir}
                     copyLabel={annotateSource === 'message' ? 'Copy message' : annotateSource === 'file' || annotateSource === 'folder' ? 'Copy file' : undefined}

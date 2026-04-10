@@ -79,6 +79,7 @@ interface AppHeaderProps {
   onSaveToObsidian: () => void;
   onSaveToBear: () => void;
   onSaveToOctarine: () => void;
+  onSaveToRoam: () => void;
 
   // PlanHeaderMenu config
   appVersion: string;
@@ -88,6 +89,7 @@ interface AppHeaderProps {
   obsidianConfigured: boolean;
   bearConfigured: boolean;
   octarineConfigured: boolean;
+  roamConfigured: boolean;
 }
 
 export const AppHeader = React.memo<AppHeaderProps>(({
@@ -148,6 +150,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   onSaveToObsidian,
   onSaveToBear,
   onSaveToOctarine,
+  onSaveToRoam,
   appVersion,
   updateInfo,
   isWSL,
@@ -155,6 +158,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   obsidianConfigured,
   bearConfigured,
   octarineConfigured,
+  roamConfigured,
 }) => {
   return (
     <header data-app-header="true" className="h-12 flex items-center justify-between px-2 md:px-4 border-b border-border/50 bg-card/50 backdrop-blur-xl sticky top-0 z-[50]">
@@ -359,12 +363,14 @@ export const AppHeader = React.memo<AppHeaderProps>(({
           onSaveToObsidian={onSaveToObsidian}
           onSaveToBear={onSaveToBear}
           onSaveToOctarine={onSaveToOctarine}
+          onSaveToRoam={onSaveToRoam}
           sharingEnabled={canShareCurrentSession}
           isApiMode={isApiMode}
           agentInstructionsEnabled={agentInstructionsEnabled}
           obsidianConfigured={!goalSetupMode && obsidianConfigured}
           bearConfigured={!goalSetupMode && bearConfigured}
           octarineConfigured={!goalSetupMode && octarineConfigured}
+          roamConfigured={!goalSetupMode && roamConfigured}
         />
       </div>
     </header>

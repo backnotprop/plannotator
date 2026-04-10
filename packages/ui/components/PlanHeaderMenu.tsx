@@ -28,12 +28,14 @@ interface PlanHeaderMenuProps {
   onSaveToObsidian: () => void;
   onSaveToBear: () => void;
   onSaveToOctarine: () => void;
+  onSaveToRoam: () => void;
   sharingEnabled: boolean;
   isApiMode: boolean;
   agentInstructionsEnabled: boolean;
   obsidianConfigured: boolean;
   bearConfigured: boolean;
   octarineConfigured: boolean;
+  roamConfigured: boolean;
 }
 
 export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
@@ -51,19 +53,21 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
   onSaveToObsidian,
   onSaveToBear,
   onSaveToOctarine,
+  onSaveToRoam,
   sharingEnabled,
   isApiMode,
   agentInstructionsEnabled,
   obsidianConfigured,
   bearConfigured,
   octarineConfigured,
+  roamConfigured,
 }) => {
   const { theme, setTheme } = useTheme();
 
   const showUpdateDot = !!updateInfo?.updateAvailable && !updateInfo.dismissed;
 
   const anyNotesAppConfigured =
-    isApiMode && (obsidianConfigured || bearConfigured || octarineConfigured);
+    isApiMode && (obsidianConfigured || bearConfigured || octarineConfigured || roamConfigured);
 
   return (
     <ActionMenu
@@ -224,6 +228,16 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
                   label="Save to Octarine"
                 />
               )}
+              {roamConfigured && (
+                <ActionMenuItem
+                  onClick={() => {
+                    closeMenu();
+                    onSaveToRoam();
+                  }}
+                  icon={<NoteIcon />}
+                  label="Save to Roam"
+                />
+              )}
             </>
           )}
 
@@ -296,4 +310,3 @@ const NoteIcon = () => (
     <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
   </svg>
 );
-

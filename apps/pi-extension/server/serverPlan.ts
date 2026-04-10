@@ -31,9 +31,11 @@ import {
 	type IntegrationResult,
 	type ObsidianConfig,
 	type OctarineConfig,
+	type RoamConfig,
 	saveToBear,
 	saveToObsidian,
 	saveToOctarine,
+	saveToRoam,
 } from "./integrations.js";
 import { listenOnPort } from "./network.js";
 
@@ -48,6 +50,9 @@ import {
 	handleObsidianDocRequest,
 	handleObsidianFilesRequest,
 	handleObsidianVaultsRequest,
+	handleRoamDoc,
+	handleRoamPages,
+	handleRoamTest,
 } from "./reference.js";
 import { warmFileListCache } from "../generated/resolve-file.js";
 
@@ -281,6 +286,12 @@ export async function startPlanReviewServer(options: {
 			handleObsidianFilesRequest(res, url);
 		} else if (url.pathname === "/api/reference/obsidian/doc" && req.method === "GET") {
 			handleObsidianDocRequest(res, url);
+		} else if (url.pathname === "/api/roam/test" && req.method === "GET") {
+			await handleRoamTest(req, res, url);
+		} else if (url.pathname === "/api/reference/roam/pages" && req.method === "GET") {
+			await handleRoamPages(req, res, url);
+		} else if (url.pathname === "/api/reference/roam/doc" && req.method === "GET") {
+			await handleRoamDoc(req, res, url);
 		} else if (url.pathname === "/api/reference/files" && req.method === "GET") {
 			handleFileBrowserRequest(res, url);
 		} else if (
@@ -326,6 +337,7 @@ export async function startPlanReviewServer(options: {
 				obsidian?: IntegrationResult;
 				bear?: IntegrationResult;
 				octarine?: IntegrationResult;
+				roam?: IntegrationResult;
 			} = {};
 			try {
 				const body = await parseBody(req);
@@ -333,6 +345,7 @@ export async function startPlanReviewServer(options: {
 				const obsConfig = body.obsidian as ObsidianConfig | undefined;
 				const bearConfig = body.bear as BearConfig | undefined;
 				const octConfig = body.octarine as OctarineConfig | undefined;
+				const roamConfig = body.roam as RoamConfig | undefined;
 				if (obsConfig?.vaultPath && obsConfig?.plan) {
 					promises.push(
 						saveToObsidian(obsConfig).then((r) => {
@@ -351,6 +364,18 @@ export async function startPlanReviewServer(options: {
 					promises.push(
 						saveToOctarine(octConfig).then((r) => {
 							results.octarine = r;
+						}),
+					);
+				}
+				if (
+					roamConfig?.graphName &&
+					roamConfig?.token &&
+					roamConfig?.port &&
+					roamConfig?.plan
+				) {
+					promises.push(
+						saveToRoam(roamConfig).then((r) => {
+							results.roam = r;
 						}),
 					);
 				}
@@ -392,6 +417,7 @@ export async function startPlanReviewServer(options: {
 				const obsConfig = body.obsidian as ObsidianConfig | undefined;
 				const bearConfig = body.bear as BearConfig | undefined;
 				const octConfig = body.octarine as OctarineConfig | undefined;
+				const roamConfig = body.roam as RoamConfig | undefined;
 				if (obsConfig?.vaultPath && obsConfig?.plan) {
 					integrationPromises.push(
 						saveToObsidian(obsConfig).then((r) => {
@@ -410,6 +436,18 @@ export async function startPlanReviewServer(options: {
 					integrationPromises.push(
 						saveToOctarine(octConfig).then((r) => {
 							integrationResults.octarine = r;
+						}),
+					);
+				}
+				if (
+					roamConfig?.graphName &&
+					roamConfig?.token &&
+					roamConfig?.port &&
+					roamConfig?.plan
+				) {
+					integrationPromises.push(
+						saveToRoam(roamConfig).then((r) => {
+							integrationResults.roam = r;
 						}),
 					);
 				}

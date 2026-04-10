@@ -22,7 +22,21 @@ import {
 	buildFileTree,
 	FILE_BROWSER_EXCLUDED,
 } from "../generated/reference-common.js";
-import { detectObsidianVaults } from "../generated/integrations-common.js";
+import {
+	detectObsidianVaults,
+	normalizeRoamSuggestionsToPages,
+	stripRoamMetadataTags,
+	type RoamSuggestionsResult,
+} from "../generated/integrations-common.js";
+import {
+	callRoamLocalApi,
+	callRoamLocalApiEnvelope,
+	RoamAuthError,
+	RoamClientError,
+	RoamConnectionError,
+	RoamTimeoutError,
+	RoamVersionMismatchError,
+} from "./roam-client.js";
 import {
 	isAbsoluteUserPath,
 	isCodeFilePath,
@@ -338,6 +352,136 @@ export function handleObsidianDocRequest(res: Res, url: URL): void {
 	} catch {
 		json(res, { error: "Failed to read file" }, 500);
 	}
+}
+
+export async function handleRoamTest(req: IncomingMessage, res: Res, url: URL): Promise<void> {
+	try {
+		const config = parseRoamRequest(req, url);
+		const response = await callRoamLocalApiEnvelope<Record<string, unknown>>(
+			config,
+			"ui.mainWindow.getOpenView",
+			[],
+			{ timeoutMs: 5_000 },
+		);
+		json(res, {
+			ok: true,
+			apiVersion: response.apiVersion,
+			graphName: config.graphName,
+		});
+	} catch (error) {
+		roamErrorResponse(res, error);
+	}
+}
+
+export async function handleRoamPages(req: IncomingMessage, res: Res, url: URL): Promise<void> {
+	try {
+		const config = parseRoamRequest(req, url);
+		const result = await callRoamLocalApi<
+			{ suggestions?: RoamSuggestionsResult } | RoamSuggestionsResult
+		>(
+			config,
+			"data.ai.search",
+			[{ query: "", scope: "pages", limit: 100, includePath: false }],
+			{ timeoutMs: 10_000 },
+		);
+		const suggestions = "suggestions" in (result ?? {})
+			? (result as { suggestions?: RoamSuggestionsResult }).suggestions ?? {}
+			: (result ?? {}) as RoamSuggestionsResult;
+		const tree = normalizeRoamSuggestionsToPages(suggestions ?? {}).map((page) => ({
+			name: page.title,
+			path: page.uid,
+			type: "file" as const,
+		}));
+		json(res, { tree });
+	} catch (error) {
+		roamErrorResponse(res, error);
+	}
+}
+
+export async function handleRoamDoc(req: IncomingMessage, res: Res, url: URL): Promise<void> {
+	try {
+		const config = parseRoamRequest(req, url);
+		const uid = url.searchParams.get("uid");
+		if (!uid) {
+			json(res, { error: "Missing uid parameter" }, 400);
+			return;
+		}
+		const result = await callRoamLocalApi<{ markdown?: string } | string>(
+			config,
+			"data.ai.getPage",
+			[{ uid }],
+			{ timeoutMs: 10_000 },
+		);
+		const rawMarkdown = typeof result === "string" ? result : result.markdown ?? "";
+		json(res, {
+			markdown: stripRoamMetadataTags(rawMarkdown),
+			filepath: `roam:${config.graphType}:${config.graphName}/${uid}`,
+		});
+	} catch (error) {
+		roamErrorResponse(res, error);
+	}
+}
+
+function parseRoamRequest(
+	req: IncomingMessage,
+	url: URL,
+): {
+	graphName: string;
+	graphType: "hosted" | "offline";
+	token: string;
+	port: number;
+} {
+	const graphName = url.searchParams.get("graphName")?.trim();
+	const graphType = url.searchParams.get("graphType") === "offline" ? "offline" : "hosted";
+	const authHeader = req.headers.authorization;
+	const tokenFromHeader = Array.isArray(authHeader)
+		? authHeader[0]?.replace(/^Bearer\s+/i, "").trim()
+		: authHeader?.replace(/^Bearer\s+/i, "").trim();
+	const tokenFromQuery = url.searchParams.get("token")?.trim();
+	const token = tokenFromHeader || tokenFromQuery;
+	const port = Number(url.searchParams.get("port") || "3333");
+
+	if (!graphName) {
+		throw new RoamClientError("Missing graphName parameter");
+	}
+	if (!token) {
+		throw new RoamAuthError("Missing Roam API token");
+	}
+	if (!Number.isFinite(port) || port < 1 || port > 65535) {
+		throw new RoamClientError("Invalid Roam API port");
+	}
+
+	return {
+		graphName,
+		graphType,
+		token,
+		port: Math.trunc(port),
+	};
+}
+
+function roamErrorResponse(res: Res, error: unknown): void {
+	if (error instanceof RoamAuthError) {
+		json(res, { error: error.message }, 401);
+		return;
+	}
+	if (error instanceof RoamVersionMismatchError) {
+		json(res, { error: error.message, actualVersion: error.actualVersion }, 409);
+		return;
+	}
+	if (error instanceof RoamTimeoutError) {
+		json(res, { error: error.message }, 504);
+		return;
+	}
+	if (error instanceof RoamConnectionError) {
+		json(res, { error: error.message }, 503);
+		return;
+	}
+	if (error instanceof RoamClientError) {
+		json(res, { error: error.message }, 502);
+		return;
+	}
+	const message = error instanceof Error ? error.message : "Unknown Roam error";
+	json(res, { error: message }, 500);
 }
 
 export function handleFileBrowserRequest(res: Res, url: URL): void {

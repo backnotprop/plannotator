@@ -23,11 +23,26 @@ export interface OctarineConfig {
 	folder: string;
 }
 
+export interface RoamConfig {
+	graphName: string;
+	graphType: "hosted" | "offline";
+	token: string;
+	port: number;
+	plan: string;
+	titleFormat?: string;
+	titleSeparator?: "space" | "dash" | "underscore";
+	saveLocation?: "page" | "daily-note";
+	dailyNoteParent?: string;
+}
+
 export interface IntegrationResult {
 	success: boolean;
 	error?: string;
 	path?: string;
 }
+
+export const ROAM_API_VERSION = "1.1.2";
+export const DEFAULT_ROAM_PARENT_BLOCK = "[[Plannotator Plans]]";
 
 /**
  * Detect Obsidian vaults by reading Obsidian's config file
@@ -198,6 +213,250 @@ export function generateFilename(
 	}
 
 	return sanitized.endsWith(".md") ? sanitized : `${sanitized}.md`;
+}
+
+export function stripFrontmatter(markdown: string): {
+	frontmatter: Record<string, unknown>;
+	body: string;
+} {
+	const match = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+	if (!match) {
+		return { frontmatter: {}, body: markdown };
+	}
+
+	const frontmatter: Record<string, unknown> = {};
+	const lines = match[1].split(/\r?\n/);
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+		const keyValueMatch = line.match(/^([A-Za-z0-9_-]+):(?:\s*(.*))?$/);
+		if (!keyValueMatch) {
+			continue;
+		}
+
+		const key = keyValueMatch[1];
+		const inlineValue = keyValueMatch[2] ?? "";
+		if (inlineValue) {
+			frontmatter[key] = parseFrontmatterScalar(inlineValue);
+			continue;
+		}
+
+		const arrayValues: string[] = [];
+		let j = i + 1;
+		while (j < lines.length) {
+			const listMatch = lines[j].match(/^\s*-\s+(.*)$/);
+			if (!listMatch) {
+				break;
+			}
+			arrayValues.push(listMatch[1]);
+			j++;
+		}
+
+		if (arrayValues.length > 0) {
+			frontmatter[key] = arrayValues.map(parseFrontmatterScalar);
+			i = j - 1;
+			continue;
+		}
+
+		frontmatter[key] = "";
+	}
+
+	return {
+		frontmatter,
+		body: markdown.slice(match[0].length).replace(/^(?:\r?\n)+/, ""),
+	};
+}
+
+function parseFrontmatterScalar(
+	value: string,
+): string | boolean | number | string[] {
+	const trimmed = value.trim();
+	if (trimmed === "true") return true;
+	if (trimmed === "false") return false;
+	if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) return Number(trimmed);
+	if (/^\[(.*)\]$/.test(trimmed)) {
+		const content = trimmed.slice(1, -1).trim();
+		if (!content) return [];
+		return content
+			.split(",")
+			.map((item) => item.trim().replace(/^["']|["']$/g, ""))
+			.filter((item) => item.length > 0);
+	}
+	return trimmed;
+}
+
+export function frontmatterToAttributeBlocks(
+	frontmatter: Record<string, unknown>,
+): string {
+	const lines: string[] = [];
+
+	for (const [key, value] of Object.entries(frontmatter)) {
+		if (value == null || value === "") continue;
+		if (key === "created" && typeof value === "string") {
+			lines.push(`created:: ${formatRoamCreatedValue(value)}`);
+			continue;
+		}
+		if (key === "tags") {
+			lines.push(`tags:: ${formatRoamTagsValue(value)}`);
+			continue;
+		}
+		lines.push(`${key}:: ${formatRoamAttributeValue(value)}`);
+	}
+
+	return lines.join("\n");
+}
+
+function formatRoamAttributeValue(value: unknown): string {
+	if (value === null || value === undefined) {
+		return "";
+	}
+	if (typeof value === "string") {
+		return value;
+	}
+	if (typeof value === "number" || typeof value === "boolean") {
+		return String(value);
+	}
+	if (Array.isArray(value)) {
+		return value.map((item) => formatRoamAttributeValue(item)).join(", ");
+	}
+	return JSON.stringify(value);
+}
+
+export function stripRoamMetadataTags(markdown: string): string {
+	return markdown
+		.replace(/<roam\b[^>]*\/>/gi, "")
+		.replace(/<roam\b[^>]*>([\s\S]*?)<\/roam>/gi, "$1");
+}
+
+export function majorMinorMatches(a: string, b: string): boolean {
+	const parsedA = parseMajorMinorVersion(a);
+	const parsedB = parseMajorMinorVersion(b);
+	if (!parsedA || !parsedB) {
+		return false;
+	}
+
+	return parsedA.major === parsedB.major && parsedA.minor === parsedB.minor;
+}
+
+function parseMajorMinorVersion(version: string): { major: number; minor: number } | null {
+	const match = version.trim().match(/^(\d+)\.(\d+)(?:\.\d+)?(?:[-+].*)?$/);
+	if (!match) {
+		return null;
+	}
+
+	return {
+		major: Number(match[1]),
+		minor: Number(match[2]),
+	};
+}
+
+export function generatePageTitle(
+	markdown: string,
+	format?: string,
+	separator?: "space" | "dash" | "underscore",
+): string {
+	return generateFilename(markdown, format, separator).replace(/\.md$/, "");
+}
+
+export function formatRoamDailyNotePage(date: Date): string {
+	const month = String(date.getMonth() + 1).padStart(2, "0");
+	const day = String(date.getDate()).padStart(2, "0");
+	const year = String(date.getFullYear());
+	return `${month}-${day}-${year}`;
+}
+
+export function normalizeRoamDailyNoteParent(value?: string | null): string {
+	const trimmed = value?.trim();
+	return trimmed ? trimmed : DEFAULT_ROAM_PARENT_BLOCK;
+}
+
+export interface RoamSuggestionPage {
+	uid: string;
+	title: string;
+	sortAt: string;
+}
+
+export interface RoamEditedPage {
+	uid: string;
+	title: string;
+	editedAt?: string;
+}
+
+export interface RoamOpenedPage {
+	uid?: string;
+	title: string;
+	type?: string;
+	openedAt?: string;
+}
+
+export interface RoamSuggestionsResult {
+	recentlyEditedPages?: RoamEditedPage[];
+	recentlyOpenedByUser?: RoamOpenedPage[];
+}
+
+export function normalizeRoamSuggestionsToPages(
+	result: RoamSuggestionsResult,
+): RoamSuggestionPage[] {
+	const pages = new Map<string, RoamSuggestionPage>();
+	for (const page of result.recentlyEditedPages ?? []) {
+		if (!page.uid || !page.title) continue;
+		pages.set(page.uid, {
+			uid: page.uid,
+			title: page.title,
+			sortAt: page.editedAt ?? "",
+		});
+	}
+
+	for (const page of result.recentlyOpenedByUser ?? []) {
+		if ((page.type && page.type !== "page") || !page.uid || !page.title) continue;
+		const existing = pages.get(page.uid);
+		if (!existing) {
+			pages.set(page.uid, {
+				uid: page.uid,
+				title: page.title,
+				sortAt: page.openedAt ?? "",
+			});
+			continue;
+		}
+
+		pages.set(page.uid, {
+			...existing,
+			sortAt: getMoreRecentSortAt(existing.sortAt, page.openedAt ?? ""),
+		});
+	}
+
+	return Array.from(pages.values()).sort((a, b) =>
+		b.sortAt.localeCompare(a.sortAt),
+	);
+}
+
+function formatRoamCreatedValue(value: string): string {
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) {
+		return value;
+	}
+
+	const month = date.toLocaleString("en-US", { month: "long" });
+	const day = date.getDate();
+	return `[[${month} ${day}${getOrdinalSuffix(day)}, ${date.getFullYear()}]]`;
+}
+
+function formatRoamTagsValue(value: unknown): string {
+	if (Array.isArray(value)) {
+		return value.map((tag) => `[[${String(tag)}]]`).join(", ");
+	}
+	return `[[${String(value)}]]`;
+}
+
+function getOrdinalSuffix(day: number): string {
+	if (day % 10 === 1 && day % 100 !== 11) return "st";
+	if (day % 10 === 2 && day % 100 !== 12) return "nd";
+	if (day % 10 === 3 && day % 100 !== 13) return "rd";
+	return "th";
+}
+
+function getMoreRecentSortAt(a: string, b: string): string {
+	return a.localeCompare(b) >= 0 ? a : b;
 }
 
 // --- Bear Integration ---

@@ -27,6 +27,12 @@ import {
   type OctarineSettings,
 } from '../utils/octarine';
 import {
+  getRoamSettings,
+  normalizeRoamPort,
+  saveRoamSettings,
+  type RoamSettings,
+} from '../utils/roam';
+import {
   getAgentSwitchSettings,
   saveAgentSwitchSettings,
   AGENT_OPTIONS,
@@ -71,7 +77,13 @@ import {
   type FileBrowserSettings,
 } from '../utils/fileBrowser';
 
-type SettingsTab = 'general' | 'theme' | 'git' | 'display' | 'saving' | 'labels' | 'shortcuts' | 'ai' | 'files' | 'obsidian' | 'bear' | 'octarine' | 'comments' | 'hooks';
+type SettingsTab = 'general' | 'theme' | 'git' | 'display' | 'saving' | 'labels' | 'shortcuts' | 'ai' | 'files' | 'obsidian' | 'bear' | 'octarine' | 'roam' | 'comments' | 'hooks';
+
+type RoamTestStatus =
+  | { state: 'idle' }
+  | { state: 'loading' }
+  | { state: 'success'; apiVersion: string; graphName: string }
+  | { state: 'error'; message: string };
 
 interface SettingsProps {
   taterMode: boolean;
@@ -637,6 +649,19 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const [vaultsLoading, setVaultsLoading] = useState(false);
   const [bear, setBear] = useState<BearSettings>({ enabled: false, customTags: '', tagPosition: 'append', autoSave: false });
   const [octarine, setOctarine] = useState<OctarineSettings>({ enabled: false, workspace: '', folder: 'plannotator', autoSave: false });
+  const [roam, setRoam] = useState<RoamSettings>({
+    enabled: false,
+    graphName: '',
+    graphType: 'hosted',
+    token: '',
+    port: 3333,
+    titleSeparator: 'space',
+    saveLocation: 'page',
+    dailyNoteParent: '[[Plannotator Plans]]',
+    autoSave: false,
+    referenceBrowserEnabled: false,
+  });
+  const [roamTestStatus, setRoamTestStatus] = useState<RoamTestStatus>({ state: 'idle' });
   const [agent, setAgent] = useState<AgentSwitchSettings>({ switchTo: 'build' });
   const [planSave, setPlanSave] = useState<PlanSaveSettings>({ enabled: true, customPath: null });
   const [uiPrefs, setUiPrefs] = useState<UIPreferences>({ tocEnabled: true, stickyActionsEnabled: true, planWidth: 'compact' });
@@ -680,12 +705,18 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const integrationTabs: { id: SettingsTab; label: string }[] = [
     { id: 'files', label: 'Files' },
     ...(mode === 'plan'
-      ? [{ id: 'obsidian' as SettingsTab, label: 'Obsidian' }, { id: 'bear' as SettingsTab, label: 'Bear' }, { id: 'octarine' as SettingsTab, label: 'Octarine' }]
+      ? [
+          { id: 'obsidian' as SettingsTab, label: 'Obsidian' },
+          { id: 'bear' as SettingsTab, label: 'Bear' },
+          { id: 'octarine' as SettingsTab, label: 'Octarine' },
+          { id: 'roam' as SettingsTab, label: 'Roam' },
+        ]
       : []),
   ];
   const obsidianDefaultSaveAvailable = obsidian.enabled && getEffectiveVaultPath(obsidian).trim().length > 0;
   const bearDefaultSaveAvailable = bear.enabled;
   const octarineDefaultSaveAvailable = octarine.enabled && octarine.workspace.trim().length > 0;
+  const roamDefaultSaveAvailable = roam.enabled && roam.graphName.trim().length > 0 && roam.token.trim().length > 0;
 
   // Sync external open state
   useEffect(() => {
@@ -701,6 +732,8 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       setObsidian(getObsidianSettings());
       setBear(getBearSettings());
       setOctarine(getOctarineSettings());
+      setRoam(getRoamSettings());
+      setRoamTestStatus({ state: 'idle' });
       setAgent(getAgentSwitchSettings());
       setPlanSave(getPlanSaveSettings());
       setUiPrefs(getUIPreferences());
@@ -727,7 +760,8 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       defaultNotesApp === 'download' ||
       (defaultNotesApp === 'obsidian' && obsidianDefaultSaveAvailable) ||
       (defaultNotesApp === 'bear' && bearDefaultSaveAvailable) ||
-      (defaultNotesApp === 'octarine' && octarineDefaultSaveAvailable);
+      (defaultNotesApp === 'octarine' && octarineDefaultSaveAvailable) ||
+      (defaultNotesApp === 'roam' && roamDefaultSaveAvailable);
 
     if (!defaultSaveAvailable) {
       setDefaultNotesApp('ask');
@@ -739,6 +773,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
     obsidianDefaultSaveAvailable,
     bearDefaultSaveAvailable,
     octarineDefaultSaveAvailable,
+    roamDefaultSaveAvailable,
   ]);
 
   // Fetch detected vaults when Obsidian is enabled
@@ -792,6 +827,39 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
     const newSettings = { ...octarine, ...updates };
     setOctarine(newSettings);
     saveOctarineSettings(newSettings);
+  };
+
+  const handleRoamChange = (updates: Partial<RoamSettings>) => {
+    const newSettings = {
+      ...roam,
+      ...updates,
+      port: normalizeRoamPort(updates.port ?? roam.port),
+    };
+    setRoam(newSettings);
+    saveRoamSettings(newSettings);
+    setRoamTestStatus({ state: 'idle' });
+  };
+
+  const handleRoamTestConnection = async () => {
+    setRoamTestStatus({ state: 'loading' });
+    try {
+      const res = await fetch(
+        `/api/roam/test?graphName=${encodeURIComponent(roam.graphName)}&graphType=${encodeURIComponent(roam.graphType)}&port=${encodeURIComponent(String(normalizeRoamPort(roam.port)))}`,
+        { headers: { Authorization: `Bearer ${roam.token}` } },
+      );
+      const data = await res.json();
+      if (data.ok) {
+        setRoamTestStatus({
+          state: 'success',
+          apiVersion: data.apiVersion,
+          graphName: data.graphName,
+        });
+      } else {
+        setRoamTestStatus({ state: 'error', message: data.error || 'Connection failed' });
+      }
+    } catch {
+      setRoamTestStatus({ state: 'error', message: 'Failed to connect to server' });
+    }
   };
 
   const handleAgentChange = (switchTo: AgentSwitchSettings['switchTo'], customName?: string) => {
@@ -1407,13 +1475,14 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                         {obsidianDefaultSaveAvailable && <option value="obsidian">Obsidian</option>}
                         {bearDefaultSaveAvailable && <option value="bear">Bear</option>}
                         {octarineDefaultSaveAvailable && <option value="octarine">Octarine</option>}
+                        {roamDefaultSaveAvailable && <option value="roam">Roam</option>}
                       </select>
                       <div className="text-[10px] text-muted-foreground/70">
                         {defaultNotesApp === 'ask'
                           ? 'Opens Export dialog with Notes tab'
                           : defaultNotesApp === 'download'
                             ? `${modKey}+S downloads the annotations file`
-                            : `${modKey}+S saves directly to ${{ obsidian: 'Obsidian', bear: 'Bear', octarine: 'Octarine' }[defaultNotesApp] ?? defaultNotesApp}`}
+                            : `${modKey}+S saves directly to ${{ obsidian: 'Obsidian', bear: 'Bear', octarine: 'Octarine', roam: 'Roam' }[defaultNotesApp] ?? defaultNotesApp}`}
                       </div>
                     </div>
 
@@ -1460,6 +1529,20 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                         <span className="flex items-center gap-2">
                           <span className={`text-[10px] font-medium ${octarine.enabled ? 'text-primary' : 'text-muted-foreground/50'}`}>
                             {octarine.enabled ? 'Enabled' : 'Off'}
+                          </span>
+                          <svg className="w-3.5 h-3.5 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                          </svg>
+                        </span>
+                      </button>
+                      <button
+                        onClick={() => setActiveTab('roam')}
+                        className="w-full flex items-center justify-between px-3 py-2.5 bg-muted/50 hover:bg-muted rounded-lg text-sm transition-colors group"
+                      >
+                        <span className="text-foreground">Roam</span>
+                        <span className="flex items-center gap-2">
+                          <span className={`text-[10px] font-medium ${roam.enabled ? 'text-primary' : 'text-muted-foreground/50'}`}>
+                            {roam.enabled ? 'Enabled' : 'Off'}
                           </span>
                           <svg className="w-3.5 h-3.5 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
@@ -2038,6 +2121,161 @@ tags: [plan, ...]
                             }`} />
                           </button>
                         </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* === ROAM TAB === */}
+                {activeTab === 'roam' && (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-sm font-medium">Roam</div>
+                        <div className="text-xs text-muted-foreground">
+                          Save plans to Roam Desktop and browse recent pages
+                        </div>
+                      </div>
+                      <button
+                        role="switch"
+                        aria-checked={roam.enabled}
+                        onClick={() => handleRoamChange({ enabled: !roam.enabled })}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                          roam.enabled ? 'bg-primary' : 'bg-muted'
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
+                            roam.enabled ? 'translate-x-6' : 'translate-x-1'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                    {roam.enabled && (
+                      <div className="mt-3 space-y-3">
+                        <div className="space-y-1.5 pl-0.5">
+                          <label className="text-xs text-muted-foreground">Graph Name</label>
+                          <input
+                            type="text"
+                            value={roam.graphName}
+                            onChange={(e) => handleRoamChange({ graphName: e.target.value })}
+                            placeholder="my-graph"
+                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                          />
+                        </div>
+                        <div className="space-y-1.5 pl-0.5">
+                          <label className="text-xs text-muted-foreground">Graph Type</label>
+                          <select
+                            value={roam.graphType}
+                            onChange={(e) => handleRoamChange({ graphType: e.target.value as RoamSettings['graphType'] })}
+                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
+                          >
+                            <option value="hosted">Hosted</option>
+                            <option value="offline">Offline</option>
+                          </select>
+                        </div>
+                        <div className="space-y-1.5 pl-0.5">
+                          <label className="text-xs text-muted-foreground">Local API Token</label>
+                          <input
+                            type="password"
+                            value={roam.token}
+                            onChange={(e) => handleRoamChange({ token: e.target.value })}
+                            placeholder="roam-graph-local-token-..."
+                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                          />
+                        </div>
+                        <div className="space-y-1.5 pl-0.5">
+                          <label className="text-xs text-muted-foreground">Local API Port</label>
+                          <input
+                            type="number"
+                            value={roam.port}
+                            onChange={(e) => handleRoamChange({ port: normalizeRoamPort(e.target.value) })}
+                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary/50"
+                          />
+                        </div>
+                        <button
+                          onClick={handleRoamTestConnection}
+                          disabled={roamTestStatus.state === 'loading'}
+                          className="px-3 py-2 rounded-lg text-xs font-medium bg-primary text-primary-foreground disabled:opacity-60"
+                        >
+                          {roamTestStatus.state === 'loading' ? 'Testing...' : 'Test Connection'}
+                        </button>
+                        {roamTestStatus.state === 'success' && (
+                          <div className="text-[10px] text-success">
+                            Connected to {roamTestStatus.graphName} · API {roamTestStatus.apiVersion}
+                          </div>
+                        )}
+                        {roamTestStatus.state === 'error' && (
+                          <div className="text-[10px] text-destructive">
+                            {roamTestStatus.message}
+                          </div>
+                        )}
+
+                        <div className="border-t border-border/30" />
+
+                        <div className="space-y-1.5 pl-0.5">
+                          <label className="text-xs text-muted-foreground">Save Location</label>
+                          <select
+                            value={roam.saveLocation}
+                            onChange={(e) => handleRoamChange({ saveLocation: e.target.value as RoamSettings['saveLocation'] })}
+                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
+                          >
+                            <option value="page">New Page</option>
+                            <option value="daily-note">Today's Daily Note</option>
+                          </select>
+                          <div className="text-[10px] text-muted-foreground/70">
+                            Saved plan contents are stored in a fenced markdown block.
+                          </div>
+                        </div>
+                        {roam.saveLocation === 'daily-note' && (
+                          <div className="space-y-1.5 pl-0.5">
+                            <label className="text-xs text-muted-foreground">Daily Note Parent Block</label>
+                            <input
+                              type="text"
+                              value={roam.dailyNoteParent}
+                              onChange={(e) => handleRoamChange({ dailyNoteParent: e.target.value })}
+                              placeholder="[[Plannotator Plans]]"
+                              className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                            />
+                          </div>
+                        )}
+                        <div className="space-y-1.5 pl-0.5">
+                          <label className="text-xs text-muted-foreground">Plan Title Format</label>
+                          <input
+                            type="text"
+                            value={roam.titleFormat || ''}
+                            onChange={(e) => handleRoamChange({ titleFormat: e.target.value || undefined })}
+                            placeholder={DEFAULT_FILENAME_FORMAT}
+                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                          />
+                        </div>
+                        <div className="space-y-1.5 pl-0.5">
+                          <label className="text-xs text-muted-foreground">Title Separator</label>
+                          <select
+                            value={roam.titleSeparator || 'space'}
+                            onChange={(e) => handleRoamChange({ titleSeparator: e.target.value as RoamSettings['titleSeparator'] })}
+                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
+                          >
+                            <option value="space">Spaces</option>
+                            <option value="dash">Dashes (-)</option>
+                            <option value="underscore">Underscores (_)</option>
+                          </select>
+                        </div>
+
+                        <div className="border-t border-border/30" />
+
+                        <ToggleSwitch
+                          checked={roam.autoSave}
+                          onChange={(value) => handleRoamChange({ autoSave: value })}
+                          label="Auto-save on Plan Arrival"
+                          description="Save to Roam before you approve or deny"
+                        />
+                        <ToggleSwitch
+                          checked={roam.referenceBrowserEnabled}
+                          onChange={(value) => handleRoamChange({ referenceBrowserEnabled: value })}
+                          label="Reference Browser"
+                          description="Browse recent Roam pages from the sidebar"
+                        />
                       </div>
                     )}
                   </>

@@ -23,6 +23,9 @@ import {
 	handleObsidianVaultsRequest,
 	handleObsidianFilesRequest,
 	handleObsidianDocRequest,
+	handleRoamDoc,
+	handleRoamPages,
+	handleRoamTest,
 } from "./reference.js";
 import { warmFileListCache } from "../generated/resolve-file.js";
 import { createExternalAnnotationHandler } from "./external-annotations.js";
@@ -152,6 +155,12 @@ export async function startAnnotateServer(options: {
 			handleObsidianFilesRequest(res, url);
 		} else if (url.pathname === "/api/reference/obsidian/doc" && req.method === "GET") {
 			handleObsidianDocRequest(res, url);
+		} else if (url.pathname === "/api/roam/test" && req.method === "GET") {
+			await handleRoamTest(req, res, url);
+		} else if (url.pathname === "/api/reference/roam/pages" && req.method === "GET") {
+			await handleRoamPages(req, res, url);
+		} else if (url.pathname === "/api/reference/roam/doc" && req.method === "GET") {
+			await handleRoamDoc(req, res, url);
 		} else if (url.pathname === "/api/reference/files" && req.method === "GET") {
 			handleFileBrowserRequest(res, url);
 		} else if (url.pathname === "/favicon.svg") {

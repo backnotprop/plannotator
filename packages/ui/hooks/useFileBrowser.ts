@@ -1,14 +1,15 @@
 /**
  * File Browser Hook
  *
- * Manages multiple directory file trees for the sidebar Files tab.
- * Each directory gets its own tree, loading, and error state.
- * Vault directories are supported via the isVault flag — they fetch
- * from the Obsidian vault endpoint instead of the generic files endpoint.
+ * Manages multiple file-browser sources for the sidebar Files tab.
+ * Each source gets its own tree, loading, and error state.
  */
 
 import { useState, useCallback } from "react";
 import type { VaultNode } from "../types";
+import type { RoamSettings } from "../utils/roam";
+
+export type DirSource = "files" | "obsidian" | "roam";
 
 export interface DirState {
   path: string;
@@ -16,8 +17,13 @@ export interface DirState {
   tree: VaultNode[];
   isLoading: boolean;
   error: string | null;
-  /** When true, fetches via /api/reference/obsidian/files and opens docs via /api/reference/obsidian/doc */
-  isVault?: boolean;
+  source: DirSource;
+  roamMeta?: {
+    graphName: string;
+    graphType: "hosted" | "offline";
+    token: string;
+    port: number;
+  };
 }
 
 export interface UseFileBrowserReturn {
@@ -28,8 +34,9 @@ export interface UseFileBrowserReturn {
   toggleCollapse: (dirPath: string) => void;
   fetchTree: (dirPath: string) => void;
   fetchAll: (directories: string[]) => void;
-  addVaultDir: (vaultPath: string) => void;
-  clearVaultDirs: () => void;
+  addObsidianDir: (vaultPath: string) => void;
+  addRoamDir: (settings: RoamSettings) => void;
+  clearSource: (source: DirSource) => void;
   activeFile: string | null;
   activeDirPath: string | null;
   setActiveFile: (path: string | null) => void;
@@ -60,7 +67,17 @@ export function useFileBrowser(): UseFileBrowserReturn {
           d.path === dirPath ? { ...d, isLoading: true, error: null } : d
         );
       }
-      return [...prev, { path: dirPath, name, tree: [], isLoading: true, error: null }];
+      return [
+        ...prev,
+        {
+          path: dirPath,
+          name,
+          tree: [],
+          isLoading: true,
+          error: null,
+          source: "files",
+        },
+      ];
     });
 
     try {
@@ -105,32 +122,43 @@ export function useFileBrowser(): UseFileBrowserReturn {
     (directories: string[]) => {
       setDirs((prev) => {
         // Preserve any vault dirs that were already loaded
-        const vaultDirs = prev.filter((d) => d.isVault);
+        const nonFileDirs = prev.filter((d) => d.source !== "files");
         const regularDirs = directories.map((path) => ({
           path,
           name: path.split("/").pop() || path,
           tree: [],
           isLoading: false,
           error: null,
+          source: "files" as const,
         }));
-        return [...regularDirs, ...vaultDirs];
+        return [...regularDirs, ...nonFileDirs];
       });
       directories.forEach((d) => fetchTree(d));
     },
     [fetchTree]
   );
 
-  const clearVaultDirs = useCallback(() => {
-    setDirs((prev) => prev.filter((d) => !d.isVault));
+  const clearSource = useCallback((source: DirSource) => {
+    setDirs((prev) => prev.filter((d) => d.source !== source));
   }, []);
 
-  const addVaultDir = useCallback(async (vaultPath: string) => {
+  const addObsidianDir = useCallback(async (vaultPath: string) => {
     const name = vaultPath.split("/").pop() || vaultPath;
 
-    // Atomically replace any existing vault dirs (handles vault path change without accumulating stale entries)
+    // Atomically replace any existing Obsidian dirs (handles vault path change without accumulating stale entries)
     setDirs((prev) => {
-      const nonVaultDirs = prev.filter((d) => !d.isVault);
-      return [...nonVaultDirs, { path: vaultPath, name, tree: [], isLoading: true, error: null, isVault: true }];
+      const otherDirs = prev.filter((d) => d.source !== "obsidian");
+      return [
+        ...otherDirs,
+        {
+          path: vaultPath,
+          name,
+          tree: [],
+          isLoading: true,
+          error: null,
+          source: "obsidian",
+        },
+      ];
     });
 
     try {
@@ -150,7 +178,9 @@ export function useFileBrowser(): UseFileBrowserReturn {
 
       setDirs((prev) =>
         prev.map((d) =>
-          d.path === vaultPath ? { ...d, tree: data.tree, isLoading: false, isVault: true } : d
+          d.path === vaultPath
+            ? { ...d, tree: data.tree, isLoading: false, source: "obsidian" }
+            : d
         )
       );
 
@@ -167,6 +197,82 @@ export function useFileBrowser(): UseFileBrowserReturn {
         prev.map((d) =>
           d.path === vaultPath ? { ...d, isLoading: false, error: "Failed to connect to server" } : d
         )
+      );
+    }
+  }, []);
+
+  const addRoamDir = useCallback(async (settings: RoamSettings) => {
+    const key = `roam:${settings.graphType}:${settings.graphName}`;
+
+    setDirs((prev) => {
+      const otherDirs = prev.filter((d) => d.source !== "roam");
+      return [
+        ...otherDirs,
+        {
+          path: key,
+          name: settings.graphName,
+          tree: [],
+          isLoading: true,
+          error: null,
+          source: "roam",
+          roamMeta: {
+            graphName: settings.graphName,
+            graphType: settings.graphType,
+            token: settings.token,
+            port: settings.port || 3333,
+          },
+        },
+      ];
+    });
+
+    try {
+      const res = await fetch(
+        `/api/reference/roam/pages?graphName=${encodeURIComponent(settings.graphName)}&graphType=${encodeURIComponent(settings.graphType)}&port=${encodeURIComponent(String(settings.port || 3333))}`,
+        {
+          headers: {
+            Authorization: `Bearer ${settings.token}`,
+          },
+        },
+      );
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        setDirs((prev) =>
+          prev.map((d) =>
+            d.path === key
+              ? { ...d, isLoading: false, error: data.error || "Failed to load" }
+              : d,
+          ),
+        );
+        return;
+      }
+
+      setDirs((prev) =>
+        prev.map((d) =>
+          d.path === key
+            ? {
+                ...d,
+                tree: data.tree,
+                isLoading: false,
+                error: null,
+                source: "roam",
+                roamMeta: {
+                  graphName: settings.graphName,
+                  graphType: settings.graphType,
+                  token: settings.token,
+                  port: settings.port || 3333,
+                },
+              }
+            : d,
+        ),
+      );
+    } catch {
+      setDirs((prev) =>
+        prev.map((d) =>
+          d.path === key
+            ? { ...d, isLoading: false, error: "Failed to connect to server" }
+            : d,
+        ),
       );
     }
   }, []);
@@ -191,8 +297,9 @@ export function useFileBrowser(): UseFileBrowserReturn {
     toggleCollapse,
     fetchTree,
     fetchAll,
-    addVaultDir,
-    clearVaultDirs,
+    addObsidianDir,
+    addRoamDir,
+    clearSource,
     activeFile,
     activeDirPath: activeFile ? (dirs.find((d) => activeFile.startsWith(d.path + "/"))?.path ?? null) : null,
     setActiveFile,

@@ -9,7 +9,21 @@ import { existsSync, statSync } from "fs";
 import { resolve } from "path";
 import { buildFileTree, FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
 import { parseCodePath } from "@plannotator/shared/code-file";
-import { detectObsidianVaults } from "./integrations";
+import {
+	detectObsidianVaults,
+	normalizeRoamSuggestionsToPages,
+	stripRoamMetadataTags,
+	type RoamSuggestionsResult,
+} from "./integrations";
+import {
+	callRoamLocalApi,
+	callRoamLocalApiEnvelope,
+	RoamClientError,
+	RoamAuthError,
+	RoamConnectionError,
+	RoamTimeoutError,
+	RoamVersionMismatchError,
+} from "./roam-client";
 import {
 	isAbsoluteUserPath,
 	isCodeFilePath,
@@ -361,6 +375,129 @@ export async function handleObsidianDoc(req: Request): Promise<Response> {
 	} catch {
 		return Response.json({ error: "Failed to read file" }, { status: 500 });
 	}
+}
+
+/** Probe the Roam local API by asking the main window for its open view. */
+export async function handleRoamTest(req: Request): Promise<Response> {
+	try {
+		const config = parseRoamRequest(req);
+		const response = await callRoamLocalApiEnvelope<Record<string, unknown>>(
+			config,
+			"ui.mainWindow.getOpenView",
+			[],
+			{ timeoutMs: 5_000 },
+		);
+		return Response.json({
+			ok: true,
+			apiVersion: response.apiVersion,
+			graphName: config.graphName,
+		});
+	} catch (error) {
+		return roamErrorResponse(error);
+	}
+}
+
+/** List Roam pages from the local API's suggestion payload. */
+export async function handleRoamPages(req: Request): Promise<Response> {
+	try {
+		const config = parseRoamRequest(req);
+		const result = await callRoamLocalApi<
+			{ suggestions?: RoamSuggestionsResult } | RoamSuggestionsResult
+		>(
+			config,
+			"data.ai.search",
+			[{ query: "", scope: "pages", limit: 100, includePath: false }],
+			{ timeoutMs: 10_000 },
+		);
+		const suggestions = "suggestions" in (result ?? {})
+			? (result as { suggestions?: RoamSuggestionsResult }).suggestions ?? {}
+			: (result ?? {}) as RoamSuggestionsResult;
+		const tree = normalizeRoamSuggestionsToPages(suggestions ?? {}).map((page) => ({
+			name: page.title,
+			path: page.uid,
+			type: "file" as const,
+		}));
+		return Response.json({ tree });
+	} catch (error) {
+		return roamErrorResponse(error);
+	}
+}
+
+/** Read a Roam page by uid and strip local API metadata wrappers before returning it. */
+export async function handleRoamDoc(req: Request): Promise<Response> {
+	try {
+		const config = parseRoamRequest(req);
+		const url = new URL(req.url);
+		const uid = url.searchParams.get("uid");
+		if (!uid) {
+			return Response.json({ error: "Missing uid parameter" }, { status: 400 });
+		}
+		const result = await callRoamLocalApi<{ markdown?: string } | string>(
+			config,
+			"data.ai.getPage",
+			[{ uid }],
+			{ timeoutMs: 10_000 },
+		);
+		const rawMarkdown = typeof result === "string" ? result : result.markdown ?? "";
+		return Response.json({
+			markdown: stripRoamMetadataTags(rawMarkdown),
+			filepath: `roam:${config.graphType}:${config.graphName}/${uid}`,
+		});
+	} catch (error) {
+		return roamErrorResponse(error);
+	}
+}
+
+function parseRoamRequest(req: Request): {
+	graphName: string;
+	graphType: "hosted" | "offline";
+	token: string;
+	port: number;
+} {
+	const url = new URL(req.url);
+	const graphName = url.searchParams.get("graphName")?.trim();
+	const graphType = url.searchParams.get("graphType") === "offline" ? "offline" : "hosted";
+	const tokenFromHeader = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim();
+	const tokenFromQuery = url.searchParams.get("token")?.trim();
+	const token = tokenFromHeader || tokenFromQuery;
+	const port = Number(url.searchParams.get("port") || "3333");
+
+	if (!graphName) {
+		throw new RoamClientError("Missing graphName parameter");
+	}
+	if (!token) {
+		throw new RoamAuthError("Missing Roam API token");
+	}
+	if (!Number.isFinite(port) || port < 1 || port > 65535) {
+		throw new RoamClientError("Invalid Roam API port");
+	}
+
+	return {
+		graphName,
+		graphType,
+		token,
+		port: Math.trunc(port),
+	};
+}
+
+function roamErrorResponse(error: unknown): Response {
+	if (error instanceof RoamAuthError) {
+		return Response.json({ error: error.message }, { status: 401 });
+	}
+	if (error instanceof RoamVersionMismatchError) {
+		return Response.json({ error: error.message, actualVersion: error.actualVersion }, { status: 409 });
+	}
+	if (error instanceof RoamTimeoutError) {
+		return Response.json({ error: error.message }, { status: 504 });
+	}
+	if (error instanceof RoamConnectionError) {
+		return Response.json({ error: error.message }, { status: 503 });
+	}
+	if (error instanceof RoamClientError) {
+		return Response.json({ error: error.message }, { status: 502 });
+	}
+	const message = error instanceof Error ? error.message : "Unknown Roam error";
+	return Response.json({ error: message }, { status: 500 });
 }
 
 // --- File Browser ---

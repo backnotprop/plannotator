@@ -11,6 +11,13 @@ import {
   stripH1,
   buildHashtags,
   buildBearContent,
+  generateFilename,
+  stripFrontmatter,
+  frontmatterToAttributeBlocks,
+  stripRoamMetadataTags,
+  majorMinorMatches,
+  generatePageTitle,
+  normalizeRoamSuggestionsToPages,
 } from "./integrations";
 
 describe("extractTitle", () => {
@@ -168,5 +175,135 @@ describe("extractTags", () => {
   test("limits to 7 tags", async () => {
     const tags = await extractTags("# One Two Three Four\n\n```go\n```\n```python\n```\n```ruby\n```\n```swift\n```");
     expect(tags.length).toBeLessThanOrEqual(7);
+  });
+});
+
+describe("Roam helpers", () => {
+  test("stripFrontmatter returns parsed frontmatter and body", () => {
+    const input = [
+      "---",
+      "created: 2026-04-09T14:30:00.000Z",
+      "source: plannotator",
+      "tags: [plannotator, auth]",
+      "---",
+      "",
+      "# Implementation Plan: Auth Flow",
+      "",
+      "Body",
+    ].join("\n");
+    const result = stripFrontmatter(input);
+
+    expect(result.frontmatter).toEqual({
+      created: "2026-04-09T14:30:00.000Z",
+      source: "plannotator",
+      tags: ["plannotator", "auth"],
+    });
+    expect(result.body).toBe("# Implementation Plan: Auth Flow\n\nBody");
+  });
+
+  test("stripFrontmatter handles CRLF line endings", () => {
+    const input = [
+      "---",
+      "created: 2026-04-09T14:30:00.000Z",
+      "source: plannotator",
+      "tags: [plannotator, auth]",
+      "---",
+      "",
+      "# Implementation Plan: Auth Flow",
+      "",
+      "Body",
+    ].join("\r\n");
+    const result = stripFrontmatter(input);
+
+    expect(result.frontmatter).toEqual({
+      created: "2026-04-09T14:30:00.000Z",
+      source: "plannotator",
+      tags: ["plannotator", "auth"],
+    });
+    expect(result.body).toBe("# Implementation Plan: Auth Flow\r\n\r\nBody");
+  });
+
+  test("frontmatterToAttributeBlocks renders Roam attributes", () => {
+    expect(
+      frontmatterToAttributeBlocks({
+        created: "2026-04-09T14:30:00.000Z",
+        source: "plannotator",
+        tags: ["plannotator", "auth"],
+        owner: "alice",
+      }),
+    ).toBe(
+      [
+        "created:: [[April 9th, 2026]]",
+        "source:: plannotator",
+        "tags:: [[plannotator]], [[auth]]",
+        "owner:: alice",
+      ].join("\n"),
+    );
+  });
+
+  test("stripRoamMetadataTags removes wrappers but preserves content", () => {
+    expect(
+      stripRoamMetadataTags('<roam uid="abc123">## Heading\n\nBody</roam>'),
+    ).toBe("## Heading\n\nBody");
+  });
+
+  test("generatePageTitle keeps the Obsidian format but drops .md", () => {
+    const markdown = "# Implementation Plan: Auth Flow\n\nBody";
+    const filename = generateFilename(markdown, "{title} - {Mon} {D}, {YYYY} {h}-{mm}{ampm}");
+    const title = generatePageTitle(markdown, "{title} - {Mon} {D}, {YYYY} {h}-{mm}{ampm}");
+    expect(title).toBe(filename.replace(/\.md$/, ""));
+    expect(title.endsWith(".md")).toBe(false);
+  });
+
+  test("majorMinorMatches ignores patch versions only", () => {
+    expect(majorMinorMatches("1.2.3", "1.2.9")).toBe(true);
+    expect(majorMinorMatches("1.2.3", "1.3.0")).toBe(false);
+    expect(majorMinorMatches("1.2.3", "2.2.3")).toBe(false);
+  });
+
+  test("normalizeRoamSuggestionsToPages keeps stable uid/title pairs", () => {
+    const result = normalizeRoamSuggestionsToPages({
+      recentlyEditedPages: [
+        { uid: "edit-1", title: "Edited Page", editedAt: "2026-04-09T19:00:00.000Z" },
+      ],
+      recentlyOpenedByUser: [
+        {
+          uid: "open-1",
+          title: "Working Set",
+          type: "page",
+          openedAt: "2026-04-09T18:00:00.000Z",
+        },
+        {
+          uid: "open-ignored",
+          title: "Block Result",
+          type: "block",
+          openedAt: "2026-04-09T17:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(result).toEqual([
+      { uid: "edit-1", title: "Edited Page", sortAt: "2026-04-09T19:00:00.000Z" },
+      { uid: "open-1", title: "Working Set", sortAt: "2026-04-09T18:00:00.000Z" },
+    ]);
+  });
+
+  test("normalizeRoamSuggestionsToPages keeps the newest timestamp for duplicate pages", () => {
+    const result = normalizeRoamSuggestionsToPages({
+      recentlyEditedPages: [
+        { uid: "same-1", title: "Edited Page", editedAt: "2026-04-09T18:00:00.000Z" },
+      ],
+      recentlyOpenedByUser: [
+        {
+          uid: "same-1",
+          title: "Edited Page",
+          openedAt: "2026-04-09T19:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(result).toEqual([
+      { uid: "same-1", title: "Edited Page", sortAt: "2026-04-09T19:00:00.000Z" },
+    ]);
   });
 });

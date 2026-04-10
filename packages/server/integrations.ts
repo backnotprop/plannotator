@@ -12,19 +12,60 @@ import {
 	type BearConfig,
 	type OctarineConfig,
 	type IntegrationResult,
+	type RoamConfig,
+	type RoamSuggestionPage,
+	type RoamSuggestionsResult,
 	extractTitle,
 	generateFrontmatter,
 	generateFilename,
 	generateOctarineFrontmatter,
+	generatePageTitle,
+	formatRoamDailyNotePage,
+	majorMinorMatches,
+	normalizeRoamSuggestionsToPages,
+	normalizeRoamDailyNoteParent,
+	frontmatterToAttributeBlocks,
+	stripFrontmatter,
+	stripRoamMetadataTags,
 	stripH1,
 	buildHashtags,
 	buildBearContent,
 	detectObsidianVaults,
+	ROAM_API_VERSION,
+	DEFAULT_ROAM_PARENT_BLOCK,
 } from "@plannotator/shared/integrations-common";
 import { resolveUserPath } from "@plannotator/shared/resolve-file";
+import { callRoamLocalApi } from "./roam-client";
 
-export type { ObsidianConfig, BearConfig, OctarineConfig, IntegrationResult };
-export { detectObsidianVaults, extractTitle, generateFrontmatter, generateFilename, generateOctarineFrontmatter, stripH1, buildHashtags, buildBearContent };
+export type {
+	ObsidianConfig,
+	BearConfig,
+	OctarineConfig,
+	RoamConfig,
+	RoamSuggestionPage,
+	RoamSuggestionsResult,
+	IntegrationResult,
+};
+export {
+	ROAM_API_VERSION,
+	detectObsidianVaults,
+	extractTitle,
+	generateFrontmatter,
+	generateFilename,
+	generateOctarineFrontmatter,
+	generatePageTitle,
+	formatRoamDailyNotePage,
+	majorMinorMatches,
+	normalizeRoamSuggestionsToPages,
+	normalizeRoamDailyNoteParent,
+	frontmatterToAttributeBlocks,
+	stripFrontmatter,
+	stripRoamMetadataTags,
+	stripH1,
+	buildHashtags,
+	buildBearContent,
+	DEFAULT_ROAM_PARENT_BLOCK,
+};
 
 /**
  * Extract tags from markdown content using simple heuristics
@@ -179,6 +220,117 @@ export async function saveToBear(
 		const message = err instanceof Error ? err.message : "Unknown error";
 		return { success: false, error: message };
 	}
+}
+
+/**
+ * Save plan to Roam Research via the local API.
+ */
+export async function saveToRoam(
+	config: RoamConfig,
+): Promise<IntegrationResult> {
+	try {
+		const { frontmatter } = stripFrontmatter(config.plan);
+		const title = generatePageTitle(
+			config.plan,
+			config.titleFormat,
+			config.titleSeparator,
+		);
+		const markdownBlock = buildRoamMarkdownBlock(config.plan);
+		const contentMarkdown = [
+			frontmatterToAttributeBlocks(frontmatter),
+			markdownBlock,
+		]
+			.filter((section) => section.trim().length > 0)
+			.join("\n\n");
+
+		if (config.saveLocation === "daily-note") {
+			const createPlanBlockResult = await callRoamLocalApi<{ uids?: string[] }>(
+				config,
+				"data.block.fromMarkdown",
+				[
+					{
+						location: {
+							order: "last",
+							"page-title": {
+								"daily-note-page": formatRoamDailyNotePage(new Date()),
+							},
+							"nest-under-str": normalizeRoamDailyNoteParent(
+								config.dailyNoteParent,
+							),
+						},
+						"markdown-string": title,
+					},
+				],
+			);
+
+			const planBlockUid = createPlanBlockResult.uids?.[0];
+			if (!planBlockUid) {
+				return {
+					success: false,
+					error: "Roam did not return a block UID for the saved plan",
+				};
+			}
+
+			await callRoamLocalApi<{ uids?: string[] }>(
+				config,
+				"data.block.fromMarkdown",
+				[
+					{
+						location: {
+							order: "last",
+							"parent-uid": planBlockUid,
+						},
+						"markdown-string": contentMarkdown,
+					},
+				],
+			);
+
+			return {
+				success: true,
+				path: `roam:${config.graphType}:${config.graphName}/${planBlockUid}`,
+			};
+		}
+
+		const markdown = [
+			DEFAULT_ROAM_PARENT_BLOCK,
+			contentMarkdown,
+		]
+			.filter((section) => section.trim().length > 0)
+			.join("\n\n");
+
+		const result = await callRoamLocalApi<{
+			uid?: string;
+			title?: string;
+			page?: { uid?: string; title?: string };
+		}>(
+			config,
+			"data.page.fromMarkdown",
+			[
+				{
+					page: { title },
+					"markdown-string": markdown,
+				},
+			],
+		);
+
+		const pathId = result.page?.uid ?? result.uid ?? result.page?.title ?? result.title ?? title;
+		return {
+			success: true,
+			path: `roam:${config.graphType}:${config.graphName}/${pathId}`,
+		};
+	} catch (err) {
+		const message = err instanceof Error ? err.message : "Unknown error";
+		return { success: false, error: message };
+	}
+}
+
+function buildRoamMarkdownBlock(markdown: string): string {
+	const longestBacktickRun = Math.max(
+		0,
+		...[...markdown.matchAll(/`+/g)].map((match) => match[0].length),
+	);
+	const fence = "`".repeat(Math.max(3, longestBacktickRun + 1));
+	return `${fence}markdown\n${markdown.trimEnd()}\n${fence}`;
 }
 
 /**

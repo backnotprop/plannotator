@@ -20,9 +20,11 @@ import {
   saveToObsidian,
   saveToBear,
   saveToOctarine,
+  saveToRoam,
   type ObsidianConfig,
   type BearConfig,
   type OctarineConfig,
+  type RoamConfig,
   type IntegrationResult,
 } from "./integrations";
 import {
@@ -46,7 +48,17 @@ import { readImprovementHook, getImprovementHookExpectedPath } from "@plannotato
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft } from "./draft";
-import { handleDoc, handleDocExists, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, handleFileBrowserFiles } from "./reference-handlers";
+import {
+  handleDoc,
+  handleDocExists,
+  handleObsidianVaults,
+  handleObsidianFiles,
+  handleObsidianDoc,
+  handleFileBrowserFiles,
+  handleRoamTest,
+  handleRoamPages,
+  handleRoamDoc,
+} from "./reference-handlers";
 import { warmFileListCache } from "@plannotator/shared/resolve-file";
 import { createEditorAnnotationHandler } from "./editor-annotations";
 import { createExternalAnnotationHandler } from "./external-annotations";
@@ -388,6 +400,21 @@ export async function startPlannotatorServer(
             return handleObsidianDoc(req);
           }
 
+          // API: Test Roam local API connectivity
+          if (url.pathname === "/api/roam/test" && req.method === "GET") {
+            return handleRoamTest(req);
+          }
+
+          // API: List Roam pages
+          if (url.pathname === "/api/reference/roam/pages" && req.method === "GET") {
+            return handleRoamPages(req);
+          }
+
+          // API: Read a Roam page by uid
+          if (url.pathname === "/api/reference/roam/doc" && req.method === "GET") {
+            return handleRoamDoc(req);
+          }
+
           // API: List markdown files in a directory as a tree
           if (url.pathname === "/api/reference/files" && req.method === "GET") {
             return handleFileBrowserFiles(req);
@@ -434,13 +461,14 @@ export async function startPlannotatorServer(
 
           // API: Save to notes (decoupled from approve/deny)
           if (url.pathname === "/api/save-notes" && req.method === "POST") {
-            const results: { obsidian?: IntegrationResult; bear?: IntegrationResult; octarine?: IntegrationResult } = {};
+            const results: { obsidian?: IntegrationResult; bear?: IntegrationResult; octarine?: IntegrationResult; roam?: IntegrationResult } = {};
 
             try {
               const body = (await req.json()) as {
                 obsidian?: ObsidianConfig;
                 bear?: BearConfig;
                 octarine?: OctarineConfig;
+                roam?: RoamConfig;
               };
 
               // Run integrations in parallel — they're independent
@@ -453,6 +481,9 @@ export async function startPlannotatorServer(
               }
               if (body.octarine?.plan && body.octarine?.workspace) {
                 promises.push(saveToOctarine(body.octarine).then(r => { results.octarine = r; }));
+              }
+              if (body.roam?.graphName && body.roam?.token && body.roam?.port && body.roam?.plan) {
+                promises.push(saveToRoam(body.roam).then(r => { results.roam = r; }));
               }
               await Promise.allSettled(promises);
 
@@ -482,6 +513,7 @@ export async function startPlannotatorServer(
                 obsidian?: ObsidianConfig;
                 bear?: BearConfig;
                 octarine?: OctarineConfig;
+                roam?: RoamConfig;
                 feedback?: string;
                 agentSwitch?: string;
                 planSave?: { enabled: boolean; customPath?: string };
@@ -520,6 +552,9 @@ export async function startPlannotatorServer(
               }
               if (body.octarine?.plan && body.octarine?.workspace) {
                 integrationPromises.push(saveToOctarine(body.octarine).then(r => { integrationResults.octarine = r; }));
+              }
+              if (body.roam?.graphName && body.roam?.token && body.roam?.port && body.roam?.plan) {
+                integrationPromises.push(saveToRoam(body.roam).then(r => { integrationResults.roam = r; }));
               }
               await Promise.allSettled(integrationPromises);
 
