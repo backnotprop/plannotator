@@ -36,6 +36,8 @@ import { saveConfig, detectGitUser, getServerConfig } from "./config";
 import { type PRMetadata, type PRReviewFileComment, fetchPRFileContent, fetchPRContext, submitPRReview, fetchPRViewedFiles, markPRFilesViewed, getPRUser, prRefFromMetadata, getDisplayRepo, getMRLabel, getMRNumberLabel } from "./pr";
 import { createAIEndpoints, ProviderRegistry, SessionManager, createProvider, type AIEndpoints, type PiSDKConfig } from "@plannotator/ai";
 import { isWSL } from "./browser";
+import { aggregateWorkspacePatch, prefixPatchPaths, resolveWorkspaceFilePath, type WorkspaceRepoRuntimeState } from "./review-workspace";
+import type { WorkspaceReviewState } from "@plannotator/shared/review-workspace";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -75,6 +77,8 @@ export interface ReviewServerOptions {
   agentCwd?: string;
   /** Cleanup callback invoked when server stops (e.g., remove temp worktree) */
   onCleanup?: () => void | Promise<void>;
+  /** Workspace-mode repo state for multi-repo review */
+  workspaceRepos?: WorkspaceRepoRuntimeState[];
 }
 
 export interface ReviewServerResult {
@@ -112,32 +116,66 @@ const RETRY_DELAY_MS = 500;
 export async function startReviewServer(
   options: ReviewServerOptions
 ): Promise<ReviewServerResult> {
-  const { htmlContent, origin, gitContext, sharingEnabled = true, shareBaseUrl, onReady, prMetadata } = options;
+  const { htmlContent, origin, gitContext, sharingEnabled = true, shareBaseUrl, onReady, prMetadata, workspaceRepos } = options;
 
   const isPRMode = !!prMetadata;
+  const isWorkspaceMode = !!workspaceRepos?.length;
   const hasLocalAccess = !!gitContext;
   const draftKey = contentHash(options.rawPatch);
   const editorAnnotations = createEditorAnnotationHandler();
   const externalAnnotations = createExternalAnnotationHandler("review");
 
   // Mutable state for diff switching
-  let currentPatch = options.rawPatch;
-  let currentGitRef = options.gitRef;
+  const initialWorkspaceSnapshot = workspaceRepos ? aggregateWorkspacePatch(workspaceRepos) : null;
+  let currentPatch = initialWorkspaceSnapshot?.rawPatch ?? options.rawPatch;
+  let currentGitRef = initialWorkspaceSnapshot?.gitRef ?? options.gitRef;
   let currentDiffType: DiffType = options.diffType || "uncommitted";
-  let currentError = options.error;
+  let currentError = initialWorkspaceSnapshot?.errors.join("\n") || options.error;
+  let currentActiveRepoId = workspaceRepos?.find((repo) => repo.selected)?.id ?? workspaceRepos?.[0]?.id ?? null;
+
+  const getWorkspaceState = (): WorkspaceReviewState | null => {
+    if (!workspaceRepos) return null;
+    return {
+      mode: "workspace",
+      repos: workspaceRepos.map(({ rawPatch: _rawPatch, gitRef: _gitRef, ...repo }) => repo),
+    };
+  };
+
+  const refreshWorkspaceAggregate = () => {
+    if (!workspaceRepos) return;
+    const snapshot = aggregateWorkspacePatch(workspaceRepos);
+    currentPatch = snapshot.rawPatch;
+    currentGitRef = snapshot.gitRef;
+    currentError = snapshot.errors.length > 0 ? snapshot.errors.join("\n") : undefined;
+  };
+
+  const getActiveRepo = (): WorkspaceRepoRuntimeState | null => {
+    if (!workspaceRepos?.length) return null;
+    return workspaceRepos.find((repo) => repo.id === currentActiveRepoId)
+      ?? workspaceRepos.find((repo) => repo.selected)
+      ?? workspaceRepos[0]
+      ?? null;
+  };
+
+  const getRepoForFilePath = (filePath: string): { repo: WorkspaceRepoRuntimeState; repoRelativePath: string } | null => {
+    if (!workspaceRepos) return null;
+    return resolveWorkspaceFilePath(workspaceRepos, filePath);
+  };
 
   // Agent jobs — background process manager (late-binds serverUrl via getter)
   let serverUrl = "";
   const agentJobs = createAgentJobHandler({
     mode: "review",
     getServerUrl: () => serverUrl,
-    getCwd: () => {
-      if (options.agentCwd) return options.agentCwd;
-      return resolveVcsCwd(currentDiffType, gitContext?.cwd) ?? process.cwd();
-    },
+        getCwd: () => {
+          const activeRepo = getActiveRepo();
+          if (activeRepo) return activeRepo.cwd;
+          if (options.agentCwd) return options.agentCwd;
+          return resolveVcsCwd(currentDiffType, gitContext?.cwd) ?? process.cwd();
+        },
 
     async buildCommand(provider) {
-      const cwd = options.agentCwd ?? resolveVcsCwd(currentDiffType, gitContext?.cwd) ?? process.cwd();
+      const cwd = getActiveRepo()?.cwd ?? options.agentCwd ?? resolveVcsCwd(currentDiffType, gitContext?.cwd) ?? process.cwd();
       const hasAgentLocalAccess = !!options.agentCwd || !!gitContext;
       const userMessage = buildCodexReviewUserMessage(
         currentPatch,
@@ -180,7 +218,14 @@ export async function startReviewServer(
         };
 
         if (output.findings.length > 0) {
-          const annotations = transformReviewFindings(output.findings, job.source, cwd, "Codex");
+          const activeRepo = getActiveRepo();
+          const annotations = transformReviewFindings(
+            output.findings,
+            job.source,
+            cwd,
+            "Codex",
+            activeRepo ? (filePath) => `${activeRepo.label}/${filePath}` : undefined,
+          );
           const result = externalAnnotations.addAnnotations({ annotations });
           if ("error" in result) console.error(`[codex-review] addAnnotations error:`, result.error);
         }
@@ -203,7 +248,13 @@ export async function startReviewServer(
         };
 
         if (output.findings.length > 0) {
-          const annotations = transformClaudeFindings(output.findings, job.source, cwd);
+          const activeRepo = getActiveRepo();
+          const annotations = transformClaudeFindings(
+            output.findings,
+            job.source,
+            cwd,
+            activeRepo ? (filePath) => `${activeRepo.label}/${filePath}` : undefined,
+          );
           const result = externalAnnotations.addAnnotations({ annotations });
           if ("error" in result) console.error(`[claude-review] addAnnotations error:`, result.error);
         }
@@ -289,10 +340,12 @@ export async function startReviewServer(
     aiEndpoints = createAIEndpoints({
       registry: aiRegistry,
       sessionManager: aiSessionManager,
-      getCwd: () => {
-        if (options.agentCwd) return options.agentCwd;
-        return resolveVcsCwd(currentDiffType, gitContext?.cwd) ?? process.cwd();
-      },
+        getCwd: () => {
+          const activeRepo = getActiveRepo();
+          if (activeRepo) return activeRepo.cwd;
+          if (options.agentCwd) return options.agentCwd;
+          return resolveVcsCwd(currentDiffType, gitContext?.cwd) ?? process.cwd();
+        },
     });
   }
 
@@ -303,7 +356,9 @@ export async function startReviewServer(
 
   // Detect repo info (cached for this session)
   // In PR mode, derive from metadata instead of local git
-  const repoInfo = isPRMode
+  const repoInfo = isWorkspaceMode
+    ? { display: `${workspaceRepos?.filter((repo) => repo.selected).length ?? 0} repos`, branch: "Workspace Review" }
+    : isPRMode
     ? { display: getDisplayRepo(prMetadata), branch: `${getMRLabel(prMetadata)} ${getMRNumberLabel(prMetadata)}` }
     : await getRepoInfo();
 
@@ -322,6 +377,24 @@ export async function startReviewServer(
     } catch {
       // Non-fatal: viewed state is best-effort
     }
+  }
+
+  if (workspaceRepos?.length) {
+    await Promise.all(workspaceRepos.map(async (repo) => {
+      if (!repo.prMetadata) return;
+      const repoPrRef = prRefFromMetadata(repo.prMetadata);
+      repo.platformUser = await getPRUser(repoPrRef);
+      if (repo.prMetadata.platform === "github") {
+        try {
+          const viewedMap = await fetchPRViewedFiles(repoPrRef);
+          repo.viewedFiles = Object.entries(viewedMap)
+            .filter(([, isViewed]) => isViewed)
+            .map(([path]) => `${repo.label}/${path}`);
+        } catch {
+          // Best effort
+        }
+      }
+    }));
   }
 
   // Decision promise
@@ -359,11 +432,12 @@ export async function startReviewServer(
               rawPatch: currentPatch,
               gitRef: currentGitRef,
               origin,
-              diffType: hasLocalAccess ? currentDiffType : undefined,
-              gitContext: hasLocalAccess ? gitContext : undefined,
+              diffType: hasLocalAccess && !isWorkspaceMode ? currentDiffType : undefined,
+              gitContext: hasLocalAccess && !isWorkspaceMode ? gitContext : undefined,
               sharingEnabled,
               shareBaseUrl,
               repoInfo,
+              workspace: getWorkspaceState(),
               isWSL: wslFlag,
               ...(options.agentCwd && { agentCwd: options.agentCwd }),
               ...(isPRMode && { prMetadata, platformUser }),
@@ -375,6 +449,37 @@ export async function startReviewServer(
 
           // API: Switch diff type (requires local file access)
           if (url.pathname === "/api/diff/switch" && req.method === "POST") {
+            if (isWorkspaceMode) {
+              try {
+                const body = (await req.json()) as { repoId: string; diffType: DiffType };
+                const repo = workspaceRepos?.find((candidate) => candidate.id === body.repoId);
+                if (!repo) {
+                  return Response.json({ error: "Unknown repo" }, { status: 404 });
+                }
+                if (!repo.gitContext) {
+                  return Response.json({ error: "Diff switching unavailable for this repo" }, { status: 400 });
+                }
+
+                const nextDiffType = body.diffType || (repo.diffType as DiffType | undefined) || "uncommitted";
+                const result = await runVcsDiff(nextDiffType, repo.gitContext.defaultBranch, repo.cwd);
+                repo.diffType = nextDiffType;
+                repo.rawPatch = prefixPatchPaths(result.patch, repo.label);
+                repo.gitRef = result.label;
+                repo.error = result.error;
+                refreshWorkspaceAggregate();
+
+                return Response.json({
+                  rawPatch: currentPatch,
+                  gitRef: currentGitRef,
+                  workspace: getWorkspaceState(),
+                  ...(currentError && { error: currentError }),
+                });
+              } catch (err) {
+                const message = err instanceof Error ? err.message : "Failed to switch workspace diff";
+                return Response.json({ error: message }, { status: 500 });
+              }
+            }
+
             if (!hasLocalAccess) {
               return Response.json(
                 { error: "Not available without local file access" },
@@ -417,8 +522,100 @@ export async function startReviewServer(
             }
           }
 
+          if (url.pathname === "/api/workspace/repo" && req.method === "PATCH") {
+            if (!isWorkspaceMode || !workspaceRepos) {
+              return Response.json({ error: "Not in workspace mode" }, { status: 400 });
+            }
+            try {
+              const body = (await req.json()) as {
+                repoId: string;
+                selected?: boolean;
+                source?: "local" | "pr";
+                prUrl?: string;
+              };
+              const repo = workspaceRepos.find((candidate) => candidate.id === body.repoId);
+              if (!repo) return Response.json({ error: "Unknown repo" }, { status: 404 });
+
+              if (typeof body.selected === "boolean") repo.selected = body.selected;
+              if (body.source) repo.source = body.source;
+
+              if (repo.source === "pr") {
+                const nextUrl = body.prUrl || repo.prMetadata?.url || repo.discoveredPRs?.[0]?.url;
+                if (!nextUrl) {
+                  return Response.json({ error: "No PR/MR available for this repo" }, { status: 400 });
+                }
+                const ref = parsePRUrl(nextUrl);
+                if (!ref) return Response.json({ error: "Invalid PR/MR URL" }, { status: 400 });
+                const pr = await fetchPR(ref);
+                repo.prMetadata = pr.metadata;
+                repo.rawPatch = prefixPatchPaths(pr.rawPatch, repo.label);
+                repo.gitRef = pr.metadata.url;
+                repo.platformUser = await getPRUser(prRefFromMetadata(pr.metadata));
+                if (pr.metadata.platform === "github") {
+                  try {
+                    const viewedMap = await fetchPRViewedFiles(prRefFromMetadata(pr.metadata));
+                    repo.viewedFiles = Object.entries(viewedMap)
+                      .filter(([, isViewed]) => isViewed)
+                      .map(([path]) => `${repo.label}/${path}`);
+                  } catch {
+                    repo.viewedFiles = [];
+                  }
+                }
+                repo.error = undefined;
+              } else if (repo.gitContext) {
+                const nextDiffType = (repo.diffType as DiffType | undefined) || "uncommitted";
+                const result = await runVcsDiff(nextDiffType, repo.gitContext.defaultBranch, repo.cwd);
+                repo.rawPatch = prefixPatchPaths(result.patch, repo.label);
+                repo.gitRef = result.label;
+                repo.prMetadata = undefined;
+                repo.platformUser = null;
+                repo.viewedFiles = [];
+                repo.error = result.error;
+              }
+
+              refreshWorkspaceAggregate();
+              return Response.json({
+                rawPatch: currentPatch,
+                gitRef: currentGitRef,
+                workspace: getWorkspaceState(),
+                ...(currentError && { error: currentError }),
+              });
+            } catch (err) {
+              const message = err instanceof Error ? err.message : "Failed to update workspace repo";
+              return Response.json({ error: message }, { status: 500 });
+            }
+          }
+
+          if (url.pathname === "/api/workspace/active" && req.method === "POST") {
+            if (!isWorkspaceMode) {
+              return Response.json({ error: "Not in workspace mode" }, { status: 400 });
+            }
+            try {
+              const body = (await req.json()) as { repoId?: string };
+              if (body.repoId) currentActiveRepoId = body.repoId;
+              return Response.json({ ok: true });
+            } catch {
+              return Response.json({ error: "Invalid request" }, { status: 400 });
+            }
+          }
+
           // API: Fetch PR context (comments, checks, merge status) — PR mode only
           if (url.pathname === "/api/pr-context" && req.method === "GET") {
+            if (isWorkspaceMode && workspaceRepos) {
+              const repoId = url.searchParams.get("repoId");
+              const repo = repoId ? workspaceRepos.find((candidate) => candidate.id === repoId) : getActiveRepo();
+              if (!repo?.prMetadata) {
+                return Response.json({ error: "Repo is not in PR mode" }, { status: 400 });
+              }
+              try {
+                const context = await fetchPRContext(prRefFromMetadata(repo.prMetadata));
+                return Response.json(context);
+              } catch (err) {
+                const message = err instanceof Error ? err.message : "Failed to fetch PR context";
+                return Response.json({ error: message }, { status: 500 });
+              }
+            }
+
             if (!isPRMode) {
               return Response.json(
                 { error: "Not in PR mode" },
@@ -448,6 +645,35 @@ export async function startReviewServer(
             if (oldPath) {
               try { validateFilePath(oldPath); } catch {
                 return Response.json({ error: "Invalid path" }, { status: 400 });
+              }
+            }
+
+            if (isWorkspaceMode && workspaceRepos) {
+              const resolved = getRepoForFilePath(filePath);
+              if (!resolved) {
+                return Response.json({ error: "Unknown repo path" }, { status: 404 });
+              }
+              const resolvedOld = oldPath ? getRepoForFilePath(oldPath) : null;
+
+              if (resolved.repo.source === "pr" && resolved.repo.prMetadata) {
+                const ref = prRefFromMetadata(resolved.repo.prMetadata);
+                const oldSha = resolved.repo.prMetadata.mergeBaseSha ?? resolved.repo.prMetadata.baseSha;
+                const [oldContent, newContent] = await Promise.all([
+                  fetchPRFileContent(ref, oldSha, resolvedOld?.repoRelativePath || resolved.repoRelativePath),
+                  fetchPRFileContent(ref, resolved.repo.prMetadata.headSha, resolved.repoRelativePath),
+                ]);
+                return Response.json({ oldContent, newContent });
+              }
+
+              if (resolved.repo.gitContext) {
+                const result = await getVcsFileContentsForDiff(
+                  (resolved.repo.diffType as DiffType) || "uncommitted",
+                  resolved.repo.gitContext.defaultBranch,
+                  resolved.repoRelativePath,
+                  resolvedOld?.repoRelativePath,
+                  resolved.repo.cwd,
+                );
+                return Response.json(result);
               }
             }
 
@@ -482,6 +708,31 @@ export async function startReviewServer(
 
           // API: Stage / unstage a file (disabled when VCS doesn't support it)
           if (url.pathname === "/api/git-add" && req.method === "POST") {
+            if (isWorkspaceMode && workspaceRepos) {
+              try {
+                const body = (await req.json()) as { filePath: string; undo?: boolean };
+                const resolved = getRepoForFilePath(body.filePath);
+                if (!resolved) {
+                  return Response.json({ error: "Unknown repo path" }, { status: 404 });
+                }
+                if (resolved.repo.source !== "local" || !resolved.repo.gitContext) {
+                  return Response.json({ error: "Staging not available" }, { status: 400 });
+                }
+
+                const repoDiffType = (resolved.repo.diffType as DiffType) || "uncommitted";
+                const cwd = resolveVcsCwd(repoDiffType, resolved.repo.cwd);
+                if (body.undo) {
+                  await unstageFile(repoDiffType, resolved.repoRelativePath, cwd);
+                } else {
+                  await stageFile(repoDiffType, resolved.repoRelativePath, cwd);
+                }
+                return Response.json({ ok: true });
+              } catch (err) {
+                const message = err instanceof Error ? err.message : "Failed to stage file";
+                return Response.json({ error: message }, { status: 500 });
+              }
+            }
+
             if (isPRMode || !canStageFiles(currentDiffType)) {
               return Response.json(
                 { error: "Staging not available" },
@@ -598,6 +849,36 @@ export async function startReviewServer(
 
           // API: Submit PR review directly to GitHub (PR mode only)
           if (url.pathname === "/api/pr-action" && req.method === "POST") {
+            if (isWorkspaceMode && workspaceRepos) {
+              const body = (await req.json()) as {
+                repoId: string;
+                action: "approve" | "comment";
+                body: string;
+                fileComments: PRReviewFileComment[];
+              };
+              const repo = workspaceRepos.find((candidate) => candidate.id === body.repoId);
+              if (!repo?.prMetadata) {
+                return Response.json({ error: "Repo is not in PR mode" }, { status: 400 });
+              }
+              try {
+                const prRefForRepo = prRefFromMetadata(repo.prMetadata);
+                await submitPRReview(
+                  prRefForRepo,
+                  repo.prMetadata.headSha,
+                  body.action,
+                  body.body,
+                  body.fileComments.map((comment) => ({
+                    ...comment,
+                    path: resolveWorkspaceFilePath(workspaceRepos, comment.path)?.repoRelativePath ?? comment.path,
+                  })),
+                );
+                return Response.json({ ok: true, prUrl: repo.prMetadata.url });
+              } catch (err) {
+                const message = err instanceof Error ? err.message : "Failed to submit PR review";
+                return Response.json({ error: message }, { status: 500 });
+              }
+            }
+
             if (!isPRMode || !prMetadata) {
               return Response.json({ error: "Not in PR mode" }, { status: 400 });
             }
@@ -630,6 +911,30 @@ export async function startReviewServer(
 
           // API: Mark/unmark PR files as viewed on GitHub (PR mode, GitHub only)
           if (url.pathname === "/api/pr-viewed" && req.method === "POST") {
+            if (isWorkspaceMode && workspaceRepos) {
+              const body = (await req.json()) as {
+                repoId: string;
+                filePaths: string[];
+                viewed: boolean;
+              };
+              const repo = workspaceRepos.find((candidate) => candidate.id === body.repoId);
+              if (!repo?.prMetadata || repo.prMetadata.platform !== "github" || !repo.prMetadata.prNodeId) {
+                return Response.json({ error: "Viewed sync not available for this repo" }, { status: 400 });
+              }
+              try {
+                await markPRFilesViewed(
+                  prRefFromMetadata(repo.prMetadata),
+                  repo.prMetadata.prNodeId,
+                  body.filePaths.map((filePath) => resolveWorkspaceFilePath(workspaceRepos, filePath)?.repoRelativePath ?? filePath),
+                  body.viewed,
+                );
+                return Response.json({ ok: true });
+              } catch (err) {
+                const message = err instanceof Error ? err.message : "Failed to update viewed state";
+                return Response.json({ error: message }, { status: 500 });
+              }
+            }
+
             if (!isPRMode || !prMetadata) {
               return Response.json({ error: "Not in PR mode" }, { status: 400 });
             }
@@ -667,7 +972,12 @@ export async function startReviewServer(
 
           // Serve embedded HTML for all other routes (SPA)
           return new Response(htmlContent, {
-            headers: { "Content-Type": "text/html" },
+            headers: {
+              "Content-Type": "text/html",
+              "Cache-Control": "no-store, no-cache, must-revalidate",
+              "Pragma": "no-cache",
+              "Expires": "0",
+            },
           });
         },
 

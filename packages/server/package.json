@@ -16,6 +16,7 @@
     "./p4": "./p4.ts",
     "./vcs": "./vcs.ts",
     "./repo": "./repo.ts",
+    "./review-workspace": "./review-workspace.ts",
     "./share-url": "./share-url.ts",
     "./sessions": "./sessions.ts",
     "./project": "./project.ts",

@@ -63,7 +63,7 @@ import {
   startAnnotateServer,
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
-import { type DiffType, getVcsContext, runVcsDiff, gitRuntime } from "@plannotator/server/vcs";
+import { type DiffType, getVcsContext, runVcsDiff, gitRuntime, detectManagedVcs } from "@plannotator/server/vcs";
 import { loadConfig, resolveDefaultDiffType } from "@plannotator/shared/config";
 import { fetchRef, createWorktree, removeWorktree, ensureObjectAvailable } from "@plannotator/shared/worktree";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getCliInstallUrl, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
@@ -89,6 +89,7 @@ import {
 } from "./cli";
 import path from "path";
 import { tmpdir } from "os";
+import { buildWorkspaceLocalRepos, buildWorkspacePRRepos } from "@plannotator/server/review-workspace";
 
 // Embed the built HTML at compile time
 // @ts-ignore - Bun import attribute for text
@@ -196,8 +197,10 @@ if (args[0] === "sessions") {
   const noLocalIdx = args.indexOf("--no-local");
   if (noLocalIdx !== -1) args.splice(noLocalIdx, 1);
 
-  const urlArg = args[1];
-  const isPRMode = urlArg?.startsWith("http://") || urlArg?.startsWith("https://");
+  const urlArgs = args.slice(1).filter((arg) => arg.startsWith("http://") || arg.startsWith("https://"));
+  const urlArg = urlArgs[0];
+  const isPRMode = urlArgs.length > 0;
+  const isMultiPRMode = urlArgs.length > 1;
   const useLocal = isPRMode && noLocalIdx === -1;
 
   let rawPatch: string;
@@ -208,8 +211,13 @@ if (args[0] === "sessions") {
   let initialDiffType: DiffType | undefined;
   let agentCwd: string | undefined;
   let worktreeCleanup: (() => void | Promise<void>) | undefined;
+  let workspaceRepos: Awaited<ReturnType<typeof buildWorkspaceLocalRepos>> | undefined;
 
-  if (isPRMode) {
+  if (isMultiPRMode) {
+    workspaceRepos = await buildWorkspacePRRepos(urlArgs);
+    rawPatch = "";
+    gitRef = "Workspace review";
+  } else if (isPRMode) {
     // --- PR Review Mode ---
     const prRef = parsePRUrl(urlArg);
     if (!prRef) {
@@ -379,12 +387,22 @@ if (args[0] === "sessions") {
     }
   } else {
     // --- Local Review Mode ---
-    gitContext = await getVcsContext();
-    initialDiffType = gitContext.vcsType === "p4" ? "p4-default" : resolveDefaultDiffType(loadConfig());
-    const diffResult = await runVcsDiff(initialDiffType, gitContext.defaultBranch);
-    rawPatch = diffResult.patch;
-    gitRef = diffResult.label;
-    diffError = diffResult.error;
+    const managedVcs = await detectManagedVcs(process.cwd());
+    if (managedVcs) {
+      gitContext = await getVcsContext();
+      initialDiffType = gitContext.vcsType === "p4" ? "p4-default" : resolveDefaultDiffType(loadConfig());
+      const diffResult = await runVcsDiff(initialDiffType, gitContext.defaultBranch);
+      rawPatch = diffResult.patch;
+      gitRef = diffResult.label;
+      diffError = diffResult.error;
+    } else {
+      workspaceRepos = await buildWorkspaceLocalRepos(process.cwd());
+      if (workspaceRepos.length === 0) {
+        throw new Error("Not in a git repo and no nested repositories were found.");
+      }
+      rawPatch = "";
+      gitRef = "Workspace review";
+    }
   }
 
   const reviewProject = (await detectProjectName()) ?? "_unknown";
@@ -398,6 +416,7 @@ if (args[0] === "sessions") {
     diffType: gitContext ? (initialDiffType ?? "unstaged") : undefined,
     gitContext,
     prMetadata,
+    workspaceRepos,
     agentCwd,
     sharingEnabled,
     shareBaseUrl,

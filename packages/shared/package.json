@@ -8,6 +8,7 @@
     "./crypto": "./crypto.ts",
     "./feedback-templates": "./feedback-templates.ts",
     "./review-core": "./review-core.ts",
+    "./review-workspace": "./review-workspace.ts",
     "./checklist": "./checklist.ts",
     "./types": "./types.ts",
     "./pr-provider": "./pr-provider.ts",

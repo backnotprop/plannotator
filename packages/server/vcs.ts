@@ -162,17 +162,26 @@ export { parseWorktreeDiffType, validateFilePath, runtime as gitRuntime } from "
 
 const vcsCache = new Map<string, VcsProvider>();
 
+/** Detect which VCS manages the given directory, without fallback. */
+export async function detectManagedVcs(cwd?: string): Promise<VcsProvider | null> {
+  for (const provider of providers) {
+    if (await provider.detect(cwd)) {
+      return provider;
+    }
+  }
+  return null;
+}
+
 /** Detect which VCS manages the given directory */
 export async function detectVcs(cwd?: string): Promise<VcsProvider> {
   const key = cwd ?? process.cwd();
   const cached = vcsCache.get(key);
   if (cached) return cached;
 
-  for (const provider of providers) {
-    if (await provider.detect(cwd)) {
-      vcsCache.set(key, provider);
-      return provider;
-    }
+  const detected = await detectManagedVcs(cwd);
+  if (detected) {
+    vcsCache.set(key, detected);
+    return detected;
   }
 
   // Default to git (existing behavior)

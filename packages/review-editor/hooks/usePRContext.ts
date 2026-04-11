@@ -1,12 +1,18 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import type { PRContext } from '@plannotator/shared/pr-provider';
 import type { PRMetadata } from '@plannotator/shared/pr-provider';
 
-export function usePRContext(prMetadata: PRMetadata | null) {
+export function usePRContext(prMetadata: PRMetadata | null, repoId?: string | null) {
   const [prContext, setPRContext] = useState<PRContext | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fetched = useRef(false);
+
+  useEffect(() => {
+    fetched.current = false;
+    setPRContext(null);
+    setError(null);
+  }, [prMetadata, repoId]);
 
   const fetchContext = useCallback(async () => {
     if (!prMetadata || fetched.current) return;
@@ -15,7 +21,8 @@ export function usePRContext(prMetadata: PRMetadata | null) {
     setError(null);
 
     try {
-      const res = await fetch('/api/pr-context');
+      const suffix = repoId ? `?repoId=${encodeURIComponent(repoId)}` : '';
+      const res = await fetch(`/api/pr-context${suffix}`);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || `HTTP ${res.status}`);
@@ -29,7 +36,7 @@ export function usePRContext(prMetadata: PRMetadata | null) {
     } finally {
       setIsLoading(false);
     }
-  }, [prMetadata]);
+  }, [prMetadata, repoId]);
 
   return { prContext, isLoading, error, fetchContext };
 }

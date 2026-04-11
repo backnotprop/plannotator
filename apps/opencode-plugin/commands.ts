@@ -19,9 +19,11 @@ import {
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
 import { getGitContext, runGitDiffWithContext } from "@plannotator/server/git";
+import { detectManagedVcs } from "@plannotator/server/vcs";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { loadConfig, resolveDefaultDiffType } from "@plannotator/shared/config";
 import { resolveMarkdownFile } from "@plannotator/shared/resolve-file";
+import { buildWorkspaceLocalRepos, buildWorkspacePRRepos } from "@plannotator/server/review-workspace";
 
 /** Shared dependencies injected by the plugin */
 export interface CommandDeps {
@@ -41,7 +43,9 @@ export async function handleReviewCommand(
 
   // @ts-ignore - Event properties contain arguments
   const urlArg: string = event.properties?.arguments || "";
-  const isPRMode = urlArg?.startsWith("http://") || urlArg?.startsWith("https://");
+  const urlArgs = urlArg.split(/\s+/).filter((arg: string) => arg.startsWith("http://") || arg.startsWith("https://"));
+  const isPRMode = urlArgs.length > 0;
+  const isMultiPRMode = urlArgs.length > 1;
 
   let rawPatch: string;
   let gitRef: string;
@@ -49,11 +53,16 @@ export async function handleReviewCommand(
   let userDiffType: import("@plannotator/shared/config").DefaultDiffType | undefined;
   let gitContext: Awaited<ReturnType<typeof getGitContext>> | undefined;
   let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
+  let workspaceRepos: Awaited<ReturnType<typeof buildWorkspaceLocalRepos>> | undefined;
 
-  if (isPRMode) {
-    const prRef = parsePRUrl(urlArg);
+  if (isMultiPRMode) {
+    workspaceRepos = await buildWorkspacePRRepos(urlArgs);
+    rawPatch = "";
+    gitRef = "Workspace review";
+  } else if (isPRMode) {
+    const prRef = parsePRUrl(urlArgs[0]);
     if (!prRef) {
-      client.app.log({ level: "error", message: `Invalid PR/MR URL: ${urlArg}` });
+      client.app.log({ level: "error", message: `Invalid PR/MR URL: ${urlArgs[0]}` });
       return;
     }
 
@@ -79,12 +88,27 @@ export async function handleReviewCommand(
   } else {
     client.app.log({ level: "info", message: "Opening code review UI..." });
 
-    gitContext = await getGitContext(directory);
-    userDiffType = resolveDefaultDiffType(loadConfig());
-    const diffResult = await runGitDiffWithContext(userDiffType, gitContext);
-    rawPatch = diffResult.patch;
-    gitRef = diffResult.label;
-    diffError = diffResult.error;
+    const managedVcs = await detectManagedVcs(directory);
+    if (managedVcs) {
+      gitContext = await getGitContext(directory);
+      userDiffType = resolveDefaultDiffType(loadConfig());
+      const diffResult = await runGitDiffWithContext(userDiffType, gitContext);
+      rawPatch = diffResult.patch;
+      gitRef = diffResult.label;
+      diffError = diffResult.error;
+    } else {
+      workspaceRepos = await buildWorkspaceLocalRepos(directory || process.cwd());
+      if (workspaceRepos.length === 0) {
+        client.app.log({ level: "error", message: "Not in a git repo and no nested repositories were found." });
+        return;
+      }
+      client.app.log({
+        level: "info",
+        message: `Workspace mode: found ${workspaceRepos.length} repos (${workspaceRepos.filter((repo) => repo.selected).length} selected with changes).`,
+      });
+      rawPatch = "";
+      gitRef = "Workspace review";
+    }
   }
 
   const server = await startReviewServer({
@@ -95,6 +119,7 @@ export async function handleReviewCommand(
     diffType: isPRMode ? undefined : userDiffType,
     gitContext,
     prMetadata,
+    workspaceRepos,
     sharingEnabled: await getSharingEnabled(),
     shareBaseUrl: getShareBaseUrl(),
     htmlContent: reviewHtmlContent,

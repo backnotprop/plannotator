@@ -58,6 +58,7 @@ import {
 import type { DiffFile } from './types';
 import type { DiffOption, WorktreeInfo, GitContext } from '@plannotator/shared/types';
 import type { PRMetadata } from '@plannotator/shared/pr-provider';
+import type { WorkspaceReviewState, WorkspaceRepoState } from '@plannotator/shared/review-workspace';
 import { altKey } from '@plannotator/ui/utils/platform';
 
 declare const __APP_VERSION__: string;
@@ -167,12 +168,22 @@ const ReviewApp: React.FC = () => {
   const [showExitWarning, setShowExitWarning] = useState(false);
   const [sharingEnabled, setSharingEnabled] = useState(true);
   const [repoInfo, setRepoInfo] = useState<{ display: string; branch?: string } | null>(null);
+  const [workspace, setWorkspace] = useState<WorkspaceReviewState | null>(null);
 
   useEffect(() => {
     document.title = repoInfo ? `${repoInfo.display} · Code Review` : "Code Review";
   }, [repoInfo]);
 
-  const [prMetadata, setPrMetadata] = useState<PRMetadata | null>(null);
+  useEffect(() => {
+    if (!workspace) return;
+    const selectedCount = workspace.repos.filter(repo => repo.selected).length;
+    setRepoInfo({
+      display: selectedCount > 0 ? `${selectedCount} selected repos` : 'Workspace Review',
+      branch: 'Workspace',
+    });
+  }, [workspace]);
+
+  const [singularPrMetadata, setSingularPrMetadata] = useState<PRMetadata | null>(null);
   const [reviewDestination, setReviewDestination] = useState<'agent' | 'platform'>(() => {
     const stored = storage.getItem('plannotator-review-dest');
     return stored === 'agent' ? 'agent' : 'platform'; // 'github' (legacy) → 'platform'
@@ -180,7 +191,7 @@ const ReviewApp: React.FC = () => {
   const [showDestinationMenu, setShowDestinationMenu] = useState(false);
   const [isPlatformActioning, setIsPlatformActioning] = useState(false);
   const [platformActionError, setPlatformActionError] = useState<string | null>(null);
-  const [platformUser, setPlatformUser] = useState<string | null>(null);
+  const [singularPlatformUser, setSingularPlatformUser] = useState<string | null>(null);
   const [platformCommentDialog, setPlatformCommentDialog] = useState<{ action: 'approve' | 'comment' } | null>(null);
   const [platformGeneralComment, setPlatformGeneralComment] = useState('');
   const [platformOpenPR, setPlatformOpenPR] = useState(() => {
@@ -197,6 +208,22 @@ const ReviewApp: React.FC = () => {
   });
 
   // Derived: Platform mode is active when destination is platform AND we have PR/MR metadata
+  const findWorkspaceRepoForPath = useCallback((filePath?: string | null): WorkspaceRepoState | null => {
+    if (!workspace || !filePath) return null;
+    return workspace.repos.find(repo => filePath === repo.label || filePath.startsWith(`${repo.label}/`)) ?? null;
+  }, [workspace]);
+
+  const activeWorkspaceRepo = useMemo(() => {
+    if (!workspace) return null;
+    return findWorkspaceRepoForPath(files[activeFileIndex]?.path)
+      ?? workspace.repos.find(repo => repo.selected)
+      ?? workspace.repos[0]
+      ?? null;
+  }, [workspace, files, activeFileIndex, findWorkspaceRepoForPath]);
+
+  const prMetadata = workspace ? activeWorkspaceRepo?.prMetadata ?? null : singularPrMetadata;
+  const platformUser = workspace ? activeWorkspaceRepo?.platformUser ?? null : singularPlatformUser;
+
   const platformMode = reviewDestination === 'platform' && !!prMetadata;
 
   // Platform-aware labels
@@ -231,7 +258,16 @@ const ReviewApp: React.FC = () => {
   const needsInitialDiffPanel = useRef(true);
 
   // PR context (lifted from sidebar so center dock PR panels can access it)
-  const { prContext, isLoading: isPRContextLoading, error: prContextError, fetchContext: fetchPRContext } = usePRContext(prMetadata ?? null);
+  const { prContext, isLoading: isPRContextLoading, error: prContextError, fetchContext: fetchPRContext } = usePRContext(prMetadata ?? null, workspace ? activeWorkspaceRepo?.id ?? null : null);
+
+  useEffect(() => {
+    if (!workspace || !activeWorkspaceRepo) return;
+    fetch('/api/workspace/active', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repoId: activeWorkspaceRepo.id }),
+    }).catch(() => {});
+  }, [workspace, activeWorkspaceRepo]);
 
   // Sync activeFileIndex from dockview's active panel (wired in handleDockReady)
 
@@ -635,6 +671,7 @@ const ReviewApp: React.FC = () => {
         prMetadata?: PRMetadata;
         platformUser?: string;
         viewedFiles?: string[];
+        workspace?: WorkspaceReviewState;
         error?: string;
         isWSL?: boolean;
         serverConfig?: { displayName?: string; gitUser?: string };
@@ -660,10 +697,17 @@ const ReviewApp: React.FC = () => {
         if (data.agentCwd) setAgentCwd(data.agentCwd);
         if (data.sharingEnabled !== undefined) setSharingEnabled(data.sharingEnabled);
         if (data.repoInfo) setRepoInfo(data.repoInfo);
-        if (data.prMetadata) setPrMetadata(data.prMetadata);
-        if (data.platformUser) setPlatformUser(data.platformUser);
+        if (data.workspace) {
+          setWorkspace(data.workspace);
+          const workspaceViewed = data.workspace.repos.flatMap(repo => repo.viewedFiles ?? []);
+          if (workspaceViewed.length > 0) {
+            setViewedFiles(new Set(workspaceViewed));
+          }
+        }
+        if (data.prMetadata) setSingularPrMetadata(data.prMetadata);
+        if (data.platformUser) setSingularPlatformUser(data.platformUser);
         // Initialize viewed files from GitHub's state (set before draft restore so draft takes precedence)
-        if (data.viewedFiles && data.viewedFiles.length > 0) {
+        if (!data.workspace && data.viewedFiles && data.viewedFiles.length > 0) {
           setViewedFiles(new Set(data.viewedFiles));
         }
         if (data.error) setDiffError(data.error);
@@ -846,7 +890,15 @@ const ReviewApp: React.FC = () => {
       }
       // Sync viewed state to GitHub (fire and forget — best effort)
       // Capture willBeViewed inside the callback to ensure correctness with React batching
-      if (prMetadata && prMetadata.platform === 'github') {
+      if (workspace && activeWorkspaceRepo?.prMetadata?.platform === 'github') {
+        fetch('/api/pr-viewed', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ repoId: activeWorkspaceRepo.id, filePaths: [filePath], viewed: willBeViewed }),
+        }).catch(() => {
+          // Silently ignore — viewed sync is best-effort
+        });
+      } else if (prMetadata && prMetadata.platform === 'github') {
         fetch('/api/pr-viewed', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -857,12 +909,14 @@ const ReviewApp: React.FC = () => {
       }
       return next;
     });
-  }, [prMetadata]);
+  }, [workspace, activeWorkspaceRepo, prMetadata]);
 
   // Derive worktree path and base diff type from the composite diffType string
+  const effectiveDiffType = workspace ? (activeWorkspaceRepo?.diffType || 'uncommitted') : diffType;
+
   const { activeWorktreePath, activeDiffBase } = useMemo(() => {
-    if (diffType.startsWith('worktree:')) {
-      const rest = diffType.slice('worktree:'.length);
+    if (effectiveDiffType.startsWith('worktree:')) {
+      const rest = effectiveDiffType.slice('worktree:'.length);
       const lastColon = rest.lastIndexOf(':');
       if (lastColon !== -1) {
         const sub = rest.slice(lastColon + 1);
@@ -872,8 +926,8 @@ const ReviewApp: React.FC = () => {
       }
       return { activeWorktreePath: rest, activeDiffBase: 'uncommitted' };
     }
-    return { activeWorktreePath: null, activeDiffBase: diffType };
-  }, [diffType]);
+    return { activeWorktreePath: null, activeDiffBase: effectiveDiffType };
+  }, [effectiveDiffType]);
 
   // Git add/staging logic
   const handleFileViewedFromStage = useCallback(
@@ -884,17 +938,39 @@ const ReviewApp: React.FC = () => {
     activeDiffBase,
     onFileViewed: handleFileViewedFromStage,
   });
-  // Staging is never available in PR review mode — the server rejects it and the UI shouldn't offer it.
-  const canStageFiles = canStageRaw && !prMetadata;
+  const canStageFiles = canStageRaw && !(workspace ? activeWorkspaceRepo?.source === 'pr' : prMetadata);
+
+  const applyServerDiffPayload = useCallback((data: {
+    rawPatch: string;
+    gitRef: string;
+    diffType?: string;
+    workspace?: WorkspaceReviewState;
+    error?: string;
+  }) => {
+    const nextFiles = parseDiffToFiles(data.rawPatch);
+    dockApi?.getPanel(REVIEW_DIFF_PANEL_ID)?.api.close();
+    needsInitialDiffPanel.current = true;
+    setDiffData(prev => prev ? { ...prev, rawPatch: data.rawPatch, gitRef: data.gitRef, diffType: data.diffType } : prev);
+    setFiles(nextFiles);
+    if (data.diffType) setDiffType(data.diffType);
+    if (data.workspace) {
+      setWorkspace(data.workspace);
+      setViewedFiles(new Set(data.workspace.repos.flatMap(repo => repo.viewedFiles ?? [])));
+    }
+    setActiveFileIndex(0);
+    setPendingSelection(null);
+    setDiffError(data.error || null);
+    resetStagedFiles();
+  }, [dockApi, resetStagedFiles]);
 
   // Shared helper: fetch a diff switch and update state
-  const fetchDiffSwitch = useCallback(async (fullDiffType: string) => {
+  const fetchDiffSwitch = useCallback(async (fullDiffType: string, repoId?: string) => {
     setIsLoadingDiff(true);
     try {
       const res = await fetch('/api/diff/switch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ diffType: fullDiffType }),
+        body: JSON.stringify(repoId ? { repoId, diffType: fullDiffType } : { diffType: fullDiffType }),
       });
 
       if (!res.ok) throw new Error('Failed to switch diff');
@@ -902,45 +978,66 @@ const ReviewApp: React.FC = () => {
       const data = await res.json() as {
         rawPatch: string;
         gitRef: string;
-        diffType: string;
+        diffType?: string;
+        workspace?: WorkspaceReviewState;
         error?: string;
       };
 
-      const nextFiles = parseDiffToFiles(data.rawPatch);
-      dockApi?.getPanel(REVIEW_DIFF_PANEL_ID)?.api.close();
-      needsInitialDiffPanel.current = true;
-      setDiffData(prev => prev ? { ...prev, rawPatch: data.rawPatch, gitRef: data.gitRef, diffType: data.diffType } : prev);
-      setFiles(nextFiles);
-      setDiffType(data.diffType);
-      setActiveFileIndex(0);
-      setPendingSelection(null);
-      setDiffError(data.error || null);
-      resetStagedFiles();
+      applyServerDiffPayload(data);
     } catch (err) {
       console.error('Failed to switch diff:', err);
       setDiffError(err instanceof Error ? err.message : 'Failed to switch diff');
     } finally {
       setIsLoadingDiff(false);
     }
-  }, [dockApi, resetStagedFiles]);
+  }, [applyServerDiffPayload]);
+
+  const updateWorkspaceRepo = useCallback(async (repoId: string, changes: { selected?: boolean; source?: 'local' | 'pr'; prUrl?: string }) => {
+    setIsLoadingDiff(true);
+    try {
+      const res = await fetch('/api/workspace/repo', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repoId, ...changes }),
+      });
+      if (!res.ok) throw new Error('Failed to update workspace repo');
+      const data = await res.json() as {
+        rawPatch: string;
+        gitRef: string;
+        workspace?: WorkspaceReviewState;
+        error?: string;
+      };
+      applyServerDiffPayload(data);
+    } catch (err) {
+      console.error('Failed to update workspace repo:', err);
+      setDiffError(err instanceof Error ? err.message : 'Failed to update workspace repo');
+    } finally {
+      setIsLoadingDiff(false);
+    }
+  }, [applyServerDiffPayload]);
 
   // Switch diff type (uncommitted, last-commit, branch) — composes worktree prefix if active
   const handleDiffSwitch = useCallback(async (baseDiffType: string) => {
+    if (workspace && activeWorkspaceRepo) {
+      await fetchDiffSwitch(baseDiffType, activeWorkspaceRepo.id);
+      return;
+    }
     const fullDiffType = activeWorktreePath
       ? `worktree:${activeWorktreePath}:${baseDiffType}`
       : baseDiffType;
     if (fullDiffType === diffType) return;
     await fetchDiffSwitch(fullDiffType);
-  }, [diffType, activeWorktreePath, fetchDiffSwitch]);
+  }, [workspace, activeWorkspaceRepo, diffType, activeWorktreePath, fetchDiffSwitch]);
 
   // Switch worktree context (or back to main repo)
   const handleWorktreeSwitch = useCallback(async (worktreePath: string | null) => {
+    if (workspace) return;
     if (worktreePath === activeWorktreePath) return;
     const fullDiffType = worktreePath
       ? `worktree:${worktreePath}:uncommitted`
       : 'uncommitted';
     await fetchDiffSwitch(fullDiffType);
-  }, [activeWorktreePath, fetchDiffSwitch]);
+  }, [workspace, activeWorktreePath, fetchDiffSwitch]);
 
   // Select annotation - switches file if needed and scrolls to it
   const handleSelectAnnotation = useCallback((id: string | null) => {
@@ -1056,7 +1153,7 @@ const ReviewApp: React.FC = () => {
       return;
     }
     try {
-      const feedback = exportReviewFeedback(allAnnotations, prMetadata);
+      const feedback = exportReviewFeedback(allAnnotations, workspace ? undefined : prMetadata);
       await navigator.clipboard.writeText(feedback);
       setCopyFeedback('Feedback copied!');
       setTimeout(() => setCopyFeedback(null), 2000);
@@ -1065,15 +1162,15 @@ const ReviewApp: React.FC = () => {
       setCopyFeedback('Failed to copy');
       setTimeout(() => setCopyFeedback(null), 2000);
     }
-  }, [allAnnotations, prMetadata]);
+  }, [workspace, allAnnotations, prMetadata]);
 
   const feedbackMarkdown = useMemo(() => {
-    let output = exportReviewFeedback(allAnnotations, prMetadata);
+    let output = exportReviewFeedback(allAnnotations, workspace ? undefined : prMetadata);
     if (editorAnnotations.length > 0) {
       output += exportEditorAnnotations(editorAnnotations);
     }
     return output;
-  }, [allAnnotations, prMetadata, editorAnnotations]);
+  }, [workspace, allAnnotations, prMetadata, editorAnnotations]);
 
   const totalAnnotationCount = allAnnotations.length + editorAnnotations.length;
 
@@ -1155,8 +1252,18 @@ const ReviewApp: React.FC = () => {
 
   // Build the payload for /api/pr-action from current annotations
   const buildPRReviewPayload = useCallback((action: 'approve' | 'comment', generalComment?: string) => {
-    const fileAnnotations = allAnnotations.filter(a => (a.scope ?? 'line') === 'line');
-    const fileScoped = allAnnotations.filter(a => a.scope === 'file');
+    const repoPrefix = workspace && activeWorkspaceRepo ? `${activeWorkspaceRepo.label}/` : null;
+    const scopedAnnotations = repoPrefix
+      ? allAnnotations.filter(annotation => annotation.filePath.startsWith(repoPrefix))
+      : allAnnotations;
+    const scopedEditorAnnotations = repoPrefix
+      ? editorAnnotations.filter(annotation => annotation.filePath.startsWith(repoPrefix))
+      : editorAnnotations;
+    const scopedFiles = repoPrefix
+      ? files.filter(file => file.path.startsWith(repoPrefix))
+      : files;
+    const fileAnnotations = scopedAnnotations.filter(a => (a.scope ?? 'line') === 'line');
+    const fileScoped = scopedAnnotations.filter(a => a.scope === 'file');
 
     // Top-level body: file-scoped comments
     const bodyParts: string[] = [];
@@ -1192,8 +1299,8 @@ const ReviewApp: React.FC = () => {
 
     // Editor annotations (VS Code extension) — always on new/RIGHT side
     // Only include annotations targeting files in the diff to avoid GitHub API rejection
-    const diffPaths = new Set(files.map(f => f.path));
-    for (const ea of editorAnnotations) {
+    const diffPaths = new Set(scopedFiles.map(f => f.path));
+    for (const ea of scopedEditorAnnotations) {
       if (!diffPaths.has(ea.filePath)) continue;
       const body = ea.comment || `> ${ea.selectedText}`;
       if (!body.trim()) continue;
@@ -1210,8 +1317,13 @@ const ReviewApp: React.FC = () => {
       });
     }
 
-    return { action, body, fileComments };
-  }, [allAnnotations, editorAnnotations, files]);
+    return {
+      ...(workspace && activeWorkspaceRepo && { repoId: activeWorkspaceRepo.id }),
+      action,
+      body,
+      fileComments,
+    };
+  }, [workspace, activeWorkspaceRepo, allAnnotations, editorAnnotations, files]);
 
   // Submit a review directly to GitHub
   const handlePlatformAction = useCallback(async (action: 'approve' | 'comment', generalComment?: string) => {
@@ -1637,6 +1749,81 @@ const ReviewApp: React.FC = () => {
           </div>
         </header>
 
+        {workspace && (
+          <div className="border-b border-border/50 bg-card/20 px-2 md:px-4 py-2 overflow-x-auto">
+            <div className="flex items-stretch gap-2 min-w-max">
+              {workspace.repos.map((repo) => (
+                <div
+                  key={repo.id}
+                  className={`rounded-lg border px-3 py-2 min-w-[240px] ${repo.selected ? 'border-primary/40 bg-primary/5' : 'border-border/60 bg-background/30'}`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="flex items-center gap-2 min-w-0 text-xs font-medium text-foreground cursor-pointer">
+                      <span
+                        role="checkbox"
+                        aria-checked={repo.selected}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          updateWorkspaceRepo(repo.id, { selected: !repo.selected });
+                        }}
+                        className="flex-shrink-0 p-0.5 rounded hover:bg-muted/50 cursor-pointer"
+                      >
+                        {repo.selected ? (
+                          <svg className="w-3.5 h-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                        ) : (
+                          <svg className="w-3.5 h-3.5 text-muted-foreground opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <circle cx="12" cy="12" r="9" />
+                          </svg>
+                        )}
+                      </span>
+                      <span className="truncate" title={repo.label}>{repo.label}</span>
+                    </label>
+                    {repo.error && (
+                      <span className="text-[10px] text-destructive truncate max-w-[90px]" title={repo.error}>
+                        issue
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-2 flex items-center gap-2 text-[11px]">
+                    <select
+                      value={repo.source}
+                      onChange={(event) => updateWorkspaceRepo(repo.id, { source: event.target.value as 'local' | 'pr' })}
+                      className="bg-background border border-border rounded px-2 py-1 min-w-0"
+                    >
+                      <option value="local">Local</option>
+                      <option value="pr" disabled={!repo.prMetadata && !(repo.discoveredPRs && repo.discoveredPRs.length > 0)}>PR/MR</option>
+                    </select>
+                    {repo.source === 'local' ? (
+                      <select
+                        value={repo.diffType || 'uncommitted'}
+                        onChange={(event) => fetchDiffSwitch(event.target.value, repo.id)}
+                        className="bg-background border border-border rounded px-2 py-1 min-w-0 flex-1"
+                      >
+                        {(repo.diffOptions || []).map((option) => (
+                          <option key={option.id} value={option.id}>{option.label}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <select
+                        value={repo.prMetadata?.url || repo.discoveredPRs?.[0]?.url || ''}
+                        onChange={(event) => updateWorkspaceRepo(repo.id, { source: 'pr', prUrl: event.target.value })}
+                        className="bg-background border border-border rounded px-2 py-1 min-w-0 flex-1"
+                      >
+                        {repo.prMetadata?.url && <option value={repo.prMetadata.url}>{repo.prMetadata.url}</option>}
+                        {(repo.discoveredPRs || []).filter(candidate => candidate.url !== repo.prMetadata?.url).map((candidate) => (
+                          <option key={candidate.url} value={candidate.url}>{candidate.url}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Main content */}
         <div className={`flex-1 flex overflow-hidden ${isResizing ? 'select-none' : ''}`}>
           {/* Left sidebar stays mounted whenever it provides navigation or context. */}
@@ -1653,15 +1840,15 @@ const ReviewApp: React.FC = () => {
                 hideViewedFiles={hideViewedFiles}
                 onToggleHideViewed={() => setHideViewedFiles(prev => !prev)}
                 enableKeyboardNav={!showExportModal && hasSearchableFiles}
-                diffOptions={gitContext?.diffOptions}
+                diffOptions={workspace ? activeWorkspaceRepo?.gitContext?.diffOptions : gitContext?.diffOptions}
                 activeDiffType={activeDiffBase}
                 onSelectDiff={handleDiffSwitch}
                 isLoadingDiff={isLoadingDiff}
                 width={fileTreeResize.width}
-                worktrees={gitContext?.worktrees}
+                worktrees={workspace ? activeWorkspaceRepo?.gitContext?.worktrees : gitContext?.worktrees}
                 activeWorktreePath={activeWorktreePath}
                 onSelectWorktree={handleWorktreeSwitch}
-                currentBranch={gitContext?.currentBranch}
+                currentBranch={workspace ? activeWorkspaceRepo?.gitContext?.currentBranch : gitContext?.currentBranch}
                 stagedFiles={stagedFiles}
                 onCopyRawDiff={handleCopyDiff}
                 canCopyRawDiff={!!diffData?.rawPatch}

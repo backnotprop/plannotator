@@ -277,6 +277,7 @@ export function transformClaudeFindings(
   findings: ClaudeFinding[],
   source: string,
   cwd?: string,
+  pathTransform?: (path: string) => string,
 ): Array<{
   source: string;
   filePath: string;
@@ -294,7 +295,9 @@ export function transformClaudeFindings(
     .filter(f => f.file && typeof f.line === "number")
     .map(f => ({
       source,
-      filePath: toRelativePath(f.file, cwd),
+      filePath: pathTransform
+        ? pathTransform(toRelativePath(f.file, cwd))
+        : toRelativePath(f.file, cwd),
       lineStart: f.line,
       lineEnd: f.end_line ?? f.line,
       type: "comment",

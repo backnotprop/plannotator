@@ -15,3 +15,10 @@ export type {
   WorktreeInfo,
   GitContext,
 } from "./review-core";
+
+export type {
+  WorkspaceRepoSource,
+  WorkspacePRCandidate,
+  WorkspaceRepoState,
+  WorkspaceReviewState,
+} from "./review-workspace";
