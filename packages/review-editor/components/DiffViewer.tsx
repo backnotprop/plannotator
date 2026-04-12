@@ -323,6 +323,46 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     }
   }, [filePath, onLineSelection]);
 
+  // Safari scroll-position guardian. Safari has a compositor bug where
+  // scrollTop resets to 0 (sometimes multiple times in quick succession)
+  // when momentum-scrolling ends inside a container whose child is a
+  // web-component shadow DOM (@pierre/diffs `<diffs-container>`). The reset
+  // bypasses JavaScript entirely — no scrollTo / scrollTop setter fires.
+  // Detect the bogus resets and restore the last known good position.
+  // Only active in WebKit — Chrome / Firefox / Edge are unaffected.
+  //
+  // filePath is in the dep array so the guardian resets when the user
+  // switches files (the file-switch useLayoutEffect legitimately scrolls
+  // to 0 — without resetting here the guardian would fight it).
+  useEffect(() => {
+    if (!viewport) return;
+    const ua = navigator.userAgent;
+    const isWebKit = ua.includes('Safari') && !ua.includes('Chrome');
+    if (!isWebKit) return;
+
+    let lastGoodST = 0;
+
+    const onScroll = () => {
+      const st = viewport.scrollTop;
+      if (st > 0) {
+        lastGoodST = st;
+      } else if (lastGoodST > 200) {
+        // scrollTop jumped from a distant position to 0 — Safari compositor bug.
+        // A legitimate scroll-to-top always has intermediate events that bring
+        // lastGoodST down to a small value before reaching 0. A jump from >200
+        // to 0 in a single event can only be the bug. Restore synchronously so
+        // the browser never paints the wrong frame.
+        viewport.scrollTop = lastGoodST;
+      } else {
+        // Near the top already (lastGoodST ≤ 200) — legitimate scroll to top
+        lastGoodST = 0;
+      }
+    };
+
+    viewport.addEventListener('scroll', onScroll, { passive: true });
+    return () => viewport.removeEventListener('scroll', onScroll);
+  }, [viewport, filePath]);
+
   // Scroll to selected annotation when it changes
   useEffect(() => {
     if (!selectedAnnotationId || !containerRef.current) return;
