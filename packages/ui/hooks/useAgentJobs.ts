@@ -192,9 +192,7 @@ export function useAgentJobs(
 
   const killAll = useCallback(async () => {
     try {
-      await fetch(JOBS_URL, {
-        method: 'DELETE',
-      });
+      await fetch(JOBS_URL, { method: 'DELETE' });
     } catch {
       // SSE will reconcile
     }
