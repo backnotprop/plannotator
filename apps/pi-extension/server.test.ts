@@ -251,65 +251,6 @@ describe("pi review server", () => {
     }
   });
 
-  test("requires the review session token to launch agent jobs", async () => {
-    const homeDir = makeTempDir("plannotator-pi-home-");
-    const repoDir = initRepo();
-    process.env.HOME = homeDir;
-    process.chdir(repoDir);
-    process.env.PLANNOTATOR_PORT = String(await reservePort());
-
-    writeFileSync(join(repoDir, "tracked.txt"), "after\n", "utf-8");
-
-    const gitContext = await getGitContext();
-    const diff = await runGitDiff("uncommitted", gitContext.defaultBranch);
-
-    const server = await startReviewServer({
-      rawPatch: diff.patch,
-      gitRef: diff.label,
-      error: diff.error,
-      diffType: "uncommitted",
-      gitContext,
-      origin: "pi",
-      htmlContent: "<!doctype html><html><body>review</body></html>",
-    });
-
-    try {
-      const diffResponse = await fetch(`${server.url}/api/diff`);
-      const diffPayload = await diffResponse.json() as { agentJobToken?: string };
-      expect(diffPayload.agentJobToken).toBeTruthy();
-
-      const unauthorized = await fetch(`${server.url}/api/agents/jobs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: "missing-provider",
-          command: ["/usr/bin/true"],
-          label: "Injected",
-        }),
-      });
-      expect(unauthorized.status).toBe(403);
-
-      const authorized = await fetch(`${server.url}/api/agents/jobs`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Plannotator-Agent-Token": diffPayload.agentJobToken!,
-        },
-        body: JSON.stringify({
-          provider: "missing-provider",
-          command: ["/usr/bin/true"],
-          label: "Injected",
-        }),
-      });
-      expect(authorized.status).toBe(400);
-      expect(await authorized.json()).toEqual({
-        error: "Unknown or unavailable provider: missing-provider",
-      });
-    } finally {
-      server.stop();
-    }
-  });
-
   test("git-add endpoint stages and unstages files in review mode", async () => {
     const homeDir = makeTempDir("plannotator-pi-home-");
     const repoDir = initRepo();

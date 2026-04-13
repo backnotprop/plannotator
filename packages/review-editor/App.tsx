@@ -70,7 +70,6 @@ interface DiffData {
   diffType?: string;
   gitContext?: GitContext;
   sharingEnabled?: boolean;
-  agentJobToken?: string;
 }
 
 // Simple diff parser to extract files from unified diff
@@ -158,7 +157,6 @@ const ReviewApp: React.FC = () => {
   const [diffType, setDiffType] = useState<string>('uncommitted');
   const [gitContext, setGitContext] = useState<GitContext | null>(null);
   const [agentCwd, setAgentCwd] = useState<string | null>(null);
-  const [agentJobToken, setAgentJobToken] = useState<string | null>(null);
   const [isLoadingDiff, setIsLoadingDiff] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
@@ -224,7 +222,7 @@ const ReviewApp: React.FC = () => {
   // The same !!origin proxy is used elsewhere in this file (draft hook, feedback guard, conditional UI)
   // so this should be addressed as a broader refactor.
   const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<CodeAnnotation>({ enabled: !!origin });
-  const agentJobs = useAgentJobs({ enabled: !!origin, authToken: agentJobToken ?? undefined });
+  const agentJobs = useAgentJobs({ enabled: !!origin });
 
   // Dockview center panel API for the review workspace.
   const [dockApi, setDockApi] = useState<DockviewApi | null>(null);
@@ -632,7 +630,6 @@ const ReviewApp: React.FC = () => {
         diffType?: string;
         gitContext?: GitContext;
         agentCwd?: string;
-        agentJobToken?: string;
         sharingEnabled?: boolean;
         repoInfo?: { display: string; branch?: string };
         prMetadata?: PRMetadata;
@@ -655,14 +652,12 @@ const ReviewApp: React.FC = () => {
           diffType: data.diffType,
           gitContext: data.gitContext,
           sharingEnabled: data.sharingEnabled,
-          agentJobToken: data.agentJobToken,
         });
         setFiles(apiFiles);
         if (data.origin) setOrigin(data.origin);
         if (data.diffType) setDiffType(data.diffType);
         if (data.gitContext) setGitContext(data.gitContext);
         if (data.agentCwd) setAgentCwd(data.agentCwd);
-        if (data.agentJobToken) setAgentJobToken(data.agentJobToken);
         if (data.sharingEnabled !== undefined) setSharingEnabled(data.sharingEnabled);
         if (data.repoInfo) setRepoInfo(data.repoInfo);
         if (data.prMetadata) setPrMetadata(data.prMetadata);

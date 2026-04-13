@@ -45,7 +45,6 @@ const BASE = "/api/agents";
 const JOBS = `${BASE}/jobs`;
 const JOBS_STREAM = `${JOBS}/stream`;
 const CAPABILITIES = `${BASE}/capabilities`;
-const AGENT_JOB_TOKEN_HEADER = "x-plannotator-agent-token";
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -78,8 +77,6 @@ export interface AgentJobHandlerOptions {
    * Use for result ingestion (e.g., reading an output file and pushing annotations).
    */
   onJobComplete?: (job: AgentJobInfo, meta: { outputPath?: string; stdout?: string; cwd?: string }) => void | Promise<void>;
-  /** Optional session token required for mutating job routes. */
-  authToken?: string;
 }
 
 export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJobHandler {
@@ -331,11 +328,6 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
     return Array.from(jobs.values()).map((e) => ({ ...e.info }));
   }
 
-  function isAuthorizedRequest(req: Request): boolean {
-    if (!options.authToken) return true;
-    return req.headers.get(AGENT_JOB_TOKEN_HEADER) === options.authToken;
-  }
-
   // --- HTTP handler ---
   return {
     killAll,
@@ -409,9 +401,6 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
 
       // --- POST /api/agents/jobs (launch) ---
       if (url.pathname === JOBS && req.method === "POST") {
-        if (!isAuthorizedRequest(req)) {
-          return Response.json({ error: "Unauthorized agent job request" }, { status: 403 });
-        }
         try {
           const body = await req.json();
           const provider = typeof body.provider === "string" ? body.provider : "";
@@ -468,9 +457,6 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
 
       // --- DELETE /api/agents/jobs/:id (kill one) ---
       if (url.pathname.startsWith(JOBS + "/") && url.pathname !== JOBS_STREAM && req.method === "DELETE") {
-        if (!isAuthorizedRequest(req)) {
-          return Response.json({ error: "Unauthorized agent job request" }, { status: 403 });
-        }
         const id = url.pathname.slice(JOBS.length + 1);
         if (!id) {
           return Response.json({ error: "Missing job ID" }, { status: 400 });
@@ -484,9 +470,6 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
 
       // --- DELETE /api/agents/jobs (kill all) ---
       if (url.pathname === JOBS && req.method === "DELETE") {
-        if (!isAuthorizedRequest(req)) {
-          return Response.json({ error: "Unauthorized agent job request" }, { status: 403 });
-        }
         const count = killAll();
         return Response.json({ ok: true, killed: count });
       }

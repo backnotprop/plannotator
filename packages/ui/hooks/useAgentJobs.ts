@@ -28,10 +28,9 @@ interface UseAgentJobsReturn {
 }
 
 export function useAgentJobs(
-  options?: { enabled?: boolean; authToken?: string },
+  options?: { enabled?: boolean },
 ): UseAgentJobsReturn {
   const enabled = options?.enabled ?? true;
-  const authToken = options?.authToken;
   const [jobs, setJobs] = useState<AgentJobInfo[]>([]);
   const [jobLogs, setJobLogs] = useState<Map<string, string>>(new Map());
   const [capabilities, setCapabilities] = useState<AgentCapabilities | null>(null);
@@ -168,10 +167,7 @@ export function useAgentJobs(
       try {
         const res = await fetch(JOBS_URL, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(authToken ? { 'X-Plannotator-Agent-Token': authToken } : {}),
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(params),
         });
         if (!res.ok) return null;
@@ -181,30 +177,28 @@ export function useAgentJobs(
         return null;
       }
     },
-    [authToken],
+    [],
   );
 
   const killJob = useCallback(async (id: string) => {
     try {
       await fetch(`${JOBS_URL}/${encodeURIComponent(id)}`, {
         method: 'DELETE',
-        headers: authToken ? { 'X-Plannotator-Agent-Token': authToken } : undefined,
       });
     } catch {
       // SSE will reconcile
     }
-  }, [authToken]);
+  }, []);
 
   const killAll = useCallback(async () => {
     try {
       await fetch(JOBS_URL, {
         method: 'DELETE',
-        headers: authToken ? { 'X-Plannotator-Agent-Token': authToken } : undefined,
       });
     } catch {
       // SSE will reconcile
     }
-  }, [authToken]);
+  }, []);
 
   return { jobs, jobLogs, capabilities, launchJob, killJob, killAll };
 }

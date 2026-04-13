@@ -190,7 +190,6 @@ export async function startReviewServer(options: {
 	let currentGitRef = options.gitRef;
 	let currentDiffType: DiffType = options.diffType || "uncommitted";
 	let currentError = options.error;
-	const agentJobToken = crypto.randomUUID();
 
 	// Agent jobs — background process manager (late-binds serverUrl via getter)
 	let serverUrl = "";
@@ -206,7 +205,6 @@ export async function startReviewServer(options: {
 	const agentJobs = createAgentJobHandler({
 		mode: "review",
 		getServerUrl: () => serverUrl,
-		authToken: agentJobToken,
 		getCwd: resolveAgentCwd,
 
 		async buildCommand(provider) {
@@ -425,7 +423,6 @@ export async function startReviewServer(options: {
 				shareBaseUrl,
 				repoInfo,
 				isWSL: wslFlag,
-				agentJobToken,
 				...(options.agentCwd && { agentCwd: options.agentCwd }),
 				...(isPRMode && { prMetadata: prMeta, platformUser }),
 				...(isPRMode && initialViewedFiles.length > 0 && { viewedFiles: initialViewedFiles }),
