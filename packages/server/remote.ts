@@ -66,11 +66,9 @@ export function getServerPort(): number {
 }
 
 /**
- * Bind review servers to loopback only.
- *
- * Remote workflows still work via SSH/devcontainer port forwarding, but the
- * server no longer accepts direct LAN requests by default.
+ * Bind local sessions to loopback, but keep remote sessions reachable via the
+ * container or host network interface for SSH/devcontainer/Docker forwarding.
  */
 export function getServerHostname(): string {
-  return LOOPBACK_HOST;
+  return isRemoteSession() ? "0.0.0.0" : LOOPBACK_HOST;
 }

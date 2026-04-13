@@ -101,9 +101,9 @@ describe("pi server hostname", () => {
 		expect(getServerHostname()).toBe("127.0.0.1");
 	});
 
-	test("binds remote sessions to loopback", () => {
+	test("binds remote sessions to all interfaces", () => {
 		clearEnv();
 		process.env.PLANNOTATOR_REMOTE = "1";
-		expect(getServerHostname()).toBe("127.0.0.1");
+		expect(getServerHostname()).toBe("0.0.0.0");
 	});
 });

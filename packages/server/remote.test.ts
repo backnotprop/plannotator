@@ -137,14 +137,14 @@ describe("getServerPort", () => {
 });
 
 describe("getServerHostname", () => {
-  test("always returns loopback for local sessions", () => {
+  test("returns loopback for local sessions", () => {
     clearEnv();
     expect(getServerHostname()).toBe("127.0.0.1");
   });
 
-  test("always returns loopback for remote sessions", () => {
+  test("returns all interfaces for remote sessions", () => {
     clearEnv();
     process.env.PLANNOTATOR_REMOTE = "1";
-    expect(getServerHostname()).toBe("127.0.0.1");
+    expect(getServerHostname()).toBe("0.0.0.0");
   });
 });
