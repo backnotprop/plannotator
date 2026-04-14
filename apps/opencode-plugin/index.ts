@@ -465,14 +465,6 @@ Do NOT proceed with implementation until your plan is approved.`);
 
             if (shouldSwitchAgent) {
               try {
-                await ctx.client.tui.executeCommand({
-                  body: { command: "agent_cycle" },
-                });
-              } catch {
-                // Silently fail
-              }
-
-              try {
                 await ctx.client.session.prompt({
                   path: { id: context.sessionID },
                   body: {
