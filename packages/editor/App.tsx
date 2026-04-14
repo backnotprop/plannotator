@@ -65,7 +65,18 @@ import { SidebarContainer } from '@plannotator/ui/components/sidebar/SidebarCont
 import type { ArchivedPlan } from '@plannotator/ui/components/sidebar/ArchiveBrowser';
 import { PlanDiffViewer } from '@plannotator/ui/components/plan-diff/PlanDiffViewer';
 import type { PlanDiffMode } from '@plannotator/ui/components/plan-diff/PlanDiffModeSwitcher';
-import { DEMO_PLAN_CONTENT } from './demoPlan';
+// Demo content toggle. Default: the original Real-time Collaboration plan.
+// Opt-in diff-engine stress test: `VITE_DIFF_DEMO=1 bun run dev:hook` swaps
+// in the 20-case Auth Service Refactor test plan. dev-mock-api.ts reads the
+// same env var on the server side so V2/V3 stay paired.
+import { DEMO_PLAN_CONTENT as DEFAULT_DEMO_PLAN_CONTENT } from './demoPlan';
+import { DIFF_DEMO_PLAN_CONTENT } from './demoPlanDiffDemo';
+const USE_DIFF_DEMO =
+  import.meta.env.VITE_DIFF_DEMO === '1' ||
+  import.meta.env.VITE_DIFF_DEMO === 'true';
+const DEMO_PLAN_CONTENT = USE_DIFF_DEMO
+  ? DIFF_DEMO_PLAN_CONTENT
+  : DEFAULT_DEMO_PLAN_CONTENT;
 import { useCheckboxOverrides } from './hooks/useCheckboxOverrides';
 
 type NoteAutoSaveResults = {
