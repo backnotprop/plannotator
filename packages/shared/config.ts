@@ -31,9 +31,55 @@ export interface CCLabelConfig {
   blocking: boolean;
 }
 
+export interface ReviewPromptOverrides {
+  approved?: string;
+}
+
+export type PromptRuntime =
+  | "claude-code"
+  | "opencode"
+  | "copilot-cli"
+  | "pi"
+  | "codex"
+  | "gemini-cli";
+
+export interface PromptConfig {
+  review?: {
+    approved?: string;
+    runtimes?: Partial<Record<PromptRuntime, ReviewPromptOverrides>>;
+  };
+}
+
+export function mergePromptConfig(
+  current?: PromptConfig,
+  partial?: PromptConfig,
+): PromptConfig | undefined {
+  if (!current && !partial) return undefined;
+
+  const currentReview = current?.review;
+  const partialReview = partial?.review;
+
+  const mergedReview = (currentReview || partialReview)
+    ? {
+        ...currentReview,
+        ...partialReview,
+        runtimes: (currentReview?.runtimes || partialReview?.runtimes)
+          ? { ...currentReview?.runtimes, ...partialReview?.runtimes }
+          : undefined,
+      }
+    : undefined;
+
+  return {
+    ...current,
+    ...partial,
+    review: mergedReview,
+  };
+}
+
 export interface PlannotatorConfig {
   displayName?: string;
   diffOptions?: DiffOptions;
+  prompts?: PromptConfig;
   conventionalComments?: boolean;
   /** null = explicitly cleared (use defaults), undefined = not set */
   conventionalLabels?: CCLabelConfig[] | null;
@@ -83,7 +129,13 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): void {
     const mergedDiffOptions = (current.diffOptions || partial.diffOptions)
       ? { ...current.diffOptions, ...partial.diffOptions }
       : undefined;
-    const merged = { ...current, ...partial, diffOptions: mergedDiffOptions };
+    const mergedPrompts = mergePromptConfig(current.prompts, partial.prompts);
+    const merged = {
+      ...current,
+      ...partial,
+      diffOptions: mergedDiffOptions,
+      prompts: mergedPrompts,
+    };
     mkdirSync(CONFIG_DIR, { recursive: true });
     writeFileSync(CONFIG_PATH, JSON.stringify(merged, null, 2) + "\n", "utf-8");
   } catch (e) {

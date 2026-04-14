@@ -74,6 +74,7 @@ import { resolveMarkdownFile, hasMarkdownFiles } from "@plannotator/shared/resol
 import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
 import { statSync, rmSync, realpathSync, existsSync } from "fs";
 import { parseRemoteUrl } from "@plannotator/shared/repo";
+import { getReviewApprovedPrompt } from "@plannotator/shared/prompts";
 import { registerSession, unregisterSession, listSessions } from "@plannotator/server/sessions";
 import { openBrowser } from "@plannotator/server/browser";
 import { detectProjectName } from "@plannotator/server/project";
@@ -443,7 +444,7 @@ if (args[0] === "sessions") {
   if (result.exit) {
     console.log("Review session closed without feedback.");
   } else if (result.approved) {
-    console.log("Code review completed — no changes requested.");
+    console.log(getReviewApprovedPrompt(detectedOrigin));
   } else {
     console.log(result.feedback);
     if (!isPRMode) {

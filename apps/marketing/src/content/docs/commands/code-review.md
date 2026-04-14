@@ -40,7 +40,7 @@ Review server starts, opens browser with diff viewer
 User annotates code, provides feedback
         ↓
 Send Feedback → feedback sent to agent
-Approve → "LGTM" sent to agent
+Approve → configured approval prompt sent to agent
 ```
 
 **PR review:**
@@ -57,7 +57,7 @@ Review server starts, opens browser with diff viewer
 User annotates code, provides feedback
         ↓
 Send Feedback → PR context included in feedback
-Approve → "LGTM" sent to agent
+Approve → configured approval prompt sent to agent
 ```
 
 ## Switching diff types
@@ -109,9 +109,36 @@ If only one provider is installed, it's used automatically with no configuration
 ## Submitting feedback
 
 - **Send Feedback** formats your annotations and sends them to the agent
-- **Approve** sends "LGTM" to the agent, indicating the changes look good
+- **Approve** sends a review-approval prompt to the agent. By default this says no changes were requested, and you can override it in `~/.plannotator/config.json`.
 
 After submission, the agent receives your feedback and can act on it, whether that's fixing issues, explaining decisions, or making the requested changes.
+
+### Customizing the approval prompt
+
+You can override the approval prompt in `~/.plannotator/config.json`.
+
+```json
+{
+  "prompts": {
+    "review": {
+      "approved": "# Code Review\n\nCommit these changes now.",
+      "runtimes": {
+        "opencode": {
+          "approved": "# Code Review\n\nNo further changes requested. Commit your work."
+        }
+      }
+    }
+  }
+}
+```
+
+Resolution order:
+
+1. `prompts.review.runtimes.<runtime>.approved`
+2. `prompts.review.approved`
+3. Plannotator's built-in default
+
+Runtime keys use Plannotator's runtime identifiers. For code review, the current values are `claude-code`, `opencode`, `copilot-cli`, `pi`, and `codex`.
 
 ## Server API
 

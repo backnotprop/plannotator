@@ -6,7 +6,7 @@ sidebar:
 section: "Getting Started"
 ---
 
-Plannotator is configured through environment variables and hook/plugin configuration files. No config file of its own is required.
+Plannotator is configured through environment variables, hook/plugin configuration files, and an optional `~/.plannotator/config.json` file for persistent settings and feature-specific overrides.
 
 ## Environment variables
 
@@ -62,6 +62,12 @@ This registers the `submit_plan` tool. Slash commands (`/plannotator-review`, `/
 ## Plan saving
 
 Approved and denied plans are saved to `~/.plannotator/plans/` by default. You can change the save directory or disable saving in the Plannotator UI settings (gear icon).
+
+## Config file
+
+Plannotator also reads `~/.plannotator/config.json` for persistent settings and feature-specific overrides.
+
+For example, code review approval prompts can be customized there. See the code review docs for the prompt shape and supported runtime keys.
 
 ## Remote mode
 

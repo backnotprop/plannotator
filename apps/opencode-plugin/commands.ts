@@ -21,6 +21,7 @@ import {
 import { getGitContext, runGitDiffWithContext } from "@plannotator/server/git";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
+import { getReviewApprovedPrompt } from "@plannotator/shared/prompts";
 import { resolveMarkdownFile } from "@plannotator/shared/resolve-file";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { urlToMarkdown } from "@plannotator/shared/url-to-markdown";
@@ -123,7 +124,7 @@ export async function handleReviewCommand(
       const targetAgent = result.agentSwitch || "build";
 
       const message = result.approved
-        ? "# Code Review\n\nCode review completed — no changes requested."
+        ? getReviewApprovedPrompt("opencode")
         : isPRMode
           ? result.feedback
           : `${result.feedback}\n\nPlease address this feedback.`;
