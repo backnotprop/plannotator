@@ -148,6 +148,20 @@ pre code.hljs .hljs-code {
   background: oklch(from var(--destructive) l c h / 0.06);
 }
 
+/* Clean diff view - modified content (mix of additions and deletions in one
+   block, rendered inline via word-level diff). Amber/yellow border matches
+   the GitHub / VSCode convention that green=add, red=remove, yellow=both. */
+.plan-diff-modified {
+  border-left: 3px solid var(--warning);
+  background: oklch(from var(--warning) l c h / 0.06);
+  padding-left: 0.75rem;
+  border-radius: 0 0.25rem 0.25rem 0;
+  margin: 0.25rem 0;
+}
+.light .plan-diff-modified {
+  background: oklch(from var(--warning) l c h / 0.06);
+}
+
 /* Clean diff view - unchanged (dimmed) */
 .plan-diff-unchanged {
   /* handled via opacity in component */

@@ -194,3 +194,37 @@ body {
   65% { background: transparent; }
   100% { background: transparent; }
 }
+
+/* Word-level diff markers inside modified plan-diff blocks. Emitted as
+   <ins>/<del> by PlanCleanDiffView's inline renderer; keep the decoration
+   compact across line wraps via box-decoration-break: clone. */
+.plan-diff-word-added,
+.plan-diff-word-removed {
+  padding: 0 2px;
+  border-radius: 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.plan-diff-word-added {
+  background-color: color-mix(in oklab, var(--success) 20%, transparent);
+  text-decoration: none;
+  color: inherit;
+}
+.plan-diff-word-removed {
+  background-color: color-mix(in oklab, var(--destructive) 15%, transparent);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklab, var(--destructive) 60%, transparent);
+  opacity: 0.75;
+  color: inherit;
+}
+
+/* Inline code pills inside diff wrappers carry their own solid background
+   which would otherwise cover the green/red tint on the surrounding
+   <ins>/<del>. Override the pill background so added code pills read clearly
+   green and removed pills read clearly red-struck. */
+.plan-diff-word-added code {
+  background-color: color-mix(in oklab, var(--success) 25%, var(--muted));
+}
+.plan-diff-word-removed code {
+  background-color: color-mix(in oklab, var(--destructive) 20%, var(--muted));
+}
