@@ -68,13 +68,32 @@ import {
 let _planHtml: string | null = null;
 let _reviewHtml: string | null = null;
 
+function resolveBundledHtmlPath(filename: string): string {
+  const candidates = [
+    path.join(import.meta.dir, filename),
+    path.join(import.meta.dir, "..", filename),
+  ];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error(`Could not find bundled HTML asset: ${filename}`);
+}
+
+function readBundledHtml(filename: string): string {
+  return readFileSync(resolveBundledHtmlPath(filename), "utf-8");
+}
+
 function getPlanHtml(): string {
-  if (!_planHtml) _planHtml = readFileSync(path.join(import.meta.dir, "..", "plannotator.html"), "utf-8");
+  if (!_planHtml) _planHtml = readBundledHtml("plannotator.html");
   return _planHtml;
 }
 
 function getReviewHtml(): string {
-  if (!_reviewHtml) _reviewHtml = readFileSync(path.join(import.meta.dir, "..", "review-editor.html"), "utf-8");
+  if (!_reviewHtml) _reviewHtml = readBundledHtml("review-editor.html");
   return _reviewHtml;
 }
 
@@ -153,8 +172,8 @@ Only write and submit a plan once you have sufficient context.
 
 export const PlannotatorPlugin: Plugin = async (ctx) => {
   // Preload HTML in background — populates the sync cache before first use
-  Bun.file(path.join(import.meta.dir, "..", "plannotator.html")).text().then(h => { _planHtml = h; });
-  Bun.file(path.join(import.meta.dir, "..", "review-editor.html")).text().then(h => { _reviewHtml = h; });
+  Bun.file(resolveBundledHtmlPath("plannotator.html")).text().then(h => { _planHtml = h; });
+  Bun.file(resolveBundledHtmlPath("review-editor.html")).text().then(h => { _reviewHtml = h; });
 
   let cachedAgents: any[] | null = null;
 

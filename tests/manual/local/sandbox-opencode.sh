@@ -1538,22 +1538,22 @@ echo ""
 
 # Set up local plugin via loader file
 echo "Setting up local plugin..."
-mkdir -p .opencode/plugin
+mkdir -p .opencode/plugins
 
 # Create a loader file that re-exports from the source
-# OpenCode only loads top-level .ts/.js files in the plugin directory
-cat > .opencode/plugin/plannotator.ts << EOF
+# OpenCode only loads top-level .ts/.js files in the plugins directory
+cat > .opencode/plugins/plannotator.ts << EOF
 // Loader for local Plannotator plugin development
 export * from "$PLUGIN_DIR/index.ts";
 EOF
 
-# Copy command files to local .opencode/command
-mkdir -p .opencode/command
-cp "$PLUGIN_DIR/commands/"*.md .opencode/command/
+# Copy command files to local .opencode/commands
+mkdir -p .opencode/commands
+cp "$PLUGIN_DIR/commands/"*.md .opencode/commands/
 
-# Also install to global command directory (some OpenCode versions need this)
-mkdir -p ~/.config/opencode/command
-cp "$PLUGIN_DIR/commands/"*.md ~/.config/opencode/command/ 2>/dev/null || true
+# Also install to global commands directory (some OpenCode versions need this)
+mkdir -p ~/.config/opencode/commands
+cp "$PLUGIN_DIR/commands/"*.md ~/.config/opencode/commands/ 2>/dev/null || true
 
 echo ""
 
