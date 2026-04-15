@@ -126,18 +126,29 @@ export class OpenCodeProvider implements AIProvider {
 		}
 	}
 
+	private getClient(): OpencodeClient {
+		if (!this.client) {
+			throw new Error("OpenCode client is not initialized.");
+		}
+		return this.client;
+	}
+
 	async createSession(options: CreateSessionOptions): Promise<AISession> {
 		await this.ensureServer();
+		const client = this.getClient();
 
-		const result = await this.client.session.create({
+		const result = await client.session.create({
 			query: { directory: options.cwd ?? this.config.cwd ?? process.cwd() },
 		});
 		const sessionData = result.data;
+		if (!sessionData) {
+			throw new Error("OpenCode did not return session data.");
+		}
 
 		const session = new OpenCodeSession({
 			sessionId: sessionData.id,
 			systemPrompt: buildSystemPrompt(options.context),
-			client: this.client,
+			client,
 			model: options.model,
 			parentSessionId: null,
 		});
@@ -146,21 +157,25 @@ export class OpenCodeProvider implements AIProvider {
 
 	async forkSession(options: CreateSessionOptions): Promise<AISession> {
 		await this.ensureServer();
+		const client = this.getClient();
 
 		const parentId = options.context.parent?.sessionId;
 		if (!parentId) {
 			throw new Error("Fork requires a parent session ID.");
 		}
 
-		const result = await this.client.session.fork({
+		const result = await client.session.fork({
 			path: { id: parentId },
 		});
 		const sessionData = result.data;
+		if (!sessionData) {
+			throw new Error("OpenCode did not return forked session data.");
+		}
 
 		return new OpenCodeSession({
 			sessionId: sessionData.id,
 			systemPrompt: buildSystemPrompt(options.context),
-			client: this.client,
+			client,
 			model: options.model,
 			parentSessionId: parentId,
 		});
@@ -168,14 +183,15 @@ export class OpenCodeProvider implements AIProvider {
 
 	async resumeSession(sessionId: string): Promise<AISession> {
 		await this.ensureServer();
+		const client = this.getClient();
 
 		// Verify session exists
-		await this.client.session.get({ path: { id: sessionId } });
+		await client.session.get({ path: { id: sessionId } });
 
 		return new OpenCodeSession({
 			sessionId,
 			systemPrompt: null,
-			client: this.client,
+			client,
 			model: undefined,
 			parentSessionId: null,
 		});
@@ -194,23 +210,24 @@ export class OpenCodeProvider implements AIProvider {
 	async fetchModels(): Promise<void> {
 		try {
 			await this.ensureServer();
+			const client = this.getClient();
 
-			const result = await this.client.provider.list({
+			const result = await client.provider.list({
 				query: { directory: this.config.cwd ?? process.cwd() },
 			});
 			const data = result.data;
-			const connected = new Set(data.connected as string[]);
-			const allProviders = data.all as Array<{
-				id: string;
-				models: Record<string, { id: string; providerID: string; name: string }>;
-			}>;
+			if (!data) {
+				return;
+			}
+			const connected = new Set(data.connected ?? []);
+			const allProviders = data.all ?? [];
 
 			const models: Array<{ id: string; label: string; default?: boolean }> = [];
 			for (const provider of allProviders) {
 				if (!connected.has(provider.id)) continue;
 				for (const model of Object.values(provider.models)) {
 					models.push({
-						id: `${model.providerID}/${model.id}`,
+						id: `${provider.id}/${model.id}`,
 						label: model.name ?? model.id,
 					});
 				}
