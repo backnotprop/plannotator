@@ -1,14 +1,14 @@
 /**
  * Plannotator Config
  *
- * Reads/writes ~/.plannotator/config.json for persistent user settings.
+ * Reads/writes config.json from the plannotator config directory.
  * Runtime-agnostic: uses only node:fs, node:os, node:child_process.
  */
 
-import { homedir } from "os";
 import { join } from "path";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { execSync } from "child_process";
+import { getConfigBase } from "./paths";
 
 export type DefaultDiffType = 'uncommitted' | 'unstaged' | 'staged';
 
@@ -54,7 +54,7 @@ export interface PlannotatorConfig {
   jina?: boolean;
 }
 
-const CONFIG_DIR = join(homedir(), ".plannotator");
+const CONFIG_DIR = getConfigBase();
 const CONFIG_PATH = join(CONFIG_DIR, "config.json");
 
 /**

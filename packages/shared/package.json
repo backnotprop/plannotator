@@ -23,6 +23,7 @@
     "./agent-jobs": "./agent-jobs.ts",
     "./config": "./config.ts",
     "./improvement-hooks": "./improvement-hooks.ts",
+    "./paths": "./paths.ts",
     "./worktree": "./worktree.ts",
     "./html-to-markdown": "./html-to-markdown.ts",
     "./url-to-markdown": "./url-to-markdown.ts"

@@ -20,11 +20,12 @@
 import { homedir } from "os";
 import { join } from "path";
 import { readFileSync, statSync } from "fs";
+import { getConfigBase } from "./paths";
 
-/** Base directory for hook-injectable files (new path) */
-const HOOKS_BASE_DIR = join(homedir(), ".plannotator", "hooks");
+/** Base directory for hook-injectable files. */
+const HOOKS_BASE_DIR = join(getConfigBase(), "hooks");
 
-/** Legacy base directory (pre-migration path) */
+/** Legacy base directory (pre-hooks-subdir path, always ~/.plannotator). */
 const LEGACY_BASE_DIR = join(homedir(), ".plannotator");
 
 /** Maximum file size to read (50 KB) */

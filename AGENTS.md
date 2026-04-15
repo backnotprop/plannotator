@@ -59,6 +59,7 @@ plannotator/
 │   ├── shared/                   # Shared types, utilities, and cross-runtime logic
 │   │   ├── storage.ts            # Plan saving, version history, archive listing (node:fs only)
 │   │   ├── draft.ts              # Annotation draft persistence (node:fs only)
+│   │   ├── paths.ts              # XDG base directory helpers (getDataBase, getStateBase, getConfigBase)
 │   │   └── project.ts            # Pure string helpers (sanitizeTag, extractRepoName, extractDirName)
 │   ├── editor/                   # Plan review App.tsx
 │   └── review-editor/            # Code review UI
@@ -104,9 +105,12 @@ claude --plugin-dir ./apps/hook
 | `PLANNOTATOR_SHARE` | Set to `disabled` to turn off URL sharing entirely. Default: enabled. |
 | `PLANNOTATOR_SHARE_URL` | Custom base URL for share links (self-hosted portal). Default: `https://share.plannotator.ai`. |
 | `PLANNOTATOR_PASTE_URL` | Base URL of the paste service API for short URL sharing. Default: `https://plannotator-paste.plannotator.workers.dev`. |
-| `PLANNOTATOR_JINA` | Set to `0` / `false` to disable Jina Reader for URL annotation, or `1` / `true` to enable. Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "jina": false }`) or per-invocation via `--no-jina`. |
+| `PLANNOTATOR_JINA` | Set to `0` / `false` to disable Jina Reader for URL annotation, or `1` / `true` to enable. Default: enabled. Can also be set via the config file (`{ "jina": false }`) or per-invocation via `--no-jina`. |
 | `JINA_API_KEY` | Optional Jina Reader API key for higher rate limits (500 RPM vs 20 RPM unauthenticated). Free keys include 10M tokens. |
-| `PLANNOTATOR_VERIFY_ATTESTATION` | **Read by the install scripts only**, not by the runtime binary. Set to `1` / `true` to have `scripts/install.sh` / `install.ps1` / `install.cmd` run `gh attestation verify` on every install. Off by default. Can also be set persistently via `~/.plannotator/config.json` (`{ "verifyAttestation": true }`) or per-invocation via `--verify-attestation`. Requires `gh` installed and authenticated. |
+| `PLANNOTATOR_VERIFY_ATTESTATION` | **Read by the install scripts only**, not by the runtime binary. Set to `1` / `true` to have `scripts/install.sh` / `install.ps1` / `install.cmd` run `gh attestation verify` on every install. Off by default. Can also be set persistently via the config file (`{ "verifyAttestation": true }`) or per-invocation via `--verify-attestation`. Requires `gh` installed and authenticated. |
+| `XDG_DATA_HOME` | Base for persistent data (plans, version history). Default: `~/.local/share`. Plannotator stores data in `$XDG_DATA_HOME/plannotator/`. Ignored when `~/.plannotator` already exists (legacy compat). |
+| `XDG_STATE_HOME` | Base for ephemeral state (drafts, sessions, debug logs). Default: `~/.local/state`. Plannotator stores state in `$XDG_STATE_HOME/plannotator/`. Ignored when `~/.plannotator` already exists (legacy compat). |
+| `XDG_CONFIG_HOME` | Base for configuration (config.json, improvement hooks). Default: `~/.config`. Plannotator stores config in `$XDG_CONFIG_HOME/plannotator/`. Ignored when `~/.plannotator` already exists (legacy compat). |
 
 **Legacy:** `SSH_TTY` and `SSH_CONNECTION` are still detected when `PLANNOTATOR_REMOTE` is unset. Set `PLANNOTATOR_REMOTE=1` / `true` to force remote mode or `0` / `false` to force local mode.
 

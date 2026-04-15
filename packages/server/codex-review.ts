@@ -6,7 +6,8 @@
  */
 
 import { join } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
+import { getStateBase } from "@plannotator/shared/paths";
 import { appendFile, mkdir, unlink, writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import type { DiffType } from "./vcs";
@@ -18,17 +19,18 @@ import { toRelativePath } from "./path-utils";
 // ---------------------------------------------------------------------------
 
 const DEBUG_ENABLED = !!process.env.PLANNOTATOR_DEBUG;
-const DEBUG_LOG_PATH = join(homedir(), ".plannotator", "codex-review-debug.log");
 
 async function debugLog(label: string, data?: unknown): Promise<void> {
   if (!DEBUG_ENABLED) return;
   try {
-    await mkdir(join(homedir(), ".plannotator"), { recursive: true });
+    const stateBase = getStateBase();
+    const debugLogPath = join(stateBase, "codex-review-debug.log");
+    await mkdir(stateBase, { recursive: true });
     const timestamp = new Date().toISOString();
     const line = data !== undefined
       ? `[${timestamp}] ${label}: ${typeof data === "string" ? data : JSON.stringify(data, null, 2)}\n`
       : `[${timestamp}] ${label}\n`;
-    await appendFile(DEBUG_LOG_PATH, line);
+    await appendFile(debugLogPath, line);
   } catch { /* never fail the main flow */ }
 }
 
@@ -80,21 +82,23 @@ const CODEX_REVIEW_SCHEMA = JSON.stringify({
   additionalProperties: false,
 });
 
-const SCHEMA_DIR = join(homedir(), ".plannotator");
-const SCHEMA_FILE = join(SCHEMA_DIR, "codex-review-schema.json");
 let schemaMaterialized = false;
+let schemaFilePath: string | undefined;
 
 /** Ensure the schema file exists on disk and return its path. */
 async function ensureSchemaFile(): Promise<string> {
   if (!schemaMaterialized) {
-    await mkdir(SCHEMA_DIR, { recursive: true });
-    await writeFile(SCHEMA_FILE, CODEX_REVIEW_SCHEMA);
+    const schemaDir = getStateBase();
+    const filePath = join(schemaDir, "codex-review-schema.json");
+    await mkdir(schemaDir, { recursive: true });
+    await writeFile(filePath, CODEX_REVIEW_SCHEMA);
     schemaMaterialized = true;
+    schemaFilePath = filePath;
   }
-  return SCHEMA_FILE;
+  return schemaFilePath!;
 }
 
-export { SCHEMA_FILE as CODEX_REVIEW_SCHEMA_PATH };
+export { schemaFilePath as CODEX_REVIEW_SCHEMA_PATH };
 
 // ---------------------------------------------------------------------------
 // System prompt — copied verbatim from codex-rs/core/review_prompt.md
