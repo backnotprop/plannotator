@@ -22,6 +22,7 @@
     "./external-annotation": "./external-annotation.ts",
     "./agent-jobs": "./agent-jobs.ts",
     "./config": "./config.ts",
+    "./prompts": "./prompts.ts",
     "./improvement-hooks": "./improvement-hooks.ts",
     "./worktree": "./worktree.ts",
     "./html-to-markdown": "./html-to-markdown.ts",
