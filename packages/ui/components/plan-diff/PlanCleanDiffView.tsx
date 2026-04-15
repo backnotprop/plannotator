@@ -723,6 +723,21 @@ const SimpleCodeBlock: React.FC<{ block: Block }> = ({ block }) => {
   );
 };
 
+/**
+ * Block dangerous link protocols (javascript:, data:, vbscript:, file:) from
+ * rendering as clickable anchors in the diff view. Plan content is attacker-
+ * influenced (Claude pulls from source comments, READMEs, fetched URLs), so
+ * a malicious `[click me](javascript:...)` link embedded in a plan must not
+ * render as a live <a>. Mirrors the same guard in Viewer.tsx; returns null
+ * for blocked schemes so the caller can render the anchor text as plain
+ * text instead of a clickable link.
+ */
+const DANGEROUS_PROTOCOL = /^\s*(javascript|data|vbscript|file)\s*:/i;
+function sanitizeLinkUrl(url: string): string | null {
+  if (DANGEROUS_PROTOCOL.test(url)) return null;
+  return url;
+}
+
 const InlineMarkdown: React.FC<{ text: string }> = ({ text }) => {
   const parts: React.ReactNode[] = [];
   let remaining = text;
@@ -809,18 +824,29 @@ const InlineMarkdown: React.FC<{ text: string }> = ({ text }) => {
     if (match) {
       // Recursively parse the anchor text so <ins>/<del> diff tags (and
       // other inline markdown) inside the link render correctly instead of
-      // showing up as literal HTML tag text.
-      parts.push(
-        <a
-          key={key++}
-          href={match[2]}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-primary underline underline-offset-2 hover:text-primary/80"
-        >
-          <InlineMarkdown text={match[1]} />
-        </a>
-      );
+      // showing up as literal HTML tag text. Sanitize the href: dangerous
+      // schemes (javascript:, data:, vbscript:, file:) are rendered as
+      // plain text instead of a live anchor to block XSS via plan content.
+      const safeHref = sanitizeLinkUrl(match[2]);
+      if (safeHref === null) {
+        parts.push(
+          <span key={key++}>
+            <InlineMarkdown text={match[1]} />
+          </span>
+        );
+      } else {
+        parts.push(
+          <a
+            key={key++}
+            href={safeHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary underline underline-offset-2 hover:text-primary/80"
+          >
+            <InlineMarkdown text={match[1]} />
+          </a>
+        );
+      }
       remaining = remaining.slice(match[0].length);
       previousChar = match[0][match[0].length - 1] || previousChar;
       continue;
