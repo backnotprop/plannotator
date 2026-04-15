@@ -10,7 +10,7 @@ import { join } from "node:path";
 import {
   type DiffResult,
   type DiffType,
-  type FileMeta,
+  type FileMetadata,
   type GitContext,
 } from "@plannotator/shared/review-core";
 import {
@@ -24,20 +24,34 @@ import {
 async function runBut(
   args: string[],
   cwd?: string,
+  timeoutMs = 30_000,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const proc = Bun.spawn(["but", ...args], {
     cwd,
+    stdin: new Uint8Array(0),
     stdout: "pipe",
     stderr: "pipe",
   });
 
-  const [stdout, stderr, exitCode] = await Promise.all([
+  const processResult = Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
     proc.exited,
-  ]);
+  ]).then(([stdout, stderr, exitCode]) => ({ stdout, stderr, exitCode }));
 
-  return { stdout, stderr, exitCode };
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(
+      () => reject(new Error(`but ${args[0]} timed out after ${timeoutMs}ms`)),
+      timeoutMs,
+    ),
+  );
+
+  try {
+    return await Promise.race([processResult, timeoutPromise]);
+  } catch (err) {
+    proc.kill();
+    throw err;
+  }
 }
 
 // --- Detection ---
@@ -126,6 +140,29 @@ export async function getGitButlerContext(cwd?: string): Promise<GitContext> {
   };
 }
 
+// GitButler only: per-lane committed/uncommitted breakdown entry.
+type LaneDetail = { lane: string; source: "committed" | "uncommitted" };
+
+function addLaneDetail(map: Map<string, LaneDetail[]>, filePath: string, detail: LaneDetail): void {
+  const arr = map.get(filePath) ?? [];
+  if (!arr.some((d) => d.lane === detail.lane && d.source === detail.source)) arr.push(detail);
+  map.set(filePath, arr);
+}
+
+function buildFileMeta(fileDetails: Map<string, LaneDetail[]>): Record<string, FileMetadata> {
+  const fileMeta: Record<string, FileMetadata> = {};
+  for (const [filePath, details] of fileDetails) {
+    if (details.length === 0) { fileMeta[filePath] = {}; continue; }
+    const lanes = [...new Set(details.map((d) => d.lane))];
+    const sources: Array<"committed" | "uncommitted"> = [...new Set(details.map((d) => d.source))];
+    const source: FileMetadata["source"] = sources.length === 1 ? sources[0] : "mixed";
+    fileMeta[filePath] = lanes.length > 1
+      ? { source, lanes, laneDetails: details }
+      : { source, lanes };
+  }
+  return fileMeta;
+}
+
 // --- Diff ---
 
 interface ButHunk {
@@ -145,18 +182,34 @@ interface ButDiffJson {
 async function runGit(
   args: string[],
   cwd?: string,
+  timeoutMs = 30_000,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const proc = Bun.spawn(["git", ...args], {
     cwd,
+    stdin: new Uint8Array(0),
     stdout: "pipe",
     stderr: "pipe",
   });
-  const [stdout, stderr, exitCode] = await Promise.all([
+
+  const processResult = Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
     proc.exited,
-  ]);
-  return { stdout, stderr, exitCode };
+  ]).then(([stdout, stderr, exitCode]) => ({ stdout, stderr, exitCode }));
+
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(
+      () => reject(new Error(`git ${args[0]} timed out after ${timeoutMs}ms`)),
+      timeoutMs,
+    ),
+  );
+
+  try {
+    return await Promise.race([processResult, timeoutPromise]);
+  } catch (err) {
+    proc.kill();
+    throw err;
+  }
 }
 
 function hunkOldStart(hunkDiff: string): number {
@@ -263,58 +316,35 @@ export async function runGitButlerDiff(
       ),
     );
 
-    const [untrackedPatches] = await Promise.all([
-      Promise.all(
-        newFiles.map((file) =>
-          runGit(
-            ["diff", "--no-ext-diff", "--no-index", "--src-prefix=a/", "--dst-prefix=b/", "/dev/null", file],
-            cwd,
-          ),
+    const untrackedPatches = await Promise.all(
+      newFiles.map((file) =>
+        runGit(
+          ["diff", "--no-ext-diff", "--no-index", "--src-prefix=a/", "--dst-prefix=b/", "/dev/null", file],
+          cwd,
         ),
       ),
-    ]);
+    );
 
     const patch = [trackedResult.stdout, ...untrackedPatches.map((r) => r.stdout)].join("");
 
     // Build fileMeta tracking per-lane source for accurate hover text
-    type LaneDetail = { lane: string; source: "committed" | "uncommitted" };
     const fileDetails = new Map<string, LaneDetail[]>();
-    const addDetail = (filePath: string, detail: LaneDetail) => {
-      const arr = fileDetails.get(filePath) ?? [];
-      // Deduplicate by lane+source key
-      if (!arr.some((d) => d.lane === detail.lane && d.source === detail.source)) {
-        arr.push(detail);
-      }
-      fileDetails.set(filePath, arr);
-    };
     for (const c of status.unassignedChanges ?? []) {
       fileDetails.set(c.filePath, fileDetails.get(c.filePath) ?? []);
     }
     for (const stack of status.stacks ?? []) {
       const laneName = stack.branches?.[0]?.name ?? stack.cliId ?? "unknown";
       for (const c of stack.assignedChanges ?? []) {
-        addDetail(c.filePath, { lane: laneName, source: "uncommitted" });
+        addLaneDetail(fileDetails, c.filePath, { lane: laneName, source: "uncommitted" });
       }
     }
     for (const { branchName, paths } of committedByBranch) {
       for (const p of paths) {
-        addDetail(p, { lane: branchName, source: "committed" });
+        addLaneDetail(fileDetails, p, { lane: branchName, source: "committed" });
       }
     }
-    const fileMeta: Record<string, FileMeta> = {};
-    for (const [filePath, details] of fileDetails) {
-      if (details.length === 0) { fileMeta[filePath] = {}; continue; }
-      const lanes = [...new Set(details.map((d) => d.lane))];
-      const sources = [...new Set(details.map((d) => d.source))];
-      const source: FileMeta["source"] =
-        sources.length === 1 ? (sources[0] as "committed" | "uncommitted") : "mixed";
-      const base = lanes.length === 1
-        ? { source, lane: lanes[0] }
-        : { source, lanes };
-      fileMeta[filePath] = lanes.length > 1 ? { ...base, laneDetails: details } : base;
-    }
 
-    return { patch, label: "Workspace (all changes)", fileMeta };
+    return { patch, label: "Workspace (all changes)", fileMeta: buildFileMeta(fileDetails) };
   }
 
   // Determine whether this is a per-stack or individual-branch diff
@@ -333,8 +363,8 @@ export async function runGitButlerDiff(
 
     const committedChanges = await butDiffChanges(branchId, cwd);
 
-    const fileMeta: Record<string, FileMeta> = {};
-    for (const c of committedChanges) fileMeta[c.path] = { source: "committed", lane: branchLabel };
+    const fileMeta: Record<string, FileMetadata> = {};
+    for (const c of committedChanges) fileMeta[c.path] = { source: "committed", lanes: [branchLabel] };
 
     return { patch: buildUnifiedPatch(committedChanges), label: branchLabel, fileMeta };
   }
@@ -343,7 +373,7 @@ export async function runGitButlerDiff(
   const target = rawTarget;
   const status = await getButStatus(cwd);
   const stack = status.stacks?.find((s) => s.cliId === target);
-  const branchCliIds = stack?.branches?.map((b) => b.cliId).filter(Boolean) as string[] ?? [];
+  const branchCliIds = stack?.branches?.map((b) => b.cliId).filter((id): id is string => Boolean(id)) ?? [];
 
   const [uncommittedChanges, ...committedChangeSets] = await Promise.all([
     butDiffChanges(target, cwd),
@@ -364,33 +394,16 @@ export async function runGitButlerDiff(
       .map((b) => [b.cliId, b.name])
   );
 
-  type LaneDetail = { lane: string; source: "committed" | "uncommitted" };
   const stackFileDetails = new Map<string, LaneDetail[]>();
-  const addStackDetail = (path: string, detail: LaneDetail) => {
-    const arr = stackFileDetails.get(path) ?? [];
-    if (!arr.some((d) => d.lane === detail.lane && d.source === detail.source)) arr.push(detail);
-    stackFileDetails.set(path, arr);
-  };
 
-  for (const c of uncommittedChanges) addStackDetail(c.path, { lane: stackLabel, source: "uncommitted" });
+  for (const c of uncommittedChanges) addLaneDetail(stackFileDetails, c.path, { lane: stackLabel, source: "uncommitted" });
 
   for (let i = 0; i < branchCliIds.length; i++) {
     const branchName = branchNameById.get(branchCliIds[i]) ?? branchCliIds[i];
-    for (const c of committedChangeSets[i]) addStackDetail(c.path, { lane: branchName, source: "committed" });
+    for (const c of committedChangeSets[i]) addLaneDetail(stackFileDetails, c.path, { lane: branchName, source: "committed" });
   }
 
-  const fileMeta: Record<string, FileMeta> = {};
-  for (const [path, details] of stackFileDetails) {
-    const lanes = [...new Set(details.map((d) => d.lane))];
-    const sources = [...new Set(details.map((d) => d.source))];
-    const source: FileMeta["source"] =
-      sources.length === 1 ? (sources[0] as "committed" | "uncommitted") : "mixed";
-    fileMeta[path] = lanes.length > 1
-      ? { source, lanes, laneDetails: details }
-      : { source, lane: lanes[0] };
-  }
-
-  return { patch: buildUnifiedPatch(merged), label: stackLabel, fileMeta };
+  return { patch: buildUnifiedPatch(merged), label: stackLabel, fileMeta: buildFileMeta(stackFileDetails) };
 }
 
 // --- File contents ---

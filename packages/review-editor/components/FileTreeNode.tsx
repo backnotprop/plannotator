@@ -1,6 +1,6 @@
 import React from 'react';
 import type { FileTreeNode as TreeNode } from '../utils/buildFileTree';
-import type { FileMeta } from '../types';
+import type { FileMetadata } from '../types';
 
 interface FileTreeNodeProps {
   node: TreeNode;
@@ -14,7 +14,7 @@ interface FileTreeNodeProps {
   hideViewedFiles: boolean;
   getAnnotationCount: (filePath: string) => number;
   stagedFiles?: Set<string>;
-  fileMeta?: Record<string, FileMeta>;
+  fileMeta?: Record<string, FileMetadata>;
   hideLaneLabel?: boolean;
 }
 
@@ -149,21 +149,20 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
         {isStaged && (
           <span className="text-primary font-medium" title="Staged (git add)">+</span>
         )}
-        {meta && (meta.lane || meta.lanes) && (() => {
+        {meta && meta.lanes && (() => {
           const srcChar = meta.source === 'committed' ? 'C' : meta.source === 'uncommitted' ? 'S' : meta.source === 'mixed' ? 'M' : null;
           const srcWord = meta.source === 'committed' ? 'committed' : meta.source === 'uncommitted' ? 'staged' : meta.source === 'mixed' ? 'committed + staged' : null;
           const srcColor = meta.source === 'committed' ? 'text-blue-400' : meta.source === 'uncommitted' ? 'text-orange-400' : meta.source === 'mixed' ? 'text-purple-400' : 'text-muted-foreground/60';
-          const laneLabel = meta.lanes ? `${meta.lanes.length} lanes` : meta.lane ?? null;
+          const laneLabel = meta.lanes.length === 1 ? meta.lanes[0] : `${meta.lanes.length} lanes`;
           const hoverTitle = (() => {
             if (meta.laneDetails && meta.laneDetails.length > 1) {
               return meta.laneDetails
                 .map((d) => `${d.source === 'committed' ? 'committed' : 'staged'} to ${d.lane}`)
                 .join(', ');
             }
-            if (srcWord && laneLabel) return `${srcWord} to ${meta.lanes ? meta.lanes.join(', ') : laneLabel}`;
+            if (srcWord && laneLabel) return `${srcWord} to ${meta.lanes.join(', ')}`;
             if (srcWord) return srcWord;
-            if (meta.lanes) return meta.lanes.join(', ');
-            return undefined;
+            return meta.lanes.join(', ');
           })();
           const displayLabel = [srcChar, hideLaneLabel ? null : laneLabel].filter(Boolean).join(' · ');
           return displayLabel ? (

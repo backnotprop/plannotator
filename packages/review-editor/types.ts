@@ -6,4 +6,4 @@ export interface DiffFile {
   deletions: number;
 }
 
-export type { FileMeta } from "@plannotator/shared/types";
+export type { FileMetadata } from "@plannotator/shared/types";

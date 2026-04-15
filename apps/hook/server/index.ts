@@ -63,7 +63,7 @@ import {
   startAnnotateServer,
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
-import { type DiffType, type FileMeta, getVcsContext, runVcsDiff, gitRuntime } from "@plannotator/server/vcs";
+import { type DiffType, type FileMetadata, getVcsContext, runVcsDiff, gitRuntime } from "@plannotator/server/vcs";
 import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { urlToMarkdown } from "@plannotator/shared/url-to-markdown";
@@ -216,7 +216,7 @@ if (args[0] === "sessions") {
   let initialDiffType: DiffType | undefined;
   let agentCwd: string | undefined;
   let worktreeCleanup: (() => void | Promise<void>) | undefined;
-  let initialFileMeta: Record<string, FileMeta> | undefined;
+  let initialFileMeta: Record<string, FileMetadata> | undefined;
 
   if (isPRMode) {
     // --- PR Review Mode ---

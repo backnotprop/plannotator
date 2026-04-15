@@ -183,7 +183,7 @@ const providers: VcsProvider[] = [gitbutlerProvider, gitProvider, p4Provider];
 export type {
   DiffType,
   DiffOption,
-  FileMeta,
+  FileMetadata,
   GitContext,
   WorktreeInfo,
   VirtualBranchInfo,

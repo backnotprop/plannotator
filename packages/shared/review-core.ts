@@ -30,6 +30,7 @@ export interface WorktreeInfo {
   head: string;
 }
 
+/** GitButler virtual branch (stack branch). */
 export interface VirtualBranchInfo {
   id: string;
   name: string;
@@ -42,13 +43,15 @@ export interface GitContext {
   worktrees: WorktreeInfo[];
   cwd?: string;
   vcsType?: "git" | "p4" | "gitbutler";
+  /** GitButler only: virtual branches (stacks) active in the workspace. */
   virtualBranches?: VirtualBranchInfo[];
 }
 
-export interface FileMeta {
+export interface FileMetadata {
   source?: "committed" | "uncommitted" | "mixed";
-  lane?: string;
+  /** GitButler only: names of virtual branch lanes that own this file. */
   lanes?: string[];
+  /** GitButler only: per-lane committed/uncommitted breakdown (populated when a file spans multiple lanes). */
   laneDetails?: Array<{ lane: string; source: "committed" | "uncommitted" }>;
 }
 
@@ -56,7 +59,7 @@ export interface DiffResult {
   patch: string;
   label: string;
   error?: string;
-  fileMeta?: Record<string, FileMeta>;
+  fileMeta?: Record<string, FileMetadata>;
 }
 
 export interface GitCommandResult {

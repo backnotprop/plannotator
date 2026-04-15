@@ -55,7 +55,7 @@ import {
   REVIEW_PR_COMMENTS_PANEL_ID,
   REVIEW_PR_CHECKS_PANEL_ID,
 } from './dock/reviewPanelTypes';
-import type { DiffFile, FileMeta } from './types';
+import type { DiffFile, FileMetadata } from './types';
 import type { DiffOption, WorktreeInfo, GitContext } from '@plannotator/shared/types';
 import type { PRMetadata } from '@plannotator/shared/pr-provider';
 import { altKey } from '@plannotator/ui/utils/platform';
@@ -155,7 +155,7 @@ const ReviewApp: React.FC = () => {
   const [gitUser, setGitUser] = useState<string | undefined>();
   const [isWSL, setIsWSL] = useState(false);
   const [diffType, setDiffType] = useState<string>('uncommitted');
-  const [fileMeta, setFileMeta] = useState<Record<string, FileMeta> | null>(null);
+  const [fileMeta, setFileMeta] = useState<Record<string, FileMetadata> | null>(null);
   const [gitContext, setGitContext] = useState<GitContext | null>(null);
   const [agentCwd, setAgentCwd] = useState<string | null>(null);
   const [isLoadingDiff, setIsLoadingDiff] = useState(false);
@@ -1667,7 +1667,7 @@ const ReviewApp: React.FC = () => {
                 currentBranch={gitContext?.currentBranch}
                 vcsType={gitContext?.vcsType}
                 fileMeta={fileMeta ?? undefined}
-                hideLaneLabel={diffType.startsWith('gitbutler:') && (diffType.match(/:/g)?.length ?? 0) >= 2}
+                hideLaneLabel={diffType.startsWith('gitbutler:') && diffType !== 'gitbutler:workspace'}
                 stagedFiles={stagedFiles}
                 onCopyRawDiff={handleCopyDiff}
                 canCopyRawDiff={!!diffData?.rawPatch}

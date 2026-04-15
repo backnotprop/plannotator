@@ -4,7 +4,7 @@ import type { DiffOption, WorktreeInfo } from '@plannotator/shared/types';
 import { buildFileTree, getAncestorPaths, getAllFolderPaths } from '../utils/buildFileTree';
 import { FileTreeNodeItem } from './FileTreeNode';
 import { getReviewSearchSideLabel, type ReviewSearchFileGroup, type ReviewSearchMatch } from '../utils/reviewSearch';
-import type { DiffFile, FileMeta } from '../types';
+import type { DiffFile, FileMetadata } from '../types';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 
 interface FileTreeProps {
@@ -28,7 +28,7 @@ interface FileTreeProps {
   onSelectWorktree?: (path: string | null) => void;
   currentBranch?: string;
   vcsType?: string;
-  fileMeta?: Record<string, FileMeta>;
+  fileMeta?: Record<string, FileMetadata>;
   hideLaneLabel?: boolean;
   stagedFiles?: Set<string>;
   onCopyRawDiff?: () => void;
