@@ -11,6 +11,7 @@ import { homedir } from "os";
 import { join, resolve, sep } from "path";
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, existsSync } from "fs";
 import { sanitizeTag } from "./project";
+import { resolveUserPath } from "./resolve-file";
 
 /**
  * Get the plan storage directory, creating it if needed.
@@ -21,15 +22,11 @@ export function getPlanDir(customPath?: string | null): string {
   let planDir: string;
 
   if (customPath) {
-    // Expand ~ to home directory
-    planDir = customPath.startsWith("~")
-      ? join(homedir(), customPath.slice(1))
-      : customPath;
+    planDir = resolveUserPath(customPath);
   } else {
     planDir = join(homedir(), ".plannotator", "plans");
   }
 
-  planDir = resolve(planDir);
   mkdirSync(planDir, { recursive: true });
   return planDir;
 }
