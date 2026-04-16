@@ -70,7 +70,7 @@ import { urlToMarkdown } from "@plannotator/shared/url-to-markdown";
 import { fetchRef, createWorktree, removeWorktree, ensureObjectAvailable } from "@plannotator/shared/worktree";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getCliInstallUrl, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
-import { resolveMarkdownFile, hasMarkdownFiles } from "@plannotator/shared/resolve-file";
+import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles } from "@plannotator/shared/resolve-file";
 import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
 import { statSync, rmSync, realpathSync, existsSync } from "fs";
 import { parseRemoteUrl } from "@plannotator/shared/repo";
@@ -502,7 +502,7 @@ if (args[0] === "sessions") {
     sourceInfo = filePath;   // Full URL for source attribution
   } else {
     // Check if the argument is a directory (folder annotation mode)
-    const resolvedArg = path.resolve(projectRoot, filePath);
+    const resolvedArg = resolveUserPath(filePath, projectRoot);
     let isFolder = false;
     try {
       isFolder = statSync(resolvedArg).isDirectory();

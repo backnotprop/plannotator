@@ -21,7 +21,7 @@ import {
 import { getGitContext, runGitDiffWithContext } from "@plannotator/server/git";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
-import { resolveMarkdownFile } from "@plannotator/shared/resolve-file";
+import { resolveMarkdownFile, resolveUserPath } from "@plannotator/shared/resolve-file";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { urlToMarkdown } from "@plannotator/shared/url-to-markdown";
 import { statSync } from "fs";
@@ -178,7 +178,7 @@ export async function handleAnnotateCommand(
     sourceInfo = filePath;
   } else {
     const projectRoot = process.cwd();
-    const resolvedArg = path.resolve(projectRoot, filePath);
+    const resolvedArg = resolveUserPath(filePath, projectRoot);
 
     if (/\.html?$/i.test(resolvedArg)) {
       // HTML file annotation — convert to markdown via Turndown
