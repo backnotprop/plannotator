@@ -11,6 +11,7 @@ These scripts test the UI components and require a browser.
 ```bash
 ./tests/manual/local/test-hook.sh          # Claude Code simulation
 ./tests/manual/local/test-hook-2.sh        # OpenCode origin badge test
+./tests/manual/local/test-codex-plan-review-e2e.sh  # Real Codex Stop-hook flow in disposable HOME
 ```
 
 **Code review UI:**
@@ -57,6 +58,23 @@ Options:
 - `--disable-sharing`: Creates `opencode.json` with sharing disabled
 - `--keep`: Don't clean up sandbox on exit
 - `--no-git`: Skip git initialization (tests non-git fallback)
+
+**Codex Stop-hook end-to-end harness:**
+
+```bash
+./tests/manual/local/test-codex-plan-review-e2e.sh [--keep] [--skip-build]
+```
+
+Builds the hook and review apps, creates a disposable `HOME` plus sample git repo, copies your Codex `auth.json`,
+enables `codex_hooks`, and runs a real `codex exec` against the sample project. The script writes logs, rollout paths,
+history indices, and session URLs into an artifact directory under the temp root.
+
+Tips:
+
+- Set `PLANNOTATOR_BROWSER=/usr/bin/true` when you want to drive the opened plan-review session with Playwright
+  instead of auto-opening a browser.
+- The validated workflow is: run the script in one terminal, then point Playwright at the printed session URL from a
+  second terminal.
 
 **Obsidian utility:**
 

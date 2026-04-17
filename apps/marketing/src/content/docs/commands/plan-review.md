@@ -1,12 +1,12 @@
 ---
 title: "Plan Review"
-description: "The core plan review flow — how Plannotator intercepts ExitPlanMode and presents the annotation UI."
+description: "The core plan review flow across Claude Code, Codex, and other supported agent hosts."
 sidebar:
   order: 10
 section: "Commands"
 ---
 
-Plan review is the core Plannotator workflow. It's not a slash command — it fires automatically when your agent calls `ExitPlanMode`.
+Plan review is the core Plannotator workflow. It's not a slash command. Plannotator opens automatically when the host agent reaches its plan handoff point.
 
 ## How it works
 
@@ -28,6 +28,32 @@ Agent resubmits → Plan Diff shows what changed
 ```
 
 The hook configuration lives at `apps/hook/hooks/hooks.json` and matches the `ExitPlanMode` tool name.
+
+## Codex flow
+
+Codex does not expose a dedicated `ExitPlanMode` interception point. Instead, Plannotator integrates through Codex's experimental `Stop` hook.
+
+```
+Codex turn stops
+        ↓
+Stop hook fires
+        ↓
+Plannotator reads transcript_path rollout
+        ↓
+Latest completed plan item is extracted
+fallback: raw <proposed_plan> block from assistant response
+        ↓
+Browser opens with the normal review UI
+        ↓
+Approve → turn stays completed
+Deny    → Stop hook returns continuation feedback
+        ↓
+Codex revises the plan in the same turn
+        ↓
+Plannotator reopens only if the revised plan actually changed
+```
+
+This means Codex plan review is post-render rather than pre-submit, but you still get the same annotations, plan history, diff view, and revision loop.
 
 ## Annotation types
 

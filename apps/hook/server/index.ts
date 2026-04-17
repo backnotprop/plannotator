@@ -1,10 +1,10 @@
 /**
- * Plannotator CLI for Claude Code & Copilot CLI
+ * Plannotator CLI for Claude Code, Codex, Gemini CLI, and Copilot CLI
  *
  * Supports eight modes:
  *
  * 1. Plan Review (default, no args):
- *    - Spawned by ExitPlanMode hook (Claude Code)
+ *    - Spawned by Claude/Gemini/Codex hook entrypoints
  *    - Reads hook event from stdin, extracts plan content
  *    - Serves UI, returns approve/deny decision to stdout
  *
@@ -82,7 +82,7 @@ import { planDenyFeedback } from "@plannotator/shared/feedback-templates";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import type { Origin } from "@plannotator/shared/agents";
 import { findSessionLogsForCwd, resolveSessionLogByPpid, findSessionLogsByAncestorWalk, getLastRenderedMessage, type RenderedMessage } from "./session-log";
-import { findCodexRolloutByThreadId, getLastCodexMessage } from "./codex-session";
+import { findCodexRolloutByThreadId, getLastCodexMessage, getLatestCodexPlan } from "./codex-session";
 import { findCopilotPlanContent, findCopilotSessionForCwd, getLastCopilotMessage } from "./copilot-session";
 import {
   formatInteractiveNoArgClarification,
@@ -957,34 +957,100 @@ if (args[0] === "sessions") {
   // Read hook event from stdin
   const eventJson = await Bun.stdin.text();
 
-  let planContent = "";
-  let permissionMode = "default";
-  let isGemini = false;
-  let planFilename = "";
   let event: Record<string, any>;
   try {
     event = JSON.parse(eventJson);
-
-    // Detect harness: Gemini sends plan_filename (file on disk), Claude Code sends plan (inline)
-    planFilename = event.tool_input?.plan_filename || event.tool_input?.plan_path || "";
-    isGemini = !!planFilename;
-
-    if (isGemini) {
-      // Reconstruct full plan path from transcript_path and session_id:
-      // transcript_path = <projectTempDir>/chats/session-...json
-      // plan lives at   = <projectTempDir>/<session_id>/plans/<plan_filename>
-      const projectTempDir = path.dirname(path.dirname(event.transcript_path));
-      const planFilePath = path.join(projectTempDir, event.session_id, "plans", planFilename);
-      planContent = await Bun.file(planFilePath).text();
-    } else {
-      planContent = event.tool_input?.plan || "";
-    }
-
-    permissionMode = event.permission_mode || "default";
   } catch (e: any) {
     console.error(`Failed to parse hook event from stdin: ${e?.message || e}`);
     process.exit(1);
   }
+
+  if (event.hook_event_name === "Stop") {
+    const rolloutPath =
+      (typeof event.transcript_path === "string" && event.transcript_path) ||
+      (process.env.CODEX_THREAD_ID
+        ? findCodexRolloutByThreadId(process.env.CODEX_THREAD_ID)
+        : null);
+
+    if (!rolloutPath || !existsSync(rolloutPath)) {
+      process.exit(0);
+    }
+
+    const latestPlan = getLatestCodexPlan(rolloutPath, {
+      turnId: typeof event.turn_id === "string" ? event.turn_id : undefined,
+      stopHookActive: !!event.stop_hook_active,
+    });
+
+    if (!latestPlan?.text) {
+      process.exit(0);
+    }
+
+    const planProject = (await detectProjectName()) ?? "_unknown";
+    const server = await startPlannotatorServer({
+      plan: latestPlan.text,
+      origin: "codex",
+      sharingEnabled,
+      shareBaseUrl,
+      pasteApiUrl,
+      htmlContent: planHtmlContent,
+      onReady: async (url, isRemote, port) => {
+        handleServerReady(url, isRemote, port);
+
+        if (isRemote && sharingEnabled) {
+          await writeRemoteShareLink(latestPlan.text, shareBaseUrl, "review the plan", "plan only").catch(() => {});
+        }
+      },
+    });
+
+    registerSession({
+      pid: process.pid,
+      port: server.port,
+      url: server.url,
+      mode: "plan",
+      project: planProject,
+      startedAt: new Date().toISOString(),
+      label: `plan-${planProject}`,
+    });
+
+    const result = await server.waitForDecision();
+    await Bun.sleep(1500);
+    server.stop();
+
+    if (result.approved) {
+      console.log("{}");
+    } else {
+      console.log(
+        JSON.stringify({
+          decision: "block",
+          reason: planDenyFeedback(result.feedback || "", "Stop"),
+        })
+      );
+    }
+
+    process.exit(0);
+  }
+
+  let planContent = "";
+  let permissionMode = "default";
+  let isGemini = false;
+  let planFilename = "";
+
+  // Detect harness: Gemini sends plan_filename (file on disk), Claude Code sends plan (inline)
+  planFilename = event.tool_input?.plan_filename || event.tool_input?.plan_path || "";
+  isGemini = !!planFilename;
+
+  if (isGemini) {
+    // Reconstruct full plan path from transcript_path and session_id:
+    // transcript_path = <projectTempDir>/chats/session-...json
+    // plan lives at   = <projectTempDir>/<session_id>/plans/<plan_filename>
+    const projectTempDir = path.dirname(path.dirname(event.transcript_path));
+    const planFilePath = path.join(projectTempDir, event.session_id, "plans", planFilename);
+    planContent = await Bun.file(planFilePath).text();
+  } else {
+    planContent = event.tool_input?.plan || "";
+  }
+
+  permissionMode = event.permission_mode || "default";
 
   if (!planContent) {
     console.error("No plan content in hook event");
