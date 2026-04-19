@@ -80,7 +80,7 @@ import { detectProjectName } from "@plannotator/server/project";
 import { hostnameOrFallback } from "@plannotator/shared/project";
 import { planDenyFeedback } from "@plannotator/shared/feedback-templates";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
-import type { Origin } from "@plannotator/shared/agents";
+import { AGENT_CONFIG, type Origin } from "@plannotator/shared/agents";
 import { findSessionLogsForCwd, resolveSessionLogByPpid, findSessionLogsByAncestorWalk, getLastRenderedMessage, type RenderedMessage } from "./session-log";
 import { findCodexRolloutByThreadId, getLastCodexMessage } from "./codex-session";
 import { findCopilotPlanContent, findCopilotSessionForCwd, getLastCopilotMessage } from "./copilot-session";
@@ -140,10 +140,21 @@ const shareBaseUrl = process.env.PLANNOTATOR_SHARE_URL || undefined;
 const pasteApiUrl = process.env.PLANNOTATOR_PASTE_URL || undefined;
 
 // Detect calling agent from environment variables set by agent runtimes.
-// Priority: Codex > Copilot CLI > Claude Code (default fallback)
+// Priority:
+//   PLANNOTATOR_ORIGIN (explicit override, validated against AGENT_CONFIG)
+//   > Codex (CODEX_THREAD_ID)
+//   > Copilot CLI (COPILOT_CLI)
+//   > OpenCode (OPENCODE)
+//   > Claude Code (default fallback)
+//
+// To add a new agent, also add an entry to AGENT_CONFIG in
+// packages/shared/agents.ts (see header comment there).
+const originOverride = process.env.PLANNOTATOR_ORIGIN as Origin | undefined;
 const detectedOrigin: Origin =
+  (originOverride && originOverride in AGENT_CONFIG) ? originOverride :
   process.env.CODEX_THREAD_ID ? "codex" :
   process.env.COPILOT_CLI ? "copilot-cli" :
+  process.env.OPENCODE ? "opencode" :
   "claude-code";
 
 if (args[0] === "sessions") {

@@ -6,7 +6,10 @@
  * Environment variables:
  *   PLANNOTATOR_REMOTE - Set to "1"/"true" for remote, "0"/"false" for local
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
- *   PLANNOTATOR_ORIGIN - Origin identifier ("claude-code" or "opencode")
+ *   PLANNOTATOR_ORIGIN - Explicit origin override; validated against AGENT_CONFIG
+ *                        in packages/shared/agents.ts. Supported values:
+ *                        "claude-code", "opencode", "codex", "copilot-cli",
+ *                        "gemini-cli", "pi".
  */
 
 import type { Origin } from "@plannotator/shared/agents";
@@ -271,10 +274,10 @@ export async function startPlannotatorServer(
                 sharingEnabled,
                 shareBaseUrl,
                 isWSL: wslFlag,
-                serverConfig: getServerConfig(gitUser),
+                serverConfig: getServerConfig(gitUser, project),
               });
             }
-            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, projectRoot: process.cwd(), isWSL: wslFlag, serverConfig: getServerConfig(gitUser) });
+            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, projectRoot: process.cwd(), isWSL: wslFlag, serverConfig: getServerConfig(gitUser, project) });
           }
 
           // API: Serve a linked markdown document
