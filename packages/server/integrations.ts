@@ -99,6 +99,10 @@ export async function saveToObsidian(
 	try {
 		const { vaultPath, folder, plan } = config;
 
+		if (!vaultPath?.trim()) {
+			return { success: false, error: "Vault path is required" };
+		}
+
 		const normalizedVault = resolveUserPath(vaultPath);
 
 		// Validate vault path exists and is a directory

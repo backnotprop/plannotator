@@ -112,6 +112,9 @@ export async function saveToObsidian(
 ): Promise<IntegrationResult> {
 	try {
 		const { vaultPath, folder, plan } = config;
+		if (!vaultPath?.trim()) {
+			return { success: false, error: "Vault path is required" };
+		}
 		const normalizedVault = resolveUserPath(vaultPath);
 		if (!existsSync(normalizedVault))
 			return {

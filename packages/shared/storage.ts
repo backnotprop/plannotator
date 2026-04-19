@@ -21,7 +21,7 @@ import { resolveUserPath } from "./resolve-file";
 export function getPlanDir(customPath?: string | null): string {
   let planDir: string;
 
-  if (customPath) {
+  if (customPath?.trim()) {
     planDir = resolveUserPath(customPath);
   } else {
     planDir = join(homedir(), ".plannotator", "plans");
