@@ -113,6 +113,11 @@ describe("resolveUserPath", () => {
 			resolve(homedir(), "docs/plan.md"),
 		);
 	});
+
+	test("returns empty string for whitespace-only input", () => {
+		expect(resolveUserPath("   ", "/tmp/project")).toBe("");
+		expect(resolveUserPath("", "/tmp/project")).toBe("");
+	});
 });
 
 // --- Core resolution strategies ---

@@ -120,6 +120,9 @@ export function resolveUserPath(
 	platform = process.platform,
 ): string {
 	const normalizedInput = normalizeUserPathInput(input, platform);
+	if (!normalizedInput) {
+		return "";
+	}
 	return isAbsoluteNormalizedUserPath(normalizedInput, platform)
 		? resolveAbsolutePath(normalizedInput, platform)
 		: resolve(baseDir, normalizedInput);
