@@ -7,6 +7,13 @@ import { FloatingQuickLabelPicker } from "./FloatingQuickLabelPicker";
 
 type PositionMode = 'center-above' | 'top-right';
 
+const THUMBS_UP_LABEL: QuickLabel = {
+  id: 'thumbs-up',
+  emoji: '👍',
+  text: 'Looks good',
+  color: 'green',
+};
+
 const isEditableElement = (node: EventTarget | Element | null): boolean => {
   if (!(node instanceof Element)) return false;
   if (node.matches('input, textarea, select, [role="textbox"]')) return true;
@@ -210,6 +217,12 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
         />
         {onQuickLabel && (
           <>
+            <ToolbarButton
+              onClick={() => onQuickLabel(THUMBS_UP_LABEL)}
+              icon={<span className="block w-4 h-4 text-sm leading-4 text-center">👍</span>}
+              label="Looks good"
+              className="hover:bg-green-500/10"
+            />
             <ToolbarButton
               ref={zapButtonRef}
               onClick={() => setShowQuickLabels(prev => !prev)}
