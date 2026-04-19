@@ -19,7 +19,7 @@
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, resolve } from "node:path";
 import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 import { Type } from "@mariozechner/pi-ai";
 import type {

@@ -44,5 +44,11 @@
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": ">=0.53.0"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.53.0",
+    "@mariozechner/pi-agent-core": ">=0.53.0",
+    "@mariozechner/pi-ai": ">=0.53.0",
+    "@mariozechner/pi-tui": ">=0.53.0"
   }
 }
