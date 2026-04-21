@@ -81,7 +81,7 @@ export function findSessionLogs(projectDir: string): string[] {
     try {
       withMtime.push({ path: full, mtime: statSync(full).mtimeMs });
     } catch {
-      continue;
+      // File disappeared between readdir and stat — skip
     }
   }
 
@@ -270,13 +270,15 @@ export function resolveSessionLogByCwdScan(
       );
       if (meta?.cwd === cwd && meta?.sessionId) candidates.push(meta);
     } catch {
-      continue;
+      // Malformed metadata file — skip
     }
   }
 
+  // Newest sessions first — pick the most recently started session that has a matching jsonl
   candidates.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+
+  const logs = findSessionLogsForCwd(cwd, opts.projectsDir);
   for (const meta of candidates) {
-    const logs = findSessionLogsForCwd(meta.cwd, opts.projectsDir);
     const match = logs.find((p) => p.includes(meta.sessionId));
     if (match) return match;
   }

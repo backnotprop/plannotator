@@ -81,7 +81,14 @@ import { hostnameOrFallback } from "@plannotator/shared/project";
 import { planDenyFeedback } from "@plannotator/shared/feedback-templates";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import { AGENT_CONFIG, type Origin } from "@plannotator/shared/agents";
-import { findSessionLogsForCwd, resolveSessionLogByAncestorPids, resolveSessionLogByCwdScan, findSessionLogsByAncestorWalk, getLastRenderedMessage, type RenderedMessage } from "./session-log";
+import {
+  findSessionLogsByAncestorWalk,
+  findSessionLogsForCwd,
+  getLastRenderedMessage,
+  resolveSessionLogByAncestorPids,
+  resolveSessionLogByCwdScan,
+  type RenderedMessage,
+} from "./session-log";
 import { findCodexRolloutByThreadId, getLastCodexMessage } from "./codex-session";
 import { findCopilotPlanContent, findCopilotSessionForCwd, getLastCopilotMessage } from "./copilot-session";
 import {
