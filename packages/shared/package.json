@@ -25,7 +25,8 @@
     "./improvement-hooks": "./improvement-hooks.ts",
     "./worktree": "./worktree.ts",
     "./html-to-markdown": "./html-to-markdown.ts",
-    "./url-to-markdown": "./url-to-markdown.ts"
+    "./url-to-markdown": "./url-to-markdown.ts",
+    "./tour": "./tour.ts"
   },
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.64",

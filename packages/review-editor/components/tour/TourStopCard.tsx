@@ -4,11 +4,6 @@ import type { TourStop, TourDiffAnchor } from '../../hooks/useTourData';
 import { DiffHunkPreview } from '../DiffHunkPreview';
 import { renderInlineMarkdown } from '../../utils/renderInlineMarkdown';
 
-// ---------------------------------------------------------------------------
-// Block-level markdown renderer for stop detail
-// Handles > [!IMPORTANT], ### headings, - bullet lists, and paragraphs
-// ---------------------------------------------------------------------------
-
 function renderDetail(text: string): React.ReactNode[] {
   if (!text) return [];
   const nodes: React.ReactNode[] = [];

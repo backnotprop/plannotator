@@ -1,51 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { DEMO_TOUR, DEMO_TOUR_ID } from '../demoTour';
+import type { CodeTourData } from '@plannotator/shared/tour';
 
-// ---------------------------------------------------------------------------
-// Types — mirrors packages/server/tour-review.ts
-// ---------------------------------------------------------------------------
-
-export interface TourDiffAnchor {
-  file: string;
-  line: number;
-  end_line: number;
-  hunk: string;
-  label: string;
-}
-
-export interface TourKeyTakeaway {
-  text: string;
-  severity: 'info' | 'important' | 'warning';
-}
-
-export interface TourStop {
-  title: string;
-  gist: string;
-  detail: string;
-  transition: string;
-  anchors: TourDiffAnchor[];
-}
-
-export interface TourQAItem {
-  question: string;
-  stop_indices: number[];
-}
-
-export interface CodeTourData {
-  title: string;
-  greeting: string;
-  intent: string;
-  before: string;
-  after: string;
-  key_takeaways: TourKeyTakeaway[];
-  stops: TourStop[];
-  qa_checklist: TourQAItem[];
-  checklist: boolean[];
-}
-
-// ---------------------------------------------------------------------------
-// Hook
-// ---------------------------------------------------------------------------
+export type { TourDiffAnchor, TourKeyTakeaway, TourStop, TourQAItem, CodeTourData } from '@plannotator/shared/tour';
 
 export interface UseTourDataReturn {
   tour: CodeTourData | null;

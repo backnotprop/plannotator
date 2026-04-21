@@ -32,7 +32,7 @@ import {
   parseClaudeStreamOutput,
   transformClaudeFindings,
 } from "./claude-review";
-import { createTourSession } from "./tour-review";
+import { createTourSession, TOUR_EMPTY_OUTPUT_ERROR } from "./tour/tour-review";
 import { saveConfig, detectGitUser, getServerConfig } from "./config";
 import { type PRMetadata, type PRReviewFileComment, fetchPRFileContent, fetchPRContext, submitPRReview, fetchPRViewedFiles, markPRFilesViewed, getPRUser, prRefFromMetadata, getDisplayRepo, getMRLabel, getMRNumberLabel } from "./pr";
 import { createAIEndpoints, ProviderRegistry, SessionManager, createProvider, type AIEndpoints, type PiSDKConfig } from "@plannotator/ai";
@@ -121,8 +121,6 @@ export async function startReviewServer(
   const editorAnnotations = createEditorAnnotationHandler();
   const externalAnnotations = createExternalAnnotationHandler("review");
 
-  // Tour session — encapsulates in-memory state, provider lifecycle, and
-  // route-handler helpers. See createTourSession in tour-review.ts.
   const tour = createTourSession();
 
   // Mutable state for diff switching
@@ -133,8 +131,6 @@ export async function startReviewServer(
 
   // Agent jobs — background process manager (late-binds serverUrl via getter)
   let serverUrl = "";
-  // Worktree-aware cwd resolver — shared by getCwd, buildCommand, and onJobComplete.
-  // Mirror of Pi's resolveAgentCwd in apps/pi-extension/server/serverReview.ts.
   const resolveAgentCwd = (): string =>
     options.agentCwd ?? resolveVcsCwd(currentDiffType, gitContext?.cwd) ?? process.cwd();
   const agentJobs = createAgentJobHandler({
@@ -145,12 +141,20 @@ export async function startReviewServer(
     async buildCommand(provider, config) {
       const cwd = resolveAgentCwd();
       const hasAgentLocalAccess = !!options.agentCwd || !!gitContext;
-      const userMessage = buildCodexReviewUserMessage(
-        currentPatch,
-        currentDiffType,
-        { defaultBranch: gitContext?.defaultBranch, hasLocalAccess: hasAgentLocalAccess },
-        prMetadata,
-      );
+      const userMessageOptions = { defaultBranch: gitContext?.defaultBranch, hasLocalAccess: hasAgentLocalAccess };
+
+      if (provider === "tour") {
+        return tour.buildCommand({
+          cwd,
+          patch: currentPatch,
+          diffType: currentDiffType,
+          options: userMessageOptions,
+          prMetadata,
+          config,
+        });
+      }
+
+      const userMessage = buildCodexReviewUserMessage(currentPatch, currentDiffType, userMessageOptions, prMetadata);
 
       if (provider === "codex") {
         const model = typeof config?.model === "string" && config.model ? config.model : undefined;
@@ -168,10 +172,6 @@ export async function startReviewServer(
         const prompt = CLAUDE_REVIEW_PROMPT + "\n\n---\n\n" + userMessage;
         const { command, stdinPrompt } = buildClaudeCommand(prompt, model, effort);
         return { command, stdinPrompt, prompt, cwd, label: "Code Review", captureStdout: true, model, effort };
-      }
-
-      if (provider === "tour") {
-        return tour.buildCommand({ cwd, userMessage, config });
       }
 
       return null;
@@ -235,7 +235,7 @@ export async function startReviewServer(
           // and nothing was stored. Flip status so the client doesn't auto-open
           // a successful-looking card that 404s on /api/tour/:id.
           job.status = "failed";
-          job.error = "Tour generation returned empty or malformed output";
+          job.error = TOUR_EMPTY_OUTPUT_ERROR;
         }
         return;
       }
@@ -392,8 +392,9 @@ export async function startReviewServer(
           }
 
           // API: Save tour checklist state
-          if (url.pathname.match(/^\/api\/tour\/[^/]+\/checklist$/) && req.method === "PUT") {
-            const jobId = url.pathname.split("/")[3];
+          const checklistMatch = url.pathname.match(/^\/api\/tour\/([^/]+)\/checklist$/);
+          if (checklistMatch && req.method === "PUT") {
+            const jobId = checklistMatch[1];
             try {
               const body = await req.json() as { checked: boolean[] };
               if (Array.isArray(body.checked)) tour.saveChecklist(jobId, body.checked);

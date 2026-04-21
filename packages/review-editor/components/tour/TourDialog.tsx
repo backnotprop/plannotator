@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, MotionConfig, type Variants } from 'motion/react';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { useTourData } from '../../hooks/useTourData';
@@ -6,6 +6,9 @@ import { useReviewState } from '../../dock/ReviewStateContext';
 import { TourStopCard } from './TourStopCard';
 import { QAChecklist } from './QAChecklist';
 import type { TourKeyTakeaway } from '../../hooks/useTourData';
+
+const prefersReducedMotion = () =>
+  typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
 // ---------------------------------------------------------------------------
 // Intro composition cascade — each piece springs into place after the dialog
@@ -162,8 +165,7 @@ export const TourDialog: React.FC<TourDialogProps> = ({ jobId, onClose }) => {
     } else if (renderedJobId) {
       // If reduced motion is on, the exit animation is suppressed and
       // onAnimationEnd will never fire — unmount immediately instead.
-      const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-      if (reduced) {
+      if (prefersReducedMotion()) {
         setRenderedJobId(null);
         setClosing(false);
       } else {
@@ -192,10 +194,6 @@ export const TourDialog: React.FC<TourDialogProps> = ({ jobId, onClose }) => {
 
   if (!renderedJobId) return null;
 
-  // MotionConfig reducedMotion="user" makes every motion.* inside honor the
-  // OS prefers-reduced-motion setting: transform/scale drop out, opacity
-  // crossfade stays. Pair with the CSS @media block that handles the
-  // class-based keyframes so both sides of the animation surface cooperate.
   return (
     <MotionConfig reducedMotion="user">
       <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-2 md:px-8 md:py-4" onClick={requestClose}>
@@ -244,8 +242,7 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
     if (exitingPage || next === page) return;
     // Reduced motion suppresses the page animations, so onAnimationEnd
     // never fires to clear exitingPage — swap immediately instead.
-    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    if (reduced) {
+    if (prefersReducedMotion()) {
       setPage(next);
       return;
     }
@@ -335,6 +332,16 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
   const checklistCount = tour.qa_checklist.length;
   const isActive = (p: TourPage) => page === p && !exitingPage;
 
+  const introCards = useMemo(
+    () =>
+      [
+        { label: 'Intent', value: tour.intent, dot: 'bg-primary/70' },
+        { label: 'Before', value: tour.before, dot: 'bg-warning/70' },
+        { label: 'After', value: tour.after, dot: 'bg-success/70' },
+      ].filter((card) => card.value && card.value.trim()),
+    [tour.intent, tour.before, tour.after],
+  );
+
   // Mark pages as "seen" the first time we mount them so we don't re-animate
   // the section heading + staggered cards on every back-and-forth navigation.
   const stopsAlreadySeen = stopsSeenRef.current;
@@ -416,11 +423,7 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
                       variants={introContainerVariants}
                       className="grid grid-cols-3 gap-3 mb-5 text-[13px]"
                     >
-                      {[
-                        { label: 'Intent', value: tour.intent, dot: 'bg-primary/70' },
-                        { label: 'Before', value: tour.before, dot: 'bg-warning/70' },
-                        { label: 'After', value: tour.after, dot: 'bg-success/70' },
-                      ].filter((card) => card.value && card.value.trim()).map((card) => (
+                      {introCards.map((card) => (
                         <motion.div
                           key={card.label}
                           variants={introItemVariants}

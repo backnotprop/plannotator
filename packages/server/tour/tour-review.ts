@@ -1,82 +1,19 @@
-/**
- * Code Tour Agent — prompt, command builders, and output parsers.
- *
- * Generates a guided walkthrough of a changeset at the product-owner level.
- * Supports both Claude (via stdin/JSONL) and Codex (via file output) backends.
- * The review server (review.ts) calls into this module via agent-jobs callbacks.
- */
-
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { mkdir, writeFile, readFile, unlink } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import type { DiffType } from "../vcs";
+import type { PRMetadata } from "../pr";
+import type {
+  CodeTourOutput,
+  TourDiffAnchor,
+  TourKeyTakeaway,
+  TourStop,
+  TourQAItem,
+} from "@plannotator/shared/tour";
 
-// ---------------------------------------------------------------------------
-// Types — shared with UI
-// ---------------------------------------------------------------------------
+export type { CodeTourOutput, TourDiffAnchor, TourKeyTakeaway, TourStop, TourQAItem };
 
-export interface TourDiffAnchor {
-  /** Relative file path within the repo. */
-  file: string;
-  /** Start line in the new file (post-change). */
-  line: number;
-  /** End line in the new file. */
-  end_line: number;
-  /** Raw unified diff hunk for this anchor. */
-  hunk: string;
-  /** One-line chip label, e.g. "Add retry logic". */
-  label: string;
-}
-
-export interface TourKeyTakeaway {
-  /** One sentence — the takeaway. */
-  text: string;
-  /** Severity for visual styling. */
-  severity: "info" | "important" | "warning";
-}
-
-export interface TourStop {
-  /** Short chapter title, friendly tone. */
-  title: string;
-  /** ONE sentence — the headline for this stop. Scannable without expanding. */
-  gist: string;
-  /** 2-3 sentences of additional context. Only shown when expanded. */
-  detail: string;
-  /** Connective phrase to the next stop, e.g. "Building on that..." (empty for last stop). */
-  transition: string;
-  /** Diff anchors — the code locations this stop references. */
-  anchors: TourDiffAnchor[];
-}
-
-export interface TourQAItem {
-  /** Product-level verification question. */
-  question: string;
-  /** Indices into stops[] that this question relates to. */
-  stop_indices: number[];
-}
-
-export interface CodeTourOutput {
-  /** One-line title for the entire tour. */
-  title: string;
-  /** 1-2 sentence friendly greeting + summary. Conversational, not formal. */
-  greeting: string;
-  /** 1-3 sentences: why this changeset exists — the motivation/problem being solved. */
-  intent: string;
-  /** What things looked like before this changeset — one sentence. */
-  before: string;
-  /** What things look like after — one sentence. */
-  after: string;
-  /** 3-5 key takeaways — the most critical info, scannable at a glance. */
-  key_takeaways: TourKeyTakeaway[];
-  /** Ordered tour stops — the detailed walk-through. */
-  stops: TourStop[];
-  /** Product-level QA checklist. */
-  qa_checklist: TourQAItem[];
-}
-
-// ---------------------------------------------------------------------------
-// Schema
-// ---------------------------------------------------------------------------
+export const TOUR_EMPTY_OUTPUT_ERROR = "Tour generation returned empty or malformed output";
 
 export const TOUR_SCHEMA_JSON = JSON.stringify({
   type: "object",
@@ -143,10 +80,6 @@ export const TOUR_SCHEMA_JSON = JSON.stringify({
   required: ["title", "greeting", "intent", "before", "after", "key_takeaways", "stops", "qa_checklist"],
   additionalProperties: false,
 });
-
-// ---------------------------------------------------------------------------
-// Tour prompt
-// ---------------------------------------------------------------------------
 
 export const TOUR_REVIEW_PROMPT = `# Code Tour Narrator
 
@@ -351,10 +284,54 @@ problems. Most clean changesets should have zero warnings and zero [!WARNING]
 callouts. The primary question is "what does this change do and why?" not
 "what's wrong with this code?"`;
 
+function buildTourUserMessage(
+  patch: string,
+  diffType: DiffType,
+  options?: { defaultBranch?: string; hasLocalAccess?: boolean },
+  prMetadata?: PRMetadata,
+): string {
+  if (prMetadata) {
+    if (options?.hasLocalAccess) {
+      return [
+        prMetadata.url,
+        "",
+        "You are in a local worktree checked out at the PR head. The code is available locally.",
+        `To see the PR changes, diff against the remote base branch: git diff origin/${prMetadata.baseBranch}...HEAD`,
+        "Do NOT diff against the local `main` branch; it may be stale. Always use origin/.",
+        "",
+        "Walk the reviewer through this changeset as a guided tour.",
+      ].join("\n");
+    }
+    return [prMetadata.url, "", "Walk the reviewer through this PR as a guided tour."].join("\n");
+  }
 
-// ---------------------------------------------------------------------------
-// Claude command builder
-// ---------------------------------------------------------------------------
+  const effectiveDiffType = diffType.startsWith("worktree:")
+    ? diffType.split(":").pop() || "uncommitted"
+    : diffType;
+
+  switch (effectiveDiffType) {
+    case "uncommitted":
+      return "Walk the reviewer through the current code changes (staged, unstaged, and untracked files) as a guided tour.";
+    case "staged":
+      return "Walk the reviewer through the currently staged code changes (`git diff --staged`) as a guided tour.";
+    case "unstaged":
+      return "Walk the reviewer through the unstaged code changes (tracked modifications and untracked files) as a guided tour.";
+    case "last-commit":
+      return "Walk the reviewer through the code changes introduced in the last commit (`git diff HEAD~1..HEAD`) as a guided tour.";
+    case "branch": {
+      const base = options?.defaultBranch || "main";
+      return `Walk the reviewer through the code changes against the base branch '${base}' as a guided tour. Run \`git diff ${base}..HEAD\` to inspect the changes.`;
+    }
+    default:
+      return [
+        "Walk the reviewer through the following code changes as a guided tour.",
+        "",
+        "```diff",
+        patch,
+        "```",
+      ].join("\n");
+  }
+}
 
 export interface TourClaudeCommandResult {
   command: string[];
@@ -371,8 +348,8 @@ export function buildTourClaudeCommand(prompt: string, model: string = "sonnet",
     "Bash(git show-ref:*)",
     "Bash(gh pr view:*)", "Bash(gh pr diff:*)", "Bash(gh pr list:*)",
     "Bash(gh api repos/*/*/pulls/*)", "Bash(gh api repos/*/*/pulls/*/files*)",
-    // Linked-issue context: the prompt tells the agent to read `Fixes #123` / `Closes
-    // owner/repo#456` targets, so the allowlist has to permit the issue-read commands.
+    // The tour prompt follows linked issues (`Fixes #123`, `Closes owner/repo#456`),
+    // so the allowlist has to permit the issue-read commands.
     "Bash(gh issue view:*)", "Bash(gh api repos/*/*/issues/*)",
     "Bash(glab mr view:*)", "Bash(glab mr diff:*)",
     "Bash(glab issue view:*)",
@@ -404,10 +381,6 @@ export function buildTourClaudeCommand(prompt: string, model: string = "sonnet",
   };
 }
 
-// ---------------------------------------------------------------------------
-// Codex command builder
-// ---------------------------------------------------------------------------
-
 const TOUR_SCHEMA_DIR = join(homedir(), ".plannotator");
 const TOUR_SCHEMA_FILE = join(TOUR_SCHEMA_DIR, "tour-schema.json");
 let tourSchemaMaterialized = false;
@@ -438,7 +411,7 @@ export async function buildTourCodexCommand(options: {
 
   const command = [
     "codex",
-    // Global flags — go before the "exec" subcommand
+    // Global flags must precede the "exec" subcommand for the Codex CLI.
     ...(model ? ["-m", model] : []),
     ...(reasoningEffort ? ["-c", `model_reasoning_effort=${reasoningEffort}`] : []),
     ...(fastMode ? ["-c", "service_tier=fast"] : []),
@@ -452,10 +425,6 @@ export async function buildTourCodexCommand(options: {
 
   return command;
 }
-
-// ---------------------------------------------------------------------------
-// Output parsers
-// ---------------------------------------------------------------------------
 
 export function parseTourStreamOutput(stdout: string): CodeTourOutput | null {
   if (!stdout.trim()) return null;
@@ -485,7 +454,6 @@ export function parseTourStreamOutput(stdout: string): CodeTourOutput | null {
 
 export async function parseTourFileOutput(outputPath: string): Promise<CodeTourOutput | null> {
   try {
-    if (!existsSync(outputPath)) return null;
     const text = await readFile(outputPath, "utf-8");
     try { await unlink(outputPath); } catch { /* ignore */ }
     if (!text.trim()) return null;
@@ -500,24 +468,12 @@ export async function parseTourFileOutput(outputPath: string): Promise<CodeTourO
   }
 }
 
-// ---------------------------------------------------------------------------
-// Tour session factory — runtime-agnostic lifecycle shared by Bun + Pi servers
-//
-// Encapsulates everything that was previously duplicated in each server:
-//   - in-memory tour + checklist state
-//   - provider's buildCommand logic (engine/model defaults, Claude vs Codex
-//     command construction)
-//   - onJobComplete ingestion (parse stdout or file output, store, summarize)
-//   - route-handler helpers (getTour, saveChecklist)
-//
-// Each server instantiates one session per review server and wires the
-// methods into its existing agent-jobs pipeline. Route handlers translate
-// the returned shapes to the server's native HTTP response primitives.
-// ---------------------------------------------------------------------------
-
 export interface TourSessionBuildCommandOptions {
   cwd: string;
-  userMessage: string;
+  patch: string;
+  diffType: DiffType;
+  options?: { defaultBranch?: string; hasLocalAccess?: boolean };
+  prMetadata?: PRMetadata;
   config?: Record<string, unknown>;
 }
 
@@ -569,16 +525,16 @@ export function createTourSession(): TourSession {
     tourResults,
     tourChecklists,
 
-    async buildCommand({ cwd, userMessage, config }) {
+    async buildCommand({ cwd, patch, diffType, options, prMetadata, config }) {
       const engine = (typeof config?.engine === "string" ? config.engine : "claude") as "claude" | "codex";
       const explicitModel = typeof config?.model === "string" && config.model ? config.model : null;
-      // Default per engine. "sonnet" is a Claude model, so we must NOT pass
-      // it to Codex when no model is explicitly selected. Leave Codex model
-      // blank and let its own CLI default pick.
+      // "sonnet" is a Claude model, so we must NOT pass it to Codex when no model
+      // is explicitly selected. Leave Codex model blank and let its CLI default pick.
       const model = explicitModel ?? (engine === "codex" ? "" : "sonnet");
       const reasoningEffort = typeof config?.reasoningEffort === "string" && config.reasoningEffort ? config.reasoningEffort : undefined;
       const effort = typeof config?.effort === "string" && config.effort ? config.effort : undefined;
       const fastMode = config?.fastMode === true;
+      const userMessage = buildTourUserMessage(patch, diffType, options, prMetadata);
       const prompt = TOUR_REVIEW_PROMPT + "\n\n---\n\n" + userMessage;
 
       if (engine === "codex") {

@@ -71,7 +71,7 @@ import {
 	parseClaudeStreamOutput,
 	transformClaudeFindings,
 } from "../generated/claude-review.js";
-import { createTourSession } from "../generated/tour-review.js";
+import { createTourSession, TOUR_EMPTY_OUTPUT_ERROR } from "../generated/tour-review.js";
 
 /** Detect if running inside WSL (Windows Subsystem for Linux) */
 function detectWSL(): boolean {
@@ -194,7 +194,6 @@ export async function startReviewServer(options: {
 
 	// Agent jobs — background process manager (late-binds serverUrl via getter)
 	let serverUrl = "";
-	// Worktree-aware cwd resolver — shared by getCwd, buildCommand, and onJobComplete
 	function resolveAgentCwd(): string {
 		if (options.agentCwd) return options.agentCwd;
 		if (currentDiffType.startsWith("worktree:")) {
@@ -203,9 +202,6 @@ export async function startReviewServer(options: {
 		}
 		return options.gitContext?.cwd ?? process.cwd();
 	}
-	// Tour session — shared factory encapsulates in-memory state, provider
-	// lifecycle, and route-handler helpers. See createTourSession in
-	// packages/server/tour-review.ts (vendored into generated/).
 	const tour = createTourSession();
 
 	const agentJobs = createAgentJobHandler({
@@ -216,12 +212,20 @@ export async function startReviewServer(options: {
 		async buildCommand(provider, config) {
 			const cwd = resolveAgentCwd();
 			const hasAgentLocalAccess = !!options.agentCwd || !!options.gitContext;
-			const userMessage = buildCodexReviewUserMessage(
-				currentPatch,
-				currentDiffType,
-				{ defaultBranch: options.gitContext?.defaultBranch, hasLocalAccess: hasAgentLocalAccess },
-				options.prMetadata,
-			);
+			const userMessageOptions = { defaultBranch: options.gitContext?.defaultBranch, hasLocalAccess: hasAgentLocalAccess };
+
+			if (provider === "tour") {
+				return tour.buildCommand({
+					cwd,
+					patch: currentPatch,
+					diffType: currentDiffType,
+					options: userMessageOptions,
+					prMetadata: options.prMetadata,
+					config,
+				});
+			}
+
+			const userMessage = buildCodexReviewUserMessage(currentPatch, currentDiffType, userMessageOptions, options.prMetadata);
 
 			if (provider === "codex") {
 				const model = typeof config?.model === "string" && config.model ? config.model : undefined;
@@ -239,10 +243,6 @@ export async function startReviewServer(options: {
 				const prompt = CLAUDE_REVIEW_PROMPT + "\n\n---\n\n" + userMessage;
 				const { command, stdinPrompt } = buildClaudeCommand(prompt, model, effort);
 				return { command, stdinPrompt, prompt, cwd, label: "Code Review", captureStdout: true, model, effort };
-			}
-
-			if (provider === "tour") {
-				return tour.buildCommand({ cwd, userMessage, config });
 			}
 
 			return null;
@@ -303,7 +303,7 @@ export async function startReviewServer(options: {
 					// and nothing was stored. Flip status so the client doesn't auto-open
 					// a successful-looking card that 404s on /api/tour/:id.
 					job.status = "failed";
-					job.error = "Tour generation returned empty or malformed output";
+					job.error = TOUR_EMPTY_OUTPUT_ERROR;
 				}
 				return;
 			}
@@ -457,8 +457,9 @@ export async function startReviewServer(options: {
 		}
 
 		// API: Save tour checklist state
-		if (url.pathname.match(/^\/api\/tour\/[^/]+\/checklist$/) && req.method === "PUT") {
-			const jobId = url.pathname.split("/")[3];
+		const checklistMatch = url.pathname.match(/^\/api\/tour\/([^/]+)\/checklist$/);
+		if (checklistMatch && req.method === "PUT") {
+			const jobId = checklistMatch[1];
 			try {
 				const body = await parseBody(req) as { checked: boolean[] };
 				if (Array.isArray(body.checked)) tour.saveChecklist(jobId, body.checked);
