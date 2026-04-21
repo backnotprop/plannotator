@@ -114,11 +114,15 @@ export function useSharing(
       if (pathMatch) {
         const pasteId = pathMatch[1];
 
-        // Extract encryption key from URL fragment: #key=<base64url>
+        // Extract key and optional paste origin from fragment: #key=<k>&paste=<base64url>
         const fragment = window.location.hash.slice(1);
-        const encryptionKey = fragment.startsWith('key=') ? fragment.slice(4) : undefined;
+        const params = new URLSearchParams(fragment);
+        const encryptionKey = params.get('key') ?? undefined;
+        const pasteFromFragment = params.get('paste')
+          ? atob(params.get('paste')!.replace(/-/g, '+').replace(/_/g, '/'))
+          : undefined;
 
-        const payload = await loadFromPasteId(pasteId, pasteApiUrl, encryptionKey);
+        const payload = await loadFromPasteId(pasteId, pasteFromFragment ?? pasteApiUrl, encryptionKey);
         if (payload) {
           setMarkdown(payload.p);
 
@@ -279,11 +283,15 @@ export function useSharing(
       let payload: SharePayload | undefined;
 
       // Check for short URL pattern: /p/<id> with optional #key=<key> fragment
-      const shortMatch = url.match(/\/p\/([A-Za-z0-9]{6,16})(?:#key=([A-Za-z0-9_-]+))?(?:\?|#|$)/);
+      const shortMatch = url.match(/\/p\/([A-Za-z0-9]{6,16})(?:#(.*))?(?:\?|$)/);
       if (shortMatch) {
         const pasteId = shortMatch[1];
-        const encryptionKey = shortMatch[2]; // undefined if no key fragment
-        const loaded = await loadFromPasteId(pasteId, pasteApiUrl, encryptionKey);
+        const fragParams = new URLSearchParams(shortMatch[2] ?? '');
+        const encryptionKey = fragParams.get('key') ?? undefined;
+        const pasteFromFragment = fragParams.get('paste')
+          ? atob(fragParams.get('paste')!.replace(/-/g, '+').replace(/_/g, '/'))
+          : undefined;
+        const loaded = await loadFromPasteId(pasteId, pasteFromFragment ?? pasteApiUrl, encryptionKey);
         if (!loaded) {
           return { success: false, count: 0, planTitle: '', error: 'Failed to load from short URL — paste may have expired' };
         }

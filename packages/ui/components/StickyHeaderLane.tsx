@@ -72,7 +72,7 @@ interface StickyHeaderLaneProps {
   archiveInfo?: { status: 'approved' | 'denied' | 'unknown'; timestamp: string; title: string } | null;
 
   // Layout
-  maxWidth?: number;
+  maxWidth?: number | null;
 
   // Re-query token for the [data-sticky-actions] ResizeObserver. When the
   // Viewer remounts (e.g., toggling a linked doc), its `data-sticky-actions`
@@ -196,7 +196,7 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
         className={`sticky z-[60] w-full self-center pointer-events-none ${
           isNarrow ? 'top-[52px] md:top-[60px]' : 'top-3'
         }`}
-        style={{ maxWidth, height: 0 }}
+        style={maxWidth == null ? { height: 0 } : { maxWidth, height: 0 }}
       >
         {/* Responsive bar.
 

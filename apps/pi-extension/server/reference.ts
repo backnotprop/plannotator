@@ -22,7 +22,12 @@ import {
 	FILE_BROWSER_EXCLUDED,
 } from "../generated/reference-common.js";
 import { detectObsidianVaults } from "../generated/integrations-common.js";
-import { resolveMarkdownFile, isWithinProjectRoot } from "../generated/resolve-file.js";
+import {
+	isAbsoluteUserPath,
+	resolveMarkdownFile,
+	resolveUserPath,
+	isWithinProjectRoot,
+} from "../generated/resolve-file.js";
 import { htmlToMarkdown } from "../generated/html-to-markdown.js";
 
 type Res = ServerResponse;
@@ -62,12 +67,13 @@ export function handleDocRequest(res: Res, url: URL): void {
 	// server (see serverAnnotate.ts /api/doc route). The standalone HTML
 	// block below (no base) retains its cwd-based containment check.
 	const base = url.searchParams.get("base");
+	const resolvedBase = base ? resolveUserPath(base) : null;
 	if (
-		base &&
-		!requestedPath.startsWith("/") &&
+		resolvedBase &&
+		!isAbsoluteUserPath(requestedPath) &&
 		/\.(mdx?|html?)$/i.test(requestedPath)
 	) {
-		const fromBase = resolvePath(base, requestedPath);
+		const fromBase = resolveUserPath(requestedPath, resolvedBase);
 		try {
 			if (existsSync(fromBase)) {
 				const raw = readFileSync(fromBase, "utf-8");
@@ -83,7 +89,7 @@ export function handleDocRequest(res: Res, url: URL): void {
 	// HTML files: resolve directly (not via resolveMarkdownFile which only handles .md/.mdx)
 	const projectRoot = process.cwd();
 	if (/\.html?$/i.test(requestedPath)) {
-		const resolvedHtml = resolvePath(base || projectRoot, requestedPath);
+		const resolvedHtml = resolveUserPath(requestedPath, resolvedBase || projectRoot);
 		if (!isWithinProjectRoot(resolvedHtml, projectRoot)) {
 			json(res, { error: "Access denied: path is outside project root" }, 403);
 			return;
@@ -136,7 +142,7 @@ export function handleObsidianFilesRequest(res: Res, url: URL): void {
 		json(res, { error: "Missing vaultPath parameter" }, 400);
 		return;
 	}
-	const resolvedVault = resolvePath(vaultPath);
+	const resolvedVault = resolveUserPath(vaultPath);
 	if (!existsSync(resolvedVault) || !statSync(resolvedVault).isDirectory()) {
 		json(res, { error: "Invalid vault path" }, 400);
 		return;
@@ -162,7 +168,7 @@ export function handleObsidianDocRequest(res: Res, url: URL): void {
 		json(res, { error: "Only markdown files are supported" }, 400);
 		return;
 	}
-	const resolvedVault = resolvePath(vaultPath);
+	const resolvedVault = resolveUserPath(vaultPath);
 	let resolvedFile = resolvePath(resolvedVault, filePath);
 
 	// Bare filename search within vault
@@ -214,7 +220,7 @@ export function handleFileBrowserRequest(res: Res, url: URL): void {
 		json(res, { error: "Missing dirPath parameter" }, 400);
 		return;
 	}
-	const resolvedDir = resolvePath(dirPath);
+	const resolvedDir = resolveUserPath(dirPath);
 	if (!existsSync(resolvedDir) || !statSync(resolvedDir).isDirectory()) {
 		json(res, { error: "Invalid directory path" }, 400);
 		return;

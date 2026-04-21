@@ -1,6 +1,7 @@
 ---
 description: Annotate the last rendered assistant message
 allowed-tools: Bash(plannotator:*)
+disable-model-invocation: true
 ---
 
 ## Message Annotations

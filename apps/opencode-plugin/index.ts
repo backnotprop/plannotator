@@ -68,13 +68,32 @@ import {
 let _planHtml: string | null = null;
 let _reviewHtml: string | null = null;
 
+function resolveBundledHtmlPath(filename: string): string {
+  const candidates = [
+    path.join(import.meta.dir, filename),
+    path.join(import.meta.dir, "..", filename),
+  ];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error(`Could not find bundled HTML asset: ${filename}`);
+}
+
+function readBundledHtml(filename: string): string {
+  return readFileSync(resolveBundledHtmlPath(filename), "utf-8");
+}
+
 function getPlanHtml(): string {
-  if (!_planHtml) _planHtml = readFileSync(path.join(import.meta.dir, "..", "plannotator.html"), "utf-8");
+  if (!_planHtml) _planHtml = readBundledHtml("plannotator.html");
   return _planHtml;
 }
 
 function getReviewHtml(): string {
-  if (!_reviewHtml) _reviewHtml = readFileSync(path.join(import.meta.dir, "..", "review-editor.html"), "utf-8");
+  if (!_reviewHtml) _reviewHtml = readBundledHtml("review-editor.html");
   return _reviewHtml;
 }
 
@@ -153,8 +172,8 @@ Only write and submit a plan once you have sufficient context.
 
 export const PlannotatorPlugin: Plugin = async (ctx) => {
   // Preload HTML in background — populates the sync cache before first use
-  Bun.file(path.join(import.meta.dir, "..", "plannotator.html")).text().then(h => { _planHtml = h; });
-  Bun.file(path.join(import.meta.dir, "..", "review-editor.html")).text().then(h => { _reviewHtml = h; });
+  Bun.file(resolveBundledHtmlPath("plannotator.html")).text().then(h => { _planHtml = h; });
+  Bun.file(resolveBundledHtmlPath("review-editor.html")).text().then(h => { _reviewHtml = h; });
 
   let cachedAgents: any[] | null = null;
 
@@ -174,6 +193,10 @@ export const PlannotatorPlugin: Plugin = async (ctx) => {
 
   function getShareBaseUrl(): string | undefined {
     return process.env.PLANNOTATOR_SHARE_URL || undefined;
+  }
+
+  function getPasteApiUrl(): string | undefined {
+    return process.env.PLANNOTATOR_PASTE_URL || undefined;
   }
 
   function getPlanTimeoutSeconds(): number | null {
@@ -344,6 +367,7 @@ Do NOT proceed with implementation until your plan is approved.`);
         reviewHtmlContent: getReviewHtml(),
         getSharingEnabled,
         getShareBaseUrl,
+        getPasteApiUrl,
         directory: ctx.directory,
       };
 
@@ -386,6 +410,7 @@ Do NOT proceed with implementation until your plan is approved.`);
         reviewHtmlContent: getReviewHtml(),
         getSharingEnabled,
         getShareBaseUrl,
+        getPasteApiUrl,
         directory: ctx.directory,
       };
 
@@ -429,6 +454,7 @@ Do NOT proceed with implementation until your plan is approved.`);
             origin: "opencode",
             sharingEnabled,
             shareBaseUrl: getShareBaseUrl(),
+            pasteApiUrl: getPasteApiUrl(),
             htmlContent: getPlanHtml(),
             opencodeClient: ctx.client,
             onReady: async (url, isRemote, port) => {
@@ -464,14 +490,6 @@ Do NOT proceed with implementation until your plan is approved.`);
             const targetAgent = result.agentSwitch || 'build';
 
             if (shouldSwitchAgent) {
-              try {
-                await ctx.client.tui.executeCommand({
-                  body: { command: "agent_cycle" },
-                });
-              } catch {
-                // Silently fail
-              }
-
               try {
                 await ctx.client.session.prompt({
                   path: { id: context.sessionID },

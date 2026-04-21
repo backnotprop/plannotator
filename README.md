@@ -35,7 +35,7 @@ Interactive Plan & Code Review for AI Coding Agents. Mark up and refine your pla
 <tr><td><strong>Visual Plan Review</strong></td><td>Built-in hook</td><td>Approve or deny agent plans with inline annotations</td></tr>
 <tr><td><strong>Plan Diff</strong></td><td>Automatic</td><td>See what changed when the agent revises a plan</td></tr>
 <tr><td><strong>Code Review</strong></td><td><code>/plannotator-review</code></td><td>View git diffs or remote PRs. Package annotations and ask AI about the code as you review.</td></tr>
-<tr><td><strong>Annotate Any File</strong></td><td><code>/plannotator-annotate</code></td><td>Annotate any markdown file and send feedback to your agent</td></tr>
+<tr><td><strong>Annotate Any File</strong></td><td><code>/plannotator-annotate &lt;file|folder|url&gt;</code></td><td>Annotate markdown, HTML, URLs, or folders and send feedback to your agent</td></tr>
 <tr><td><strong>Annotate Last Message</strong></td><td><code>/plannotator-last</code></td><td>Annotate the agent's last response and send structured feedback</td></tr>
 </table>
 

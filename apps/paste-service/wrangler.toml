@@ -9,4 +9,7 @@ id = "9bc2647f6f5244499c26c90d87a743a0"
 preview_id = "6efae5ac33c4443ba8f0a0b83a2eb111"
 
 [vars]
+# Default values target the hosted plannotator.ai deployment.
+# Self-hosters must override ALLOWED_ORIGINS to point at their own portal,
+# either by editing this file or setting it via `wrangler secret put`.
 ALLOWED_ORIGINS = "https://share.plannotator.ai,http://localhost:3001"

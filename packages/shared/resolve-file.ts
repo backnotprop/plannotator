@@ -9,6 +9,7 @@
  * Used by both the CLI (`plannotator annotate`) and the `/api/doc` endpoint.
  */
 
+import { homedir } from "os";
 import { isAbsolute, join, resolve, win32 } from "path";
 import { existsSync, readdirSync, type Dirent } from "fs";
 
@@ -42,8 +43,93 @@ function stripTrailingSlashes(input: string): string {
 	return input.replace(/\/+$/, "");
 }
 
+export function expandHomePath(input: string, home = homedir()): string {
+	if (input === "~") {
+		return home;
+	}
+
+	if (input.startsWith("~/") || input.startsWith("~\\")) {
+		return join(home, input.slice(2));
+	}
+
+	return input;
+}
+
+function stripWrappingQuotes(input: string): string {
+	if (input.length < 2) {
+		return input;
+	}
+
+	const first = input[0];
+	const last = input[input.length - 1];
+	if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+		return input.slice(1, -1);
+	}
+
+	return input;
+}
+
+export function normalizeUserPathInput(
+	input: string,
+	platform = process.platform,
+): string {
+	const trimmedInput = input.trim();
+	const unquotedInput = stripWrappingQuotes(trimmedInput);
+	const expandedInput = expandHomePath(unquotedInput);
+
+	if (platform !== "win32") {
+		return expandedInput;
+	}
+
+	for (const pattern of WINDOWS_DRIVE_PATH_PATTERNS) {
+		const match = expandedInput.match(pattern);
+		if (!match) {
+			continue;
+		}
+
+		const [, driveLetter, rest] = match;
+		return `${driveLetter.toUpperCase()}:/${rest}`;
+	}
+
+	return expandedInput;
+}
+
+function isAbsoluteNormalizedUserPath(
+	input: string,
+	platform = process.platform,
+): boolean {
+	if (hasWindowsDriveLetter(input)) {
+		return true;
+	}
+
+	return platform === "win32"
+		? win32.isAbsolute(input)
+		: isAbsolute(input);
+}
+
+export function isAbsoluteUserPath(
+	input: string,
+	platform = process.platform,
+): boolean {
+	return isAbsoluteNormalizedUserPath(normalizeUserPathInput(input, platform), platform);
+}
+
+export function resolveUserPath(
+	input: string,
+	baseDir = process.cwd(),
+	platform = process.platform,
+): string {
+	const normalizedInput = normalizeUserPathInput(input, platform);
+	if (!normalizedInput) {
+		return "";
+	}
+	return isAbsoluteNormalizedUserPath(normalizedInput, platform)
+		? resolveAbsolutePath(normalizedInput, platform)
+		: resolve(baseDir, normalizedInput);
+}
+
 function normalizeComparablePath(input: string): string {
-	return stripTrailingSlashes(normalizeSeparators(resolve(input)));
+	return stripTrailingSlashes(normalizeSeparators(resolveUserPath(input)));
 }
 
 export function isWithinProjectRoot(candidate: string, projectRoot: string): boolean {
@@ -76,20 +162,6 @@ function resolveAbsolutePath(
 
 function isSearchableMarkdownPath(input: string): boolean {
 	return MARKDOWN_PATH_REGEX.test(input.trim());
-}
-
-function stripWrappingQuotes(input: string): string {
-	if (input.length < 2) {
-		return input;
-	}
-
-	const first = input[0];
-	const last = input[input.length - 1];
-	if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
-		return input.slice(1, -1);
-	}
-
-	return input;
 }
 
 /** Check if a path looks like a Windows absolute path (e.g. C:\ or C:/) */
@@ -127,42 +199,6 @@ function walkMarkdownFiles(dir: string, root: string, results: string[], ignored
 	}
 }
 
-export function normalizeMarkdownPathInput(
-	input: string,
-	platform = process.platform,
-): string {
-	if (platform !== "win32") {
-		return input;
-	}
-
-	for (const pattern of WINDOWS_DRIVE_PATH_PATTERNS) {
-		const match = input.match(pattern);
-		if (!match) {
-			continue;
-		}
-
-		const [, driveLetter, rest] = match;
-		return `${driveLetter.toUpperCase()}:/${rest}`;
-	}
-
-	return input;
-}
-
-export function isAbsoluteMarkdownPath(
-	input: string,
-	platform = process.platform,
-): boolean {
-	const normalizedInput = normalizeMarkdownPathInput(input, platform);
-	// Always check for Windows drive letters (handles compiled Bun exes where
-	// process.platform may not reflect the actual OS correctly)
-	if (hasWindowsDriveLetter(normalizedInput)) {
-		return true;
-	}
-	return platform === "win32"
-		? win32.isAbsolute(normalizedInput)
-		: isAbsolute(normalizedInput);
-}
-
 /**
  * Resolve a markdown file path within a project root.
  *
@@ -173,7 +209,7 @@ function resolveMarkdownFileCore(
 	input: string,
 	projectRoot: string,
 ): ResolveResult {
-	const normalizedInput = normalizeMarkdownPathInput(input);
+	const normalizedInput = normalizeUserPathInput(input);
 	const searchInput = normalizeSeparators(normalizedInput);
 	const isBareFilename = !searchInput.includes("/");
 	const targetLookupKey = getLookupKey(searchInput, isBareFilename);
@@ -185,7 +221,7 @@ function resolveMarkdownFileCore(
 
 	// 1. Absolute path — use as-is (no project root restriction;
 	//    the user explicitly typed the full path)
-	if (isAbsoluteMarkdownPath(normalizedInput)) {
+	if (isAbsoluteNormalizedUserPath(normalizedInput)) {
 		const absolutePath = resolveAbsolutePath(normalizedInput);
 		if (fileExists(absolutePath)) {
 			return { kind: "found", path: absolutePath };

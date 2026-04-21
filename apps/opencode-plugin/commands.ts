@@ -21,7 +21,7 @@ import {
 import { getGitContext, runGitDiffWithContext } from "@plannotator/server/git";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
-import { resolveMarkdownFile } from "@plannotator/shared/resolve-file";
+import { resolveMarkdownFile, resolveUserPath } from "@plannotator/shared/resolve-file";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { urlToMarkdown } from "@plannotator/shared/url-to-markdown";
 import { statSync } from "fs";
@@ -34,6 +34,7 @@ export interface CommandDeps {
   reviewHtmlContent: string;
   getSharingEnabled: () => Promise<boolean>;
   getShareBaseUrl: () => string | undefined;
+  getPasteApiUrl: () => string | undefined;
   directory?: string;
 }
 
@@ -147,7 +148,7 @@ export async function handleAnnotateCommand(
   event: any,
   deps: CommandDeps
 ) {
-  const { client, htmlContent, getSharingEnabled, getShareBaseUrl } = deps;
+  const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl } = deps;
 
   // @ts-ignore - Event properties contain arguments
   const filePath = event.properties?.arguments || event.arguments || "";
@@ -178,7 +179,7 @@ export async function handleAnnotateCommand(
     sourceInfo = filePath;
   } else {
     const projectRoot = process.cwd();
-    const resolvedArg = path.resolve(projectRoot, filePath);
+    const resolvedArg = resolveUserPath(filePath, projectRoot);
 
     if (/\.html?$/i.test(resolvedArg)) {
       // HTML file annotation — convert to markdown via Turndown
@@ -228,6 +229,7 @@ export async function handleAnnotateCommand(
     sourceInfo,
     sharingEnabled: await getSharingEnabled(),
     shareBaseUrl: getShareBaseUrl(),
+    pasteApiUrl: getPasteApiUrl(),
     htmlContent,
     onReady: handleAnnotateServerReady,
   });
@@ -271,7 +273,7 @@ export async function handleAnnotateLastCommand(
   event: any,
   deps: CommandDeps
 ): Promise<string | null> {
-  const { client, htmlContent, getSharingEnabled, getShareBaseUrl } = deps;
+  const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl } = deps;
 
   // @ts-ignore - Event properties contain sessionID
   const sessionId = event.properties?.sessionID;
@@ -317,6 +319,7 @@ export async function handleAnnotateLastCommand(
     mode: "annotate-last",
     sharingEnabled: await getSharingEnabled(),
     shareBaseUrl: getShareBaseUrl(),
+    pasteApiUrl: getPasteApiUrl(),
     htmlContent,
     onReady: handleAnnotateServerReady,
   });
@@ -336,7 +339,7 @@ export async function handleArchiveCommand(
   event: any,
   deps: CommandDeps
 ) {
-  const { client, htmlContent, getSharingEnabled, getShareBaseUrl } = deps;
+  const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl } = deps;
 
   client.app.log({ level: "info", message: "Opening plan archive..." });
 
@@ -346,6 +349,7 @@ export async function handleArchiveCommand(
     mode: "archive",
     sharingEnabled: await getSharingEnabled(),
     shareBaseUrl: getShareBaseUrl(),
+    pasteApiUrl: getPasteApiUrl(),
     htmlContent,
     onReady: handleServerReady,
   });

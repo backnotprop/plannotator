@@ -1,6 +1,7 @@
 ---
 description: Open interactive annotation UI for a markdown file or folder
 allowed-tools: Bash(plannotator:*)
+disable-model-invocation: true
 ---
 
 ## Markdown Annotations

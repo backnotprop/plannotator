@@ -116,6 +116,44 @@ jobs:
           bun build apps/paste-service/targets/bun.ts --compile --target=bun-windows-arm64 --outfile plannotator-paste-win32-arm64.exe
           sha256sum plannotator-paste-win32-arm64.exe > plannotator-paste-win32-arm64.exe.sha256
 
+      - name: Smoke-test linux-x64 binary
+        run: |
+          chmod +x plannotator-linux-x64
+
+          # 1. --help: proves binary loads and arg parsing works
+          ./plannotator-linux-x64 --help
+
+          # Helper: start server, poll endpoint for 200, kill
+          smoke_test_server() {
+            local LABEL="$1" PORT="$2" ENDPOINT="$3"
+            shift 3
+            # Start the binary in background
+            PLANNOTATOR_PORT=$PORT "$@" &
+            local PID=$!
+            # Poll until the API responds (up to 10s)
+            local OK=0
+            for i in $(seq 1 20); do
+              if curl -sf "http://localhost:${PORT}${ENDPOINT}" -o /dev/null 2>/dev/null; then
+                OK=1; break
+              fi
+              sleep 0.5
+            done
+            kill $PID 2>/dev/null; wait $PID 2>/dev/null || true
+            if [ "$OK" = "0" ]; then
+              echo "FAIL: $LABEL did not respond on :${PORT}${ENDPOINT}"
+              exit 1
+            fi
+            echo "OK: $LABEL — :${PORT}${ENDPOINT} responded"
+          }
+
+          # 2. review: exercises full server startup (imports, bundled HTML, git diff, HTTP)
+          smoke_test_server "plannotator review" 19500 "/api/diff" \
+            ./plannotator-linux-x64 review
+
+          # 3. annotate: exercises annotate server path with a real file
+          smoke_test_server "plannotator annotate" 19501 "/api/plan" \
+            ./plannotator-linux-x64 annotate README.md
+
       - name: Upload artifacts
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:

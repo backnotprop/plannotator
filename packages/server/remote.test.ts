@@ -5,7 +5,7 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { isRemoteSession, getServerPort } from "./remote";
+import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
 
 // Save and restore env between tests
 const savedEnv: Record<string, string | undefined> = {};
@@ -133,5 +133,18 @@ describe("getServerPort", () => {
     clearEnv();
     process.env.PLANNOTATOR_PORT = "0";
     expect(getServerPort()).toBe(0);
+  });
+});
+
+describe("getServerHostname", () => {
+  test("returns loopback for local sessions", () => {
+    clearEnv();
+    expect(getServerHostname()).toBe("127.0.0.1");
+  });
+
+  test("returns all interfaces for remote sessions", () => {
+    clearEnv();
+    process.env.PLANNOTATOR_REMOTE = "1";
+    expect(getServerHostname()).toBe("0.0.0.0");
   });
 });

@@ -311,20 +311,20 @@ import AnnoReplace from '../components/landing/AnnoReplace.astro';
           <div class="cap-group">
             <h3 class="cap-group-label">Commands</h3>
             <div class="cap-item">
-              <span class="cap-name">Plan review</span>
-              <span class="cap-desc">Automatic — hooks into your agent's plan step</span>
+              <code class="cap-cmd">Plan review</code>
+              <span class="cap-desc">Automatic: hooks into your agent's plan step</span>
             </div>
             <div class="cap-item">
-              <code class="cap-cmd">/plannotator-review</code>
-              <span class="cap-desc">Code review for uncommitted changes or a PR URL</span>
-            </div>
-            <div class="cap-item">
-              <code class="cap-cmd">/plannotator-annotate</code>
-              <span class="cap-desc">Annotate any markdown file and send feedback</span>
+              <code class="cap-cmd">/plannotator-annotate &lt;file|dir|url&gt;</code>
+              <span class="cap-desc">Annotate any markdown, spec/plan, folder, or URL and send feedback</span>
             </div>
             <div class="cap-item">
               <code class="cap-cmd">/plannotator-last</code>
               <span class="cap-desc">Annotate the agent's last message</span>
+            </div>
+            <div class="cap-item">
+              <code class="cap-cmd">/plannotator-review &lt;null|pr-url&gt;</code>
+              <span class="cap-desc">Code review for local changes or GitHub and GitLab PRs</span>
             </div>
           </div>
           <div class="cap-group">

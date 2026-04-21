@@ -14,7 +14,7 @@ export interface UrlToMarkdownOptions {
 
 export interface UrlToMarkdownResult {
   markdown: string;
-  source: "jina" | "fetch+turndown" | "fetch-raw";
+  source: "jina" | "fetch+turndown" | "fetch-raw" | "content-negotiation";
 }
 
 const FETCH_TIMEOUT_MS = 30_000;
@@ -86,7 +86,17 @@ export async function urlToMarkdown(
     // Server returned HTML for this .md URL — fall through to normal conversion
   }
 
-  if (options.useJina && !isLocalUrl(url)) {
+  // Content negotiation fast path — if the server natively returns markdown
+  // (e.g. Cloudflare's Markdown for Agents), skip Jina/Turndown entirely.
+  const local = isLocalUrl(url);
+  if (!local) {
+    const negotiated = await fetchViaContentNegotiation(url);
+    if (negotiated !== null) {
+      return { markdown: negotiated, source: "content-negotiation" };
+    }
+  }
+
+  if (options.useJina && !local) {
     try {
       const markdown = await fetchViaJina(url);
       return { markdown, source: "jina" };
@@ -185,6 +195,57 @@ async function fetchRawText(url: string): Promise<string | null> {
       throw new Error(`Timed out fetching ${url}`);
     }
     throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Content negotiation fast path — request `text/markdown` via the Accept header.
+ * Sites that support Cloudflare's "Markdown for Agents" (or similar) will return
+ * markdown directly, letting us skip Jina and Turndown entirely.
+ * Returns null if the server doesn't serve markdown.
+ */
+const NEGOTIATION_TIMEOUT_MS = 5_000; // Short timeout — this is a best-effort optimization
+
+async function fetchViaContentNegotiation(url: string): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), NEGOTIATION_TIMEOUT_MS);
+  const headers = {
+    "User-Agent": "Mozilla/5.0 (compatible; Plannotator/1.0; +https://plannotator.ai)",
+    Accept: "text/markdown, text/html;q=0.9",
+  };
+
+  try {
+    let currentUrl = url;
+    let res = await fetch(currentUrl, { headers, redirect: "manual", signal: controller.signal });
+
+    for (let i = 0; i < MAX_REDIRECTS && REDIRECT_STATUSES.has(res.status); i++) {
+      const location = res.headers.get("location");
+      if (!location) break;
+      currentUrl = new URL(location, currentUrl).href;
+      if (isLocalUrl(currentUrl)) {
+        res.body?.cancel();
+        return null;
+      }
+      res.body?.cancel();
+      res = await fetch(currentUrl, { headers, redirect: "manual", signal: controller.signal });
+    }
+
+    if (!res.ok) {
+      res.body?.cancel();
+      return null;
+    }
+
+    const ct = res.headers.get("content-type") || "";
+    if (!ct.includes("text/markdown")) {
+      res.body?.cancel();
+      return null;
+    }
+
+    return await readBodyWithLimit(res);
+  } catch {
+    return null;
   } finally {
     clearTimeout(timer);
   }

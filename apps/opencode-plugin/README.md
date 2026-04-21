@@ -60,6 +60,7 @@ Restart OpenCode. The `submit_plan` tool is now available.
 | `PLANNOTATOR_PORT` | Fixed port to use. Default: random locally, `19432` for remote sessions. |
 | `PLANNOTATOR_BROWSER` | Custom browser to open plans in. macOS: app name or path. Linux/Windows: executable path. |
 | `PLANNOTATOR_SHARE_URL` | Custom share portal URL for self-hosting. Default: `https://share.plannotator.ai`. |
+| `PLANNOTATOR_PASTE_URL` | Custom paste service URL for self-hosting. Default: `https://plannotator-paste.plannotator.workers.dev`. |
 | `PLANNOTATOR_PLAN_TIMEOUT_SECONDS` | Timeout for `submit_plan` review wait. Default: `345600` (96h). Set `0` to disable timeout. |
 
 ## Devcontainer / Docker

@@ -38,6 +38,10 @@ apps/pi-extension/review-core.ts
 .idea
 .DS_Store
 *.suo
+
+# Claude Code session-local runtime state (lock files, scheduled-task state).
+# Machine-specific; never belongs in the repo.
+.claude/
 *.ntvs*
 *.njsproj
 *.sln

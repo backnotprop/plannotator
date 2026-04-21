@@ -148,6 +148,7 @@ export async function startReviewServer(options: {
 	error?: string;
 	sharingEnabled?: boolean;
 	shareBaseUrl?: string;
+	pasteApiUrl?: string;
 	prMetadata?: PRMetadata;
 	/** Working directory for agent processes (e.g., --local worktree). Independent of diff pipeline. */
 	agentCwd?: string;
@@ -313,6 +314,8 @@ export async function startReviewServer(options: {
 		options.sharingEnabled ?? process.env.PLANNOTATOR_SHARE !== "disabled";
 	const shareBaseUrl =
 		(options.shareBaseUrl ?? process.env.PLANNOTATOR_SHARE_URL) || undefined;
+	const pasteApiUrl =
+		(options.pasteApiUrl ?? process.env.PLANNOTATOR_PASTE_URL) || undefined;
 	let resolveDecision!: (result: {
 		approved: boolean;
 		feedback: string;
@@ -479,6 +482,7 @@ export async function startReviewServer(options: {
 				gitContext: hasLocalAccess ? options.gitContext : undefined,
 				sharingEnabled,
 				shareBaseUrl,
+				pasteApiUrl,
 				repoInfo,
 				isWSL: wslFlag,
 				...(options.agentCwd && { agentCwd: options.agentCwd }),

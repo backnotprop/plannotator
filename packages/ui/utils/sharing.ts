@@ -267,8 +267,12 @@ export async function createShortShareUrl(
     }
 
     const result = (await response.json()) as { id: string };
-    // Key in fragment — never sent to server per HTTP spec
-    const shortUrl = `${shareBase}/p/${result.id}#key=${key}`;
+    // Embed paste origin in fragment when non-default so the share portal can
+    // fetch from the right service without a server.
+    const pasteParam = pasteApi !== DEFAULT_PASTE_API
+      ? `&paste=${btoa(pasteApi).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')}`
+      : '';
+    const shortUrl = `${shareBase}/p/${result.id}#key=${key}${pasteParam}`;
 
     return { shortUrl, id: result.id };
   } catch (e) {

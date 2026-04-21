@@ -1,50 +1,94 @@
 ---
 title: "Annotate"
-description: "The /plannotator-annotate slash command for annotating any markdown file."
+description: "The /plannotator-annotate slash command for annotating markdown files, HTML files, URLs, and folders."
 sidebar:
   order: 12
 section: "Commands"
 ---
 
-The `/plannotator-annotate` command opens any markdown file in the Plannotator annotation UI.
+The `/plannotator-annotate` command opens files, URLs, or folders in the Plannotator annotation UI.
 
-## Usage
+## What you can annotate
+
+| Input | Command | What happens |
+|-------|---------|--------------|
+| Markdown file | `plannotator annotate README.md` | Opens the file directly |
+| HTML file | `plannotator annotate docs/guide.html` | Converts to markdown via Turndown, then opens |
+| URL | `plannotator annotate https://docs.stripe.com/api` | Fetches the page, converts to markdown, then opens |
+| Folder | `plannotator annotate ./docs/` | Opens a file browser showing all `.md`, `.mdx`, `.html`, and `.htm` files |
 
 ### Slash command (inside an agent session)
 
 ```
 /plannotator-annotate path/to/file.md
+/plannotator-annotate https://docs.stripe.com/api
+/plannotator-annotate ./specs/
 ```
 
-The agent runs `plannotator annotate <file>` under the hood. The annotation UI opens in the browser. When you submit, feedback is returned to the agent as structured output.
+The agent runs `plannotator annotate <arg>` under the hood. The annotation UI opens in the browser. When you submit, feedback is returned to the agent as structured output.
 
 ### Standalone CLI (outside an agent session)
 
 ```bash
 plannotator annotate path/to/file.md
+plannotator annotate index.html
+plannotator annotate https://example.com/docs
+plannotator annotate ./docs/
 ```
 
-This starts a local server, opens the browser, and blocks until you submit. The formatted feedback is printed to stdout.
+Starts a local server, opens the browser, and blocks until you submit. Formatted feedback is printed to stdout.
 
-## How it works
+## Folders
 
+When you pass a folder, Plannotator opens a file browser showing all markdown and HTML files in the directory tree. Click any file to open it in the annotation UI. This is useful for annotating a set of specs, documentation, or your Obsidian vault.
+
+Build output directories like `_site/`, `public/`, `.docusaurus/`, and `node_modules/` are automatically excluded from the file browser.
+
+## URLs
+
+Fetching a URL converts the page to markdown before opening it in the annotation editor.
+
+### Jina Reader (default)
+
+By default, URLs are fetched through [Jina Reader](https://jina.ai/reader/) (`r.jina.ai`). Jina handles JavaScript-rendered pages and returns clean, reader-mode markdown. This works well for documentation sites, blog posts, and API references.
+
+Set `JINA_API_KEY` in your environment for higher rate limits (500 req/min vs 20 req/min unauthenticated). Free API keys are available from Jina.
+
+### Direct fetch (`--no-jina`)
+
+If you don't want to use Jina, pass `--no-jina`. Plannotator will fetch the HTML directly and convert it with Turndown. This is useful for pages behind authentication, internal docs, or when you just prefer not to route through a third-party service.
+
+```bash
+plannotator annotate https://internal.company.com/docs --no-jina
 ```
-User runs /plannotator-annotate README.md
-        ↓
-CLI reads README.md from disk
-        ↓
-Annotate server starts (random port)
-        ↓
-Browser opens, loads annotation UI
-        ↓
-/api/plan returns { plan: markdown, mode: "annotate" }
-        ↓
-User annotates → Send Annotations
-        ↓
-POST /api/feedback with exported feedback
-        ↓
-Server prints feedback to stdout, exits
-```
+
+### .md and .mdx URLs
+
+URLs ending in `.md` or `.mdx` are fetched as raw text with no conversion. If the server returns HTML instead (like GitHub's rendered markdown viewer), Plannotator falls through to Jina or Turndown automatically.
+
+### Local and private URLs
+
+URLs pointing to `localhost`, `127.x.x.x`, `10.x.x.x`, `192.168.x.x`, and other private or link-local addresses always use direct fetch. Jina is skipped automatically since it can't reach private networks.
+
+### Configuring Jina
+
+Three ways to disable Jina Reader, in priority order:
+
+1. **CLI flag:** `--no-jina`
+2. **Environment variable:** `PLANNOTATOR_JINA=0` or `PLANNOTATOR_JINA=false`
+3. **Config file:** `~/.plannotator/config.json` with `{ "jina": false }`
+
+If none of these are set, Jina is enabled by default.
+
+## HTML files
+
+Local `.html` and `.htm` files are read from disk and converted to markdown using [Turndown](https://github.com/mixmark-io/turndown) with GFM table support. `<script>`, `<style>`, and `<noscript>` tags are stripped before conversion.
+
+HTML files must be within your current working directory. Files outside the project root return a 403 error.
+
+## Source badge
+
+When annotating an HTML file or URL (not plain markdown), a small badge appears under the document title showing where the content came from. For URLs it shows the hostname (e.g. "stripe.com"). For HTML files it shows the filename (e.g. "guide.html").
 
 ## Annotate mode differences
 
@@ -55,7 +99,7 @@ The annotation UI in annotate mode works the same as plan review, with a few cha
 - `Cmd/Ctrl+Enter` sends annotations instead of approving
 - The completion screen says "Annotations Sent" instead of "Plan Approved"
 
-All annotation types work identically — deletions, replacements, comments, insertions, global comments, and image attachments.
+All annotation types work identically: deletions, replacements, comments, insertions, global comments, and image attachments.
 
 ## Feedback format
 
@@ -84,11 +128,20 @@ The agent receives this and can act on each annotation.
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/api/plan` | GET | Returns `{ plan, mode: "annotate", filePath }` |
+| `/api/plan` | GET | Returns `{ plan, mode: "annotate", filePath, sourceInfo }` |
 | `/api/feedback` | POST | Submit annotations |
+| `/api/exit` | POST | Close session without feedback |
 | `/api/image` | GET | Serve image by path |
 | `/api/upload` | POST | Upload image attachment |
+| `/api/draft` | GET/POST/DELETE | Auto-save annotation drafts |
 
 ## Environment variables
 
-The annotate server respects the same environment variables as plan review. See the [environment variables reference](/docs/reference/environment-variables/).
+The annotate server respects the same environment variables as plan review, plus two specific to URL annotation:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PLANNOTATOR_JINA` | enabled | Set to `0` or `false` to disable Jina Reader for URL annotation. |
+| `JINA_API_KEY` | (none) | Optional Jina Reader API key for higher rate limits (500 RPM vs 20 RPM). |
+
+See the [environment variables reference](/docs/reference/environment-variables/) for all options.

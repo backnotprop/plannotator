@@ -16,6 +16,7 @@
   "dependencies": {
     "@plannotator/shared": "workspace:*",
     "@plannotator/web-highlighter": "^0.8.1",
+    "@radix-ui/react-tooltip": "^1.2.8",
     "@viz-js/viz": "^3.25.0",
     "diff": "^8.0.3",
     "highlight.js": "^11.11.1",

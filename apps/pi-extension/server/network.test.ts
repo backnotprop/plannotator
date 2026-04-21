@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { getServerPort, isRemoteSession } from "./network";
+import { getServerHostname, getServerPort, isRemoteSession } from "./network";
 
 const savedEnv: Record<string, string | undefined> = {};
 const envKeys = ["PLANNOTATOR_REMOTE", "PLANNOTATOR_PORT", "SSH_TTY", "SSH_CONNECTION"];
@@ -92,5 +92,18 @@ describe("pi port selection", () => {
 		process.env.SSH_TTY = "/dev/pts/0";
 		process.env.PLANNOTATOR_PORT = "9999";
 		expect(getServerPort()).toEqual({ port: 9999, portSource: "env" });
+	});
+});
+
+describe("pi server hostname", () => {
+	test("binds local sessions to loopback", () => {
+		clearEnv();
+		expect(getServerHostname()).toBe("127.0.0.1");
+	});
+
+	test("binds remote sessions to all interfaces", () => {
+		clearEnv();
+		process.env.PLANNOTATOR_REMOTE = "1";
+		expect(getServerHostname()).toBe("0.0.0.0");
 	});
 });

@@ -19,7 +19,7 @@
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { resolve, basename } from "node:path";
+import { basename, resolve } from "node:path";
 import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 import { Type } from "@mariozechner/pi-ai";
 import type {
@@ -34,7 +34,7 @@ import {
 	parseChecklist,
 } from "./generated/checklist.js";
 import { planDenyFeedback } from "./generated/feedback-templates.js";
-import { hasMarkdownFiles } from "./generated/resolve-file.js";
+import { hasMarkdownFiles, resolveUserPath } from "./generated/resolve-file.js";
 import { FILE_BROWSER_EXCLUDED } from "./generated/reference-common.js";
 import { htmlToMarkdown } from "./generated/html-to-markdown.js";
 import { urlToMarkdown } from "./generated/url-to-markdown.js";
@@ -417,7 +417,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				absolutePath = filePath;
 				sourceInfo = filePath;
 			} else {
-				absolutePath = resolve(ctx.cwd, filePath);
+				absolutePath = resolveUserPath(filePath, ctx.cwd);
 				if (!existsSync(absolutePath)) {
 					ctx.ui.notify(`File not found: ${absolutePath}`, "error");
 					return;
