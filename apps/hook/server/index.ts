@@ -81,7 +81,7 @@ import { hostnameOrFallback } from "@plannotator/shared/project";
 import { planDenyFeedback } from "@plannotator/shared/feedback-templates";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import { AGENT_CONFIG, type Origin } from "@plannotator/shared/agents";
-import { findSessionLogsForCwd, resolveSessionLogByPpid, findSessionLogsByAncestorWalk, getLastRenderedMessage, type RenderedMessage } from "./session-log";
+import { findSessionLogsForCwd, resolveSessionLogByAncestorPids, resolveSessionLogByCwdScan, findSessionLogsByAncestorWalk, getLastRenderedMessage, type RenderedMessage } from "./session-log";
 import { findCodexRolloutByThreadId, getLastCodexMessage } from "./codex-session";
 import { findCopilotPlanContent, findCopilotSessionForCwd, getLastCopilotMessage } from "./copilot-session";
 import {
@@ -652,12 +652,18 @@ if (args[0] === "sessions") {
     // Claude Code path: resolve session log
     //
     // Strategy (most precise → least precise):
-    // 1. PPID session metadata: ~/.claude/sessions/<ppid>.json gives us the
-    //    exact sessionId and original cwd. Deterministic, O(1), no scanning.
-    // 2. CWD slug match: existing behavior — works when the shell CWD hasn't
-    //    changed from the session's project directory.
-    // 3. Ancestor walk: walk up the directory tree trying parent slugs. Handles
-    //    the common case where the user `cd`'d deeper into a subdirectory.
+    // 1. Ancestor-PID session metadata: walk up the process tree checking
+    //    ~/.claude/sessions/<pid>.json at each hop. When invoked from a slash
+    //    command's `!` bang, the direct parent is a bash subshell — Claude's
+    //    session file is a few hops up. Deterministic when it matches.
+    // 2. Cwd-scan of session metadata: read every ~/.claude/sessions/*.json,
+    //    filter by cwd, pick the most recent startedAt. Better than mtime
+    //    guessing because it uses session-level metadata.
+    // 3. CWD slug match (mtime-based): legacy behavior — picks the most
+    //    recently modified jsonl in the project dir. Fragile when multiple
+    //    sessions exist for the same project.
+    // 4. Ancestor directory walk: handles the case where the user `cd`'d
+    //    deeper into a subdirectory after session start.
 
     if (process.env.PLANNOTATOR_DEBUG) {
       console.error(`[DEBUG] Project root: ${projectRoot}`);
@@ -677,15 +683,19 @@ if (args[0] === "sessions") {
       }
     }
 
-    // 1. Try PPID-based session metadata (most reliable)
-    const ppidLog = resolveSessionLogByPpid();
-    tryLogCandidates("PPID session metadata", () => ppidLog ? [ppidLog] : []);
+    // 1. Walk ancestor PIDs for a matching session metadata file
+    const ancestorLog = resolveSessionLogByAncestorPids();
+    tryLogCandidates("Ancestor PID session metadata", () => ancestorLog ? [ancestorLog] : []);
 
-    // 2. Fall back to CWD slug match
-    tryLogCandidates("CWD slug match", () => findSessionLogsForCwd(projectRoot));
+    // 2. Scan all session metadata files for one whose cwd matches
+    const cwdScanLog = resolveSessionLogByCwdScan({ cwd: projectRoot });
+    tryLogCandidates("Cwd-scan session metadata", () => cwdScanLog ? [cwdScanLog] : []);
 
-    // 3. Fall back to ancestor directory walk
-    tryLogCandidates("Ancestor walk", () => findSessionLogsByAncestorWalk(projectRoot));
+    // 3. Fall back to CWD slug match (mtime-based)
+    tryLogCandidates("CWD slug match (mtime)", () => findSessionLogsForCwd(projectRoot));
+
+    // 4. Fall back to ancestor directory walk
+    tryLogCandidates("Directory ancestor walk", () => findSessionLogsByAncestorWalk(projectRoot));
   }
 
   if (!lastMessage) {
