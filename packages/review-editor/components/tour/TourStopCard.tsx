@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import type { TourStop, TourDiffAnchor } from '../../hooks/useTourData';
+import type { TourStop, TourDiffAnchor } from '../../hooks/tour/useTourData';
 import { DiffHunkPreview } from '../DiffHunkPreview';
 import { renderInlineMarkdown } from '../../utils/renderInlineMarkdown';
 

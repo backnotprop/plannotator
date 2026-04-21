@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import * as Checkbox from '@radix-ui/react-checkbox';
-import type { TourQAItem, TourStop } from '../../hooks/useTourData';
+import type { TourQAItem, TourStop } from '../../hooks/tour/useTourData';
 
 interface QAChecklistProps {
   items: TourQAItem[];

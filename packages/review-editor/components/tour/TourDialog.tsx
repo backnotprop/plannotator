@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, MotionConfig, type Variants } from 'motion/react';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
-import { useTourData } from '../../hooks/useTourData';
+import { useTourData } from '../../hooks/tour/useTourData';
 import { useReviewState } from '../../dock/ReviewStateContext';
 import { TourStopCard } from './TourStopCard';
 import { QAChecklist } from './QAChecklist';
-import type { TourKeyTakeaway } from '../../hooks/useTourData';
+import type { TourKeyTakeaway } from '../../hooks/tour/useTourData';
 
 const prefersReducedMotion = () =>
   typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -294,6 +294,19 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
     return () => clearTimeout(t);
   }, [page, tour]);
 
+  // All hooks must run before the early returns below (rules of hooks).
+  // `tour` may still be null during loading, so access it safely — the
+  // filter strips the empty values out anyway.
+  const introCards = useMemo(
+    () =>
+      [
+        { label: 'Intent', value: tour?.intent, dot: 'bg-primary/70' },
+        { label: 'Before', value: tour?.before, dot: 'bg-warning/70' },
+        { label: 'After', value: tour?.after, dot: 'bg-success/70' },
+      ].filter((card) => card.value && card.value.trim()),
+    [tour?.intent, tour?.before, tour?.after],
+  );
+
   // Loading
   if (loading) {
     return (
@@ -331,16 +344,6 @@ function TourDialogContent({ jobId, onClose }: { jobId: string; onClose: () => v
   const verifiedCount = checked.filter(Boolean).length;
   const checklistCount = tour.qa_checklist.length;
   const isActive = (p: TourPage) => page === p && !exitingPage;
-
-  const introCards = useMemo(
-    () =>
-      [
-        { label: 'Intent', value: tour.intent, dot: 'bg-primary/70' },
-        { label: 'Before', value: tour.before, dot: 'bg-warning/70' },
-        { label: 'After', value: tour.after, dot: 'bg-success/70' },
-      ].filter((card) => card.value && card.value.trim()),
-    [tour.intent, tour.before, tour.after],
-  );
 
   // Mark pages as "seen" the first time we mount them so we don't re-animate
   // the section heading + staggered cards on every back-and-forth navigation.

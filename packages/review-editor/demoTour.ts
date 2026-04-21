@@ -6,7 +6,7 @@
  * floating button in App.tsx (only shown when import.meta.env.DEV is true).
  */
 
-import type { CodeTourData } from './hooks/useTourData';
+import type { CodeTourData } from './hooks/tour/useTourData';
 
 export const DEMO_TOUR_ID = 'demo-tour';
 
