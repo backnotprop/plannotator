@@ -22,6 +22,18 @@ import { homedir } from "node:os";
 const DEFAULT_SESSIONS_DIR = join(homedir(), ".claude", "sessions");
 const DEFAULT_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 
+/**
+ * Normalize a cwd for comparison. On Windows, filesystems are case-insensitive
+ * and processes can report drive letters in either case, so we lowercase and
+ * fold slashes. On Unix, cwds are compared as-is.
+ */
+export function normalizeCwdForCompare(cwd: string): string {
+  if (process.platform === "win32") {
+    return cwd.replace(/\//g, "\\").toLowerCase();
+  }
+  return cwd;
+}
+
 // --- Types ---
 
 export interface SessionLogEntry {
@@ -163,20 +175,96 @@ function readSessionMetadata(
 }
 
 /**
- * Default implementation of getParentPid using `ps -o ppid=`.
- * Returns null on any error (non-zero exit, non-numeric output, etc.).
+ * Parse `ps -eo pid=,ppid=` output into a pid → ppid map.
+ * Each non-empty line is expected to be two whitespace-separated integers.
+ * Malformed lines are skipped.
  */
-function getParentPidViaPs(pid: number): number | null {
-  try {
-    const result = spawnSync("ps", ["-o", "ppid=", "-p", String(pid)], {
-      encoding: "utf-8",
-    });
-    if (result.status !== 0) return null;
-    const ppid = parseInt(result.stdout.trim(), 10);
-    return Number.isFinite(ppid) && ppid > 0 ? ppid : null;
-  } catch {
-    return null;
+export function parseProcessTablePs(stdout: string): Map<number, number> {
+  const table = new Map<number, number>();
+  for (const line of stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const parts = trimmed.split(/\s+/);
+    if (parts.length < 2) continue;
+    const pid = parseInt(parts[0], 10);
+    const ppid = parseInt(parts[1], 10);
+    if (Number.isFinite(pid) && Number.isFinite(ppid)) {
+      table.set(pid, ppid);
+    }
   }
+  return table;
+}
+
+/**
+ * Parse PowerShell `Get-CimInstance Win32_Process | ConvertTo-Csv` output
+ * into a pid → ppid map. Skips the CSV header and any malformed rows.
+ */
+export function parseProcessTableCsv(stdout: string): Map<number, number> {
+  const table = new Map<number, number>();
+  const lines = stdout.split(/\r?\n/);
+  // Skip the CSV header row if present
+  for (let i = 1; i < lines.length; i++) {
+    const match = lines[i].trim().match(/^"?(\d+)"?\s*,\s*"?(\d+)"?$/);
+    if (!match) continue;
+    const pid = parseInt(match[1], 10);
+    const ppid = parseInt(match[2], 10);
+    if (Number.isFinite(pid) && Number.isFinite(ppid)) {
+      table.set(pid, ppid);
+    }
+  }
+  return table;
+}
+
+/**
+ * Snapshot the entire process table in a single spawn, platform-aware.
+ *
+ * Unix: `ps -eo pid=,ppid=` (suppresses headers with trailing `=`).
+ * Windows: `powershell Get-CimInstance Win32_Process | ConvertTo-Csv`.
+ *   PowerShell 5.1 ships with every Windows install as `powershell.exe`.
+ *
+ * Returns an empty map on any failure (missing binary, non-zero exit, timeout).
+ * Callers walk the returned map with cycle detection, so an empty map just
+ * means the ancestor-PID resolver degrades to tier 2.
+ */
+function snapshotProcessTable(): Map<number, number> {
+  try {
+    if (process.platform === "win32") {
+      const result = spawnSync(
+        "powershell",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Csv -NoTypeInformation",
+        ],
+        { encoding: "utf-8", timeout: 2000 }
+      );
+      if (result.status !== 0) return new Map();
+      return parseProcessTableCsv(result.stdout);
+    }
+    const result = spawnSync("ps", ["-eo", "pid=,ppid="], {
+      encoding: "utf-8",
+      timeout: 2000,
+    });
+    if (result.status !== 0) return new Map();
+    return parseProcessTablePs(result.stdout);
+  } catch {
+    return new Map();
+  }
+}
+
+/**
+ * Default `getParentPid` implementation. Snapshots the process table lazily
+ * on first call and caches it for the lifetime of the closure, so walking
+ * up to `maxHops` ancestors costs a single spawn instead of one per hop.
+ */
+function createDefaultGetParentPid(): (pid: number) => number | null {
+  let table: Map<number, number> | null = null;
+  return (pid: number) => {
+    if (table === null) table = snapshotProcessTable();
+    const ppid = table.get(pid);
+    return ppid && ppid > 0 ? ppid : null;
+  };
 }
 
 /**
@@ -221,7 +309,9 @@ export function resolveSessionLogByAncestorPids(
   const startPid = opts.startPid ?? process.ppid;
   if (!startPid) return null;
   const sessionsDir = opts.sessionsDir ?? DEFAULT_SESSIONS_DIR;
-  const getParent = opts.getParentPid ?? getParentPidViaPs;
+  // Fresh closure per call: each resolver invocation gets its own snapshot,
+  // so the process table can't go stale between unrelated lookups.
+  const getParent = opts.getParentPid ?? createDefaultGetParentPid();
   const maxHops = opts.maxHops ?? 8;
 
   const pids = getAncestorPids(startPid, maxHops, getParent);
@@ -262,13 +352,20 @@ export function resolveSessionLogByCwdScan(
     return null;
   }
 
+  const normalizedTarget = normalizeCwdForCompare(cwd);
   const candidates: SessionMetadata[] = [];
   for (const f of files) {
     try {
       const meta: SessionMetadata = JSON.parse(
         readFileSync(join(sessionsDir, f), "utf-8")
       );
-      if (meta?.cwd === cwd && meta?.sessionId) candidates.push(meta);
+      if (
+        meta?.sessionId &&
+        meta?.cwd &&
+        normalizeCwdForCompare(meta.cwd) === normalizedTarget
+      ) {
+        candidates.push(meta);
+      }
     } catch {
       // Malformed metadata file — skip
     }

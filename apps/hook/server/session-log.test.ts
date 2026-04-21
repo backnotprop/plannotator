@@ -17,6 +17,9 @@ import {
   findSessionLogsByAncestorWalk,
   findSessionLogsForCwd,
   getAncestorPids,
+  normalizeCwdForCompare,
+  parseProcessTableCsv,
+  parseProcessTablePs,
   resolveSessionLogByAncestorPids,
   resolveSessionLogByCwdScan,
   type SessionLogEntry,
@@ -925,6 +928,133 @@ describe("resolveSessionLogByCwdScan", () => {
         projectsDir,
       });
       expect(result).toBe(goodLog);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+// --- Process Table Parser Tests ---
+
+describe("parseProcessTablePs", () => {
+  test("parses well-formed ps output", () => {
+    const stdout = [
+      "    1     0",
+      "  123     1",
+      " 4567   123",
+    ].join("\n");
+    const table = parseProcessTablePs(stdout);
+    expect(table.get(1)).toBe(0);
+    expect(table.get(123)).toBe(1);
+    expect(table.get(4567)).toBe(123);
+    expect(table.size).toBe(3);
+  });
+
+  test("skips blank and malformed lines", () => {
+    const stdout = [
+      "",
+      "   ",
+      "not a row",
+      "  100   200",
+      "only-one",
+    ].join("\n");
+    const table = parseProcessTablePs(stdout);
+    expect(table.get(100)).toBe(200);
+    expect(table.size).toBe(1);
+  });
+
+  test("returns empty map for empty input", () => {
+    expect(parseProcessTablePs("").size).toBe(0);
+  });
+});
+
+describe("parseProcessTableCsv", () => {
+  test("parses ConvertTo-Csv output with quoted fields", () => {
+    const stdout = [
+      '"ProcessId","ParentProcessId"',
+      '"4","0"',
+      '"1234","4"',
+      '"5678","1234"',
+    ].join("\r\n");
+    const table = parseProcessTableCsv(stdout);
+    expect(table.get(4)).toBe(0);
+    expect(table.get(1234)).toBe(4);
+    expect(table.get(5678)).toBe(1234);
+    expect(table.size).toBe(3);
+  });
+
+  test("tolerates unquoted numeric rows", () => {
+    const stdout = [
+      "ProcessId,ParentProcessId",
+      "100,200",
+      "300,100",
+    ].join("\n");
+    const table = parseProcessTableCsv(stdout);
+    expect(table.get(100)).toBe(200);
+    expect(table.get(300)).toBe(100);
+  });
+
+  test("skips malformed rows", () => {
+    const stdout = [
+      '"ProcessId","ParentProcessId"',
+      'garbage',
+      '"100","200"',
+      '"abc","def"',
+      '',
+    ].join("\r\n");
+    const table = parseProcessTableCsv(stdout);
+    expect(table.size).toBe(1);
+    expect(table.get(100)).toBe(200);
+  });
+
+  test("returns empty map for empty input", () => {
+    expect(parseProcessTableCsv("").size).toBe(0);
+  });
+});
+
+describe("normalizeCwdForCompare", () => {
+  // normalizeCwdForCompare branches on process.platform. Rather than mock the
+  // platform, assert the invariant that identical cwds always normalize equal,
+  // and that on the current platform the function is idempotent.
+  test("is idempotent", () => {
+    const cwd = process.platform === "win32"
+      ? "C:\\Users\\me\\project"
+      : "/home/me/project";
+    expect(normalizeCwdForCompare(normalizeCwdForCompare(cwd))).toBe(
+      normalizeCwdForCompare(cwd)
+    );
+  });
+
+  test("on Windows: case and slash differences are normalized", () => {
+    if (process.platform !== "win32") return;
+    expect(normalizeCwdForCompare("C:\\Users\\Admin\\Project"))
+      .toBe(normalizeCwdForCompare("c:/users/admin/project"));
+  });
+
+  test("on Unix: preserves exact string (case-sensitive)", () => {
+    if (process.platform === "win32") return;
+    expect(normalizeCwdForCompare("/home/me/Project"))
+      .not.toBe(normalizeCwdForCompare("/home/me/project"));
+  });
+});
+
+describe("resolveSessionLogByCwdScan (cross-platform cwd matching)", () => {
+  test("matches when Claude-stored cwd casing differs on Windows", () => {
+    if (process.platform !== "win32") return;
+    const { sessionsDir, projectsDir, cleanup } = makeTempDirs("win-case");
+    try {
+      // Claude writes C:\Users\... but process.cwd() may return c:\users\...
+      const storedCwd = "C:\\Users\\Admin\\proj";
+      const queryCwd = "c:\\users\\admin\\proj";
+      writeSessionMeta(sessionsDir, 111, { sessionId: "s1", cwd: storedCwd });
+      const log = writeSessionLog(projectsDir, storedCwd, "s1");
+
+      const result = resolveSessionLogByCwdScan({
+        cwd: queryCwd,
+        sessionsDir,
+        projectsDir,
+      });
+      expect(result).toBe(log);
     } finally {
       cleanup();
     }
