@@ -296,6 +296,80 @@ describe("computeInlineDiff — emphasis pair atomization (A3)", () => {
   });
 });
 
+describe("computeInlineDiff — hyphenated compound atomization", () => {
+  test("letter-letter compound swaps whole token (ninety-five → ninety-nine)", () => {
+    const r = computeInlineDiff(
+      "at least ninety-five percent",
+      "at least ninety-nine percent"
+    );
+    expect(r).not.toBeNull();
+    const u = unify(r!);
+    expect(u).toContain("<del>ninety-five</del>");
+    expect(u).toContain("<ins>ninety-nine</ins>");
+    // No partial-word fragmentation.
+    expect(u).not.toContain("<del>five</del>");
+    expect(u).not.toContain("<ins>nine</ins>");
+    expect(u).not.toMatch(/PLDIFFHY/);
+  });
+
+  test("digit-letter compound swaps whole token (64-byte → 2048-bit)", () => {
+    const r = computeInlineDiff(
+      "a 64-byte value",
+      "a 2048-bit value"
+    );
+    expect(r).not.toBeNull();
+    const u = unify(r!);
+    expect(u).toContain("<del>64-byte</del>");
+    expect(u).toContain("<ins>2048-bit</ins>");
+    expect(u).not.toMatch(/PLDIFFHY/);
+  });
+
+  test("multi-hyphen compound atomizes fully (state-of-the-art → state-of-the-craft)", () => {
+    const r = computeInlineDiff(
+      "the state-of-the-art approach",
+      "the state-of-the-craft approach"
+    );
+    expect(r).not.toBeNull();
+    const u = unify(r!);
+    expect(u).toContain("<del>state-of-the-art</del>");
+    expect(u).toContain("<ins>state-of-the-craft</ins>");
+    expect(u).not.toMatch(/PLDIFFHY/);
+  });
+
+  test("hyphenated compound unchanged between versions stays unchanged", () => {
+    const r = computeInlineDiff(
+      "the cookie-based flow runs nightly",
+      "the cookie-based flow runs daily"
+    );
+    expect(r).not.toBeNull();
+    const u = unify(r!);
+    // Compound must be intact in unchanged context — no PLDIFFHY leak.
+    expect(u).toContain("cookie-based");
+    expect(u).toContain("<del>nightly</del>");
+    expect(u).toContain("<ins>daily</ins>");
+    expect(u).not.toMatch(/PLDIFFHY/);
+  });
+
+  test("leading/trailing dash is not substituted (em-dash-like prose)", () => {
+    // A dash with no word char on one side is a separator, not a compound.
+    const r = computeInlineDiff("foo - bar end", "foo - baz end");
+    expect(r).not.toBeNull();
+    const u = unify(r!);
+    expect(u).toContain("<del>bar</del>");
+    expect(u).toContain("<ins>baz</ins>");
+    expect(u).not.toMatch(/PLDIFFHY/);
+  });
+
+  test("hyphens inside bold phrase stay atomic via emphasis pass, not corrupted", () => {
+    const r = computeInlineDiff("**cookie-based** flow", "**token-based** flow");
+    expect(r).not.toBeNull();
+    const u = unify(r!);
+    expect(u).toContain("<del>**cookie-based**</del>");
+    expect(u).toContain("<ins>**token-based**</ins>");
+    expect(u).not.toMatch(/PLDIFFHY/);
+  });
+});
+
 describe("computeInlineDiff — coalescing pass (Commit 2)", () => {
   test("two adjacent swaps separated by a single space coalesce into one swap", () => {
     const r = computeInlineDiff("foo bar baz", "qux quux baz");

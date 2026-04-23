@@ -302,6 +302,33 @@ function restoreEmphasisPairs(
   return value.replace(PAIR_SENTINEL_PATTERN, (m) => pairMap.get(m) ?? m);
 }
 
+// Hyphen sentinel. Hyphens between word chars (e.g. `ninety-five`,
+// `64-byte`, `state-of-the-art`) are semantic compound words, not two
+// tokens. `diffWordsWithSpace` splits on word boundaries, so without
+// this pass `ninety-five` → `ninety-nine` fragments into an unchanged
+// `ninety-` prefix and a swapped `five`/`nine` suffix, producing
+// visually noisy partial-word diffs that confuse readers.
+//
+// Replace each infix hyphen with a word-char marker before diffing and
+// restore afterwards. The sentinel is a fixed string (no per-instance
+// id) because all hyphens restore to the same character — uniqueness
+// isn't needed, only opacity to the word-boundary tokenizer.
+//
+// Runs AFTER the code/link/emphasis sentinel passes so hyphens inside
+// those constructs (e.g. `**state-of-the-art**`, `[link-text](url)`)
+// are already hidden and not re-processed here.
+const HYPHEN_SENTINEL = "PLDIFFHYZZ";
+const HYPHEN_SENTINEL_PATTERN = /PLDIFFHYZZ/g;
+const HYPHEN_INFIX_PATTERN = /(?<=\w)-(?=\w)/g;
+
+function substituteHyphens(text: string): string {
+  return text.replace(HYPHEN_INFIX_PATTERN, HYPHEN_SENTINEL);
+}
+
+function restoreHyphens(value: string): string {
+  return value.replace(HYPHEN_SENTINEL_PATTERN, "-");
+}
+
 // Coalescing pass (Commit 2). After `diffWordsWithSpace` and sentinel
 // restoration, adjacent word-level changes separated by only "thin"
 // unchanged tokens (whitespace + closed punctuation) get merged into a
@@ -434,11 +461,16 @@ export function computeInlineDiff(
   //      diffs atomically, avoiding the fragmented/unbalanced-delimiter
   //      output that whitespace-splitting `diffWordsWithSpace` produces
   //      for multi-word emphasis changes.
+  //   4. Infix hyphens — replace `-` between word chars with a word-char
+  //      marker so hyphenated compounds (`ninety-five`, `64-byte`,
+  //      `state-of-the-art`) diff as single atomic tokens instead of
+  //      fragmenting into an unchanged prefix + swapped suffix.
   //
   // Code spans are substituted first so that a backticked literal like
   // `[fake](link)` is treated as code and not accidentally captured by the
   // link regex; similarly, code and link sentinels are opaque to the
-  // emphasis-pair regex. Restorations run in reverse order afterwards.
+  // emphasis-pair regex. Hyphens run last so that hyphens inside those
+  // constructs are already hidden. Restorations run in reverse order.
   const codeMap = new Map<string, string>();
   const codeToId = new Map<string, number>();
   const linkMap = new Map<string, string>();
@@ -452,12 +484,17 @@ export function computeInlineDiff(
   substB = substituteLinks(substB, linkMap, linkToId);
   substA = substituteEmphasisPairs(substA, pairMap, pairToId);
   substB = substituteEmphasisPairs(substB, pairMap, pairToId);
+  substA = substituteHyphens(substA);
+  substB = substituteHyphens(substB);
 
   const changes = diffWordsWithSpace(substA, substB);
   const rawTokens: InlineDiffToken[] = changes.map((c) => ({
     type: c.added ? "added" : c.removed ? "removed" : "unchanged",
     value: restoreCodeSpans(
-      restoreLinks(restoreEmphasisPairs(c.value, pairMap), linkMap),
+      restoreLinks(
+        restoreEmphasisPairs(restoreHyphens(c.value), pairMap),
+        linkMap
+      ),
       codeMap
     ),
   }));
