@@ -7,6 +7,7 @@ interface TableBlockProps {
   onHover?: (element: HTMLElement) => void;
   onLeave?: () => void;
   onOpenLinkedDoc?: (path: string) => void;
+  onNavigateAnchor?: (hash: string) => void;
   imageBaseDir?: string;
   onImageClick?: (src: string, alt: string) => void;
   githubRepo?: string;
@@ -80,6 +81,7 @@ export const TableBlock: React.FC<TableBlockProps> = ({
   onHover,
   onLeave,
   onOpenLinkedDoc,
+  onNavigateAnchor,
   imageBaseDir,
   onImageClick,
   githubRepo,
@@ -109,6 +111,7 @@ export const TableBlock: React.FC<TableBlockProps> = ({
                   onImageClick={onImageClick}
                   text={header}
                   onOpenLinkedDoc={onOpenLinkedDoc}
+                  onNavigateAnchor={onNavigateAnchor}
                   githubRepo={githubRepo}
                 />
               </th>
@@ -125,6 +128,7 @@ export const TableBlock: React.FC<TableBlockProps> = ({
                     onImageClick={onImageClick}
                     text={cell}
                     onOpenLinkedDoc={onOpenLinkedDoc}
+                    onNavigateAnchor={onNavigateAnchor}
                     githubRepo={githubRepo}
                   />
                 </td>

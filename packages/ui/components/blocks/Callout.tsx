@@ -12,6 +12,7 @@ interface CalloutProps {
   imageBaseDir?: string;
   onImageClick?: (src: string, alt: string) => void;
   githubRepo?: string;
+  onNavigateAnchor?: (hash: string) => void;
 }
 
 export const Callout: React.FC<CalloutProps> = ({
@@ -25,6 +26,7 @@ export const Callout: React.FC<CalloutProps> = ({
   imageBaseDir,
   onImageClick,
   githubRepo,
+  onNavigateAnchor,
 }) => {
   const kindAttr =
     blockType === 'alert' ? { 'data-alert-kind': kindAttribute } : { 'data-directive-kind': kindAttribute };
@@ -47,6 +49,7 @@ export const Callout: React.FC<CalloutProps> = ({
         imageBaseDir,
         onImageClick,
         onOpenLinkedDoc,
+        onNavigateAnchor,
         githubRepo,
       })}
     </div>

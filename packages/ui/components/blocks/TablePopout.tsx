@@ -22,6 +22,7 @@ interface TablePopoutProps {
   /** hooks can walk into the popout's text nodes. Null falls back to body. */
   container?: HTMLElement | null;
   onOpenLinkedDoc?: (path: string) => void;
+  onNavigateAnchor?: (hash: string) => void;
   imageBaseDir?: string;
   onImageClick?: (src: string, alt: string) => void;
   githubRepo?: string;
@@ -38,6 +39,7 @@ const TablePopoutImpl: React.FC<TablePopoutProps> = ({
   onClose,
   container,
   onOpenLinkedDoc,
+  onNavigateAnchor,
   imageBaseDir,
   onImageClick,
   githubRepo,
@@ -80,12 +82,13 @@ const TablePopoutImpl: React.FC<TablePopoutProps> = ({
             onImageClick={onImageClick}
             text={info.getValue()}
             onOpenLinkedDoc={onOpenLinkedDoc}
+            onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
           />
         ),
       }),
     );
-  }, [columnIds, headers, imageBaseDir, onImageClick, onOpenLinkedDoc, githubRepo]);
+  }, [columnIds, headers, imageBaseDir, onImageClick, onOpenLinkedDoc, onNavigateAnchor, githubRepo]);
 
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState('');

@@ -16,6 +16,7 @@ export function renderProseBody(args: {
   imageBaseDir?: string;
   onImageClick?: (src: string, alt: string) => void;
   onOpenLinkedDoc?: (path: string) => void;
+  onNavigateAnchor?: (hash: string) => void;
   githubRepo?: string;
 }): React.ReactNode {
   const {
@@ -25,6 +26,7 @@ export function renderProseBody(args: {
     imageBaseDir,
     onImageClick,
     onOpenLinkedDoc,
+    onNavigateAnchor,
     githubRepo,
   } = args;
 
@@ -34,6 +36,7 @@ export function renderProseBody(args: {
       onImageClick={onImageClick}
       text={text}
       onOpenLinkedDoc={onOpenLinkedDoc}
+      onNavigateAnchor={onNavigateAnchor}
       githubRepo={githubRepo}
     />
   );

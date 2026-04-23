@@ -85,10 +85,11 @@ function emitPlainTextWithBareUrls(
 export const InlineMarkdown: React.FC<{
   text: string;
   onOpenLinkedDoc?: (path: string) => void;
+  onNavigateAnchor?: (hash: string) => void;
   imageBaseDir?: string;
   onImageClick?: (src: string, alt: string) => void;
   githubRepo?: string;
-}> = ({ text, onOpenLinkedDoc, imageBaseDir, onImageClick, githubRepo }) => {
+}> = ({ text, onOpenLinkedDoc, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo }) => {
   const parts: React.ReactNode[] = [];
   let remaining = text;
   let key = 0;
@@ -179,8 +180,9 @@ export const InlineMarkdown: React.FC<{
             onImageClick={onImageClick}
             text={match[1]}
             onOpenLinkedDoc={onOpenLinkedDoc}
+            onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
-/>
+          />
         </del>,
       );
       remaining = remaining.slice(match[0].length);
@@ -199,8 +201,9 @@ export const InlineMarkdown: React.FC<{
               onImageClick={onImageClick}
               text={match[1]}
               onOpenLinkedDoc={onOpenLinkedDoc}
-            githubRepo={githubRepo}
-  />
+              onNavigateAnchor={onNavigateAnchor}
+              githubRepo={githubRepo}
+            />
           </em>
         </strong>,
       );
@@ -219,8 +222,9 @@ export const InlineMarkdown: React.FC<{
             onImageClick={onImageClick}
             text={match[1]}
             onOpenLinkedDoc={onOpenLinkedDoc}
+            onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
-/>
+          />
         </strong>,
       );
       remaining = remaining.slice(match[0].length);
@@ -238,8 +242,9 @@ export const InlineMarkdown: React.FC<{
             onImageClick={onImageClick}
             text={match[1]}
             onOpenLinkedDoc={onOpenLinkedDoc}
+            onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
-/>
+          />
         </em>,
       );
       remaining = remaining.slice(match[0].length);
@@ -258,8 +263,9 @@ export const InlineMarkdown: React.FC<{
             onImageClick={onImageClick}
             text={match[1]}
             onOpenLinkedDoc={onOpenLinkedDoc}
+            onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
-/>
+          />
         </em>,
       );
       remaining = remaining.slice(match[0].length);
@@ -500,8 +506,23 @@ export const InlineMarkdown: React.FC<{
         !linkUrl.startsWith("http://") &&
         !linkUrl.startsWith("https://");
       const linkedDocPath = isLocalDoc ? linkUrl.replace(/#.*$/, '') : linkUrl;
+      const isInPageAnchor = safeLinkUrl.startsWith('#');
 
-      if (isLocalDoc && onOpenLinkedDoc) {
+      if (isInPageAnchor) {
+        parts.push(
+          <a
+            key={key++}
+            href={safeLinkUrl}
+            onClick={onNavigateAnchor ? (e) => {
+              e.preventDefault();
+              onNavigateAnchor(safeLinkUrl);
+            } : undefined}
+            className="text-primary underline underline-offset-2 hover:text-primary/80"
+          >
+            {linkText}
+          </a>,
+        );
+      } else if (isLocalDoc && onOpenLinkedDoc) {
         parts.push(
           <a
             key={key++}
@@ -569,8 +590,9 @@ export const InlineMarkdown: React.FC<{
             key={key++}
             text={before}
             onOpenLinkedDoc={onOpenLinkedDoc}
+            onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
-  imageBaseDir={imageBaseDir}
+            imageBaseDir={imageBaseDir}
             onImageClick={onImageClick}
           />,
         );
