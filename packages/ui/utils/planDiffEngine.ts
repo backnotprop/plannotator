@@ -221,6 +221,87 @@ function restoreFencedBlocks(
   return value.replace(FENCE_SENTINEL_PATTERN, (m) => fenceMap.get(m) ?? m);
 }
 
+// Inline-emphasis sentinels. Each balanced markdown emphasis pair
+// (`**...**`, `__...__`, `~~...~~`, `*...*`, `_..._`) gets a unique
+// word-char sentinel before `diffWordsWithSpace` runs so that:
+//
+//   - The whole phrase diffs as a single atomic token (sentinels contain
+//     no whitespace, and `diffWordsWithSpace` splits on whitespace).
+//   - Identical phrases on both sides pair as unchanged via sentinel
+//     identity; different phrases pair as a single remove + add.
+//
+// This is the "pair" form of atomization discussed in the bold-phrase
+// design doc: it reliably handles both single-word (`**important**`) and
+// multi-word (`**preliminary analysis**`) emphasis without fragmenting
+// the closing delimiter into unchanged-tail tokens, which the earlier
+// single-delimiter substitution couldn't achieve.
+//
+// Pair matching uses CommonMark-ish flanking rules: opening delimiter
+// must not be preceded by a word char and must be followed by a non-space
+// char; closing delimiter must be preceded by a non-space char and not
+// followed by a word char. Content is matched lazily. Stray unbalanced
+// delimiters (e.g., `2**3` arithmetic) don't match and are left verbatim,
+// preserving existing behaviour.
+//
+// Longest-first ordering (`**`/`__`/`~~` before `*`/`_`) prevents single
+// delimiters from eating the inside of a double-delim pair.
+const PAIR_SENTINEL_PREFIX = "PLDIFFEMPH";
+const PAIR_SENTINEL_PATTERN = /PLDIFFEMPH\d+ZZ/g;
+
+const PAIR_PATTERNS: Array<{ delim: string; regex: RegExp }> = [
+  // Triples first so `***foo***` (bold+italic) atomizes as one token
+  // instead of being split into `**` pair plus a leftover `*`.
+  { delim: "***", regex: /(?<!\w)\*\*\*(\S(?:[\s\S]*?\S)?)\*\*\*(?!\w)/g },
+  {
+    delim: "___",
+    regex: /(?<![A-Za-z0-9])___(\S(?:[\s\S]*?\S)?)___(?![A-Za-z0-9])/g,
+  },
+  { delim: "**", regex: /(?<!\w)\*\*(\S(?:[\s\S]*?\S)?)\*\*(?!\w)/g },
+  // `__` with word-boundary guard to protect intraword underscores
+  // (e.g., `my__var__name`). Same for `_` below.
+  {
+    delim: "__",
+    regex: /(?<![A-Za-z0-9])__(\S(?:[\s\S]*?\S)?)__(?![A-Za-z0-9])/g,
+  },
+  { delim: "~~", regex: /(?<!\w)~~(\S(?:[\s\S]*?\S)?)~~(?!\w)/g },
+  { delim: "*", regex: /(?<!\w)\*(\S(?:[^*]*?\S)?)\*(?!\w)/g },
+  {
+    delim: "_",
+    regex: /(?<![A-Za-z0-9])_(\S(?:[^_]*?\S)?)_(?![A-Za-z0-9])/g,
+  },
+];
+
+function pairSentinelFor(id: number): string {
+  return `${PAIR_SENTINEL_PREFIX}${id}ZZ`;
+}
+
+function substituteEmphasisPairs(
+  text: string,
+  pairMap: Map<string, string>,
+  pairToId: Map<string, number>
+): string {
+  for (const { regex } of PAIR_PATTERNS) {
+    text = text.replace(regex, (match) => {
+      let id = pairToId.get(match);
+      if (id === undefined) {
+        id = pairToId.size;
+        pairMap.set(pairSentinelFor(id), match);
+        pairToId.set(match, id);
+      }
+      return pairSentinelFor(id);
+    });
+  }
+  return text;
+}
+
+function restoreEmphasisPairs(
+  value: string,
+  pairMap: Map<string, string>
+): string {
+  if (pairMap.size === 0) return value;
+  return value.replace(PAIR_SENTINEL_PATTERN, (m) => pairMap.get(m) ?? m);
+}
+
 function wrapFromBlock(block: Block): InlineDiffWrap {
   if (block.type === "heading") {
     return { type: "heading", level: block.level };
@@ -258,29 +339,42 @@ export function computeInlineDiff(
   if (!INLINE_DIFFABLE_TYPES.has(a.type)) return null;
   if (!structuralFieldsMatch(a, b)) return null;
 
-  // Atomic passes before word-diffing:
+  // Atomic passes before word-diffing (longest-lived sentinels first):
   //   1. Inline code spans — protect backtick-wrapped content so diff markers
   //      never land between backticks (see SENTINEL_PREFIX comment).
   //   2. Markdown links [text](url) — protect the whole link so diff markers
   //      never land inside the link's bracketed text or parenthesized href.
+  //   3. Balanced emphasis pairs (**…**, __…__, ~~…~~, *…*, _…_) — replace
+  //      each whole pair with a unique word-char sentinel so the phrase
+  //      diffs atomically, avoiding the fragmented/unbalanced-delimiter
+  //      output that whitespace-splitting `diffWordsWithSpace` produces
+  //      for multi-word emphasis changes.
   //
   // Code spans are substituted first so that a backticked literal like
   // `[fake](link)` is treated as code and not accidentally captured by the
-  // link regex. Restorations run in reverse order afterwards.
+  // link regex; similarly, code and link sentinels are opaque to the
+  // emphasis-pair regex. Restorations run in reverse order afterwards.
   const codeMap = new Map<string, string>();
   const codeToId = new Map<string, number>();
   const linkMap = new Map<string, string>();
   const linkToId = new Map<string, number>();
+  const pairMap = new Map<string, string>();
+  const pairToId = new Map<string, number>();
 
   let substA = substituteCodeSpans(a.content, codeMap, codeToId);
   let substB = substituteCodeSpans(b.content, codeMap, codeToId);
   substA = substituteLinks(substA, linkMap, linkToId);
   substB = substituteLinks(substB, linkMap, linkToId);
+  substA = substituteEmphasisPairs(substA, pairMap, pairToId);
+  substB = substituteEmphasisPairs(substB, pairMap, pairToId);
 
   const changes = diffWordsWithSpace(substA, substB);
   const tokens: InlineDiffToken[] = changes.map((c) => ({
     type: c.added ? "added" : c.removed ? "removed" : "unchanged",
-    value: restoreCodeSpans(restoreLinks(c.value, linkMap), codeMap),
+    value: restoreCodeSpans(
+      restoreLinks(restoreEmphasisPairs(c.value, pairMap), linkMap),
+      codeMap
+    ),
   }));
 
   // Build the render wrapper from the NEW block so ordered-list items that

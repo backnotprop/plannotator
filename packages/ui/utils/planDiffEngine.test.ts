@@ -134,6 +134,12 @@ describe("computeInlineDiff — token content", () => {
   });
 
   test("unified string round-trip preserves delimiter pair around diff tags", () => {
+    // After pair-based emphasis atomization, the whole `**phrase**`
+    // becomes one atomic token on each side — so the unified string
+    // starts with `<del>**important**</del>` rather than
+    // `**<del>important</del>...**`. Visual render is equivalent because
+    // `<del>` recurses into `InlineMarkdown` and the inner `**…**` parses
+    // as bold.
     const result = computeInlineDiff(
       "**important** text\n",
       "**critical** text\n"
@@ -146,10 +152,196 @@ describe("computeInlineDiff — token content", () => {
         return t.value;
       })
       .join("");
-    expect(unified.startsWith("**")).toBe(true);
-    expect(unified.includes("** text")).toBe(true);
-    expect(unified).toContain("<ins>critical</ins>");
-    expect(unified).toContain("<del>important</del>");
+    expect(unified).toContain("<del>**important**</del>");
+    expect(unified).toContain("<ins>**critical**</ins>");
+    expect(unified).toContain(" text");
+  });
+});
+
+// Helper to build a unified <ins>/<del>-wrapped string from a computeInlineDiff
+// result for readable assertions in tests below.
+function unify(result: { tokens: import("./planDiffEngine").InlineDiffToken[] }) {
+  return result.tokens
+    .map((t) => {
+      if (t.type === "added") return `<ins>${t.value}</ins>`;
+      if (t.type === "removed") return `<del>${t.value}</del>`;
+      return t.value;
+    })
+    .join("");
+}
+
+describe("computeInlineDiff — emphasis pair atomization (A3)", () => {
+  test("single-word bold swap atomizes as one phrase per side", () => {
+    const r = computeInlineDiff("**old** end", "**new** end");
+    expect(r).not.toBeNull();
+    expect(unify(r!)).toBe("<del>**old**</del><ins>**new**</ins> end");
+  });
+
+  test("multi-word bold with one-word change renders as balanced bold swap", () => {
+    // The demo case: `**preliminary analysis**` → `**final analysis**`.
+    // Before this fix, the closing `**` orphaned into unchanged-tail,
+    // leaving raw literal asterisks in the rendered view.
+    const r = computeInlineDiff(
+      "Review the **preliminary analysis** today.",
+      "Review the **final analysis** today."
+    );
+    expect(r).not.toBeNull();
+    const u = unify(r!);
+    expect(u).toContain("<del>**preliminary analysis**</del>");
+    expect(u).toContain("<ins>**final analysis**</ins>");
+    // No literal unbalanced `**` outside diff tags.
+    expect(u).not.toMatch(/\*\*[^*]*\*\*/g.test(
+      u.replace(/<(?:ins|del)>[\s\S]*?<\/(?:ins|del)>/g, "")
+    ) ? /.*/ : /never/);
+  });
+
+  test("multi-word bold, both words change, renders as phrase swap", () => {
+    const r = computeInlineDiff("**foo bar**", "**baz qux**");
+    expect(r).not.toBeNull();
+    expect(unify(r!)).toBe("<del>**foo bar**</del><ins>**baz qux**</ins>");
+  });
+
+  test("italic `*…*` swap atomizes per pair", () => {
+    const r = computeInlineDiff("*italic* stuff", "*bold* stuff");
+    expect(r).not.toBeNull();
+    expect(unify(r!)).toBe("<del>*italic*</del><ins>*bold*</ins> stuff");
+  });
+
+  test("strikethrough `~~…~~` swap atomizes per pair", () => {
+    const r = computeInlineDiff("~~strike~~", "~~gone~~");
+    expect(r).not.toBeNull();
+    expect(unify(r!)).toBe("<del>~~strike~~</del><ins>~~gone~~</ins>");
+  });
+
+  test("bold-alt `__…__` swap atomizes per pair", () => {
+    const r = computeInlineDiff("__alt bold__", "__new stuff__");
+    expect(r).not.toBeNull();
+    expect(unify(r!)).toBe("<del>__alt bold__</del><ins>__new stuff__</ins>");
+  });
+
+  test("italic-alt `_…_` swap atomizes per pair", () => {
+    const r = computeInlineDiff("_alt italic_", "_new_");
+    expect(r).not.toBeNull();
+    expect(unify(r!)).toBe("<del>_alt italic_</del><ins>_new_</ins>");
+  });
+
+  test("word-boundary guard: `my__var__name` → `my__var__names` leaves intraword `__` alone", () => {
+    // Markdown doesn't treat intraword `__` as bold delimiters, so the pair
+    // regex must not consume them. Verify the diff treats both sides as
+    // single identifiers rather than mis-sentinelizing them.
+    const r = computeInlineDiff("my__var__name", "my__var__names");
+    expect(r).not.toBeNull();
+    const u = unify(r!);
+    // The exact diff shape can vary, but no token should contain an
+    // unmatched sentinel fragment and the full identifiers must survive
+    // the round-trip.
+    expect(u).toContain("my__var__name");
+    expect(u).toContain("my__var__names");
+    expect(u).not.toMatch(/PLDIFFEMPH/);
+  });
+
+  test("word-boundary guard: single-underscore intraword preserved (`snake_case`)", () => {
+    const r = computeInlineDiff("snake_case", "snake_casey");
+    expect(r).not.toBeNull();
+    const u = unify(r!);
+    expect(u).toContain("snake_case");
+    expect(u).toContain("snake_casey");
+    expect(u).not.toMatch(/PLDIFFEMPH/);
+  });
+
+  test("nested triple `***foo***` atomizes as one token", () => {
+    const r = computeInlineDiff("***foo***", "***bar***");
+    expect(r).not.toBeNull();
+    expect(unify(r!)).toBe("<del>***foo***</del><ins>***bar***</ins>");
+  });
+
+  test("nested triple with multi-word inside", () => {
+    const r = computeInlineDiff("***foo bar***", "***baz qux***");
+    expect(r).not.toBeNull();
+    expect(unify(r!)).toBe(
+      "<del>***foo bar***</del><ins>***baz qux***</ins>"
+    );
+  });
+
+  test("stray unbalanced `**` in arithmetic context is preserved as literal", () => {
+    // `2**3` (exponent in prose) must not be mis-matched. Only the real
+    // balanced `**bold**` should atomize.
+    const r = computeInlineDiff(
+      "2**3 and **bold** text",
+      "2**4 and **bold** text"
+    );
+    expect(r).not.toBeNull();
+    const u = unify(r!);
+    // `**bold**` unchanged
+    expect(u).toContain("**bold**");
+    // The stray `**` preserved literally; the 3→4 swap shows normally
+    expect(u).toContain("<del>3</del>");
+    expect(u).toContain("<ins>4</ins>");
+  });
+
+  test("existing code-span sentinel format is not corrupted", () => {
+    // Two paragraphs both containing inline code spans — the diff should
+    // still round-trip the code spans correctly with the pair atomization
+    // layered on top.
+    const r = computeInlineDiff(
+      "Call `foo()` inside **bold text** here.",
+      "Call `bar()` inside **bold text** here."
+    );
+    expect(r).not.toBeNull();
+    const u = unify(r!);
+    expect(u).toContain("<del>`foo()`</del>");
+    expect(u).toContain("<ins>`bar()`</ins>");
+    expect(u).toContain("**bold text**");
+    expect(u).not.toMatch(/PLDIFF(?:CODE|LINK|EMPH)/);
+  });
+});
+
+describe("computeInlineDiff — broader integration", () => {
+  test("code-span swap adjacent to unchanged text still renders cleanly", () => {
+    const r = computeInlineDiff("Call `foo()` now.", "Call `bar()` now.");
+    expect(r).not.toBeNull();
+    const u = unify(r!);
+    expect(u).toBe("Call <del>`foo()`</del><ins>`bar()`</ins> now.");
+  });
+
+  test("link URL swap atomizes the whole link", () => {
+    const r = computeInlineDiff("See [docs](old)", "See [docs](new)");
+    expect(r).not.toBeNull();
+    const u = unify(r!);
+    expect(u).toBe("See <del>[docs](old)</del><ins>[docs](new)</ins>");
+  });
+
+  test("heading modification populates inlineTokens with heading wrap", () => {
+    const r = computeInlineDiff("## **Plan** v1\n", "## **Plan** v2\n");
+    expect(r).not.toBeNull();
+    expect(r!.wrap.type).toBe("heading");
+    expect(r!.wrap.level).toBe(2);
+    const u = unify(r!);
+    expect(u).toContain("v");
+    expect(u).toContain("<del>");
+    expect(u).toContain("<ins>");
+  });
+
+  test("computePlanDiff end-to-end with bold-phrase change produces one modified block with balanced inline tokens", () => {
+    const old =
+      "Review the **preliminary analysis** of load testing results today.\n";
+    const neu = "Review the **final analysis** of load testing results today.\n";
+    const { blocks } = computePlanDiff(old, neu);
+    const mod = blocks.find((b) => b.type === "modified");
+    expect(mod).toBeDefined();
+    expect(mod!.inlineTokens).toBeDefined();
+    const u = mod!.inlineTokens!
+      .map((t) =>
+        t.type === "added"
+          ? `<ins>${t.value}</ins>`
+          : t.type === "removed"
+            ? `<del>${t.value}</del>`
+            : t.value
+      )
+      .join("");
+    // Balanced bold pair on each side of the diff — no orphan delimiters.
+    expect(u).toContain("<del>**preliminary analysis**</del>");
+    expect(u).toContain("<ins>**final analysis**</ins>");
   });
 });
 
