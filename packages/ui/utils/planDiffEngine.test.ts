@@ -296,6 +296,111 @@ describe("computeInlineDiff — emphasis pair atomization (A3)", () => {
   });
 });
 
+describe("computeInlineDiff — coalescing pass (Commit 2)", () => {
+  test("two adjacent swaps separated by a single space coalesce into one swap", () => {
+    const r = computeInlineDiff("foo bar baz", "qux quux baz");
+    expect(r).not.toBeNull();
+    const u = unify(r!);
+    // Both word swaps merge into a single phrase swap ending at the
+    // unchanged tail ` baz`.
+    expect(u).toContain("<del>foo bar</del><ins>qux quux</ins>");
+    expect(u).toContain(" baz");
+  });
+
+  test("three adjacent swaps (the motivating paragraph example) coalesce", () => {
+    // Parens act as hard boundaries because they aren't in the thin set.
+    const r = computeInlineDiff(
+      "(and the originating case)",
+      "(and a small set of admins who opted in)"
+    );
+    expect(r).not.toBeNull();
+    const u = unify(r!);
+    expect(u).toBe(
+      "(and <del>the originating case</del><ins>a small set of admins who opted in</ins>)"
+    );
+  });
+
+  test("single isolated swap stays word-level (no coalescing)", () => {
+    const r = computeInlineDiff("the quick brown fox", "the slow brown fox");
+    expect(r).not.toBeNull();
+    const u = unify(r!);
+    // Only the `quick` → `slow` change should be diffed; `brown fox` must
+    // stay as unchanged text.
+    expect(u).toContain("<del>quick</del>");
+    expect(u).toContain("<ins>slow</ins>");
+    expect(u).toContain(" brown fox");
+    // No accidental absorption of `brown fox` into a combined swap.
+    expect(u).not.toContain("quick brown fox");
+    expect(u).not.toContain("slow brown fox");
+  });
+
+  test("asymmetric coalesce: two removes + one add in dirty run", () => {
+    const r = computeInlineDiff("foo bar baz end", "foo newword end");
+    expect(r).not.toBeNull();
+    const u = unify(r!);
+    // `bar` and `baz` both removed, `newword` added — coalesce absorbs the
+    // intervening space into the combined swap. The trailing space to the
+    // unchanged `end` gets pulled into the ins/del because jsdiff pairs
+    // `baz ` with `newword ` as a single token-level swap.
+    expect(u).toContain("<del>bar baz");
+    expect(u).toContain("<ins>newword");
+    expect(u).toContain("end");
+  });
+
+  test("swap + swap separated by a comma coalesces (thin punctuation)", () => {
+    const r = computeInlineDiff("alpha, beta end", "gamma, delta end");
+    expect(r).not.toBeNull();
+    const u = unify(r!);
+    expect(u).toContain("<del>alpha, beta</del><ins>gamma, delta</ins>");
+  });
+
+  test("swap + swap separated by unchanged word does NOT coalesce", () => {
+    const r = computeInlineDiff("foo bar baz qux end", "zap bar zip end");
+    expect(r).not.toBeNull();
+    const u = unify(r!);
+    // `bar` unchanged word between the two swaps must block coalescing.
+    expect(u).toContain("<del>foo</del>");
+    expect(u).toContain("<ins>zap</ins>");
+    expect(u).toContain(" bar ");
+    expect(u).toContain("<del>baz qux");
+    expect(u).toContain("<ins>zip");
+    // Sanity: not a single combined swap across `bar`.
+    expect(u).not.toContain("<del>foo bar baz qux</del>");
+  });
+
+  test("swap + swap separated by an unchanged inline link does NOT coalesce", () => {
+    // The link is an atomic unchanged token whose value is the whole
+    // `[text](url)` string — that contains non-thin chars (`[`, `]`, `(`,
+    // `)`), so it blocks coalescing.
+    const r = computeInlineDiff(
+      "see foo [docs](https://example.com) bar end",
+      "see zop [docs](https://example.com) zip end"
+    );
+    expect(r).not.toBeNull();
+    const u = unify(r!);
+    expect(u).toContain("<del>foo</del>");
+    expect(u).toContain("<ins>zop</ins>");
+    expect(u).toContain("[docs](https://example.com)");
+    expect(u).toContain("<del>bar</del>");
+    expect(u).toContain("<ins>zip</ins>");
+    // Not coalesced across the link.
+    expect(u).not.toContain("<del>foo [docs]");
+  });
+
+  test("multi-word bold phrase swap via coalescing-rescue (Case 2 wrap)", () => {
+    // `foo bar baz` → `foo **bar baz**`: without coalescing, atomization
+    // leaves `bar` and `baz` as two word tokens on the old side but
+    // `**bar baz**` as one atomic pair on the new side, producing
+    // alternating removes/adds that coalescing folds back into a single
+    // clean phrase swap.
+    const r = computeInlineDiff("foo bar baz end", "foo **bar baz** end");
+    expect(r).not.toBeNull();
+    const u = unify(r!);
+    expect(u).toContain("<del>bar baz");
+    expect(u).toContain("<ins>**bar baz**");
+  });
+});
+
 describe("computeInlineDiff — broader integration", () => {
   test("code-span swap adjacent to unchanged text still renders cleanly", () => {
     const r = computeInlineDiff("Call `foo()` now.", "Call `bar()` now.");

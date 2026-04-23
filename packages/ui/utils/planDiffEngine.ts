@@ -302,6 +302,91 @@ function restoreEmphasisPairs(
   return value.replace(PAIR_SENTINEL_PATTERN, (m) => pairMap.get(m) ?? m);
 }
 
+// Coalescing pass (Commit 2). After `diffWordsWithSpace` and sentinel
+// restoration, adjacent word-level changes separated by only "thin"
+// unchanged tokens (whitespace + closed punctuation) get merged into a
+// single phrase-level swap. This turns alternating red/green word-noise
+// into a readable before/after, and rescues the A3 regression where
+// mashed sentinel-plus-word tokens would otherwise render as fragmented
+// literal delimiters inside colored tags.
+//
+// Definitions (from the design doc):
+//   - change site: contiguous non-unchanged run
+//   - thin unchanged: value consists only of whitespace + { , . ; : — – " ' }
+//     (parens/brackets EXCLUDED so inline links stay as hard boundaries)
+//   - dirty run: maximal sequence of change sites joined by thin-unchanged
+// Coalesce when a dirty run has ≥2 change sites (asymmetric counts allowed).
+// Single-site dirty runs pass through so isolated swaps keep word-level
+// highlighting.
+const THIN_UNCHANGED_RE =
+  /^[\s,.;:—–"'‘’“”]+$/;
+
+function isChangeToken(t: InlineDiffToken): boolean {
+  return t.type !== "unchanged";
+}
+
+function isThinUnchangedToken(t: InlineDiffToken): boolean {
+  return t.type === "unchanged" && THIN_UNCHANGED_RE.test(t.value);
+}
+
+function coalesceChangeTokens(tokens: InlineDiffToken[]): InlineDiffToken[] {
+  const out: InlineDiffToken[] = [];
+  let i = 0;
+  while (i < tokens.length) {
+    if (!isChangeToken(tokens[i])) {
+      out.push(tokens[i]);
+      i++;
+      continue;
+    }
+    // Scan first change site.
+    let lastChangeEnd = i;
+    while (
+      lastChangeEnd + 1 < tokens.length &&
+      isChangeToken(tokens[lastChangeEnd + 1])
+    ) {
+      lastChangeEnd++;
+    }
+    let siteCount = 1;
+    while (true) {
+      let scan = lastChangeEnd + 1;
+      while (scan < tokens.length && isThinUnchangedToken(tokens[scan])) scan++;
+      if (scan < tokens.length && isChangeToken(tokens[scan])) {
+        let newEnd = scan;
+        while (
+          newEnd + 1 < tokens.length &&
+          isChangeToken(tokens[newEnd + 1])
+        ) {
+          newEnd++;
+        }
+        lastChangeEnd = newEnd;
+        siteCount++;
+      } else {
+        break;
+      }
+    }
+    if (siteCount >= 2) {
+      let removedText = "";
+      let addedText = "";
+      for (let j = i; j <= lastChangeEnd; j++) {
+        const t = tokens[j];
+        if (t.type === "removed") removedText += t.value;
+        else if (t.type === "added") addedText += t.value;
+        else {
+          removedText += t.value;
+          addedText += t.value;
+        }
+      }
+      if (removedText.length > 0)
+        out.push({ type: "removed", value: removedText });
+      if (addedText.length > 0) out.push({ type: "added", value: addedText });
+    } else {
+      for (let j = i; j <= lastChangeEnd; j++) out.push(tokens[j]);
+    }
+    i = lastChangeEnd + 1;
+  }
+  return out;
+}
+
 function wrapFromBlock(block: Block): InlineDiffWrap {
   if (block.type === "heading") {
     return { type: "heading", level: block.level };
@@ -369,13 +454,20 @@ export function computeInlineDiff(
   substB = substituteEmphasisPairs(substB, pairMap, pairToId);
 
   const changes = diffWordsWithSpace(substA, substB);
-  const tokens: InlineDiffToken[] = changes.map((c) => ({
+  const rawTokens: InlineDiffToken[] = changes.map((c) => ({
     type: c.added ? "added" : c.removed ? "removed" : "unchanged",
     value: restoreCodeSpans(
       restoreLinks(restoreEmphasisPairs(c.value, pairMap), linkMap),
       codeMap
     ),
   }));
+
+  // Coalesce adjacent change sites separated by thin unchanged context into
+  // single phrase-level swaps. Turns alternating red/green word-noise into
+  // a readable before/after, and rescues the Case-2 regression where
+  // wrapping a previously-plain phrase in emphasis would otherwise surface
+  // as fragmented literal delimiters inside colored tags.
+  const tokens = coalesceChangeTokens(rawTokens);
 
   // Build the render wrapper from the NEW block so ordered-list items that
   // renumbered (e.g., 3. → 4. because a step was inserted above) display the
