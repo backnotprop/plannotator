@@ -4,9 +4,11 @@ allowed-tools: Bash(plannotator:*)
 disable-model-invocation: true
 ---
 
-## Markdown Annotations
+## Instructions
 
-!`plannotator annotate $ARGUMENTS`
+Run `plannotator annotate $ARGUMENTS` using the Bash tool with `run_in_background: true`. This starts an annotation server and opens the browser. The user will annotate the document and submit feedback — this may take a long time.
+
+**Wait for the background task to complete before proceeding.** Do not interrupt or take other actions while the user is annotating.
 
 ## Your task
 
