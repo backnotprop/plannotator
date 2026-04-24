@@ -11,10 +11,9 @@
 
 import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
 import type { Origin } from "@plannotator/shared/agents";
-import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath, getVcsContext } from "./vcs";
-import { parseWorktreeDiffType } from "@plannotator/shared/review-core";
+import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath, getVcsContext, gitRuntime } from "./vcs";
+import { parseWorktreeDiffType, detectRemoteDefaultBranch, resolveBaseBranch } from "@plannotator/shared/review-core";
 import type { AgentJobInfo } from "@plannotator/shared/agent-jobs";
-import { resolveBaseBranch } from "@plannotator/shared/review-core";
 import { getRepoInfo } from "./repo";
 import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft } from "./draft";
@@ -144,6 +143,17 @@ export async function startReviewServer(
   // the reviewer is currently looking at. Honors an explicit initialBase from
   // the caller — e.g. programmatic Pi callers can request a non-detected base.
   let currentBase = options.initialBase || gitContext?.defaultBranch || "main";
+  let baseEverSwitched = false;
+
+  // Fire-and-forget: query the remote for its actual default branch. If it
+  // arrives before the user interacts, quietly upgrade currentBase from the
+  // local fallback (e.g. "main") to the upstream ref (e.g. "origin/main").
+  // Non-blocking — the server is already listening by the time this resolves.
+  if (gitContext && !options.initialBase && !isPRMode) {
+    detectRemoteDefaultBranch(gitRuntime, gitContext.cwd).then((remote) => {
+      if (remote && !baseEverSwitched) currentBase = remote;
+    });
+  }
 
   // Agent jobs — background process manager (late-binds serverUrl via getter)
   let serverUrl = "";
@@ -496,6 +506,7 @@ export async function startReviewServer(
               currentGitRef = result.label;
               currentDiffType = newDiffType;
               currentBase = base;
+              baseEverSwitched = true;
               currentError = result.error;
 
               // Recompute gitContext for the effective cwd so the client's

@@ -59,7 +59,7 @@ export interface GitCommandResult {
 export interface ReviewGitRuntime {
   runGit: (
     args: string[],
-    options?: { cwd?: string },
+    options?: { cwd?: string; timeoutMs?: number },
   ) => Promise<GitCommandResult>;
   readTextFile: (path: string) => Promise<string | null>;
 }
@@ -109,6 +109,38 @@ export async function getDefaultBranch(
   if (mainBranch.exitCode === 0) return "main";
 
   return "master";
+}
+
+/**
+ * Query the remote for its default branch via `ls-remote --symref`. Returns
+ * `origin/<name>` if the remote answers and the tracking ref exists locally,
+ * otherwise `null`. Designed to run in the background at server startup — the
+ * caller fires it with `.then()` and uses the result if/when it arrives.
+ *
+ * Timeout-guarded: if the network is slow or absent, the promise resolves
+ * (with `null`) once the timeout fires. Never throws.
+ */
+export async function detectRemoteDefaultBranch(
+  runtime: ReviewGitRuntime,
+  cwd?: string,
+): Promise<string | null> {
+  try {
+    const lsRemote = await runtime.runGit(
+      ["ls-remote", "--symref", "origin", "HEAD"],
+      { cwd, timeoutMs: 5000 },
+    );
+    if (lsRemote.exitCode !== 0) return null;
+    const match = lsRemote.stdout.match(/^ref:\s+refs\/heads\/(\S+)\s+HEAD/m);
+    if (!match) return null;
+    const remoteBranch = `origin/${match[1]}`;
+    const refExists = await runtime.runGit(
+      ["show-ref", "--verify", "--quiet", `refs/remotes/${remoteBranch}`],
+      { cwd },
+    );
+    return refExists.exitCode === 0 ? remoteBranch : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function listBranches(

@@ -26,6 +26,7 @@ import {
 	type DiffType,
 	type GitCommandResult,
 	type GitContext,
+	detectRemoteDefaultBranch,
 	getFileContentsForDiff as getFileContentsForDiffCore,
 	getGitContext as getGitContextCore,
 	gitAddFile as gitAddFileCore,
@@ -106,11 +107,12 @@ export interface ReviewServerResult {
 export const reviewRuntime: ReviewGitRuntime = {
 	async runGit(
 		args: string[],
-		options?: { cwd?: string },
+		options?: { cwd?: string; timeoutMs?: number },
 	): Promise<GitCommandResult> {
 		const result = spawnSync("git", args, {
 			cwd: options?.cwd,
 			encoding: "utf-8",
+			...(options?.timeoutMs ? { timeout: options.timeoutMs } : {}),
 		});
 		return {
 			stdout: result.stdout ?? "",
@@ -207,6 +209,14 @@ export async function startReviewServer(options: {
 	// the reviewer is currently looking at. Honors an explicit initialBase from
 	// the caller — e.g. programmatic Pi callers can request a non-detected base.
 	let currentBase = options.initialBase || options.gitContext?.defaultBranch || "main";
+	let baseEverSwitched = false;
+
+	// Fire-and-forget: query the remote for its actual default branch.
+	if (options.gitContext && !options.initialBase && !isPRMode) {
+		detectRemoteDefaultBranch(reviewRuntime, options.gitContext.cwd).then((remote) => {
+			if (remote && !baseEverSwitched) currentBase = remote;
+		});
+	}
 
 	// Agent jobs — background process manager (late-binds serverUrl via getter)
 	let serverUrl = "";
@@ -547,6 +557,7 @@ export async function startReviewServer(options: {
 				currentGitRef = result.label;
 				currentDiffType = newType;
 				currentBase = base;
+				baseEverSwitched = true;
 				currentError = result.error;
 
 				// Recompute gitContext for the effective cwd so the client's
