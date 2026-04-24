@@ -19,7 +19,7 @@ describe("CLI top-level help", () => {
     expect(output).toContain("plannotator --help");
     expect(output).toContain("plannotator [--browser <name>]");
     expect(output).toContain("plannotator review [PR_URL]");
-    expect(output).toContain("plannotator annotate <file.md | folder/>");
+    expect(output).toContain("plannotator annotate <file.md | file.html | https://... | folder/>");
     expect(output).toContain("running 'plannotator' without arguments is for hook integration");
   });
 });

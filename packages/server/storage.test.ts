@@ -75,6 +75,12 @@ describe("getPlanDir", () => {
     const result = getPlanDir(null);
     expect(result).toMatch(/\.plannotator\/plans$/);
   });
+
+  test("uses default for whitespace-only custom path", () => {
+    const result = getPlanDir("   ");
+    expect(result).toMatch(/\.plannotator\/plans$/);
+    expect(result).not.toBe(process.cwd());
+  });
 });
 
 describe("savePlan", () => {

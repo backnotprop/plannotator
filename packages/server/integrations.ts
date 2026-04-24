@@ -21,6 +21,7 @@ import {
 	buildBearContent,
 	detectObsidianVaults,
 } from "@plannotator/shared/integrations-common";
+import { resolveUserPath } from "@plannotator/shared/resolve-file";
 
 export type { ObsidianConfig, BearConfig, OctarineConfig, IntegrationResult };
 export { detectObsidianVaults, extractTitle, generateFrontmatter, generateFilename, generateOctarineFrontmatter, stripH1, buildHashtags, buildBearContent };
@@ -98,14 +99,11 @@ export async function saveToObsidian(
 	try {
 		const { vaultPath, folder, plan } = config;
 
-		// Normalize path (handle ~ on Unix, forward/back slashes)
-		let normalizedVault = vaultPath.trim();
-
-		// Expand ~ to home directory (Unix/macOS)
-		if (normalizedVault.startsWith("~")) {
-			const home = process.env.HOME || process.env.USERPROFILE || "";
-			normalizedVault = join(home, normalizedVault.slice(1));
+		if (!vaultPath?.trim()) {
+			return { success: false, error: "Vault path is required" };
 		}
+
+		const normalizedVault = resolveUserPath(vaultPath);
 
 		// Validate vault path exists and is a directory
 		if (!existsSync(normalizedVault)) {

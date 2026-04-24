@@ -1,8 +1,11 @@
 import React, { useEffect, useCallback, useState, useMemo } from 'react';
 import { CodeAnnotation } from '@plannotator/ui/types';
-import type { DiffOption, WorktreeInfo } from '@plannotator/shared/types';
+import type { AvailableBranches, DiffOption, WorktreeInfo } from '@plannotator/shared/types';
 import { buildFileTree, getAncestorPaths, getAllFolderPaths } from '../utils/buildFileTree';
 import { FileTreeNodeItem } from './FileTreeNode';
+import { BaseBranchPicker } from './BaseBranchPicker';
+import { DiffTypePicker } from './DiffTypePicker';
+import { WorktreePicker } from './WorktreePicker';
 import { getReviewSearchSideLabel, type ReviewSearchFileGroup, type ReviewSearchMatch } from '../utils/reviewSearch';
 import type { DiffFile } from '../types';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
@@ -27,6 +30,11 @@ interface FileTreeProps {
   activeWorktreePath?: string | null;
   onSelectWorktree?: (path: string | null) => void;
   currentBranch?: string;
+  /** Base-branch picker — only meaningful when activeDiffType is "branch" or "merge-base". */
+  availableBranches?: AvailableBranches;
+  selectedBase?: string;
+  detectedBase?: string;
+  onSelectBase?: (branch: string) => void;
   stagedFiles?: Set<string>;
   onCopyRawDiff?: () => void;
   canCopyRawDiff?: boolean;
@@ -66,6 +74,10 @@ export const FileTree: React.FC<FileTreeProps> = ({
   activeWorktreePath,
   onSelectWorktree,
   currentBranch,
+  availableBranches,
+  selectedBase,
+  detectedBase,
+  onSelectBase,
   stagedFiles,
   onCopyRawDiff,
   canCopyRawDiff = false,
@@ -92,6 +104,20 @@ export const FileTree: React.FC<FileTreeProps> = ({
 
     // Don't interfere with input fields
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+      return;
+    }
+
+    // Yield keyboard nav when a floating overlay owns the focus — Radix
+    // DropdownMenu / Popover / Dialog handle arrow keys themselves, and the
+    // old native <select> used to absorb these natively. `data-radix-popper-
+    // content-wrapper` is Radix's shared wrapper for every floating primitive
+    // (Popover, DropdownMenu, Tooltip, HoverCard), so it catches the base
+    // picker and worktree picker in addition to role-based dialogs/menus.
+    const active = document.activeElement;
+    if (
+      active instanceof HTMLElement &&
+      active.closest('[role="menu"], [role="dialog"], [role="listbox"], [data-radix-popper-content-wrapper]')
+    ) {
       return;
     }
 
@@ -297,61 +323,51 @@ export const FileTree: React.FC<FileTreeProps> = ({
       {((worktrees && worktrees.length > 0 && onSelectWorktree) || (diffOptions && diffOptions.length > 0 && onSelectDiff)) && (
         <div className="px-2 py-1.5 border-b border-border/30 flex gap-2">
           {worktrees && worktrees.length > 0 && onSelectWorktree && (
-            <div className="relative flex-1 min-w-0">
-              <select
-                value={activeWorktreePath || ''}
-                onChange={(e) => onSelectWorktree(e.target.value || null)}
+            <div className="flex-1 min-w-0">
+              <WorktreePicker
+                worktrees={worktrees}
+                activeWorktreePath={activeWorktreePath ?? null}
+                currentBranch={currentBranch}
+                onSelect={onSelectWorktree}
                 disabled={isLoadingDiff}
-                className={`w-full px-2.5 py-1.5 rounded text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer disabled:opacity-50 disabled:cursor-wait appearance-none pr-7 ${
-                  activeWorktreePath
-                    ? 'bg-primary/10 border border-primary/30'
-                    : 'bg-muted'
-                }`}
-              >
-                <option value="">{currentBranch || 'Main repo'}</option>
-                {worktrees.map(wt => (
-                  <option key={wt.path} value={wt.path}>
-                    {(wt.branch || wt.path.split('/').pop()) + ' (worktree)'}
-                  </option>
-                ))}
-              </select>
-              <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
-                <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                </svg>
-              </div>
+              />
             </div>
           )}
           {diffOptions && diffOptions.length > 0 && onSelectDiff && (
-            <div className="relative flex-1 min-w-0">
-              <select
-                value={activeDiffType || 'uncommitted'}
-                onChange={(e) => onSelectDiff(e.target.value)}
-                disabled={isLoadingDiff}
-                className="w-full px-2.5 py-1.5 bg-muted rounded text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer disabled:opacity-50 disabled:cursor-wait appearance-none pr-7"
-              >
-                {diffOptions.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
-                {isLoadingDiff ? (
-                  <svg className="w-3.5 h-3.5 text-muted-foreground animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                ) : (
-                  <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                  </svg>
-                )}
-              </div>
+            <div className="flex-1 min-w-0">
+              <DiffTypePicker
+                options={diffOptions}
+                activeDiffType={activeDiffType || 'uncommitted'}
+                onSelect={onSelectDiff}
+                isLoading={isLoadingDiff}
+                hasBasePicker={!!onSelectBase && !!availableBranches}
+              />
             </div>
           )}
         </div>
       )}
+
+      {/* Base-branch picker — only relevant for branch / merge-base diff types */}
+      {onSelectBase &&
+        selectedBase &&
+        detectedBase &&
+        availableBranches &&
+        (activeDiffType === 'branch' || activeDiffType === 'merge-base') && (
+          <div className="px-2 py-1.5 border-b border-border/30 flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-wide text-muted-foreground flex-shrink-0">
+              compare against
+            </span>
+            <div className="flex-1 min-w-0">
+              <BaseBranchPicker
+                availableBranches={availableBranches}
+                selectedBase={selectedBase}
+                detectedBase={detectedBase}
+                onSelectBase={onSelectBase}
+                disabled={isLoadingDiff}
+              />
+            </div>
+          </div>
+        )}
 
       {/* File tree or search results */}
       <OverlayScrollArea className="flex-1 min-h-0">

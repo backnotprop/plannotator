@@ -45,6 +45,13 @@ export interface PlannotatorConfig {
    * (`gh auth login`). OS-level opt-in only — no UI surface. Default: false.
    */
   verifyAttestation?: boolean;
+  /**
+   * Enable Jina Reader for URL-to-markdown conversion during annotation.
+   * When true (default), `plannotator annotate <url>` routes through
+   * r.jina.ai for better JS-rendered page support and reader-mode extraction.
+   * Set to false to always use plain fetch + Turndown.
+   */
+  jina?: boolean;
 }
 
 const CONFIG_DIR = join(homedir(), ".plannotator");
@@ -124,4 +131,27 @@ export function getServerConfig(gitUser: string | null): {
 export function resolveDefaultDiffType(cfg?: PlannotatorConfig): DefaultDiffType {
   const v = cfg?.diffOptions?.defaultDiffType;
   return v === 'uncommitted' || v === 'unstaged' || v === 'staged' ? v : 'unstaged';
+}
+
+/**
+ * Resolve whether to use Jina Reader for URL annotation.
+ *
+ * Priority (highest wins):
+ *   --no-jina CLI flag  →  PLANNOTATOR_JINA env var  →  config.jina  →  default true
+ */
+export function resolveUseJina(cliNoJina: boolean, config: PlannotatorConfig): boolean {
+  // CLI flag has highest priority
+  if (cliNoJina) return false;
+
+  // Environment variable
+  const envVal = process.env.PLANNOTATOR_JINA;
+  if (envVal !== undefined) {
+    return envVal === "1" || envVal.toLowerCase() === "true";
+  }
+
+  // Config file
+  if (config.jina !== undefined) return config.jina;
+
+  // Default: enabled
+  return true;
 }

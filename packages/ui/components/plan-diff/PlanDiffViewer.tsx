@@ -177,7 +177,9 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
         )}
 
         {/* Diff content */}
-        {diffMode === "clean" ? (
+        {diffMode === "raw" ? (
+          <PlanRawDiffView blocks={diffBlocks} />
+        ) : (
           <PlanCleanDiffView
             blocks={diffBlocks}
             annotations={annotations}
@@ -185,9 +187,8 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
             onSelectAnnotation={onSelectAnnotation}
             selectedAnnotationId={selectedAnnotationId}
             mode={mode}
+            wordLevel={diffMode === "clean"}
           />
-        ) : (
-          <PlanRawDiffView blocks={diffBlocks} />
         )}
       </article>
     </div>

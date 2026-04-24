@@ -1081,3 +1081,150 @@ diffs-container {
 :root[style*="--diff-font-size-override"] .ai-markdown code {
   font-size: var(--diff-font-size-override) !important;
 }
+
+/* =====================================================
+   Code Tour
+   ===================================================== */
+
+/* --- Dialog overlay + card entrance / exit --- */
+@keyframes tour-dialog-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes tour-dialog-overlay-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes tour-dialog-content-in {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes tour-dialog-content-out {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(0.98); }
+}
+
+.tour-dialog-overlay {
+  animation: tour-dialog-overlay-in 150ms cubic-bezier(0.33, 1, 0.68, 1) both;
+}
+
+.tour-dialog-content {
+  animation: tour-dialog-content-in 250ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.tour-dialog-overlay-closing {
+  animation: tour-dialog-overlay-out 160ms cubic-bezier(0.33, 1, 0.68, 1) forwards;
+}
+
+.tour-dialog-content-closing {
+  animation: tour-dialog-content-out 180ms cubic-bezier(0.33, 1, 0.68, 1) forwards;
+  pointer-events: none;
+}
+
+/* --- Stop card reveal (applied by parent wrapper, staggered via animation-delay) --- */
+@keyframes tour-stop-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.tour-stop-reveal {
+  animation: tour-stop-reveal 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+/* --- Intro page exit: lifts up and fades out, then stops page reveals --- */
+@keyframes tour-intro-exit {
+  0%   { opacity: 1; transform: translateY(0) scale(1); }
+  30%  { opacity: 0.8; transform: translateY(-4px) scale(0.99); }
+  100% { opacity: 0; transform: translateY(-20px) scale(0.97); }
+}
+
+.tour-intro-exit {
+  animation: tour-intro-exit 320ms cubic-bezier(0.33, 1, 0.68, 1) forwards;
+  pointer-events: none;
+}
+
+/* --- Stops section label entrance (after intro exits) --- */
+@keyframes tour-section-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.tour-section-enter {
+  animation: tour-section-enter 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* --- Page slide transitions (stops ↔ checklist) --- */
+@keyframes tour-slide-out-left {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(-48px); }
+}
+
+@keyframes tour-slide-in-right {
+  from { opacity: 0; transform: translateX(48px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes tour-slide-out-right {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(48px); }
+}
+
+@keyframes tour-slide-in-left {
+  from { opacity: 0; transform: translateX(-48px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.tour-page-exit-fwd {
+  animation: tour-slide-out-left 220ms cubic-bezier(0.33, 1, 0.68, 1) forwards;
+  pointer-events: none;
+}
+
+.tour-page-enter-fwd {
+  animation: tour-slide-in-right 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.tour-page-exit-bwd {
+  animation: tour-slide-out-right 220ms cubic-bezier(0.33, 1, 0.68, 1) forwards;
+  pointer-events: none;
+}
+
+.tour-page-enter-bwd {
+  animation: tour-slide-in-left 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* --- Checkbox transition (ease for color changes — elegant, per the easing blueprint) --- */
+.tour-checkbox {
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+
+
+/* --- Reduced motion: disable all tour animations --- */
+@media (prefers-reduced-motion: reduce) {
+  .tour-dialog-overlay,
+  .tour-dialog-overlay-closing,
+  .tour-dialog-content,
+  .tour-dialog-content-closing,
+  .tour-stop-reveal,
+  .tour-intro-exit,
+  .tour-section-enter,
+  .tour-page-exit-fwd,
+  .tour-page-enter-fwd,
+  .tour-page-exit-bwd,
+  .tour-page-enter-bwd {
+    animation: none !important;
+  }
+  .tour-checkbox {
+    transition: none !important;
+  }
+}

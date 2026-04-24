@@ -151,7 +151,8 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
               onPrint();
             }}
             icon={<PrintIcon />}
-            label="Print Plan"
+            label="Print / Save as PDF"
+            subtitle="Choose 'Save as PDF' in the print dialog"
           />
           {sharingEnabled && (
             <ActionMenuItem

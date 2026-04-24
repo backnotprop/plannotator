@@ -100,10 +100,16 @@ export interface PlannotatorAnnotatePayload {
 	markdown?: string;
 	mode?: "annotate" | "annotate-folder" | "annotate-last";
 	folderPath?: string;
+	/** Enable review-gate UX (Approve / Annotate / Close), #570 */
+	gate?: boolean;
 }
 
 export interface PlannotatorAnnotationResult {
 	feedback: string;
+	/** True when the reviewer closed the session without providing feedback. */
+	exit?: boolean;
+	/** True when the reviewer clicked Approve in review-gate mode, #570 */
+	approved?: boolean;
 }
 
 export interface PlannotatorArchivePayload {
@@ -272,6 +278,8 @@ export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
 						payload.markdown ?? "",
 						payload.mode ?? "annotate",
 						payload.folderPath,
+						undefined,
+						payload.gate,
 					);
 					request.respond({ status: "handled", result });
 					return;
@@ -283,7 +291,7 @@ export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
 						request.respond({ status: "unavailable", error: "No assistant message found in session." });
 						return;
 					}
-					const result = await openLastMessageAnnotation(ctx, lastText);
+					const result = await openLastMessageAnnotation(ctx, lastText, payload?.gate);
 					request.respond({ status: "handled", result });
 					return;
 				}

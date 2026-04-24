@@ -148,6 +148,23 @@ pre code.hljs .hljs-code {
   background: oklch(from var(--destructive) l c h / 0.06);
 }
 
+/* Clean diff view - modified content (mix of additions and deletions in one
+   block, rendered inline via word-level diff).
+   Deliberate asymmetry with added/removed: add/remove are BLOCK-scope events
+   — the whole block matters, so a loud fill is the right signal. Modify is
+   a WORD-scope event — the words matter, and the inline red-struck /
+   green-highlighted word markers already grab attention. A block-level fill
+   would compete with that inline work; an amber gutter on a normal
+   background says "look inside, the change is in the text" while staying
+   consistent with the green/red/yellow diff convention. */
+.plan-diff-modified {
+  border-left: 3px solid oklch(from var(--warning) l c h / 0.75);
+  background: transparent;
+  padding-left: 0.75rem;
+  border-radius: 0 0.25rem 0.25rem 0;
+  margin: 0.25rem 0;
+}
+
 /* Clean diff view - unchanged (dimmed) */
 .plan-diff-unchanged {
   /* handled via opacity in component */

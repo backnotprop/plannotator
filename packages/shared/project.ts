@@ -58,3 +58,14 @@ export function extractDirName(path: string): string | null {
 
   return sanitizeTag(name);
 }
+
+/**
+ * Extract hostname from a URL string, or return the original string on failure.
+ */
+export function hostnameOrFallback(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}

@@ -13,6 +13,7 @@
 import React from 'react';
 import { PlanDiffBadge } from './plan-diff/PlanDiffBadge';
 import type { PlanDiffStats } from '../utils/planDiffEngine';
+import { hostnameOrFallback } from '@plannotator/shared/project';
 
 export interface DocBadgesProps {
   layout: 'column' | 'row';
@@ -24,6 +25,8 @@ export interface DocBadgesProps {
   showDemoBadge?: boolean;
   archiveInfo?: { status: 'approved' | 'denied' | 'unknown'; timestamp: string; title: string } | null;
   linkedDocInfo?: { filepath: string; onBack: () => void; label?: string; backLabel?: string } | null;
+  /** Source attribution for HTML/URL annotations (e.g. "https://..." or "index.html") */
+  sourceInfo?: string;
 }
 
 export const DocBadges: React.FC<DocBadgesProps> = ({
@@ -36,6 +39,7 @@ export const DocBadges: React.FC<DocBadgesProps> = ({
   showDemoBadge,
   archiveInfo,
   linkedDocInfo,
+  sourceInfo,
 }) => {
   const isRow = layout === 'row';
 
@@ -44,7 +48,7 @@ export const DocBadges: React.FC<DocBadgesProps> = ({
   // will truly produce visible output to avoid an empty wrapper div.
   const anything = isRow
     ? (!linkedDocInfo && ((hasPreviousVersion && planDiffStats) || archiveInfo))
-    : repoInfo || hasPreviousVersion || showDemoBadge || linkedDocInfo || archiveInfo;
+    : repoInfo || hasPreviousVersion || showDemoBadge || linkedDocInfo || archiveInfo || sourceInfo;
   if (!anything) return null;
 
   // Row layout: single horizontal line. Column layout: stacked rows.
@@ -77,6 +81,17 @@ export const DocBadges: React.FC<DocBadgesProps> = ({
             </span>
           )}
         </div>
+      )}
+
+      {sourceInfo && !linkedDocInfo && !isRow && (
+        <span
+          className="px-1.5 py-0.5 bg-muted/30 rounded truncate max-w-[200px]"
+          title={sourceInfo}
+        >
+          {/^https?:\/\//i.test(sourceInfo)
+            ? hostnameOrFallback(sourceInfo)
+            : sourceInfo}
+        </span>
       )}
 
       {onPlanDiffToggle && !linkedDocInfo && (

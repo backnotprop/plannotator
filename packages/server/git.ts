@@ -36,7 +36,7 @@ export type {
 
 async function runGit(
   args: string[],
-  options?: { cwd?: string },
+  options?: { cwd?: string; timeoutMs?: number },
 ): Promise<GitCommandResult> {
   const proc = Bun.spawn(["git", ...args], {
     cwd: options?.cwd,
@@ -44,11 +44,18 @@ async function runGit(
     stderr: "pipe",
   });
 
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  if (options?.timeoutMs) {
+    timer = setTimeout(() => proc.kill(), options.timeoutMs);
+  }
+
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
     proc.exited,
   ]);
+
+  if (timer) clearTimeout(timer);
 
   return { stdout, stderr, exitCode };
 }

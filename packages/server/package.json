@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/server",
-  "version": "0.17.8",
+  "version": "0.19.1",
   "private": true,
   "description": "Shared server implementation for Plannotator plugins",
   "main": "index.ts",

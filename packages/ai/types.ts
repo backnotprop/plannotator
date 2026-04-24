@@ -364,6 +364,6 @@ export interface OpenCodeConfig extends AIProviderConfig {
   type: "opencode-sdk";
   /** Hostname for the OpenCode server. Default: "127.0.0.1". */
   hostname?: string;
-  /** Port for the OpenCode server. Default: random. */
+  /** Port for the OpenCode server. Default: 4096. */
   port?: number;
 }

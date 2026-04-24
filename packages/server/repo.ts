@@ -8,7 +8,7 @@
 import { $ } from "bun";
 
 import type { RepoInfo } from "@plannotator/shared/repo";
-import { parseRemoteUrl, getDirName } from "@plannotator/shared/repo";
+import { parseRemoteUrl, parseRemoteHost, getDirName } from "@plannotator/shared/repo";
 
 /**
  * Get current git branch
@@ -40,10 +40,12 @@ export async function getRepoInfo(): Promise<RepoInfo | null> {
 	try {
 		const result = await $`git remote get-url origin`.quiet().nothrow();
 		if (result.exitCode === 0) {
-			const orgRepo = parseRemoteUrl(result.stdout.toString().trim());
+			const remoteUrl = result.stdout.toString().trim();
+			const orgRepo = parseRemoteUrl(remoteUrl);
 			if (orgRepo) {
 				branch = await getCurrentBranch();
-				return { display: orgRepo, branch };
+				const host = parseRemoteHost(remoteUrl) ?? undefined;
+				return { display: orgRepo, branch, host };
 			}
 		}
 	} catch {

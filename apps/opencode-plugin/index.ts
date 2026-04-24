@@ -58,9 +58,19 @@ import {
 } from "./commands";
 import { planDenyFeedback } from "@plannotator/shared/feedback-templates";
 import {
-  normalizeEditPermission,
   stripConflictingPlanModeRules,
 } from "./plan-mode";
+import {
+  applyWorkflowConfig,
+  isPlanningAgent,
+  normalizeWorkflowOptions,
+  shouldApplyToolDefinitionRewrites,
+  shouldInjectFullPlanningPrompt,
+  shouldInjectGenericPlanReminder,
+  shouldRegisterSubmitPlan,
+  shouldRejectSubmitPlanForAgent,
+  type PlannotatorOpenCodeOptions,
+} from "./workflow";
 
 // Lazy-load HTML at first use instead of embedding in the bundle.
 // The two SPA files are ~20 MB combined — inlining them as string literals
@@ -68,13 +78,32 @@ import {
 let _planHtml: string | null = null;
 let _reviewHtml: string | null = null;
 
+function resolveBundledHtmlPath(filename: string): string {
+  const candidates = [
+    path.join(import.meta.dir, filename),
+    path.join(import.meta.dir, "..", filename),
+  ];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error(`Could not find bundled HTML asset: ${filename}`);
+}
+
+function readBundledHtml(filename: string): string {
+  return readFileSync(resolveBundledHtmlPath(filename), "utf-8");
+}
+
 function getPlanHtml(): string {
-  if (!_planHtml) _planHtml = readFileSync(path.join(import.meta.dir, "..", "plannotator.html"), "utf-8");
+  if (!_planHtml) _planHtml = readBundledHtml("plannotator.html");
   return _planHtml;
 }
 
 function getReviewHtml(): string {
-  if (!_reviewHtml) _reviewHtml = readFileSync(path.join(import.meta.dir, "..", "review-editor.html"), "utf-8");
+  if (!_reviewHtml) _reviewHtml = readBundledHtml("review-editor.html");
   return _reviewHtml;
 }
 
@@ -151,10 +180,23 @@ Only write and submit a plan once you have sufficient context.
 
 // ── Plugin ────────────────────────────────────────────────────────────────
 
-export const PlannotatorPlugin: Plugin = async (ctx) => {
+function getLastUserAgentFromMessages(messages: any[] | undefined): string | undefined {
+  if (!messages) return undefined;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.info?.role === "user" && typeof msg.info.agent === "string") {
+      return msg.info.agent;
+    }
+  }
+  return undefined;
+}
+
+export const PlannotatorPlugin: Plugin = async (ctx, rawOptions?: PlannotatorOpenCodeOptions) => {
+  const workflowOptions = normalizeWorkflowOptions(rawOptions);
+
   // Preload HTML in background — populates the sync cache before first use
-  Bun.file(path.join(import.meta.dir, "..", "plannotator.html")).text().then(h => { _planHtml = h; });
-  Bun.file(path.join(import.meta.dir, "..", "review-editor.html")).text().then(h => { _reviewHtml = h; });
+  Bun.file(resolveBundledHtmlPath("plannotator.html")).text().then(h => { _planHtml = h; });
+  Bun.file(resolveBundledHtmlPath("review-editor.html")).text().then(h => { _reviewHtml = h; });
 
   let cachedAgents: any[] | null = null;
 
@@ -174,6 +216,10 @@ export const PlannotatorPlugin: Plugin = async (ctx) => {
 
   function getShareBaseUrl(): string | undefined {
     return process.env.PLANNOTATOR_SHARE_URL || undefined;
+  }
+
+  function getPasteApiUrl(): string | undefined {
+    return process.env.PLANNOTATOR_PASTE_URL || undefined;
   }
 
   function getPlanTimeoutSeconds(): number | null {
@@ -197,36 +243,25 @@ export const PlannotatorPlugin: Plugin = async (ctx) => {
     return val === "1" || val === "true";
   }
 
-  return {
-    // Register submit_plan as primary-only tool (hidden from sub-agents by default)
+  const plugin: any = {
     config: async (opencodeConfig) => {
-      if (!allowSubagents()) {
-        const existingPrimaryTools = opencodeConfig.experimental?.primary_tools ?? [];
-        if (!existingPrimaryTools.includes("submit_plan")) {
-          opencodeConfig.experimental = {
-            ...opencodeConfig.experimental,
-            primary_tools: [...existingPrimaryTools, "submit_plan"],
-          };
-        }
-      }
-
-      // Allow the plan agent to write .md files anywhere.
-      // OpenCode's built-in plan agent uses relative-path globs that break
-      // when worktree != cwd (non-git projects). Per-agent config merges
-      // last, so this only affects the plan agent.
-      opencodeConfig.agent ??= {};
-      opencodeConfig.agent.plan ??= {};
-      opencodeConfig.agent.plan.permission ??= {};
-      opencodeConfig.agent.plan.permission.edit = {
-        ...normalizeEditPermission(opencodeConfig.agent.plan.permission.edit),
-        "*.md": "allow",
-      };
+      applyWorkflowConfig(opencodeConfig, workflowOptions, allowSubagents());
     },
 
     // Replace OpenCode's "STRICTLY FORBIDDEN" plan mode prompt with a version
     // that allows markdown file writing. OpenCode's original blocks ALL file edits,
     // but we need the agent to write plans, specs, docs, etc.
     "experimental.chat.messages.transform": async (input, output) => {
+      if (workflowOptions.workflow === "manual") return;
+
+      const lastUserAgent = getLastUserAgentFromMessages(output.messages);
+      if (
+        workflowOptions.workflow === "plan-agent"
+        && !isPlanningAgent(lastUserAgent, workflowOptions)
+      ) {
+        return;
+      }
+
       for (const message of output.messages) {
         if (message.info.role !== "user") continue;
         for (const part of message.parts as any[]) {
@@ -257,6 +292,8 @@ tools (except writing markdown files), or otherwise make changes to the system.
     // Suppress plan_exit — redirect to submit_plan
     // Override todowrite — defer to submit_plan during planning
     "tool.definition": async (input, output) => {
+      if (!shouldApplyToolDefinitionRewrites(workflowOptions)) return;
+
       if (input.toolID === "plan_exit") {
         output.description =
           "Do not call this tool. Use submit_plan instead — it opens a visual review UI for plan approval.";
@@ -269,12 +306,15 @@ tools (except writing markdown files), or otherwise make changes to the system.
 
     // Inject planning instructions into system prompt
     "experimental.chat.system.transform": async (input, output) => {
+      if (workflowOptions.workflow === "manual") return;
+
       const systemText = output.system.join("\n");
       if (systemText.toLowerCase().includes("title generator") || systemText.toLowerCase().includes("generate a title")) {
         return;
       }
 
       let lastUserAgent: string | undefined;
+      let isSubagent = false;
       try {
         const messagesResponse = await ctx.client.session.messages({
           // @ts-ignore - sessionID exists on input
@@ -282,21 +322,9 @@ tools (except writing markdown files), or otherwise make changes to the system.
         });
         const messages = messagesResponse.data;
 
-        if (messages) {
-          for (let i = messages.length - 1; i >= 0; i--) {
-            const msg = messages[i];
-            if (msg.info.role === "user") {
-              // @ts-ignore - UserMessage has agent field
-              lastUserAgent = msg.info.agent;
-              break;
-            }
-          }
-        }
+        lastUserAgent = getLastUserAgentFromMessages(messages);
 
         if (!lastUserAgent) return;
-
-        // Build agent doesn't need planning instructions
-        if (lastUserAgent === "build") return;
 
         // Cache agents list (static per session)
         if (!cachedAgents) {
@@ -307,22 +335,21 @@ tools (except writing markdown files), or otherwise make changes to the system.
         }
         const agent = cachedAgents.find((a: { name: string }) => a.name === lastUserAgent);
 
-        // Skip sub-agents
         // @ts-ignore - Agent has mode field
-        if (agent?.mode === "subagent") return;
+        isSubagent = agent?.mode === "subagent";
 
       } catch {
         return;
       }
 
-      // Plan agent: strip conflicting OpenCode rules, inject full prompt
-      if (lastUserAgent === "plan") {
+      if (shouldInjectFullPlanningPrompt(lastUserAgent, workflowOptions)) {
         output.system = stripConflictingPlanModeRules(output.system);
         output.system.push(getPlanningPrompt());
         return;
       }
 
-      // Other primary agents: minimal reminder about the tool
+      if (!shouldInjectGenericPlanReminder(lastUserAgent, isSubagent, workflowOptions)) return;
+
       output.system.push(`## Plan Submission
 
 When you have completed your plan, call the \`submit_plan\` tool to submit it for user review. Pass your plan as markdown text, or pass an absolute file path to a .md file.
@@ -344,11 +371,14 @@ Do NOT proceed with implementation until your plan is approved.`);
         reviewHtmlContent: getReviewHtml(),
         getSharingEnabled,
         getShareBaseUrl,
+        getPasteApiUrl,
         directory: ctx.directory,
       };
 
       const feedback = await handleAnnotateLastCommand(
-        { properties: { sessionID: input.sessionID } },
+        // input.arguments is the raw tail string from OpenCode's command dispatcher —
+        // needed so --gate / --json reach handleAnnotateLastCommand's parseAnnotateArgs (#570).
+        { properties: { sessionID: input.sessionID, arguments: input.arguments } },
         deps
       );
 
@@ -386,6 +416,7 @@ Do NOT proceed with implementation until your plan is approved.`);
         reviewHtmlContent: getReviewHtml(),
         getSharingEnabled,
         getShareBaseUrl,
+        getPasteApiUrl,
         directory: ctx.directory,
       };
 
@@ -396,8 +427,10 @@ Do NOT proceed with implementation until your plan is approved.`);
       if (commandName === "plannotator-archive")
         return handleArchiveCommand(event, deps);
     },
+  };
 
-    tool: {
+  if (shouldRegisterSubmitPlan(workflowOptions)) {
+    plugin.tool = {
       submit_plan: tool({
         description:
           "Planning tool used to submit a plan to the user for review. Before calling this tool you must conduct interactive and exploratory analysis in order to submit a quality plan. Ask questions. Explore the codebase for context if needed. Only call submit_plan once you have enough details to create a quality plan. Work with the user to get those details. Pass either markdown text or an absolute path to a .md file.",
@@ -408,6 +441,13 @@ Do NOT proceed with implementation until your plan is approved.`);
         },
 
         async execute(args, context) {
+          const invokingAgent = (context as { agent?: string }).agent;
+          if (shouldRejectSubmitPlanForAgent(invokingAgent, workflowOptions)) {
+            return `Plannotator is configured for plan-agent mode. submit_plan can only be called by: ${workflowOptions.planningAgents.join(", ")}.
+
+Use /plannotator-last or /plannotator-annotate for manual review, or set workflow to all-agents to allow broader submit_plan access.`;
+          }
+
           // Auto-detect: file path or plan text
           let planContent: string;
           let sourceFilePath: string | undefined;
@@ -429,6 +469,7 @@ Do NOT proceed with implementation until your plan is approved.`);
             origin: "opencode",
             sharingEnabled,
             shareBaseUrl: getShareBaseUrl(),
+            pasteApiUrl: getPasteApiUrl(),
             htmlContent: getPlanHtml(),
             opencodeClient: ctx.client,
             onReady: async (url, isRemote, port) => {
@@ -465,14 +506,6 @@ Do NOT proceed with implementation until your plan is approved.`);
 
             if (shouldSwitchAgent) {
               try {
-                await ctx.client.tui.executeCommand({
-                  body: { command: "agent_cycle" },
-                });
-              } catch {
-                // Silently fail
-              }
-
-              try {
                 await ctx.client.session.prompt({
                   path: { id: context.sessionID },
                   body: {
@@ -507,8 +540,10 @@ Proceed with implementation, incorporating these notes where applicable.`;
           }
         },
       }),
-    },
-  };
+    };
+  }
+
+  return plugin;
 };
 
 export default PlannotatorPlugin;

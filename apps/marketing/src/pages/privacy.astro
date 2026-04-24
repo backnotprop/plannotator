@@ -1,0 +1,125 @@
+---
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+---
+<Base
+  title="Privacy Policy - Plannotator"
+  description="Plannotator is a local-first, open source project. This privacy policy explains what data may be processed when you use our website and hosted sharing services."
+>
+  <div class="min-h-screen bg-background text-foreground">
+    <Nav />
+    <div class="max-w-3xl mx-auto px-8 pt-20 pb-16">
+      <article class="prose">
+        <h1>Privacy Policy</h1>
+        <p class="text-sm text-muted-foreground">Last updated: April 15, 2026</p>
+
+        <p>Plannotator is a local-first, open source project. The core Plannotator experience runs on your machine.</p>
+        <p>This Privacy Policy explains what data may be processed when you use:</p>
+        <ul>
+          <li><a href="https://plannotator.ai">https://plannotator.ai</a></li>
+          <li><a href="https://share.plannotator.ai">https://share.plannotator.ai</a></li>
+          <li>any hosted sharing or short-link services we operate</li>
+        </ul>
+
+        <h2>1. Contact</h2>
+        <p>
+          <strong>Michael Ramos</strong><br />
+          Email: <a href="mailto:backnotprop@gmail.com">backnotprop@gmail.com</a>
+        </p>
+
+        <h2>2. What this policy covers</h2>
+        <p>This policy covers our website and hosted sharing services.</p>
+        <p>This policy does <strong>not</strong> cover:</p>
+        <ul>
+          <li>your local use of Plannotator on your own machine, except when you choose to use our hosted sharing features</li>
+          <li>third-party tools or model providers you use locally, such as ChatGPT, Codex, Claude Code, or others</li>
+          <li>self-hosted deployments run by you or your organization</li>
+        </ul>
+
+        <h2>3. How Plannotator works</h2>
+        <p>Plannotator is designed to run locally. We do not host your normal day-to-day planning workflow.</p>
+        <p>Our services are only involved when you use our website or choose to use hosted sharing features.</p>
+        <p>For hosted sharing:</p>
+        <ul>
+          <li>smaller shares may be encoded directly in the URL</li>
+          <li>larger shares may be stored temporarily in encrypted form behind a short link</li>
+          <li>if you self-host the sharing services, your deployment is separate from ours</li>
+        </ul>
+
+        <h2>4. What we collect</h2>
+        <p>We try to collect as little as possible.</p>
+
+        <h3>a. Shared plan data</h3>
+        <p>If you use hosted sharing for larger plans, we may temporarily store an encrypted version of the shared plan so the short link can work.</p>
+        <p>We do not store unencrypted shared plan contents through that flow.</p>
+        <p>We do not store the decryption key. Because the key is not stored by our hosted service, we cannot access the unencrypted contents of shared plans through this flow.</p>
+
+        <h3>b. Basic infrastructure data</h3>
+        <p>Our hosted services rely on infrastructure providers such as AWS, CloudFront, and Cloudflare. As a result, limited technical data such as IP addresses or request metadata may be processed by those providers as part of delivering the service.</p>
+        <p>We have configured logging services to be turned off to the extent supported by those providers and services.</p>
+
+        <h3>c. Contact information</h3>
+        <p>If you contact us directly, we may receive your email address and the contents of your message.</p>
+
+        <h2>5. What we do not collect</h2>
+        <ul>
+          <li>We do not use tracking cookies.</li>
+          <li>We do not use analytics cookies.</li>
+          <li>We do not store analytics data.</li>
+          <li>We do not store telemetry about your local Plannotator usage.</li>
+        </ul>
+
+        <h2>6. Cookies and local storage</h2>
+        <p>We may use cookies or similar local storage only where needed for the app to function, such as remembering settings, preferences, or theme choices.</p>
+        <p>We do not use cookies for advertising or analytics.</p>
+
+        <h2>7. How we use information</h2>
+        <p>We use information only as needed to:</p>
+        <ul>
+          <li>serve the website and hosted sharing features</li>
+          <li>deliver shared content through short links</li>
+          <li>keep the service functioning and secure</li>
+          <li>respond to support or contact requests</li>
+          <li>comply with legal obligations</li>
+        </ul>
+
+        <h2>8. Third parties and subprocessors</h2>
+        <p>Our hosted services may rely on third-party infrastructure providers, including:</p>
+        <ul>
+          <li>AWS</li>
+          <li>Amazon CloudFront</li>
+          <li>Cloudflare</li>
+        </ul>
+        <p>These providers may process limited technical information as part of operating and delivering the service.</p>
+
+        <h2>9. Retention</h2>
+        <p>Encrypted shared payloads are retained only as long as needed for the hosted sharing flow to work.</p>
+        <p>Contact emails or support messages may be retained as needed to respond to you and keep basic records of those conversations.</p>
+        <p>We may retain information longer if required for security, abuse prevention, or legal compliance.</p>
+
+        <h2>10. Your choices</h2>
+        <p>You can avoid our hosted services entirely by:</p>
+        <ul>
+          <li>using Plannotator locally without hosted sharing</li>
+          <li>self-hosting the sharing services</li>
+          <li>disabling sharing features</li>
+        </ul>
+        <p>If you are working on sensitive, regulated, or confidential projects, we recommend self-hosting or disabling hosted sharing.</p>
+
+        <h2>11. Security</h2>
+        <p>We take reasonable steps to limit the data processed by our hosted services. However, no website or internet-based system can offer perfect security.</p>
+        <p>For sensitive or regulated use cases, self-hosting is the safest option.</p>
+
+        <h2>12. Your rights</h2>
+        <p>Depending on where you live, you may have rights to request access to, correction of, or deletion of personal information we hold about you.</p>
+        <p>To make a privacy request, email: <a href="mailto:backnotprop@gmail.com">backnotprop@gmail.com</a></p>
+        <p>Because Plannotator is primarily local-first, and because some hosted shared data may be stored only in encrypted form, our ability to identify, access, or act on some data may be limited.</p>
+
+        <h2>13. Changes to this policy</h2>
+        <p>We may update this Privacy Policy from time to time. If we do, we will update the "Last updated" date above.</p>
+      </article>
+    </div>
+    <Footer />
+  </div>
+</Base>

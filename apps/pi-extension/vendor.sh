@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 
 mkdir -p generated generated/ai/providers
 
-for f in feedback-templates review-core storage draft project pr-provider pr-github pr-gitlab checklist integrations-common repo reference-common favicon resolve-file config external-annotation agent-jobs worktree; do
+for f in feedback-templates review-core storage draft project pr-provider pr-github pr-gitlab checklist integrations-common repo reference-common favicon resolve-file config external-annotation agent-jobs worktree html-to-markdown url-to-markdown tour annotate-args at-reference; do
   src="../../packages/shared/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/shared/%s.ts\n' "$f" | cat - "$src" > "generated/$f.ts"
 done
@@ -18,6 +18,17 @@ for f in codex-review claude-review path-utils; do
     | sed 's|from "./vcs"|from "./review-core.js"|' \
     | sed 's|from "./pr"|from "./pr-provider.js"|' \
     | sed 's|from "./path-utils"|from "./path-utils.js"|' \
+    > "generated/$f.ts"
+done
+
+# tour-review lives in packages/server/tour/ — parent-relative imports and the
+# shared tour types package each map to the flat generated/ layout.
+for f in tour-review; do
+  src="../../packages/server/tour/$f.ts"
+  printf '// @generated — DO NOT EDIT. Source: packages/server/tour/%s.ts\n' "$f" | cat - "$src" \
+    | sed 's|from "\.\./vcs"|from "./review-core.js"|' \
+    | sed 's|from "\.\./pr"|from "./pr-provider.js"|' \
+    | sed 's|from "@plannotator/shared/tour"|from "./tour.js"|' \
     > "generated/$f.ts"
 done
 

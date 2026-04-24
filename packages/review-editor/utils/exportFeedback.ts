@@ -17,14 +17,46 @@ export function formatConventionalPrefix(
 }
 
 /**
+ * Describes what the reviewer was looking at in local-review mode — diff mode,
+ * optional base branch, optional worktree. Threaded into the feedback header so
+ * the receiving agent knows which diff the annotations are anchored to. Ignored
+ * in PR mode, where `prMeta` already carries equivalent context.
+ */
+export interface FeedbackDiffContext {
+  mode: string;
+  base?: string;
+  worktreePath?: string | null;
+}
+
+function describeDiff(ctx: FeedbackDiffContext): string {
+  const { mode, base, worktreePath } = ctx;
+  let label: string;
+  switch (mode) {
+    case "uncommitted":  label = "Uncommitted changes"; break;
+    case "staged":       label = "Staged changes"; break;
+    case "unstaged":     label = "Unstaged changes"; break;
+    case "last-commit":  label = "Last commit"; break;
+    case "branch":       label = base ? `Branch diff vs \`${base}\`` : "Branch diff"; break;
+    case "merge-base":   label = base ? `PR Diff vs \`${base}\`` : "PR Diff"; break;
+    default:             label = mode; // p4-* or anything else — show raw
+  }
+  return worktreePath ? `${label} _(worktree: ${worktreePath})_` : label;
+}
+
+/**
  * Build markdown feedback from code review annotations.
  *
  * In PR mode (prMeta provided), the header includes repo, PR number,
  * title, branches, and URL so the receiving agent has full context.
+ *
+ * In local mode, an optional diffContext adds one line describing which
+ * diff the reviewer was looking at — otherwise the agent only sees file
+ * paths and line numbers and has to guess which diff those anchor to.
  */
 export function exportReviewFeedback(
   annotations: CodeAnnotation[],
   prMeta?: PRMetadata | null,
+  diffContext?: FeedbackDiffContext,
 ): string {
   if (annotations.length === 0) {
     return '# Code Review\n\nNo feedback provided.';
@@ -42,7 +74,7 @@ export function exportReviewFeedback(
       `**${prMeta.title}**\n` +
       `Branch: \`${prMeta.headBranch}\` → \`${prMeta.baseBranch}\`\n` +
       `${prMeta.url}\n\n`
-    : '# Code Review Feedback\n\n';
+    : `# Code Review Feedback\n\n${diffContext ? `**Diff:** ${describeDiff(diffContext)}\n\n` : ''}`;
 
   for (const [filePath, fileAnnotations] of grouped) {
     output += `## ${filePath}\n\n`;

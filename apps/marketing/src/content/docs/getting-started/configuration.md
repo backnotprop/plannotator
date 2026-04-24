@@ -57,7 +57,25 @@ OpenCode uses `opencode.json` to load the plugin:
 }
 ```
 
-This registers the `submit_plan` tool. Slash commands (`/plannotator-review`, `/plannotator-annotate`) require the CLI to be installed separately via the install script.
+This uses the default `plan-agent` workflow: `submit_plan` is registered for OpenCode's `plan` agent, while `build` and other primary agents do not see it.
+
+To configure the workflow explicitly:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    ["@plannotator/opencode@latest", {
+      "workflow": "plan-agent",
+      "planningAgents": ["plan"]
+    }]
+  ]
+}
+```
+
+Use `workflow: "manual"` for commands-only mode, or `workflow: "all-agents"` to restore the legacy behavior where primary agents can call `submit_plan`. In `plan-agent` mode, any names listed in `planningAgents` are added alongside OpenCode's built-in `plan` agent. Slash commands (`/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`) require the CLI to be installed separately via the install script.
+
+If you are upgrading from an older OpenCode install, see the [OpenCode 0.19.1 migration guide](/docs/guides/opencode-migration-0-19-1/).
 
 ## Plan saving
 

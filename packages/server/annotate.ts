@@ -11,7 +11,7 @@
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
  */
 
-import { isRemoteSession, getServerPort } from "./remote";
+import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
 import { getRepoInfo } from "./repo";
 import type { Origin } from "@plannotator/shared/agents";
 import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon } from "./shared-handlers";
@@ -19,7 +19,7 @@ import { handleDoc, handleFileBrowserFiles, handleObsidianVaults, handleObsidian
 import { contentHash, deleteDraft } from "./draft";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { saveConfig, detectGitUser, getServerConfig } from "./config";
-import { dirname } from "path";
+import { dirname, resolve as resolvePath } from "path";
 import { isWSL } from "./browser";
 
 // Re-export utilities
@@ -48,6 +48,10 @@ export interface AnnotateServerOptions {
   shareBaseUrl?: string;
   /** Base URL of the paste service API for short URL sharing */
   pasteApiUrl?: string;
+  /** Source attribution: original URL or filename (e.g. "https://..." or "index.html") */
+  sourceInfo?: string;
+  /** Enable review-gate UX: adds an Approve button alongside Close/Send Annotations (#570) */
+  gate?: boolean;
   /** Called when server starts with the URL, remote status, and port */
   onReady?: (url: string, isRemote: boolean, port: number) => void;
 }
@@ -64,6 +68,7 @@ export interface AnnotateServerResult {
     feedback: string;
     annotations: unknown[];
     exit?: boolean;
+    approved?: boolean;
   }>;
   /** Stop the server */
   stop: () => void;
@@ -92,9 +97,11 @@ export async function startAnnotateServer(
     origin,
     mode = "annotate",
     folderPath,
+    sourceInfo,
     sharingEnabled = true,
     shareBaseUrl,
     pasteApiUrl,
+    gate = false,
     onReady,
   } = options;
 
@@ -102,7 +109,11 @@ export async function startAnnotateServer(
   const configuredPort = getServerPort();
   const wslFlag = await isWSL();
   const gitUser = detectGitUser();
-  const draftKey = contentHash(markdown);
+  const draftSource =
+    mode === "annotate-folder" && folderPath
+      ? `folder:${resolvePath(folderPath)}`
+      : markdown;
+  const draftKey = contentHash(draftSource);
   const externalAnnotations = createExternalAnnotationHandler("plan");
 
   // Detect repo info (cached for this session)
@@ -113,11 +124,13 @@ export async function startAnnotateServer(
     feedback: string;
     annotations: unknown[];
     exit?: boolean;
+    approved?: boolean;
   }) => void;
   const decisionPromise = new Promise<{
     feedback: string;
     annotations: unknown[];
     exit?: boolean;
+    approved?: boolean;
   }>((resolve) => {
     resolveDecision = resolve;
   });
@@ -128,6 +141,7 @@ export async function startAnnotateServer(
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       server = Bun.serve({
+        hostname: getServerHostname(),
         port: configuredPort,
 
         async fetch(req, server) {
@@ -140,6 +154,8 @@ export async function startAnnotateServer(
               origin,
               mode,
               filePath,
+              sourceInfo,
+              gate,
               sharingEnabled,
               shareBaseUrl,
               pasteApiUrl,
@@ -172,9 +188,10 @@ export async function startAnnotateServer(
           }
 
           // API: Serve a linked markdown document
-          // Inject source file's directory as base for relative path resolution
+          // Inject source file's directory as base for relative path resolution.
+          // Skip base injection for URL annotations — there's no local directory to resolve against.
           if (url.pathname === "/api/doc" && req.method === "GET") {
-            if (!url.searchParams.has("base")) {
+            if (!url.searchParams.has("base") && !/^https?:\/\//i.test(filePath)) {
               const docUrl = new URL(req.url);
               docUrl.searchParams.set("base", dirname(filePath));
               return handleDoc(new Request(docUrl.toString()));
@@ -224,6 +241,13 @@ export async function startAnnotateServer(
           if (url.pathname === "/api/exit" && req.method === "POST") {
             deleteDraft(draftKey);
             resolveDecision({ feedback: "", annotations: [], exit: true });
+            return Response.json({ ok: true });
+          }
+
+          // API: Approve the annotation session (review-gate UX, #570)
+          if (url.pathname === "/api/approve" && req.method === "POST") {
+            deleteDraft(draftKey);
+            resolveDecision({ feedback: "", annotations: [], approved: true });
             return Response.json({ ok: true });
           }
 

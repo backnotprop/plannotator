@@ -15,8 +15,24 @@
  */
 
 import { readdirSync, statSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
+
+const DEFAULT_SESSIONS_DIR = join(homedir(), ".claude", "sessions");
+const DEFAULT_PROJECTS_DIR = join(homedir(), ".claude", "projects");
+
+/**
+ * Normalize a cwd for comparison. On Windows, filesystems are case-insensitive
+ * and processes can report drive letters in either case, so we lowercase and
+ * fold slashes. On Unix, cwds are compared as-is.
+ */
+export function normalizeCwdForCompare(cwd: string): string {
+  if (process.platform === "win32") {
+    return cwd.replace(/\//g, "\\").toLowerCase();
+  }
+  return cwd;
+}
 
 // --- Types ---
 
@@ -77,7 +93,7 @@ export function findSessionLogs(projectDir: string): string[] {
     try {
       withMtime.push({ path: full, mtime: statSync(full).mtimeMs });
     } catch {
-      continue;
+      // File disappeared between readdir and stat — skip
     }
   }
 
@@ -95,9 +111,9 @@ export function findSessionLogs(projectDir: string): string[] {
  * while our cwd may have mixed case. The fallback scans the projects directory
  * for a case-insensitive match.
  */
-export function findSessionLogsForCwd(cwd: string): string[] {
+export function findSessionLogsForCwd(cwd: string, projectsDirOverride?: string): string[] {
   const slug = projectSlugFromCwd(cwd);
-  const projectsDir = join(homedir(), ".claude", "projects");
+  const projectsDir = projectsDirOverride ?? DEFAULT_PROJECTS_DIR;
   const projectDir = join(projectsDir, slug);
 
   // Try exact match first
@@ -135,7 +151,7 @@ export function findSessionLogsForCwd(cwd: string): string[] {
  * (e.g. after the user runs `cd` during a session).
  */
 
-interface SessionMetadata {
+export interface SessionMetadata {
   pid: number;
   sessionId: string;
   cwd: string;
@@ -146,8 +162,11 @@ interface SessionMetadata {
  * Read a Claude Code session metadata file for a given PID.
  * Returns null if the file doesn't exist or can't be parsed.
  */
-function readSessionMetadata(pid: number): SessionMetadata | null {
-  const metaPath = join(homedir(), ".claude", "sessions", `${pid}.json`);
+function readSessionMetadata(
+  pid: number,
+  sessionsDir: string
+): SessionMetadata | null {
+  const metaPath = join(sessionsDir, `${pid}.json`);
   try {
     return JSON.parse(readFileSync(metaPath, "utf-8"));
   } catch {
@@ -156,25 +175,211 @@ function readSessionMetadata(pid: number): SessionMetadata | null {
 }
 
 /**
- * Resolve the session log path using Claude Code's session metadata.
- *
- * Strategy:
- * 1. Read ~/.claude/sessions/<ppid>.json to get the exact sessionId and cwd.
- * 2. Use findSessionLogsForCwd() with the session's original cwd (not the
- *    current shell cwd), which handles case-insensitive slug matching on Windows.
- * 3. Return the log matching the sessionId, or null.
- *
- * Returns null if session metadata is unavailable or the log file doesn't exist.
+ * Parse `ps -eo pid=,ppid=` output into a pid → ppid map.
+ * Each non-empty line is expected to be two whitespace-separated integers.
+ * Malformed lines are skipped.
  */
-export function resolveSessionLogByPpid(): string | null {
-  const ppid = process.ppid;
-  if (!ppid) return null;
+export function parseProcessTablePs(stdout: string): Map<number, number> {
+  const table = new Map<number, number>();
+  for (const line of stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const parts = trimmed.split(/\s+/);
+    if (parts.length < 2) continue;
+    const pid = parseInt(parts[0], 10);
+    const ppid = parseInt(parts[1], 10);
+    if (Number.isFinite(pid) && Number.isFinite(ppid)) {
+      table.set(pid, ppid);
+    }
+  }
+  return table;
+}
 
-  const meta = readSessionMetadata(ppid);
-  if (!meta?.sessionId || !meta?.cwd) return null;
+/**
+ * Parse PowerShell `Get-CimInstance Win32_Process | ConvertTo-Csv` output
+ * into a pid → ppid map. Skips the CSV header and any malformed rows.
+ */
+export function parseProcessTableCsv(stdout: string): Map<number, number> {
+  const table = new Map<number, number>();
+  const lines = stdout.split(/\r?\n/);
+  // Skip the CSV header row if present
+  for (let i = 1; i < lines.length; i++) {
+    const match = lines[i].trim().match(/^"?(\d+)"?\s*,\s*"?(\d+)"?$/);
+    if (!match) continue;
+    const pid = parseInt(match[1], 10);
+    const ppid = parseInt(match[2], 10);
+    if (Number.isFinite(pid) && Number.isFinite(ppid)) {
+      table.set(pid, ppid);
+    }
+  }
+  return table;
+}
 
-  const candidates = findSessionLogsForCwd(meta.cwd);
-  return candidates.find((p) => p.includes(meta.sessionId)) ?? null;
+/**
+ * Snapshot the entire process table in a single spawn, platform-aware.
+ *
+ * Unix: `ps -eo pid=,ppid=` (suppresses headers with trailing `=`).
+ * Windows: `powershell Get-CimInstance Win32_Process | ConvertTo-Csv`.
+ *   PowerShell 5.1 ships with every Windows install as `powershell.exe`.
+ *
+ * Returns an empty map on any failure (missing binary, non-zero exit, timeout).
+ * Callers walk the returned map with cycle detection, so an empty map just
+ * means the ancestor-PID resolver degrades to tier 2.
+ */
+function snapshotProcessTable(): Map<number, number> {
+  try {
+    if (process.platform === "win32") {
+      const result = spawnSync(
+        "powershell",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Csv -NoTypeInformation",
+        ],
+        { encoding: "utf-8", timeout: 2000 }
+      );
+      if (result.status !== 0) return new Map();
+      return parseProcessTableCsv(result.stdout);
+    }
+    const result = spawnSync("ps", ["-eo", "pid=,ppid="], {
+      encoding: "utf-8",
+      timeout: 2000,
+    });
+    if (result.status !== 0) return new Map();
+    return parseProcessTablePs(result.stdout);
+  } catch {
+    return new Map();
+  }
+}
+
+/**
+ * Default `getParentPid` implementation. Snapshots the process table lazily
+ * on first call and caches it for the lifetime of the closure, so walking
+ * up to `maxHops` ancestors costs a single spawn instead of one per hop.
+ */
+function createDefaultGetParentPid(): (pid: number) => number | null {
+  let table: Map<number, number> | null = null;
+  return (pid: number) => {
+    if (table === null) table = snapshotProcessTable();
+    const ppid = table.get(pid);
+    return ppid && ppid > 0 ? ppid : null;
+  };
+}
+
+/**
+ * Walk up the process tree from `startPid`, collecting PIDs until we hit
+ * init (PID 1), a cycle, or `maxHops` is reached.
+ *
+ * Why: when plannotator is spawned by a slash command's `!` bang, the direct
+ * parent is a bash subshell — not Claude Code. Claude's `sessions/<pid>.json`
+ * lives a few hops up. We can't assume `process.ppid` is the right PID.
+ */
+export function getAncestorPids(
+  startPid: number,
+  maxHops: number,
+  getParent: (pid: number) => number | null
+): number[] {
+  if (!startPid || startPid <= 1) return [];
+  const chain: number[] = [];
+  const seen = new Set<number>();
+  let pid: number | null = startPid;
+  while (chain.length < maxHops && pid !== null && pid > 1 && !seen.has(pid)) {
+    chain.push(pid);
+    seen.add(pid);
+    pid = getParent(pid);
+  }
+  return chain;
+}
+
+/**
+ * Resolve a session log path by walking up the PID chain, checking
+ * `~/.claude/sessions/<pid>.json` at each hop for a session metadata match.
+ * Deterministic — no mtime guessing, no cwd matching.
+ */
+export function resolveSessionLogByAncestorPids(
+  opts: {
+    startPid?: number;
+    sessionsDir?: string;
+    projectsDir?: string;
+    getParentPid?: (pid: number) => number | null;
+    maxHops?: number;
+  } = {}
+): string | null {
+  const startPid = opts.startPid ?? process.ppid;
+  if (!startPid) return null;
+  const sessionsDir = opts.sessionsDir ?? DEFAULT_SESSIONS_DIR;
+  // Fresh closure per call: each resolver invocation gets its own snapshot,
+  // so the process table can't go stale between unrelated lookups.
+  const getParent = opts.getParentPid ?? createDefaultGetParentPid();
+  const maxHops = opts.maxHops ?? 8;
+
+  const pids = getAncestorPids(startPid, maxHops, getParent);
+  for (const pid of pids) {
+    const meta = readSessionMetadata(pid, sessionsDir);
+    if (!meta?.sessionId || !meta?.cwd) continue;
+
+    const candidates = findSessionLogsForCwd(meta.cwd, opts.projectsDir);
+    const match = candidates.find((p) => p.includes(meta.sessionId));
+    if (match) return match;
+  }
+  return null;
+}
+
+/**
+ * Resolve a session log path by scanning all `~/.claude/sessions/*.json`
+ * metadata files, filtering to those whose `cwd` matches, and picking the
+ * session with the most recent `startedAt`.
+ *
+ * Better than "newest jsonl mtime in the project dir" because it uses
+ * session-level metadata rather than file modification time, which can be
+ * touched by unrelated processes or resumed sessions.
+ */
+export function resolveSessionLogByCwdScan(
+  opts: {
+    cwd?: string;
+    sessionsDir?: string;
+    projectsDir?: string;
+  } = {}
+): string | null {
+  const cwd = opts.cwd ?? process.cwd();
+  const sessionsDir = opts.sessionsDir ?? DEFAULT_SESSIONS_DIR;
+
+  let files: string[];
+  try {
+    files = readdirSync(sessionsDir).filter((f) => f.endsWith(".json"));
+  } catch {
+    return null;
+  }
+
+  const normalizedTarget = normalizeCwdForCompare(cwd);
+  const candidates: SessionMetadata[] = [];
+  for (const f of files) {
+    try {
+      const meta: SessionMetadata = JSON.parse(
+        readFileSync(join(sessionsDir, f), "utf-8")
+      );
+      if (
+        meta?.sessionId &&
+        meta?.cwd &&
+        normalizeCwdForCompare(meta.cwd) === normalizedTarget
+      ) {
+        candidates.push(meta);
+      }
+    } catch {
+      // Malformed metadata file — skip
+    }
+  }
+
+  // Newest sessions first — pick the most recently started session that has a matching jsonl
+  candidates.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+
+  const logs = findSessionLogsForCwd(cwd, opts.projectsDir);
+  for (const meta of candidates) {
+    const match = logs.find((p) => p.includes(meta.sessionId));
+    if (match) return match;
+  }
+  return null;
 }
 
 /**

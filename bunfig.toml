@@ -1,2 +1,4 @@
 [install]
 linker = "isolated"
+minimumReleaseAge = 604800  # 7 days in seconds
+minimumReleaseAgeExcludes = ["@pierre/diffs"]

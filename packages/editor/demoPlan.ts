@@ -1,5 +1,20 @@
 export const DEMO_PLAN_CONTENT = `# Implementation Plan: Real-time Collaboration
 
+## Context
+
+This proposal introduces real-time collaborative editing to the Plannotator editor, letting reviewers annotate the same plan simultaneously with sub-second visibility of each other's cursors and edits. We are targeting **production-grade concurrency** for up to 50 active collaborators per document, with end-to-end edit-to-visible latency under 150ms at the 95th percentile. The implementation uses operational transforms running on a dedicated Node.js gateway that speaks \`WebSocket\` to clients and \`gRPC\` to the storage tier. See [the technical design doc](https://docs.example.com/realtime-v2) for the full rationale and rollout plan.
+
+Runtime parameters for phase one:
+
+\`\`\`typescript
+export const COLLAB_CONFIG = {
+  maxCollaborators: 50,
+  heartbeatIntervalMs: 5_000,
+  operationBatchSize: 32,
+  gateway: "wss://collab.plannotator.ai",
+} as const;
+\`\`\`
+
 ## Overview
 Add real-time collaboration features to the editor using _**[WebSocket API](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API)**_ and *[operational transforms](https://en.wikipedia.org/wiki/Operational_transformation)*.
 
@@ -56,43 +71,6 @@ CREATE TABLE collaborators (
 );
 
 CREATE INDEX idx_collaborators_document ON collaborators(document_id);
-\`\`\`
-
-### Architecture
-
-\`\`\`mermaid
-flowchart LR
-    subgraph Client["Client Browser"]
-        UI[React UI] --> OT[OT Engine]
-        OT <--> WS[WebSocket Client]
-    end
-
-    subgraph Server["Backend"]
-        WSS[WebSocket Server] <--> OTS[OT Transform]
-        OTS <--> DB[(PostgreSQL)]
-    end
-
-    WS <--> WSS
-\`\`\`
-
-### Service Dependencies (Graphviz)
-
-\`\`\`graphviz
-digraph CollaborationStack {
-  rankdir=LR;
-  node [shape=box, style="rounded"];
-
-  Browser [label="Client Browser"];
-  API [label="WebSocket API"];
-  OT [label="OT Engine"];
-  Redis [label="Presence Cache"];
-  Postgres [label="PostgreSQL"];
-
-  Browser -> API;
-  API -> OT;
-  OT -> Redis;
-  OT -> Postgres;
-}
 \`\`\`
 
 ## Phase 2: Operational Transforms
@@ -327,6 +305,47 @@ export const CursorOverlay: React.FC<CursorOverlayProps> = ({
    - Another sub-bullet
      1. Nested numbered list
      2. Second nested number
+
+---
+
+## Appendix: Diagrams
+
+### Architecture
+
+\`\`\`mermaid
+flowchart LR
+    subgraph Client["Client Browser"]
+        UI[React UI] --> OT[OT Engine]
+        OT <--> WS[WebSocket Client]
+    end
+
+    subgraph Server["Backend"]
+        WSS[WebSocket Server] <--> OTS[OT Transform]
+        OTS <--> DB[(PostgreSQL)]
+    end
+
+    WS <--> WSS
+\`\`\`
+
+### Service Dependencies (Graphviz)
+
+\`\`\`graphviz
+digraph CollaborationStack {
+  rankdir=LR;
+  node [shape=box, style="rounded"];
+
+  Browser [label="Client Browser"];
+  API [label="WebSocket API"];
+  OT [label="OT Engine"];
+  Redis [label="Presence Cache"];
+  Postgres [label="PostgreSQL"];
+
+  Browser -> API;
+  API -> OT;
+  OT -> Redis;
+  OT -> Postgres;
+}
+\`\`\`
 
 ---
 

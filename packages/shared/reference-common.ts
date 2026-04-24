@@ -21,6 +21,12 @@ export const FILE_BROWSER_EXCLUDED = [
 	".parcel-cache/",
 	".webpack/",
 	".expo/",
+	"_site/",
+	"public/",
+	".jekyll-cache/",
+	"out/",
+	".docusaurus/",
+	"storybook-static/",
 ];
 
 export interface VaultNode {

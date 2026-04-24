@@ -6,17 +6,67 @@ sidebar:
 section: "Getting Started"
 ---
 
-Plannotator integrates with OpenCode as an npm plugin that registers a `submit_plan` tool. When the agent calls `submit_plan`, Plannotator opens the review UI in your browser.
+Plannotator integrates with OpenCode as an npm plugin. By default it makes `submit_plan` available to OpenCode's `plan` agent only, so OpenCode plan mode can use Plannotator without exposing the tool to `build`.
+
+If you are upgrading from an older OpenCode setup, read the [0.19.1 migration guide](/docs/guides/opencode-migration-0-19-1/) first.
 
 ## How the plugin works
 
 The OpenCode plugin (`@plannotator/opencode`) hooks into OpenCode's plugin system:
 
-1. The plugin registers a `submit_plan` tool that the agent can call
+1. The plugin registers a `submit_plan` tool for OpenCode's built-in `plan` agent and any extra planning agents you configure
 2. When `submit_plan` is called with a plan, Plannotator starts a local server and opens the browser
 3. The user reviews and annotates the plan
 4. On approval, the plugin returns a success response to the agent
 5. On denial, the plugin returns the feedback for the agent to revise
+
+## Workflow modes
+
+OpenCode support has three explicit modes:
+
+- **`plan-agent`** (default): `submit_plan` is available to OpenCode's built-in `plan` agent plus any extra agents listed in `planningAgents`.
+- **`manual`**: `submit_plan` is not registered. Use `/plannotator-last`, `/plannotator-annotate`, `/plannotator-review`, and `/plannotator-archive` when you want Plannotator.
+- **`all-agents`**: legacy broad behavior. Primary agents can see and call `submit_plan`.
+
+Default config:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    ["@plannotator/opencode@latest", {
+      "workflow": "plan-agent",
+      "planningAgents": ["plan"]
+    }]
+  ]
+}
+```
+
+If you want the old broad behavior:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    ["@plannotator/opencode@latest", {
+      "workflow": "all-agents"
+    }]
+  ]
+}
+```
+
+If you want commands only:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    ["@plannotator/opencode@latest", {
+      "workflow": "manual"
+    }]
+  ]
+}
+```
 
 ## Approve with annotations
 
@@ -40,7 +90,7 @@ If the configured agent isn't found in the current OpenCode session, Plannotator
 
 ## Slash commands
 
-The plugin registers three slash commands:
+The plugin registers slash commands that work in every workflow mode:
 
 ### `/plannotator-review`
 
@@ -54,7 +104,7 @@ Requires the CLI to be installed (the slash command runs `plannotator review` un
 
 ### `/plannotator-annotate <file.md>`
 
-Opens a markdown file in the annotation UI. Also requires the CLI.
+Opens a markdown file, directory, or URL in the annotation UI. Also requires the CLI.
 
 ### `/plannotator-last`
 
@@ -79,7 +129,7 @@ Add to your `opencode.json`:
 }
 ```
 
-Restart OpenCode. The `submit_plan` tool is now available. See the [installation guide](/docs/getting-started/installation/) for full details.
+Restart OpenCode. With the default workflow, `submit_plan` is available to the `plan` agent. If you need `build` or another primary agent to call it, set `workflow` to `all-agents`. See the [installation guide](/docs/getting-started/installation/) for full details.
 
 ## Devcontainer / Docker
 

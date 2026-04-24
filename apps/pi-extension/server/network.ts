@@ -8,6 +8,7 @@ import type { Server } from "node:http";
 import { release } from "node:os";
 
 const DEFAULT_REMOTE_PORT = 19432;
+const LOOPBACK_HOST = "127.0.0.1";
 
 /**
  * Check if running in a remote session (SSH, devcontainer, etc.)
@@ -67,6 +68,10 @@ export function getServerPort(): {
 	return { port: 0, portSource: "random" };
 }
 
+export function getServerHostname(): string {
+	return isRemoteSession() ? "0.0.0.0" : LOOPBACK_HOST;
+}
+
 const MAX_RETRIES = 5;
 const RETRY_DELAY_MS = 500;
 
@@ -81,7 +86,7 @@ export async function listenOnPort(
 				server.once("error", reject);
 				server.listen(
 					result.port,
-					isRemoteSession() ? "0.0.0.0" : "127.0.0.1",
+					getServerHostname(),
 					() => {
 						server.removeListener("error", reject);
 						resolve();

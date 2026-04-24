@@ -28,7 +28,7 @@ export interface AnnotateServerResult {
 	port: number;
 	portSource: "env" | "remote-default" | "random";
 	url: string;
-	waitForDecision: () => Promise<{ feedback: string; annotations: unknown[]; exit?: boolean }>;
+	waitForDecision: () => Promise<{ feedback: string; annotations: unknown[]; exit?: boolean; approved?: boolean }>;
 	stop: () => void;
 }
 
@@ -42,6 +42,8 @@ export async function startAnnotateServer(options: {
 	sharingEnabled?: boolean;
 	shareBaseUrl?: string;
 	pasteApiUrl?: string;
+	sourceInfo?: string;
+	gate?: boolean;
 }): Promise<AnnotateServerResult> {
 	const gitUser = detectGitUser();
 	const sharingEnabled =
@@ -55,17 +57,23 @@ export async function startAnnotateServer(options: {
 		feedback: string;
 		annotations: unknown[];
 		exit?: boolean;
+		approved?: boolean;
 	}) => void;
 	const decisionPromise = new Promise<{
 		feedback: string;
 		annotations: unknown[];
 		exit?: boolean;
+		approved?: boolean;
 	}>((r) => {
 		resolveDecision = r;
 	});
 
-	// Draft key for annotation persistence
-	const draftKey = contentHash(options.markdown);
+	// Folder annotation has no stable markdown body, so key drafts by folder path instead.
+	const draftSource =
+		options.mode === "annotate-folder" && options.folderPath
+			? `folder:${resolvePath(options.folderPath)}`
+			: options.markdown;
+	const draftKey = contentHash(draftSource);
 
 	// Detect repo info (cached for this session)
 	const repoInfo = getRepoInfo();
@@ -83,6 +91,8 @@ export async function startAnnotateServer(options: {
 				origin: options.origin ?? "pi",
 				mode: options.mode || "annotate",
 				filePath: options.filePath,
+				sourceInfo: options.sourceInfo,
+				gate: options.gate ?? false,
 				sharingEnabled,
 				shareBaseUrl,
 				pasteApiUrl,
@@ -109,8 +119,9 @@ export async function startAnnotateServer(options: {
 		} else if (url.pathname === "/api/draft") {
 			await handleDraftRequest(req, res, draftKey);
 		} else if (url.pathname === "/api/doc" && req.method === "GET") {
-			// Inject source file's directory as base for relative path resolution
-			if (!url.searchParams.has("base") && options.filePath) {
+			// Inject source file's directory as base for relative path resolution.
+			// Skip for URL annotations — there's no local directory to resolve against.
+			if (!url.searchParams.has("base") && options.filePath && !/^https?:\/\//i.test(options.filePath)) {
 				url.searchParams.set("base", dirname(resolvePath(options.filePath)));
 			}
 			handleDocRequest(res, url);
@@ -127,6 +138,10 @@ export async function startAnnotateServer(options: {
 		} else if (url.pathname === "/api/exit" && req.method === "POST") {
 			deleteDraft(draftKey);
 			resolveDecision({ feedback: "", annotations: [], exit: true });
+			json(res, { ok: true });
+		} else if (url.pathname === "/api/approve" && req.method === "POST") {
+			deleteDraft(draftKey);
+			resolveDecision({ feedback: "", annotations: [], approved: true });
 			json(res, { ok: true });
 		} else if (url.pathname === "/api/feedback" && req.method === "POST") {
 			try {

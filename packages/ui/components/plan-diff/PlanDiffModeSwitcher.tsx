@@ -6,7 +6,7 @@
 
 import React from "react";
 
-export type PlanDiffMode = "clean" | "raw";
+export type PlanDiffMode = "clean" | "classic" | "raw";
 
 interface PlanDiffModeSwitcherProps {
   mode: PlanDiffMode;
@@ -21,6 +21,7 @@ export const PlanDiffModeSwitcher: React.FC<PlanDiffModeSwitcherProps> = ({
     <div className="inline-flex items-center bg-muted/50 rounded-lg p-0.5 border border-border/30">
       <button
         onClick={() => onChange("clean")}
+        title="Word-level inline diff (experimental)"
         className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all ${
           mode === "clean"
             ? "bg-background text-foreground shadow-sm"
@@ -46,6 +47,33 @@ export const PlanDiffModeSwitcher: React.FC<PlanDiffModeSwitcherProps> = ({
           />
         </svg>
         Rendered
+        <span className="text-[9px] uppercase tracking-wider opacity-60 ml-0.5">
+          exp
+        </span>
+      </button>
+      <button
+        onClick={() => onChange("classic")}
+        title="Block-level stacked diff (old above new)"
+        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all ${
+          mode === "classic"
+            ? "bg-background text-foreground shadow-sm"
+            : "text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        <svg
+          className="w-3.5 h-3.5"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M4 6h16M4 12h16M4 18h16"
+          />
+        </svg>
+        Classic
       </button>
       <button
         onClick={() => onChange("raw")}

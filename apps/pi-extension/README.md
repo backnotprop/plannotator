@@ -190,8 +190,7 @@ During execution, the agent marks completed steps with `[DONE:n]` markers. Progr
 
 | Command | Description |
 |---------|-------------|
-| `/plannotator [path]` | Toggle plan mode. Accepts optional file path or prompts interactively |
-| `/plannotator-set-file <path>` | Change the plan file path mid-session |
+| `/plannotator` | Toggle plan mode. The agent writes a markdown plan file anywhere in the working directory and submits its path |
 | `/plannotator-status` | Show current phase, plan file, and progress |
 | `/plannotator-review` | Open code review UI for current changes |
 | `/plannotator-annotate <file>` | Open markdown file in annotation UI |
@@ -202,7 +201,6 @@ During execution, the agent marks completed steps with `[DONE:n]` markers. Progr
 | Flag | Description |
 |------|-------------|
 | `--plan` | Start in plan mode |
-| `--plan-file <path>` | Custom plan file path (default: `PLAN.md`) |
 
 ## Keyboard shortcuts
 
