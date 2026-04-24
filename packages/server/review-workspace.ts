@@ -38,10 +38,13 @@ function prefixRepoPath(label: string, filePath: string): string {
 }
 
 function rewritePatchLine(line: string, label: string): string {
-  if (line.startsWith("diff --git a/")) {
-    const match = line.match(/^diff --git a\/(.+) b\/(.+)$/);
+  // diff --git with optional quotes around paths
+  if (line.startsWith("diff --git a/") || line.startsWith('diff --git "a/')) {
+    const match = line.match(/^diff --git (?:"?a\/(.+?)"?|\/?a\/(.+?)) (?:"?b\/(.+?)"?|\/?b\/(.+?))$/);
     if (!match) return line;
-    return `diff --git a/${prefixRepoPath(label, match[1])} b/${prefixRepoPath(label, match[2])}`;
+    const oldPath = match[1] ?? match[2];
+    const newPath = match[3] ?? match[4];
+    return `diff --git a/${prefixRepoPath(label, oldPath)} b/${prefixRepoPath(label, newPath)}`;
   }
 
   if (line.startsWith("--- ")) {
@@ -56,6 +59,18 @@ function rewritePatchLine(line: string, label: string): string {
     if (path === "/dev/null") return line;
     if (path.startsWith("b/")) return `+++ b/${prefixRepoPath(label, path.slice(2))}`;
     return line;
+  }
+
+  // rename/copy headers
+  if (line.startsWith("rename from ") || line.startsWith("copy from ")) {
+    const prefix = line.slice(0, line.indexOf(" ") + 1);
+    const path = line.slice(prefix.length);
+    return `${prefix}a/${prefixRepoPath(label, path)}`;
+  }
+  if (line.startsWith("rename to ") || line.startsWith("copy to ")) {
+    const prefix = line.slice(0, line.indexOf(" ") + 1);
+    const path = line.slice(prefix.length);
+    return `${prefix}b/${prefixRepoPath(label, path)}`;
   }
 
   return line;
@@ -73,14 +88,20 @@ export function resolveWorkspaceFilePath(
   repos: WorkspaceRepoRuntimeState[],
   prefixedPath: string,
 ): { repo: WorkspaceRepoRuntimeState; repoRelativePath: string } | null {
-  validateFilePath(prefixedPath);
+  const normalizedPath = normalizePath(prefixedPath);
+  validateFilePath(normalizedPath);
 
-  for (const repo of [...repos].sort((a, b) => b.label.length - a.label.length)) {
+  // Pre-sort once — callers should pass pre-sorted arrays for performance.
+  const sorted = repos[0]?.__sorted
+    ? repos
+    : [...repos].sort((a, b) => b.label.length - a.label.length);
+
+  for (const repo of sorted) {
     const prefix = `${normalizePath(repo.label)}/`;
-    if (prefixedPath.startsWith(prefix)) {
+    if (normalizedPath === normalizePath(repo.label) || normalizedPath.startsWith(prefix)) {
       return {
         repo,
-        repoRelativePath: prefixedPath.slice(prefix.length),
+        repoRelativePath: normalizedPath.slice(prefix.length),
       };
     }
   }
@@ -160,6 +181,16 @@ function buildUniqueLabel(preferred: string, used = new Set<string>()): string {
   return next;
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, context: string): Promise<T | null> {
+  return Promise.race([
+    promise.then((v) => v as T | null),
+    new Promise<null>((resolve) => setTimeout(() => {
+      console.error(`[workspace] Timeout: ${context}`);
+      resolve(null);
+    }, ms)),
+  ]);
+}
+
 async function discoverGitHubPRCandidate(cwd: string, gitContext: GitContext): Promise<WorkspacePRCandidate | null> {
   const branch = gitContext.currentBranch;
   if (!branch || branch === "HEAD") return null;
@@ -231,7 +262,8 @@ async function discoverGitHubPRCandidate(cwd: string, gitContext: GitContext): P
   if (!ref) return null;
 
   try {
-    const pr = await fetchPR(ref);
+    const pr = await withTimeout(fetchPR(ref), 15000, `fetchPR ${url}`);
+    if (!pr) return null;
     return { url, metadata: pr.metadata };
   } catch {
     return null;
@@ -281,7 +313,8 @@ async function discoverGitLabPRCandidate(cwd: string, gitContext: GitContext): P
   if (!ref) return null;
 
   try {
-    const pr = await fetchPR(ref);
+    const pr = await withTimeout(fetchPR(ref), 15000, `fetchPR ${url}`);
+    if (!pr) return null;
     return { url, metadata: pr.metadata };
   } catch {
     return null;
@@ -300,10 +333,13 @@ export async function discoverPRCandidates(cwd: string, gitContext: GitContext):
 export async function buildWorkspaceLocalRepos(root: string): Promise<WorkspaceRepoRuntimeState[]> {
   const repoPaths = discoverWorkspaceRepoPaths(root);
   const defaultDiffType = resolveDefaultDiffType(loadConfig());
+
+  // Pre-compute labels sequentially to avoid race conditions in parallel map
   const usedLabels = new Set<string>();
+  const labels = repoPaths.map((cwd) => buildRepoLabel(root, cwd, usedLabels));
 
   const repos = await Promise.all(repoPaths.map(async (cwd, index) => {
-    const label = buildRepoLabel(root, cwd, usedLabels);
+    const label = labels[index];
     try {
       const gitContext = await getVcsContext(cwd);
       const diffType = gitContext.vcsType === "p4" ? "p4-default" : defaultDiffType;
@@ -341,7 +377,26 @@ export async function buildWorkspaceLocalRepos(root: string): Promise<WorkspaceR
 }
 
 export async function buildWorkspacePRRepos(urls: string[]): Promise<WorkspaceRepoRuntimeState[]> {
+  // Pre-compute labels sequentially to avoid race conditions in parallel map
   const usedLabels = new Set<string>();
+  const prefetched = await Promise.all(urls.map(async (url) => {
+    const ref = parsePRUrl(url);
+    if (!ref) return null;
+    try {
+      const pr = await fetchPR(ref);
+      const baseLabel = pr.metadata.platform === "github"
+        ? `${pr.metadata.owner}/${pr.metadata.repo}`
+        : pr.metadata.projectPath;
+      return { pr, baseLabel };
+    } catch {
+      return null;
+    }
+  }));
+
+  const labels = prefetched.map((p) =>
+    p ? buildUniqueLabel(p.baseLabel, usedLabels) : buildUniqueLabel(`invalid-${prefetched.indexOf(p) + 1}`, usedLabels)
+  );
+
   const repos = await Promise.all(urls.map(async (url, index) => {
     const ref = parsePRUrl(url);
     if (!ref) {
@@ -390,14 +445,17 @@ export async function buildWorkspacePRRepos(urls: string[]): Promise<WorkspaceRe
   return repos;
 }
 
-export function aggregateWorkspacePatch(repos: WorkspaceRepoRuntimeState[]): {
+export interface WorkspacePatchAggregate {
   rawPatch: string;
   gitRef: string;
   errors: string[];
-} {
+}
+
+export function aggregateWorkspacePatch(repos: WorkspaceRepoRuntimeState[]): WorkspacePatchAggregate {
   const selected = repos.filter((repo) => repo.selected);
+  const trimmedPatches = selected.map((repo) => repo.rawPatch.trim()).filter(Boolean);
   return {
-    rawPatch: selected.map((repo) => repo.rawPatch.trim()).filter(Boolean).join("\n"),
+    rawPatch: trimmedPatches.join("\n\n"),
     gitRef: selected.map((repo) => repo.gitRef || repo.label).filter(Boolean).join(" | ") || "Workspace review",
     errors: selected.flatMap((repo) => repo.error ? [`${repo.label}: ${repo.error}`] : []),
   };

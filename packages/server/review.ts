@@ -162,6 +162,20 @@ export async function startReviewServer(
     currentError = snapshot.errors.length > 0 ? snapshot.errors.join("\n") : undefined;
   };
 
+  /** Apply workspace repo mutation atomically with rollback on failure. */
+  const applyRepoMutation = (
+    repo: WorkspaceRepoRuntimeState,
+    mutator: () => Promise<void> | void,
+  ): Promise<void> => {
+    const prev = { ...repo };
+    return Promise.resolve()
+      .then(() => mutator())
+      .catch((err) => {
+        Object.assign(repo, prev);
+        throw err;
+      });
+  };
+
   const getActiveRepo = (): WorkspaceRepoRuntimeState | null => {
     if (!workspaceRepos?.length) return null;
     return workspaceRepos.find((repo) => repo.id === currentActiveRepoId)
@@ -207,8 +221,9 @@ export async function startReviewServer(
     },
 
     async buildCommand(provider, config) {
-      const cwd = getActiveRepo()?.cwd ?? options.agentCwd ?? resolveVcsCwd(currentDiffType, gitContext?.cwd) ?? process.cwd();
-      const hasAgentLocalAccess = !!options.agentCwd || !!gitContext;
+      const activeRepo = getActiveRepo();
+      const cwd = activeRepo?.cwd ?? options.agentCwd ?? resolveVcsCwd(currentDiffType, gitContext?.cwd) ?? process.cwd();
+      const hasAgentLocalAccess = !!options.agentCwd || !!gitContext || !!activeRepo;
       const userMessageOptions = { defaultBranch: currentBase, hasLocalAccess: hasAgentLocalAccess };
 
       // Snapshot the diff context at launch — stored on the job so
@@ -226,6 +241,10 @@ export async function startReviewServer(
             worktreePath: worktreeParts?.path ?? null,
           };
 
+      const repoSnapshot = activeRepo
+        ? { repoId: activeRepo.id, repoLabel: activeRepo.label, repoCwd: activeRepo.cwd }
+        : undefined;
+
       if (provider === "tour") {
         const built = await tour.buildCommand({
           cwd,
@@ -235,7 +254,7 @@ export async function startReviewServer(
           prMetadata,
           config,
         });
-        return built ? { ...built, diffContext } : built;
+        return built ? { ...built, diffContext, ...repoSnapshot } : built;
       }
 
       const userMessage = buildCodexReviewUserMessage(currentPatch, currentDiffType, userMessageOptions, prMetadata);
@@ -247,7 +266,7 @@ export async function startReviewServer(
         const outputPath = generateOutputPath();
         const prompt = CODEX_REVIEW_SYSTEM_PROMPT + "\n\n---\n\n" + userMessage;
         const command = await buildCodexCommand({ cwd, outputPath, prompt, model, reasoningEffort, fastMode });
-        return { command, outputPath, prompt, label: "Code Review", model, reasoningEffort, fastMode: fastMode || undefined, diffContext };
+        return { command, outputPath, prompt, label: "Code Review", model, reasoningEffort, fastMode: fastMode || undefined, diffContext, ...repoSnapshot };
       }
 
       if (provider === "claude") {
@@ -255,14 +274,23 @@ export async function startReviewServer(
         const effort = typeof config?.effort === "string" && config.effort ? config.effort : undefined;
         const prompt = CLAUDE_REVIEW_PROMPT + "\n\n---\n\n" + userMessage;
         const { command, stdinPrompt } = buildClaudeCommand(prompt, model, effort);
-        return { command, stdinPrompt, prompt, cwd, label: "Code Review", captureStdout: true, model, effort, diffContext };
+        return { command, stdinPrompt, prompt, cwd, label: "Code Review", captureStdout: true, model, effort, diffContext, ...repoSnapshot };
       }
 
       return null;
     },
 
     async onJobComplete(job, meta) {
-      const cwd = resolveAgentCwd();
+      const cwd = meta.cwd ?? resolveAgentCwd();
+      // Use the repo snapshot captured at launch time to avoid races with UI changes
+      const repoLabel = job.repoLabel;
+      const pathTransform = repoLabel
+        ? (filePath: string) => {
+            // Avoid double-prefixing if the agent already returned a prefixed path
+            if (filePath.startsWith(`${repoLabel}/`)) return filePath;
+            return `${repoLabel}/${filePath}`;
+          }
+        : undefined;
 
       // --- Codex path ---
       if (job.provider === "codex" && meta.outputPath) {
@@ -279,13 +307,12 @@ export async function startReviewServer(
         };
 
         if (output.findings.length > 0) {
-          const activeRepo = getActiveRepo();
           const annotations = transformReviewFindings(
             output.findings,
             job.source,
             cwd,
             "Codex",
-            activeRepo ? (filePath) => `${activeRepo.label}/${filePath}` : undefined,
+            pathTransform,
           );
           const result = externalAnnotations.addAnnotations({ annotations });
           if ("error" in result) console.error(`[codex-review] addAnnotations error:`, result.error);
@@ -309,12 +336,11 @@ export async function startReviewServer(
         };
 
         if (output.findings.length > 0) {
-          const activeRepo = getActiveRepo();
           const annotations = transformClaudeFindings(
             output.findings,
             job.source,
             cwd,
-            activeRepo ? (filePath) => `${activeRepo.label}/${filePath}` : undefined,
+            pathTransform,
           );
           const result = externalAnnotations.addAnnotations({ annotations });
           if ("error" in result) console.error(`[claude-review] addAnnotations error:`, result.error);
@@ -660,48 +686,54 @@ export async function startReviewServer(
               const body = (await req.json()) as {
                 repoId: string;
                 selected?: boolean;
-                source?: "local" | "pr";
+                source?: string;
                 prUrl?: string;
               };
               const repo = workspaceRepos.find((candidate) => candidate.id === body.repoId);
               if (!repo) return Response.json({ error: "Unknown repo" }, { status: 404 });
 
-              if (typeof body.selected === "boolean") repo.selected = body.selected;
-              if (body.source) repo.source = body.source;
-
-              if (repo.source === "pr") {
-                const nextUrl = body.prUrl || repo.prMetadata?.url || repo.discoveredPRs?.[0]?.url;
-                if (!nextUrl) {
-                  return Response.json({ error: "No PR/MR available for this repo" }, { status: 400 });
-                }
-                const ref = parsePRUrl(nextUrl);
-                if (!ref) return Response.json({ error: "Invalid PR/MR URL" }, { status: 400 });
-                const pr = await fetchPR(ref);
-                repo.prMetadata = pr.metadata;
-                repo.rawPatch = prefixPatchPaths(pr.rawPatch, repo.label);
-                repo.gitRef = pr.metadata.url;
-                repo.platformUser = await getPRUser(prRefFromMetadata(pr.metadata));
-                if (pr.metadata.platform === "github") {
-                  try {
-                    const viewedMap = await fetchPRViewedFiles(prRefFromMetadata(pr.metadata));
-                    repo.viewedFiles = Object.entries(viewedMap)
-                      .filter(([, isViewed]) => isViewed)
-                      .map(([path]) => `${repo.label}/${path}`);
-                  } catch {
-                    repo.viewedFiles = [];
-                  }
-                }
-                repo.error = undefined;
-              } else if (repo.gitContext) {
-                const nextDiffType = (repo.diffType as DiffType | undefined) || "uncommitted";
-                const result = await runVcsDiff(nextDiffType, repo.gitContext.defaultBranch, repo.cwd);
-                repo.rawPatch = prefixPatchPaths(result.patch, repo.label);
-                repo.gitRef = result.label;
-                repo.prMetadata = undefined;
-                repo.platformUser = null;
-                repo.viewedFiles = [];
-                repo.error = result.error;
+              if (body.source && body.source !== "local" && body.source !== "pr") {
+                return Response.json({ error: "Invalid source. Must be 'local' or 'pr'" }, { status: 400 });
               }
+
+              await applyRepoMutation(repo, async () => {
+                if (typeof body.selected === "boolean") repo.selected = body.selected;
+                if (body.source) repo.source = body.source;
+
+                if (repo.source === "pr") {
+                  const nextUrl = body.prUrl || repo.prMetadata?.url || repo.discoveredPRs?.[0]?.url;
+                  if (!nextUrl) {
+                    throw new Error("No PR/MR available for this repo");
+                  }
+                  const ref = parsePRUrl(nextUrl);
+                  if (!ref) throw new Error("Invalid PR/MR URL");
+                  const pr = await fetchPR(ref);
+                  repo.prMetadata = pr.metadata;
+                  repo.rawPatch = prefixPatchPaths(pr.rawPatch, repo.label);
+                  repo.gitRef = pr.metadata.url;
+                  repo.platformUser = await getPRUser(prRefFromMetadata(pr.metadata));
+                  if (pr.metadata.platform === "github") {
+                    try {
+                      const viewedMap = await fetchPRViewedFiles(prRefFromMetadata(pr.metadata));
+                      repo.viewedFiles = Object.entries(viewedMap)
+                        .filter(([, isViewed]) => isViewed)
+                        .map(([path]) => `${repo.label}/${path}`);
+                    } catch {
+                      repo.viewedFiles = [];
+                    }
+                  }
+                  repo.error = undefined;
+                } else if (repo.gitContext) {
+                  const nextDiffType = (repo.diffType as DiffType | undefined) || "uncommitted";
+                  const result = await runVcsDiff(nextDiffType, repo.gitContext.defaultBranch, repo.cwd);
+                  repo.rawPatch = prefixPatchPaths(result.patch, repo.label);
+                  repo.gitRef = result.label;
+                  repo.prMetadata = undefined;
+                  repo.platformUser = null;
+                  repo.viewedFiles = [];
+                  repo.error = result.error;
+                }
+              });
 
               refreshWorkspaceAggregate();
               return Response.json({

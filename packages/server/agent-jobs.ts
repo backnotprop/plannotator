@@ -132,7 +132,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
     command: string[],
     label: string,
     outputPath?: string,
-    spawnOptions?: { captureStdout?: boolean; stdinPrompt?: string; cwd?: string; prompt?: string; engine?: string; model?: string; effort?: string; reasoningEffort?: string; fastMode?: boolean; diffContext?: AgentJobInfo["diffContext"] },
+    spawnOptions?: { captureStdout?: boolean; stdinPrompt?: string; cwd?: string; prompt?: string; engine?: string; model?: string; effort?: string; reasoningEffort?: string; fastMode?: boolean; diffContext?: AgentJobInfo["diffContext"]; repoId?: string; repoLabel?: string; repoCwd?: string },
   ): AgentJobInfo {
     const id = crypto.randomUUID();
     const source = jobSource(id);
@@ -152,6 +152,9 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
       ...(spawnOptions?.reasoningEffort && { reasoningEffort: spawnOptions.reasoningEffort }),
       ...(spawnOptions?.fastMode && { fastMode: spawnOptions.fastMode }),
       ...(spawnOptions?.diffContext && { diffContext: spawnOptions.diffContext }),
+      ...(spawnOptions?.repoId && { repoId: spawnOptions.repoId }),
+      ...(spawnOptions?.repoLabel && { repoLabel: spawnOptions.repoLabel }),
+      ...(spawnOptions?.repoCwd && { repoCwd: spawnOptions.repoCwd }),
     };
 
     let proc: ReturnType<typeof Bun.spawn> | null = null;

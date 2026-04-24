@@ -71,6 +71,10 @@ export interface AgentJobInfo {
   };
   /** Diff context at launch time (see AgentJobDiffContext). */
   diffContext?: AgentJobDiffContext;
+  /** Workspace repo snapshot at launch — prevents race with UI selection changes. */
+  repoId?: string;
+  repoLabel?: string;
+  repoCwd?: string;
 }
 
 export interface AgentCapability {

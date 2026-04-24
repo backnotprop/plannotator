@@ -224,7 +224,15 @@ const ReviewApp: React.FC = () => {
   // Derived: Platform mode is active when destination is platform AND we have PR/MR metadata
   const findWorkspaceRepoForPath = useCallback((filePath?: string | null): WorkspaceRepoState | null => {
     if (!workspace || !filePath) return null;
-    return workspace.repos.find(repo => filePath === repo.label || filePath.startsWith(`${repo.label}/`)) ?? null;
+    let best: WorkspaceRepoState | null = null;
+    for (const repo of workspace.repos) {
+      if (filePath === repo.label || filePath.startsWith(`${repo.label}/`)) {
+        if (!best || repo.label.length > best.label.length) {
+          best = repo;
+        }
+      }
+    }
+    return best;
   }, [workspace]);
 
   const activeWorkspaceRepo = useMemo(() => {

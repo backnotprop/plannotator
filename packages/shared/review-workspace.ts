@@ -1,4 +1,4 @@
-import type { DiffOption, GitContext } from "./review-core";
+import type { DiffType, DiffOption, GitContext } from "./review-core";
 import type { PRMetadata } from "./pr-provider";
 
 export type WorkspaceRepoSource = "local" | "pr";
@@ -14,12 +14,12 @@ export interface WorkspaceRepoState {
   cwd: string;
   selected: boolean;
   source: WorkspaceRepoSource;
-  diffType?: string;
+  diffType?: DiffType;
   gitContext?: GitContext;
   prMetadata?: PRMetadata;
   discoveredPRs?: WorkspacePRCandidate[];
   diffOptions?: DiffOption[];
-  platformUser?: string | null;
+  platformUser: string | null;
   viewedFiles?: string[];
   error?: string;
 }
