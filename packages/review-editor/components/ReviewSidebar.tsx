@@ -185,8 +185,11 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
     }
   };
 
-  // Group annotations by file
-  const groupedAnnotations = React.useMemo(() => {
+  // Group annotations by file, optionally by PR first
+  const { groupedAnnotations, prGroups, isMultiPR } = React.useMemo(() => {
+    const prUrls = new Set(annotations.map(a => a.prUrl).filter(Boolean));
+    const multiPR = prUrls.size > 1;
+
     const grouped = new Map<string, CodeAnnotation[]>();
     for (const ann of annotations) {
       const existing = grouped.get(ann.filePath) || [];
@@ -196,10 +199,102 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
     for (const [, anns] of grouped) {
       anns.sort(compareCodeAnnotations);
     }
-    return grouped;
+
+    let prs: Map<string, Map<string, CodeAnnotation[]>> | null = null;
+    if (multiPR) {
+      prs = new Map();
+      for (const ann of annotations) {
+        const prKey = ann.prUrl ?? '_none';
+        if (!prs.has(prKey)) prs.set(prKey, new Map());
+        const fileMap = prs.get(prKey)!;
+        const existing = fileMap.get(ann.filePath) || [];
+        existing.push(ann);
+        fileMap.set(ann.filePath, existing);
+      }
+      for (const fileMap of prs.values()) {
+        for (const anns of fileMap.values()) {
+          anns.sort(compareCodeAnnotations);
+        }
+      }
+    }
+
+    return { groupedAnnotations: grouped, prGroups: prs, isMultiPR: multiPR };
   }, [annotations]);
 
   if (!isOpen) return null;
+
+  function renderAnnotationCard(annotation: CodeAnnotation) {
+    const isSelected = selectedAnnotationId === annotation.id;
+    const isFileScope = getAnnotationScope(annotation) === 'file';
+    return (
+      <div
+        key={annotation.id}
+        onClick={() => onSelectAnnotation(annotation.id)}
+        className={`group relative p-2.5 rounded border cursor-pointer transition-colors duration-150 ${
+          isSelected
+            ? 'bg-primary/5 border-primary/30'
+            : 'border-transparent hover:bg-muted/30'
+        }`}
+      >
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="flex items-center gap-2">
+            {isFileScope ? (
+              <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                file
+              </span>
+            ) : (
+              <span className="text-[10px] font-mono text-muted-foreground">
+                {annotation.lineStart === annotation.lineEnd
+                  ? `L${annotation.lineStart}`
+                  : `L${annotation.lineStart}-${annotation.lineEnd}`}
+                {annotation.tokenText && (
+                  <span className="ml-1 text-primary/70">{`\`${annotation.tokenText.length > 30 ? annotation.tokenText.slice(0, 27) + '...' : annotation.tokenText}\``}</span>
+                )}
+              </span>
+            )}
+            {annotation.conventionalLabel && (
+              <ConventionalLabelBadge label={annotation.conventionalLabel} decorations={annotation.decorations} />
+            )}
+            {annotation.author && (
+              <span className={`text-[10px] truncate max-w-[100px] ${isCurrentUser(annotation.author) ? 'text-muted-foreground/50' : 'text-muted-foreground/70'}`}>
+                {annotation.author}{isCurrentUser(annotation.author) && ' (me)'}
+              </span>
+            )}
+          </div>
+          <span className="text-[10px] text-muted-foreground/50">
+            {formatRelativeTime(annotation.createdAt)}
+          </span>
+        </div>
+        {annotation.text && (
+          <div className="text-xs text-foreground/80 line-clamp-2 review-comment-markdown">
+            {renderInlineMarkdown(annotation.text)}
+          </div>
+        )}
+        {annotation.suggestedCode && (
+          <div className="mt-1.5">
+            <SuggestionPreview code={annotation.suggestedCode} originalCode={annotation.originalCode} language={detectLanguage(annotation.filePath)} />
+          </div>
+        )}
+        <div className="flex items-center justify-end gap-1 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          {annotation.text && (
+            <CopyButton text={`${annotation.filePath}:${annotation.lineStart}${annotation.lineEnd !== annotation.lineStart ? `-${annotation.lineEnd}` : ''}\n${annotation.text}${annotation.reasoning ? `\n\nReasoning: ${annotation.reasoning}` : ''}`} variant="inline" />
+          )}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDeleteAnnotation(annotation.id);
+            }}
+            className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+            title="Delete annotation"
+          >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <aside className="border-l border-border/50 bg-card/30 backdrop-blur-sm flex flex-col flex-shrink-0" style={{ width: width ?? 288 }}>
@@ -300,88 +395,43 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                 </div>
               ) : (
                 <div className="p-2 space-y-4">
-                  {Array.from(groupedAnnotations.entries()).map(([filePath, fileAnnotations]) => (
-                    <div key={filePath}>
-                      <div className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm px-2 py-1 text-xs font-mono text-muted-foreground truncate">
-                        {filePath.split('/').pop()}
-                      </div>
-                      <div className="space-y-1">
-                        {fileAnnotations.map((annotation) => {
-                          const isSelected = selectedAnnotationId === annotation.id;
-                          const isFileScope = getAnnotationScope(annotation) === 'file';
-                          return (
-                            <div
-                              key={annotation.id}
-                              onClick={() => onSelectAnnotation(annotation.id)}
-                              className={`group relative p-2.5 rounded border cursor-pointer transition-colors duration-150 ${
-                                isSelected
-                                  ? 'bg-primary/5 border-primary/30'
-                                  : 'border-transparent hover:bg-muted/30'
-                              }`}
-                            >
-                              <div className="flex items-center justify-between mb-1.5">
-                                <div className="flex items-center gap-2">
-                                  {isFileScope ? (
-                                    <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary">
-                                      file
-                                    </span>
-                                  ) : (
-                                    <span className="text-[10px] font-mono text-muted-foreground">
-                                      {annotation.lineStart === annotation.lineEnd
-                                        ? `L${annotation.lineStart}`
-                                        : `L${annotation.lineStart}-${annotation.lineEnd}`}
-                                      {annotation.tokenText && (
-                                        <span className="ml-1 text-primary/70">{`\`${annotation.tokenText.length > 30 ? annotation.tokenText.slice(0, 27) + '...' : annotation.tokenText}\``}</span>
-                                      )}
-                                    </span>
-                                  )}
-                                  {annotation.conventionalLabel && (
-                                    <ConventionalLabelBadge label={annotation.conventionalLabel} decorations={annotation.decorations} />
-                                  )}
-                                  {annotation.author && (
-                                    <span className={`text-[10px] truncate max-w-[100px] ${isCurrentUser(annotation.author) ? 'text-muted-foreground/50' : 'text-muted-foreground/70'}`}>
-                                      {annotation.author}{isCurrentUser(annotation.author) && ' (me)'}
-                                    </span>
-                                  )}
+                  {isMultiPR && prGroups ? (
+                    Array.from(prGroups.entries()).map(([prUrl, fileMap]) => {
+                      const sample = fileMap.values().next().value?.[0];
+                      const prLabel = prUrl === '_none' ? 'Local Changes' :
+                        `${sample?.prRepo ? `${sample.prRepo}` : ''}#${sample?.prNumber ?? '?'} ${sample?.prTitle ?? ''}`;
+                      return (
+                        <div key={prUrl}>
+                          <div className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm px-2 py-1.5 text-[10px] font-medium text-accent/80 border-b border-border/30 mb-1">
+                            {prLabel}
+                          </div>
+                          <div className="space-y-4">
+                            {Array.from(fileMap.entries()).map(([filePath, fileAnnotations]) => (
+                              <div key={filePath}>
+                                <div className="sticky top-7 z-10 bg-background/95 backdrop-blur-sm px-2 py-1 text-xs font-mono text-muted-foreground truncate">
+                                  {filePath.split('/').pop()}
                                 </div>
-                                <span className="text-[10px] text-muted-foreground/50">
-                                  {formatRelativeTime(annotation.createdAt)}
-                                </span>
+                                <div className="space-y-1">
+                                  {fileAnnotations.map((annotation) => renderAnnotationCard(annotation))}
+                                </div>
                               </div>
-                              {annotation.text && (
-                                <div className="text-xs text-foreground/80 line-clamp-2 review-comment-markdown">
-                                  {renderInlineMarkdown(annotation.text)}
-                                </div>
-                              )}
-                              {annotation.suggestedCode && (
-                                <div className="mt-1.5">
-                                  <SuggestionPreview code={annotation.suggestedCode} originalCode={annotation.originalCode} language={detectLanguage(annotation.filePath)} />
-                                </div>
-                              )}
-                              {/* Actions — visible on hover */}
-                              <div className="flex items-center justify-end gap-1 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                {annotation.text && (
-                                  <CopyButton text={`${annotation.filePath}:${annotation.lineStart}${annotation.lineEnd !== annotation.lineStart ? `-${annotation.lineEnd}` : ''}\n${annotation.text}${annotation.reasoning ? `\n\nReasoning: ${annotation.reasoning}` : ''}`} variant="inline" />
-                                )}
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onDeleteAnnotation(annotation.id);
-                                  }}
-                                  className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-                                  title="Delete annotation"
-                                >
-                                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                  </svg>
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    Array.from(groupedAnnotations.entries()).map(([filePath, fileAnnotations]) => (
+                      <div key={filePath}>
+                        <div className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm px-2 py-1 text-xs font-mono text-muted-foreground truncate">
+                          {filePath.split('/').pop()}
+                        </div>
+                        <div className="space-y-1">
+                          {fileAnnotations.map((annotation) => renderAnnotationCard(annotation))}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               )}
 

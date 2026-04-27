@@ -5,6 +5,7 @@ import type { DiffFile } from '../types';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import type { ReviewSearchMatch } from '../utils/reviewSearch';
 import type { PRMetadata, PRContext } from '@plannotator/shared/pr-provider';
+import type { PRDiffScope } from '@plannotator/shared/pr-stack';
 import type { FeedbackDiffContext } from '../utils/exportFeedback';
 
 /**
@@ -36,6 +37,9 @@ export interface ReviewState {
   /** Diff context baked into exported feedback so downstream panels (agent job
    * detail, etc.) produce the same markdown the main feedback path sends. */
   feedbackDiffContext?: FeedbackDiffContext;
+  /** PR/MR review scope label, e.g. "Layer diff" or "Full stack diff". */
+  prReviewScope?: string;
+  prDiffScope?: PRDiffScope;
 
   // Annotations
   allAnnotations: CodeAnnotation[];

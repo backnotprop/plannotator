@@ -21,8 +21,17 @@ export const ReviewDiffPanel: React.FC<IDockviewPanelProps> = (props) => {
   const isFocusedFile = !!file && state.focusedFilePath === file.path;
 
   const fileAnnotations = useMemo(
-    () => file ? state.allAnnotations.filter((a) => a.filePath === file.path) : [],
-    [state.allAnnotations, file]
+    () => {
+      if (!file) return [];
+      const currentPrUrl = state.prMetadata?.url;
+      const currentDiffScope = state.prDiffScope;
+      return state.allAnnotations.filter((a) =>
+        a.filePath === file.path &&
+        (!a.prUrl || !currentPrUrl || a.prUrl === currentPrUrl) &&
+        (!a.diffScope || !currentDiffScope || a.diffScope === currentDiffScope)
+      );
+    },
+    [state.allAnnotations, file, state.prMetadata, state.prDiffScope]
   );
 
   const aiMessagesForFile = useMemo(

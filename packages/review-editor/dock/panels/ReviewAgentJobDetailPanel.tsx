@@ -93,15 +93,17 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
   // analyzed. Falls back to current UI state only if the job predates the
   // snapshotting (older jobs without diffContext).
   const copyAllText = useMemo(
-    () =>
-      activeAnnotations.length > 0
-        ? exportReviewFeedback(
-            activeAnnotations,
-            state.prMetadata,
-            job?.diffContext ?? state.feedbackDiffContext,
-          )
-        : '',
-    [activeAnnotations, state.prMetadata, job?.diffContext, state.feedbackDiffContext],
+    () => {
+      if (activeAnnotations.length === 0) return '';
+      const jobMatchesCurrent = !job?.prUrl || job.prUrl === state.prMetadata?.url;
+      return exportReviewFeedback(
+        activeAnnotations,
+        jobMatchesCurrent ? state.prMetadata : null,
+        job?.diffContext ?? state.feedbackDiffContext,
+        jobMatchesCurrent ? state.prReviewScope : undefined,
+      );
+    },
+    [activeAnnotations, state.prMetadata, job?.prUrl, job?.diffContext, state.feedbackDiffContext, state.prReviewScope],
   );
 
   const { jobLogs } = useJobLogs();

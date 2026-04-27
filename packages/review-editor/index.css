@@ -1228,3 +1228,78 @@ diffs-container {
     transition: none !important;
   }
 }
+
+/* Popover animation */
+@keyframes popover-in {
+  from { opacity: 0; transform: scale(0.97) translateY(-4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+.popover-enter { animation: popover-in 0.12s ease-out; }
+
+/* =====================================================
+   PR Switch Loading Indicators
+   ===================================================== */
+
+@keyframes shimmer-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+.pr-switch-shimmer {
+  height: 2px;
+  overflow: hidden;
+}
+
+.pr-switch-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 25%;
+  background: linear-gradient(90deg, transparent, oklch(from var(--accent) l c h / 0.8), transparent);
+  animation: shimmer-slide 1.2s ease-in-out infinite;
+}
+
+/*  3×3 grid — one lit block chases clockwise around the perimeter.
+    DOM order:  1 2 3 / 4 5 6 / 7 8 9     (5 = center, hidden)
+    Chase order: 0 1 2 / 7 · 3 / 6 5 4    */
+
+@keyframes block-chase {
+  0%, 12% { opacity: 1; }
+  13%, 100% { opacity: 0.1; }
+}
+
+.pr-switch-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 6px);
+  grid-template-rows: repeat(3, 6px);
+  gap: 3px;
+}
+
+.pr-switch-grid > span {
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: oklch(from var(--accent) l c h);
+  opacity: 0.1;
+  animation: block-chase 1s linear infinite;
+}
+
+.pr-switch-grid > span:nth-child(5) { opacity: 0.1; animation: none; }
+
+.pr-switch-grid > span:nth-child(1) { animation-delay: 0s; }
+.pr-switch-grid > span:nth-child(2) { animation-delay: 0.125s; }
+.pr-switch-grid > span:nth-child(3) { animation-delay: 0.25s; }
+.pr-switch-grid > span:nth-child(6) { animation-delay: 0.375s; }
+.pr-switch-grid > span:nth-child(9) { animation-delay: 0.5s; }
+.pr-switch-grid > span:nth-child(8) { animation-delay: 0.625s; }
+.pr-switch-grid > span:nth-child(7) { animation-delay: 0.75s; }
+.pr-switch-grid > span:nth-child(4) { animation-delay: 0.875s; }
+
+@keyframes overlay-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.pr-switch-overlay {
+  animation: overlay-fade-in 0.15s ease-out both;
+}
