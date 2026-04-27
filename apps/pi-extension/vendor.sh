@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 
 mkdir -p generated generated/ai/providers
 
-for f in feedback-templates review-core storage draft project pr-provider pr-github pr-gitlab checklist integrations-common repo reference-common favicon resolve-file config external-annotation agent-jobs worktree html-to-markdown url-to-markdown tour annotate-args at-reference; do
+for f in feedback-templates review-core storage draft project pr-provider pr-stack pr-github pr-gitlab checklist integrations-common repo reference-common favicon resolve-file config external-annotation agent-jobs worktree worktree-pool html-to-markdown url-to-markdown tour annotate-args at-reference; do
   src="../../packages/shared/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/shared/%s.ts\n' "$f" | cat - "$src" > "generated/$f.ts"
 done

@@ -18,6 +18,7 @@ import {
 	getDisplayRepo,
 	getMRLabel,
 	getMRNumberLabel,
+	isSameProject,
 	type PRMetadata,
 	type PRReviewFileComment,
 	prRefFromMetadata,
@@ -37,6 +38,16 @@ import {
 	runGitDiff as runGitDiffCore,
 	validateFilePath,
 } from "../generated/review-core.js";
+import {
+	checkoutPRHead,
+	getPRDiffScopeOptions,
+	getPRStackInfo,
+	resolvePRFullStackBaseRef,
+	runPRFullStackDiff,
+	type PRDiffScope,
+} from "../generated/pr-stack.js";
+
+import type { WorktreePool } from "../generated/worktree-pool.js";
 
 import { createEditorAnnotationHandler } from "./annotations.js";
 import { createAgentJobHandler } from "./agent-jobs.js";
@@ -52,11 +63,15 @@ import { html, json, parseBody, requestUrl, toWebRequest } from "./helpers.js";
 
 import { isRemoteSession, listenOnPort } from "./network.js";
 import {
+	fetchPR,
 	fetchPRContext,
 	fetchPRFileContent,
+	fetchPRList,
+	fetchPRStack,
 	fetchPRViewedFiles,
 	getPRUser,
 	markPRFilesViewed,
+	parsePRUrl,
 	submitPRReview,
 } from "./pr.js";
 import { getRepoInfo } from "./project.js";
@@ -184,20 +199,43 @@ export async function startReviewServer(options: {
 	prMetadata?: PRMetadata;
 	/** Working directory for agent processes (e.g., --local worktree). Independent of diff pipeline. */
 	agentCwd?: string;
+	/** Per-PR worktree pool. When set, pr-switch creates worktrees instead of checking out. */
+	worktreePool?: WorktreePool;
 	/** Cleanup callback invoked when server stops (e.g., remove temp worktree) */
 	onCleanup?: () => void | Promise<void>;
 	/** Called when server starts with the URL, remote status, and port */
 	onReady?: (url: string, isRemote: boolean, port: number) => void;
 }): Promise<ReviewServerResult> {
 	const gitUser = detectGitUser();
-	const draftKey = contentHash(options.rawPatch);
-	const prMeta = options.prMetadata;
+	let draftKey = contentHash(options.rawPatch);
+	let prMeta = options.prMetadata;
 	const isPRMode = !!prMeta;
 	const hasLocalAccess = !!options.gitContext;
 	const isRemote = isRemoteSession();
 	const wslFlag = detectWSL();
-	const prRef = prMeta ? prRefFromMetadata(prMeta) : null;
+	let prRef = prMeta ? prRefFromMetadata(prMeta) : null;
 	const platformUser = prRef ? await getPRUser(prRef) : null;
+	let prStackInfo = isPRMode ? getPRStackInfo(prMeta) : null;
+	let prDiffScopeOptions = isPRMode
+		? getPRDiffScopeOptions(prMeta, !!(options.worktreePool || options.agentCwd))
+		: [];
+
+	let prListCache: import("../generated/pr-provider.js").PRListItem[] | null = null;
+	let prListCacheTime = 0;
+	const prSwitchCache = new Map<string, { metadata: PRMetadata; rawPatch: string }>();
+	if (isPRMode && prMeta) prSwitchCache.set(prMeta.url, { metadata: prMeta, rawPatch: options.rawPatch });
+	const prStackTreeCache = new Map<string, import("../generated/pr-provider.js").PRStackTree | null>();
+
+	// Fetch full stack tree (best-effort — client falls back to buildMinimalStackTree)
+	let prStackTree: import("../generated/pr-provider.js").PRStackTree | null = null;
+	if (prStackInfo && prRef && prMeta) {
+		try {
+			prStackTree = await fetchPRStack(prRef, prMeta);
+		} catch {
+			// Non-fatal: client falls back to buildMinimalStackTree()
+		}
+		prStackTreeCache.set(prMeta.url, prStackTree);
+	}
 
 	// Fetch GitHub viewed file state (non-blocking — errors are silently ignored)
 	let initialViewedFiles: string[] = [];
@@ -211,7 +249,7 @@ export async function startReviewServer(options: {
 			// Non-fatal: viewed state is best-effort
 		}
 	}
-	const repoInfo = prMeta
+	let repoInfo = prMeta
 		? {
 				display: getDisplayRepo(prMeta),
 				branch: `${getMRLabel(prMeta)} ${getMRNumberLabel(prMeta)}`,
@@ -224,6 +262,10 @@ export async function startReviewServer(options: {
 	let currentGitRef = options.gitRef;
 	let currentDiffType: DiffType = options.diffType || "uncommitted";
 	let currentError = options.error;
+	let originalPRPatch = options.rawPatch;
+	let originalPRGitRef = options.gitRef;
+	let originalPRError = options.error;
+	let currentPRDiffScope: PRDiffScope = "layer";
 	// Tracks the base branch the user picked from the UI. Agent review prompts
 	// read this (not gitContext.defaultBranch) so they analyze the same diff
 	// the reviewer is currently looking at. Honors an explicit initialBase from
@@ -241,6 +283,10 @@ export async function startReviewServer(options: {
 	// Agent jobs — background process manager (late-binds serverUrl via getter)
 	let serverUrl = "";
 	function resolveAgentCwd(): string {
+		if (options.worktreePool && prMeta) {
+			const poolPath = options.worktreePool.resolve(prMeta.url);
+			if (poolPath) return poolPath;
+		}
 		if (options.agentCwd) return options.agentCwd;
 		if (currentDiffType.startsWith("worktree:")) {
 			const parsed = parseWorktreeDiffType(currentDiffType);
@@ -257,8 +303,8 @@ export async function startReviewServer(options: {
 
 		async buildCommand(provider, config) {
 			const cwd = resolveAgentCwd();
-			const hasAgentLocalAccess = !!options.agentCwd || !!options.gitContext;
-			const userMessageOptions = { defaultBranch: currentBase, hasLocalAccess: hasAgentLocalAccess };
+			const hasAgentLocalAccess = !!options.worktreePool || !!options.agentCwd || !!options.gitContext;
+			const userMessageOptions = { defaultBranch: currentBase, hasLocalAccess: hasAgentLocalAccess, prDiffScope: currentPRDiffScope };
 
 			// Snapshot the diff context at launch (see review.ts buildCommand
 			// for the rationale — keeps downstream "Copy All" honest across
@@ -266,7 +312,9 @@ export async function startReviewServer(options: {
 			const worktreeParts = currentDiffType.startsWith("worktree:")
 				? parseWorktreeDiffType(currentDiffType)
 				: null;
-			const diffContext: AgentJobInfo["diffContext"] | undefined = options.prMetadata
+			const launchPrUrl = prMeta?.url;
+			const launchDiffScope = isPRMode ? currentPRDiffScope : undefined;
+			const diffContext: AgentJobInfo["diffContext"] | undefined = prMeta
 				? undefined
 				: {
 						mode: (worktreeParts?.subType ?? currentDiffType) as string,
@@ -280,13 +328,13 @@ export async function startReviewServer(options: {
 					patch: currentPatch,
 					diffType: currentDiffType,
 					options: userMessageOptions,
-					prMetadata: options.prMetadata,
+					prMetadata: prMeta,
 					config,
 				});
-				return built ? { ...built, diffContext } : built;
+				return built ? { ...built, prUrl: launchPrUrl, diffScope: launchDiffScope, diffContext } : built;
 			}
 
-			const userMessage = buildCodexReviewUserMessage(currentPatch, currentDiffType, userMessageOptions, options.prMetadata);
+			const userMessage = buildCodexReviewUserMessage(currentPatch, currentDiffType, userMessageOptions, prMeta);
 
 			if (provider === "codex") {
 				const model = typeof config?.model === "string" && config.model ? config.model : undefined;
@@ -295,7 +343,7 @@ export async function startReviewServer(options: {
 				const outputPath = generateOutputPath();
 				const prompt = CODEX_REVIEW_SYSTEM_PROMPT + "\n\n---\n\n" + userMessage;
 				const command = await buildCodexCommand({ cwd, outputPath, prompt, model, reasoningEffort, fastMode });
-				return { command, outputPath, prompt, label: "Code Review", model, reasoningEffort, fastMode: fastMode || undefined, diffContext };
+				return { command, outputPath, prompt, cwd, label: "Code Review", model, reasoningEffort, fastMode: fastMode || undefined, prUrl: launchPrUrl, diffScope: launchDiffScope, diffContext };
 			}
 
 			if (provider === "claude") {
@@ -303,21 +351,21 @@ export async function startReviewServer(options: {
 				const effort = typeof config?.effort === "string" && config.effort ? config.effort : undefined;
 				const prompt = CLAUDE_REVIEW_PROMPT + "\n\n---\n\n" + userMessage;
 				const { command, stdinPrompt } = buildClaudeCommand(prompt, model, effort);
-				return { command, stdinPrompt, prompt, cwd, label: "Code Review", captureStdout: true, model, effort, diffContext };
+				return { command, stdinPrompt, prompt, cwd, label: "Code Review", captureStdout: true, model, effort, prUrl: launchPrUrl, diffScope: launchDiffScope, diffContext };
 			}
 
 			return null;
 		},
 
 		async onJobComplete(job, meta) {
-			const cwd = resolveAgentCwd();
+			const cwd = meta.cwd ?? resolveAgentCwd();
+			const jobPrUrl = job.prUrl;
+			const jobDiffScope = job.diffScope;
 
 			if (job.provider === "codex" && meta.outputPath) {
 				const output = await parseCodexOutput(meta.outputPath);
 				if (!output) return;
 
-				// Override verdict if there are blocking findings (P0/P1) — Codex's
-				// freeform correctness string can say "mostly correct" with real bugs.
 				const hasBlockingFindings = output.findings.some(f => f.priority !== null && f.priority <= 1);
 				job.summary = {
 					correctness: hasBlockingFindings ? "Issues Found" : output.overall_correctness,
@@ -326,7 +374,8 @@ export async function startReviewServer(options: {
 				};
 
 				if (output.findings.length > 0) {
-					const annotations = transformReviewFindings(output.findings, job.source, cwd, "Codex");
+					const annotations = transformReviewFindings(output.findings, job.source, cwd, "Codex")
+						.map(a => ({ ...a, ...(jobPrUrl && { prUrl: jobPrUrl }), ...(jobDiffScope && { diffScope: jobDiffScope }) }));
 					const result = externalAnnotations.addAnnotations({ annotations });
 					if ("error" in result) console.error(`[codex-review] addAnnotations error:`, result.error);
 				}
@@ -348,7 +397,8 @@ export async function startReviewServer(options: {
 				};
 
 				if (output.findings.length > 0) {
-					const annotations = transformClaudeFindings(output.findings, job.source, cwd);
+					const annotations = transformClaudeFindings(output.findings, job.source, cwd)
+						.map(a => ({ ...a, ...(jobPrUrl && { prUrl: jobPrUrl }), ...(jobDiffScope && { diffScope: jobDiffScope }) }));
 					const result = externalAnnotations.addAnnotations({ annotations });
 					if ("error" in result) console.error(`[claude-review] addAnnotations error:`, result.error);
 				}
@@ -549,7 +599,14 @@ export async function startReviewServer(options: {
 				repoInfo,
 				isWSL: wslFlag,
 				...(options.agentCwd && { agentCwd: options.agentCwd }),
-				...(isPRMode && { prMetadata: prMeta, platformUser }),
+				...(isPRMode && {
+					prMetadata: prMeta,
+					platformUser,
+					prStackInfo,
+					prStackTree,
+					prDiffScope: currentPRDiffScope,
+					prDiffScopeOptions,
+				}),
 				...(isPRMode && initialViewedFiles.length > 0 && { viewedFiles: initialViewedFiles }),
 				...(currentError && { error: currentError }),
 				serverConfig: getServerConfig(gitUser),
@@ -610,6 +667,153 @@ export async function startReviewServer(options: {
 				const message = err instanceof Error ? err.message : "Failed to switch diff";
 				json(res, { error: message }, 500);
 			}
+		} else if (url.pathname === "/api/pr-diff-scope" && req.method === "POST") {
+			if (!isPRMode || !prMeta) {
+				json(res, { error: "Not in PR mode" }, 400);
+				return;
+			}
+			try {
+				const body = await parseBody(req) as { scope?: PRDiffScope };
+				if (body.scope !== "layer" && body.scope !== "full-stack") {
+					json(res, { error: "Invalid PR diff scope" }, 400);
+					return;
+				}
+
+				if (body.scope === "layer") {
+					currentPatch = originalPRPatch;
+					currentGitRef = originalPRGitRef;
+					currentError = originalPRError;
+					currentPRDiffScope = "layer";
+					json(res, {
+						rawPatch: currentPatch,
+						gitRef: currentGitRef,
+						prDiffScope: currentPRDiffScope,
+						...(currentError ? { error: currentError } : {}),
+					});
+					return;
+				}
+
+				const fullStackOption = prDiffScopeOptions.find((option) => option.id === "full-stack");
+				if (!fullStackOption?.enabled || !(options.worktreePool || options.agentCwd)) {
+					json(res, { error: "Full stack diff requires a stacked PR and a local checkout" }, 400);
+					return;
+				}
+
+				const fullStackCwd = (options.worktreePool && prMeta ? options.worktreePool.resolve(prMeta.url) : undefined) ?? options.agentCwd;
+				const result = await runPRFullStackDiff(reviewRuntime, prMeta, fullStackCwd);
+
+				if (result.error) {
+					json(res, { error: result.error }, 400);
+					return;
+				}
+
+				currentPatch = result.patch;
+				currentGitRef = result.label;
+				currentError = undefined;
+				currentPRDiffScope = "full-stack";
+				json(res, {
+					rawPatch: currentPatch,
+					gitRef: currentGitRef,
+					prDiffScope: currentPRDiffScope,
+				});
+			} catch (err) {
+				const message = err instanceof Error ? err.message : "Failed to switch PR diff scope";
+				json(res, { error: message }, 500);
+			}
+		} else if (url.pathname === "/api/pr-switch" && req.method === "POST") {
+			if (!isPRMode || !prRef) {
+				return json(res, { error: "Not in PR mode" }, 400);
+			}
+			try {
+				const body = (await parseBody(req)) as { url?: string };
+				if (!body?.url) return json(res, { error: "Missing PR URL" }, 400);
+				const newRef = parsePRUrl(body.url);
+				if (!newRef) return json(res, { error: "Invalid PR URL" }, 400);
+				if (!isSameProject(newRef, prRef!)) return json(res, { error: "Cannot switch to a PR in a different repository" }, 400);
+
+				const cached = prSwitchCache.get(body.url);
+				const pr = cached ?? await fetchPR(newRef);
+				if (!cached) prSwitchCache.set(body.url, pr);
+				prMeta = pr.metadata;
+				prRef = prRefFromMetadata(pr.metadata);
+				currentPatch = pr.rawPatch;
+				currentGitRef = `${getMRLabel(pr.metadata)} ${getMRNumberLabel(pr.metadata)}`;
+				currentError = undefined;
+				originalPRPatch = pr.rawPatch;
+				originalPRGitRef = currentGitRef;
+				originalPRError = undefined;
+				currentPRDiffScope = "layer";
+				draftKey = contentHash(pr.rawPatch);
+				prListCache = null;
+
+				prStackInfo = getPRStackInfo(pr.metadata);
+				if (prStackTreeCache.has(body.url)) {
+					prStackTree = prStackTreeCache.get(body.url) ?? null;
+				} else {
+					try {
+						prStackTree = await fetchPRStack(prRef, pr.metadata);
+					} catch { prStackTree = null; }
+					prStackTreeCache.set(body.url, prStackTree);
+				}
+
+				let hasLocalForNewPR = false;
+				if (options.worktreePool) {
+					try {
+						await options.worktreePool.ensure(reviewRuntime, pr.metadata);
+						hasLocalForNewPR = true;
+					} catch {}
+				} else if (options.agentCwd) {
+					hasLocalForNewPR = await checkoutPRHead(reviewRuntime, pr.metadata, options.agentCwd);
+				}
+
+				prDiffScopeOptions = prStackInfo
+					? getPRDiffScopeOptions(pr.metadata, hasLocalForNewPR)
+					: [];
+
+				let switchedViewedFiles: string[] = [];
+				try {
+					const viewedMap = await fetchPRViewedFiles(prRef);
+					switchedViewedFiles = Object.entries(viewedMap)
+						.filter(([, v]) => v).map(([p]) => p);
+				} catch {}
+				initialViewedFiles = switchedViewedFiles;
+
+				repoInfo = {
+					display: getDisplayRepo(pr.metadata),
+					branch: `${getMRLabel(pr.metadata)} ${getMRNumberLabel(pr.metadata)}`,
+				};
+
+				return json(res, {
+					rawPatch: currentPatch,
+					gitRef: currentGitRef,
+					prMetadata: pr.metadata,
+					prStackInfo,
+					prStackTree,
+					prDiffScope: currentPRDiffScope,
+					prDiffScopeOptions,
+					repoInfo,
+					...(switchedViewedFiles.length > 0 && { viewedFiles: switchedViewedFiles }),
+					...(currentError ? { error: currentError } : {}),
+				});
+			} catch (err) {
+				return json(res, { error: err instanceof Error ? err.message : "Failed to switch PR" }, 500);
+			}
+		} else if (url.pathname === "/api/pr-list" && req.method === "GET") {
+			if (!isPRMode || !prRef) {
+				return json(res, { error: "Not in PR mode" }, 400);
+			}
+			try {
+				const now = Date.now();
+				if (prListCache && now - prListCacheTime < 30_000) {
+					return json(res, { prs: prListCache });
+				}
+				const prs = await fetchPRList(prRef);
+				prListCache = prs;
+				prListCacheTime = now;
+				return json(res, { prs });
+			} catch {
+				return json(res, { error: "Failed to fetch PR list" }, 500);
+			}
 		} else if (url.pathname === "/api/pr-context" && req.method === "GET") {
 			if (!isPRMode || !prRef) {
 				json(res, { error: "Not in PR mode" }, 400);
@@ -636,16 +840,36 @@ export async function startReviewServer(options: {
 			try {
 				const body = await parseBody(req);
 				const fileComments = (body.fileComments as PRReviewFileComment[]) || [];
-				console.error(`[pr-action] ${body.action} with ${fileComments.length} file comment(s), headSha=${prMeta.headSha}`);
+				const targetPrUrl = body.targetPrUrl as string | undefined;
+
+				let targetRef = prRef;
+				let targetHeadSha = prMeta.headSha;
+				let targetUrl = prMeta.url;
+
+				if (targetPrUrl) {
+					const cached = prSwitchCache.get(targetPrUrl);
+					if (!cached) {
+						json(res, { error: "Target PR not found in session" }, 400);
+						return;
+					}
+					targetRef = prRefFromMetadata(cached.metadata);
+					targetHeadSha = cached.metadata.headSha;
+					targetUrl = cached.metadata.url;
+				} else if (currentPRDiffScope !== "layer") {
+					json(res, { error: "Switch to Layer diff before posting a platform review" }, 400);
+					return;
+				}
+
+				console.error(`[pr-action] ${body.action} with ${fileComments.length} file comment(s), target=${targetUrl}, headSha=${targetHeadSha}`);
 				await submitPRReview(
-					prRef,
-					prMeta.headSha,
+					targetRef,
+					targetHeadSha,
 					body.action as "approve" | "comment",
 					body.body as string,
 					fileComments,
 				);
 				console.error(`[pr-action] Success`);
-				json(res, { ok: true, prUrl: prMeta.url });
+				json(res, { ok: true, prUrl: targetUrl });
 			} catch (err) {
 				const message = err instanceof Error ? err.message : "Failed to submit PR review";
 				console.error(`[pr-action] Failed: ${message}`);
@@ -699,6 +923,34 @@ export async function startReviewServer(options: {
 					json(res, { error: "Invalid path" }, 400);
 					return;
 				}
+			}
+
+			const fileContentCwd = (options.worktreePool && prMeta) ? options.worktreePool.resolve(prMeta.url) : options.agentCwd;
+			if (
+				isPRMode &&
+				currentPRDiffScope === "full-stack" &&
+				fileContentCwd &&
+				prMeta?.defaultBranch
+			) {
+				const baseRef = await resolvePRFullStackBaseRef(
+					reviewRuntime,
+					prMeta.defaultBranch,
+					fileContentCwd,
+				);
+				if (!baseRef) {
+					json(res, { oldContent: null, newContent: null });
+					return;
+				}
+				const result = await getFileContentsForDiffCore(
+					reviewRuntime,
+					"merge-base",
+					baseRef,
+					filePath,
+					oldPath,
+					fileContentCwd,
+				);
+				json(res, result);
+				return;
 			}
 
 			// Local mode first (matches Bun server priority)
