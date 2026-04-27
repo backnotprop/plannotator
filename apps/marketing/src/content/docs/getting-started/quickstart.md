@@ -31,11 +31,14 @@ The plan renders as formatted markdown with syntax-highlighted code blocks. Read
 Select any text in the plan to open the annotation toolbar. Choose an action:
 
 - **Delete** — Mark text for removal ("Remove this")
-- **Replace** — Suggest replacement text ("Change this to...")
 - **Comment** — Add feedback on a section ("This needs more detail")
-- **Insert** — Add new content after the selection ("Add error handling here")
+- **Quick label** (⚡) — Apply a preset label like "Clarify this", "Needs tests", or "Out of scope"
+- **Looks good** (👍) — Mark a section as approved
+- **Copy** — Copy the selected text to your clipboard
 
 You can also add **global comments** — general feedback that isn't tied to specific text.
+
+Need a replacement or an insertion? Just say so in a comment — the agent will handle it.
 
 Switch between annotation modes using the mode switcher at the top of the document:
 
