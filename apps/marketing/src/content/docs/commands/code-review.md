@@ -79,7 +79,7 @@ The review UI shows your changes in a familiar diff format:
 - **File tree sidebar** for navigating between changed files
 - **Viewed tracking** to mark files as reviewed and track your progress
 - **Unified diff** showing additions and deletions in context
-- **Annotation tools** with the same annotation types as plan review (delete, comment, quick label)
+- **Annotation tools** with the same annotation types as plan review (delete, comment, quick label, "looks good")
 
 ## Annotating code
 

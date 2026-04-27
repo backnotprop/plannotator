@@ -49,7 +49,7 @@ Your senior clicks **Export → Copy Link** to share their annotated version bac
 
 ### 5. You send combined feedback to Claude
 
-With the merged annotations in front of you, you click **Request Changes**. Plannotator formats the combined feedback — deletions, comments, global comments, and quick labels — into structured markdown and sends it back to Claude Code through the hook system. Claude receives specific, actionable feedback and revises the plan.
+With the merged annotations in front of you, you click **Request Changes**. Plannotator formats the combined feedback — deletions, comments, global comments, quick labels, and "looks good" approvals — into structured markdown and sends it back to Claude Code through the hook system. Claude receives specific, actionable feedback and revises the plan.
 
 ## How the hook integration works
 
