@@ -361,6 +361,13 @@ export async function startReviewServer(options: {
 			const cwd = meta.cwd ?? resolveAgentCwd();
 			const jobPrUrl = job.prUrl;
 			const jobDiffScope = job.diffScope;
+			const jobPrMeta = jobPrUrl ? prSwitchCache.get(jobPrUrl)?.metadata : undefined;
+			const jobPrContext = jobPrMeta ? {
+				prUrl: jobPrUrl,
+				prNumber: jobPrMeta.platform === "github" ? jobPrMeta.number : jobPrMeta.iid,
+				prTitle: jobPrMeta.title,
+				prRepo: getDisplayRepo(jobPrMeta),
+			} : jobPrUrl ? { prUrl: jobPrUrl } : {};
 
 			if (job.provider === "codex" && meta.outputPath) {
 				const output = await parseCodexOutput(meta.outputPath);
@@ -375,7 +382,7 @@ export async function startReviewServer(options: {
 
 				if (output.findings.length > 0) {
 					const annotations = transformReviewFindings(output.findings, job.source, cwd, "Codex")
-						.map(a => ({ ...a, ...(jobPrUrl && { prUrl: jobPrUrl }), ...(jobDiffScope && { diffScope: jobDiffScope }) }));
+						.map(a => ({ ...a, ...jobPrContext, ...(jobDiffScope && { diffScope: jobDiffScope }) }));
 					const result = externalAnnotations.addAnnotations({ annotations });
 					if ("error" in result) console.error(`[codex-review] addAnnotations error:`, result.error);
 				}
@@ -398,7 +405,7 @@ export async function startReviewServer(options: {
 
 				if (output.findings.length > 0) {
 					const annotations = transformClaudeFindings(output.findings, job.source, cwd)
-						.map(a => ({ ...a, ...(jobPrUrl && { prUrl: jobPrUrl }), ...(jobDiffScope && { diffScope: jobDiffScope }) }));
+						.map(a => ({ ...a, ...jobPrContext, ...(jobDiffScope && { diffScope: jobDiffScope }) }));
 					const result = externalAnnotations.addAnnotations({ annotations });
 					if ("error" in result) console.error(`[claude-review] addAnnotations error:`, result.error);
 				}
