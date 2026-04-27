@@ -8,22 +8,22 @@ const OPTIONS: { value: DefaultDiffType; label: string; description: string }[] 
   {
     value: 'unstaged',
     label: 'Unstaged',
-    description: 'Changes not yet staged. Matches `git diff`',
+    description: "Only changes you haven't staged yet",
   },
   {
     value: 'uncommitted',
     label: 'All Changes',
-    description: 'Staged and unstaged combined. Matches `git diff HEAD`',
+    description: "Everything you've changed since your last commit",
   },
   {
     value: 'staged',
     label: 'Staged',
-    description: 'Only changes added to the index. Matches `git diff --staged`',
+    description: "Only changes you've staged for commit",
   },
   {
-    value: 'branch',
-    label: 'Branch',
-    description: 'All committed changes vs the default branch. Matches `git diff main...HEAD`',
+    value: 'merge-base',
+    label: 'Committed',
+    description: "Everything you've committed on this branch",
   },
 ];
 
@@ -87,7 +87,7 @@ export const DiffTypeSetupDialog: React.FC<DiffTypeSetupDialogProps> = ({
         {/* Footer */}
         <div className="p-4 border-t border-border flex justify-between items-center gap-3">
           <p className="text-[10px] text-muted-foreground/70 flex-1">
-            You can change this later in Settings &gt; Display.
+            You can change this later in Settings &gt; Git.
           </p>
           <button
             onClick={handleDone}

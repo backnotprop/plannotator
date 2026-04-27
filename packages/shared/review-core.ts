@@ -272,8 +272,7 @@ export async function getGitContext(
   // old guard hid the active mode's option, trapping them. Unconditional
   // emission keeps the active option reachable in every flow.
   if (defaultBranch) {
-    diffOptions.push({ id: "branch", label: `vs ${defaultBranch}` });
-    diffOptions.push({ id: "merge-base", label: `Current PR Diff` });
+    diffOptions.push({ id: "merge-base", label: "Committed changes" });
   }
 
   const [worktrees, currentTreePathResult] = await Promise.all([
