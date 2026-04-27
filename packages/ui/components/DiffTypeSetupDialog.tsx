@@ -20,6 +20,11 @@ const OPTIONS: { value: DefaultDiffType; label: string; description: string }[] 
     label: 'Staged',
     description: 'Only changes added to the index. Matches `git diff --staged`',
   },
+  {
+    value: 'branch',
+    label: 'Branch',
+    description: 'All committed changes vs the default branch. Matches `git diff main...HEAD`',
+  },
 ];
 
 interface DiffTypeSetupDialogProps {

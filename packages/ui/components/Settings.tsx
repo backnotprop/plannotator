@@ -70,7 +70,7 @@ import {
   type FileBrowserSettings,
 } from '../utils/fileBrowser';
 
-type SettingsTab = 'general' | 'theme' | 'display' | 'saving' | 'labels' | 'shortcuts' | 'ai' | 'files' | 'obsidian' | 'bear' | 'octarine' | 'comments';
+type SettingsTab = 'general' | 'theme' | 'git' | 'display' | 'saving' | 'labels' | 'shortcuts' | 'ai' | 'files' | 'obsidian' | 'bear' | 'octarine' | 'comments';
 
 interface SettingsProps {
   taterMode: boolean;
@@ -126,6 +126,7 @@ const DEFAULT_DIFF_TYPE_OPTIONS = [
   { value: 'uncommitted' as const, label: 'All Changes' },
   { value: 'unstaged' as const, label: 'Unstaged' },
   { value: 'staged' as const, label: 'Staged' },
+  { value: 'branch' as const, label: 'Branch' },
 ];
 
 function SegmentedControl<T extends string>({ options, value, onChange }: {
@@ -182,8 +183,20 @@ function ToggleSwitch({ checked, onChange, label, description }: {
   );
 }
 
-const ReviewDisplayTab: React.FC = () => {
+const GitTab: React.FC = () => {
   const defaultDiffType = useConfigValue('defaultDiffType');
+  return (
+    <div className="space-y-2">
+      <div>
+        <div className="text-sm font-medium">Default Diff View</div>
+        <div className="text-xs text-muted-foreground">Which changes to show when opening a review</div>
+      </div>
+      <SegmentedControl options={DEFAULT_DIFF_TYPE_OPTIONS} value={defaultDiffType} onChange={(v) => configStore.set('defaultDiffType', v)} />
+    </div>
+  );
+};
+
+const ReviewDisplayTab: React.FC = () => {
   const diffStyle = useConfigValue('diffStyle');
   const diffOverflow = useConfigValue('diffOverflow');
   const diffIndicators = useConfigValue('diffIndicators');
@@ -200,17 +213,6 @@ const ReviewDisplayTab: React.FC = () => {
 
   return (
     <>
-      {/* Default Diff View */}
-      <div className="space-y-2">
-        <div>
-          <div className="text-sm font-medium">Default Diff View</div>
-          <div className="text-xs text-muted-foreground">Which changes to show when opening a review</div>
-        </div>
-        <SegmentedControl options={DEFAULT_DIFF_TYPE_OPTIONS} value={defaultDiffType} onChange={(v) => configStore.set('defaultDiffType', v)} />
-      </div>
-
-      <div className="border-t border-border" />
-
       {/* Font Family */}
       <div className="space-y-2">
         <div>
@@ -589,6 +591,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       t.push({ id: 'labels', label: 'Labels' });
     }
     if (mode === 'review') {
+      t.push({ id: 'git', label: 'Git' });
       t.push({ id: 'display', label: 'Display' });
       t.push({ id: 'comments', label: 'Comments' });
       if (aiProviders.length > 0) {
@@ -1058,6 +1061,11 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
 
                 {/* === THEME TAB === */}
                 {activeTab === 'theme' && <ThemeTab />}
+
+                {/* === GIT TAB === */}
+                {activeTab === 'git' && mode === 'review' && (
+                  <GitTab />
+                )}
 
                 {/* === DISPLAY TAB === */}
                 {activeTab === 'display' && mode === 'review' && (
