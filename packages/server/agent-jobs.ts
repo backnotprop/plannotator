@@ -62,7 +62,7 @@ export interface AgentJobHandlerOptions {
    * Return an object with the command to spawn (and optional output path for result ingestion).
    * Return null to reject or fall through to frontend-supplied command.
    */
-  buildCommand?: (provider: string) => Promise<{
+  buildCommand?: (provider: string, config?: Record<string, unknown>) => Promise<{
     command: string[];
     outputPath?: string;
     captureStdout?: boolean;
@@ -71,6 +71,18 @@ export interface AgentJobHandlerOptions {
     label?: string;
     /** The full prompt text for display in the detail panel. */
     prompt?: string;
+    /** Underlying engine used (e.g., "claude" or "codex"). Stored on AgentJobInfo for UI display. */
+    engine?: string;
+    /** Model used (e.g., "sonnet", "opus"). Stored on AgentJobInfo for UI display. */
+    model?: string;
+    /** Claude --effort level. */
+    effort?: string;
+    /** Codex reasoning effort level. */
+    reasoningEffort?: string;
+    /** Whether Codex fast mode was enabled. */
+    fastMode?: boolean;
+    /** Diff context snapshot at launch (stored on AgentJobInfo for per-job "Copy All"). */
+    diffContext?: AgentJobInfo["diffContext"];
   } | null>;
   /**
    * Called after a job process exits with exit code 0.
@@ -93,6 +105,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
   const capabilities: AgentCapability[] = [
     { id: "claude", name: "Claude Code", available: !!Bun.which("claude") },
     { id: "codex", name: "Codex CLI", available: !!Bun.which("codex") },
+    { id: "tour", name: "Code Tour", available: !!Bun.which("claude") || !!Bun.which("codex") },
   ];
   const capabilitiesResponse: AgentCapabilities = {
     mode,
@@ -119,7 +132,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
     command: string[],
     label: string,
     outputPath?: string,
-    spawnOptions?: { captureStdout?: boolean; stdinPrompt?: string; cwd?: string; prompt?: string },
+    spawnOptions?: { captureStdout?: boolean; stdinPrompt?: string; cwd?: string; prompt?: string; engine?: string; model?: string; effort?: string; reasoningEffort?: string; fastMode?: boolean; diffContext?: AgentJobInfo["diffContext"] },
   ): AgentJobInfo {
     const id = crypto.randomUUID();
     const source = jobSource(id);
@@ -133,6 +146,12 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
       startedAt: Date.now(),
       command,
       cwd: getCwd(),
+      ...(spawnOptions?.engine && { engine: spawnOptions.engine }),
+      ...(spawnOptions?.model && { model: spawnOptions.model }),
+      ...(spawnOptions?.effort && { effort: spawnOptions.effort }),
+      ...(spawnOptions?.reasoningEffort && { reasoningEffort: spawnOptions.reasoningEffort }),
+      ...(spawnOptions?.fastMode && { fastMode: spawnOptions.fastMode }),
+      ...(spawnOptions?.diffContext && { diffContext: spawnOptions.diffContext }),
     };
 
     let proc: ReturnType<typeof Bun.spawn> | null = null;
@@ -220,8 +239,9 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
                 const lines = text.split('\n');
                 for (const line of lines) {
                   if (!line.trim()) continue;
-                  // Claude: format JSONL into readable text
-                  if (provider === "claude") {
+                  // Claude: format JSONL into readable text. Tour jobs with the
+                  // Claude engine also stream Claude JSONL, so key off engine too.
+                  if (provider === "claude" || spawnOptions?.engine === "claude") {
                     const formatted = formatClaudeLogEvent(line);
                     if (formatted !== null) {
                       broadcast({ type: "job:log", jobId: id, delta: formatted + '\n' });
@@ -423,8 +443,21 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
           let stdinPrompt: string | undefined;
           let spawnCwd: string | undefined;
           let promptText: string | undefined;
+          let jobEngine: string | undefined;
+          let jobModel: string | undefined;
+          let jobEffort: string | undefined;
+          let jobReasoningEffort: string | undefined;
+          let jobFastMode: boolean | undefined;
+          let jobDiffContext: AgentJobInfo["diffContext"] | undefined;
           if (options.buildCommand) {
-            const built = await options.buildCommand(provider);
+            // Thread config from POST body to buildCommand
+            const config: Record<string, unknown> = {};
+            if (typeof body.engine === "string") config.engine = body.engine;
+            if (typeof body.model === "string") config.model = body.model;
+            if (typeof body.reasoningEffort === "string") config.reasoningEffort = body.reasoningEffort;
+            if (typeof body.effort === "string") config.effort = body.effort;
+            if (body.fastMode === true) config.fastMode = true;
+            const built = await options.buildCommand(provider, Object.keys(config).length > 0 ? config : undefined);
             if (built) {
               command = built.command;
               outputPath = built.outputPath;
@@ -433,6 +466,12 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
               spawnCwd = built.cwd;
               promptText = built.prompt;
               if (built.label) label = built.label;
+              jobEngine = built.engine;
+              jobModel = built.model;
+              jobEffort = built.effort;
+              jobReasoningEffort = built.reasoningEffort;
+              jobFastMode = built.fastMode;
+              jobDiffContext = built.diffContext;
             }
           }
 
@@ -448,6 +487,12 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
             stdinPrompt,
             cwd: spawnCwd,
             prompt: promptText,
+            engine: jobEngine,
+            model: jobModel,
+            effort: jobEffort,
+            reasoningEffort: jobReasoningEffort,
+            fastMode: jobFastMode,
+            diffContext: jobDiffContext,
           });
           return Response.json({ job }, { status: 201 });
         } catch {

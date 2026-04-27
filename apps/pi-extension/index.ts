@@ -1,17 +1,15 @@
 /**
  * Plannotator Pi Extension — File-based plan mode with visual browser review.
  *
- * Plans are written to PLAN.md on disk (git-trackable, editor-visible).
- * The agent calls plannotator_submit_plan to request approval; the user
- * reviews the plan in the Plannotator browser UI and can approve, deny
- * with annotations, or request changes.
+ * During planning the agent writes any markdown file anywhere inside cwd and
+ * calls plannotator_submit_plan with the path. The user reviews in the
+ * browser UI and can approve, deny with annotations, or request changes.
  *
  * Features:
  * - /plannotator command or Ctrl+Alt+P to toggle
  * - --plan flag to start in planning mode
- * - --plan-file flag to customize the plan file path
  * - Bash unrestricted during planning (prompt-guided)
- * - Write restricted to plan file only during planning
+ * - Writes restricted to markdown files inside cwd during planning
  * - plannotator_submit_plan tool with browser-based visual approval
  * - [DONE:n] markers for execution progress tracking
  * - /plannotator-review command for code review
@@ -19,7 +17,7 @@
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { resolve, basename } from "node:path";
+import { basename, resolve } from "node:path";
 import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 import { Type } from "@mariozechner/pi-ai";
 import type {
@@ -34,11 +32,13 @@ import {
 	parseChecklist,
 } from "./generated/checklist.js";
 import { planDenyFeedback } from "./generated/feedback-templates.js";
-import { hasMarkdownFiles } from "./generated/resolve-file.js";
+import { hasMarkdownFiles, resolveUserPath } from "./generated/resolve-file.js";
 import { FILE_BROWSER_EXCLUDED } from "./generated/reference-common.js";
 import { htmlToMarkdown } from "./generated/html-to-markdown.js";
 import { urlToMarkdown } from "./generated/url-to-markdown.js";
 import { loadConfig, resolveUseJina } from "./generated/config.js";
+import { parseAnnotateArgs } from "./generated/annotate-args.js";
+import { resolveAtReference } from "./generated/at-reference.js";
 import {
 	getLastAssistantMessageText,
 	hasPlanBrowserHtml,
@@ -53,6 +53,7 @@ import {
 } from "./plannotator-events.js";
 import {
 	getToolsForPhase,
+	isPlanWritePathAllowed,
 	PLAN_SUBMIT_TOOL,
 	type Phase,
 	stripPlanningOnlyTools,
@@ -69,7 +70,7 @@ type SavedPhaseState = {
 
 type PersistedPlannotatorState = {
 	phase: Phase;
-	planFilePath?: string;
+	lastSubmittedPath?: string;
 	savedState?: SavedPhaseState;
 };
 
@@ -106,7 +107,7 @@ function getPlanReviewAvailabilityWarning(options: { hasUI: boolean; hasPlanHtml
 export default function plannotator(pi: ExtensionAPI): void {
 	let phase: Phase = "idle";
 	void registerPlannotatorEventListeners(pi);
-	let planFilePath = "PLAN.md";
+	let lastSubmittedPath: string | null = null;
 	let checklistItems: ChecklistItem[] = [];
 	let savedState: SavedPhaseState | null = null;
 	let plannotatorConfig = {};
@@ -119,17 +120,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 		default: false,
 	});
 
-	pi.registerFlag("plan-file", {
-		description: "Plan file path (default: PLAN.md)",
-		type: "string",
-		default: "PLAN.md",
-	});
-
 	// ── Helpers ──────────────────────────────────────────────────────────
-
-	function resolvePlanPath(cwd: string): string {
-		return resolve(cwd, planFilePath);
-	}
 
 	function getPhaseProfile(): ReturnType<typeof resolvePhaseProfile> | undefined {
 		if (phase === "planning" || phase === "executing") {
@@ -183,7 +174,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 	function persistState(): void {
 
 
-		pi.appendEntry("plannotator", { phase, planFilePath, savedState });
+		pi.appendEntry("plannotator", { phase, lastSubmittedPath, savedState });
 	}
 
 	async function applyModelRef(
@@ -249,7 +240,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 		await applyPhaseConfig(ctx, { restoreSavedState: false });
 		persistState();
 		ctx.ui.notify(
-			`Plannotator: planning mode enabled. Write your plan to ${planFilePath}.`,
+			"Plannotator: planning mode enabled. Write a markdown plan, then submit it for review.",
 		);
 		const warning = getPlanReviewAvailabilityWarning({ hasUI: ctx.hasUI, hasPlanHtml: hasPlanBrowserHtml() });
 		if (warning) {
@@ -260,7 +251,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 	async function exitToIdle(ctx: ExtensionContext): Promise<void> {
 		phase = "idle";
 		checklistItems = [];
-
+		lastSubmittedPath = null;
 
 		await restoreSavedState(ctx);
 		savedState = null;
@@ -281,57 +272,24 @@ export default function plannotator(pi: ExtensionAPI): void {
 	// ── Commands & Shortcuts ─────────────────────────────────────────────
 
 	pi.registerCommand("plannotator", {
-		description: "Toggle plannotator (file-based plan mode)",
-		handler: async (args, ctx) => {
-			if (phase !== "idle") {
-				await exitToIdle(ctx);
-				return;
-			}
-
-			// Accept path as argument: /plannotator plans/auth.md
-			let targetPath = args?.trim() || undefined;
-
-			// No arg — prompt for file path interactively
-			if (!targetPath && ctx.hasUI) {
-				targetPath = await ctx.ui.input("Plan file path", planFilePath);
-				if (targetPath === undefined) return; // cancelled
-			}
-
-			if (targetPath) planFilePath = targetPath;
-			await enterPlanning(ctx);
+		description: "Toggle plannotator planning mode",
+		handler: async (_args, ctx) => {
+			await togglePlanMode(ctx);
 		},
 	});
 
 	pi.registerCommand("plannotator-status", {
 		description: "Show plannotator status",
 		handler: async (_args, ctx) => {
-			const parts = [`Phase: ${phase}`, `Plan file: ${planFilePath}`];
+			const parts = [`Phase: ${phase}`];
+			if (lastSubmittedPath) {
+				parts.push(`Plan file: ${lastSubmittedPath}`);
+			}
 			if (checklistItems.length > 0) {
 				const done = checklistItems.filter((t) => t.completed).length;
 				parts.push(`Progress: ${done}/${checklistItems.length}`);
 			}
 			ctx.ui.notify(parts.join("\n"), "info");
-		},
-	});
-
-	pi.registerCommand("plannotator-set-file", {
-		description: "Change the plan file path",
-		handler: async (args, ctx) => {
-			let targetPath = args?.trim() || undefined;
-
-			if (!targetPath && ctx.hasUI) {
-				targetPath = await ctx.ui.input("Plan file path", planFilePath);
-				if (targetPath === undefined) return; // cancelled
-			}
-
-			if (!targetPath) {
-				ctx.ui.notify(`Current plan file: ${planFilePath}`, "info");
-				return;
-			}
-
-			planFilePath = targetPath;
-			persistState();
-			ctx.ui.notify(`Plan file changed to: ${planFilePath}`);
 		},
 	});
 
@@ -381,9 +339,13 @@ export default function plannotator(pi: ExtensionAPI): void {
 	pi.registerCommand("plannotator-annotate", {
 		description: "Open markdown file or folder in annotation UI",
 		handler: async (args, ctx) => {
-			const filePath = args?.trim();
+			// #570: split --gate / --json from the path. --json is silently
+			// accepted (Pi writes back via sendUserMessage, not stdout).
+			// `rawFilePath` keeps any leading `@` for the literal-@ fallback
+			// (scoped-package-style names).
+			const { filePath, rawFilePath, gate } = parseAnnotateArgs(args ?? "");
 			if (!filePath) {
-				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.html | https://... | folder/>", "error");
+				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.html | https://... | folder/> [--gate] [--json]", "error");
 				return;
 			}
 			if (!hasPlanBrowserHtml()) {
@@ -417,11 +379,20 @@ export default function plannotator(pi: ExtensionAPI): void {
 				absolutePath = filePath;
 				sourceInfo = filePath;
 			} else {
-				absolutePath = resolve(ctx.cwd, filePath);
-				if (!existsSync(absolutePath)) {
+				// Pick the interpretation of the user input that actually exists:
+				// stripped form first (reference-mode primary), literal as fallback
+				// for scoped-package-style names. Falls back to the stripped form
+				// for the error message if neither exists.
+				const resolvedCandidate = resolveAtReference(rawFilePath, (c) => {
+					const abs = resolveUserPath(c, ctx.cwd);
+					return existsSync(abs);
+				});
+				if (resolvedCandidate === null) {
+					absolutePath = resolveUserPath(filePath, ctx.cwd);
 					ctx.ui.notify(`File not found: ${absolutePath}`, "error");
 					return;
 				}
+				absolutePath = resolveUserPath(resolvedCandidate, ctx.cwd);
 
 				try {
 					isFolder = statSync(absolutePath).isDirectory();
@@ -457,8 +428,10 @@ export default function plannotator(pi: ExtensionAPI): void {
 			}
 
 			try {
-				const result = await openMarkdownAnnotation(ctx, absolutePath, markdown, mode ?? "annotate", folderPath, sourceInfo);
-				if (result.exit) {
+				const result = await openMarkdownAnnotation(ctx, absolutePath, markdown, mode ?? "annotate", folderPath, sourceInfo, gate);
+				if (result.approved) {
+					ctx.ui.notify("Annotation approved.", "info");
+				} else if (result.exit) {
 					ctx.ui.notify("Annotation session closed.", "info");
 				} else if (result.feedback) {
 					const header = isFolder
@@ -481,7 +454,10 @@ export default function plannotator(pi: ExtensionAPI): void {
 
 	pi.registerCommand("plannotator-last", {
 		description: "Annotate the last assistant message",
-		handler: async (_args, ctx) => {
+		handler: async (args, ctx) => {
+			// #570: support --gate on /plannotator-last for Stop-hook review gate.
+			const { gate } = parseAnnotateArgs(args ?? "");
+
 			if (!hasPlanBrowserHtml()) {
 				ctx.ui.notify(
 					"Annotation UI not available. Run 'bun run build' in the pi-extension directory.",
@@ -499,8 +475,10 @@ export default function plannotator(pi: ExtensionAPI): void {
 			ctx.ui.notify("Opening annotation UI for last message...", "info");
 
 			try {
-				const result = await openLastMessageAnnotation(ctx, lastText);
-				if (result.exit) {
+				const result = await openLastMessageAnnotation(ctx, lastText, gate);
+				if (result.approved) {
+					ctx.ui.notify("Message approved.", "info");
+				} else if (result.exit) {
 					ctx.ui.notify("Annotation session closed.", "info");
 				} else if (result.feedback) {
 					pi.sendUserMessage(
@@ -557,18 +535,18 @@ export default function plannotator(pi: ExtensionAPI): void {
 		label: "Submit Plan",
 		description:
 			"Submit your Plannotator plan for user review. " +
-			"Call this only while Plannotator planning mode is active, after drafting or revising your plan file. " +
+			"Call this only while Plannotator planning mode is active, after writing your plan as a markdown file anywhere inside the working directory. " +
+			"Pass the path to the plan file (e.g. PLAN.md or plans/auth.md). " +
 			"The user will review the plan in a visual browser UI and can approve, deny with feedback, or annotate it. " +
-			"If denied, use the edit tool to make targeted revisions (not write), then call this again.",
+			"If denied, edit the same file in place, then call this again with the same path.",
 		parameters: Type.Object({
-			summary: Type.Optional(
-				Type.String({
-					description: "Brief summary of the plan for the user's review",
-				}),
-			),
+			filePath: Type.String({
+				description:
+					"Path to the markdown plan file, relative to the working directory. Must end in .md or .mdx and resolve inside cwd.",
+			}),
 		}) as any,
 
-		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			// Guard: must be in planning phase
 			if (phase !== "planning") {
 				return {
@@ -582,17 +560,66 @@ export default function plannotator(pi: ExtensionAPI): void {
 				};
 			}
 
-			// Read plan file
-			const fullPath = resolvePlanPath(ctx.cwd);
-			let planContent: string;
+			const inputPath = (params as { filePath?: string })?.filePath?.trim();
+			if (!inputPath) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Error: ${PLAN_SUBMIT_TOOL} requires a filePath argument pointing to your markdown plan file (e.g. "PLAN.md" or "plans/auth.md").`,
+						},
+					],
+					details: { approved: false },
+				};
+			}
+
+			if (!isPlanWritePathAllowed(inputPath, ctx.cwd)) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Error: plan file must be a markdown file (.md or .mdx) inside the working directory. Rejected: ${inputPath}`,
+						},
+					],
+					details: { approved: false },
+				};
+			}
+
+			const fullPath = resolve(ctx.cwd, inputPath);
+
 			try {
-				planContent = readFileSync(fullPath, "utf-8");
+				if (!statSync(fullPath).isFile()) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Error: ${inputPath} is not a regular file. Write your plan to a markdown file first, then call ${PLAN_SUBMIT_TOOL} with its path.`,
+							},
+						],
+						details: { approved: false },
+					};
+				}
 			} catch {
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Error: ${planFilePath} does not exist. Write your plan using the write tool first, then call ${PLAN_SUBMIT_TOOL} again.`,
+							text: `Error: ${inputPath} does not exist. Write your plan using the write tool first, then call ${PLAN_SUBMIT_TOOL} again.`,
+						},
+					],
+					details: { approved: false },
+				};
+			}
+
+			let planContent: string;
+			try {
+				planContent = readFileSync(fullPath, "utf-8");
+			} catch (err) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Error: failed to read ${inputPath}: ${err instanceof Error ? err.message : String(err)}`,
 						},
 					],
 					details: { approved: false },
@@ -604,23 +631,21 @@ export default function plannotator(pi: ExtensionAPI): void {
 					content: [
 						{
 							type: "text",
-							text: `Error: ${planFilePath} is empty. Write your plan first, then call ${PLAN_SUBMIT_TOOL} again.`,
+							text: `Error: ${inputPath} is empty. Write your plan first, then call ${PLAN_SUBMIT_TOOL} again.`,
 						},
 					],
 					details: { approved: false },
 				};
 			}
 
-			// Parse checklist items
+			lastSubmittedPath = inputPath;
 			checklistItems = parseChecklist(planContent);
 
 			// Non-interactive or no HTML: auto-approve
 			if (!ctx.hasUI || !hasPlanBrowserHtml()) {
 				phase = "executing";
-
-
 				await applyPhaseConfig(ctx, { restoreSavedState: true });
-				pi.appendEntry("plannotator-execute", { planFilePath });
+				pi.appendEntry("plannotator-execute", { lastSubmittedPath });
 				persistState();
 				return {
 					content: [
@@ -647,10 +672,8 @@ export default function plannotator(pi: ExtensionAPI): void {
 
 			if (result.approved) {
 				phase = "executing";
-
-
 				await applyPhaseConfig(ctx, { restoreSavedState: true });
-				pi.appendEntry("plannotator-execute", { planFilePath });
+				pi.appendEntry("plannotator-execute", { lastSubmittedPath });
 				persistState();
 
 				const doneMsg =
@@ -663,7 +686,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 						content: [
 							{
 								type: "text",
-								text: `Plan approved with notes! You now have full tool access (read, bash, edit, write). Execute the plan in ${planFilePath}. ${doneMsg}\n\n## Implementation Notes\n\nThe user approved your plan but added the following notes to consider during implementation:\n\n${result.feedback}\n\nProceed with implementation, incorporating these notes where applicable.`,
+								text: `Plan approved with notes! You now have full tool access (read, bash, edit, write). Execute the plan in ${inputPath}. ${doneMsg}\n\n## Implementation Notes\n\nThe user approved your plan but added the following notes to consider during implementation:\n\n${result.feedback}\n\nProceed with implementation, incorporating these notes where applicable.`,
 							},
 						],
 						details: { approved: true, feedback: result.feedback },
@@ -674,7 +697,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 					content: [
 						{
 							type: "text",
-							text: `Plan approved. You now have full tool access (read, bash, edit, write). Execute the plan in ${planFilePath}. ${doneMsg}`,
+							text: `Plan approved. You now have full tool access (read, bash, edit, write). Execute the plan in ${inputPath}. ${doneMsg}`,
 						},
 					],
 					details: { approved: true },
@@ -682,13 +705,14 @@ export default function plannotator(pi: ExtensionAPI): void {
 			}
 
 			// Denied
+			persistState();
 			const feedbackText = result.feedback || "Plan rejected. Please revise.";
 			return {
 				content: [
 					{
 						type: "text",
 						text: planDenyFeedback(feedbackText, PLAN_SUBMIT_TOOL, {
-							planFilePath,
+							planFilePath: inputPath,
 						}),
 					},
 				],
@@ -699,39 +723,29 @@ export default function plannotator(pi: ExtensionAPI): void {
 
 	// ── Event Handlers ───────────────────────────────────────────────────
 
-	// Gate writes during planning
+	// Gate writes during planning — only markdown files inside cwd.
 	pi.on("tool_call", async (event, ctx) => {
 		if (phase !== "planning") return;
+		if (event.toolName !== "write" && event.toolName !== "edit") return;
 
-		if (event.toolName === "write") {
-			const targetPath = resolve(ctx.cwd, event.input.path as string);
-			const allowedPath = resolvePlanPath(ctx.cwd);
-			if (targetPath !== allowedPath) {
-				return {
-					block: true,
-					reason: `Plannotator: writes are restricted to ${planFilePath} during planning. Blocked: ${event.input.path}`,
-				};
-			}
-		}
-
-		if (event.toolName === "edit") {
-			const targetPath = resolve(ctx.cwd, event.input.path as string);
-			const allowedPath = resolvePlanPath(ctx.cwd);
-			if (targetPath !== allowedPath) {
-				return {
-					block: true,
-					reason: `Plannotator: edits are restricted to ${planFilePath} during planning. Blocked: ${event.input.path}`,
-				};
-			}
+		const inputPath = event.input.path as string;
+		if (!isPlanWritePathAllowed(inputPath, ctx.cwd)) {
+			const verb = event.toolName === "write" ? "writes" : "edits";
+			return {
+				block: true,
+				reason: `Plannotator: during planning, ${verb} are limited to markdown files (.md, .mdx) inside the working directory. Blocked: ${inputPath}`,
+			};
 		}
 	});
 
 	// Inject phase-specific context
 	pi.on("before_agent_start", async (_event, ctx) => {
 		const profile = getPhaseProfile();
-		if (phase === "executing") {
+		const planRef = lastSubmittedPath ?? "your plan file";
+
+		if (phase === "executing" && lastSubmittedPath) {
 			// Re-read from disk each turn to stay current
-			const fullPath = resolvePlanPath(ctx.cwd);
+			const fullPath = resolve(ctx.cwd, lastSubmittedPath);
 			try {
 				const planContent = readFileSync(fullPath, "utf-8");
 				checklistItems = parseChecklist(planContent);
@@ -745,7 +759,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			const rendered = renderTemplate(
 				profile.systemPrompt,
 				buildPromptVariables({
-					planFilePath,
+					planFilePath: planRef,
 					phase,
 					todoList: todoStats.todoList,
 					completedCount: todoStats.completedCount,
@@ -768,22 +782,26 @@ export default function plannotator(pi: ExtensionAPI): void {
 				message: {
 					customType: "plannotator-context",
 					content: `[PLANNOTATOR - PLANNING PHASE]
-You are in plan mode. You MUST NOT make any changes to the codebase — no edits, no commits, no installs, no destructive commands. The ONLY file you may write to or edit is the plan file: ${planFilePath}.
+You are in plan mode. You MUST NOT make any changes to the codebase — no edits, no commits, no installs, no destructive commands. During planning you may only write or edit markdown files (.md, .mdx) inside the working directory.
 
-Available tools: read, bash, grep, find, ls, write (${planFilePath} only), edit (${planFilePath} only), ${PLAN_SUBMIT_TOOL}
+Available tools: read, bash, grep, find, ls, write (markdown only), edit (markdown only), ${PLAN_SUBMIT_TOOL}
 
 Do not run destructive bash commands (rm, git push, npm install, etc.) — focus on reading and exploring the codebase. Web fetching (curl, wget) is fine.
 
 ## Iterative Planning Workflow
 
-You are pair-planning with the user. Explore the code to build context, then write your findings into ${planFilePath} as you go. The plan starts as a rough skeleton and gradually becomes the final plan.
+You are pair-planning with the user. Explore the code to build context, then write your findings into a markdown plan file as you go. The plan starts as a rough skeleton and gradually becomes the final plan.
+
+### Picking a plan file
+
+Choose a descriptive filename for your plan. Convention: \`PLAN.md\` at the repo root for a single focused plan, or \`plans/<short-name>.md\` for projects that keep multiple plans. Reuse the same filename across revisions of the same plan so version history links up.
 
 ### The Loop
 
 Repeat this cycle until the plan is complete:
 
 1. **Explore** — Use read, grep, find, ls, and bash to understand the codebase. Actively search for existing functions, utilities, and patterns that can be reused — avoid proposing new code when suitable implementations already exist.
-2. **Update the plan file** — After each discovery, immediately capture what you learned in ${planFilePath}. Don't wait until the end. Use write for the initial draft, then edit for all subsequent updates.
+2. **Update the plan file** — After each discovery, immediately capture what you learned in the plan. Don't wait until the end. Use write for the initial draft, then edit for all subsequent updates.
 3. **Ask the user** — When you hit an ambiguity or decision you can't resolve from code alone, ask. Then go back to step 1.
 
 ### First Turn
@@ -813,14 +831,14 @@ Keep the plan concise enough to scan quickly, but detailed enough to execute eff
 
 ### When to Submit
 
-Your plan is ready when you've addressed all ambiguities and it covers: what to change, which files to modify, what existing code to reuse, and how to verify. Call ${PLAN_SUBMIT_TOOL} to submit for review.
+Your plan is ready when you've addressed all ambiguities and it covers: what to change, which files to modify, what existing code to reuse, and how to verify. Call ${PLAN_SUBMIT_TOOL} with the path to your plan file to submit for review.
 
 ### Revising After Feedback
 
 When the user denies a plan with feedback:
-1. Read ${planFilePath} to see the current plan.
+1. Read the plan file to see the current plan.
 2. Use the edit tool to make targeted changes addressing the feedback — do NOT rewrite the entire file.
-3. Call ${PLAN_SUBMIT_TOOL} again to resubmit.
+3. Call ${PLAN_SUBMIT_TOOL} again with the same filePath to resubmit.
 
 ### Ending Your Turn
 
@@ -835,16 +853,6 @@ Do not end your turn without doing one of these two things.`,
 		}
 
 		if (phase === "executing" && checklistItems.length > 0) {
-			// Re-read from disk each turn to stay current
-			const fullPath = resolvePlanPath(ctx.cwd);
-			let planContent = "";
-			try {
-				planContent = readFileSync(fullPath, "utf-8");
-				checklistItems = parseChecklist(planContent);
-			} catch {
-				// File deleted during execution — degrade gracefully
-			}
-
 			const remaining = checklistItems.filter((t) => !t.completed);
 			if (remaining.length > 0) {
 				const todoList = remaining
@@ -854,7 +862,7 @@ Do not end your turn without doing one of these two things.`,
 					message: {
 						customType: "plannotator-context",
 						content: `[PLANNOTATOR - EXECUTING PLAN]
-Full tool access is enabled. Execute the plan from ${planFilePath}.
+Full tool access is enabled. Execute the plan from ${planRef}.
 
 Remaining steps:
 ${todoList}
@@ -924,7 +932,7 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 			);
 			phase = "idle";
 			checklistItems = [];
-
+			lastSubmittedPath = null;
 
 			await restoreSavedState(ctx);
 			savedState = null;
@@ -936,12 +944,6 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 
 	// Restore state on session start/resume
 	pi.on("session_start", async (_event, ctx) => {
-		// Resolve plan file path from flag
-		const flagPlanFile = pi.getFlag("plan-file") as string;
-		if (flagPlanFile) {
-			planFilePath = flagPlanFile;
-		}
-
 		const loadedConfig = loadPlannotatorConfig(ctx.cwd);
 		plannotatorConfig = loadedConfig.config;
 		for (const warning of loadedConfig.warnings) {
@@ -960,48 +962,50 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 				(e: { type: string; customType?: string }) =>
 					e.type === "custom" && e.customType === "plannotator",
 			)
-
-
 			.pop() as { data?: PersistedPlannotatorState } | undefined;
 
 		if (stateEntry?.data) {
 			phase = stateEntry.data.phase ?? phase;
-			planFilePath = stateEntry.data.planFilePath ?? planFilePath;
-
-
+			lastSubmittedPath = stateEntry.data.lastSubmittedPath ?? lastSubmittedPath;
 			savedState = stateEntry.data.savedState ?? savedState;
 		}
 
 		// Rebuild execution state from disk + session messages
 		if (phase === "executing") {
-			const fullPath = resolvePlanPath(ctx.cwd);
-			if (existsSync(fullPath)) {
-				const content = readFileSync(fullPath, "utf-8");
-				checklistItems = parseChecklist(content);
+			if (lastSubmittedPath) {
+				const fullPath = resolve(ctx.cwd, lastSubmittedPath);
+				if (existsSync(fullPath)) {
+					const content = readFileSync(fullPath, "utf-8");
+					checklistItems = parseChecklist(content);
 
-				// Find last execution marker and scan messages after it for [DONE:n]
-				let executeIndex = -1;
-				for (let i = entries.length - 1; i >= 0; i--) {
-					const entry = entries[i] as { type: string; customType?: string };
-					if (entry.customType === "plannotator-execute") {
-						executeIndex = i;
-						break;
+					// Find last execution marker and scan messages after it for [DONE:n]
+					let executeIndex = -1;
+					for (let i = entries.length - 1; i >= 0; i--) {
+						const entry = entries[i] as { type: string; customType?: string };
+						if (entry.customType === "plannotator-execute") {
+							executeIndex = i;
+							break;
+						}
 					}
-				}
 
-				for (let i = executeIndex + 1; i < entries.length; i++) {
-					const entry = entries[i];
-					if (
-						entry.type === "message" &&
-						"message" in entry &&
-						isAssistantMessage(entry.message as AssistantMessageLike)
-					) {
-						const text = getTextContent(entry.message as { content: AssistantTextBlock[] });
-						markCompletedSteps(text, checklistItems);
+					for (let i = executeIndex + 1; i < entries.length; i++) {
+						const entry = entries[i];
+						if (
+							entry.type === "message" &&
+							"message" in entry &&
+							isAssistantMessage(entry.message as AssistantMessageLike)
+						) {
+							const text = getTextContent(entry.message as { content: AssistantTextBlock[] });
+							markCompletedSteps(text, checklistItems);
+						}
 					}
+				} else {
+					// Plan file gone — fall back to idle
+					phase = "idle";
+					lastSubmittedPath = null;
 				}
 			} else {
-				// Plan file gone — fall back to idle
+				// No path recorded — can't rebuild, fall back to idle
 				phase = "idle";
 			}
 		}

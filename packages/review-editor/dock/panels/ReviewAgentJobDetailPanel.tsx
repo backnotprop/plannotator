@@ -27,7 +27,8 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
   );
 
   const terminal = job ? isTerminalStatus(job.status) : false;
-  const [activeTab, setActiveTab] = useState<DetailTab>('findings');
+  const isTour = job?.provider === 'tour';
+  const [activeTab, setActiveTab] = useState<DetailTab>(isTour ? 'logs' : 'findings');
 
   const { fullCommand, userMessage, systemPrompt } = useMemo(() => {
     const cmd = job?.command ?? [];
@@ -86,9 +87,21 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
     state.onSelectAnnotation(ann.id);
   }, [state.openDiffFile, state.onSelectAnnotation]);
 
+  // Copy All uses the diff context snapshotted on the JOB at launch, not the
+  // current UI state — so if the reviewer switches modes/bases after the job
+  // ran, the exported markdown still describes the diff the agent actually
+  // analyzed. Falls back to current UI state only if the job predates the
+  // snapshotting (older jobs without diffContext).
   const copyAllText = useMemo(
-    () => activeAnnotations.length > 0 ? exportReviewFeedback(activeAnnotations, state.prMetadata) : '',
-    [activeAnnotations, state.prMetadata]
+    () =>
+      activeAnnotations.length > 0
+        ? exportReviewFeedback(
+            activeAnnotations,
+            state.prMetadata,
+            job?.diffContext ?? state.feedbackDiffContext,
+          )
+        : '',
+    [activeAnnotations, state.prMetadata, job?.diffContext, state.feedbackDiffContext],
   );
 
   const { jobLogs } = useJobLogs();
@@ -108,7 +121,7 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
       <div className="flex-shrink-0 px-8 py-3 border-b border-border/40">
         <div className="flex items-center gap-2">
           <StatusDot status={job.status} />
-          <ProviderPill provider={job.provider} />
+          <ProviderPill provider={job.provider} engine={job.engine} model={job.model} />
           <span className="text-sm font-medium text-foreground truncate">{job.label}</span>
           <span className="ml-auto text-[10px] font-mono text-muted-foreground">
             {terminal && job.endedAt ? formatDuration(job.endedAt - job.startedAt) : <ElapsedTime startedAt={job.startedAt} />}
@@ -132,7 +145,7 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
               <pre className="text-xs font-mono text-foreground/80 whitespace-pre-wrap break-words max-h-48 overflow-y-auto">{userMessage}</pre>
             </Disclosure>
             {systemPrompt && (
-              <Disclosure title="Review Prompt" copyText={systemPrompt} nested>
+              <Disclosure title={isTour ? "Tour Prompt" : "Review Prompt"} copyText={systemPrompt} nested>
                 <pre className="text-xs font-mono text-foreground/80 whitespace-pre-wrap break-words max-h-48 overflow-y-auto">{systemPrompt}</pre>
               </Disclosure>
             )}
@@ -142,9 +155,16 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
 
       {/* ── Tabs ── */}
       <div className="flex-shrink-0 px-8 flex gap-0.5 border-b border-border/40">
-        <TabButton active={activeTab === 'findings'} onClick={() => setActiveTab('findings')}>
-          Findings{activeAnnotations.length > 0 && ` (${activeAnnotations.length})`}
-        </TabButton>
+        {!isTour && (
+          <TabButton active={activeTab === 'findings'} onClick={() => setActiveTab('findings')}>
+            Findings{activeAnnotations.length > 0 && ` (${activeAnnotations.length})`}
+          </TabButton>
+        )}
+        {isTour && (
+          <TabButton active={activeTab === 'findings'} onClick={() => setActiveTab('findings')}>
+            Status
+          </TabButton>
+        )}
         <TabButton active={activeTab === 'logs'} onClick={() => setActiveTab('logs')}>
           Logs
           {!terminal && <span className="ml-1.5 w-1.5 h-1.5 rounded-full bg-primary animate-pulse inline-block" />}
@@ -153,43 +173,51 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
 
       {/* ── Content ── */}
       {activeTab === 'findings' ? (
-        <ScrollFade>
-        <div className="px-8 py-3 space-y-4 max-w-2xl">
-          {/* Verdict — scrolls with content */}
-          <VerdictCard summary={job.summary} isCorrect={isCorrect} terminal={terminal} />
-
-          {/* Findings list */}
-          {displayAnnotations.length > 0 && (
-            <>
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] text-muted-foreground">
-                  {activeAnnotations.length} finding{activeAnnotations.length !== 1 ? 's' : ''}
-                  {dismissedCount > 0 && ` · ${dismissedCount} dismissed`}
-                </span>
-                {copyAllText && <CopyButton text={copyAllText} variant="inline" label="Copy All" />}
-              </div>
-              {activeAnnotations.some(a => a.severity) && (
-                <div className="flex items-center gap-3 text-[10px] text-muted-foreground/60">
-                  <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-destructive" /> Important</span>
-                  <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Nit</span>
-                  <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-muted-foreground" /> Pre-existing</span>
-                </div>
-              )}
-            </>
-          )}
-
-          {displayAnnotations.length === 0 ? (
-            <EmptyState terminal={terminal} />
-          ) : (
-            <div className="space-y-2">
-              {displayAnnotations.map(({ annotation: ann, dismissed }) => (
-                <AnnotationRow key={ann.id} annotation={ann} dismissed={dismissed} onClick={handleAnnotationClick} />
-              ))}
+        isTour ? (
+          /* Tour status view — no findings, just status + Open Tour button */
+          <ScrollFade>
+            <div className="px-8 py-3 space-y-4 max-w-2xl">
+              <TourStatusCard summary={job.summary} terminal={terminal} jobId={jobId} />
             </div>
-          )}
+          </ScrollFade>
+        ) : (
+          /* Review findings view */
+          <ScrollFade>
+          <div className="px-8 py-3 space-y-4 max-w-2xl">
+            <VerdictCard summary={job.summary} isCorrect={isCorrect} terminal={terminal} />
 
-        </div>
-        </ScrollFade>
+            {displayAnnotations.length > 0 && (
+              <>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-muted-foreground">
+                    {activeAnnotations.length} finding{activeAnnotations.length !== 1 ? 's' : ''}
+                    {dismissedCount > 0 && ` · ${dismissedCount} dismissed`}
+                  </span>
+                  {copyAllText && <CopyButton text={copyAllText} variant="inline" label="Copy All" />}
+                </div>
+                {activeAnnotations.some(a => a.severity) && (
+                  <div className="flex items-center gap-3 text-[10px] text-muted-foreground/60">
+                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-destructive" /> Important</span>
+                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Nit</span>
+                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-muted-foreground" /> Pre-existing</span>
+                  </div>
+                )}
+              </>
+            )}
+
+            {displayAnnotations.length === 0 ? (
+              <EmptyState terminal={terminal} />
+            ) : (
+              <div className="space-y-2">
+                {displayAnnotations.map(({ annotation: ann, dismissed }) => (
+                  <AnnotationRow key={ann.id} annotation={ann} dismissed={dismissed} onClick={handleAnnotationClick} />
+                ))}
+              </div>
+            )}
+
+          </div>
+          </ScrollFade>
+        )
       ) : (
         <div className="flex-1 flex flex-col min-h-0 px-8 py-3">
           <LiveLogViewer content={logContent} isLive={!terminal} />
@@ -254,6 +282,54 @@ function VerdictCard({ summary, isCorrect, terminal }: {
   );
 }
 
+function TourStatusCard({ summary, terminal, jobId }: {
+  summary: AgentJobInfo['summary'];
+  terminal: boolean;
+  jobId: string;
+}) {
+  const state = useReviewState();
+
+  if (summary) {
+    return (
+      <div className="space-y-3">
+        <div className="rounded px-3 py-2.5 bg-success/5">
+          <div className="flex items-baseline gap-2">
+            <span className="text-xs font-semibold text-success">Tour Generated</span>
+          </div>
+          <p className="text-xs text-foreground/80 leading-relaxed mt-1.5">{summary.explanation}</p>
+        </div>
+        <button
+          onClick={() => state.openTourPanel(jobId)}
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors text-xs font-medium active:scale-[0.98]"
+        >
+          Open Tour
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M3 7h8M8 3.5L11 7l-3 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded bg-muted/10 px-3 py-2.5">
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+          Tour Status
+        </span>
+        {!terminal && (
+          <span className="text-[10px] text-muted-foreground/40 animate-pulse">Generating...</span>
+        )}
+      </div>
+      {terminal ? (
+        <p className="text-xs text-muted-foreground/50 mt-1">Tour generation failed.</p>
+      ) : (
+        <p className="text-xs text-muted-foreground/50 mt-1">The tour will be ready when the agent finishes.</p>
+      )}
+    </div>
+  );
+}
+
 function StatusDot({ status }: { status: AgentJobInfo['status'] }) {
   if (status === 'starting' || status === 'running') {
     return (
@@ -267,9 +343,21 @@ function StatusDot({ status }: { status: AgentJobInfo['status'] }) {
   return <span className={`inline-flex rounded-full h-2 w-2 flex-shrink-0 ${c[status] ?? c.killed}`} />;
 }
 
-function ProviderPill({ provider }: { provider: string }) {
-  const label = provider === 'claude' ? 'Claude' : provider === 'codex' ? 'Codex' : 'Shell';
-  return <span className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{label}</span>;
+function ProviderPill({ provider, engine, model }: { provider: string; engine?: string; model?: string }) {
+  let label: string;
+  if (provider === 'tour') {
+    const engineLabel = engine === 'codex' ? 'Codex' : 'Claude';
+    label = model && engine !== 'codex' ? `Tour · ${engineLabel} ${model.charAt(0).toUpperCase() + model.slice(1)}` : `Tour · ${engineLabel}`;
+  } else {
+    label = provider === 'claude' ? 'Claude' : provider === 'codex' ? 'Codex' : 'Shell';
+  }
+  return (
+    <span className={`text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+      provider === 'tour' ? 'bg-accent/10 text-accent' : 'bg-muted text-muted-foreground'
+    }`}>
+      {label}
+    </span>
+  );
 }
 
 function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {

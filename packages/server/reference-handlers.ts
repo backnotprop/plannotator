@@ -9,7 +9,12 @@ import { existsSync, statSync } from "fs";
 import { resolve } from "path";
 import { buildFileTree, FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
 import { detectObsidianVaults } from "./integrations";
-import { resolveMarkdownFile, isWithinProjectRoot } from "@plannotator/shared/resolve-file";
+import {
+	isAbsoluteUserPath,
+	resolveMarkdownFile,
+	resolveUserPath,
+	isWithinProjectRoot,
+} from "@plannotator/shared/resolve-file";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 
 // --- Route handlers ---
@@ -29,12 +34,13 @@ export async function handleDoc(req: Request): Promise<Response> {
 	// server (see annotate.ts /api/doc route). The standalone HTML block
 	// below (no base) retains its cwd-based containment check.
 	const base = url.searchParams.get("base");
+	const resolvedBase = base ? resolveUserPath(base) : null;
 	if (
-		base &&
-		!requestedPath.startsWith("/") &&
+		resolvedBase &&
+		!isAbsoluteUserPath(requestedPath) &&
 		/\.(mdx?|html?)$/i.test(requestedPath)
 	) {
-		const fromBase = resolve(base, requestedPath);
+		const fromBase = resolveUserPath(requestedPath, resolvedBase);
 		try {
 			const file = Bun.file(fromBase);
 			if (await file.exists()) {
@@ -50,7 +56,7 @@ export async function handleDoc(req: Request): Promise<Response> {
 	// HTML files: resolve directly (not via resolveMarkdownFile which only handles .md/.mdx)
 	const projectRoot = process.cwd();
 	if (/\.html?$/i.test(requestedPath)) {
-		const resolvedHtml = resolve(base || projectRoot, requestedPath);
+		const resolvedHtml = resolveUserPath(requestedPath, resolvedBase || projectRoot);
 		if (!isWithinProjectRoot(resolvedHtml, projectRoot)) {
 			return Response.json({ error: "Access denied: path is outside project root" }, { status: 403 });
 		}
@@ -109,7 +115,7 @@ export async function handleObsidianFiles(req: Request): Promise<Response> {
 		);
 	}
 
-	const resolvedVault = resolve(vaultPath);
+	const resolvedVault = resolveUserPath(vaultPath);
 	if (!existsSync(resolvedVault) || !statSync(resolvedVault).isDirectory()) {
 		return Response.json({ error: "Invalid vault path" }, { status: 400 });
 	}
@@ -154,7 +160,7 @@ export async function handleObsidianDoc(req: Request): Promise<Response> {
 		);
 	}
 
-	const resolvedVault = resolve(vaultPath);
+	const resolvedVault = resolveUserPath(vaultPath);
 	let resolvedFile = resolve(resolvedVault, filePath);
 
 	// If direct path doesn't exist and it's a bare filename, search the vault
@@ -220,7 +226,7 @@ export async function handleFileBrowserFiles(req: Request): Promise<Response> {
 		);
 	}
 
-	const resolvedDir = resolve(dirPath);
+	const resolvedDir = resolveUserPath(dirPath);
 	if (!existsSync(resolvedDir) || !statSync(resolvedDir).isDirectory()) {
 		return Response.json({ error: "Invalid directory path" }, { status: 400 });
 	}

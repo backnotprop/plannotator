@@ -512,7 +512,7 @@ const InlineModifiedBlock: React.FC<InlineModifiedBlockProps> = ({
 
   if (wrap.type === "heading") {
     const level = wrap.level || 1;
-    const Tag = `h${level}` as keyof React.JSX.IntrinsicElements;
+    const Tag = `h${level}` as 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
     return (
       <Tag
         data-diff-block-index={index}

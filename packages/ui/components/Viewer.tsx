@@ -1,9 +1,14 @@
-import React, { useRef, useState, useEffect, forwardRef, useImperativeHandle, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useMemo, forwardRef, useImperativeHandle, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import hljs from 'highlight.js';
-import 'highlight.js/styles/github-dark.css';
 import { Block, Annotation, AnnotationType, EditorMode, type InputMethod, type ImageAttachment, type ActionsLabelMode } from '../types';
 import { Frontmatter, computeListIndices } from '../utils/parser';
+import { buildHeadingSlugMap } from '../utils/slugify';
+import { BlockRenderer } from './BlockRenderer';
+import { CodeBlock } from './blocks/CodeBlock';
+import { TableBlock } from './blocks/TableBlock';
+import { TableToolbar } from './blocks/TableToolbar';
+import { TablePopout } from './blocks/TablePopout';
 import { ListMarker } from './ListMarker';
 import { AnnotationToolbar } from './AnnotationToolbar';
 import { FloatingQuickLabelPicker } from './FloatingQuickLabelPicker';
@@ -25,6 +30,7 @@ class ToolbarErrorBoundary extends React.Component<
     return this.props.children;
   }
 }
+
 import { CommentPopover } from './CommentPopover';
 import { TaterSpriteSitting } from './TaterSpriteSitting';
 import { AttachmentsButton } from './AttachmentsButton';
@@ -39,6 +45,7 @@ import { PinpointOverlay } from './PinpointOverlay';
 import { usePinpoint } from '../hooks/usePinpoint';
 import { useAnnotationHighlighter } from '../hooks/useAnnotationHighlighter';
 import { useScrollViewport } from '../hooks/useScrollViewport';
+import { decodeAnchorHash } from '../utils/anchors';
 
 interface ViewerProps {
   blocks: Block[];
@@ -54,7 +61,7 @@ interface ViewerProps {
   globalAttachments?: ImageAttachment[];
   onAddGlobalAttachment?: (image: ImageAttachment) => void;
   onRemoveGlobalAttachment?: (path: string) => void;
-  repoInfo?: { display: string; branch?: string } | null;
+  repoInfo?: { display: string; branch?: string; host?: string } | null;
   stickyActions?: boolean;
   onOpenLinkedDoc?: (path: string) => void;
   imageBaseDir?: string;
@@ -66,8 +73,8 @@ interface ViewerProps {
   hasPreviousVersion?: boolean;
   /** Show amber "Demo" badge (portal mode, no shared content loaded) */
   showDemoBadge?: boolean;
-  /** Max width in px for the plan card (from plan width setting) */
-  maxWidth?: number;
+  /** Max width in px for the plan card; null removes the cap entirely. */
+  maxWidth?: number | null;
   /** Label for the copy button (default: "Copy plan") */
   copyLabel?: string;
   /**
@@ -157,6 +164,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 }, ref) => {
   const [copied, setCopied] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
+  const [locationHash, setLocationHash] = useState(() => window.location.hash);
   const globalCommentButtonRef = useRef<HTMLButtonElement>(null);
 
   const handleCopyPlan = async () => {
@@ -169,8 +177,16 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     }
   };
   const containerRef = useRef<HTMLDivElement>(null);
+  // Per-doc heading slug map with dedup — computed once per blocks array so
+  // anchor ids stay stable across re-renders and duplicate heading texts get
+  // `-1`/`-2`/... suffixes rather than colliding on the same id.
+  const headingSlugMap = useMemo(() => buildHeadingSlugMap(blocks), [blocks]);
   const [hoveredCodeBlock, setHoveredCodeBlock] = useState<{ block: Block; element: HTMLElement } | null>(null);
   const [isCodeBlockToolbarExiting, setIsCodeBlockToolbarExiting] = useState(false);
+  const [hoveredTable, setHoveredTable] = useState<{ block: Block; element: HTMLElement } | null>(null);
+  const [isTableToolbarExiting, setIsTableToolbarExiting] = useState(false);
+  const tableHoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [popoutTable, setPopoutTable] = useState<Block | null>(null);
   // Viewer-specific comment popover state (global comments + code blocks)
   const [viewerCommentPopover, setViewerCommentPopover] = useState<{
     anchorEl: HTMLElement;
@@ -186,6 +202,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   } | null>(null);
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const stickySentinelRef = useRef<HTMLDivElement>(null);
+  const lastAutoScrolledHashRef = useRef<string | null>(null);
   const [isStuck, setIsStuck] = useState(false);
 
   // Shared annotation infrastructure via hook
@@ -279,6 +296,55 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     observer.observe(stickySentinelRef.current);
     return () => observer.disconnect();
   }, [stickyActions, stickyScrollViewport]);
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      lastAutoScrolledHashRef.current = null;
+      setLocationHash(window.location.hash);
+    };
+
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  const scrollToAnchor = useCallback((hash: string) => {
+    const anchor = decodeAnchorHash(hash);
+    if (!anchor) return false;
+
+    const container = containerRef.current;
+    if (!container || !stickyScrollViewport) return false;
+
+    const target = document.getElementById(anchor);
+    if (!target || !container.contains(target)) return false;
+
+    const stickyActionsEl = container.querySelector<HTMLElement>('[data-sticky-actions]');
+    const stickyTop = stickyActionsEl
+      ? Number.parseFloat(window.getComputedStyle(stickyActionsEl).top || '0') || 0
+      : 0;
+    const headerOffset = stickyActionsEl
+      ? stickyActionsEl.getBoundingClientRect().height + stickyTop
+      : 0;
+    const containerRect = stickyScrollViewport.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const relativeTop = targetRect.top - containerRect.top;
+    const offsetPosition = stickyScrollViewport.scrollTop + relativeTop - headerOffset;
+
+    stickyScrollViewport.scrollTo({
+      top: Math.max(0, offsetPosition),
+      behavior: 'smooth',
+    });
+    return true;
+  }, [stickyScrollViewport]);
+
+  useEffect(() => {
+    if (!stickyScrollViewport || !locationHash || lastAutoScrolledHashRef.current === locationHash) return;
+    const timer = window.setTimeout(() => {
+      if (scrollToAnchor(locationHash)) {
+        lastAutoScrolledHashRef.current = locationHash;
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [blocks, locationHash, scrollToAnchor, stickyScrollViewport]);
 
   // Cmd+C / Ctrl+C keyboard shortcut for copying selected text
   useEffect(() => {
@@ -443,7 +509,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   }, []);
 
   return (
-    <div className="relative z-50 w-full" style={maxWidth ? { maxWidth } : { maxWidth: 832 }}>
+    <div className="relative z-50 w-full" style={maxWidth === null ? undefined : { maxWidth: maxWidth ?? 832 }}>
       {taterMode && <TaterSpriteSitting />}
       <article
         ref={containerRef}
@@ -547,6 +613,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                       onOpenLinkedDoc={onOpenLinkedDoc}
                       onToggleCheckbox={onToggleCheckbox}
                       checkboxOverrides={checkboxOverrides}
+                      githubRepo={repoInfo?.display}
+                      headingAnchorId={headingSlugMap.get(block.id)}
+                      onNavigateAnchor={scrollToAnchor}
                     />
                   ))}
                 </div>
@@ -556,6 +625,35 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             <MermaidBlock key={group.block.id} block={group.block} />
           ) : group.block.type === 'code' && isGraphvizLanguage(group.block.language) ? (
             <GraphvizBlock key={group.block.id} block={group.block} />
+          ) : group.block.type === 'table' ? (
+            <TableBlock
+              key={group.block.id}
+              block={group.block}
+              imageBaseDir={imageBaseDir}
+              onImageClick={(src, alt) => setLightbox({ src, alt })}
+              onOpenLinkedDoc={onOpenLinkedDoc}
+              githubRepo={repoInfo?.display}
+              onNavigateAnchor={scrollToAnchor}
+              onHover={(element) => {
+                if (tableHoverTimeoutRef.current) {
+                  clearTimeout(tableHoverTimeoutRef.current);
+                  tableHoverTimeoutRef.current = null;
+                }
+                setIsTableToolbarExiting(false);
+                if (!toolbarState) {
+                  setHoveredTable({ block: group.block, element });
+                }
+              }}
+              onLeave={() => {
+                tableHoverTimeoutRef.current = setTimeout(() => {
+                  setIsTableToolbarExiting(true);
+                  setTimeout(() => {
+                    setHoveredTable(null);
+                    setIsTableToolbarExiting(false);
+                  }, 150);
+                }, 100);
+              }}
+            />
           ) : group.block.type === 'code' ? (
             <CodeBlock
               key={group.block.id}
@@ -587,7 +685,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               isHovered={inputMethod !== 'pinpoint' && hoveredCodeBlock?.block.id === group.block.id}
             />
           ) : (
-            <BlockRenderer imageBaseDir={imageBaseDir} onImageClick={(src, alt) => setLightbox({ src, alt })} key={group.block.id} block={group.block} onOpenLinkedDoc={onOpenLinkedDoc} onToggleCheckbox={onToggleCheckbox} checkboxOverrides={checkboxOverrides} />
+            <BlockRenderer imageBaseDir={imageBaseDir} onImageClick={(src, alt) => setLightbox({ src, alt })} key={group.block.id} block={group.block} onOpenLinkedDoc={onOpenLinkedDoc} onNavigateAnchor={scrollToAnchor} onToggleCheckbox={onToggleCheckbox} checkboxOverrides={checkboxOverrides} githubRepo={repoInfo?.display} headingAnchorId={headingSlugMap.get(group.block.id)} />
           )
         )}
 
@@ -605,6 +703,40 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               closeOnScrollOut
             />
           </ToolbarErrorBoundary>
+        )}
+
+        {/* Table hover toolbar */}
+        {hoveredTable && !toolbarState && (
+          <TableToolbar
+            element={hoveredTable.element}
+            markdown={hoveredTable.block.content}
+            isExiting={isTableToolbarExiting}
+            onExpand={() => {
+              setPopoutTable(hoveredTable.block);
+              setHoveredTable(null);
+              setIsTableToolbarExiting(false);
+              if (tableHoverTimeoutRef.current) {
+                clearTimeout(tableHoverTimeoutRef.current);
+                tableHoverTimeoutRef.current = null;
+              }
+            }}
+            onMouseEnter={() => {
+              if (tableHoverTimeoutRef.current) {
+                clearTimeout(tableHoverTimeoutRef.current);
+                tableHoverTimeoutRef.current = null;
+              }
+              setIsTableToolbarExiting(false);
+            }}
+            onMouseLeave={() => {
+              tableHoverTimeoutRef.current = setTimeout(() => {
+                setIsTableToolbarExiting(true);
+                setTimeout(() => {
+                  setHoveredTable(null);
+                  setIsTableToolbarExiting(false);
+                }, 150);
+              }, 100);
+            }}
+          />
         )}
 
         {/* Code block hover toolbar */}
@@ -636,6 +768,22 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             }}
           />
           </ToolbarErrorBoundary>
+        )}
+
+        {/* Table popout dialog — portaled into containerRef so annotations */}
+        {/* can walk into its text nodes the same way they do the inline table. */}
+        {popoutTable && (
+          <TablePopout
+            block={popoutTable}
+            open={!!popoutTable}
+            onClose={() => setPopoutTable(null)}
+            container={containerRef.current}
+            imageBaseDir={imageBaseDir}
+            onImageClick={(src, alt) => setLightbox({ src, alt })}
+            onOpenLinkedDoc={onOpenLinkedDoc}
+            githubRepo={repoInfo?.display}
+            onNavigateAnchor={scrollToAnchor}
+          />
         )}
 
         {/* Pinpoint hover overlay */}
@@ -733,306 +881,9 @@ const ImageLightbox: React.FC<{ src: string; alt: string; onClose: () => void }>
   );
 };
 
-/** Block dangerous link protocols (javascript:, data:, vbscript:, file:). Returns null for blocked URLs. */
-const DANGEROUS_PROTOCOL = /^\s*(javascript|data|vbscript|file)\s*:/i;
-function sanitizeLinkUrl(url: string): string | null {
-  if (DANGEROUS_PROTOCOL.test(url)) return null;
-  return url;
-}
 
-/**
- * Renders inline markdown: **bold**, *italic*, _italic_, `code`, [links](url)
- */
-const InlineMarkdown: React.FC<{ text: string; onOpenLinkedDoc?: (path: string) => void; imageBaseDir?: string; onImageClick?: (src: string, alt: string) => void }> = ({ text, onOpenLinkedDoc, imageBaseDir, onImageClick }) => {
-  const parts: React.ReactNode[] = [];
-  let remaining = text;
-  let key = 0;
-  let previousChar = '';
 
-  while (remaining.length > 0) {
-    // Backslash escaping: \. \* \_ \` \[ \~ etc. — emit literal char, hide backslash
-    let match = remaining.match(/^\\([\\*_`\[\]~!.()\-#>+|{}&])/);
-    if (match) {
-      parts.push(match[1]);
-      remaining = remaining.slice(2);
-      previousChar = match[1];
-      continue;
-    }
 
-    // Autolinks: <https://url> or <email@domain.com>
-    match = remaining.match(/^<(https?:\/\/[^>]+)>/);
-    if (match) {
-      const url = match[1];
-      parts.push(<a key={key++} href={url} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2 hover:text-primary/80">{url}</a>);
-      remaining = remaining.slice(match[0].length);
-      previousChar = '>';
-      continue;
-    }
-    match = remaining.match(/^<([^@>\s]+@[^>\s]+)>/);
-    if (match) {
-      const email = match[1];
-      parts.push(<a key={key++} href={`mailto:${email}`} className="text-primary underline underline-offset-2 hover:text-primary/80">{email}</a>);
-      remaining = remaining.slice(match[0].length);
-      previousChar = '>';
-      continue;
-    }
-
-    // Strikethrough: ~~text~~
-    match = remaining.match(/^~~([\s\S]+?)~~/);
-    if (match) {
-      parts.push(<del key={key++}><InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={match[1]} onOpenLinkedDoc={onOpenLinkedDoc} /></del>);
-      remaining = remaining.slice(match[0].length);
-      previousChar = match[0][match[0].length - 1] || previousChar;
-      continue;
-    }
-
-    // Bold + italic: ***text***
-    match = remaining.match(/^\*\*\*([\s\S]+?)\*\*\*/);
-    if (match) {
-      parts.push(<strong key={key++} className="font-semibold"><em><InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={match[1]} onOpenLinkedDoc={onOpenLinkedDoc} /></em></strong>);
-      remaining = remaining.slice(match[0].length);
-      previousChar = match[0][match[0].length - 1] || previousChar;
-      continue;
-    }
-
-    // Bold: **text** ([\s\S]+? allows matching across hard line breaks)
-    match = remaining.match(/^\*\*([\s\S]+?)\*\*/);
-    if (match) {
-      parts.push(<strong key={key++} className="font-semibold"><InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={match[1]} onOpenLinkedDoc={onOpenLinkedDoc} /></strong>);
-      remaining = remaining.slice(match[0].length);
-      previousChar = match[0][match[0].length - 1] || previousChar;
-      continue;
-    }
-
-    // Italic: *text* or _text_ (avoid intraword underscores)
-    match = remaining.match(/^\*([\s\S]+?)\*/);
-    if (match) {
-      parts.push(<em key={key++}><InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={match[1]} onOpenLinkedDoc={onOpenLinkedDoc} /></em>);
-      remaining = remaining.slice(match[0].length);
-      previousChar = match[0][match[0].length - 1] || previousChar;
-      continue;
-    }
-
-    match = !/\w/.test(previousChar)
-      ? remaining.match(/^_([^_\s](?:[\s\S]*?[^_\s])?)_(?!\w)/)
-      : null;
-    if (match) {
-      parts.push(<em key={key++}><InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={match[1]} onOpenLinkedDoc={onOpenLinkedDoc} /></em>);
-      remaining = remaining.slice(match[0].length);
-      previousChar = match[0][match[0].length - 1] || previousChar;
-      continue;
-    }
-
-    // Inline code: `code`
-    match = remaining.match(/^`([^`]+)`/);
-    if (match) {
-      parts.push(
-        <code key={key++} className="px-1.5 py-0.5 rounded bg-muted text-sm font-mono">
-          {match[1]}
-        </code>
-      );
-      remaining = remaining.slice(match[0].length);
-      previousChar = match[0][match[0].length - 1] || previousChar;
-      continue;
-    }
-
-    // Hex color swatch — 3/4-digit forms need an a-f letter to avoid matching issue refs like #123.
-    match = remaining.match(/^(#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{4}|(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{3}))(?![0-9a-fA-F\w])/);
-    if (match) {
-      const hex = match[1];
-      parts.push(
-        <span key={key++} className="inline-flex items-center gap-1 align-middle">
-          <span
-            className="inline-block w-3.5 h-3.5 rounded-sm border border-black/20 dark:border-white/20 flex-shrink-0"
-            style={{ backgroundColor: hex }}
-            title={hex}
-          />
-          <code className="px-1.5 py-0.5 rounded bg-muted text-sm font-mono">{hex}</code>
-        </span>
-      );
-      remaining = remaining.slice(match[0].length);
-      previousChar = match[0][match[0].length - 1] || previousChar;
-      continue;
-    }
-
-    // Wikilinks: [[filename]] or [[filename|display text]]
-    match = remaining.match(/^\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/);
-    if (match) {
-      const target = match[1].trim();
-      const display = match[2]?.trim() || target;
-      const targetPath = /\.(mdx?|html?)$/i.test(target) ? target : `${target}.md`;
-
-      if (onOpenLinkedDoc) {
-        parts.push(
-          <a
-            key={key++}
-            href={targetPath}
-            onClick={(e) => {
-              e.preventDefault();
-              onOpenLinkedDoc(targetPath);
-            }}
-            className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1 cursor-pointer"
-            title={`Open: ${target}`}
-          >
-            {display}
-            <svg className="w-3 h-3 opacity-50 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-            </svg>
-          </a>
-        );
-      } else {
-        parts.push(
-          <span key={key++} className="text-primary">{display}</span>
-        );
-      }
-      remaining = remaining.slice(match[0].length);
-      previousChar = match[0][match[0].length - 1] || previousChar;
-      continue;
-    }
-
-    // Images: ![alt](path)
-    match = remaining.match(/^!\[([^\]]*)\]\(([^)]+)\)/);
-    if (match) {
-      const alt = match[1];
-      const src = match[2];
-      const imgSrc = /^https?:\/\//.test(src) ? src : getImageSrc(src, imageBaseDir);
-      parts.push(
-        <img
-          key={key++}
-          src={imgSrc}
-          alt={alt}
-          className="max-w-full rounded my-2 cursor-zoom-in"
-          loading="lazy"
-          onClick={(e) => { e.stopPropagation(); onImageClick?.(imgSrc, alt); }}
-        />
-      );
-      remaining = remaining.slice(match[0].length);
-      previousChar = match[0][match[0].length - 1] || previousChar;
-      continue;
-    }
-
-    // Links: [text](url)
-    match = remaining.match(/^\[([^\]]+)\]\(([^)]+)\)/);
-    if (match) {
-      const linkText = match[1];
-      const linkUrl = match[2];
-      const safeLinkUrl = sanitizeLinkUrl(linkUrl);
-
-      // Dangerous protocol stripped — render as plain text, not a dead link
-      if (safeLinkUrl === null) {
-        parts.push(<span key={key++}>{linkText}</span>);
-        remaining = remaining.slice(match[0].length);
-        previousChar = match[0][match[0].length - 1] || previousChar;
-        continue;
-      }
-
-      const isLocalDoc = /\.(mdx?|html?)$/i.test(linkUrl) &&
-        !linkUrl.startsWith('http://') &&
-        !linkUrl.startsWith('https://');
-
-      if (isLocalDoc && onOpenLinkedDoc) {
-        parts.push(
-          <a
-            key={key++}
-            href={safeLinkUrl}
-            onClick={(e) => {
-              e.preventDefault();
-              onOpenLinkedDoc(linkUrl);
-            }}
-            className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1 cursor-pointer"
-            title={`Open: ${linkUrl}`}
-          >
-            {linkText}
-            <svg className="w-3 h-3 opacity-50 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-            </svg>
-          </a>
-        );
-      } else if (isLocalDoc) {
-        // No handler — render as plain link (e.g., in shared/portal views)
-        parts.push(
-          <a
-            key={key++}
-            href={safeLinkUrl}
-            className="text-primary underline underline-offset-2 hover:text-primary/80"
-          >
-            {linkText}
-          </a>
-        );
-      } else {
-        parts.push(
-          <a
-            key={key++}
-            href={safeLinkUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-primary underline underline-offset-2 hover:text-primary/80"
-          >
-            {linkText}
-          </a>
-        );
-      }
-      remaining = remaining.slice(match[0].length);
-      previousChar = match[0][match[0].length - 1] || previousChar;
-      continue;
-    }
-
-    // Hard line break: two+ trailing spaces + newline, or backslash + newline
-    match = remaining.match(/ {2,}\n|\\\n/);
-    if (match && match.index !== undefined) {
-      const before = remaining.slice(0, match.index);
-      if (before) {
-        parts.push(<InlineMarkdown key={key++} text={before} onOpenLinkedDoc={onOpenLinkedDoc} imageBaseDir={imageBaseDir} onImageClick={onImageClick} />);
-      }
-      parts.push(<br key={key++} />);
-      remaining = remaining.slice(match.index + match[0].length);
-      previousChar = '\n';
-      continue;
-    }
-
-    // Find next special character or consume one regular character
-    const nextSpecial = remaining.slice(1).search(/[\*_`\[!~\\<#]/);
-    if (nextSpecial === -1) {
-      parts.push(remaining);
-      previousChar = remaining[remaining.length - 1] || previousChar;
-      break;
-    } else {
-      const plainText = remaining.slice(0, nextSpecial + 1);
-      parts.push(plainText);
-      remaining = remaining.slice(nextSpecial + 1);
-      previousChar = plainText[plainText.length - 1] || previousChar;
-    }
-  }
-
-  return <>{parts}</>;
-};
-
-const parseTableContent = (content: string): { headers: string[]; rows: string[][] } => {
-  const lines = content.split('\n').filter(line => line.trim());
-  if (lines.length === 0) return { headers: [], rows: [] };
-
-  const parseRow = (line: string): string[] => {
-    // Remove leading/trailing pipes, split by unescaped |, then unescape \|
-    return line
-      .replace(/^\|/, '')
-      .replace(/\|$/, '')
-      .split(/(?<!\\)\|/)
-      .map(cell => cell.trim().replace(/\\\|/g, '|'));
-  };
-
-  const headers = parseRow(lines[0]);
-  const rows: string[][] = [];
-
-  // Skip the separator line (contains dashes) and parse data rows
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    // Skip separator lines (contain only dashes, pipes, colons, spaces)
-    if (/^[\|\-:\s]+$/.test(line)) continue;
-    rows.push(parseRow(line));
-  }
-
-  return { headers, rows };
-};
 
 /** Groups consecutive list-item blocks so they can share a pinpoint hover wrapper. */
 type RenderGroup =
@@ -1058,190 +909,4 @@ function groupBlocks(blocks: Block[]): RenderGroup[] {
   return groups;
 }
 
-const BlockRenderer: React.FC<{
-  block: Block;
-  onOpenLinkedDoc?: (path: string) => void;
-  imageBaseDir?: string;
-  onImageClick?: (src: string, alt: string) => void;
-  onToggleCheckbox?: (blockId: string, checked: boolean) => void;
-  checkboxOverrides?: Map<string, boolean>;
-  orderedIndex?: number | null;
-}> = ({ block, onOpenLinkedDoc, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex }) => {
-  switch (block.type) {
-    case 'heading':
-      const Tag = `h${block.level || 1}` as React.ElementType;
-      const styles = {
-        1: 'text-2xl font-bold mb-4 mt-6 first:mt-0 tracking-tight',
-        2: 'text-xl font-semibold mb-3 mt-8 text-foreground/90',
-        3: 'text-base font-semibold mb-2 mt-6 text-foreground/80',
-      }[block.level || 1] || 'text-base font-semibold mb-2 mt-4';
 
-      return <Tag className={styles} data-block-id={block.id} data-block-type="heading"><InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} /></Tag>;
-
-    case 'blockquote': {
-      // Content may span multiple merged `>` lines. Split on blank-line
-      // paragraph breaks so `> a\n>\n> b` renders as two <p> children.
-      const paragraphs = block.content.split(/\n\n+/);
-      return (
-        <blockquote
-          className="border-l-2 border-primary/50 pl-4 my-4 text-muted-foreground italic"
-          data-block-id={block.id}
-        >
-          {paragraphs.map((para, i) => (
-            <p key={i} className={i > 0 ? 'mt-2' : ''}>
-              <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={para} onOpenLinkedDoc={onOpenLinkedDoc} />
-            </p>
-          ))}
-        </blockquote>
-      );
-    }
-
-    case 'list-item': {
-      const indent = (block.level || 0) * 1.25; // 1.25rem per level
-      const isCheckbox = block.checked !== undefined;
-      const isChecked = checkboxOverrides?.has(block.id)
-        ? checkboxOverrides.get(block.id)!
-        : block.checked;
-      const isInteractive = isCheckbox && !!onToggleCheckbox;
-      return (
-        <div
-          className="flex items-start gap-3 my-1.5"
-          data-block-id={block.id}
-          style={{ marginLeft: `${indent}rem` }}
-        >
-          <ListMarker
-            level={block.level || 0}
-            ordered={block.ordered}
-            orderedIndex={orderedIndex}
-            checked={isChecked}
-            interactive={isInteractive}
-            onToggle={isInteractive ? () => onToggleCheckbox!(block.id, !isChecked) : undefined}
-          />
-          <span className={`text-sm leading-relaxed ${isCheckbox && isChecked ? 'text-muted-foreground line-through' : 'text-foreground/90'}`}>
-            <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} />
-          </span>
-        </div>
-      );
-    }
-
-    case 'code':
-      return <CodeBlock block={block} onHover={() => {}} onLeave={() => {}} isHovered={false} />;
-
-    case 'table': {
-      const { headers, rows } = parseTableContent(block.content);
-      return (
-        <div className="my-4 overflow-x-auto" data-block-id={block.id}>
-          <table className="min-w-full border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-border">
-                {headers.map((header, i) => (
-                  <th
-                    key={i}
-                    className="px-3 py-2 text-left font-semibold text-foreground/90 bg-muted/30"
-                  >
-                    <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={header} onOpenLinkedDoc={onOpenLinkedDoc} />
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, rowIdx) => (
-                <tr key={rowIdx} className="border-b border-border/50 hover:bg-muted/20">
-                  {row.map((cell, cellIdx) => (
-                    <td key={cellIdx} className="px-3 py-2 text-foreground/80">
-                      <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={cell} onOpenLinkedDoc={onOpenLinkedDoc} />
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      );
-    }
-
-    case 'hr':
-      return <hr className="border-border/30 my-8" data-block-id={block.id} />;
-
-    default:
-      return (
-        <p
-          className="mb-4 leading-relaxed text-foreground/90 text-[15px]"
-          data-block-id={block.id}
-        >
-          <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} />
-        </p>
-      );
-  }
-};
-
-interface CodeBlockProps {
-  block: Block;
-  onHover: (element: HTMLElement) => void;
-  onLeave: () => void;
-  isHovered: boolean;
-}
-
-const CodeBlock: React.FC<CodeBlockProps> = ({ block, onHover, onLeave, isHovered }) => {
-  const [copied, setCopied] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const codeRef = useRef<HTMLElement>(null);
-
-  // Highlight code block on mount and when content/language changes
-  useEffect(() => {
-    if (codeRef.current) {
-      // Reset any previous highlighting
-      codeRef.current.removeAttribute('data-highlighted');
-      codeRef.current.className = `hljs font-mono${block.language ? ` language-${block.language}` : ''}`;
-      hljs.highlightElement(codeRef.current);
-    }
-  }, [block.content, block.language]);
-
-  const handleCopy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(block.content);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy:', err);
-    }
-  }, [block.content]);
-
-  const handleMouseEnter = () => {
-    if (containerRef.current) {
-      onHover(containerRef.current);
-    }
-  };
-
-  // Build className for code element
-  const codeClassName = `hljs font-mono${block.language ? ` language-${block.language}` : ''}`;
-
-  return (
-    <div
-      ref={containerRef}
-      className="relative group my-5"
-      data-block-id={block.id}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={onLeave}
-    >
-      <button
-        onClick={handleCopy}
-        className="absolute top-2 right-2 p-1.5 rounded-md bg-muted/80 hover:bg-muted text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity z-10"
-        title={copied ? 'Copied!' : 'Copy code'}
-      >
-        {copied ? (
-          <svg className="w-4 h-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-          </svg>
-        ) : (
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-          </svg>
-        )}
-      </button>
-      <pre className="rounded-lg text-[13px] overflow-x-auto bg-muted/50 border border-border/30">
-        <code ref={codeRef} className={codeClassName}>{block.content}</code>
-      </pre>
-    </div>
-  );
-};

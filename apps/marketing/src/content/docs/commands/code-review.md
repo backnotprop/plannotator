@@ -106,6 +106,10 @@ When multiple providers are available, set your default in **Settings → AI**. 
 
 If only one provider is installed, it's used automatically with no configuration needed.
 
+## How review agents prompt the CLI
+
+The review agents (Claude, Codex, Code Tour) shell out to external CLIs. Plannotator controls the user message and output schema; the CLI's own harness owns the system prompt. See the [Prompts reference](/docs/reference/prompts/) for the full breakdown of what each provider sends, how the pieces join, and which knobs you can tune per job.
+
 ## Submitting feedback
 
 - **Send Feedback** formats your annotations and sends them to the agent

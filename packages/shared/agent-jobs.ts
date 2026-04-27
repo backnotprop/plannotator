@@ -14,13 +14,37 @@
 
 export type AgentJobStatus = "starting" | "running" | "done" | "failed" | "killed";
 
+/**
+ * Snapshot of the diff the reviewer was looking at when this job was launched.
+ * Carried on the job so downstream UIs (agent-result panel "Copy All") export
+ * the same `**Diff:** ...` header the job was actually run against — if the
+ * reviewer switches the UI to a different diff afterwards, the job's snapshot
+ * still reflects truth. Structurally compatible with the UI-side
+ * `FeedbackDiffContext` in `packages/review-editor/utils/exportFeedback.ts`.
+ */
+export interface AgentJobDiffContext {
+  mode: string;
+  base?: string;
+  worktreePath?: string | null;
+}
+
 export interface AgentJobInfo {
   /** Unique job identifier (UUID). */
   id: string;
   /** Source identifier for external annotations — "agent-{id prefix}". */
   source: string;
-  /** Provider that spawned this job — "claude", "codex", "shell", etc. */
+  /** Provider that spawned this job — "claude", "codex", "tour", "shell", etc. */
   provider: string;
+  /** Underlying engine used (e.g., "claude" or "codex"). Set when provider is "tour". */
+  engine?: string;
+  /** Model used (e.g., "sonnet", "opus"). Set when provider is "tour" with Claude engine. */
+  model?: string;
+  /** Claude --effort level (e.g., "low", "medium", "high", "xhigh", "max"). */
+  effort?: string;
+  /** Codex reasoning effort level (e.g., "high", "medium"). */
+  reasoningEffort?: string;
+  /** Whether Codex fast mode (service_tier=fast) was enabled. */
+  fastMode?: boolean;
   /** Human-readable label for the job. */
   label: string;
   /** Current lifecycle status. */
@@ -45,6 +69,8 @@ export interface AgentJobInfo {
     explanation: string;
     confidence: number;
   };
+  /** Diff context at launch time (see AgentJobDiffContext). */
+  diffContext?: AgentJobDiffContext;
 }
 
 export interface AgentCapability {

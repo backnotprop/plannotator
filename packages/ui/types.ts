@@ -18,6 +18,8 @@ export type InputMethod = 'drag' | 'pinpoint';
  */
 export type ActionsLabelMode = 'full' | 'short' | 'icon';
 
+export type WideModeType = 'wide' | 'focus';
+
 export interface ImageAttachment {
   path: string;
   name: string;
@@ -51,15 +53,19 @@ export interface Annotation {
   };
 }
 
+export type AlertKind = 'note' | 'tip' | 'warning' | 'caution' | 'important';
+
 export interface Block {
   id: string;
-  type: 'paragraph' | 'heading' | 'blockquote' | 'list-item' | 'code' | 'hr' | 'table';
-  content: string; // Plain text content
+  type: 'paragraph' | 'heading' | 'blockquote' | 'list-item' | 'code' | 'hr' | 'table' | 'html' | 'directive';
+  content: string; // Plain text, or raw (unsanitized) HTML for type === 'html'
   level?: number; // For headings (1-6) or list indentation
   language?: string; // For code blocks (e.g., 'rust', 'typescript')
   checked?: boolean; // For checkbox list items (true = checked, false = unchecked, undefined = not a checkbox)
   ordered?: boolean; // For list items: true when source marker was \d+.
   orderedStart?: number; // For ordered list items: integer parsed from the marker (e.g. 5 for "5.")
+  alertKind?: AlertKind; // For blockquotes starting with [!NOTE] / [!TIP] / etc.
+  directiveKind?: string; // For directive containers (e.g. ':::note' → 'note')
   order: number; // Sorting order
   startLine: number; // 1-based line number in source
 }

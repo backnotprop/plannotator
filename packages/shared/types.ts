@@ -14,4 +14,5 @@ export type {
   DiffOption,
   WorktreeInfo,
   GitContext,
+  AvailableBranches,
 } from "./review-core";

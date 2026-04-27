@@ -43,6 +43,7 @@ apps/pi-extension/review-core.ts
 # Machine-specific; never belongs in the repo.
 .claude/
 .playwright-cli/
+.serena/
 *.ntvs*
 *.njsproj
 *.sln

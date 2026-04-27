@@ -11,6 +11,7 @@ import type { Annotation, EditorMode, ImageAttachment } from '../types';
 import { AnnotationType } from '../types';
 import type { QuickLabel } from '../utils/quickLabels';
 import { getIdentity } from '../utils/identity';
+import { transformPlainText } from '../utils/inlineTransforms';
 
 // --- Exported state types ---
 
@@ -104,63 +105,82 @@ export function useAnnotationHighlighter({
   const findTextInDOM = useCallback((searchText: string): Range | null => {
     if (!containerRef.current) return null;
 
-    const walker = document.createTreeWalker(
-      containerRef.current,
-      NodeFilter.SHOW_TEXT,
-      null
-    );
+    // Search for an exact substring match inside the container's text tree.
+    // Falls back to a multi-text-node walk when the match spans siblings.
+    const searchOnce = (needle: string): Range | null => {
+      if (!needle || !containerRef.current) return null;
 
-    let node: Text | null;
-    while ((node = walker.nextNode() as Text | null)) {
-      const text = node.textContent || '';
-      const index = text.indexOf(searchText);
-      if (index !== -1) {
+      const walker = document.createTreeWalker(
+        containerRef.current,
+        NodeFilter.SHOW_TEXT,
+        null
+      );
+
+      let node: Text | null;
+      while ((node = walker.nextNode() as Text | null)) {
+        const text = node.textContent || '';
+        const index = text.indexOf(needle);
+        if (index !== -1) {
+          const range = document.createRange();
+          range.setStart(node, index);
+          range.setEnd(node, index + needle.length);
+          return range;
+        }
+      }
+
+      const fullText = containerRef.current.textContent || '';
+      const searchIndex = fullText.indexOf(needle);
+      if (searchIndex === -1) return null;
+
+      const walker2 = document.createTreeWalker(
+        containerRef.current,
+        NodeFilter.SHOW_TEXT,
+        null
+      );
+
+      let charCount = 0;
+      let startNode: Text | null = null;
+      let startOffset = 0;
+      let endNode: Text | null = null;
+      let endOffset = 0;
+
+      while ((node = walker2.nextNode() as Text | null)) {
+        const nodeLength = node.textContent?.length || 0;
+
+        if (!startNode && charCount + nodeLength > searchIndex) {
+          startNode = node;
+          startOffset = searchIndex - charCount;
+        }
+
+        if (startNode && charCount + nodeLength >= searchIndex + needle.length) {
+          endNode = node;
+          endOffset = searchIndex + needle.length - charCount;
+          break;
+        }
+
+        charCount += nodeLength;
+      }
+
+      if (startNode && endNode) {
         const range = document.createRange();
-        range.setStart(node, index);
-        range.setEnd(node, index + searchText.length);
+        range.setStart(startNode, startOffset);
+        range.setEnd(endNode, endOffset);
         return range;
       }
-    }
 
-    // Try across multiple text nodes for multi-line content
-    const fullText = containerRef.current.textContent || '';
-    const searchIndex = fullText.indexOf(searchText);
-    if (searchIndex === -1) return null;
+      return null;
+    };
 
-    const walker2 = document.createTreeWalker(
-      containerRef.current,
-      NodeFilter.SHOW_TEXT,
-      null
-    );
+    // First try the literal text. If that misses, re-try with the same
+    // transform the renderer applies to plain text (emoji shortcodes +
+    // smart punctuation) so annotations made before those transforms
+    // shipped can still re-bind to their target after reload.
+    const direct = searchOnce(searchText);
+    if (direct) return direct;
 
-    let charCount = 0;
-    let startNode: Text | null = null;
-    let startOffset = 0;
-    let endNode: Text | null = null;
-    let endOffset = 0;
-
-    while ((node = walker2.nextNode() as Text | null)) {
-      const nodeLength = node.textContent?.length || 0;
-
-      if (!startNode && charCount + nodeLength > searchIndex) {
-        startNode = node;
-        startOffset = searchIndex - charCount;
-      }
-
-      if (startNode && charCount + nodeLength >= searchIndex + searchText.length) {
-        endNode = node;
-        endOffset = searchIndex + searchText.length - charCount;
-        break;
-      }
-
-      charCount += nodeLength;
-    }
-
-    if (startNode && endNode) {
-      const range = document.createRange();
-      range.setStart(startNode, startOffset);
-      range.setEnd(endNode, endOffset);
-      return range;
+    const transformed = transformPlainText(searchText);
+    if (transformed !== searchText) {
+      return searchOnce(transformed);
     }
 
     return null;

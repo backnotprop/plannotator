@@ -16,6 +16,12 @@ import {
   projectSlugFromCwd,
   findSessionLogsByAncestorWalk,
   findSessionLogsForCwd,
+  getAncestorPids,
+  normalizeCwdForCompare,
+  parseProcessTableCsv,
+  parseProcessTablePs,
+  resolveSessionLogByAncestorPids,
+  resolveSessionLogByCwdScan,
   type SessionLogEntry,
 } from "./session-log";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
@@ -632,6 +638,425 @@ describe("findSessionLogsByAncestorWalk", () => {
       expect(result.every((p) => !p.includes(slugDir))).toBe(true);
     } finally {
       rmSync(slugDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// --- Resolver Tests (new) ---
+
+describe("getAncestorPids", () => {
+  test("returns empty array for invalid startPid", () => {
+    expect(getAncestorPids(0, 5, () => null)).toEqual([]);
+    expect(getAncestorPids(1, 5, () => null)).toEqual([]);
+  });
+
+  test("returns startPid when there is no parent", () => {
+    expect(getAncestorPids(100, 5, () => null)).toEqual([100]);
+  });
+
+  test("walks up the PID chain until root", () => {
+    const parents: Record<number, number> = { 100: 200, 200: 300, 300: 1 };
+    expect(
+      getAncestorPids(100, 10, (p) => parents[p] ?? null)
+    ).toEqual([100, 200, 300]);
+  });
+
+  test("respects maxHops limit", () => {
+    const parents: Record<number, number> = { 100: 200, 200: 300, 300: 400 };
+    expect(
+      getAncestorPids(100, 2, (p) => parents[p] ?? null)
+    ).toEqual([100, 200]);
+  });
+
+  test("breaks on PID cycles", () => {
+    const parents: Record<number, number> = { 100: 200, 200: 100 };
+    const chain = getAncestorPids(100, 50, (p) => parents[p] ?? null);
+    expect(chain).toEqual([100, 200]);
+  });
+
+  test("breaks when getParent returns startPid (self-loop)", () => {
+    const chain = getAncestorPids(100, 50, () => 100);
+    expect(chain).toEqual([100]);
+  });
+});
+
+/** Build an isolated sessions + projects dir under tmpdir for a test. */
+function makeTempDirs(label: string): {
+  sessionsDir: string;
+  projectsDir: string;
+  cleanup: () => void;
+} {
+  const base = join(tmpdir(), `plannotator-resolver-${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  const sessionsDir = join(base, "sessions");
+  const projectsDir = join(base, "projects");
+  mkdirSync(sessionsDir, { recursive: true });
+  mkdirSync(projectsDir, { recursive: true });
+  return {
+    sessionsDir,
+    projectsDir,
+    cleanup: () => rmSync(base, { recursive: true, force: true }),
+  };
+}
+
+/** Write a session metadata file for a PID. */
+function writeSessionMeta(
+  sessionsDir: string,
+  pid: number,
+  meta: { sessionId: string; cwd: string; startedAt?: number }
+): void {
+  writeFileSync(
+    join(sessionsDir, `${pid}.json`),
+    JSON.stringify({
+      pid,
+      sessionId: meta.sessionId,
+      cwd: meta.cwd,
+      startedAt: meta.startedAt ?? Date.now(),
+    })
+  );
+}
+
+/** Create a session jsonl for a given cwd + sessionId. */
+function writeSessionLog(
+  projectsDir: string,
+  cwd: string,
+  sessionId: string,
+  content = '{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"hi"}]}}\n'
+): string {
+  const slug = cwd.replace(/[^a-zA-Z0-9-]/g, "-");
+  const dir = join(projectsDir, slug);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, `${sessionId}.jsonl`);
+  writeFileSync(path, content);
+  return path;
+}
+
+describe("resolveSessionLogByAncestorPids", () => {
+  test("returns null when no ancestor PID has session metadata", () => {
+    const { sessionsDir, projectsDir, cleanup } = makeTempDirs("no-ancestor");
+    try {
+      const result = resolveSessionLogByAncestorPids({
+        startPid: 100,
+        getParentPid: () => null,
+        sessionsDir,
+        projectsDir,
+      });
+      expect(result).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("finds session at direct parent (1 hop)", () => {
+    const { sessionsDir, projectsDir, cleanup } = makeTempDirs("direct-parent");
+    try {
+      const cwd = "/tmp/fake-project-direct";
+      const sessionId = "abcd-1234";
+      writeSessionMeta(sessionsDir, 999, { sessionId, cwd });
+      const logPath = writeSessionLog(projectsDir, cwd, sessionId);
+
+      const result = resolveSessionLogByAncestorPids({
+        startPid: 999,
+        getParentPid: () => null,
+        sessionsDir,
+        projectsDir,
+      });
+      expect(result).toBe(logPath);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("walks past bash subshell to find Claude Code ancestor", () => {
+    // Simulates: plannotator (ppid=500 = sh) → sh (ppid=400 = claude)
+    // Claude Code's session file is at pid 400, NOT 500.
+    const { sessionsDir, projectsDir, cleanup } = makeTempDirs("walks-past");
+    try {
+      const cwd = "/tmp/fake-project-walk";
+      const sessionId = "walk-1234";
+      writeSessionMeta(sessionsDir, 400, { sessionId, cwd });
+      const logPath = writeSessionLog(projectsDir, cwd, sessionId);
+
+      const parents: Record<number, number> = { 500: 400, 400: 1 };
+      const result = resolveSessionLogByAncestorPids({
+        startPid: 500,
+        getParentPid: (p) => parents[p] ?? null,
+        sessionsDir,
+        projectsDir,
+      });
+      expect(result).toBe(logPath);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("skips metadata when matching jsonl does not exist", () => {
+    const { sessionsDir, projectsDir, cleanup } = makeTempDirs("skip-missing");
+    try {
+      const cwd = "/tmp/fake-project-skip";
+      // Metadata exists but the log file does not
+      writeSessionMeta(sessionsDir, 400, { sessionId: "missing-id", cwd });
+
+      const result = resolveSessionLogByAncestorPids({
+        startPid: 400,
+        getParentPid: () => null,
+        sessionsDir,
+        projectsDir,
+      });
+      expect(result).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("returns null when sessionsDir doesn't exist", () => {
+    const { projectsDir, cleanup } = makeTempDirs("no-sessions");
+    try {
+      const result = resolveSessionLogByAncestorPids({
+        startPid: 100,
+        getParentPid: () => null,
+        sessionsDir: "/nonexistent/sessions/dir/xyz",
+        projectsDir,
+      });
+      expect(result).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("resolveSessionLogByCwdScan", () => {
+  test("returns null when sessionsDir is empty", () => {
+    const { sessionsDir, projectsDir, cleanup } = makeTempDirs("empty");
+    try {
+      const result = resolveSessionLogByCwdScan({
+        cwd: "/tmp/any",
+        sessionsDir,
+        projectsDir,
+      });
+      expect(result).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("returns null when no session metadata matches cwd", () => {
+    const { sessionsDir, projectsDir, cleanup } = makeTempDirs("no-match");
+    try {
+      writeSessionMeta(sessionsDir, 100, {
+        sessionId: "other-id",
+        cwd: "/tmp/other-project",
+      });
+      const result = resolveSessionLogByCwdScan({
+        cwd: "/tmp/my-project",
+        sessionsDir,
+        projectsDir,
+      });
+      expect(result).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("picks most recent startedAt when multiple sessions match cwd", () => {
+    const { sessionsDir, projectsDir, cleanup } = makeTempDirs("pick-recent");
+    try {
+      const cwd = "/tmp/multi-project";
+      // Two concurrent sessions with the same cwd
+      writeSessionMeta(sessionsDir, 111, {
+        sessionId: "old-session",
+        cwd,
+        startedAt: 1_000,
+      });
+      writeSessionMeta(sessionsDir, 222, {
+        sessionId: "new-session",
+        cwd,
+        startedAt: 2_000,
+      });
+      writeSessionLog(projectsDir, cwd, "old-session");
+      const newLog = writeSessionLog(projectsDir, cwd, "new-session");
+
+      const result = resolveSessionLogByCwdScan({
+        cwd,
+        sessionsDir,
+        projectsDir,
+      });
+      expect(result).toBe(newLog);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("falls through to older session if newest has no matching jsonl", () => {
+    const { sessionsDir, projectsDir, cleanup } = makeTempDirs("fallthrough");
+    try {
+      const cwd = "/tmp/fallthrough-project";
+      writeSessionMeta(sessionsDir, 111, {
+        sessionId: "old-session",
+        cwd,
+        startedAt: 1_000,
+      });
+      writeSessionMeta(sessionsDir, 222, {
+        sessionId: "new-session-no-log",
+        cwd,
+        startedAt: 2_000,
+      });
+      const oldLog = writeSessionLog(projectsDir, cwd, "old-session");
+      // Note: no jsonl for new-session-no-log
+
+      const result = resolveSessionLogByCwdScan({
+        cwd,
+        sessionsDir,
+        projectsDir,
+      });
+      expect(result).toBe(oldLog);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("ignores malformed session metadata files", () => {
+    const { sessionsDir, projectsDir, cleanup } = makeTempDirs("malformed");
+    try {
+      const cwd = "/tmp/malformed-project";
+      writeFileSync(join(sessionsDir, "999.json"), "not valid json");
+      writeSessionMeta(sessionsDir, 111, { sessionId: "good", cwd });
+      const goodLog = writeSessionLog(projectsDir, cwd, "good");
+
+      const result = resolveSessionLogByCwdScan({
+        cwd,
+        sessionsDir,
+        projectsDir,
+      });
+      expect(result).toBe(goodLog);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+// --- Process Table Parser Tests ---
+
+describe("parseProcessTablePs", () => {
+  test("parses well-formed ps output", () => {
+    const stdout = [
+      "    1     0",
+      "  123     1",
+      " 4567   123",
+    ].join("\n");
+    const table = parseProcessTablePs(stdout);
+    expect(table.get(1)).toBe(0);
+    expect(table.get(123)).toBe(1);
+    expect(table.get(4567)).toBe(123);
+    expect(table.size).toBe(3);
+  });
+
+  test("skips blank and malformed lines", () => {
+    const stdout = [
+      "",
+      "   ",
+      "not a row",
+      "  100   200",
+      "only-one",
+    ].join("\n");
+    const table = parseProcessTablePs(stdout);
+    expect(table.get(100)).toBe(200);
+    expect(table.size).toBe(1);
+  });
+
+  test("returns empty map for empty input", () => {
+    expect(parseProcessTablePs("").size).toBe(0);
+  });
+});
+
+describe("parseProcessTableCsv", () => {
+  test("parses ConvertTo-Csv output with quoted fields", () => {
+    const stdout = [
+      '"ProcessId","ParentProcessId"',
+      '"4","0"',
+      '"1234","4"',
+      '"5678","1234"',
+    ].join("\r\n");
+    const table = parseProcessTableCsv(stdout);
+    expect(table.get(4)).toBe(0);
+    expect(table.get(1234)).toBe(4);
+    expect(table.get(5678)).toBe(1234);
+    expect(table.size).toBe(3);
+  });
+
+  test("tolerates unquoted numeric rows", () => {
+    const stdout = [
+      "ProcessId,ParentProcessId",
+      "100,200",
+      "300,100",
+    ].join("\n");
+    const table = parseProcessTableCsv(stdout);
+    expect(table.get(100)).toBe(200);
+    expect(table.get(300)).toBe(100);
+  });
+
+  test("skips malformed rows", () => {
+    const stdout = [
+      '"ProcessId","ParentProcessId"',
+      'garbage',
+      '"100","200"',
+      '"abc","def"',
+      '',
+    ].join("\r\n");
+    const table = parseProcessTableCsv(stdout);
+    expect(table.size).toBe(1);
+    expect(table.get(100)).toBe(200);
+  });
+
+  test("returns empty map for empty input", () => {
+    expect(parseProcessTableCsv("").size).toBe(0);
+  });
+});
+
+describe("normalizeCwdForCompare", () => {
+  // normalizeCwdForCompare branches on process.platform. Rather than mock the
+  // platform, assert the invariant that identical cwds always normalize equal,
+  // and that on the current platform the function is idempotent.
+  test("is idempotent", () => {
+    const cwd = process.platform === "win32"
+      ? "C:\\Users\\me\\project"
+      : "/home/me/project";
+    expect(normalizeCwdForCompare(normalizeCwdForCompare(cwd))).toBe(
+      normalizeCwdForCompare(cwd)
+    );
+  });
+
+  test("on Windows: case and slash differences are normalized", () => {
+    if (process.platform !== "win32") return;
+    expect(normalizeCwdForCompare("C:\\Users\\Admin\\Project"))
+      .toBe(normalizeCwdForCompare("c:/users/admin/project"));
+  });
+
+  test("on Unix: preserves exact string (case-sensitive)", () => {
+    if (process.platform === "win32") return;
+    expect(normalizeCwdForCompare("/home/me/Project"))
+      .not.toBe(normalizeCwdForCompare("/home/me/project"));
+  });
+});
+
+describe("resolveSessionLogByCwdScan (cross-platform cwd matching)", () => {
+  test("matches when Claude-stored cwd casing differs on Windows", () => {
+    if (process.platform !== "win32") return;
+    const { sessionsDir, projectsDir, cleanup } = makeTempDirs("win-case");
+    try {
+      // Claude writes C:\Users\... but process.cwd() may return c:\users\...
+      const storedCwd = "C:\\Users\\Admin\\proj";
+      const queryCwd = "c:\\users\\admin\\proj";
+      writeSessionMeta(sessionsDir, 111, { sessionId: "s1", cwd: storedCwd });
+      const log = writeSessionLog(projectsDir, storedCwd, "s1");
+
+      const result = resolveSessionLogByCwdScan({
+        cwd: queryCwd,
+        sessionsDir,
+        projectsDir,
+      });
+      expect(result).toBe(log);
+    } finally {
+      cleanup();
     }
   });
 });

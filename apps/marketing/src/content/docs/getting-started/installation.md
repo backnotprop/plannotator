@@ -106,7 +106,7 @@ Add the plugin to your `opencode.json`:
 }
 ```
 
-Restart OpenCode. The `submit_plan` tool is now available.
+Restart OpenCode. By default, `submit_plan` is available to OpenCode's `plan` agent only. Use the [OpenCode guide](/docs/guides/opencode/) if you want commands-only mode or the legacy all-agents behavior.
 
 For slash commands (`/plannotator-review`, `/plannotator-annotate`), also run the install script:
 

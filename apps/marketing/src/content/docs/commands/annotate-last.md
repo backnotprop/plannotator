@@ -73,6 +73,18 @@ The annotation UI in `annotate-last` mode works the same as `/plannotator-annota
 - Completion screen says "annotations on the message"
 - Feedback export is titled "Message Feedback" instead of "Plan Feedback"
 
+## Flags
+
+`plannotator annotate-last` accepts the same `--gate`, `--json`, and `--hook` flags as `plannotator annotate`. See [Annotate → Flags](/docs/commands/annotate/#flags) for the full matrix.
+
+The common use case for `--gate` on annotate-last is a turn-by-turn review gate wired to a Stop hook:
+
+```bash
+plannotator annotate-last --gate
+```
+
+Paired with a Claude Code `Stop` hook, this pauses every agent turn for human review. Approve lets the turn end; Send Annotations re-prompts the agent with feedback. See [Hook integration recipes](/docs/guides/hook-integration/).
+
 ## Server API
 
 The annotate-last mode reuses the same annotate server endpoints. See the [annotate docs](/docs/commands/annotate/#server-api).

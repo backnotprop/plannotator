@@ -483,9 +483,9 @@ module.exports = { authenticate };
 
 ---
 
-## ⑯ Known Limitation — Word Swap Inside a Multi-Word Bold Phrase
+## ⑯ Fixed — Word Swap Inside a Multi-Word Bold Phrase
 
-> **What to watch for (this is a known glitch):** When a single word inside a multi-word bold phrase changes — like **preliminary analysis** becoming **final analysis** — the engine splits the bold markers across the change boundary. You will likely see raw \`**\` asterisks rendered as literal text and the word "analysis" lose its bold styling. This is a boundary case we haven't fixed yet; it was surfaced by an adversarial audit of the engine.
+> **What to watch for:** When a single word inside a multi-word bold phrase changes — like **preliminary analysis** becoming **final analysis** — the diff engine atomizes the whole balanced \`**…**\` pair so it renders as a clean old-bold-struck + new-bold-green swap. Previously the closing \`**\` orphaned into unchanged-tail text and rendered as a literal asterisk; that limitation is resolved.
 
 Before the leadership steering committee signs off on the external rollout phase, the team must complete a full pass over the **preliminary analysis** of load testing results, confirm that the error budget still permits the planned migration window, and escalate any unresolved dependencies to the program lead. Any open question at this stage must be either resolved or formally deferred to the post-launch review with named owners and dates.
 

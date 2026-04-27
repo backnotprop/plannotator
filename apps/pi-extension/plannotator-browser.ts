@@ -181,6 +181,7 @@ export async function openCodeReview(
 	let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
 	let diffType: DiffType | undefined;
 	let agentCwd: string | undefined;
+	let initialBase: string | undefined;
 	let worktreeCleanup: (() => void | Promise<void>) | undefined;
 	let exitHandler: (() => void) | undefined;
 
@@ -342,6 +343,10 @@ export async function openCodeReview(
 		rawPatch = result.patch;
 		gitRef = result.label;
 		diffError = result.error;
+		// Remember which base the initial diff was computed against so it can
+		// be forwarded to the server below. Only matters when the caller
+		// overrode the detected default; otherwise it matches gitCtx already.
+		initialBase = defaultBranch;
 	}
 
 	const server = await startReviewServer({
@@ -351,11 +356,13 @@ export async function openCodeReview(
 		origin: "pi",
 		diffType,
 		gitContext: gitCtx,
+		initialBase,
 		prMetadata,
 		agentCwd,
 		htmlContent: reviewHtmlContent,
 		sharingEnabled: process.env.PLANNOTATOR_SHARE !== "disabled",
 		shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
+		pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
 		onCleanup: worktreeCleanup,
 	});
 
@@ -369,7 +376,8 @@ export async function openMarkdownAnnotation(
 	mode: AnnotateMode,
 	folderPath?: string,
 	sourceInfo?: string,
-): Promise<{ feedback: string; exit?: boolean }> {
+	gate?: boolean,
+): Promise<{ feedback: string; exit?: boolean; approved?: boolean }> {
 	if (!ctx.hasUI || !planHtmlContent) {
 		throw new Error("Plannotator annotation browser is unavailable in this session.");
 	}
@@ -393,6 +401,7 @@ export async function openMarkdownAnnotation(
 		mode,
 		folderPath,
 		sourceInfo,
+		gate,
 		htmlContent: planHtmlContent,
 		sharingEnabled: process.env.PLANNOTATOR_SHARE !== "disabled",
 		shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
@@ -405,8 +414,9 @@ export async function openMarkdownAnnotation(
 export async function openLastMessageAnnotation(
 	ctx: ExtensionContext,
 	lastText: string,
-): Promise<{ feedback: string; exit?: boolean }> {
-	return openMarkdownAnnotation(ctx, "last-message", lastText, "annotate-last");
+	gate?: boolean,
+): Promise<{ feedback: string; exit?: boolean; approved?: boolean }> {
+	return openMarkdownAnnotation(ctx, "last-message", lastText, "annotate-last", undefined, undefined, gate);
 }
 
 export async function openArchiveBrowserAction(

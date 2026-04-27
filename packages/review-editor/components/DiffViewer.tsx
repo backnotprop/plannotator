@@ -118,6 +118,8 @@ interface DiffViewerProps {
   patch: string;
   filePath: string;
   oldPath?: string;
+  /** Base branch override used for file-content lookups (branch / merge-base modes only). */
+  reviewBase?: string;
   isFocused?: boolean;
   diffStyle: 'split' | 'unified';
   diffOverflow?: 'scroll' | 'wrap';
@@ -162,6 +164,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   patch,
   filePath,
   oldPath,
+  reviewBase,
   isFocused = false,
   diffStyle,
   diffOverflow,
@@ -275,6 +278,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     setFileContents(null);
     const params = new URLSearchParams({ path: filePath });
     if (oldPath) params.set('oldPath', oldPath);
+    if (reviewBase) params.set('base', reviewBase);
     fetch(`/api/file-content?${params}`, { signal: controller.signal })
       .then(res => res.ok ? res.json() : null)
       .then((data: { oldContent: string | null; newContent: string | null } | null) => {
@@ -284,7 +288,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       })
       .catch(() => {}); // Silent fallback — no expansion in demo mode
     return () => controller.abort();
-  }, [filePath, oldPath]);
+  }, [filePath, oldPath, reviewBase]);
 
   // Re-parse the patch with full file contents so hunk indices are computed
   // against the complete file (isPartial: false), enabling expansion.

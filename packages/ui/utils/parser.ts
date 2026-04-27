@@ -64,6 +64,25 @@ export function extractFrontmatter(markdown: string): { frontmatter: Frontmatter
 }
 
 /**
+ * Tag names that trigger a raw HTML block per CommonMark §4.6, Type 6.
+ * A line starting with `<tag` or `</tag` (where `tag` is in this set) opens
+ * an HTML block that continues verbatim until a blank line or EOF.
+ *
+ * Inline-only tags (`kbd`, `sub`, `sup`, `mark`, etc.) are NOT here — a line
+ * that happens to start with one of those still goes through the paragraph
+ * path and renders as escaped text, matching prior behavior.
+ */
+export const HTML_BLOCK_TAGS: ReadonlySet<string> = new Set([
+  'details', 'summary',
+  'div', 'section', 'article', 'aside', 'header', 'footer',
+  'blockquote', 'pre',
+  'table', 'thead', 'tbody', 'tr', 'td', 'th',
+  'ul', 'ol', 'li', 'p',
+]);
+
+const HTML_BLOCK_OPEN_RE = /^<\/?([a-zA-Z][a-zA-Z0-9]*)(?:\s|>|\/|$)/;
+
+/**
  * A simplified markdown parser that splits content into linear blocks.
  * For a production app, we would use a robust AST walker (remark),
  * but for this demo, we want predictable text-anchoring.
@@ -195,18 +214,32 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
       // `> 1. item` line would get glued onto the list-item block.
       const prevIsMarkerQuote =
         prevBlock?.type === 'blockquote' && blockMarkerRe.test(prevBlock.content);
-      if (
+      // Alerts own their body: once a blockquote is tagged as an alert,
+      // subsequent `>` lines always merge into it (until a blank line).
+      // Without this, `> [!NOTE]\n> - item` splits the list item off into
+      // a separate plain quote, losing the callout.
+      const prevIsAlert = prevBlock?.type === 'blockquote' && !!prevBlock.alertKind;
+      const shouldMergeIntoAlert = prevIsAlert && !prevLineWasBlank;
+      const shouldMergeNormal =
         !hasBlockMarker &&
         !prevIsMarkerQuote &&
         !prevLineWasBlank &&
-        prevBlock?.type === 'blockquote'
-      ) {
-        prevBlock.content += '\n' + stripped;
+        prevBlock?.type === 'blockquote';
+      if (shouldMergeIntoAlert || shouldMergeNormal) {
+        prevBlock!.content = prevBlock!.content
+          ? prevBlock!.content + '\n' + stripped
+          : stripped;
       } else {
+        // GitHub alert marker: a blockquote whose first line is [!KIND].
+        // We strip the marker from content and tag the block; rendering decides the style.
+        const alertMatch = stripped.match(/^\[!(NOTE|TIP|WARNING|CAUTION|IMPORTANT)\]\s*$/i);
         blocks.push({
           id: `block-${currentId++}`,
           type: 'blockquote',
-          content: stripped,
+          content: alertMatch ? '' : stripped,
+          alertKind: alertMatch
+            ? (alertMatch[1].toLowerCase() as 'note' | 'tip' | 'warning' | 'caution' | 'important')
+            : undefined,
           order: currentId,
           startLine: currentLineNum
         });
@@ -265,6 +298,73 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
         content: tableLines.join('\n'),
         order: currentId,
         startLine: tableStartLine
+      });
+      continue;
+    }
+
+    // Raw HTML blocks. A line starting with a known block-level HTML tag
+    // opens an HTML block. For opening tags we accumulate until the matching
+    // close tag is balanced (so `<details>…blank line…</details>` renders as
+    // one unit, matching GitHub's flavored behavior rather than strict
+    // CommonMark §4.6 Type 6 blank-line termination). For a line that starts
+    // with a close tag, we fall back to blank-line termination. Content is
+    // sanitized at render time, not here.
+    // Directive container: `:::kind` opens, `:::` closes. Inline kind is
+    // restricted to simple identifiers (letters, digits, hyphens). Body is
+    // accumulated verbatim and rendered with inline markdown.
+    const directiveOpen = trimmed.match(/^:::\s*([a-zA-Z][a-zA-Z0-9-]*)\s*$/);
+    if (directiveOpen) {
+      flush();
+      const directiveStartLine = currentLineNum;
+      const kind = directiveOpen[1].toLowerCase();
+      const bodyLines: string[] = [];
+      while (i + 1 < lines.length) {
+        i++;
+        if (lines[i].trim() === ':::') break;
+        bodyLines.push(lines[i]);
+      }
+      blocks.push({
+        id: `block-${currentId++}`,
+        type: 'directive',
+        content: bodyLines.join('\n'),
+        directiveKind: kind,
+        order: currentId,
+        startLine: directiveStartLine,
+      });
+      continue;
+    }
+
+    const htmlTagMatch = trimmed.match(HTML_BLOCK_OPEN_RE);
+    if (htmlTagMatch && HTML_BLOCK_TAGS.has(htmlTagMatch[1].toLowerCase())) {
+      flush();
+      const htmlStartLine = currentLineNum;
+      const tagName = htmlTagMatch[1].toLowerCase();
+      const isCloseTag = trimmed.startsWith('</');
+      const htmlLines: string[] = [line];
+
+      if (isCloseTag) {
+        while (i + 1 < lines.length && lines[i + 1].trim() !== '') {
+          i++;
+          htmlLines.push(lines[i]);
+        }
+      } else {
+        const openRe = new RegExp(`<${tagName}(?:\\s|>|/|$)`, 'gi');
+        const closeRe = new RegExp(`</${tagName}\\s*>`, 'gi');
+        let depth = (line.match(openRe) || []).length - (line.match(closeRe) || []).length;
+        while (depth > 0 && i + 1 < lines.length) {
+          i++;
+          htmlLines.push(lines[i]);
+          depth += (lines[i].match(openRe) || []).length;
+          depth -= (lines[i].match(closeRe) || []).length;
+        }
+      }
+
+      blocks.push({
+        id: `block-${currentId++}`,
+        type: 'html',
+        content: htmlLines.join('\n'),
+        order: currentId,
+        startLine: htmlStartLine,
       });
       continue;
     }

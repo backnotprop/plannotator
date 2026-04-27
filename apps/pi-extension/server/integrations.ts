@@ -23,6 +23,7 @@ import {
 	detectObsidianVaults,
 } from "../generated/integrations-common.js";
 import { sanitizeTag } from "../generated/project.js";
+import { resolveUserPath } from "../generated/resolve-file.js";
 
 export type { ObsidianConfig, BearConfig, OctarineConfig, IntegrationResult };
 export {
@@ -111,11 +112,10 @@ export async function saveToObsidian(
 ): Promise<IntegrationResult> {
 	try {
 		const { vaultPath, folder, plan } = config;
-		let normalizedVault = vaultPath.trim();
-		if (normalizedVault.startsWith("~")) {
-			const home = process.env.HOME || process.env.USERPROFILE || "";
-			normalizedVault = join(home, normalizedVault.slice(1));
+		if (!vaultPath?.trim()) {
+			return { success: false, error: "Vault path is required" };
 		}
+		const normalizedVault = resolveUserPath(vaultPath);
 		if (!existsSync(normalizedVault))
 			return {
 				success: false,

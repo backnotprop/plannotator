@@ -2,23 +2,30 @@
 # Sandbox script for testing Plannotator OpenCode plugin locally
 #
 # Usage:
-#   ./sandbox-opencode.sh [--disable-sharing] [--keep] [--no-git]
+#   ./sandbox-opencode.sh [--workflow MODE] [--planning-agents AGENTS] [--disable-sharing] [--keep] [--no-git]
 #
 # Options:
+#   --workflow MODE     Plugin workflow to test: manual | plan-agent | all-agents
+#                      Default: plan-agent
+#   --planning-agents   Comma-separated planning agent names for plan-agent mode
+#                      Default: plan
 #   --disable-sharing  Create opencode.json with "share": "disabled" to test
 #                      the sharing disable feature without env var pollution
 #   --keep             Don't clean up sandbox on exit (for debugging)
 #   --no-git           Don't initialize git repo (tests non-git fallback)
 #
 # What it does:
-#   1. Builds the plugin (ensures latest code)
-#   2. Creates a temp directory with git repo
-#   3. Creates sample files with uncommitted changes (for /plannotator-review)
-#   4. Sets up the local plugin
-#   5. Launches OpenCode in the sandbox
+#   1. Clears OpenCode-related caches
+#   2. Builds the plugin (ensures latest code)
+#   3. Creates a temp directory with git repo
+#   4. Creates sample files with uncommitted changes (for /plannotator-review)
+#   5. Creates two minimal folders for reproducing folder-annotation draft collisions
+#   6. Writes workflow-specific OpenCode config
+#   7. Sets up the local plugin
+#   8. Launches OpenCode in the sandbox
 #
 # To test:
-#   - Plan mode: Ask the agent to plan something, it should call submit_plan
+#   - Plan mode behavior varies by --workflow
 #   - Code review: Run /plannotator-review to review the sample changes
 
 set -e
@@ -26,13 +33,33 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 PLUGIN_DIR="$PROJECT_ROOT/apps/opencode-plugin"
+CLEAR_CACHE_SCRIPT="$PROJECT_ROOT/scripts/clear-opencode-cache.sh"
+PLUGIN_LOADER_RELATIVE_PATH="./.opencode/plannotator.ts"
 
 # Parse CLI flags
+WORKFLOW="plan-agent"
+PLANNING_AGENTS="plan"
 DISABLE_SHARING=false
 KEEP_SANDBOX=false
 NO_GIT=false
-for arg in "$@"; do
-  case $arg in
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --workflow)
+      if [ -z "${2:-}" ]; then
+        echo "--workflow requires an argument" >&2
+        exit 1
+      fi
+      WORKFLOW="$2"
+      shift 2
+      ;;
+    --planning-agents)
+      if [ -z "${2:-}" ]; then
+        echo "--planning-agents requires an argument" >&2
+        exit 1
+      fi
+      PLANNING_AGENTS="$2"
+      shift 2
+      ;;
     --disable-sharing)
       DISABLE_SHARING=true
       shift
@@ -45,10 +72,49 @@ for arg in "$@"; do
       NO_GIT=true
       shift
       ;;
+    *)
+      echo "Unknown option: $1" >&2
+      exit 1
+      ;;
   esac
 done
 
+case "$WORKFLOW" in
+  manual|plan-agent|all-agents) ;;
+  *)
+    echo "Invalid --workflow value: $WORKFLOW" >&2
+    echo "Expected one of: manual, plan-agent, all-agents" >&2
+    exit 1
+    ;;
+esac
+
+planning_agents_json() {
+  local raw="$1"
+  local IFS=','
+  local parts=()
+  local item
+  for item in $raw; do
+    item="${item#"${item%%[![:space:]]*}"}"
+    item="${item%"${item##*[![:space:]]}"}"
+    if [ -n "$item" ]; then
+      parts+=("\"$item\"")
+    fi
+  done
+
+  if [ ${#parts[@]} -eq 0 ]; then
+    parts+=("\"plan\"")
+  fi
+
+  local IFS=', '
+  printf '[%s]' "${parts[*]}"
+}
+
 echo "=== Plannotator OpenCode Sandbox ==="
+echo ""
+
+# Clear OpenCode caches so the sandbox always starts from a fresh plugin state
+echo "Clearing OpenCode caches..."
+bash "$CLEAR_CACHE_SCRIPT"
 echo ""
 
 # Build the plugin (includes building dependencies)
@@ -87,6 +153,7 @@ fi
 
 # Create initial project structure
 mkdir -p src/{api,components,hooks,utils,types}
+mkdir -p docs/folder-draft-a docs/folder-draft-b
 mkdir -p tests
 
 cat > package.json << 'EOF'
@@ -176,6 +243,21 @@ export async function fetchApi<T>(
 
   return response.json();
 }
+EOF
+
+# Minimal folder-annotation repro fixture
+cat > docs/folder-draft-a/spec.md << 'EOF'
+# Folder Draft A
+
+- This folder exists only to reproduce draft collisions.
+- Leave a draft here, then open folder B.
+EOF
+
+cat > docs/folder-draft-b/spec.md << 'EOF'
+# Folder Draft B
+
+- This folder exists only to reproduce draft collisions.
+- If the bug is present, it will show folder A's draft.
 EOF
 
 # Task API
@@ -1538,11 +1620,11 @@ echo ""
 
 # Set up local plugin via loader file
 echo "Setting up local plugin..."
-mkdir -p .opencode/plugins
+mkdir -p .opencode
 
-# Create a loader file that re-exports from the source
-# OpenCode only loads top-level .ts/.js files in the plugins directory
-cat > .opencode/plugins/plannotator.ts << EOF
+# Create a loader file that re-exports from the source.
+# The loader is referenced from opencode.json so we can pass plugin options.
+cat > .opencode/plannotator.ts << EOF
 // Loader for local Plannotator plugin development
 export * from "$PLUGIN_DIR/index.ts";
 EOF
@@ -1557,19 +1639,39 @@ cp "$PLUGIN_DIR/commands/"*.md ~/.config/opencode/commands/ 2>/dev/null || true
 
 echo ""
 
-# Create opencode.json config if --disable-sharing was passed
-if [ "$DISABLE_SHARING" = true ]; then
-  echo "Creating opencode.json with sharing disabled..."
-  cat > opencode.json << 'EOF'
+# Create opencode.json with workflow-specific plugin config
+echo "Writing opencode.json for workflow: $WORKFLOW"
+PLUGIN_CONFIG=$(cat <<EOF
+[
+  ["$PLUGIN_LOADER_RELATIVE_PATH", {
+    "workflow": "$WORKFLOW"$(
+      if [ "$WORKFLOW" = "plan-agent" ]; then
+        printf ',\n    "planningAgents": %s' "$(planning_agents_json "$PLANNING_AGENTS")"
+      fi
+    )
+  }]
+]
+EOF
+)
+
+cat > opencode.json << EOF
 {
-  "share": "disabled"
+  "\$schema": "https://opencode.ai/config.json",
+  "plugin": $PLUGIN_CONFIG$(
+    if [ "$DISABLE_SHARING" = true ]; then
+      printf ',\n  "share": "disabled"'
+    fi
+  )
 }
 EOF
-fi
 
 echo "=== Sandbox Ready ==="
 echo ""
 echo "Directory: $SANDBOX_DIR"
+echo "Workflow: $WORKFLOW"
+if [ "$WORKFLOW" = "plan-agent" ]; then
+  echo "Planning agents: $PLANNING_AGENTS"
+fi
 if [ "$NO_GIT" = true ]; then
   echo "Git: DISABLED (--no-git)"
 else
@@ -1582,10 +1684,28 @@ else
 fi
 echo ""
 echo "To test:"
-echo "  1. Plan mode: Ask the agent to plan something"
+case "$WORKFLOW" in
+  manual)
+    echo "  1. Plan mode: ask for a plan and confirm submit_plan is not available"
+    echo "  2. Manual review: run /plannotator-last or /plannotator-annotate"
+    ;;
+  plan-agent)
+    echo "  1. Plan mode: ask the plan agent to produce a plan and call submit_plan"
+    echo "  2. Confirm build does not get submit_plan access"
+    ;;
+  all-agents)
+    echo "  1. Plan mode: ask a primary agent to produce a plan and call submit_plan"
+    echo "  2. Confirm broad primary-agent access is restored"
+    ;;
+esac
 if [ "$NO_GIT" = false ]; then
-  echo "  2. Code review: Run /plannotator-review"
+  echo "  3. Code review: Run /plannotator-review"
 fi
+echo "  4. Folder draft repro:"
+echo "     /plannotator-annotate docs/folder-draft-a"
+echo "     Type a draft in the browser, wait a few seconds, then close the tab without sending feedback"
+echo "     /plannotator-annotate docs/folder-draft-b"
+echo "     If the bug is present, folder B will show folder A's draft"
 echo ""
 echo "Launching OpenCode..."
 echo ""

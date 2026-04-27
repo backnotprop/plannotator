@@ -28,7 +28,7 @@ export interface AnnotateServerResult {
 	port: number;
 	portSource: "env" | "remote-default" | "random";
 	url: string;
-	waitForDecision: () => Promise<{ feedback: string; annotations: unknown[]; exit?: boolean }>;
+	waitForDecision: () => Promise<{ feedback: string; annotations: unknown[]; exit?: boolean; approved?: boolean }>;
 	stop: () => void;
 }
 
@@ -43,6 +43,7 @@ export async function startAnnotateServer(options: {
 	shareBaseUrl?: string;
 	pasteApiUrl?: string;
 	sourceInfo?: string;
+	gate?: boolean;
 }): Promise<AnnotateServerResult> {
 	const gitUser = detectGitUser();
 	const sharingEnabled =
@@ -56,17 +57,23 @@ export async function startAnnotateServer(options: {
 		feedback: string;
 		annotations: unknown[];
 		exit?: boolean;
+		approved?: boolean;
 	}) => void;
 	const decisionPromise = new Promise<{
 		feedback: string;
 		annotations: unknown[];
 		exit?: boolean;
+		approved?: boolean;
 	}>((r) => {
 		resolveDecision = r;
 	});
 
-	// Draft key for annotation persistence
-	const draftKey = contentHash(options.markdown);
+	// Folder annotation has no stable markdown body, so key drafts by folder path instead.
+	const draftSource =
+		options.mode === "annotate-folder" && options.folderPath
+			? `folder:${resolvePath(options.folderPath)}`
+			: options.markdown;
+	const draftKey = contentHash(draftSource);
 
 	// Detect repo info (cached for this session)
 	const repoInfo = getRepoInfo();
@@ -85,6 +92,7 @@ export async function startAnnotateServer(options: {
 				mode: options.mode || "annotate",
 				filePath: options.filePath,
 				sourceInfo: options.sourceInfo,
+				gate: options.gate ?? false,
 				sharingEnabled,
 				shareBaseUrl,
 				pasteApiUrl,
@@ -130,6 +138,10 @@ export async function startAnnotateServer(options: {
 		} else if (url.pathname === "/api/exit" && req.method === "POST") {
 			deleteDraft(draftKey);
 			resolveDecision({ feedback: "", annotations: [], exit: true });
+			json(res, { ok: true });
+		} else if (url.pathname === "/api/approve" && req.method === "POST") {
+			deleteDraft(draftKey);
+			resolveDecision({ feedback: "", annotations: [], approved: true });
 			json(res, { ok: true });
 		} else if (url.pathname === "/api/feedback" && req.method === "POST") {
 			try {

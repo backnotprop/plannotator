@@ -137,7 +137,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
 
   if (mode === 'dialog') {
     return createPortal(
-      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <div data-comment-popover="true" className="fixed inset-0 z-[100] flex items-center justify-center p-4">
         {/* Backdrop */}
         <div className="absolute inset-0 bg-background/80 backdrop-blur-sm" />
 
@@ -226,6 +226,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   return createPortal(
     <div
       ref={popoverRef}
+      data-comment-popover="true"
       className="fixed z-[100] bg-popover border border-border rounded-xl shadow-2xl flex flex-col"
       style={dragPosition
         ? { top: dragPosition.top, left: dragPosition.left, width: position.width }

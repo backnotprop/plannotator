@@ -1,6 +1,7 @@
 ---
 description: Browse saved plan decisions in the archive
 allowed-tools: Bash(plannotator:*)
+disable-model-invocation: true
 ---
 
 ## Plan Archive

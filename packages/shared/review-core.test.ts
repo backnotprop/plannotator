@@ -4,9 +4,12 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import {
+  getDefaultBranch,
   getFileContentsForDiff,
   getGitContext,
+  parseWorktreeDiffType,
   runGitDiff,
+  type DiffType,
   type ReviewGitRuntime,
 } from "./review-core";
 
@@ -159,7 +162,11 @@ describe("review-core", () => {
 
     expect(result.patch).toBe("");
     expect(result.label).toBe("Error: branch");
-    expect(result.error).toContain("git diff --no-ext-diff master..HEAD");
+    // Error is derived from the argv — assert the meaningful parts rather
+    // than the exact string so harmless argv reorders (e.g. --end-of-options)
+    // don't break it.
+    expect(result.error).toContain("git diff");
+    expect(result.error).toContain("master..HEAD");
   });
 
   test("git context lists worktrees and file content lookup returns old/new content", async () => {
@@ -198,5 +205,42 @@ describe("review-core", () => {
     );
     expect(newFileContents.oldContent).toBeNull();
     expect(newFileContents.newContent).toBe("brand new\n");
+  });
+
+  test("getDefaultBranch falls back to local when origin/HEAD points at an unfetched ref", () => {
+    // Simulates a narrow / partial clone where origin/HEAD is configured but
+    // the target ref was never fetched. Before the verify step, the server
+    // would return "origin/phantom" and every branch/merge-base diff would
+    // fail with "unknown revision". With the verify step we fall back to
+    // local main.
+    const repoDir = initRepo();
+
+    // Manually set origin/HEAD → origin/phantom without ever fetching it.
+    git(repoDir, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/phantom"]);
+
+    const runtime = makeRuntime(repoDir);
+    return getDefaultBranch(runtime).then((result) => {
+      expect(result).toBe("main");
+    });
+  });
+
+  test("parseWorktreeDiffType recognises every DiffType suffix, including merge-base", () => {
+    // Regression guard: every local diff type must round-trip through the
+    // worktree-prefixed form. Missing `merge-base` here previously routed
+    // "worktree:/path:merge-base" to { path: "/path:merge-base", subType: "uncommitted" }
+    // which pointed git at a non-existent cwd and silently collapsed the diff mode.
+    const subTypes = [
+      "uncommitted",
+      "staged",
+      "unstaged",
+      "last-commit",
+      "branch",
+      "merge-base",
+    ] as const;
+    for (const sub of subTypes) {
+      const composite = `worktree:/tmp/my-worktree:${sub}` as DiffType;
+      const parsed = parseWorktreeDiffType(composite);
+      expect(parsed).toEqual({ path: "/tmp/my-worktree", subType: sub });
+    }
   });
 });

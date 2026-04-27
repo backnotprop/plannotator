@@ -52,6 +52,41 @@ describe("exportReviewFeedback", () => {
     expect(result).not.toContain("PR Review");
   });
 
+  it("local mode with diff context: describes mode + base in the header", () => {
+    const result = exportReviewFeedback([ann()], undefined, {
+      mode: "branch",
+      base: "develop",
+    });
+    expect(result).toContain("**Diff:** Branch diff vs `develop`");
+  });
+
+  it("local mode with merge-base: labels PR Diff with the base", () => {
+    const result = exportReviewFeedback([ann()], undefined, {
+      mode: "merge-base",
+      base: "release/v2",
+    });
+    expect(result).toContain("**Diff:** PR Diff vs `release/v2`");
+  });
+
+  it("local mode with worktree path: appends worktree info", () => {
+    const result = exportReviewFeedback([ann()], undefined, {
+      mode: "uncommitted",
+      worktreePath: "/tmp/feature-wt",
+    });
+    expect(result).toContain("**Diff:** Uncommitted changes _(worktree: /tmp/feature-wt)_");
+  });
+
+  it("PR mode ignores diff context (PR header already carries branches)", () => {
+    const result = exportReviewFeedback([ann()], prMeta, {
+      mode: "branch",
+      base: "develop",
+    });
+    // The PR-style branches line must appear.
+    expect(result).toContain("Branch: `fix/widget` → `main`");
+    // The local-mode Diff line must not.
+    expect(result).not.toContain("**Diff:**");
+  });
+
   it("PR mode: includes all PR context fields", () => {
     const result = exportReviewFeedback([ann()], prMeta);
     expect(result).toStartWith("# PR Review: acme/widgets#42\n\n");

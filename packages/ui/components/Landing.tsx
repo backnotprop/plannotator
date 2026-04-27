@@ -4,9 +4,11 @@ import { ModeToggle } from "./ModeToggle";
 
 interface LandingProps {
   onEnter?: () => void;
+  shareBaseUrl?: string;
 }
 
-export const Landing: React.FC<LandingProps> = ({ onEnter }) => {
+export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
+  const demoUrl = shareBaseUrl || "https://share.plannotator.ai";
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* Nav */}
@@ -112,7 +114,7 @@ export const Landing: React.FC<LandingProps> = ({ onEnter }) => {
                   </button>
                 ) : (
                   <a
-                    href="https://share.plannotator.ai"
+                    href={demoUrl}
                     className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-primary-foreground font-medium hover:opacity-90 transition-opacity"
                   >
                     Open Demo

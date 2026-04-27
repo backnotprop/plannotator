@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/pi-extension",
-  "version": "0.17.10",
+  "version": "0.19.1",
   "type": "module",
   "description": "Plannotator extension for Pi coding agent - interactive plan review with visual annotation",
   "author": "backnotprop",
@@ -44,5 +44,11 @@
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": ">=0.53.0"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.53.0",
+    "@mariozechner/pi-agent-core": ">=0.53.0",
+    "@mariozechner/pi-ai": ">=0.53.0",
+    "@mariozechner/pi-tui": ">=0.53.0"
   }
 }
