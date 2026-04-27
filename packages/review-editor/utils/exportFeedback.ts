@@ -53,89 +53,137 @@ function describeDiff(ctx: FeedbackDiffContext): string {
  * diff the reviewer was looking at — otherwise the agent only sees file
  * paths and line numbers and has to guess which diff those anchor to.
  */
-export function exportReviewFeedback(
-  annotations: CodeAnnotation[],
-  prMeta?: PRMetadata | null,
-  diffContext?: FeedbackDiffContext,
-): string {
-  if (annotations.length === 0) {
-    return '# Code Review\n\nNo feedback provided.';
+function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel = '###'): string {
+  let output = '';
+
+  const sorted = [...fileAnnotations].sort((a, b) => {
+    const aScope = a.scope ?? 'line';
+    const bScope = b.scope ?? 'line';
+    if (aScope !== bScope) {
+      return aScope === 'file' ? -1 : 1;
+    }
+    return a.lineStart - b.lineStart;
+  });
+
+  for (const ann of sorted) {
+    const scope = ann.scope ?? 'line';
+    const prefix = formatConventionalPrefix(ann.conventionalLabel, ann.decorations);
+
+    if (scope === 'file') {
+      output += `${headingLevel} File Comment\n`;
+      if (ann.text) {
+        output += `${prefix}${ann.text}\n`;
+      } else if (prefix) {
+        output += `${prefix.trimEnd()}\n`;
+      }
+      if (ann.suggestedCode) {
+        output += `\n**Suggested code:**\n\`\`\`\n${ann.suggestedCode}\n\`\`\`\n`;
+      }
+      output += '\n';
+      continue;
+    }
+
+    const lineRange = ann.lineStart === ann.lineEnd
+      ? `Line ${ann.lineStart}`
+      : `Lines ${ann.lineStart}-${ann.lineEnd}`;
+    const tokenSuffix = ann.tokenText
+      ? ` — \`\`${ann.tokenText.replace(/`/g, '\\`')}\`\`${ann.charStart != null ? ` (chars ${ann.charStart}-${ann.charEnd})` : ''}`
+      : '';
+    output += `${headingLevel} ${lineRange} (${ann.side})${tokenSuffix}\n`;
+
+    if (ann.text) {
+      output += `${prefix}${ann.text}\n`;
+    } else if (prefix) {
+      output += `${prefix.trimEnd()}\n`;
+    }
+    if (ann.reasoning) {
+      output += `\n**Reasoning:** ${ann.reasoning}\n`;
+    }
+    if (ann.suggestedCode) {
+      output += `\n**Suggested code:**\n\`\`\`\n${ann.suggestedCode}\n\`\`\`\n`;
+    }
+    output += '\n';
   }
 
+  return output;
+}
+
+function groupByFile(annotations: CodeAnnotation[]): Map<string, CodeAnnotation[]> {
   const grouped = new Map<string, CodeAnnotation[]>();
   for (const ann of annotations) {
     const existing = grouped.get(ann.filePath) || [];
     existing.push(ann);
     grouped.set(ann.filePath, existing);
   }
+  return grouped;
+}
 
-  let output = prMeta
-    ? `# ${getMRLabel(prMeta)} Review: ${getDisplayRepo(prMeta)}${getMRNumberLabel(prMeta)}\n\n` +
-      `**${prMeta.title}**\n` +
-      `Branch: \`${prMeta.headBranch}\` → \`${prMeta.baseBranch}\`\n` +
-      `${prMeta.url}\n\n`
-    : `# Code Review Feedback\n\n${diffContext ? `**Diff:** ${describeDiff(diffContext)}\n\n` : ''}`;
-
+function renderFileGroups(grouped: Map<string, CodeAnnotation[]>, headingLevel: string): string {
+  const annotationHeading = headingLevel + '#';
+  let output = '';
   for (const [filePath, fileAnnotations] of grouped) {
-    output += `## ${filePath}\n\n`;
+    output += `${headingLevel} ${filePath}\n\n`;
+    output += formatFileAnnotations(fileAnnotations, annotationHeading);
+  }
+  return output;
+}
 
-    const sorted = [...fileAnnotations].sort((a, b) => {
-      const aScope = a.scope ?? 'line';
-      const bScope = b.scope ?? 'line';
-      if (aScope !== bScope) {
-        return aScope === 'file' ? -1 : 1;
-      }
-      return a.lineStart - b.lineStart;
-    });
+export function exportReviewFeedback(
+  annotations: CodeAnnotation[],
+  prMeta?: PRMetadata | null,
+  diffContext?: FeedbackDiffContext,
+  prReviewScope?: string,
+): string {
+  if (annotations.length === 0) {
+    return '# Code Review\n\nNo feedback provided.';
+  }
 
-    for (let i = 0; i < sorted.length; i++) {
-      const ann = sorted[i];
-      const scope = ann.scope ?? 'line';
+  const prUrls = new Set(annotations.map(a => a.prUrl).filter(Boolean));
+  const isMultiPR = prUrls.size > 1;
+  const singlePrUrl = prUrls.size === 1 ? [...prUrls][0] : null;
+  const prMismatch = singlePrUrl && prMeta && singlePrUrl !== prMeta.url;
 
-      const prefix = formatConventionalPrefix(ann.conventionalLabel, ann.decorations);
+  if (!isMultiPR && !prMismatch) {
+    let output = prMeta
+      ? `# ${getMRLabel(prMeta)} Review: ${getDisplayRepo(prMeta)}${getMRNumberLabel(prMeta)}\n\n` +
+        `**${prMeta.title}**\n` +
+        `Branch: \`${prMeta.headBranch}\` → \`${prMeta.baseBranch}\`\n` +
+        `${prReviewScope ? `Review scope: ${prReviewScope}\n` : ''}` +
+        `${prMeta.url}\n\n`
+      : `# Code Review Feedback\n\n${diffContext ? `**Diff:** ${describeDiff(diffContext)}\n\n` : ''}`;
 
-      if (scope === 'file') {
-        output += `### File Comment\n`;
+    output += renderFileGroups(groupByFile(annotations), '##');
+    return output;
+  }
 
-        if (ann.text) {
-          output += `${prefix}${ann.text}\n`;
-        } else if (prefix) {
-          output += `${prefix.trimEnd()}\n`;
-        }
+  // Multi-PR: group by prUrl, then by file within each
+  let output = isMultiPR ? '# Multi-PR Review\n\n' : '# Code Review\n\n';
 
-        if (ann.suggestedCode) {
-          output += `\n**Suggested code:**\n\`\`\`\n${ann.suggestedCode}\n\`\`\`\n`;
-        }
+  const byPR = new Map<string, CodeAnnotation[]>();
+  for (const ann of annotations) {
+    const key = ann.prUrl ?? '_none';
+    const existing = byPR.get(key) || [];
+    existing.push(ann);
+    byPR.set(key, existing);
+  }
 
-        output += '\n';
-        continue;
-      }
-
-      const lineRange = ann.lineStart === ann.lineEnd
-        ? `Line ${ann.lineStart}`
-        : `Lines ${ann.lineStart}-${ann.lineEnd}`;
-
-      const tokenSuffix = ann.tokenText
-        ? ` — \`\`${ann.tokenText.replace(/`/g, '\\`')}\`\`${ann.charStart != null ? ` (chars ${ann.charStart}-${ann.charEnd})` : ''}`
-        : '';
-      output += `### ${lineRange} (${ann.side})${tokenSuffix}\n`;
-
-      if (ann.text) {
-        output += `${prefix}${ann.text}\n`;
-      } else if (prefix) {
-        output += `${prefix.trimEnd()}\n`;
-      }
-
-      if (ann.reasoning) {
-        output += `\n**Reasoning:** ${ann.reasoning}\n`;
-      }
-
-      if (ann.suggestedCode) {
-        output += `\n**Suggested code:**\n\`\`\`\n${ann.suggestedCode}\n\`\`\`\n`;
-      }
-
-      output += '\n';
+  for (const [prUrl, prAnnotations] of byPR) {
+    const sample = prAnnotations[0];
+    if (prUrl === '_none') {
+      output += '## Local Changes\n\n';
+    } else {
+      const repo = sample.prRepo ?? '';
+      const num = sample.prNumber != null ? `#${sample.prNumber}` : '';
+      const title = sample.prTitle ?? '';
+      output += `## ${repo}${num}${title ? ` — ${title}` : ''}\n\n`;
     }
+
+    const scopes = new Set(prAnnotations.map(a => a.diffScope).filter(Boolean));
+    if (scopes.size > 0) {
+      output += `Review scope: ${[...scopes].join(', ')}\n\n`;
+    }
+
+    output += renderFileGroups(groupByFile(prAnnotations), '###');
   }
 
   return output;

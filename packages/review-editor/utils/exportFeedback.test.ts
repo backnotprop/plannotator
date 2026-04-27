@@ -17,6 +17,7 @@ const ann = (overrides: Partial<CodeAnnotation> = {}): CodeAnnotation => ({
 
 const prMeta: PRMetadata = {
   platform: "github",
+  host: "github.com",
   owner: "acme",
   repo: "widgets",
   number: 42,
@@ -95,6 +96,17 @@ describe("exportReviewFeedback", () => {
     expect(result).toContain("https://github.com/acme/widgets/pull/42");
     // Must not contain the generic local header
     expect(result).not.toContain("# Code Review Feedback");
+  });
+
+  it("PR mode: includes stacked diff review scope when provided", () => {
+    const result = exportReviewFeedback(
+      [ann()],
+      prMeta,
+      undefined,
+      "Full stack diff vs `main`",
+    );
+
+    expect(result).toContain("Review scope: Full stack diff vs `main`");
   });
 
   it("PR mode: annotations still render after PR header", () => {
@@ -181,5 +193,50 @@ describe("exportReviewFeedback", () => {
     const result = exportReviewFeedback([ann()], prMeta);
     const headingMatches = result.match(/^# /gm) || [];
     expect(headingMatches).toHaveLength(1);
+  });
+
+  it("multi-PR: annotation headings are one level deeper than file headings", () => {
+    const result = exportReviewFeedback([
+      ann({ prUrl: "https://github.com/acme/widgets/pull/1", prNumber: 1, prTitle: "PR 1", prRepo: "acme/widgets" }),
+      ann({ prUrl: "https://github.com/acme/widgets/pull/2", prNumber: 2, prTitle: "PR 2", prRepo: "acme/widgets", filePath: "src/other.ts" }),
+    ]);
+    expect(result).toContain("### src/index.ts");
+    expect(result).toContain("#### Line 10 (new)");
+    expect(result).not.toMatch(/^### Line/m);
+  });
+
+  it("single-PR with mismatched prMeta uses annotation PR context", () => {
+    const prMetaB: PRMetadata = { ...prMeta, number: 99, url: "https://github.com/acme/widgets/pull/99", title: "different PR" };
+    const result = exportReviewFeedback([
+      ann({ prUrl: "https://github.com/acme/widgets/pull/42", prNumber: 42, prTitle: "fix: broken widget", prRepo: "acme/widgets" }),
+    ], prMetaB);
+    expect(result).not.toContain("#99");
+    expect(result).toContain("#42");
+    expect(result).not.toContain("Multi-PR");
+    expect(result).toContain("acme/widgets");
+    expect(result).toContain("fix: broken widget");
+  });
+
+  it("multi-PR with diffScope: includes review scope line per PR group", () => {
+    const result = exportReviewFeedback([
+      ann({ prUrl: "https://github.com/acme/widgets/pull/1", prNumber: 1, prTitle: "PR 1", prRepo: "acme/widgets", diffScope: "layer" }),
+      ann({ prUrl: "https://github.com/acme/widgets/pull/2", prNumber: 2, prTitle: "PR 2", prRepo: "acme/widgets", filePath: "src/other.ts", diffScope: "full-stack" }),
+    ]);
+    expect(result).toContain("Review scope: layer");
+    expect(result).toContain("Review scope: full-stack");
+  });
+
+  it("multi-PR without diffScope: no review scope line", () => {
+    const result = exportReviewFeedback([
+      ann({ prUrl: "https://github.com/acme/widgets/pull/1", prNumber: 1, prTitle: "PR 1", prRepo: "acme/widgets" }),
+      ann({ prUrl: "https://github.com/acme/widgets/pull/2", prNumber: 2, prTitle: "PR 2", prRepo: "acme/widgets", filePath: "src/other.ts" }),
+    ]);
+    expect(result).not.toContain("Review scope:");
+  });
+
+  it("non-stacked annotations have no diffScope in export", () => {
+    const result = exportReviewFeedback([ann()], prMeta);
+    expect(result).not.toContain("Review scope: layer");
+    expect(result).not.toContain("Review scope: full-stack");
   });
 });
