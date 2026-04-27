@@ -250,6 +250,9 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/agents/jobs` | POST | Launch an agent job (body: `{ provider, command, label }`) |
 | `/api/agents/jobs` | DELETE | Kill all running agent jobs |
 | `/api/agents/jobs/:id` | DELETE | Kill a specific agent job |
+| `/api/pr-diff-scope` | POST | Switch between layer and full-stack diff scope |
+| `/api/pr-list` | GET | List PRs for the current repo (cached 30s) |
+| `/api/pr-switch` | POST | Switch to a different PR in-place (body: `{ url }`) |
 | `/api/tour/:jobId` | GET | Fetch Code Tour result (greeting, stops, checklist) for a completed tour job |
 | `/api/tour/:jobId/checklist` | PUT | Persist checklist item state for a Code Tour |
 

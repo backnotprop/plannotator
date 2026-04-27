@@ -24,6 +24,8 @@ The `/plannotator-review` command opens an interactive code review UI for your l
 
 PR review uses the `gh` CLI for authentication, so private repos work automatically if you're authenticated with `gh auth login`.
 
+GitLab merge request URLs are also supported when the `glab` CLI is installed and authenticated.
+
 ## How it works
 
 **Local review:**
@@ -59,6 +61,14 @@ User annotates code, provides feedback
 Send Feedback → PR context included in feedback
 Approve → "LGTM" sent to agent
 ```
+
+## Stacked PRs and MRs
+
+When a PR or MR targets a non-default branch, Plannotator marks it as stacked in the review header. The default view remains **Layer**, which matches the platform diff and is the safe mode for posting inline review comments.
+
+If Plannotator has a local checkout for the PR or MR, the header also offers **Full stack**. Full stack shows everything from the repository default branch through the current checked-out head, which helps you understand the whole chain before reviewing the current layer.
+
+Platform posting is intentionally limited to **Layer** because GitHub and GitLab inline comments are anchored to the PR or MR's own diff. Use **Full stack** for comprehension and agent review, then switch back to **Layer** before posting to the platform.
 
 ## Switching diff types
 
