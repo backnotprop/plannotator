@@ -39,8 +39,14 @@ import { DockviewReact, type DockviewReadyEvent, type DockviewApi } from 'dockvi
 import { ReviewHeaderMenu } from './components/ReviewHeaderMenu';
 import { ReviewSidebar } from './components/ReviewSidebar';
 import { FileTree } from './components/FileTree';
+import { StackedPRLabel } from './components/StackedPRLabel';
+import { PRSelector } from './components/PRSelector';
+import { PRSwitchOverlay } from './components/PRSwitchOverlay';
+import { usePRStack } from './hooks/usePRStack';
+import { useAnnotationFactory } from './hooks/useAnnotationFactory';
 import { DEMO_DIFF } from './demoData';
-import { exportReviewFeedback, formatConventionalPrefix } from './utils/exportFeedback';
+import { exportReviewFeedback } from './utils/exportFeedback';
+import { ReviewSubmissionDialog, buildReviewSubmission, type ReviewSubmission, type SubmissionTarget } from './components/ReviewSubmissionDialog';
 import { ReviewStateProvider, type ReviewState } from './dock/ReviewStateContext';
 import { JobLogsProvider } from './dock/JobLogsContext';
 import { reviewPanelComponents } from './dock/reviewPanelComponents';
@@ -59,6 +65,7 @@ import {
 import type { DiffFile } from './types';
 import type { DiffOption, WorktreeInfo, GitContext } from '@plannotator/shared/types';
 import type { PRMetadata } from '@plannotator/shared/pr-provider';
+import type { PRDiffScope, PRDiffScopeOption, PRStackInfo, PRStackTree } from '@plannotator/shared/pr-stack';
 import { altKey } from '@plannotator/ui/utils/platform';
 import { TourDialog } from './components/tour/TourDialog';
 import { DEMO_TOUR_ID } from './demoTour';
@@ -73,6 +80,9 @@ interface DiffData {
   diffType?: string;
   gitContext?: GitContext;
   sharingEnabled?: boolean;
+  prStackInfo?: PRStackInfo | null;
+  prDiffScope?: PRDiffScope;
+  prDiffScopeOptions?: PRDiffScopeOption[];
 }
 
 // Simple diff parser to extract files from unified diff
@@ -187,6 +197,18 @@ const ReviewApp: React.FC = () => {
   }, [repoInfo]);
 
   const [prMetadata, setPrMetadata] = useState<PRMetadata | null>(null);
+  const [prStackInfo, setPrStackInfo] = useState<PRStackInfo | null>(null);
+  const [prStackTree, setPrStackTree] = useState<PRStackTree | null>(null);
+  const [prDiffScope, setPrDiffScope] = useState<PRDiffScope>('layer');
+  const [prDiffScopeOptions, setPrDiffScopeOptions] = useState<PRDiffScopeOption[]>([]);
+  const { withPRContext } = useAnnotationFactory(prMetadata, prStackInfo ? prDiffScope : undefined);
+
+  const prStackCallbacksRef = useRef<import('./hooks/usePRStack').PRStackCallbacks | null>(null);
+  const {
+    isSwitchingPRScope,
+    handleScopeSelect: handlePRDiffScopeSelect,
+    handlePRSwitch,
+  } = usePRStack(prStackCallbacksRef);
   const [reviewDestination, setReviewDestination] = useState<'agent' | 'platform'>(() => {
     const stored = storage.getItem('plannotator-review-dest');
     return stored === 'agent' ? 'agent' : 'platform'; // 'github' (legacy) → 'platform'
@@ -195,7 +217,7 @@ const ReviewApp: React.FC = () => {
   const [isPlatformActioning, setIsPlatformActioning] = useState(false);
   const [platformActionError, setPlatformActionError] = useState<string | null>(null);
   const [platformUser, setPlatformUser] = useState<string | null>(null);
-  const [platformCommentDialog, setPlatformCommentDialog] = useState<{ action: 'approve' | 'comment' } | null>(null);
+  const [platformCommentDialog, setPlatformCommentDialog] = useState<{ action: 'approve' | 'comment'; plan: ReviewSubmission } | null>(null);
   const [platformGeneralComment, setPlatformGeneralComment] = useState('');
   const [platformOpenPR, setPlatformOpenPR] = useState(() => {
     const platformSetting = storage.getItem('plannotator-platform-open-pr');
@@ -684,6 +706,10 @@ const ReviewApp: React.FC = () => {
         sharingEnabled?: boolean;
         repoInfo?: { display: string; branch?: string };
         prMetadata?: PRMetadata;
+        prStackInfo?: PRStackInfo | null;
+        prStackTree?: PRStackTree | null;
+        prDiffScope?: PRDiffScope;
+        prDiffScopeOptions?: PRDiffScopeOption[];
         platformUser?: string;
         viewedFiles?: string[];
         error?: string;
@@ -720,6 +746,10 @@ const ReviewApp: React.FC = () => {
         if (data.sharingEnabled !== undefined) setSharingEnabled(data.sharingEnabled);
         if (data.repoInfo) setRepoInfo(data.repoInfo);
         if (data.prMetadata) setPrMetadata(data.prMetadata);
+        if (data.prStackInfo !== undefined) setPrStackInfo(data.prStackInfo);
+        if (data.prStackTree !== undefined) setPrStackTree(data.prStackTree);
+        if (data.prDiffScope) setPrDiffScope(data.prDiffScope);
+        if (data.prDiffScopeOptions) setPrDiffScopeOptions(data.prDiffScopeOptions);
         if (data.platformUser) setPlatformUser(data.platformUser);
         // Initialize viewed files from GitHub's state (set before draft restore so draft takes precedence)
         if (data.viewedFiles && data.viewedFiles.length > 0) {
@@ -800,9 +830,9 @@ const ReviewApp: React.FC = () => {
       decorations,
     };
 
-    setAnnotations(prev => [...prev, newAnnotation]);
+    setAnnotations(prev => [...prev, withPRContext(newAnnotation)]);
     setPendingSelection(null);
-  }, [pendingSelection, files, activeFileIndex, identity]);
+  }, [pendingSelection, files, activeFileIndex, identity, withPRContext]);
 
   const handleAddFileComment = useCallback((text: string) => {
     const activeFile = files[activeFileIndex];
@@ -822,8 +852,8 @@ const ReviewApp: React.FC = () => {
       author: identity,
     };
 
-    setAnnotations(prev => [...prev, newAnnotation]);
-  }, [files, activeFileIndex, identity]);
+    setAnnotations(prev => [...prev, withPRContext(newAnnotation)]);
+  }, [files, activeFileIndex, identity, withPRContext]);
 
   // Edit annotation
   const handleEditAnnotation = useCallback((
@@ -945,6 +975,47 @@ const ReviewApp: React.FC = () => {
   });
   // Staging is never available in PR review mode — the server rejects it and the UI shouldn't offer it.
   const canStageFiles = canStageRaw && !prMetadata;
+
+  // Shared function: apply a PR response (used by both initial load and PR switch)
+  function applyPRResponse(data: {
+    rawPatch: string; gitRef: string;
+    prMetadata?: PRMetadata; prStackInfo?: PRStackInfo | null;
+    prStackTree?: PRStackTree | null; prDiffScope?: PRDiffScope;
+    prDiffScopeOptions?: PRDiffScopeOption[];
+    repoInfo?: { display: string; branch?: string };
+    viewedFiles?: string[]; error?: string;
+  }) {
+    const isPRSwitch = !!data.prMetadata;
+    const nextFiles = parseDiffToFiles(data.rawPatch);
+    dockApi?.getPanel(REVIEW_DIFF_PANEL_ID)?.api.close();
+    needsInitialDiffPanel.current = true;
+    setDiffData(prev => prev ? { ...prev, rawPatch: data.rawPatch, gitRef: data.gitRef } : prev);
+    setFiles(nextFiles);
+    if (isPRSwitch) {
+      setActiveFileIndex(0);
+    } else {
+      const currentFile = files[activeFileIndex];
+      const preserved = currentFile ? nextFiles.findIndex(f => f.path === currentFile.path) : -1;
+      setActiveFileIndex(preserved >= 0 ? preserved : 0);
+    }
+    setPendingSelection(null);
+    if (data.prMetadata) setPrMetadata(data.prMetadata);
+    if (data.prStackInfo !== undefined) setPrStackInfo(data.prStackInfo);
+    if (data.prStackTree !== undefined) setPrStackTree(data.prStackTree);
+    if (data.prDiffScope) setPrDiffScope(data.prDiffScope);
+    if (data.prDiffScopeOptions) setPrDiffScopeOptions(data.prDiffScopeOptions);
+    if (data.repoInfo) setRepoInfo(data.repoInfo);
+    if (data.prMetadata) {
+      setViewedFiles(data.viewedFiles ? new Set(data.viewedFiles) : new Set());
+    }
+    setDiffError(data.error || null);
+    resetStagedFiles();
+  }
+
+  prStackCallbacksRef.current = {
+    applyPRResponse,
+    onError: (message) => setDiffError(message),
+  };
 
   // Shared helper: fetch a diff switch and update state.
   // Returns true on success, false on failure — callers that optimistically
@@ -1106,6 +1177,14 @@ const ReviewApp: React.FC = () => {
     [prMetadata, activeDiffBase, committedBase, activeWorktreePath],
   );
 
+  const prReviewScopeLabel = useMemo(() => {
+    if (!prMetadata || !prStackInfo) return undefined;
+    if (prDiffScope === 'full-stack') {
+      return `Diff vs \`${prMetadata.defaultBranch ?? 'default branch'}\``;
+    }
+    return `Diff vs \`${prMetadata.baseBranch}\``;
+  }, [prMetadata, prStackInfo, prDiffScope]);
+
   // Build ReviewState value for dock panel context
   const reviewStateValue = useMemo<ReviewState>(() => ({
     files,
@@ -1130,6 +1209,8 @@ const ReviewApp: React.FC = () => {
         : undefined,
     activeDiffBase,
     feedbackDiffContext,
+    prReviewScope: prReviewScopeLabel,
+    prDiffScope,
     allAnnotations,
     externalAnnotations,
     selectedAnnotationId,
@@ -1172,7 +1253,7 @@ const ReviewApp: React.FC = () => {
   }), [
     files, activeFileIndex, diffStyle, diffOverflow, diffIndicators,
     diffLineDiffType, diffShowLineNumbers, diffShowBackground,
-    diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext,
+    diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope,
     allAnnotations, externalAnnotations,
     selectedAnnotationId, pendingSelection, handleLineSelection,
     handleAddAnnotation, handleAddFileComment, handleEditAnnotation,
@@ -1211,7 +1292,7 @@ const ReviewApp: React.FC = () => {
       return;
     }
     try {
-      const feedback = exportReviewFeedback(allAnnotations, prMetadata, feedbackDiffContext);
+      const feedback = exportReviewFeedback(allAnnotations, prMetadata, feedbackDiffContext, prReviewScopeLabel);
       await navigator.clipboard.writeText(feedback);
       setCopyFeedback('Feedback copied!');
       setTimeout(() => setCopyFeedback(null), 2000);
@@ -1220,15 +1301,15 @@ const ReviewApp: React.FC = () => {
       setCopyFeedback('Failed to copy');
       setTimeout(() => setCopyFeedback(null), 2000);
     }
-  }, [allAnnotations, prMetadata, feedbackDiffContext]);
+  }, [allAnnotations, prMetadata, feedbackDiffContext, prReviewScopeLabel]);
 
   const feedbackMarkdown = useMemo(() => {
-    let output = exportReviewFeedback(allAnnotations, prMetadata, feedbackDiffContext);
+    let output = exportReviewFeedback(allAnnotations, prMetadata, feedbackDiffContext, prReviewScopeLabel);
     if (editorAnnotations.length > 0) {
       output += exportEditorAnnotations(editorAnnotations);
     }
     return output;
-  }, [allAnnotations, prMetadata, feedbackDiffContext, editorAnnotations]);
+  }, [allAnnotations, prMetadata, feedbackDiffContext, prReviewScopeLabel, editorAnnotations]);
 
   const totalAnnotationCount = allAnnotations.length + editorAnnotations.length;
 
@@ -1308,112 +1389,114 @@ const ReviewApp: React.FC = () => {
     }
   }, []);
 
-  // Build the payload for /api/pr-action from current annotations
-  const buildPRReviewPayload = useCallback((action: 'approve' | 'comment', generalComment?: string) => {
-    const fileAnnotations = allAnnotations.filter(a => (a.scope ?? 'line') === 'line');
-    const fileScoped = allAnnotations.filter(a => a.scope === 'file');
-
-    // Top-level body: file-scoped comments
-    const bodyParts: string[] = [];
-    if (fileScoped.length > 0) {
-      for (const ann of fileScoped) {
-        if (ann.text) bodyParts.push(`**${ann.filePath}:** ${ann.text}`);
-      }
-    }
-    const body = bodyParts.length > 0
-      ? `${generalComment ? generalComment + '\n\n' : ''}Review from Plannotator\n\n${bodyParts.join('\n\n')}`
-      : generalComment || 'Review from Plannotator';
-
-    // Inline file comments
-    const fileComments = fileAnnotations.map(ann => {
-      const ccPrefix = formatConventionalPrefix(ann.conventionalLabel, ann.decorations);
-      let commentBody = ccPrefix + (ann.text ?? '');
-      if (ann.suggestedCode) {
-        commentBody += `\n\n\`\`\`suggestion\n${ann.suggestedCode}\n\`\`\``;
-      }
-      const side = (ann.side === 'old' ? 'LEFT' : 'RIGHT') as 'LEFT' | 'RIGHT';
-      const isMultiLine = ann.lineStart != null && ann.lineEnd != null && ann.lineStart !== ann.lineEnd;
-      return {
-        path: ann.filePath,
-        line: ann.lineEnd ?? ann.lineStart,
-        side,
-        body: commentBody.trim(),
-        ...(isMultiLine && {
-          start_line: ann.lineStart,
-          start_side: side,
-        }),
-      };
-    }).filter(c => c.body.length > 0);
-
-    // Editor annotations (VS Code extension) — always on new/RIGHT side
-    // Only include annotations targeting files in the diff to avoid GitHub API rejection
-    const diffPaths = new Set(files.map(f => f.path));
-    for (const ea of editorAnnotations) {
-      if (!diffPaths.has(ea.filePath)) continue;
-      const body = ea.comment || `> ${ea.selectedText}`;
-      if (!body.trim()) continue;
-      const isMultiLine = ea.lineStart !== ea.lineEnd;
-      fileComments.push({
-        path: ea.filePath,
-        line: ea.lineEnd,
-        side: 'RIGHT' as const,
-        body: ea.comment ? `> ${ea.selectedText}\n\n${ea.comment}` : `> ${ea.selectedText}`,
-        ...(isMultiLine && {
-          start_line: ea.lineStart,
-          start_side: 'RIGHT' as const,
-        }),
-      });
-    }
-
-    return { action, body, fileComments };
-  }, [allAnnotations, editorAnnotations, files]);
-
-  // Submit a review directly to GitHub
-  const handlePlatformAction = useCallback(async (action: 'approve' | 'comment', generalComment?: string) => {
+  // Submit reviews to one or more PRs via /api/pr-action
+  const handlePlatformAction = useCallback(async (action: 'approve' | 'comment', plan: ReviewSubmission, generalComment?: string) => {
     setIsPlatformActioning(true);
     setPlatformActionError(null);
+
     try {
-      const payload = buildPRReviewPayload(action, generalComment);
-      const prRes = await fetch('/api/pr-action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const prData = await prRes.json() as { ok?: boolean; prUrl?: string; error?: string };
-      if (!prRes.ok || prData.error) {
-        setPlatformActionError(prData.error ?? 'Failed to submit PR review');
-        setIsPlatformActioning(false);
+      const bodyForTarget = (target: SubmissionTarget) => {
+        const parts: string[] = [];
+        if (generalComment) parts.push(generalComment);
+        parts.push('Review from Plannotator');
+        if (target.fileScopedBody) parts.push(target.fileScopedBody);
+        return parts.join('\n\n');
+      };
+
+      // For approve, only post to the currently viewed PR.
+      // For comment with no targets but a general comment, create a minimal target.
+      let targets = plan.targets;
+      if (action === 'approve' || (targets.length === 0 && generalComment?.trim())) {
+        const currentTarget = plan.targets.find(t => t.prUrl === prMetadata?.url);
+        targets = currentTarget ? [currentTarget] : [{
+          prUrl: prMetadata?.url ?? '',
+          prNumber: prMetadata ? (prMetadata.platform === 'github' ? prMetadata.number : prMetadata.iid) : 0,
+          prTitle: prMetadata?.title ?? '',
+          prRepo: prMetadata ? getDisplayRepo(prMetadata) : '',
+          fileComments: [], fileScopedBody: '',
+          fileCount: 0, annotationCount: 0, status: 'pending' as const,
+        }];
+      }
+
+      const openUrls: string[] = targets.filter(t => t.status === 'success' && t.prUrl).map(t => t.prUrl);
+      const results = await Promise.allSettled(
+        targets.map(async (target): Promise<SubmissionTarget> => {
+          if (target.status === 'success') return target;
+          try {
+            const prRes = await fetch('/api/pr-action', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                action,
+                body: bodyForTarget(target),
+                fileComments: target.fileComments,
+                targetPrUrl: target.prUrl || undefined,
+              }),
+            });
+            const prData = await prRes.json() as { ok?: boolean; prUrl?: string; error?: string };
+            if (!prRes.ok || prData.error) {
+              return { ...target, status: 'failed', error: prData.error ?? 'Failed to submit' };
+            }
+            if (prData.prUrl) openUrls.push(prData.prUrl);
+            return { ...target, status: 'success' };
+          } catch (err) {
+            return { ...target, status: 'failed', error: err instanceof Error ? err.message : 'Network error' };
+          }
+        }),
+      );
+      const updatedTargets = results.map((r, i) => r.status === 'fulfilled' ? r.value : { ...targets[i], status: 'failed' as const, error: 'Unexpected error' });
+      const allOk = updatedTargets.every(t => t.status === 'success');
+
+      if (!allOk) {
+        setPlatformCommentDialog(prev => prev ? {
+          ...prev,
+          plan: { ...plan, targets: updatedTargets },
+        } : null);
         return;
       }
 
-      // Open PR in browser (if opted in)
-      if (prData.prUrl && platformOpenPR) {
-        window.open(prData.prUrl, '_blank');
+      setPlatformCommentDialog(null);
+      setSubmitted(action === 'approve' ? 'approved' : 'feedback');
+
+      if (platformOpenPR) {
+        for (const url of openUrls) window.open(url, '_blank');
       }
 
-      // Close the local session with a neutral message — don't send annotations to the agent
       const agentSwitchSettings = getAgentSwitchSettings();
       const effectiveAgent = getEffectiveAgentName(agentSwitchSettings);
-      const prLink = prData.prUrl ?? '';
+      const prLinks = openUrls.join(', ');
       const statusMessage = action === 'approve'
-        ? `${mrLabel === 'MR' ? 'Merge request' : 'Pull request'} approved on ${platformLabel}${prLink ? ': ' + prLink : ''}`
-        : `${mrLabel === 'MR' ? 'Merge request' : 'Pull request'} reviewed on ${platformLabel}${prLink ? ': ' + prLink : ''}`;
-      await fetch('/api/feedback', {
+        ? `${mrLabel === 'MR' ? 'Merge request' : 'Pull request'} approved on ${platformLabel}${prLinks ? ': ' + prLinks : ''}`
+        : `${mrLabel === 'MR' ? 'Merge request' : 'Pull request'} reviewed on ${platformLabel}${prLinks ? ': ' + prLinks : ''}`;
+      fetch('/api/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        keepalive: true,
         body: JSON.stringify({
           approved: false,
           feedback: statusMessage,
           annotations: [],
           ...(effectiveAgent && { agentSwitch: effectiveAgent }),
         }),
-      });
-      setSubmitted(action === 'approve' ? 'approved' : 'feedback');
+      }).catch(() => {});
     } catch (err) {
-      setPlatformActionError(err instanceof Error ? err.message : 'Failed to submit PR review');
+      setPlatformActionError(err instanceof Error ? err.message : 'Failed to submit review');
+    } finally {
       setIsPlatformActioning(false);
     }
-  }, [buildPRReviewPayload, platformOpenPR]);
+  }, [platformOpenPR, platformLabel, mrLabel, prMetadata]);
+
+  const openPlatformDialog = useCallback((action: 'approve' | 'comment') => {
+    const diffPaths = new Set(files.map(f => f.path));
+    const prMeta = prMetadata ? {
+      number: prMetadata.platform === 'github' ? prMetadata.number : prMetadata.iid,
+      title: prMetadata.title,
+      repo: getDisplayRepo(prMetadata),
+    } : undefined;
+    const plan = buildReviewSubmission(allAnnotations, editorAnnotations, prMetadata?.url, diffPaths, prMeta);
+    setPlatformGeneralComment('');
+    setPlatformCommentDialog({ action, plan });
+  }, [allAnnotations, editorAnnotations, files, prMetadata]);
 
   // Double-tap Option/Alt to toggle review destination (PR mode only)
   useEffect(() => {
@@ -1456,16 +1539,15 @@ const ReviewApp: React.FC = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
 
-      // If the GitHub comment dialog is open, Cmd+Enter submits it
+      // If the platform post dialog is open, Cmd+Enter submits it
       if (platformCommentDialog) {
         if (submitted || isPlatformActioning) return;
         const isApproveAction = platformCommentDialog.action === 'approve';
-        const canSubmit = isApproveAction || totalAnnotationCount > 0 || platformGeneralComment.trim();
+        const hasTargets = platformCommentDialog.plan.targets.length > 0;
+        const canSubmit = isApproveAction || hasTargets || platformGeneralComment.trim();
         if (!canSubmit) return;
         e.preventDefault();
-        const { action } = platformCommentDialog;
-        setPlatformCommentDialog(null);
-        handlePlatformAction(action, platformGeneralComment);
+        handlePlatformAction(platformCommentDialog.action, platformCommentDialog.plan, platformGeneralComment);
         return;
       }
 
@@ -1481,11 +1563,9 @@ const ReviewApp: React.FC = () => {
         // GitHub mode: No annotations → Approve on GitHub, otherwise → Post Review
         const isOwnPR = !!platformUser && prMetadata?.author === platformUser;
         if (totalAnnotationCount === 0 && !isOwnPR) {
-          setPlatformGeneralComment('');
-          setPlatformCommentDialog({ action: 'approve' });
+          openPlatformDialog('approve');
         } else {
-          setPlatformGeneralComment('');
-          setPlatformCommentDialog({ action: 'comment' });
+          openPlatformDialog('comment');
         }
       } else {
         // Agent mode: No annotations → Approve, otherwise → Send Feedback
@@ -1503,7 +1583,7 @@ const ReviewApp: React.FC = () => {
     showExportModal, showNoAnnotationsDialog, showApproveWarning, showExitWarning,
     platformCommentDialog, platformGeneralComment,
     submitted, isSendingFeedback, isApproving, isExiting, isPlatformActioning,
-    origin, platformMode, platformUser, prMetadata, totalAnnotationCount,
+    origin, platformMode, platformLabel, platformUser, prMetadata, totalAnnotationCount, openPlatformDialog,
     handleApprove, handleSendFeedback, handlePlatformAction
   ]);
 
@@ -1522,13 +1602,14 @@ const ReviewApp: React.FC = () => {
       <TooltipProvider delayDuration={200} skipDelayDuration={100}>
       <ReviewStateProvider value={reviewStateValue}>
       <JobLogsProvider value={jobLogsValue}>
+      {isSwitchingPRScope && <PRSwitchOverlay />}
       <div className="h-screen flex flex-col bg-background overflow-hidden">
         {/* Header */}
         <header className="py-1 flex items-center justify-between px-2 md:px-4 border-b border-border/50 bg-card/50 backdrop-blur-xl z-50">
           <div className="min-w-0 flex items-center gap-2 md:gap-3">
             {prMetadata ? (
               <div className="min-w-0 flex items-center gap-2 md:gap-3">
-                {prMetadata && (gitContext || agentCwd) && (
+                {(gitContext || agentCwd) && (
                   <button
                     onClick={() => setShowWorktreeDialog(true)}
                     className="text-[10px] font-medium text-primary/80 bg-primary/10 hover:bg-primary/20 px-1.5 py-0.5 rounded transition-colors cursor-pointer"
@@ -1537,23 +1618,29 @@ const ReviewApp: React.FC = () => {
                   </button>
                 )}
                 <span
-                  className="text-xs text-muted-foreground/60 inline-flex items-center gap-1 truncate max-w-[200px]"
-                  title={displayRepo}
+                  className="text-xs text-muted-foreground/60 inline-flex items-center gap-1 whitespace-nowrap"
                 >
                   <RepoIcon className="w-3 h-3 flex-shrink-0" />
                   {displayRepo}
                 </span>
-                <a
-                  href={prMetadata.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-accent/80 hover:text-accent inline-flex items-center gap-1 truncate max-w-[340px] transition-colors"
-                  title={prMetadata.title}
-                >
-                  <PullRequestIcon className="w-3 h-3 flex-shrink-0" />
-                  <span className="font-mono whitespace-nowrap">{mrNumberLabel}</span>
-                  <span className="truncate hidden md:inline">{prMetadata.title}</span>
-                </a>
+                <PRSelector
+                  mrNumberLabel={mrNumberLabel}
+                  prTitle={prMetadata.title}
+                  currentNumber={prMetadata.platform === 'github' ? prMetadata.number : prMetadata.iid}
+                  onSelect={handlePRSwitch}
+                  disabled={isSwitchingPRScope}
+                />
+                <StackedPRLabel
+                  metadata={prMetadata}
+                  mrNumberLabel={mrNumberLabel}
+                  stackInfo={prStackInfo}
+                  stackTree={prStackTree}
+                  scope={prDiffScope}
+                  scopeOptions={prDiffScopeOptions}
+                  isSwitchingScope={isSwitchingPRScope}
+                  onSelectScope={handlePRDiffScopeSelect}
+                  onNavigatePR={handlePRSwitch}
+                />
                 <div className="hidden md:flex items-center gap-0.5 ml-1">
                   <button onClick={() => handleOpenPRPanel('summary')} className="p-1 rounded text-muted-foreground/50 hover:text-foreground hover:bg-muted/30 transition-colors duration-150" title="PR Summary">
                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
@@ -1713,24 +1800,20 @@ const ReviewApp: React.FC = () => {
                       isLoading={isExiting}
                     />
                     <FeedbackButton
-                      onClick={() => {
-                        setPlatformGeneralComment('');
-                        setPlatformCommentDialog({ action: 'comment' });
-                      }}
+                      onClick={() => openPlatformDialog('comment')}
                       disabled={isSendingFeedback || isApproving || isPlatformActioning}
                       isLoading={isSendingFeedback || isPlatformActioning}
                       label="Post Comments"
                       shortLabel="Post"
                       loadingLabel="Posting..."
                       shortLoadingLabel="Posting..."
-                      title="Send feedback"
+                      title="Post review to platform"
                     />
                     <div className="relative group/approve">
                       <ApproveButton
                         onClick={() => {
                           if (platformUser && prMetadata?.author === platformUser) return;
-                          setPlatformGeneralComment('');
-                          setPlatformCommentDialog({ action: 'approve' });
+                          openPlatformDialog('approve');
                         }}
                         disabled={
                           isSendingFeedback || isApproving || isPlatformActioning ||
@@ -2123,63 +2206,26 @@ const ReviewApp: React.FC = () => {
         <UpdateBanner origin={origin} isWSL={isWSL} />
 
         {/* GitHub general comment dialog */}
-        {platformCommentDialog && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
-            <div className="bg-card border border-border rounded-xl w-full max-w-sm shadow-2xl p-6">
-              <h3 className="font-semibold mb-1">
-                {platformCommentDialog.action === 'approve' ? `Approve ${mrLabel}` : 'Post Review Comment'}
-              </h3>
-              <p className="text-sm text-muted-foreground mb-3">
-                Add a general comment to the review (optional).
-              </p>
-              <textarea
-                autoFocus
-                value={platformGeneralComment}
-                onChange={e => setPlatformGeneralComment(e.target.value)}
-                placeholder="Leave a comment..."
-                rows={4}
-                className="w-full rounded-md border border-border bg-background text-sm px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-primary mb-3"
-              />
-              <label className="flex items-center gap-2 text-sm text-muted-foreground mb-4 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={platformOpenPR}
-                  onChange={e => {
-                    setPlatformOpenPR(e.target.checked);
-                    storage.setItem('plannotator-platform-open-pr', String(e.target.checked));
-                  }}
-                  className="rounded border-border"
-                />
-                Open {mrLabel} after submitting
-              </label>
-              <div className="flex justify-end gap-2">
-                <button
-                  onClick={() => setPlatformCommentDialog(null)}
-                  className="px-4 py-2 rounded-md text-sm font-medium bg-muted text-muted-foreground hover:bg-muted/80"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    const { action } = platformCommentDialog;
-                    setPlatformCommentDialog(null);
-                    handlePlatformAction(action, platformGeneralComment);
-                  }}
-                  disabled={platformCommentDialog.action !== 'approve' && totalAnnotationCount === 0 && !platformGeneralComment.trim()}
-                  className={`px-4 py-2 rounded-md text-sm font-medium transition-opacity ${
-                    platformCommentDialog.action !== 'approve' && totalAnnotationCount === 0 && !platformGeneralComment.trim()
-                      ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
-                      : platformCommentDialog.action === 'approve'
-                        ? 'bg-success text-success-foreground hover:opacity-90'
-                        : 'bg-primary text-primary-foreground hover:opacity-90'
-                  }`}
-                >
-                  {platformCommentDialog.action === 'approve' ? 'Approve' : 'Post Comments'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        <ReviewSubmissionDialog
+          isOpen={!!platformCommentDialog}
+          action={platformCommentDialog?.action ?? 'comment'}
+          submission={platformCommentDialog?.plan ?? { targets: [], orphans: [] }}
+          generalComment={platformGeneralComment}
+          onGeneralCommentChange={setPlatformGeneralComment}
+          platformOpenPR={platformOpenPR}
+          onPlatformOpenPRChange={(checked) => {
+            setPlatformOpenPR(checked);
+            storage.setItem('plannotator-platform-open-pr', String(checked));
+          }}
+          onConfirm={() => {
+            if (!platformCommentDialog) return;
+            handlePlatformAction(platformCommentDialog.action, platformCommentDialog.plan, platformGeneralComment);
+          }}
+          onCancel={() => setPlatformCommentDialog(null)}
+          isSubmitting={isPlatformActioning}
+          mrLabel={mrLabel}
+          platformLabel={platformLabel}
+        />
       </div>
 
       {/* Tour dialog overlay */}
