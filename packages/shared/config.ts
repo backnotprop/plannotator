@@ -10,7 +10,7 @@ import { join } from "path";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { execSync } from "child_process";
 
-export type DefaultDiffType = 'uncommitted' | 'unstaged' | 'staged';
+export type DefaultDiffType = 'uncommitted' | 'unstaged' | 'staged' | 'branch';
 
 export interface DiffOptions {
   diffStyle?: 'split' | 'unified';
@@ -130,7 +130,7 @@ export function getServerConfig(gitUser: string | null): {
  */
 export function resolveDefaultDiffType(cfg?: PlannotatorConfig): DefaultDiffType {
   const v = cfg?.diffOptions?.defaultDiffType;
-  return v === 'uncommitted' || v === 'unstaged' || v === 'staged' ? v : 'unstaged';
+  return v === 'uncommitted' || v === 'unstaged' || v === 'staged' || v === 'branch' ? v : 'unstaged';
 }
 
 /**

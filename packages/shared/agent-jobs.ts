@@ -69,6 +69,10 @@ export interface AgentJobInfo {
     explanation: string;
     confidence: number;
   };
+  /** PR URL at launch time — used to attribute findings to the correct PR. */
+  prUrl?: string;
+  /** PR diff scope at launch time — "layer" or "full-stack". */
+  diffScope?: string;
   /** Diff context at launch time (see AgentJobDiffContext). */
   diffContext?: AgentJobDiffContext;
 }
