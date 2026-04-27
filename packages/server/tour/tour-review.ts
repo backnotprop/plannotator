@@ -287,10 +287,22 @@ callouts. The primary question is "what does this change do and why?" not
 function buildTourUserMessage(
   patch: string,
   diffType: DiffType,
-  options?: { defaultBranch?: string; hasLocalAccess?: boolean },
+  options?: { defaultBranch?: string; hasLocalAccess?: boolean; prDiffScope?: string },
   prMetadata?: PRMetadata,
 ): string {
   if (prMetadata) {
+    if (options?.prDiffScope === "full-stack") {
+      return [
+        `Full-stack tour of ${prMetadata.url}`,
+        "",
+        "This is a stacked PR. The diff below shows ALL accumulated changes from the repository default branch through this PR's head (not just this PR's own layer).",
+        "Walk the reviewer through the complete changeset as a guided tour.",
+        "",
+        "```diff",
+        patch,
+        "```",
+      ].join("\n");
+    }
     if (options?.hasLocalAccess) {
       return [
         prMetadata.url,

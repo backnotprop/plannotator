@@ -166,11 +166,23 @@ The finding description should be one paragraph.`;
 export function buildCodexReviewUserMessage(
   patch: string,
   diffType: DiffType,
-  options?: { defaultBranch?: string; hasLocalAccess?: boolean },
+  options?: { defaultBranch?: string; hasLocalAccess?: boolean; prDiffScope?: string },
   prMetadata?: PRMetadata,
 ): string {
   // PR/MR mode — pass the link, with local context if --local
   if (prMetadata) {
+    if (options?.prDiffScope === "full-stack") {
+      return [
+        `Full-stack review of ${prMetadata.url}`,
+        "",
+        "This is a stacked PR. The diff below shows ALL accumulated changes from the repository default branch through this PR's head (not just this PR's own layer).",
+        "Review the complete diff for issues that span the stack.",
+        "",
+        "```diff",
+        patch,
+        "```",
+      ].join("\n");
+    }
     if (options?.hasLocalAccess) {
       return [
         prMetadata.url,
