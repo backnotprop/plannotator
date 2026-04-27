@@ -119,6 +119,11 @@ export interface CodeAnnotation {
   reasoning?: string; // Validation chain — how the issue was confirmed (Claude)
   conventionalLabel?: ConventionalLabel;
   decorations?: ConventionalDecoration[];
+  prUrl?: string;
+  prNumber?: number;
+  prTitle?: string;
+  prRepo?: string;
+  diffScope?: 'layer' | 'full-stack';
 }
 
 /** Token-level metadata passed from selection to annotation creation. */
