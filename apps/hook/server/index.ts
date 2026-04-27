@@ -69,6 +69,7 @@ import { stripAtPrefix, resolveAtReference } from "@plannotator/shared/at-refere
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { urlToMarkdown } from "@plannotator/shared/url-to-markdown";
 import { fetchRef, createWorktree, removeWorktree, ensureObjectAvailable } from "@plannotator/shared/worktree";
+import { createWorktreePool, type WorktreePool } from "@plannotator/shared/worktree-pool";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getCliInstallUrl, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
 import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles } from "@plannotator/shared/resolve-file";
@@ -293,6 +294,7 @@ if (args[0] === "sessions") {
   let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
   let initialDiffType: DiffType | undefined;
   let agentCwd: string | undefined;
+  let worktreePool: WorktreePool | undefined;
   let worktreeCleanup: (() => void | Promise<void>) | undefined;
 
   if (isPRMode) {
@@ -337,6 +339,7 @@ if (args[0] === "sessions") {
     if (useLocal && prMetadata) {
       // Hoisted so catch block can clean up partially-created directories
       let localPath: string | undefined;
+      let sessionDir: string | undefined;
       try {
         const repoDir = process.cwd();
         const identifier = prMetadata.platform === "github"
@@ -345,7 +348,9 @@ if (args[0] === "sessions") {
         const suffix = Math.random().toString(36).slice(2, 8);
         // Resolve tmpdir to its real path — on macOS, tmpdir() returns /var/folders/...
         // but processes report /private/var/folders/... which breaks path stripping.
-        localPath = path.join(realpathSync(tmpdir()), `plannotator-pr-${identifier}-${suffix}`);
+        sessionDir = path.join(realpathSync(tmpdir()), `plannotator-pr-${identifier}-${suffix}`);
+        const prNumber = prMetadata.platform === "github" ? prMetadata.number : prMetadata.iid;
+        localPath = path.join(sessionDir, "pool", `pr-${prNumber}`);
         const fetchRefStr = prMetadata.platform === "github"
           ? `refs/pull/${prMetadata.number}/head`
           : `refs/merge-requests/${prMetadata.iid}/head`;
@@ -393,9 +398,18 @@ if (args[0] === "sessions") {
             cwd: repoDir,
           });
 
-          worktreeCleanup = () => removeWorktree(gitRuntime, localPath, { force: true, cwd: repoDir });
+          worktreeCleanup = async () => {
+            if (worktreePool) await worktreePool.cleanup(gitRuntime);
+            try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
+          };
           process.once("exit", () => {
-            try { Bun.spawnSync(["git", "worktree", "remove", "--force", localPath]); } catch {}
+            // Best-effort sync cleanup: remove each pool worktree from git, then rm session dir
+            try {
+              for (const entry of worktreePool?.entries() ?? []) {
+                Bun.spawnSync(["git", "worktree", "remove", "--force", entry.path], { cwd: repoDir });
+              }
+            } catch {}
+            try { Bun.spawnSync(["rm", "-rf", sessionDir]); } catch {}
           });
         } else {
           // ── Cross-repo: shallow clone + fetch PR head ──
@@ -443,9 +457,9 @@ if (args[0] === "sessions") {
           Bun.spawnSync(["git", "branch", "--", prMetadata.baseBranch, prMetadata.baseSha], { cwd: localPath, stderr: "pipe" });
           Bun.spawnSync(["git", "update-ref", `refs/remotes/origin/${prMetadata.baseBranch}`, prMetadata.baseSha], { cwd: localPath, stderr: "pipe" });
 
-          worktreeCleanup = () => { try { rmSync(localPath, { recursive: true, force: true }); } catch {} };
+          worktreeCleanup = () => { try { rmSync(sessionDir, { recursive: true, force: true }); } catch {} };
           process.once("exit", () => {
-            try { Bun.spawnSync(["rm", "-rf", localPath]); } catch {}
+            try { Bun.spawnSync(["rm", "-rf", sessionDir]); } catch {}
           });
         }
 
@@ -453,13 +467,19 @@ if (args[0] === "sessions") {
         // Do NOT set gitContext — that would contaminate the diff pipeline.
         agentCwd = localPath;
 
+        // Create worktree pool with the initial PR as the first entry
+        worktreePool = createWorktreePool(
+          { sessionDir, repoDir, isSameRepo },
+          { path: localPath, prUrl: prMetadata.url, number: prNumber, ready: true },
+        );
+
         console.error(`Local checkout ready at ${localPath}`);
       } catch (err) {
         console.error(`Warning: --local failed, falling back to remote diff`);
         console.error(err instanceof Error ? err.message : String(err));
-        // Clean up partially-created directory (clone may have succeeded before fetch/checkout failed)
-        if (localPath) try { rmSync(localPath, { recursive: true, force: true }); } catch {}
+        if (sessionDir) try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
         agentCwd = undefined;
+        worktreePool = undefined;
         worktreeCleanup = undefined;
       }
     }
@@ -485,6 +505,7 @@ if (args[0] === "sessions") {
     gitContext,
     prMetadata,
     agentCwd,
+    worktreePool,
     sharingEnabled,
     shareBaseUrl,
     htmlContent: reviewHtmlContent,
