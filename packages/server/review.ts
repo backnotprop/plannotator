@@ -13,6 +13,14 @@ import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
 import type { Origin } from "@plannotator/shared/agents";
 import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath, getVcsContext, gitRuntime } from "./vcs";
 import { parseWorktreeDiffType, detectRemoteDefaultBranch, resolveBaseBranch } from "@plannotator/shared/review-core";
+import {
+  getPRDiffScopeOptions,
+  getPRStackInfo,
+  resolvePRFullStackBaseRef,
+  runPRFullStackDiff,
+  checkoutPRHead,
+  type PRDiffScope,
+} from "@plannotator/shared/pr-stack";
 import type { AgentJobInfo } from "@plannotator/shared/agent-jobs";
 import { getRepoInfo } from "./repo";
 import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, type OpencodeClient } from "./shared-handlers";
@@ -36,7 +44,7 @@ import {
 } from "./claude-review";
 import { createTourSession, TOUR_EMPTY_OUTPUT_ERROR } from "./tour/tour-review";
 import { saveConfig, detectGitUser, getServerConfig } from "./config";
-import { type PRMetadata, type PRReviewFileComment, fetchPRFileContent, fetchPRContext, submitPRReview, fetchPRViewedFiles, markPRFilesViewed, getPRUser, prRefFromMetadata, getDisplayRepo, getMRLabel, getMRNumberLabel } from "./pr";
+import { type PRMetadata, type PRReviewFileComment, type PRStackTree, type PRListItem, fetchPR, fetchPRFileContent, fetchPRContext, submitPRReview, fetchPRViewedFiles, markPRFilesViewed, fetchPRStack, fetchPRList, getPRUser, parsePRUrl, prRefFromMetadata, isSameProject, getDisplayRepo, getMRLabel, getMRNumberLabel } from "./pr";
 import { createAIEndpoints, ProviderRegistry, SessionManager, createProvider, type AIEndpoints, type PiSDKConfig } from "@plannotator/ai";
 import { isWSL } from "./browser";
 
@@ -84,6 +92,8 @@ export interface ReviewServerOptions {
   prMetadata?: PRMetadata;
   /** Working directory for agent processes (e.g., --local worktree). Independent of diff pipeline. */
   agentCwd?: string;
+  /** Per-PR worktree pool. When set, pr-switch creates worktrees instead of checking out. */
+  worktreePool?: import("@plannotator/shared/worktree-pool").WorktreePool;
   /** Cleanup callback invoked when server stops (e.g., remove temp worktree) */
   onCleanup?: () => void | Promise<void>;
 }
@@ -123,11 +133,12 @@ const RETRY_DELAY_MS = 500;
 export async function startReviewServer(
   options: ReviewServerOptions
 ): Promise<ReviewServerResult> {
-  const { htmlContent, origin, gitContext, sharingEnabled = true, shareBaseUrl, onReady, prMetadata } = options;
+  const { htmlContent, origin, gitContext, sharingEnabled = true, shareBaseUrl, onReady } = options;
 
+  let prMetadata = options.prMetadata;
   const isPRMode = !!prMetadata;
   const hasLocalAccess = !!gitContext;
-  const draftKey = contentHash(options.rawPatch);
+  let draftKey = contentHash(options.rawPatch);
   const editorAnnotations = createEditorAnnotationHandler();
   const externalAnnotations = createExternalAnnotationHandler("review");
 
@@ -138,6 +149,15 @@ export async function startReviewServer(
   let currentGitRef = options.gitRef;
   let currentDiffType: DiffType = options.diffType || "uncommitted";
   let currentError = options.error;
+  let originalPRPatch = options.rawPatch;
+  let originalPRGitRef = options.gitRef;
+  let originalPRError = options.error;
+  let currentPRDiffScope: PRDiffScope = "layer";
+  let prListCache: PRListItem[] | null = null;
+  let prListCacheTime = 0;
+  const prSwitchCache = new Map<string, { metadata: PRMetadata; rawPatch: string }>();
+  if (isPRMode && prMetadata) prSwitchCache.set(prMetadata.url, { metadata: prMetadata, rawPatch: options.rawPatch });
+  const prStackTreeCache = new Map<string, PRStackTree | null>();
   // Tracks the base branch the user picked from the UI. Agent review prompts
   // read this (not gitContext.defaultBranch) so they analyze the same diff
   // the reviewer is currently looking at. Honors an explicit initialBase from
@@ -157,8 +177,13 @@ export async function startReviewServer(
 
   // Agent jobs — background process manager (late-binds serverUrl via getter)
   let serverUrl = "";
-  const resolveAgentCwd = (): string =>
-    options.agentCwd ?? resolveVcsCwd(currentDiffType, gitContext?.cwd) ?? process.cwd();
+  const resolveAgentCwd = (): string => {
+    if (options.worktreePool && prMetadata) {
+      const poolPath = options.worktreePool.resolve(prMetadata.url);
+      if (poolPath) return poolPath;
+    }
+    return options.agentCwd ?? resolveVcsCwd(currentDiffType, gitContext?.cwd) ?? process.cwd();
+  };
   const agentJobs = createAgentJobHandler({
     mode: "review",
     getServerUrl: () => serverUrl,
@@ -166,8 +191,8 @@ export async function startReviewServer(
 
     async buildCommand(provider, config) {
       const cwd = resolveAgentCwd();
-      const hasAgentLocalAccess = !!options.agentCwd || !!gitContext;
-      const userMessageOptions = { defaultBranch: currentBase, hasLocalAccess: hasAgentLocalAccess };
+      const hasAgentLocalAccess = !!options.worktreePool || !!options.agentCwd || !!gitContext;
+      const userMessageOptions = { defaultBranch: currentBase, hasLocalAccess: hasAgentLocalAccess, prDiffScope: currentPRDiffScope };
 
       // Snapshot the diff context at launch — stored on the job so
       // downstream "Copy All" produces the same markdown as /api/feedback
@@ -176,6 +201,8 @@ export async function startReviewServer(
       const worktreeParts = currentDiffType.startsWith("worktree:")
         ? parseWorktreeDiffType(currentDiffType)
         : null;
+      const launchPrUrl = prMetadata?.url;
+      const launchDiffScope = isPRMode ? currentPRDiffScope : undefined;
       const diffContext: AgentJobInfo["diffContext"] | undefined = prMetadata
         ? undefined
         : {
@@ -193,7 +220,7 @@ export async function startReviewServer(
           prMetadata,
           config,
         });
-        return built ? { ...built, diffContext } : built;
+        return built ? { ...built, prUrl: launchPrUrl, diffScope: launchDiffScope, diffContext } : built;
       }
 
       const userMessage = buildCodexReviewUserMessage(currentPatch, currentDiffType, userMessageOptions, prMetadata);
@@ -205,7 +232,7 @@ export async function startReviewServer(
         const outputPath = generateOutputPath();
         const prompt = CODEX_REVIEW_SYSTEM_PROMPT + "\n\n---\n\n" + userMessage;
         const command = await buildCodexCommand({ cwd, outputPath, prompt, model, reasoningEffort, fastMode });
-        return { command, outputPath, prompt, label: "Code Review", model, reasoningEffort, fastMode: fastMode || undefined, diffContext };
+        return { command, outputPath, prompt, cwd, label: "Code Review", model, reasoningEffort, fastMode: fastMode || undefined, prUrl: launchPrUrl, diffScope: launchDiffScope, diffContext };
       }
 
       if (provider === "claude") {
@@ -213,14 +240,16 @@ export async function startReviewServer(
         const effort = typeof config?.effort === "string" && config.effort ? config.effort : undefined;
         const prompt = CLAUDE_REVIEW_PROMPT + "\n\n---\n\n" + userMessage;
         const { command, stdinPrompt } = buildClaudeCommand(prompt, model, effort);
-        return { command, stdinPrompt, prompt, cwd, label: "Code Review", captureStdout: true, model, effort, diffContext };
+        return { command, stdinPrompt, prompt, cwd, label: "Code Review", captureStdout: true, model, effort, prUrl: launchPrUrl, diffScope: launchDiffScope, diffContext };
       }
 
       return null;
     },
 
     async onJobComplete(job, meta) {
-      const cwd = resolveAgentCwd();
+      const cwd = meta.cwd ?? resolveAgentCwd();
+      const jobPrUrl = job.prUrl;
+      const jobDiffScope = job.diffScope;
 
       // --- Codex path ---
       if (job.provider === "codex" && meta.outputPath) {
@@ -237,7 +266,8 @@ export async function startReviewServer(
         };
 
         if (output.findings.length > 0) {
-          const annotations = transformReviewFindings(output.findings, job.source, cwd, "Codex");
+          const annotations = transformReviewFindings(output.findings, job.source, cwd, "Codex")
+            .map(a => ({ ...a, ...(jobPrUrl && { prUrl: jobPrUrl }), ...(jobDiffScope && { diffScope: jobDiffScope }) }));
           const result = externalAnnotations.addAnnotations({ annotations });
           if ("error" in result) console.error(`[codex-review] addAnnotations error:`, result.error);
         }
@@ -260,7 +290,8 @@ export async function startReviewServer(
         };
 
         if (output.findings.length > 0) {
-          const annotations = transformClaudeFindings(output.findings, job.source, cwd);
+          const annotations = transformClaudeFindings(output.findings, job.source, cwd)
+            .map(a => ({ ...a, ...(jobPrUrl && { prUrl: jobPrUrl }), ...(jobDiffScope && { diffScope: jobDiffScope }) }));
           const result = externalAnnotations.addAnnotations({ annotations });
           if ("error" in result) console.error(`[claude-review] addAnnotations error:`, result.error);
         }
@@ -361,10 +392,7 @@ export async function startReviewServer(
     aiEndpoints = createAIEndpoints({
       registry: aiRegistry,
       sessionManager: aiSessionManager,
-      getCwd: () => {
-        if (options.agentCwd) return options.agentCwd;
-        return resolveVcsCwd(currentDiffType, gitContext?.cwd) ?? process.cwd();
-      },
+      getCwd: resolveAgentCwd,
     });
   }
 
@@ -375,13 +403,28 @@ export async function startReviewServer(
 
   // Detect repo info (cached for this session)
   // In PR mode, derive from metadata instead of local git
-  const repoInfo = isPRMode
+  let repoInfo = isPRMode && prMetadata
     ? { display: getDisplayRepo(prMetadata), branch: `${getMRLabel(prMetadata)} ${getMRNumberLabel(prMetadata)}` }
     : await getRepoInfo();
 
   // Fetch current platform user (for own-PR/MR detection)
-  const prRef = isPRMode ? prRefFromMetadata(prMetadata) : null;
+  let prRef = isPRMode && prMetadata ? prRefFromMetadata(prMetadata) : null;
   const platformUser = prRef ? await getPRUser(prRef) : null;
+  let prStackInfo = prMetadata ? getPRStackInfo(prMetadata) : null;
+  let prDiffScopeOptions = prMetadata
+    ? getPRDiffScopeOptions(prMetadata, !!(options.worktreePool || options.agentCwd))
+    : [];
+
+  // Fetch full stack tree (best-effort — client falls back to buildMinimalStackTree)
+  let prStackTree: PRStackTree | null = null;
+  if (prStackInfo && prRef && prMetadata) {
+    try {
+      prStackTree = await fetchPRStack(prRef, prMetadata);
+    } catch {
+      // Non-fatal: client falls back to buildMinimalStackTree()
+    }
+    prStackTreeCache.set(prMetadata.url, prStackTree);
+  }
 
   // Fetch GitHub viewed file state (non-blocking — errors are silently ignored)
   let initialViewedFiles: string[] = [];
@@ -464,7 +507,14 @@ export async function startReviewServer(
               repoInfo,
               isWSL: wslFlag,
               ...(options.agentCwd && { agentCwd: options.agentCwd }),
-              ...(isPRMode && { prMetadata, platformUser }),
+              ...(isPRMode && {
+                prMetadata,
+                platformUser,
+                prStackInfo,
+                prStackTree,
+                prDiffScope: currentPRDiffScope,
+                prDiffScopeOptions,
+              }),
               ...(isPRMode && initialViewedFiles.length > 0 && { viewedFiles: initialViewedFiles }),
               ...(currentError && { error: currentError }),
               serverConfig: getServerConfig(gitUser),
@@ -543,6 +593,186 @@ export async function startReviewServer(
             }
           }
 
+          // API: Switch PR diff scope between the platform layer diff and a local full-stack diff.
+          if (url.pathname === "/api/pr-diff-scope" && req.method === "POST") {
+            if (!isPRMode || !prMetadata) {
+              return Response.json({ error: "Not in PR mode" }, { status: 400 });
+            }
+
+            try {
+              const body = (await req.json()) as { scope?: PRDiffScope };
+              if (body.scope !== "layer" && body.scope !== "full-stack") {
+                return Response.json({ error: "Invalid PR diff scope" }, { status: 400 });
+              }
+
+              if (body.scope === "layer") {
+                currentPatch = originalPRPatch;
+                currentGitRef = originalPRGitRef;
+                currentError = originalPRError;
+                currentPRDiffScope = "layer";
+                return Response.json({
+                  rawPatch: currentPatch,
+                  gitRef: currentGitRef,
+                  prDiffScope: currentPRDiffScope,
+                  ...(currentError && { error: currentError }),
+                });
+              }
+
+              const fullStackOption = prDiffScopeOptions.find((option) => option.id === "full-stack");
+              if (!fullStackOption?.enabled || !(options.worktreePool || options.agentCwd)) {
+                return Response.json(
+                  { error: "Full stack diff requires a stacked PR and a local checkout" },
+                  { status: 400 },
+                );
+              }
+
+              const fullStackCwd = (options.worktreePool && prMetadata ? options.worktreePool.resolve(prMetadata.url) : undefined) ?? options.agentCwd;
+              const result = await runPRFullStackDiff(gitRuntime, prMetadata, fullStackCwd);
+
+              if (result.error) {
+                return Response.json({ error: result.error }, { status: 400 });
+              }
+
+              currentPatch = result.patch;
+              currentGitRef = result.label;
+              currentError = undefined;
+              currentPRDiffScope = "full-stack";
+
+              return Response.json({
+                rawPatch: currentPatch,
+                gitRef: currentGitRef,
+                prDiffScope: currentPRDiffScope,
+              });
+            } catch (err) {
+              const message =
+                err instanceof Error ? err.message : "Failed to switch PR diff scope";
+              return Response.json({ error: message }, { status: 500 });
+            }
+          }
+
+          // API: List PRs for the current repo (cached for 30s)
+          if (url.pathname === "/api/pr-list" && req.method === "GET") {
+            if (!isPRMode || !prRef) {
+              return Response.json({ error: "Not in PR mode" }, { status: 400 });
+            }
+            try {
+              const now = Date.now();
+              if (prListCache && now - prListCacheTime < 30_000) {
+                return Response.json({ prs: prListCache });
+              }
+              const prs = await fetchPRList(prRef);
+              prListCache = prs;
+              prListCacheTime = now;
+              return Response.json({ prs });
+            } catch (err) {
+              return Response.json({ error: "Failed to fetch PR list" }, { status: 500 });
+            }
+          }
+
+          // API: Switch to a different PR in the stack (in-place navigation)
+          if (url.pathname === "/api/pr-switch" && req.method === "POST") {
+            if (!isPRMode || !prRef) {
+              return Response.json({ error: "Not in PR mode" }, { status: 400 });
+            }
+
+            try {
+              const body = (await req.json()) as { url?: string };
+              if (!body.url) {
+                return Response.json({ error: "Missing PR URL" }, { status: 400 });
+              }
+
+              const newRef = parsePRUrl(body.url);
+              if (!newRef) {
+                return Response.json({ error: "Invalid PR URL" }, { status: 400 });
+              }
+              if (!isSameProject(newRef, prRef!)) {
+                return Response.json({ error: "Cannot switch to a PR in a different repository" }, { status: 400 });
+              }
+
+              const cached = prSwitchCache.get(body.url);
+              const pr = cached ?? await fetchPR(newRef);
+              if (!cached) prSwitchCache.set(body.url, pr);
+
+              // Update mutable server state
+              prMetadata = pr.metadata;
+              prRef = prRefFromMetadata(pr.metadata);
+              currentPatch = pr.rawPatch;
+              currentGitRef = `${getMRLabel(pr.metadata)} ${getMRNumberLabel(pr.metadata)}`;
+              currentError = undefined;
+              originalPRPatch = pr.rawPatch;
+              originalPRGitRef = currentGitRef;
+              originalPRError = undefined;
+              currentPRDiffScope = "layer";
+              draftKey = contentHash(pr.rawPatch);
+              prListCache = null;
+
+              // Recompute stack info
+              prStackInfo = getPRStackInfo(pr.metadata);
+
+              // Fetch stack tree (cached per PR for the session)
+              if (prStackTreeCache.has(body.url)) {
+                prStackTree = prStackTreeCache.get(body.url) ?? null;
+              } else {
+                try {
+                  prStackTree = await fetchPRStack(prRef, pr.metadata);
+                } catch {
+                  prStackTree = null;
+                }
+                prStackTreeCache.set(body.url, prStackTree);
+              }
+
+              // Ensure worktree for the new PR (pool creates a fresh one, no shared-state mutation)
+              let hasLocalForNewPR = false;
+              if (options.worktreePool) {
+                try {
+                  await options.worktreePool.ensure(gitRuntime, pr.metadata);
+                  hasLocalForNewPR = true;
+                } catch {
+                  // Pool creation failed — full-stack will be disabled
+                }
+              } else if (options.agentCwd) {
+                hasLocalForNewPR = await checkoutPRHead(gitRuntime, pr.metadata, options.agentCwd);
+              }
+
+              prDiffScopeOptions = prStackInfo
+                ? getPRDiffScopeOptions(pr.metadata, hasLocalForNewPR)
+                : [];
+
+              // Fetch viewed files for the new PR
+              let switchedViewedFiles: string[] = [];
+              try {
+                const viewedMap = await fetchPRViewedFiles(prRef);
+                switchedViewedFiles = Object.entries(viewedMap)
+                  .filter(([, isViewed]) => isViewed)
+                  .map(([path]) => path);
+              } catch {
+                // Non-fatal
+              }
+              initialViewedFiles = switchedViewedFiles;
+
+              repoInfo = {
+                display: getDisplayRepo(pr.metadata),
+                branch: `${getMRLabel(pr.metadata)} ${getMRNumberLabel(pr.metadata)}`,
+              };
+
+              return Response.json({
+                rawPatch: currentPatch,
+                gitRef: currentGitRef,
+                prMetadata: pr.metadata,
+                prStackInfo,
+                prStackTree,
+                prDiffScope: currentPRDiffScope,
+                prDiffScopeOptions,
+                repoInfo,
+                ...(switchedViewedFiles.length > 0 && { viewedFiles: switchedViewedFiles }),
+                ...(currentError ? { error: currentError } : {}),
+              });
+            } catch (err) {
+              const message = err instanceof Error ? err.message : "Failed to switch PR";
+              return Response.json({ error: message }, { status: 500 });
+            }
+          }
+
           // API: Fetch PR context (comments, checks, merge status) — PR mode only
           if (url.pathname === "/api/pr-context" && req.method === "GET") {
             if (!isPRMode) {
@@ -577,6 +807,35 @@ export async function startReviewServer(
               }
             }
 
+            // Full-stack PR mode uses local git for file expansion because
+            // the patch is no longer the platform's layer diff.
+            const fileContentCwd = (options.worktreePool && prMetadata) ? options.worktreePool.resolve(prMetadata.url) : options.agentCwd;
+            if (
+              isPRMode &&
+              currentPRDiffScope === "full-stack" &&
+              fileContentCwd &&
+              prMetadata?.defaultBranch
+            ) {
+              const baseRef = await resolvePRFullStackBaseRef(
+                gitRuntime,
+                prMetadata!.defaultBranch,
+                fileContentCwd,
+              );
+              if (!baseRef) {
+                return Response.json(
+                  { oldContent: null, newContent: null },
+                );
+              }
+              const result = await getVcsFileContentsForDiff(
+                "merge-base",
+                baseRef,
+                filePath,
+                oldPath,
+                fileContentCwd,
+              );
+              return Response.json(result);
+            }
+
             // Local review: read file contents from local git
             if (hasLocalAccess) {
               const detectedBase = gitContext?.defaultBranch || "main";
@@ -598,7 +857,7 @@ export async function startReviewServer(
             // PR mode: fetch from platform API using merge-base/head SHAs.
             // The diff is computed against the merge-base (common ancestor), not the
             // base branch tip. File contents must match the diff for hunk expansion.
-            if (isPRMode) {
+            if (isPRMode && prMetadata) {
               const oldSha = prMetadata.mergeBaseSha ?? prMetadata.baseSha;
               const [oldContent, newContent] = await Promise.all([
                 fetchPRFileContent(prRef!, oldSha, oldPath || filePath),
@@ -736,20 +995,43 @@ export async function startReviewServer(
                 action: "approve" | "comment";
                 body: string;
                 fileComments: PRReviewFileComment[];
+                targetPrUrl?: string;
               };
 
-              console.error(`[pr-action] ${body.action} with ${body.fileComments.length} file comment(s), headSha=${prMetadata.headSha}`);
+              // Resolve target PR — either explicit target or current.
+              // When targetPrUrl is provided, the client has already filtered
+              // annotations by diffScope, so we skip the server-side scope guard.
+              let targetRef = prRef!;
+              let targetHeadSha = prMetadata.headSha;
+              let targetUrl = prMetadata.url;
+
+              if (body.targetPrUrl) {
+                const cached = prSwitchCache.get(body.targetPrUrl);
+                if (!cached) {
+                  return Response.json({ error: "Target PR not found in session" }, { status: 400 });
+                }
+                targetRef = prRefFromMetadata(cached.metadata);
+                targetHeadSha = cached.metadata.headSha;
+                targetUrl = cached.metadata.url;
+              } else if (currentPRDiffScope !== "layer") {
+                return Response.json(
+                  { error: "Switch to Layer diff before posting a platform review" },
+                  { status: 400 },
+                );
+              }
+
+              console.error(`[pr-action] ${body.action} with ${body.fileComments.length} file comment(s), target=${targetUrl}, headSha=${targetHeadSha}`);
 
               await submitPRReview(
-                prRef!,
-                prMetadata.headSha,
+                targetRef,
+                targetHeadSha,
                 body.action,
                 body.body,
                 body.fileComments,
               );
 
               console.error(`[pr-action] Success`);
-              return Response.json({ ok: true, prUrl: prMetadata.url });
+              return Response.json({ ok: true, prUrl: targetUrl });
             } catch (err) {
               const message =
                 err instanceof Error ? err.message : "Failed to submit PR review";
