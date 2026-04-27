@@ -136,6 +136,24 @@ Add it explicitly. OpenCode's built-in `plan` agent stays enabled in `plan-agent
 }
 ```
 
+If you also use other OpenCode plugins, keep Plannotator as the two-item array entry and put the other plugins beside it:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    ["@plannotator/opencode@latest", {
+      "workflow": "plan-agent",
+      "planningAgents": ["planner", "sisyphus"]
+    }],
+    "oh-my-opencode-slim",
+    "openviking-opencode"
+  ]
+}
+```
+
+Do not put `{ "workflow": "plan-agent" }` as a separate item in the `plugin` array. OpenCode expects each plugin entry to be either a string or `[pluginName, options]`.
+
 ### I upgraded but OpenCode still looks stale
 
 Restart OpenCode after upgrading. If a cached plugin version is still being used, rerun the install script or clear the OpenCode cache and restart.

@@ -42,6 +42,25 @@ Default config:
 }
 ```
 
+If you use other OpenCode plugins, keep everything in the same `plugin` array and attach Plannotator's options directly to the Plannotator entry:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    ["@plannotator/opencode@latest", {
+      "workflow": "plan-agent",
+      "planningAgents": ["plan", "sisyphus"]
+    }],
+    "@tarquinen/opencode-dcp@latest",
+    "octto",
+    "oh-my-opencode-slim"
+  ]
+}
+```
+
+Do not put `{ "workflow": "plan-agent" }` as its own item in the `plugin` array. OpenCode plugin entries must be either a plugin string or a two-item array like `[pluginName, options]`.
+
 If you want the old broad behavior:
 
 ```json
@@ -64,6 +83,38 @@ If you want commands only:
     ["@plannotator/opencode@latest", {
       "workflow": "manual"
     }]
+  ]
+}
+```
+
+## Custom planning agents
+
+OpenCode's built-in `plan` agent is always included in `plan-agent` mode. If you use another planning agent, add its OpenCode agent name to `planningAgents`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    ["@plannotator/opencode@latest", {
+      "workflow": "plan-agent",
+      "planningAgents": ["planner", "sisyphus"]
+    }]
+  ]
+}
+```
+
+With other plugins, the same rule applies. Only the Plannotator entry becomes a tuple with options:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    ["@plannotator/opencode@latest", {
+      "workflow": "plan-agent",
+      "planningAgents": ["planner", "sisyphus"]
+    }],
+    "oh-my-opencode-slim",
+    "openviking-opencode"
   ]
 }
 ```

@@ -213,7 +213,17 @@ import AnnoReplace from './AnnoReplace.astro';
           '"plugin": ["@plannotator/opencode@latest"]',
           'Restart OpenCode to load the plugin'
         ],
-        detail: 'Then add to opencode.json:'
+        detail: 'Then add to opencode.json:',
+        links: [
+          {
+            text: 'OpenCode setup and custom agents',
+            url: '/docs/guides/opencode/#custom-planning-agents'
+          },
+          {
+            text: '0.19.1 migration guide',
+            url: '/docs/guides/opencode-migration-0-19-1/'
+          }
+        ]
       },
       copilot: {
         steps: [
@@ -283,18 +293,26 @@ import AnnoReplace from './AnnoReplace.astro';
         stepsEl.classList.add('hidden');
       }
 
-      // Handle marketplace link
+      // Handle documentation and marketplace links
       if (linkEl) { linkEl.remove(); linkEl = null; }
-      if (config.link) {
-        var a = document.createElement('a');
-        a.id = 'install-link';
-        a.href = config.link.url;
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
-        a.className = 'mt-3 text-sm hidden sm:inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors';
-        a.innerHTML = config.link.text + ' <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>';
-        installBlock.parentNode.insertBefore(a, installBlock.nextSibling);
-        linkEl = a;
+      var links = config.links || (config.link ? [config.link] : []);
+      if (links.length) {
+        var linkWrap = document.createElement('div');
+        linkWrap.id = 'install-link';
+        linkWrap.className = 'mt-3 hidden sm:flex flex-wrap items-center gap-x-4 gap-y-1';
+
+        links.forEach(function(link) {
+          var a = document.createElement('a');
+          a.href = link.url;
+          a.target = link.url.charAt(0) === '/' ? '_self' : '_blank';
+          if (a.target === '_blank') a.rel = 'noopener noreferrer';
+          a.className = 'text-sm inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors';
+          a.innerHTML = link.text + ' <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>';
+          linkWrap.appendChild(a);
+        });
+
+        installBlock.parentNode.insertBefore(linkWrap, installBlock.nextSibling);
+        linkEl = linkWrap;
       }
     }
 
