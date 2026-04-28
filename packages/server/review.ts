@@ -422,15 +422,26 @@ export async function startReviewServer(
     ? getPRDiffScopeOptions(prMetadata, !!(options.worktreePool || options.agentCwd))
     : [];
 
-  // Fetch full stack tree (best-effort — client falls back to buildMinimalStackTree)
+  // Fetch full stack tree (best-effort — always try in PR mode so root PRs
+  // that target the default branch can still discover descendant PRs)
   let prStackTree: PRStackTree | null = null;
-  if (prStackInfo && prRef && prMetadata) {
+  if (prRef && prMetadata) {
     try {
       prStackTree = await fetchPRStack(prRef, prMetadata);
     } catch {
       // Non-fatal: client falls back to buildMinimalStackTree()
     }
     prStackTreeCache.set(prMetadata.url, prStackTree);
+    if (!prStackInfo && prStackTree && prStackTree.nodes.filter(n => !n.isDefaultBranch).length > 1) {
+      prStackInfo = getPRStackInfo(prMetadata) ?? {
+        isStacked: true,
+        baseBranch: prMetadata.baseBranch,
+        defaultBranch: prMetadata.defaultBranch!,
+        label: `Root of stack — ${prMetadata.headBranch}`,
+        source: "tree-discovered",
+      };
+      prDiffScopeOptions = getPRDiffScopeOptions(prMetadata, !!(options.worktreePool || options.agentCwd));
+    }
   }
 
   // Fetch GitHub viewed file state (non-blocking — errors are silently ignored)

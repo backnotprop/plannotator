@@ -226,15 +226,26 @@ export async function startReviewServer(options: {
 	if (isPRMode && prMeta) prSwitchCache.set(prMeta.url, { metadata: prMeta, rawPatch: options.rawPatch });
 	const prStackTreeCache = new Map<string, import("../generated/pr-provider.js").PRStackTree | null>();
 
-	// Fetch full stack tree (best-effort — client falls back to buildMinimalStackTree)
+	// Fetch full stack tree (best-effort — always try in PR mode so root PRs
+	// that target the default branch can still discover descendant PRs)
 	let prStackTree: import("../generated/pr-provider.js").PRStackTree | null = null;
-	if (prStackInfo && prRef && prMeta) {
+	if (prRef && prMeta) {
 		try {
 			prStackTree = await fetchPRStack(prRef, prMeta);
 		} catch {
 			// Non-fatal: client falls back to buildMinimalStackTree()
 		}
 		prStackTreeCache.set(prMeta.url, prStackTree);
+		if (!prStackInfo && prStackTree && prStackTree.nodes.filter(n => !n.isDefaultBranch).length > 1) {
+			prStackInfo = getPRStackInfo(prMeta) ?? {
+				isStacked: true,
+				baseBranch: prMeta.baseBranch,
+				defaultBranch: prMeta.defaultBranch!,
+				label: `Root of stack — ${prMeta.headBranch}`,
+				source: "tree-discovered",
+			};
+			prDiffScopeOptions = getPRDiffScopeOptions(prMeta, !!(options.worktreePool || options.agentCwd));
+		}
 	}
 
 	// Fetch GitHub viewed file state (non-blocking — errors are silently ignored)
