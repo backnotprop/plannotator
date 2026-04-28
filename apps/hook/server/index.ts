@@ -214,6 +214,7 @@ const pasteApiUrl = process.env.PLANNOTATOR_PASTE_URL || undefined;
 //   > Codex (CODEX_THREAD_ID)
 //   > Copilot CLI (COPILOT_CLI)
 //   > OpenCode (OPENCODE)
+//   > Gemini CLI (GEMINI_CLI)
 //   > Claude Code (default fallback)
 //
 // To add a new agent, also add an entry to AGENT_CONFIG in
@@ -224,6 +225,7 @@ const detectedOrigin: Origin =
   process.env.CODEX_THREAD_ID ? "codex" :
   process.env.COPILOT_CLI ? "copilot-cli" :
   process.env.OPENCODE ? "opencode" :
+  process.env.GEMINI_CLI ? "gemini-cli" :
   "claude-code";
 
 if (args[0] === "sessions") {
