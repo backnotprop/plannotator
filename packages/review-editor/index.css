@@ -478,6 +478,21 @@ diffs-container {
   color: var(--destructive);
 }
 
+/* Generic ON state for cc-toggle (non-destructive) */
+.cc-blocking-toggle.is-on .cc-toggle-track {
+  background: oklch(from var(--accent) l c h / 0.20);
+  border-color: oklch(from var(--accent) l c h / 0.40);
+}
+
+.cc-blocking-toggle.is-on .cc-toggle-thumb {
+  transform: translateX(0.4375rem);
+  background: var(--accent);
+}
+
+.cc-blocking-toggle.is-on {
+  color: var(--accent);
+}
+
 /* --- Inline badge on rendered annotation comments --- */
 
 .cc-inline-badge {

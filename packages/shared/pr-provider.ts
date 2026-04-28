@@ -200,6 +200,7 @@ export interface PRStackNode {
   url?: string;
   isCurrent: boolean;
   isDefaultBranch: boolean;
+  state?: 'open' | 'merged' | 'closed';
 }
 
 export interface PRStackTree {

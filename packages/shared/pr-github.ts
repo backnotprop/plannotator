@@ -505,7 +505,7 @@ export async function submitGhPRReview(
 
 // --- Stack Tree (GraphQL) ---
 
-type StackPRNode = { number: number; title: string; url: string; baseRefName: string; headRefName: string };
+type StackPRNode = { number: number; title: string; url: string; baseRefName: string; headRefName: string; state: string };
 
 function stackPRQuery(kind: "head" | "base"): string {
   const varName = kind === "head" ? "headRefName" : "baseRefName";
@@ -514,7 +514,7 @@ function stackPRQuery(kind: "head" | "base"): string {
 query($owner: String!, $repo: String!, $${varName}: String!) {
   repository(owner: $owner, name: $repo) {
     pullRequests(first: ${first}, ${varName}: $${varName}, states: [OPEN, MERGED]) {
-      nodes { number title url baseRefName headRefName }
+      nodes { number title url baseRefName headRefName state }
     }
   }
 }`;
@@ -587,6 +587,7 @@ export async function fetchGhPRStack(
       url: pr.url,
       isCurrent: false,
       isDefaultBranch: false,
+      state: (pr.state === 'MERGED' ? 'merged' : pr.state === 'CLOSED' ? 'closed' : 'open') as PRStackNode['state'],
     });
     nextHead = pr.baseRefName;
   }
@@ -607,6 +608,7 @@ export async function fetchGhPRStack(
       url: pr.url,
       isCurrent: false,
       isDefaultBranch: false,
+      state: (pr.state === 'MERGED' ? 'merged' : pr.state === 'CLOSED' ? 'closed' : 'open') as PRStackNode['state'],
     });
     nextBase = pr.headRefName;
   }

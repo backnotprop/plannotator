@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import { getPlatformLabel } from '@plannotator/shared/pr-provider';
 import { buildMinimalStackTree } from '@plannotator/shared/pr-stack';
+import { getItem, setItem } from '@plannotator/ui/utils/storage';
 import type { PRMetadata } from '@plannotator/shared/pr-provider';
 import type { PRDiffScope, PRDiffScopeOption, PRStackInfo, PRStackTree, PRStackNode } from '@plannotator/shared/pr-stack';
 
@@ -43,6 +44,8 @@ function classifyNode(
   return { kind: 'navigate', url: node.url ?? '' };
 }
 
+const HIDE_MERGED_KEY = 'plannotator-stack-hide-merged';
+
 export function StackedPRLabel({
   metadata,
   mrNumberLabel,
@@ -56,6 +59,13 @@ export function StackedPRLabel({
 }: StackedPRLabelProps) {
   const [open, setOpen] = useState(false);
 
+  const [hideMerged, setHideMerged] = useState(() => getItem(HIDE_MERGED_KEY) === 'true');
+  function toggleHideMerged() {
+    const next = !hideMerged;
+    setHideMerged(next);
+    setItem(HIDE_MERGED_KEY, String(next));
+  }
+
   const hasStack = !!(stackInfo || (stackTree && stackTree.nodes.filter(n => !n.isDefaultBranch).length > 1));
 
   if (!hasStack) return null;
@@ -65,6 +75,18 @@ export function StackedPRLabel({
   const currentIndex = tree.nodes.findIndex(n => n.isCurrent);
   const parentNode = currentIndex > 0 ? tree.nodes[currentIndex - 1] : null;
   const rootNode = tree.nodes[0];
+
+  const hasStateInfo = tree.nodes.some(n => !n.isDefaultBranch && n.state !== undefined);
+  const mergedCount = tree.nodes.filter(n => !n.isDefaultBranch && !n.isCurrent && n.state === 'merged').length;
+  const showToggle = hasStateInfo && mergedCount > 0;
+
+  const visibleNodes = hideMerged && showToggle
+    ? tree.nodes.filter(n => n.isCurrent || n.isDefaultBranch || n.state !== 'merged')
+    : tree.nodes;
+
+  function isMergedNode(node: PRStackNode): boolean {
+    return !node.isCurrent && !node.isDefaultBranch && node.state === 'merged';
+  }
 
   const layerTarget = parentNode ? shortNodeLabel(parentNode) : (stackInfo?.baseBranch ?? 'base');
   const fullStackTarget = rootNode?.isDefaultBranch ? rootNode.branch : (stackInfo?.defaultBranch ?? 'main');
@@ -84,6 +106,7 @@ export function StackedPRLabel({
   }
 
   function isNodeDisabled(node: PRStackNode): boolean {
+    if (isMergedNode(node)) return true;
     const action = classifyNode(node);
     if (action.kind === 'current') return true;
     if (action.kind === 'full-stack') return !(fullStackOption?.enabled) || isSwitchingScope;
@@ -156,14 +179,34 @@ export function StackedPRLabel({
         >
           {/* Section 1: Stack Tree */}
           <div className="px-3 pt-3 pb-2">
-            <div className="text-[11px] font-medium text-muted-foreground mb-2">
-              Stack ({prNodes.length} {prNodes.length === 1 ? 'PR' : 'PRs'})
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-medium text-muted-foreground">
+                Stack ({prNodes.length} {prNodes.length === 1 ? 'PR' : 'PRs'})
+                {hideMerged && showToggle && (
+                  <span className="ml-1 text-[10px] text-muted-foreground/50">
+                    · {mergedCount} merged hidden
+                  </span>
+                )}
+              </span>
+              {showToggle && (
+                <button
+                  type="button"
+                  onClick={toggleHideMerged}
+                  title={hideMerged ? 'Show merged PRs' : 'Hide merged PRs'}
+                  className={`cc-blocking-toggle ${hideMerged ? 'is-on' : ''}`}
+                  style={{ borderLeft: 'none', marginLeft: 0 }}
+                >
+                  <span className="cc-toggle-track"><span className="cc-toggle-thumb" /></span>
+                  <span>Hide merged</span>
+                </button>
+              )}
             </div>
             <div>
-              {tree.nodes.map((node, i) => {
+              {visibleNodes.map((node, i) => {
                 const depth = node.isDefaultBranch ? 0 : i;
-                const isLast = i === tree.nodes.length - 1;
+                const isLast = i === visibleNodes.length - 1;
                 const disabled = isNodeDisabled(node);
+                const merged = isMergedNode(node);
                 const action = classifyNode(node);
                 const tooltip = nodeTooltip(node);
 
@@ -171,7 +214,7 @@ export function StackedPRLabel({
                   <div
                     key={node.branch}
                     className="flex items-start"
-                    style={{ paddingLeft: `${Math.max(0, depth - 1) * 14}px` }}
+                    style={{ paddingLeft: `${depth * 2}px` }}
                   >
                     <div className="flex items-center flex-shrink-0 mt-[5px]">
                       {depth > 0 && (
@@ -180,7 +223,7 @@ export function StackedPRLabel({
                         </span>
                       )}
                       <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                        node.isCurrent ? 'bg-accent' : node.isDefaultBranch ? 'bg-muted-foreground/30' : 'bg-muted-foreground/40'
+                        node.isCurrent ? 'bg-accent' : node.isDefaultBranch ? 'bg-muted-foreground/30' : merged ? 'bg-muted-foreground/20' : 'bg-muted-foreground/40'
                       }`} />
                     </div>
                     <button
@@ -191,16 +234,21 @@ export function StackedPRLabel({
                       className={`flex items-center gap-1.5 min-w-0 text-xs leading-6 ml-1.5 rounded px-1 -mx-0.5 transition-colors ${
                         node.isCurrent
                           ? 'text-accent font-medium cursor-default'
-                          : disabled
-                            ? 'text-muted-foreground/40 cursor-not-allowed'
-                            : action.kind === 'navigate'
-                              ? 'text-muted-foreground hover:text-foreground hover:bg-muted/30 cursor-pointer'
-                              : 'text-muted-foreground hover:text-accent hover:bg-muted/30 cursor-pointer'
+                          : merged
+                            ? 'text-muted-foreground/40 cursor-default'
+                            : disabled
+                              ? 'text-muted-foreground/40 cursor-not-allowed'
+                              : action.kind === 'navigate'
+                                ? 'text-muted-foreground hover:text-foreground hover:bg-muted/30 cursor-pointer'
+                                : 'text-muted-foreground hover:text-accent hover:bg-muted/30 cursor-pointer'
                       }`}
                     >
-                      <span className="truncate">{nodeLabel(node)}</span>
+                      <span className={`truncate ${merged ? 'line-through' : ''}`}>{nodeLabel(node)}</span>
                       {node.isCurrent && (
                         <span className="text-[9px] text-accent/60 whitespace-nowrap">reviewing</span>
+                      )}
+                      {merged && (
+                        <span className="text-[9px] text-muted-foreground/40 whitespace-nowrap border border-muted-foreground/20 rounded px-0.5 leading-tight">merged</span>
                       )}
                       {action.kind === 'navigate' && node.url && !disabled && (
                         <svg className="w-2.5 h-2.5 flex-shrink-0 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
