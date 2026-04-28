@@ -784,6 +784,16 @@ export async function startReviewServer(options: {
 					hasLocalForNewPR = await checkoutPRHead(reviewRuntime, pr.metadata, options.agentCwd);
 				}
 
+				if (!prStackInfo && prStackTree && prStackTree.nodes.filter(n => !n.isDefaultBranch).length > 1) {
+					prStackInfo = getPRStackInfo(prMeta) ?? {
+						isStacked: true,
+						baseBranch: pr.metadata.baseBranch,
+						defaultBranch: pr.metadata.defaultBranch!,
+						label: `Root of stack — ${pr.metadata.headBranch}`,
+						source: "tree-discovered",
+					};
+				}
+
 				prDiffScopeOptions = prStackInfo
 					? getPRDiffScopeOptions(pr.metadata, hasLocalForNewPR)
 					: [];

@@ -102,7 +102,7 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
         job?.diffContext ?? state.feedbackDiffContext,
       );
     },
-    [activeAnnotations, state.prMetadata, job?.prUrl, job?.diffContext, state.feedbackDiffContext, state.prReviewScope],
+    [activeAnnotations, state.prMetadata, job?.prUrl, job?.diffContext, state.feedbackDiffContext],
   );
 
   const { jobLogs } = useJobLogs();
