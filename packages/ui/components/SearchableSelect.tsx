@@ -8,6 +8,7 @@ interface SearchableSelectProps<T extends { id: string }> {
   filterFn: (item: T, query: string) => boolean;
   renderItem: (item: T, state: { isSelected: boolean; isFocused: boolean }) => ReactNode;
   renderTrigger: (state: { open: boolean }) => ReactNode;
+  headerContent?: ReactNode;
   placeholder?: string;
   emptyMessage?: string;
   align?: 'start' | 'center' | 'end';
@@ -22,6 +23,7 @@ export function SearchableSelect<T extends { id: string }>({
   filterFn,
   renderItem,
   renderTrigger,
+  headerContent,
   placeholder = 'Search...',
   emptyMessage = 'No results',
   align = 'start',
@@ -119,6 +121,8 @@ export function SearchableSelect<T extends { id: string }>({
             className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground/50 outline-none"
           />
         </div>
+
+        {headerContent}
 
         {/* Item list */}
         <div ref={listRef} className="max-h-60 overflow-y-auto py-1">

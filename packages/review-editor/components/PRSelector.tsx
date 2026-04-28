@@ -1,6 +1,7 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { SearchableSelect } from '@plannotator/ui/components/SearchableSelect';
 import { PullRequestIcon } from '@plannotator/ui/components/PullRequestIcon';
+import { getItem, setItem } from '@plannotator/ui/utils/storage';
 import type { PRListItem } from '@plannotator/shared/pr-provider';
 
 type PRItem = PRListItem;
@@ -25,12 +26,28 @@ interface PRSelectorProps {
   disabled?: boolean;
 }
 
+const HIDE_MERGED_PR_KEY = 'plannotator-pr-list-hide-merged';
+
 export function PRSelector({ mrNumberLabel, prTitle, currentNumber, onSelect, disabled }: PRSelectorProps) {
   const [prs, setPrs] = useState<PRItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [fetched, setFetched] = useState(false);
+  const [hideMerged, setHideMerged] = useState(() => getItem(HIDE_MERGED_PR_KEY) === 'true');
 
   const selectedId = String(currentNumber);
+
+  const visiblePrs = useMemo(
+    () => hideMerged ? prs.filter(pr => pr.state !== 'merged') : prs,
+    [prs, hideMerged],
+  );
+
+  const mergedCount = useMemo(() => prs.filter(pr => pr.state === 'merged').length, [prs]);
+
+  function toggleHideMerged() {
+    const next = !hideMerged;
+    setHideMerged(next);
+    setItem(HIDE_MERGED_PR_KEY, String(next));
+  }
 
   useEffect(() => { setPrs([]); setFetched(false); }, [currentNumber]);
 
@@ -53,7 +70,7 @@ export function PRSelector({ mrNumberLabel, prTitle, currentNumber, onSelect, di
 
   return (
     <SearchableSelect
-      items={prs}
+      items={visiblePrs}
       selectedId={selectedId}
       onSelect={(item) => {
         if (item.number !== currentNumber) {
@@ -73,6 +90,23 @@ export function PRSelector({ mrNumberLabel, prTitle, currentNumber, onSelect, di
       align="start"
       width="w-80"
       onOpenChange={handleOpen}
+      headerContent={mergedCount > 0 ? (
+        <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/50">
+          <span className="text-[10px] text-muted-foreground/60">
+            {hideMerged ? `${mergedCount} merged hidden` : `${visiblePrs.length} PRs`}
+          </span>
+          <button
+            type="button"
+            onClick={toggleHideMerged}
+            title={hideMerged ? 'Show merged PRs' : 'Hide merged PRs'}
+            className={`cc-blocking-toggle ${hideMerged ? 'is-on' : ''}`}
+            style={{ borderLeft: 'none', marginLeft: 0 }}
+          >
+            <span className="cc-toggle-track"><span className="cc-toggle-thumb" /></span>
+            <span>Hide merged</span>
+          </button>
+        </div>
+      ) : undefined}
       renderTrigger={({ open }) => (
         <button
           type="button"
