@@ -37,11 +37,12 @@ export function PRSelector({ mrNumberLabel, prTitle, currentNumber, onSelect, di
   const selectedId = String(currentNumber);
 
   const visiblePrs = useMemo(
-    () => hideMerged ? prs.filter(pr => pr.state !== 'merged') : prs,
+    () => hideMerged ? prs.filter(pr => pr.state === 'open') : prs,
     [prs, hideMerged],
   );
 
-  const mergedCount = useMemo(() => prs.filter(pr => pr.state === 'merged').length, [prs]);
+  const openCount = useMemo(() => prs.filter(pr => pr.state === 'open').length, [prs]);
+  const mergedCount = useMemo(() => prs.filter(pr => pr.state !== 'open').length, [prs]);
 
   function toggleHideMerged() {
     const next = !hideMerged;
@@ -93,7 +94,7 @@ export function PRSelector({ mrNumberLabel, prTitle, currentNumber, onSelect, di
       headerContent={mergedCount > 0 ? (
         <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/50">
           <span className="text-[10px] text-muted-foreground/60">
-            {hideMerged ? `${mergedCount} merged hidden` : `${visiblePrs.length} PRs`}
+            {hideMerged ? `${openCount} open · ${mergedCount} hidden` : `${openCount} open, ${prs.length} total`}
           </span>
           <button
             type="button"
