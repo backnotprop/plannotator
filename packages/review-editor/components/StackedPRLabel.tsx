@@ -56,7 +56,7 @@ export function StackedPRLabel({
 }: StackedPRLabelProps) {
   const [open, setOpen] = useState(false);
 
-  const hasStack = !!(stackInfo || (stackTree && stackTree.nodes.length > 1));
+  const hasStack = !!(stackInfo || (stackTree && stackTree.nodes.filter(n => !n.isDefaultBranch).length > 1));
 
   if (!hasStack) return null;
 

@@ -25,6 +25,22 @@ export function getPRStackInfo(metadata: PRMetadata | undefined): PRStackInfo | 
   };
 }
 
+export function resolveStackInfo(
+  metadata: PRMetadata,
+  stackTree: PRStackTree | null,
+  existing?: PRStackInfo | null,
+): PRStackInfo | null {
+  if (existing) return existing;
+  if (!stackTree || stackTree.nodes.filter(n => !n.isDefaultBranch).length <= 1) return null;
+  return getPRStackInfo(metadata) ?? {
+    isStacked: true,
+    baseBranch: metadata.baseBranch,
+    defaultBranch: metadata.defaultBranch!,
+    label: `Root of stack — ${metadata.headBranch}`,
+    source: "tree-discovered",
+  };
+}
+
 export function getPRDiffScopeOptions(
   metadata: PRMetadata | undefined,
   hasLocalCheckout: boolean,

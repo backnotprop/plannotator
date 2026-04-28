@@ -16,6 +16,7 @@ import { parseWorktreeDiffType, detectRemoteDefaultBranch, resolveBaseBranch } f
 import {
   getPRDiffScopeOptions,
   getPRStackInfo,
+  resolveStackInfo,
   resolvePRFullStackBaseRef,
   runPRFullStackDiff,
   checkoutPRHead,
@@ -432,14 +433,9 @@ export async function startReviewServer(
       // Non-fatal: client falls back to buildMinimalStackTree()
     }
     prStackTreeCache.set(prMetadata.url, prStackTree);
-    if (!prStackInfo && prStackTree && prStackTree.nodes.filter(n => !n.isDefaultBranch).length > 1) {
-      prStackInfo = getPRStackInfo(prMetadata) ?? {
-        isStacked: true,
-        baseBranch: prMetadata.baseBranch,
-        defaultBranch: prMetadata.defaultBranch!,
-        label: `Root of stack — ${prMetadata.headBranch}`,
-        source: "tree-discovered",
-      };
+    const resolved = resolveStackInfo(prMetadata, prStackTree, prStackInfo);
+    if (resolved && !prStackInfo) {
+      prStackInfo = resolved;
       prDiffScopeOptions = getPRDiffScopeOptions(prMetadata, !!(options.worktreePool || options.agentCwd));
     }
   }
@@ -752,15 +748,7 @@ export async function startReviewServer(
                 hasLocalForNewPR = await checkoutPRHead(gitRuntime, pr.metadata, options.agentCwd);
               }
 
-              if (!prStackInfo && prStackTree && prStackTree.nodes.filter(n => !n.isDefaultBranch).length > 1) {
-                prStackInfo = getPRStackInfo(pr.metadata) ?? {
-                  isStacked: true,
-                  baseBranch: pr.metadata.baseBranch,
-                  defaultBranch: pr.metadata.defaultBranch!,
-                  label: `Root of stack — ${pr.metadata.headBranch}`,
-                  source: "tree-discovered",
-                };
-              }
+              prStackInfo = resolveStackInfo(pr.metadata, prStackTree, prStackInfo);
 
               prDiffScopeOptions = prStackInfo
                 ? getPRDiffScopeOptions(pr.metadata, hasLocalForNewPR)
