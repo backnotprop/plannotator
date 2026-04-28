@@ -43,6 +43,7 @@ import { StackedPRLabel } from './components/StackedPRLabel';
 import { PRSelector } from './components/PRSelector';
 import { PRSwitchOverlay } from './components/PRSwitchOverlay';
 import { usePRStack } from './hooks/usePRStack';
+import { usePRSession, type PRSessionUpdate } from './hooks/usePRSession';
 import { useAnnotationFactory } from './hooks/useAnnotationFactory';
 import { DEMO_DIFF } from './demoData';
 import { exportReviewFeedback } from './utils/exportFeedback';
@@ -196,11 +197,7 @@ const ReviewApp: React.FC = () => {
     document.title = repoInfo ? `${repoInfo.display} · Code Review` : "Code Review";
   }, [repoInfo]);
 
-  const [prMetadata, setPrMetadata] = useState<PRMetadata | null>(null);
-  const [prStackInfo, setPrStackInfo] = useState<PRStackInfo | null>(null);
-  const [prStackTree, setPrStackTree] = useState<PRStackTree | null>(null);
-  const [prDiffScope, setPrDiffScope] = useState<PRDiffScope>('layer');
-  const [prDiffScopeOptions, setPrDiffScopeOptions] = useState<PRDiffScopeOption[]>([]);
+  const { prMetadata, prStackInfo, prStackTree, prDiffScope, prDiffScopeOptions, updatePRSession } = usePRSession();
   const { withPRContext } = useAnnotationFactory(prMetadata, prStackInfo ? prDiffScope : undefined);
 
   const prStackCallbacksRef = useRef<import('./hooks/usePRStack').PRStackCallbacks | null>(null);
@@ -745,11 +742,13 @@ const ReviewApp: React.FC = () => {
         if (data.agentCwd) setAgentCwd(data.agentCwd);
         if (data.sharingEnabled !== undefined) setSharingEnabled(data.sharingEnabled);
         if (data.repoInfo) setRepoInfo(data.repoInfo);
-        if (data.prMetadata) setPrMetadata(data.prMetadata);
-        if (data.prStackInfo !== undefined) setPrStackInfo(data.prStackInfo);
-        if (data.prStackTree !== undefined) setPrStackTree(data.prStackTree);
-        if (data.prDiffScope) setPrDiffScope(data.prDiffScope);
-        if (data.prDiffScopeOptions) setPrDiffScopeOptions(data.prDiffScopeOptions);
+        updatePRSession({
+          ...(data.prMetadata && { prMetadata: data.prMetadata }),
+          ...(data.prStackInfo !== undefined && { prStackInfo: data.prStackInfo }),
+          ...(data.prStackTree !== undefined && { prStackTree: data.prStackTree }),
+          ...(data.prDiffScope && { prDiffScope: data.prDiffScope }),
+          ...(data.prDiffScopeOptions && { prDiffScopeOptions: data.prDiffScopeOptions }),
+        });
         if (data.platformUser) setPlatformUser(data.platformUser);
         // Initialize viewed files from GitHub's state (set before draft restore so draft takes precedence)
         if (data.viewedFiles && data.viewedFiles.length > 0) {
@@ -977,11 +976,8 @@ const ReviewApp: React.FC = () => {
   const canStageFiles = canStageRaw && !prMetadata;
 
   // Shared function: apply a PR response (used by both initial load and PR switch)
-  function applyPRResponse(data: {
+  function applyPRResponse(data: PRSessionUpdate & {
     rawPatch: string; gitRef: string;
-    prMetadata?: PRMetadata; prStackInfo?: PRStackInfo | null;
-    prStackTree?: PRStackTree | null; prDiffScope?: PRDiffScope;
-    prDiffScopeOptions?: PRDiffScopeOption[];
     repoInfo?: { display: string; branch?: string };
     viewedFiles?: string[]; error?: string;
   }) {
@@ -999,11 +995,13 @@ const ReviewApp: React.FC = () => {
       setActiveFileIndex(preserved >= 0 ? preserved : 0);
     }
     setPendingSelection(null);
-    if (data.prMetadata) setPrMetadata(data.prMetadata);
-    if (data.prStackInfo !== undefined) setPrStackInfo(data.prStackInfo);
-    if (data.prStackTree !== undefined) setPrStackTree(data.prStackTree);
-    if (data.prDiffScope) setPrDiffScope(data.prDiffScope);
-    if (data.prDiffScopeOptions) setPrDiffScopeOptions(data.prDiffScopeOptions);
+    updatePRSession({
+      ...(data.prMetadata && { prMetadata: data.prMetadata }),
+      ...(data.prStackInfo !== undefined && { prStackInfo: data.prStackInfo }),
+      ...(data.prStackTree !== undefined && { prStackTree: data.prStackTree }),
+      ...(data.prDiffScope && { prDiffScope: data.prDiffScope }),
+      ...(data.prDiffScopeOptions && { prDiffScopeOptions: data.prDiffScopeOptions }),
+    });
     if (data.repoInfo) setRepoInfo(data.repoInfo);
     if (data.prMetadata) {
       setViewedFiles(data.viewedFiles ? new Set(data.viewedFiles) : new Set());
