@@ -37,8 +37,7 @@ export const DiffTypePicker: React.FC<DiffTypePickerProps> = ({
   // base-dependent labels — the branch belongs in the picker.
   const displayLabel = (opt: DiffOption) => {
     if (!hasBasePicker) return opt.label;
-    if (opt.id === 'branch') return 'Branch diff';
-    if (opt.id === 'merge-base') return 'PR Diff';
+    if (opt.id === 'merge-base') return 'Committed changes';
     return opt.label;
   };
 

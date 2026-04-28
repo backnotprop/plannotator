@@ -61,12 +61,12 @@ describe("exportReviewFeedback", () => {
     expect(result).toContain("**Diff:** Branch diff vs `develop`");
   });
 
-  it("local mode with merge-base: labels PR Diff with the base", () => {
+  it("local mode with merge-base: labels committed changes with the base", () => {
     const result = exportReviewFeedback([ann()], undefined, {
       mode: "merge-base",
       base: "release/v2",
     });
-    expect(result).toContain("**Diff:** PR Diff vs `release/v2`");
+    expect(result).toContain("**Diff:** Committed changes vs `release/v2`");
   });
 
   it("local mode with worktree path: appends worktree info", () => {
