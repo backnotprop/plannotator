@@ -239,4 +239,53 @@ describe("exportReviewFeedback", () => {
     expect(result).not.toContain("Review scope: layer");
     expect(result).not.toContain("Review scope: full-stack");
   });
+
+  it("single-PR with uniform diffScope: derives scope from annotations, not prReviewScope param", () => {
+    const result = exportReviewFeedback([
+      ann({ diffScope: "layer" }),
+      ann({ filePath: "src/other.ts", diffScope: "layer" }),
+    ], prMeta);
+    expect(result).toContain("Review scope: layer");
+    expect(result).not.toContain("full-stack");
+  });
+
+  it("single-PR with mixed diffScope: groups annotations under scope headings", () => {
+    const result = exportReviewFeedback([
+      ann({ diffScope: "layer", text: "layer finding" }),
+      ann({ filePath: "src/other.ts", diffScope: "full-stack", text: "full-stack finding" }),
+    ], prMeta);
+    // Should have separate scope sections, not comma-joined
+    expect(result).not.toContain("layer, full-stack");
+    // Each scope should be a heading
+    expect(result).toContain("## Layer");
+    expect(result).toContain("## Full-stack");
+    // Annotations should be under their respective scopes
+    const layerIdx = result.indexOf("## Layer");
+    const fullStackIdx = result.indexOf("## Full-stack");
+    const layerFindingIdx = result.indexOf("layer finding");
+    const fullStackFindingIdx = result.indexOf("full-stack finding");
+    expect(layerFindingIdx).toBeGreaterThan(layerIdx);
+    expect(layerFindingIdx).toBeLessThan(fullStackIdx);
+    expect(fullStackFindingIdx).toBeGreaterThan(fullStackIdx);
+  });
+
+  it("single-PR with one scope: no scope heading, just scope label in header", () => {
+    const result = exportReviewFeedback([
+      ann({ diffScope: "full-stack", text: "finding" }),
+    ], prMeta);
+    expect(result).toContain("Review scope: full-stack");
+    // No scope sub-headings when all annotations share the same scope
+    expect(result).not.toContain("## Full-stack");
+    expect(result).not.toContain("## Layer");
+  });
+
+  it("prReviewScope param is ignored when annotations carry diffScope", () => {
+    // Simulates Copy All bug: agent ran in layer, user switched to full-stack
+    const result = exportReviewFeedback([
+      ann({ diffScope: "layer", text: "agent finding" }),
+    ], prMeta, undefined, "full-stack");
+    // Should use annotation's diffScope, not the passed-in prReviewScope
+    expect(result).toContain("Review scope: layer");
+    expect(result).not.toContain("Review scope: full-stack");
+  });
 });

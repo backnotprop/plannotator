@@ -100,7 +100,6 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
         activeAnnotations,
         jobMatchesCurrent ? state.prMetadata : null,
         job?.diffContext ?? state.feedbackDiffContext,
-        jobMatchesCurrent ? state.prReviewScope : undefined,
       );
     },
     [activeAnnotations, state.prMetadata, job?.prUrl, job?.diffContext, state.feedbackDiffContext, state.prReviewScope],

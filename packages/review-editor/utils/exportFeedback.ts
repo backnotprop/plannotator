@@ -128,6 +128,29 @@ function renderFileGroups(grouped: Map<string, CodeAnnotation[]>, headingLevel: 
   return output;
 }
 
+function scopeDisplayLabel(scope: string): string {
+  if (scope === 'layer') return 'Layer';
+  if (scope === 'full-stack') return 'Full-stack';
+  return scope;
+}
+
+function renderScopedGroups(annotations: CodeAnnotation[], headingLevel: string): string {
+  const scopes = new Set(annotations.map(a => a.diffScope).filter(Boolean));
+  if (scopes.size <= 1) return renderFileGroups(groupByFile(annotations), headingLevel);
+
+  let output = '';
+  for (const scope of scopes) {
+    const scopeAnns = annotations.filter(a => a.diffScope === scope);
+    output += `${headingLevel} ${scopeDisplayLabel(scope)}\n\n`;
+    output += renderFileGroups(groupByFile(scopeAnns), headingLevel + '#');
+  }
+  const unscopedAnns = annotations.filter(a => !a.diffScope);
+  if (unscopedAnns.length > 0) {
+    output += renderFileGroups(groupByFile(unscopedAnns), headingLevel);
+  }
+  return output;
+}
+
 export function exportReviewFeedback(
   annotations: CodeAnnotation[],
   prMeta?: PRMetadata | null,
@@ -144,15 +167,19 @@ export function exportReviewFeedback(
   const prMismatch = singlePrUrl && prMeta && singlePrUrl !== prMeta.url;
 
   if (!isMultiPR && !prMismatch) {
+    const scopes = new Set(annotations.map(a => a.diffScope).filter(Boolean));
+    const derivedScope = scopes.size === 1 ? [...scopes][0] : undefined;
+    const scopeLabel = derivedScope ?? (scopes.size === 0 ? prReviewScope : undefined);
+
     let output = prMeta
       ? `# ${getMRLabel(prMeta)} Review: ${getDisplayRepo(prMeta)}${getMRNumberLabel(prMeta)}\n\n` +
         `**${prMeta.title}**\n` +
         `Branch: \`${prMeta.headBranch}\` → \`${prMeta.baseBranch}\`\n` +
-        `${prReviewScope ? `Review scope: ${prReviewScope}\n` : ''}` +
+        `${scopeLabel ? `Review scope: ${scopeLabel}\n` : ''}` +
         `${prMeta.url}\n\n`
       : `# Code Review Feedback\n\n${diffContext ? `**Diff:** ${describeDiff(diffContext)}\n\n` : ''}`;
 
-    output += renderFileGroups(groupByFile(annotations), '##');
+    output += renderScopedGroups(annotations, '##');
     return output;
   }
 
@@ -179,11 +206,11 @@ export function exportReviewFeedback(
     }
 
     const scopes = new Set(prAnnotations.map(a => a.diffScope).filter(Boolean));
-    if (scopes.size > 0) {
-      output += `Review scope: ${[...scopes].join(', ')}\n\n`;
+    if (scopes.size === 1) {
+      output += `Review scope: ${[...scopes][0]}\n\n`;
     }
 
-    output += renderFileGroups(groupByFile(prAnnotations), '###');
+    output += renderScopedGroups(prAnnotations, '###');
   }
 
   return output;
