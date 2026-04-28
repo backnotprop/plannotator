@@ -1,11 +1,13 @@
 /**
  * OpenCode provider — bridges Plannotator's AI layer with OpenCode's agent server.
  *
- * Uses @opencode-ai/sdk to spawn `opencode serve` and communicate via HTTP + SSE.
- * One server per provider, shared across all sessions. The user must have the
- * `opencode` CLI installed and authenticated.
+ * Uses @opencode-ai/sdk to connect to an existing `opencode serve` first and
+ * only spawns a new server when nothing is reachable. One server is shared
+ * across all sessions. The user must have the `opencode` CLI installed and
+ * authenticated.
  */
 
+import type { OpencodeClient } from "@opencode-ai/sdk";
 import { BaseSession } from "../base-session.ts";
 import { buildSystemPrompt } from "../context.ts";
 import type {
@@ -54,17 +56,17 @@ export class OpenCodeProvider implements AIProvider {
 	private config: OpenCodeConfig;
 	// biome-ignore lint/suspicious/noExplicitAny: SDK types not available at compile time
 	private server: { url: string; close: () => void } | null = null;
-	// biome-ignore lint/suspicious/noExplicitAny: SDK types not available at compile time
-	private client: any = null;
+	private client: OpencodeClient | null = null;
 	private startPromise: Promise<void> | null = null;
+	private lastAttachError: string | null = null;
 
 	constructor(config: OpenCodeConfig) {
 		this.config = config;
 	}
 
-	/** Lazy-spawn the OpenCode server and create the HTTP client. */
+	/** Attach to an existing OpenCode server or spawn one if needed. */
 	async ensureServer(): Promise<void> {
-		if (this.server && this.client) return;
+		if (this.client) return;
 		this.startPromise ??= this.doStart().catch((err) => {
 			this.startPromise = null;
 			throw err;
@@ -73,13 +75,27 @@ export class OpenCodeProvider implements AIProvider {
 	}
 
 	private async doStart(): Promise<void> {
+		this.lastAttachError = null;
 		const { createOpencodeServer, createOpencodeClient } = await getSDK();
+		const attachedClient = await this.tryAttachExistingServer(createOpencodeClient);
+		if (attachedClient) {
+			this.client = attachedClient;
+			return;
+		}
 
-		this.server = await createOpencodeServer({
-			hostname: this.config.hostname ?? "127.0.0.1",
-			...(this.config.port != null && { port: this.config.port }),
-			timeout: 15_000,
-		});
+		try {
+			this.server = await createOpencodeServer({
+				hostname: this.config.hostname ?? "127.0.0.1",
+				...(this.config.port != null && { port: this.config.port }),
+				timeout: 15_000,
+			});
+		} catch (err) {
+			const spawnMessage = err instanceof Error ? err.message : String(err);
+			if (this.lastAttachError) {
+				throw new Error(`${this.lastAttachError}\nFallback startup also failed: ${spawnMessage}`);
+			}
+			throw err;
+		}
 
 		this.client = createOpencodeClient({
 			baseUrl: this.server!.url,
@@ -87,18 +103,52 @@ export class OpenCodeProvider implements AIProvider {
 		});
 	}
 
+	private async tryAttachExistingServer(
+		createOpencodeClient: (config?: { baseUrl?: string; directory?: string }) => OpencodeClient,
+	): Promise<OpencodeClient | null> {
+		const cwd = this.config.cwd ?? process.cwd();
+		const baseUrl = `http://${this.config.hostname ?? "127.0.0.1"}:${this.config.port ?? 4096}`;
+		const client = createOpencodeClient({
+			baseUrl,
+			directory: cwd,
+		});
+
+		try {
+			await client.config.get({
+				throwOnError: true,
+				signal: AbortSignal.timeout(1_000),
+			});
+			return client;
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			this.lastAttachError = `Failed to attach to existing OpenCode server at ${baseUrl}: ${message}`;
+			return null;
+		}
+	}
+
+	private getClient(): OpencodeClient {
+		if (!this.client) {
+			throw new Error("OpenCode client is not initialized.");
+		}
+		return this.client;
+	}
+
 	async createSession(options: CreateSessionOptions): Promise<AISession> {
 		await this.ensureServer();
+		const client = this.getClient();
 
-		const result = await this.client.session.create({
+		const result = await client.session.create({
 			query: { directory: options.cwd ?? this.config.cwd ?? process.cwd() },
 		});
 		const sessionData = result.data;
+		if (!sessionData) {
+			throw new Error("OpenCode did not return session data.");
+		}
 
 		const session = new OpenCodeSession({
 			sessionId: sessionData.id,
 			systemPrompt: buildSystemPrompt(options.context),
-			client: this.client,
+			client,
 			model: options.model,
 			parentSessionId: null,
 		});
@@ -107,21 +157,25 @@ export class OpenCodeProvider implements AIProvider {
 
 	async forkSession(options: CreateSessionOptions): Promise<AISession> {
 		await this.ensureServer();
+		const client = this.getClient();
 
 		const parentId = options.context.parent?.sessionId;
 		if (!parentId) {
 			throw new Error("Fork requires a parent session ID.");
 		}
 
-		const result = await this.client.session.fork({
+		const result = await client.session.fork({
 			path: { id: parentId },
 		});
 		const sessionData = result.data;
+		if (!sessionData) {
+			throw new Error("OpenCode did not return forked session data.");
+		}
 
 		return new OpenCodeSession({
 			sessionId: sessionData.id,
 			systemPrompt: buildSystemPrompt(options.context),
-			client: this.client,
+			client,
 			model: options.model,
 			parentSessionId: parentId,
 		});
@@ -129,14 +183,15 @@ export class OpenCodeProvider implements AIProvider {
 
 	async resumeSession(sessionId: string): Promise<AISession> {
 		await this.ensureServer();
+		const client = this.getClient();
 
 		// Verify session exists
-		await this.client.session.get({ path: { id: sessionId } });
+		await client.session.get({ path: { id: sessionId } });
 
 		return new OpenCodeSession({
 			sessionId,
 			systemPrompt: null,
-			client: this.client,
+			client,
 			model: undefined,
 			parentSessionId: null,
 		});
@@ -146,32 +201,33 @@ export class OpenCodeProvider implements AIProvider {
 		if (this.server) {
 			this.server.close();
 			this.server = null;
-			this.client = null;
-			this.startPromise = null;
 		}
+		this.client = null;
+		this.startPromise = null;
 	}
 
 	/** Fetch available models from OpenCode. Call before registering the provider. */
 	async fetchModels(): Promise<void> {
 		try {
 			await this.ensureServer();
+			const client = this.getClient();
 
-			const result = await this.client.provider.list({
+			const result = await client.provider.list({
 				query: { directory: this.config.cwd ?? process.cwd() },
 			});
 			const data = result.data;
-			const connected = new Set(data.connected as string[]);
-			const allProviders = data.all as Array<{
-				id: string;
-				models: Record<string, { id: string; providerID: string; name: string }>;
-			}>;
+			if (!data) {
+				return;
+			}
+			const connected = new Set(data.connected ?? []);
+			const allProviders = data.all ?? [];
 
 			const models: Array<{ id: string; label: string; default?: boolean }> = [];
 			for (const provider of allProviders) {
 				if (!connected.has(provider.id)) continue;
 				for (const model of Object.values(provider.models)) {
 					models.push({
-						id: `${model.providerID}/${model.id}`,
+						id: `${provider.id}/${model.id}`,
 						label: model.name ?? model.id,
 					});
 				}

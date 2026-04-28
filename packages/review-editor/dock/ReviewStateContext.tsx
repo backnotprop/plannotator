@@ -5,6 +5,8 @@ import type { DiffFile } from '../types';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import type { ReviewSearchMatch } from '../utils/reviewSearch';
 import type { PRMetadata, PRContext } from '@plannotator/shared/pr-provider';
+import type { PRDiffScope } from '@plannotator/shared/pr-stack';
+import type { FeedbackDiffContext } from '../utils/exportFeedback';
 
 /**
  * Shared review state consumed by dockview panel wrappers.
@@ -26,6 +28,18 @@ export interface ReviewState {
   disableBackground?: boolean;
   fontFamily?: string;
   fontSize?: string;
+  /** User-selected base branch; feeds the `base` query param on file-content fetches. */
+  reviewBase?: string;
+  /** Active diff mode (e.g. "branch", "merge-base", "uncommitted"). Used as
+   *  part of the DiffViewer remount key so mode switches invalidate cached
+   *  file content — branch and merge-base compute different "old" sides. */
+  activeDiffBase?: string;
+  /** Diff context baked into exported feedback so downstream panels (agent job
+   * detail, etc.) produce the same markdown the main feedback path sends. */
+  feedbackDiffContext?: FeedbackDiffContext;
+  /** PR/MR review scope label, e.g. "Layer diff" or "Full stack diff". */
+  prReviewScope?: string;
+  prDiffScope?: PRDiffScope;
 
   // Annotations
   allAnnotations: CodeAnnotation[];
@@ -78,6 +92,9 @@ export interface ReviewState {
 
   // Diff navigation
   openDiffFile: (filePath: string) => void;
+
+  // Tour
+  openTourPanel: (jobId: string) => void;
 }
 
 const ReviewStateContext = createContext<ReviewState | null>(null);

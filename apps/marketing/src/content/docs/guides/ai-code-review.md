@@ -24,6 +24,13 @@ Both integrations are derived from official tooling. Claude's review model is ba
 
 For PR reviews, a temporary local checkout is created by default so the agent has file access beyond the diff. Pass `--no-local` to skip this.
 
+For stacked PRs and MRs, the review header lets you choose what the agent sees:
+
+- **Layer** reviews only the current PR or MR relative to its parent branch.
+- **Full stack** reviews the cumulative diff from the repository default branch through the current head.
+
+Layer review is best for avoiding duplicate feedback on parent PRs. Full stack review is useful for integration issues that only appear when the whole chain is considered together. Posting inline comments back to GitHub or GitLab stays limited to Layer because platform comments must anchor to the platform diff.
+
 ## Findings
 
 Each finding includes a file path, line range, description, and severity or priority. Claude findings also include a reasoning trace that explains how the issue was verified.

@@ -3,6 +3,9 @@ export interface RepoInfo {
 	display: string;
 	/** Current git branch (if in a git repo) */
 	branch?: string;
+	/** Host of the git remote (e.g., "github.com", "gitlab.com"). Populated */
+	/** only when the remote URL is parseable; absent for directory-only fallbacks. */
+	host?: string;
 }
 
 /**
@@ -32,6 +35,28 @@ export function parseRemoteUrl(url: string): string | null {
 	const httpsMatch = url.match(/^https?:\/\/[^/]+\/(.+?)(?:\.git)?$/);
 	if (httpsMatch) return httpsMatch[1];
 
+	return null;
+}
+
+/**
+ * Parse the host from a git remote URL. Returns null when the shape
+ * doesn't match a known remote form. Used to identify the forge
+ * (github.com, gitlab.com, self-hosted) so inline mention / issue
+ * refs can link to the correct destination instead of assuming GitHub.
+ */
+export function parseRemoteHost(url: string): string | null {
+	if (!url) return null;
+	// ssh://git@host:port/path
+	const sshPort = url.match(/^ssh:\/\/(?:[^@]+@)?([^:/]+)/i);
+	if (sshPort) return sshPort[1];
+	// git@host:path
+	if (!url.includes('://')) {
+		const ssh = url.match(/^[^@\s]+@([^:\s]+):/);
+		if (ssh) return ssh[1];
+	}
+	// https://host/path or http://host/path
+	const https = url.match(/^https?:\/\/([^/:]+)/i);
+	if (https) return https[1];
 	return null;
 }
 

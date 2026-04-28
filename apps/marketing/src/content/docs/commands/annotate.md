@@ -94,12 +94,56 @@ When annotating an HTML file or URL (not plain markdown), a small badge appears 
 
 The annotation UI in annotate mode works the same as plan review, with a few changes:
 
-- The "Approve" button is hidden (there's nothing to approve)
+- The "Approve" button is hidden by default (there's nothing to approve for most use cases). Pass `--gate` to enable it as a review decision.
 - "Send Feedback" becomes **"Send Annotations"**
 - `Cmd/Ctrl+Enter` sends annotations instead of approving
 - The completion screen says "Annotations Sent" instead of "Plan Approved"
 
-All annotation types work identically: deletions, replacements, comments, insertions, global comments, and image attachments.
+All annotation types work identically: deletions, comments, global comments, quick labels, "looks good" approvals, and image attachments.
+
+## Flags
+
+Three opt-in flags turn annotate into a review gate for hook integrations (spec-driven frameworks, turn-by-turn review, and so on). They compose: use any alone or combine them.
+
+### `--gate`
+
+Adds a third **Approve** button to the UI. The reviewer now has three exits:
+
+- **Approve** — the artifact looks good; the agent should proceed.
+- **Send Annotations** — changes requested; feedback goes back to the agent.
+- **Close** — dismissed without deciding.
+
+### `--json`
+
+Switches stdout to a structured decision object so hooks can route programmatically:
+
+```json
+{ "decision": "approved" | "annotated" | "dismissed", "feedback": "..." }
+```
+
+`feedback` is only present when `decision === "annotated"`.
+
+### `--hook`
+
+Emits hook-native JSON that works directly with Claude Code and Codex PostToolUse/Stop hook protocols. Implies `--gate` (always three-button UX). Approve and Close emit empty stdout (hook passes), Send Annotations emits `{"decision":"block","reason":"<feedback>"}` (hook blocks with feedback).
+
+This is the recommended flag for hook integrations. If both `--hook` and `--json` are passed, `--hook` wins.
+
+### Stdout matrix
+
+| Flags | UX | Approve | Close | Send Annotations |
+|---|---|---|---|---|
+| *(none)* | 2-button | n/a | empty | feedback (plaintext) |
+| `--gate` | 3-button | `The user approved.` | empty | feedback (plaintext) |
+| `--json` | 2-button | n/a | `{"decision":"dismissed"}` | `{"decision":"annotated","feedback":"..."}` |
+| `--gate --json` | 3-button | `{"decision":"approved"}` | `{"decision":"dismissed"}` | `{"decision":"annotated","feedback":"..."}` |
+| `--hook` | 3-button | empty | empty | `{"decision":"block","reason":"..."}` |
+
+**Key property:** `--gate` plaintext output is unambiguous across three decisions. Use `--json` when you want machine-readable decision objects. Use `--hook` when wiring into Claude Code or Codex hooks directly.
+
+On OpenCode and Pi, `--json` and `--hook` are silently accepted because those harnesses write back into the session directly rather than via stdout. The `--gate` flag behaves identically across all three harnesses.
+
+See [Hook integration recipes](/docs/guides/hook-integration/) for ready-to-use PostToolUse and Stop hook examples.
 
 ## Feedback format
 
@@ -128,8 +172,9 @@ The agent receives this and can act on each annotation.
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/api/plan` | GET | Returns `{ plan, mode: "annotate", filePath, sourceInfo }` |
+| `/api/plan` | GET | Returns `{ plan, mode: "annotate", filePath, sourceInfo, gate }` |
 | `/api/feedback` | POST | Submit annotations |
+| `/api/approve` | POST | Approve without feedback (`--gate` UX) |
 | `/api/exit` | POST | Close session without feedback |
 | `/api/image` | GET | Serve image by path |
 | `/api/upload` | POST | Upload image attachment |

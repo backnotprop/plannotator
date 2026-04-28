@@ -8,7 +8,7 @@
  * execution so the logic is reusable across Bun and Node/jiti.
  */
 
-import { checkGhAuth, getGhUser, fetchGhPR, fetchGhPRContext, fetchGhPRFileContent, submitGhPRReview, fetchGhPRViewedFiles, markGhFilesViewed } from "./pr-github";
+import { checkGhAuth, getGhUser, fetchGhPR, fetchGhPRContext, fetchGhPRFileContent, submitGhPRReview, fetchGhPRViewedFiles, markGhFilesViewed, fetchGhPRStack, fetchGhPRList } from "./pr-github";
 import { checkGlAuth, getGlUser, fetchGlMR, fetchGlMRContext, fetchGlFileContent, submitGlMRReview } from "./pr-gitlab";
 
 // --- Runtime Types ---
@@ -68,6 +68,8 @@ export interface GithubPRMetadata {
   author: string;
   baseBranch: string;
   headBranch: string;
+  /** Repository default branch, used to infer whether this PR targets another PR branch. */
+  defaultBranch?: string;
   baseSha: string;
   headSha: string;
   /** Merge-base SHA — the common ancestor commit used to compute the PR diff. Differs from baseSha when the base branch has moved. */
@@ -85,6 +87,8 @@ export interface GitlabMRMetadata {
   author: string;
   baseBranch: string;
   headBranch: string;
+  /** Project default branch, used to infer whether this MR targets another MR branch. */
+  defaultBranch?: string;
   baseSha: string;
   headSha: string;
   /** Merge-base SHA — the common ancestor commit used to compute the MR diff. */
@@ -172,6 +176,46 @@ export interface PRReviewFileComment {
   start_side?: "LEFT" | "RIGHT";
 }
 
+export type PRDiffScope = "layer" | "full-stack";
+
+export interface PRDiffScopeOption {
+  id: PRDiffScope;
+  label: string;
+  description: string;
+  enabled: boolean;
+}
+
+export interface PRStackInfo {
+  isStacked: boolean;
+  baseBranch: string;
+  defaultBranch?: string;
+  label: string;
+  source: "branch-inferred" | "tree-discovered" | "github-native" | "gitlab-native" | "graphite" | "ghstack";
+}
+
+export interface PRStackNode {
+  branch: string;
+  number?: number;
+  title?: string;
+  url?: string;
+  isCurrent: boolean;
+  isDefaultBranch: boolean;
+}
+
+export interface PRStackTree {
+  nodes: PRStackNode[];
+}
+
+export interface PRListItem {
+  id: string;
+  number: number;
+  title: string;
+  author: string;
+  url: string;
+  baseBranch: string;
+  state: 'open' | 'closed' | 'merged';
+}
+
 // --- Label Helpers ---
 // Accept either PRRef or PRMetadata (both have `platform` discriminant)
 
@@ -205,6 +249,17 @@ export function prRefFromMetadata(m: PRMetadata): PRRef {
     return { platform: "github", host: m.host, owner: m.owner, repo: m.repo, number: m.number };
   }
   return { platform: "gitlab", host: m.host, projectPath: m.projectPath, iid: m.iid };
+}
+
+export function isSameProject(a: PRRef, b: PRRef): boolean {
+  if (a.platform !== b.platform) return false;
+  if (a.platform === "github" && b.platform === "github") {
+    return a.host === b.host && a.owner === b.owner && a.repo === b.repo;
+  }
+  if (a.platform === "gitlab" && b.platform === "gitlab") {
+    return a.host === b.host && a.projectPath === b.projectPath;
+  }
+  return false;
 }
 
 /** CLI tool name for the platform */
@@ -349,4 +404,27 @@ export async function markPRFilesViewed(
 ): Promise<void> {
   if (ref.platform === "github") return markGhFilesViewed(runtime, ref, prNodeId, filePaths, viewed);
   // GitLab: no-op
+}
+
+/**
+ * Fetch the full stack tree for a stacked PR.
+ * Walks up from the current PR to the default branch, resolving
+ * PR numbers and titles for each intermediate branch.
+ * Returns null if the PR is not stacked or the API call fails.
+ */
+export async function fetchPRStack(
+  runtime: PRRuntime,
+  ref: PRRef,
+  metadata: PRMetadata,
+): Promise<PRStackTree | null> {
+  if (ref.platform === "github") return fetchGhPRStack(runtime, ref, metadata);
+  return null; // GitLab: not yet implemented
+}
+
+export async function fetchPRList(
+  runtime: PRRuntime,
+  ref: PRRef,
+): Promise<PRListItem[]> {
+  if (ref.platform === "github") return fetchGhPRList(runtime, ref);
+  return []; // GitLab: not yet implemented
 }

@@ -4,7 +4,7 @@
  * All functions use the `gh` CLI via the PRRuntime abstraction.
  */
 
-import type { PRRuntime, PRMetadata, PRContext, PRReviewThread, PRThreadComment, PRReviewFileComment, CommandResult } from "./pr-provider";
+import type { PRRuntime, PRMetadata, PRContext, PRReviewThread, PRThreadComment, PRReviewFileComment, CommandResult, PRStackTree, PRStackNode, PRListItem } from "./pr-provider";
 import { encodeApiFilePath } from "./pr-provider";
 
 // GitHub-specific PRRef shape (used internally)
@@ -65,8 +65,8 @@ export async function fetchGhPR(
 ): Promise<{ metadata: PRMetadata; rawPatch: string }> {
   const repo = repoFlag(ref);
 
-  // Fetch diff and metadata in parallel
-  const [diffResult, viewResult] = await Promise.all([
+  // Fetch diff, metadata, and repository defaults in parallel.
+  const [diffResult, viewResult, repoResult] = await Promise.all([
     runtime.runCommand("gh", [
       "pr", "diff", String(ref.number),
       "--repo", repo,
@@ -75,6 +75,11 @@ export async function fetchGhPR(
       "pr", "view", String(ref.number),
       "--repo", repo,
       "--json", "id,title,author,baseRefName,headRefName,baseRefOid,headRefOid,url",
+    ]),
+    runtime.runCommand("gh", [
+      "repo", "view", repo,
+      "--json", "defaultBranchRef",
+      "--jq", ".defaultBranchRef.name",
     ]),
   ]);
 
@@ -127,6 +132,9 @@ export async function fetchGhPR(
     author: raw.author.login,
     baseBranch: raw.baseRefName,
     headBranch: raw.headRefName,
+    defaultBranch: repoResult.exitCode === 0 && repoResult.stdout.trim() && repoResult.stdout.trim() !== "null"
+      ? repoResult.stdout.trim()
+      : undefined,
     baseSha: raw.baseRefOid,
     headSha: raw.headRefOid,
     mergeBaseSha,
@@ -493,4 +501,159 @@ export async function submitGhPRReview(
     const message = result.stderr.trim() || result.stdout.trim() || `exit code ${result.exitCode}`;
     throw new Error(`Failed to submit PR review: ${message}`);
   }
+}
+
+// --- Stack Tree (GraphQL) ---
+
+type StackPRNode = { number: number; title: string; url: string; baseRefName: string; headRefName: string };
+
+function stackPRQuery(kind: "head" | "base"): string {
+  const varName = kind === "head" ? "headRefName" : "baseRefName";
+  const first = kind === "head" ? 5 : 10;
+  return `
+query($owner: String!, $repo: String!, $${varName}: String!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequests(first: ${first}, ${varName}: $${varName}, states: [OPEN, MERGED]) {
+      nodes { number title url baseRefName headRefName }
+    }
+  }
+}`;
+}
+
+async function queryPRsByRef(
+  runtime: PRRuntime,
+  ref: GhPRRef,
+  kind: "head" | "base",
+  refName: string,
+): Promise<StackPRNode[]> {
+  const varName = kind === "head" ? "headRefName" : "baseRefName";
+  const result = await runtime.runCommand("gh", hostnameArgs(ref.host, [
+    "api", "graphql",
+    "-f", `query=${stackPRQuery(kind)}`,
+    "-f", `owner=${ref.owner}`,
+    "-f", `repo=${ref.repo}`,
+    "-f", `${varName}=${refName}`,
+  ]));
+  if (result.exitCode !== 0) return [];
+  const data = JSON.parse(result.stdout);
+  const prs = data?.data?.repository?.pullRequests?.nodes;
+  return Array.isArray(prs) ? prs : [];
+}
+
+/**
+ * Walk up and down the PR stack from the current PR, resolving
+ * PR numbers/titles for every node in the chain.
+ *
+ * Up: walk from currentPR.baseBranch → defaultBranch (ancestors)
+ * Down: walk from currentPR.headBranch → leaf PRs (descendants)
+ */
+export async function fetchGhPRStack(
+  runtime: PRRuntime,
+  ref: GhPRRef,
+  metadata: PRMetadata,
+): Promise<PRStackTree | null> {
+  if (metadata.platform !== "github") return null;
+  const defaultBranch = metadata.defaultBranch;
+  if (!defaultBranch) return null;
+
+  const currentNode: PRStackNode = {
+    branch: metadata.headBranch,
+    number: metadata.number,
+    title: metadata.title,
+    url: metadata.url,
+    isCurrent: true,
+    isDefaultBranch: false,
+  };
+
+  // Walk up: find the PR whose headRefName === baseBranch, repeat
+  const ancestors: PRStackNode[] = [];
+  let nextHead = metadata.baseBranch;
+  const maxDepth = 10;
+
+  for (let i = 0; i < maxDepth; i++) {
+    if (nextHead === defaultBranch) break;
+
+    const prs = await queryPRsByRef(runtime, ref, "head", nextHead);
+    if (prs.length === 0) {
+      ancestors.push({ branch: nextHead, isCurrent: false, isDefaultBranch: false });
+      break;
+    }
+
+    const pr = prs[0];
+    ancestors.push({
+      branch: pr.headRefName,
+      number: pr.number,
+      title: pr.title,
+      url: pr.url,
+      isCurrent: false,
+      isDefaultBranch: false,
+    });
+    nextHead = pr.baseRefName;
+  }
+
+  // Walk down: find PRs whose baseRefName === current headBranch, repeat
+  const descendants: PRStackNode[] = [];
+  let nextBase = metadata.headBranch;
+
+  for (let i = 0; i < maxDepth; i++) {
+    const prs = await queryPRsByRef(runtime, ref, "base", nextBase);
+    if (prs.length === 0) break;
+
+    const pr = prs[0];
+    descendants.push({
+      branch: pr.headRefName,
+      number: pr.number,
+      title: pr.title,
+      url: pr.url,
+      isCurrent: false,
+      isDefaultBranch: false,
+    });
+    nextBase = pr.headRefName;
+  }
+
+  // Build tree: defaultBranch → ancestors (reversed) → current → descendants
+  const nodes: PRStackNode[] = [
+    { branch: defaultBranch, isCurrent: false, isDefaultBranch: true },
+    ...ancestors.reverse(),
+    currentNode,
+    ...descendants,
+  ];
+
+  return { nodes };
+}
+
+// --- PR List ---
+
+export async function fetchGhPRList(
+  runtime: PRRuntime,
+  ref: GhPRRef,
+): Promise<PRListItem[]> {
+  const result = await runtime.runCommand("gh", [
+    "pr", "list",
+    "--repo", repoFlag(ref),
+    "--json", "number,title,author,url,baseRefName,state",
+    "--limit", "30",
+    "--state", "all",
+  ]);
+
+  if (result.exitCode !== 0) return [];
+
+  const raw = JSON.parse(result.stdout) as Array<{
+    number: number;
+    title: string;
+    author: { login: string };
+    url: string;
+    baseRefName: string;
+    state: string;
+  }>;
+
+  return raw.map((pr) => ({
+    id: String(pr.number),
+    number: pr.number,
+    title: pr.title,
+    author: pr.author.login,
+    url: pr.url,
+    baseBranch: pr.baseRefName,
+    state: (pr.state === "OPEN" ? "open" : pr.state === "MERGED" ? "merged" : "closed") as PRListItem["state"],
+  }));
 }

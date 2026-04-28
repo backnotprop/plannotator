@@ -41,6 +41,7 @@ export class CodexSDKProvider implements AIProvider {
     tools: true,
   };
   readonly models = [
+    { id: 'gpt-5.5', label: 'GPT-5.5' },
     { id: 'gpt-5.4', label: 'GPT-5.4', default: true },
     { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
     { id: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },

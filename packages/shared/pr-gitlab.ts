@@ -142,6 +142,7 @@ export async function fetchGlMR(
     author: { username: string };
     source_branch: string;
     target_branch: string;
+    target_project_id?: number;
     diff_refs: { base_sha: string; head_sha: string; start_sha: string } | null;
     web_url: string;
   };
@@ -149,6 +150,18 @@ export async function fetchGlMR(
   if (!raw.diff_refs) {
     throw new Error("MR has no diff refs — it may have been merged or the source branch deleted.");
   }
+
+  let defaultBranch: string | undefined;
+  const projectEndpoint = typeof raw.target_project_id === "number"
+    ? `projects/${raw.target_project_id}`
+    : `projects/${encoded}`;
+  try {
+    const projectResult = await runtime.runCommand("glab", apiArgs(ref.host, projectEndpoint));
+    if (projectResult.exitCode === 0 && projectResult.stdout.trim()) {
+      const project = JSON.parse(projectResult.stdout) as { default_branch?: string };
+      defaultBranch = project.default_branch;
+    }
+  } catch { /* default branch is best-effort metadata */ }
 
   const metadata: PRMetadata = {
     platform: "gitlab",
@@ -159,6 +172,7 @@ export async function fetchGlMR(
     author: raw.author.username,
     baseBranch: raw.target_branch,
     headBranch: raw.source_branch,
+    defaultBranch,
     baseSha: raw.diff_refs.base_sha,
     headSha: raw.diff_refs.head_sha,
     url: raw.web_url,

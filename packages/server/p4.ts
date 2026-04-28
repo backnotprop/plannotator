@@ -125,6 +125,7 @@ export async function getP4Context(cwd?: string): Promise<GitContext> {
       defaultBranch: "",
       diffOptions: [],
       worktrees: [],
+      availableBranches: { local: [], remote: [] },
       cwd,
       vcsType: "p4",
     };
@@ -174,6 +175,7 @@ export async function getP4Context(cwd?: string): Promise<GitContext> {
     defaultBranch: "",
     diffOptions,
     worktrees: [],
+    availableBranches: { local: [], remote: [] },
     cwd: cwd ?? workspace.clientRoot,
     vcsType: "p4",
   };

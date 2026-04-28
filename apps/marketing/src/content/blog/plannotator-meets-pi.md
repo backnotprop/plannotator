@@ -49,7 +49,7 @@ Because the plan lives on disk as a regular file, you can open it in your editor
 
 ### Review phase
 
-When the agent calls `plannotator_submit_plan`, the extension reads `PLAN.md` from disk, starts a local HTTP server, and opens the Plannotator browser UI. You see the rendered plan with all the annotation tools — comments, deletions, replacements, insertions.
+When the agent calls `plannotator_submit_plan`, the extension reads `PLAN.md` from disk, starts a local HTTP server, and opens the Plannotator browser UI. You see the rendered plan with all the annotation tools — comments, deletions, global comments, quick labels, and "looks good" approvals.
 
 Three outcomes:
 

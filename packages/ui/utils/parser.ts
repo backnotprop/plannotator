@@ -10,23 +10,34 @@ export interface Frontmatter {
 
 /**
  * Extract YAML frontmatter from markdown if present.
- * Returns both the parsed frontmatter and the remaining markdown.
+ * Returns the parsed frontmatter, the remaining markdown, and the 1-based
+ * line number where content begins in the original file (so downstream
+ * line references stay accurate).
  */
-export function extractFrontmatter(markdown: string): { frontmatter: Frontmatter | null; content: string } {
+export function extractFrontmatter(markdown: string): { frontmatter: Frontmatter | null; content: string; contentStartLine: number } {
   const trimmed = markdown.trimStart();
   if (!trimmed.startsWith('---')) {
-    return { frontmatter: null, content: markdown };
+    return { frontmatter: null, content: markdown, contentStartLine: 1 };
   }
 
   // Find the closing ---
   const endIndex = trimmed.indexOf('\n---', 3);
   if (endIndex === -1) {
-    return { frontmatter: null, content: markdown };
+    return { frontmatter: null, content: markdown, contentStartLine: 1 };
   }
 
   // Extract frontmatter content (between the --- delimiters)
   const frontmatterRaw = trimmed.slice(4, endIndex).trim();
-  const afterFrontmatter = trimmed.slice(endIndex + 4).trimStart();
+  const rawAfterFrontmatter = trimmed.slice(endIndex + 4);
+  const afterFrontmatter = rawAfterFrontmatter.trimStart();
+
+  // Compute the 1-based line where content begins in the original file.
+  // Account for: leading whitespace trimmed from original, the frontmatter
+  // block itself, and any blank lines between closing --- and first content.
+  const leadingChars = markdown.length - trimmed.length;
+  const consumedInTrimmed = endIndex + 4 + (rawAfterFrontmatter.length - afterFrontmatter.length);
+  const consumedTotal = leadingChars + consumedInTrimmed;
+  const contentStartLine = (markdown.slice(0, consumedTotal).match(/\n/g) || []).length + 1;
 
   // Parse simple YAML (key: value pairs)
   const frontmatter: Frontmatter = {};
@@ -60,8 +71,27 @@ export function extractFrontmatter(markdown: string): { frontmatter: Frontmatter
     }
   }
 
-  return { frontmatter, content: afterFrontmatter };
+  return { frontmatter, content: afterFrontmatter, contentStartLine };
 }
+
+/**
+ * Tag names that trigger a raw HTML block per CommonMark §4.6, Type 6.
+ * A line starting with `<tag` or `</tag` (where `tag` is in this set) opens
+ * an HTML block that continues verbatim until a blank line or EOF.
+ *
+ * Inline-only tags (`kbd`, `sub`, `sup`, `mark`, etc.) are NOT here — a line
+ * that happens to start with one of those still goes through the paragraph
+ * path and renders as escaped text, matching prior behavior.
+ */
+export const HTML_BLOCK_TAGS: ReadonlySet<string> = new Set([
+  'details', 'summary',
+  'div', 'section', 'article', 'aside', 'header', 'footer',
+  'blockquote', 'pre',
+  'table', 'thead', 'tbody', 'tr', 'td', 'th',
+  'ul', 'ol', 'li', 'p',
+]);
+
+const HTML_BLOCK_OPEN_RE = /^<\/?([a-zA-Z][a-zA-Z0-9]*)(?:\s|>|\/|$)/;
 
 /**
  * A simplified markdown parser that splits content into linear blocks.
@@ -69,7 +99,7 @@ export function extractFrontmatter(markdown: string): { frontmatter: Frontmatter
  * but for this demo, we want predictable text-anchoring.
  */
 export const parseMarkdownToBlocks = (markdown: string): Block[] => {
-  const { content: cleanMarkdown } = extractFrontmatter(markdown);
+  const { content: cleanMarkdown, contentStartLine } = extractFrontmatter(markdown);
   const lines = cleanMarkdown.split('\n');
   const blocks: Block[] = [];
   let currentId = 0;
@@ -77,7 +107,7 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
   let buffer: string[] = [];
   let currentType: Block['type'] = 'paragraph';
   let currentLevel = 0;
-  let bufferStartLine = 1; // Track the start line of the current buffer
+  let bufferStartLine = contentStartLine;
   let lastLineWasBlank = false;
 
   const flush = () => {
@@ -98,7 +128,7 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
-    const currentLineNum = i + 1; // 1-based index
+    const currentLineNum = i + contentStartLine;
     const prevLineWasBlank = lastLineWasBlank;
     lastLineWasBlank = false;
 
@@ -195,18 +225,32 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
       // `> 1. item` line would get glued onto the list-item block.
       const prevIsMarkerQuote =
         prevBlock?.type === 'blockquote' && blockMarkerRe.test(prevBlock.content);
-      if (
+      // Alerts own their body: once a blockquote is tagged as an alert,
+      // subsequent `>` lines always merge into it (until a blank line).
+      // Without this, `> [!NOTE]\n> - item` splits the list item off into
+      // a separate plain quote, losing the callout.
+      const prevIsAlert = prevBlock?.type === 'blockquote' && !!prevBlock.alertKind;
+      const shouldMergeIntoAlert = prevIsAlert && !prevLineWasBlank;
+      const shouldMergeNormal =
         !hasBlockMarker &&
         !prevIsMarkerQuote &&
         !prevLineWasBlank &&
-        prevBlock?.type === 'blockquote'
-      ) {
-        prevBlock.content += '\n' + stripped;
+        prevBlock?.type === 'blockquote';
+      if (shouldMergeIntoAlert || shouldMergeNormal) {
+        prevBlock!.content = prevBlock!.content
+          ? prevBlock!.content + '\n' + stripped
+          : stripped;
       } else {
+        // GitHub alert marker: a blockquote whose first line is [!KIND].
+        // We strip the marker from content and tag the block; rendering decides the style.
+        const alertMatch = stripped.match(/^\[!(NOTE|TIP|WARNING|CAUTION|IMPORTANT)\]\s*$/i);
         blocks.push({
           id: `block-${currentId++}`,
           type: 'blockquote',
-          content: stripped,
+          content: alertMatch ? '' : stripped,
+          alertKind: alertMatch
+            ? (alertMatch[1].toLowerCase() as 'note' | 'tip' | 'warning' | 'caution' | 'important')
+            : undefined,
           order: currentId,
           startLine: currentLineNum
         });
@@ -265,6 +309,73 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
         content: tableLines.join('\n'),
         order: currentId,
         startLine: tableStartLine
+      });
+      continue;
+    }
+
+    // Raw HTML blocks. A line starting with a known block-level HTML tag
+    // opens an HTML block. For opening tags we accumulate until the matching
+    // close tag is balanced (so `<details>…blank line…</details>` renders as
+    // one unit, matching GitHub's flavored behavior rather than strict
+    // CommonMark §4.6 Type 6 blank-line termination). For a line that starts
+    // with a close tag, we fall back to blank-line termination. Content is
+    // sanitized at render time, not here.
+    // Directive container: `:::kind` opens, `:::` closes. Inline kind is
+    // restricted to simple identifiers (letters, digits, hyphens). Body is
+    // accumulated verbatim and rendered with inline markdown.
+    const directiveOpen = trimmed.match(/^:::\s*([a-zA-Z][a-zA-Z0-9-]*)\s*$/);
+    if (directiveOpen) {
+      flush();
+      const directiveStartLine = currentLineNum;
+      const kind = directiveOpen[1].toLowerCase();
+      const bodyLines: string[] = [];
+      while (i + 1 < lines.length) {
+        i++;
+        if (lines[i].trim() === ':::') break;
+        bodyLines.push(lines[i]);
+      }
+      blocks.push({
+        id: `block-${currentId++}`,
+        type: 'directive',
+        content: bodyLines.join('\n'),
+        directiveKind: kind,
+        order: currentId,
+        startLine: directiveStartLine,
+      });
+      continue;
+    }
+
+    const htmlTagMatch = trimmed.match(HTML_BLOCK_OPEN_RE);
+    if (htmlTagMatch && HTML_BLOCK_TAGS.has(htmlTagMatch[1].toLowerCase())) {
+      flush();
+      const htmlStartLine = currentLineNum;
+      const tagName = htmlTagMatch[1].toLowerCase();
+      const isCloseTag = trimmed.startsWith('</');
+      const htmlLines: string[] = [line];
+
+      if (isCloseTag) {
+        while (i + 1 < lines.length && lines[i + 1].trim() !== '') {
+          i++;
+          htmlLines.push(lines[i]);
+        }
+      } else {
+        const openRe = new RegExp(`<${tagName}(?:\\s|>|/|$)`, 'gi');
+        const closeRe = new RegExp(`</${tagName}\\s*>`, 'gi');
+        let depth = (line.match(openRe) || []).length - (line.match(closeRe) || []).length;
+        while (depth > 0 && i + 1 < lines.length) {
+          i++;
+          htmlLines.push(lines[i]);
+          depth += (lines[i].match(openRe) || []).length;
+          depth -= (lines[i].match(closeRe) || []).length;
+        }
+      }
+
+      blocks.push({
+        id: `block-${currentId++}`,
+        type: 'html',
+        content: htmlLines.join('\n'),
+        order: currentId,
+        startLine: htmlStartLine,
       });
       continue;
     }
@@ -347,7 +458,40 @@ export const computeListIndices = (blocks: Block[]): (number | null)[] => {
 export const wrapFeedbackForAgent = (feedback: string): string =>
   planDenyFeedback(feedback);
 
-export const exportAnnotations = (blocks: Block[], annotations: any[], globalAttachments: ImageAttachment[] = [], title: string = 'Plan Feedback', subject: string = 'plan'): string => {
+export interface ExportAnnotationsOptions {
+  sourceConverted?: boolean;
+}
+
+/** Compute the end line of a block from its content and type. */
+const blockEndLine = (block: Block): number => {
+  if (!block.content) return block.startLine;
+  const contentLines = block.content.split('\n').length;
+  if (block.type === 'code') return block.startLine + contentLines + 1;
+  if (block.type === 'directive') return block.startLine + contentLines + 1;
+  if (block.alertKind) return block.startLine + contentLines;
+  return block.startLine + contentLines - 1;
+};
+
+/** Resolve the source-line label for a single annotation.
+ *  Returns null for global comments, diff-view annotations, or missing blocks. */
+const lineLabelForAnnotation = (blocks: Block[], ann: any): string | null => {
+  if (!ann.blockId || ann.type === 'GLOBAL_COMMENT') return null;
+  if (typeof ann.blockId === 'string' && ann.blockId.startsWith('diff-block-')) return null;
+  const block = blocks.find(b => b.id === ann.blockId);
+  if (!block || typeof block.startLine !== 'number') return null;
+  const end = blockEndLine(block);
+  if (end <= block.startLine) return `line ${block.startLine}`;
+  return `lines ${block.startLine}–${end}`;
+};
+
+export const exportAnnotations = (
+  blocks: Block[],
+  annotations: any[],
+  globalAttachments: ImageAttachment[] = [],
+  title: string = 'Plan Feedback',
+  subject: string = 'plan',
+  opts: ExportAnnotationsOptions = {},
+): string => {
   if (annotations.length === 0 && globalAttachments.length === 0) {
     return 'No changes detected.';
   }
@@ -361,6 +505,10 @@ export const exportAnnotations = (blocks: Block[], annotations: any[], globalAtt
   });
 
   let output = `# ${title}\n\n`;
+
+  if (opts.sourceConverted) {
+    output += `> Note: Line numbers below refer to the converted markdown, not the original HTML/URL source.\n\n`;
+  }
 
   // Add global reference images section if any
   if (globalAttachments.length > 0) {
@@ -377,13 +525,14 @@ export const exportAnnotations = (blocks: Block[], annotations: any[], globalAtt
   }
 
   sortedAnns.forEach((ann, index) => {
-    const block = blocks.find(b => b.id === ann.blockId);
-
     output += `## ${index + 1}. `;
 
     // Add diff context label if annotation was created in diff view
     if (ann.diffContext) {
       output += `[In diff content] `;
+    } else {
+      const lineLabel = lineLabelForAnnotation(blocks, ann);
+      if (lineLabel) output += `(${lineLabel}) `;
     }
 
     switch (ann.type) {
@@ -442,15 +591,23 @@ export const exportAnnotations = (blocks: Block[], annotations: any[], globalAtt
   return output;
 };
 
+export interface LinkedDocAnnotationEntry {
+  annotations: Annotation[];
+  globalAttachments: ImageAttachment[];
+  markdown?: string;
+  blocks?: Block[];
+  isConverted?: boolean;
+}
+
 export const exportLinkedDocAnnotations = (
-  docAnnotations: Map<string, { annotations: Annotation[]; globalAttachments: ImageAttachment[] }>
+  docAnnotations: Map<string, LinkedDocAnnotationEntry>
 ): string => {
   let output = `\n# Linked Document Feedback\n\nThe following feedback is on documents referenced in the plan.\n\n`;
 
-  for (const [filepath, { annotations, globalAttachments }] of docAnnotations) {
+  for (const [filepath, { annotations, globalAttachments, blocks: docBlocks, isConverted }] of docAnnotations) {
     if (annotations.length === 0 && globalAttachments.length === 0) continue;
 
-    output += `## ${filepath}\n\n`;
+    output += `## ${filepath}${isConverted ? ' (converted from HTML — line numbers refer to converted markdown)' : ''}\n\n`;
 
     if (globalAttachments.length > 0) {
       output += `### Reference Images\n`;
@@ -471,6 +628,9 @@ export const exportLinkedDocAnnotations = (
 
     sortedAnns.forEach((ann, index) => {
       output += `### ${index + 1}. `;
+
+      const lineLabel = docBlocks ? lineLabelForAnnotation(docBlocks, ann) : null;
+      if (lineLabel) output += `(${lineLabel}) `;
 
       switch (ann.type) {
         case 'DELETION':

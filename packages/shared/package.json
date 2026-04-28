@@ -11,6 +11,7 @@
     "./checklist": "./checklist.ts",
     "./types": "./types.ts",
     "./pr-provider": "./pr-provider.ts",
+    "./pr-stack": "./pr-stack.ts",
     "./project": "./project.ts",
     "./storage": "./storage.ts",
     "./draft": "./draft.ts",
@@ -25,8 +26,12 @@
     "./prompts": "./prompts.ts",
     "./improvement-hooks": "./improvement-hooks.ts",
     "./worktree": "./worktree.ts",
+    "./worktree-pool": "./worktree-pool.ts",
     "./html-to-markdown": "./html-to-markdown.ts",
-    "./url-to-markdown": "./url-to-markdown.ts"
+    "./url-to-markdown": "./url-to-markdown.ts",
+    "./tour": "./tour.ts",
+    "./annotate-args": "./annotate-args.ts",
+    "./at-reference": "./at-reference.ts"
   },
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.64",

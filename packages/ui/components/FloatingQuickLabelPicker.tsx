@@ -113,6 +113,7 @@ export const FloatingQuickLabelPicker: React.FC<FloatingQuickLabelPickerProps> =
     <div
       ref={ref}
       data-quick-label-picker
+      data-floating-picker="true"
       className="fixed z-[100]"
       style={{
         top: position.top,

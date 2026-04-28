@@ -19,7 +19,7 @@ import { handleDoc, handleFileBrowserFiles, handleObsidianVaults, handleObsidian
 import { contentHash, deleteDraft } from "./draft";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { saveConfig, detectGitUser, getServerConfig } from "./config";
-import { dirname } from "path";
+import { dirname, resolve as resolvePath } from "path";
 import { isWSL } from "./browser";
 
 // Re-export utilities
@@ -50,6 +50,11 @@ export interface AnnotateServerOptions {
   pasteApiUrl?: string;
   /** Source attribution: original URL or filename (e.g. "https://..." or "index.html") */
   sourceInfo?: string;
+  /** True when `markdown` was produced by Turndown/Jina (HTML or URL) —
+   *  feedback line numbers won't match the original source. */
+  sourceConverted?: boolean;
+  /** Enable review-gate UX: adds an Approve button alongside Close/Send Annotations (#570) */
+  gate?: boolean;
   /** Called when server starts with the URL, remote status, and port */
   onReady?: (url: string, isRemote: boolean, port: number) => void;
 }
@@ -66,6 +71,7 @@ export interface AnnotateServerResult {
     feedback: string;
     annotations: unknown[];
     exit?: boolean;
+    approved?: boolean;
   }>;
   /** Stop the server */
   stop: () => void;
@@ -95,9 +101,11 @@ export async function startAnnotateServer(
     mode = "annotate",
     folderPath,
     sourceInfo,
+    sourceConverted,
     sharingEnabled = true,
     shareBaseUrl,
     pasteApiUrl,
+    gate = false,
     onReady,
   } = options;
 
@@ -105,7 +113,11 @@ export async function startAnnotateServer(
   const configuredPort = getServerPort();
   const wslFlag = await isWSL();
   const gitUser = detectGitUser();
-  const draftKey = contentHash(markdown);
+  const draftSource =
+    mode === "annotate-folder" && folderPath
+      ? `folder:${resolvePath(folderPath)}`
+      : markdown;
+  const draftKey = contentHash(draftSource);
   const externalAnnotations = createExternalAnnotationHandler("plan");
 
   // Detect repo info (cached for this session)
@@ -116,11 +128,13 @@ export async function startAnnotateServer(
     feedback: string;
     annotations: unknown[];
     exit?: boolean;
+    approved?: boolean;
   }) => void;
   const decisionPromise = new Promise<{
     feedback: string;
     annotations: unknown[];
     exit?: boolean;
+    approved?: boolean;
   }>((resolve) => {
     resolveDecision = resolve;
   });
@@ -145,6 +159,8 @@ export async function startAnnotateServer(
               mode,
               filePath,
               sourceInfo,
+              sourceConverted: sourceConverted ?? false,
+              gate,
               sharingEnabled,
               shareBaseUrl,
               pasteApiUrl,
@@ -230,6 +246,13 @@ export async function startAnnotateServer(
           if (url.pathname === "/api/exit" && req.method === "POST") {
             deleteDraft(draftKey);
             resolveDecision({ feedback: "", annotations: [], exit: true });
+            return Response.json({ ok: true });
+          }
+
+          // API: Approve the annotation session (review-gate UX, #570)
+          if (url.pathname === "/api/approve" && req.method === "POST") {
+            deleteDraft(draftKey);
+            resolveDecision({ feedback: "", annotations: [], approved: true });
             return Response.json({ ok: true });
           }
 

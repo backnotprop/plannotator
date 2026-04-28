@@ -17,6 +17,11 @@ export interface UrlToMarkdownResult {
   source: "jina" | "fetch+turndown" | "fetch-raw" | "content-negotiation";
 }
 
+/** True when the source indicates the markdown was converted from HTML,
+ *  not returned as-is from the origin. */
+export const isConvertedSource = (source: UrlToMarkdownResult["source"]): boolean =>
+  source === "jina" || source === "fetch+turndown";
+
 const FETCH_TIMEOUT_MS = 30_000;
 const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10 MB — matches local HTML file guard
 

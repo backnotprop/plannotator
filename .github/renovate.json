@@ -13,6 +13,19 @@
       "matchManagers": ["github-actions"],
       "groupName": "GitHub Actions",
       "automerge": false
+    },
+    {
+      "description": "Pin Bun to 1.3.11: 1.3.12+ broke macOS binary codesign for bun build --compile (hotfixed in v0.17.9). Unpin only after verifying signed builds work on the target version.",
+      "matchManagers": ["github-actions"],
+      "matchDepNames": ["oven-sh/setup-bun"],
+      "matchDepTypes": ["action"],
+      "enabled": true
+    },
+    {
+      "description": "Do not bump the bun-version input passed to oven-sh/setup-bun. See v0.17.9 hotfix.",
+      "matchManagers": ["github-actions"],
+      "matchDepNames": ["bun"],
+      "enabled": false
     }
   ]
 }

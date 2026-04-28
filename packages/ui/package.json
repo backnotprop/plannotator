@@ -16,9 +16,14 @@
   "dependencies": {
     "@plannotator/shared": "workspace:*",
     "@plannotator/web-highlighter": "^0.8.1",
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-popover": "^1.1.15",
+    "@radix-ui/react-tooltip": "^1.2.8",
+    "@tanstack/react-table": "^8.21.3",
     "@viz-js/viz": "^3.25.0",
     "diff": "^8.0.3",
     "highlight.js": "^11.11.1",
+    "marked": "^17.0.6",
     "mermaid": "^11.12.2",
     "overlayscrollbars": "^2.11.0",
     "overlayscrollbars-react": "^0.5.6",
@@ -26,5 +31,15 @@
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "unique-username-generator": "^1.5.1"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "@types/dompurify": "^3.0.5",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "typescript": "~5.8.2"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   }
 }

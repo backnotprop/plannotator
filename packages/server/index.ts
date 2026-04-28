@@ -6,7 +6,10 @@
  * Environment variables:
  *   PLANNOTATOR_REMOTE - Set to "1"/"true" for remote, "0"/"false" for local
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
- *   PLANNOTATOR_ORIGIN - Origin identifier ("claude-code" or "opencode")
+ *   PLANNOTATOR_ORIGIN - Explicit origin override; validated against AGENT_CONFIG
+ *                        in packages/shared/agents.ts. Supported values:
+ *                        "claude-code", "opencode", "codex", "copilot-cli",
+ *                        "gemini-cli", "pi".
  */
 
 import type { Origin } from "@plannotator/shared/agents";

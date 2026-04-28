@@ -104,6 +104,7 @@ claude --plugin-dir ./apps/hook
 | `PLANNOTATOR_SHARE` | Set to `disabled` to turn off URL sharing entirely. Default: enabled. |
 | `PLANNOTATOR_SHARE_URL` | Custom base URL for share links (self-hosted portal). Default: `https://share.plannotator.ai`. |
 | `PLANNOTATOR_PASTE_URL` | Base URL of the paste service API for short URL sharing. Default: `https://plannotator-paste.plannotator.workers.dev`. |
+| `PLANNOTATOR_ORIGIN` | Explicit agent-origin override at the top of the detection chain. Valid values: `claude-code`, `opencode`, `codex`, `copilot-cli`, `gemini-cli`. Invalid values silently fall through to env-based detection. Unset by default. |
 | `PLANNOTATOR_JINA` | Set to `0` / `false` to disable Jina Reader for URL annotation, or `1` / `true` to enable. Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "jina": false }`) or per-invocation via `--no-jina`. |
 | `JINA_API_KEY` | Optional Jina Reader API key for higher rate limits (500 RPM vs 20 RPM unauthenticated). Free keys include 10M tokens. |
 | `PLANNOTATOR_VERIFY_ATTESTATION` | **Read by the install scripts only**, not by the runtime binary. Set to `1` / `true` to have `scripts/install.sh` / `install.ps1` / `install.cmd` run `gh attestation verify` on every install. Off by default. Can also be set persistently via `~/.plannotator/config.json` (`{ "verifyAttestation": true }`) or per-invocation via `--verify-attestation`. Requires `gh` installed and authenticated. |
@@ -222,8 +223,9 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 
 | Endpoint              | Method | Purpose                                    |
 | --------------------- | ------ | ------------------------------------------ |
-| `/api/diff`           | GET    | Returns `{ rawPatch, gitRef, origin, diffType, gitContext }` |
-| `/api/file-content`   | GET    | Returns `{ oldContent, newContent }` for expandable diff context |
+| `/api/diff`           | GET    | Returns `{ rawPatch, gitRef, origin, diffType, base, gitContext }` |
+| `/api/diff/switch`    | POST   | Switch diff type and/or base branch (body: `{ diffType, base? }`) |
+| `/api/file-content`   | GET    | Returns `{ oldContent, newContent }` for expandable diff context (`?path=&oldPath=&base=`) |
 | `/api/git-add`        | POST   | Stage/unstage a file (body: `{ filePath, undo? }`) |
 | `/api/feedback`       | POST   | Submit review (body: feedback, annotations, agentSwitch) |
 | `/api/image`          | GET    | Serve image by path query param            |
@@ -242,19 +244,26 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/external-annotations` | POST | Add external annotations (single or batch `{ annotations: [...] }`) |
 | `/api/external-annotations` | PATCH | Update fields on a single annotation (`?id=`) |
 | `/api/external-annotations` | DELETE | Remove by `?id=`, `?source=`, or clear all |
-| `/api/agents/capabilities` | GET | Check available agent providers (claude, codex) |
+| `/api/agents/capabilities` | GET | Check available agent providers (claude, codex, tour) |
 | `/api/agents/jobs/stream` | GET | SSE stream for real-time agent job status updates |
 | `/api/agents/jobs` | GET | Snapshot of agent jobs (polling fallback, `?since=N` for version gating) |
 | `/api/agents/jobs` | POST | Launch an agent job (body: `{ provider, command, label }`) |
 | `/api/agents/jobs` | DELETE | Kill all running agent jobs |
 | `/api/agents/jobs/:id` | DELETE | Kill a specific agent job |
+| `/api/pr-diff-scope` | POST | Switch between layer and full-stack diff scope |
+| `/api/pr-list` | GET | List PRs for the current repo (cached 30s) |
+| `/api/pr-switch` | POST | Switch to a different PR in-place (body: `{ url }`) |
+| `/api/tour/:jobId` | GET | Fetch Code Tour result (greeting, stops, checklist) for a completed tour job |
+| `/api/tour/:jobId/checklist` | PUT | Persist checklist item state for a Code Tour |
 
 ### Annotate Server (`packages/server/annotate.ts`)
 
 | Endpoint              | Method | Purpose                                    |
 | --------------------- | ------ | ------------------------------------------ |
-| `/api/plan`           | GET    | Returns `{ plan, origin, mode: "annotate", filePath, sourceInfo? }` |
+| `/api/plan`           | GET    | Returns `{ plan, origin, mode: "annotate", filePath, sourceInfo?, gate }` |
 | `/api/feedback`       | POST   | Submit annotations (body: feedback, annotations) |
+| `/api/approve`        | POST   | Approve without feedback (review-gate UX, `--gate`) |
+| `/api/exit`           | POST   | Close session without feedback |
 | `/api/image`          | GET    | Serve image by path query param            |
 | `/api/upload`         | POST   | Upload image, returns `{ path, originalName }` |
 | `/api/draft`          | GET/POST/DELETE | Auto-save annotation drafts to survive server crashes |
@@ -336,10 +345,11 @@ interface Annotation {
 
 interface Block {
   id: string;
-  type: "paragraph" | "heading" | "blockquote" | "list-item" | "code" | "hr";
+  type: "paragraph" | "heading" | "blockquote" | "list-item" | "code" | "hr" | "table" | "html" | "directive";
   content: string;
   level?: number; // For headings (1-6)
   language?: string; // For code blocks
+  alertKind?: "note" | "tip" | "warning" | "caution" | "important"; // GitHub alerts (blockquote subtype)
   order: number;
   startLine: number;
 }
@@ -351,12 +361,15 @@ interface Block {
 
 `parseMarkdownToBlocks(markdown)` splits markdown into Block objects. Handles:
 
-- Headings (`#`, `##`, etc.)
+- Headings (`#`, `##`, etc.) with slug-derived anchor ids
 - Code blocks (``` with language extraction)
 - List items (`-`, `*`, `1.`)
-- Blockquotes (`>`)
+- Blockquotes (`>`) — including GitHub alerts (`> [!NOTE|TIP|WARNING|CAUTION|IMPORTANT]`) which set `alertKind`
 - Horizontal rules (`---`)
-- Paragraphs (default)
+- Tables (pipe-delimited) — rendered via `TableBlock` with a `TableToolbar` (copy as markdown/CSV) and `TablePopout` overlay
+- Raw HTML blocks (`<details>`, `<summary>`, etc.) — rendered via `HtmlBlock` through `marked` + DOMPurify
+- Directive containers (`:::kind ... :::`) — rendered via `Callout`
+- Paragraphs (default) with inline extras: bare URL autolinks, `@mentions` / `#issue-refs`, emoji shortcodes, smart punctuation
 
 `exportAnnotations(blocks, annotations, globalAttachments)` generates human-readable feedback for Claude. Images are referenced by name: `[image-name] /tmp/path...`. Annotations with `diffContext` include `[In diff content]` labels.
 

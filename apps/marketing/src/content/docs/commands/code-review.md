@@ -24,6 +24,8 @@ The `/plannotator-review` command opens an interactive code review UI for your l
 
 PR review uses the `gh` CLI for authentication, so private repos work automatically if you're authenticated with `gh auth login`.
 
+GitLab merge request URLs are also supported when the `glab` CLI is installed and authenticated.
+
 ## How it works
 
 **Local review:**
@@ -60,6 +62,14 @@ Send Feedback → PR context included in feedback
 Approve → configured approval prompt sent to agent
 ```
 
+## Stacked PRs and MRs
+
+When a PR or MR targets a non-default branch, Plannotator marks it as stacked in the review header. The default view remains **Layer**, which matches the platform diff and is the safe mode for posting inline review comments.
+
+If Plannotator has a local checkout for the PR or MR, the header also offers **Full stack**. Full stack shows everything from the repository default branch through the current checked-out head, which helps you understand the whole chain before reviewing the current layer.
+
+Platform posting is intentionally limited to **Layer** because GitHub and GitLab inline comments are anchored to the PR or MR's own diff. Use **Full stack** for comprehension and agent review, then switch back to **Layer** before posting to the platform.
+
 ## Switching diff types
 
 By default the review opens showing uncommitted changes, but you can switch what you're comparing using the diff type dropdown in the toolbar. The available options are:
@@ -79,7 +89,7 @@ The review UI shows your changes in a familiar diff format:
 - **File tree sidebar** for navigating between changed files
 - **Viewed tracking** to mark files as reviewed and track your progress
 - **Unified diff** showing additions and deletions in context
-- **Annotation tools** with the same annotation types as plan review (delete, replace, comment, insert)
+- **Annotation tools** with the same annotation types as plan review (delete, comment, quick label, "looks good")
 
 ## Annotating code
 
@@ -105,6 +115,10 @@ All providers can be available simultaneously. Plannotator does not manage API k
 When multiple providers are available, set your default in **Settings → AI**. The AI tab shows all detected providers as selectable cards. Your choice persists across sessions.
 
 If only one provider is installed, it's used automatically with no configuration needed.
+
+## How review agents prompt the CLI
+
+The review agents (Claude, Codex, Code Tour) shell out to external CLIs. Plannotator controls the user message and output schema; the CLI's own harness owns the system prompt. See the [Prompts reference](/docs/reference/prompts/) for the full breakdown of what each provider sends, how the pieces join, and which knobs you can tune per job.
 
 ## Submitting feedback
 

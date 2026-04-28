@@ -8,11 +8,12 @@
 import { storage } from './storage';
 
 const STORAGE_KEY = 'plannotator-diff-type-setup-done';
+const CURRENT_VERSION = '2';
 
 export function needsDiffTypeSetup(): boolean {
-  return storage.getItem(STORAGE_KEY) !== 'true';
+  return storage.getItem(STORAGE_KEY) !== CURRENT_VERSION;
 }
 
 export function markDiffTypeSetupDone(): void {
-  storage.setItem(STORAGE_KEY, 'true');
+  storage.setItem(STORAGE_KEY, CURRENT_VERSION);
 }

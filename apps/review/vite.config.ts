@@ -17,6 +17,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, '.'),
+      '@plannotator/shared': path.resolve(__dirname, '../../packages/shared'),
       '@plannotator/ui': path.resolve(__dirname, '../../packages/ui'),
       '@plannotator/review-editor/styles': path.resolve(__dirname, '../../packages/review-editor/index.css'),
       '@plannotator/review-editor': path.resolve(__dirname, '../../packages/review-editor/App.tsx'),

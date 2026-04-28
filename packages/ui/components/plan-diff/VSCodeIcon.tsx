@@ -9,7 +9,7 @@ export const VSCodeIcon: React.FC<{ className?: string }> = ({ className }) => (
   >
     <mask
       id="mask0"
-      maskType="alpha"
+      {...{ 'mask-type': 'alpha' }}
       maskUnits="userSpaceOnUse"
       x="0"
       y="0"

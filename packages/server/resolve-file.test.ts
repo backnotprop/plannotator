@@ -6,20 +6,23 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
-  isAbsoluteMarkdownPath,
-  normalizeMarkdownPathInput,
-  resolveMarkdownFile,
+	expandHomePath,
+	isAbsoluteUserPath,
+	normalizeUserPathInput,
+	resolveMarkdownFile,
+	resolveUserPath,
 } from "@plannotator/shared/resolve-file";
 
 const tempDirs: string[] = [];
 
 function createTempProject(
   files: Record<string, string> = {},
+  baseDir = join(tmpdir(), "plannotator-resolve-file-"),
 ): string {
-  const root = mkdtempSync(join(tmpdir(), "plannotator-resolve-file-"));
+  const root = mkdtempSync(baseDir);
   tempDirs.push(root);
   for (const [relativePath, content] of Object.entries(files)) {
     const full = join(root, relativePath);
@@ -35,37 +38,86 @@ afterEach(() => {
   }
 });
 
-// --- Windows path normalization (PR #267) ---
+// --- User path normalization ---
 
-describe("normalizeMarkdownPathInput", () => {
+describe("normalizeUserPathInput", () => {
+	test("expands tilde paths before normalization", () => {
+		expect(normalizeUserPathInput("~/test-plan.md")).toBe(
+			join(homedir(), "test-plan.md"),
+		);
+	});
+
+	test("strips wrapping quotes", () => {
+		expect(normalizeUserPathInput('"~/test-plan.md"')).toBe(
+			join(homedir(), "test-plan.md"),
+		);
+	});
+
   test("converts MSYS paths on Windows", () => {
-    expect(normalizeMarkdownPathInput("/c/Users/dev/test-plan.md", "win32")).toBe(
+    expect(normalizeUserPathInput("/c/Users/dev/test-plan.md", "win32")).toBe(
       "C:/Users/dev/test-plan.md",
     );
   });
 
   test("converts Cygwin paths on Windows", () => {
-    expect(normalizeMarkdownPathInput("/cygdrive/c/Users/dev/test-plan.md", "win32")).toBe(
+    expect(normalizeUserPathInput("/cygdrive/c/Users/dev/test-plan.md", "win32")).toBe(
       "C:/Users/dev/test-plan.md",
     );
   });
 
   test("leaves non-Windows paths unchanged", () => {
-    expect(normalizeMarkdownPathInput("/Users/dev/test-plan.md", "darwin")).toBe(
+    expect(normalizeUserPathInput("/Users/dev/test-plan.md", "darwin")).toBe(
       "/Users/dev/test-plan.md",
     );
   });
 });
 
-describe("isAbsoluteMarkdownPath", () => {
+describe("expandHomePath", () => {
+	test("expands bare home alias", () => {
+		expect(expandHomePath("~", "/tmp/home")).toBe("/tmp/home");
+	});
+
+	test("expands home-relative paths", () => {
+		expect(expandHomePath("~/docs/plan.md", "/tmp/home")).toBe(
+			join("/tmp/home", "docs/plan.md"),
+		);
+	});
+
+	test("does not expand tilde usernames", () => {
+		expect(expandHomePath("~alice/docs/plan.md", "/tmp/home")).toBe(
+			"~alice/docs/plan.md",
+		);
+	});
+});
+
+describe("isAbsoluteUserPath", () => {
   test("detects Windows drive letter paths", () => {
-    expect(isAbsoluteMarkdownPath("C:\\Users\\dev\\test-plan.md", "win32")).toBe(true);
-    expect(isAbsoluteMarkdownPath("C:/Users/dev/test-plan.md", "win32")).toBe(true);
+    expect(isAbsoluteUserPath("C:\\Users\\dev\\test-plan.md", "win32")).toBe(true);
+    expect(isAbsoluteUserPath("C:/Users/dev/test-plan.md", "win32")).toBe(true);
   });
 
   test("detects converted MSYS paths as absolute on Windows", () => {
-    expect(isAbsoluteMarkdownPath("/c/Users/dev/test-plan.md", "win32")).toBe(true);
+    expect(isAbsoluteUserPath("/c/Users/dev/test-plan.md", "win32")).toBe(true);
   });
+});
+
+describe("resolveUserPath", () => {
+	test("resolves relative paths against a base directory", () => {
+		expect(resolveUserPath("docs/plan.md", "/tmp/project")).toBe(
+			resolve("/tmp/project", "docs/plan.md"),
+		);
+	});
+
+	test("resolves quoted tilde paths", () => {
+		expect(resolveUserPath('"~/docs/plan.md"')).toBe(
+			resolve(homedir(), "docs/plan.md"),
+		);
+	});
+
+	test("returns empty string for whitespace-only input", () => {
+		expect(resolveUserPath("   ", "/tmp/project")).toBe("");
+		expect(resolveUserPath("", "/tmp/project")).toBe("");
+	});
 });
 
 // --- Core resolution strategies ---
@@ -79,6 +131,15 @@ describe("resolveMarkdownFile", () => {
     const result = resolveMarkdownFile(absPath, root);
     expect(result).toEqual({ kind: "found", path: absPath });
   });
+
+	test("resolves tilde-prefixed absolute paths", async () => {
+		const homeRoot = createTempProject({}, join(homedir(), ".plannotator-resolve-file-"));
+		const absPath = resolve(homeRoot, "plan.md");
+		writeFileSync(absPath, "# Plan");
+		const relativeToHome = absPath.slice(homedir().length + 1).replace(/\\/g, "/");
+		const result = resolveMarkdownFile(`~/${relativeToHome}`, "/unused");
+		expect(result).toEqual({ kind: "found", path: absPath });
+	});
 
   test("returns not_found for absolute path that doesn't exist", async () => {
     const root = createTempProject();

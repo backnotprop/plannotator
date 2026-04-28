@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { parseMarkdownToBlocks, computeListIndices } from "./parser";
+import { parseMarkdownToBlocks, computeListIndices, extractFrontmatter, exportAnnotations } from "./parser";
 import type { Block } from "../types";
 
 /** Tiny factory for list-item blocks used by computeListIndices tests. */
@@ -514,6 +514,226 @@ describe("parseMarkdownToBlocks — blockquotes", () => {
   });
 });
 
+describe("parseMarkdownToBlocks — GitHub alerts", () => {
+  test("detects NOTE alert and strips marker from content", () => {
+    const md = "> [!NOTE]\n> Useful information.";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("blockquote");
+    expect(blocks[0].alertKind).toBe("note");
+    expect(blocks[0].content).toBe("Useful information.");
+  });
+
+  test("detects each GitHub alert kind, case-insensitive", () => {
+    for (const kind of ["NOTE", "TIP", "WARNING", "CAUTION", "IMPORTANT"]) {
+      const blocks = parseMarkdownToBlocks(`> [!${kind}]\n> body`);
+      expect(blocks[0].alertKind).toBe(kind.toLowerCase() as 'note' | 'tip' | 'warning' | 'caution' | 'important');
+    }
+    const lower = parseMarkdownToBlocks("> [!note]\n> body");
+    expect(lower[0].alertKind).toBe("note");
+  });
+
+  test("alert marker alone (no body) still tags the block", () => {
+    const md = "> [!TIP]";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks[0].alertKind).toBe("tip");
+    expect(blocks[0].content).toBe("");
+  });
+
+  test("blockquote without marker has no alertKind", () => {
+    const blocks = parseMarkdownToBlocks("> just a quote");
+    expect(blocks[0].alertKind).toBeUndefined();
+  });
+
+  test("alert body absorbs a list, producing one block with list-formatted content", () => {
+    const md = "> [!NOTE]\n> - first\n> - second";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("blockquote");
+    expect(blocks[0].alertKind).toBe("note");
+    expect(blocks[0].content).toBe("- first\n- second");
+  });
+
+  test("alert body absorbs a code fence", () => {
+    const md = "> [!WARNING]\n> ```\n> danger\n> ```";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].alertKind).toBe("warning");
+    expect(blocks[0].content).toBe("```\ndanger\n```");
+  });
+
+  test("blank line ends an alert", () => {
+    const md = "> [!TIP]\n> body line\n\nafter";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks[0].type).toBe("blockquote");
+    expect(blocks[0].alertKind).toBe("tip");
+    expect(blocks[0].content).toBe("body line");
+    expect(blocks[1].type).toBe("paragraph");
+  });
+
+  test("marker-like text mid-quote is not treated as alert", () => {
+    const md = "> intro\n> [!NOTE]";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks[0].alertKind).toBeUndefined();
+    expect(blocks[0].content).toBe("intro\n[!NOTE]");
+  });
+});
+
+describe("parseMarkdownToBlocks — directive containers", () => {
+  test("captures body between :::kind and :::", () => {
+    const md = ":::note\nBody line.\n:::";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("directive");
+    expect(blocks[0].directiveKind).toBe("note");
+    expect(blocks[0].content).toBe("Body line.");
+  });
+
+  test("supports arbitrary kinds (info, success, danger)", () => {
+    for (const kind of ["info", "success", "danger", "warning"]) {
+      const blocks = parseMarkdownToBlocks(`:::${kind}\nbody\n:::`);
+      expect(blocks[0].directiveKind).toBe(kind);
+    }
+  });
+
+  test("multi-paragraph body keeps blank-line separator", () => {
+    const md = ":::tip\npara 1\n\npara 2\n:::";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks[0].content).toBe("para 1\n\npara 2");
+  });
+
+  test("unterminated directive absorbs rest of document", () => {
+    // Not ideal, but prevents silent loss — user sees the whole body styled.
+    const md = ":::note\nbody\nmore body";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("directive");
+    expect(blocks[0].content).toBe("body\nmore body");
+  });
+
+  test(":::kind with extra spaces still parses", () => {
+    const md = "::: note \nbody\n:::";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks[0].type).toBe("directive");
+    expect(blocks[0].directiveKind).toBe("note");
+  });
+});
+
+describe("parseMarkdownToBlocks — raw HTML blocks", () => {
+  test("<details>/<summary> parsed as a single html block", () => {
+    const md = "<details>\n<summary>Title</summary>\nBody text\n</details>";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("html");
+    expect(blocks[0].content).toBe(md);
+  });
+
+  test("blank line terminates the HTML block", () => {
+    const md = "<details>\n<summary>T</summary>\n</details>\n\nAfter paragraph";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("html");
+    expect(blocks[0].content).toBe("<details>\n<summary>T</summary>\n</details>");
+    expect(blocks[1].type).toBe("paragraph");
+    expect(blocks[1].content).toBe("After paragraph");
+  });
+
+  test("EOF terminates the HTML block", () => {
+    const md = "<details>\n<summary>T</summary>\n</details>";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("html");
+  });
+
+  test("paragraph before HTML block is separated correctly", () => {
+    const md = "Some intro\n\n<details>\n<summary>T</summary>\n</details>";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("paragraph");
+    expect(blocks[0].content).toBe("Some intro");
+    expect(blocks[1].type).toBe("html");
+  });
+
+  test("non-allowlisted tag (<xyz>) falls through to paragraph — preserves prior behavior", () => {
+    const md = "<xyz>not a block</xyz>";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("paragraph");
+    expect(blocks[0].content).toBe("<xyz>not a block</xyz>");
+  });
+
+  test("inline HTML in the middle of a paragraph is NOT a block", () => {
+    // Line does not start with `<tag`, so the paragraph path wins.
+    const md = "Press <kbd>Ctrl</kbd> to submit";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("paragraph");
+  });
+
+  test("nested tags stay in one block", () => {
+    const md = "<details>\n<summary>Outer</summary>\n<details>\n<summary>Inner</summary>\nnested\n</details>\n</details>";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("html");
+    expect(blocks[0].content).toBe(md);
+  });
+
+  test("case-insensitive tag detection", () => {
+    const md = "<DETAILS>\n<SUMMARY>T</SUMMARY>\n</DETAILS>";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("html");
+  });
+
+  test("multiple HTML blocks separated by blank lines produce multiple blocks", () => {
+    const md = "<details>\n<summary>A</summary>\n</details>\n\n<details>\n<summary>B</summary>\n</details>";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("html");
+    expect(blocks[1].type).toBe("html");
+  });
+
+  test("startLine points to first line of the HTML block", () => {
+    const md = "intro\n\n<details>\n<summary>T</summary>\n</details>";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks[1].type).toBe("html");
+    expect(blocks[1].startLine).toBe(3);
+  });
+
+  test("single-line inline HTML block (open + close on one line) is captured", () => {
+    const md = "<details><summary>T</summary>body</details>";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("html");
+    expect(blocks[0].content).toBe(md);
+  });
+
+  test("blank line inside <details> does NOT terminate the block (GitHub-flavored)", () => {
+    const md = "<details>\n<summary>Title</summary>\n\nBody across blanks.\n\n</details>";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("html");
+    expect(blocks[0].content).toBe(md);
+  });
+
+  test("nested same-tag open/close is balanced (not terminated by first close)", () => {
+    const md = "<details>\n<summary>Outer</summary>\n<details>\n<summary>Inner</summary>\n</details>\nouter tail\n</details>";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("html");
+    expect(blocks[0].content).toBe(md);
+  });
+
+  test("trailing paragraph after closed <details> is a separate block", () => {
+    const md = "<details>\n<summary>T</summary>\n\nBody\n\n</details>\n\nAfter paragraph";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("html");
+    expect(blocks[1].type).toBe("paragraph");
+    expect(blocks[1].content).toBe("After paragraph");
+  });
+});
+
 describe("computeListIndices", () => {
   test("all unordered → all null", () => {
     const blocks = [li(0, false), li(0, false), li(0, false)];
@@ -611,5 +831,107 @@ describe("computeListIndices", () => {
   test("single ordered item with no orderedStart defaults to 1", () => {
     const blocks = [{ ...li(0, true), orderedStart: undefined }];
     expect(computeListIndices(blocks)).toEqual([1]);
+  });
+});
+
+describe("extractFrontmatter — contentStartLine", () => {
+  test("no frontmatter → contentStartLine is 1", () => {
+    const { contentStartLine } = extractFrontmatter("# Hello\nworld");
+    expect(contentStartLine).toBe(1);
+  });
+
+  test("standard frontmatter offsets correctly", () => {
+    const md = "---\ntitle: foo\ndate: bar\n---\n# Hello";
+    const { contentStartLine, content } = extractFrontmatter(md);
+    expect(content).toBe("# Hello");
+    expect(contentStartLine).toBe(5);
+  });
+
+  test("frontmatter with blank line before content", () => {
+    const md = "---\ntitle: foo\n---\n\n# Hello";
+    const { contentStartLine } = extractFrontmatter(md);
+    expect(contentStartLine).toBe(5);
+  });
+
+  test("unclosed frontmatter treated as no frontmatter", () => {
+    const md = "---\ntitle: foo\n# Not closed";
+    const { contentStartLine, content } = extractFrontmatter(md);
+    expect(contentStartLine).toBe(1);
+    expect(content).toBe(md);
+  });
+});
+
+describe("parseMarkdownToBlocks — startLine accuracy", () => {
+  test("basic blocks get correct startLine", () => {
+    const md = "# Heading\n\nParagraph\n\n- Item";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks[0].startLine).toBe(1); // # Heading
+    expect(blocks[1].startLine).toBe(3); // Paragraph
+    expect(blocks[2].startLine).toBe(5); // - Item
+  });
+
+  test("code block startLine points to the opening fence", () => {
+    const md = "intro\n\n```ts\nconst x = 1;\nconst y = 2;\n```\n\noutro";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks[0].startLine).toBe(1); // intro
+    expect(blocks[1].startLine).toBe(3); // ```ts
+    expect(blocks[1].type).toBe("code");
+    expect(blocks[2].startLine).toBe(8); // outro
+  });
+
+  test("frontmatter shifts all startLines", () => {
+    const md = "---\ntitle: test\n---\n\n# Heading\n\nParagraph";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks[0].type).toBe("heading");
+    expect(blocks[0].startLine).toBe(5);
+    expect(blocks[1].type).toBe("paragraph");
+    expect(blocks[1].startLine).toBe(7);
+  });
+
+  test("table gets correct startLine", () => {
+    const md = "# Title\n\n| A | B |\n|---|---|\n| 1 | 2 |";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks[1].type).toBe("table");
+    expect(blocks[1].startLine).toBe(3);
+  });
+});
+
+describe("exportAnnotations — line labels", () => {
+  const blocks = parseMarkdownToBlocks("# Heading\n\nShort paragraph\n\n```ts\nline1\nline2\nline3\n```");
+
+  test("single-line block shows 'line N'", () => {
+    const anns = [{ blockId: blocks[0].id, type: "COMMENT", text: "fix this", originalText: "Heading", startOffset: 0 }];
+    const output = exportAnnotations(blocks, anns);
+    expect(output).toContain("(line 1)");
+  });
+
+  test("multi-line code block shows line range", () => {
+    const codeBlock = blocks.find(b => b.type === "code")!;
+    const anns = [{ blockId: codeBlock.id, type: "COMMENT", text: "refactor", originalText: "line1", startOffset: 0 }];
+    const output = exportAnnotations(blocks, anns);
+    expect(output).toMatch(/\(lines 5–9\)/);
+  });
+
+  test("GLOBAL_COMMENT has no line label", () => {
+    const anns = [{ blockId: "global", type: "GLOBAL_COMMENT", text: "overall feedback", originalText: "", startOffset: 0 }];
+    const output = exportAnnotations(blocks, anns);
+    expect(output).not.toMatch(/\(line/);
+  });
+
+  test("diff-context annotation shows label instead of line number", () => {
+    const anns = [{ blockId: blocks[0].id, type: "COMMENT", text: "change", originalText: "Heading", startOffset: 0, diffContext: "added" }];
+    const output = exportAnnotations(blocks, anns);
+    expect(output).not.toMatch(/\(line/);
+    expect(output).toContain("[In diff content]");
+  });
+
+  test("sourceConverted adds caveat", () => {
+    const output = exportAnnotations(blocks, [{ blockId: blocks[0].id, type: "COMMENT", text: "ok", originalText: "Heading", startOffset: 0 }], [], "Feedback", "plan", { sourceConverted: true });
+    expect(output).toContain("converted markdown");
+  });
+
+  test("no sourceConverted means no caveat", () => {
+    const output = exportAnnotations(blocks, [{ blockId: blocks[0].id, type: "COMMENT", text: "ok", originalText: "Heading", startOffset: 0 }]);
+    expect(output).not.toContain("converted markdown");
   });
 });

@@ -11,6 +11,8 @@ import {
   type PRContext,
   type PRRuntime,
   type PRReviewFileComment,
+  type PRStackTree,
+  type PRListItem,
   parsePRUrl as parsePRUrlCore,
   checkAuth as checkAuthCore,
   getUser as getUserCore,
@@ -20,6 +22,8 @@ import {
   submitPRReview as submitPRReviewCore,
   fetchPRViewedFiles as fetchPRViewedFilesCore,
   markPRFilesViewed as markPRFilesViewedCore,
+  fetchPRStack as fetchPRStackCore,
+  fetchPRList as fetchPRListCore,
   prRefFromMetadata,
   getPlatformLabel,
   getMRLabel,
@@ -29,8 +33,8 @@ import {
   getCliInstallUrl,
 } from "@plannotator/shared/pr-provider";
 
-export type { PRRef, PRMetadata, PRContext, PRReviewFileComment } from "@plannotator/shared/pr-provider";
-export { prRefFromMetadata, getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo, getCliName, getCliInstallUrl } from "@plannotator/shared/pr-provider";
+export type { PRRef, PRMetadata, PRContext, PRReviewFileComment, PRStackTree, PRListItem } from "@plannotator/shared/pr-provider";
+export { prRefFromMetadata, isSameProject, getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo, getCliName, getCliInstallUrl } from "@plannotator/shared/pr-provider";
 export type { GithubPRMetadata } from "@plannotator/shared/pr-provider";
 
 const runtime: PRRuntime = {
@@ -122,4 +126,17 @@ export function markPRFilesViewed(
   viewed: boolean,
 ): Promise<void> {
   return markPRFilesViewedCore(runtime, ref, prNodeId, filePaths, viewed);
+}
+
+export function fetchPRStack(
+  ref: PRRef,
+  metadata: PRMetadata,
+): Promise<PRStackTree | null> {
+  return fetchPRStackCore(runtime, ref, metadata);
+}
+
+export function fetchPRList(
+  ref: PRRef,
+): Promise<PRListItem[]> {
+  return fetchPRListCore(runtime, ref);
 }

@@ -21,8 +21,17 @@ export const ReviewDiffPanel: React.FC<IDockviewPanelProps> = (props) => {
   const isFocusedFile = !!file && state.focusedFilePath === file.path;
 
   const fileAnnotations = useMemo(
-    () => file ? state.allAnnotations.filter((a) => a.filePath === file.path) : [],
-    [state.allAnnotations, file]
+    () => {
+      if (!file) return [];
+      const currentPrUrl = state.prMetadata?.url;
+      const currentDiffScope = state.prDiffScope;
+      return state.allAnnotations.filter((a) =>
+        a.filePath === file.path &&
+        (!a.prUrl || !currentPrUrl || a.prUrl === currentPrUrl) &&
+        (!a.diffScope || !currentDiffScope || a.diffScope === currentDiffScope)
+      );
+    },
+    [state.allAnnotations, file, state.prMetadata, state.prDiffScope]
   );
 
   const aiMessagesForFile = useMemo(
@@ -51,12 +60,17 @@ export const ReviewDiffPanel: React.FC<IDockviewPanelProps> = (props) => {
     );
   }
 
+  // Keying on reviewBase forces a remount when the user picks a new base.
+  // Otherwise the file-content fetch for the new base can land before the new
+  // patch, and Pierre briefly reconciles old-patch + new-content → "trailing
+  // context mismatch" warnings in the console.
   return (
-    <div key={file.path} className="h-full relative">
+    <div key={`${file.path}:${state.reviewBase ?? ''}:${state.activeDiffBase ?? ''}`} className="h-full relative">
       <DiffViewer
         patch={file.patch}
         filePath={file.path}
         oldPath={file.oldPath}
+        reviewBase={state.reviewBase}
         isFocused={isFocusedFile}
         diffStyle={state.diffStyle}
         diffOverflow={state.diffOverflow}

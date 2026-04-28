@@ -74,10 +74,10 @@ The annotation tools are identical to plan review:
 Annotation types:
 
 - **Deletion** — "Remove this"
-- **Replacement** — "Change this to..."
 - **Comment** — "Feedback on this..."
-- **Insertion** — "Add this after..."
 - **Global comment** — General feedback not tied to specific text
+- **Quick label** — Apply a preset label like "Clarify this" or "Needs tests"
+- **Looks good** — Mark a section as approved (👍)
 
 Users can also paste or upload images and attach them to annotations.
 

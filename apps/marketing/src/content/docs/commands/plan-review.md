@@ -36,10 +36,12 @@ When you select text in the plan, the annotation toolbar appears with these opti
 | Type | What it does | Example |
 |------|-------------|---------|
 | **Deletion** | Marks text for removal | "Remove this section" |
-| **Replacement** | Suggests alternative text | "Change `WebSocket` to `SSE`" |
 | **Comment** | Adds feedback on a section | "This needs error handling" |
-| **Insertion** | Adds content after the selection | "Add a retry mechanism here" |
+| **Quick label** | Applies a preset label (⚡) | "Clarify this", "Needs tests", "Out of scope" |
+| **Looks good** | Marks a section as approved (👍) | — |
 | **Global comment** | General feedback (not tied to text) | "The plan looks good overall but needs tests" |
+
+If you want a replacement or an insertion, ask for it in a comment ("Change `WebSocket` to `SSE`" or "Add a retry mechanism here") — the agent will incorporate it during the revision.
 
 ## Image attachments
 

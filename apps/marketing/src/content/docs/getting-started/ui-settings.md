@@ -116,7 +116,7 @@ The mode switcher below the header in the plan review UI controls how text selec
 
 | Mode | Behavior |
 |------|----------|
-| **Selection** (default) | Select text, then choose an annotation type from the toolbar (comment, deletion, replacement, insertion) |
+| **Selection** (default) | Select text, then choose an annotation type from the toolbar (comment, deletion, quick label, "looks good") |
 | **Comment** | Select text to immediately create a comment annotation |
 | **Redline** | Select text to immediately create a deletion annotation |
 

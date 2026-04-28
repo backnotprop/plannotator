@@ -13,6 +13,43 @@ interface DiffHunkPreviewProps {
 }
 
 /**
+ * Build the unsafeCSS string for @pierre/diffs by reading computed CSS variables.
+ * Called synchronously so the first render is already themed (no flash on tooltip open).
+ */
+function buildPierreCSS(mode: 'dark' | 'light', fontFamily: string, fontSize: string): string {
+  try {
+    const styles = getComputedStyle(document.documentElement);
+    const bg = styles.getPropertyValue('--background').trim();
+    const fg = styles.getPropertyValue('--foreground').trim();
+    if (!bg || !fg) return '';
+
+    const fontCSS = (fontFamily || fontSize) ? `
+      pre, code, [data-line-content], [data-column-number] {
+        ${fontFamily ? `font-family: '${fontFamily}', monospace !important;` : ''}
+        ${fontSize ? `font-size: ${fontSize} !important; line-height: 1.5 !important;` : ''}
+      }` : '';
+
+    return `
+      :host, [data-diff], [data-file], [data-diffs-header], [data-error-wrapper], [data-virtualizer-buffer] {
+        --diffs-bg: ${bg} !important;
+        --diffs-fg: ${fg} !important;
+        --diffs-dark-bg: ${bg};
+        --diffs-light-bg: ${bg};
+        --diffs-dark: ${fg};
+        --diffs-light: ${fg};
+      }
+      pre, code { background-color: ${bg} !important; }
+      [data-column-number] { background-color: ${bg} !important; }
+      [data-file-info] { display: none !important; }
+      [data-diffs-header] { display: none !important; }
+      ${fontCSS}
+    `;
+  } catch {
+    return '';
+  }
+}
+
+/**
  * Renders a small inline diff hunk using @pierre/diffs.
  * Compact, read-only, no file header. Shares theme + font settings
  * with the main DiffViewer via the same unsafeCSS injection pattern.
@@ -29,60 +66,46 @@ export const DiffHunkPreview: React.FC<DiffHunkPreviewProps> = ({
   const fileDiff = useMemo(() => {
     if (!hunk) return undefined;
     try {
-      const needsHeaders = !hunk.startsWith('diff --git') && !hunk.startsWith('--- ');
-      const patch = needsHeaders
-        ? `diff --git a/file b/file\n--- a/file\n+++ b/file\n${hunk}`
-        : hunk;
+      // Robustly handle all three hunk formats the tour agent might produce:
+      //   1. Full git diff: starts with "diff --git" — use as-is
+      //   2. File-level diff: starts with "--- " — prepend "diff --git" line only
+      //   3. Bare hunk: starts with "@@ " — prepend full synthetic headers
+      const patch = hunk.startsWith('diff --git')
+        ? hunk
+        : hunk.startsWith('--- ')
+          ? `diff --git a/file b/file\n${hunk}`
+          : `diff --git a/file b/file\n--- a/file\n+++ b/file\n${hunk}`;
       return getSingularPatch(patch);
     } catch {
       return undefined;
     }
   }, [hunk]);
 
-  // Theme injection — same pattern as DiffViewer (reads computed CSS vars, injects via unsafeCSS)
-  const [pierreTheme, setPierreTheme] = useState<{ type: 'dark' | 'light'; css: string }>({
-    type: resolvedMode,
-    css: '',
-  });
+  // Initialize synchronously so the very first render (inside a tooltip) is already themed.
+  // The lazy initializer reads computed CSS variables from the document root.
+  const [pierreTheme, setPierreTheme] = useState<{ type: 'dark' | 'light'; css: string }>(() => ({
+    type: resolvedMode ?? 'dark',
+    css: buildPierreCSS(resolvedMode ?? 'dark', state.fontFamily, state.fontSize),
+  }));
 
+  // Re-compute on theme / font changes
   useEffect(() => {
     const rafId = requestAnimationFrame(() => {
-      const styles = getComputedStyle(document.documentElement);
-      const bg = styles.getPropertyValue('--background').trim();
-      const fg = styles.getPropertyValue('--foreground').trim();
-      if (!bg || !fg) return;
-
-      const fontFamily = state.fontFamily;
-      const fontSize = state.fontSize;
-      const fontCSS = fontFamily || fontSize ? `
-        pre, code, [data-line-content], [data-column-number] {
-          ${fontFamily ? `font-family: '${fontFamily}', monospace !important;` : ''}
-          ${fontSize ? `font-size: ${fontSize} !important; line-height: 1.5 !important;` : ''}
-        }` : '';
-
       setPierreTheme({
-        type: resolvedMode,
-        css: `
-          :host, [data-diff], [data-file], [data-diffs-header], [data-error-wrapper], [data-virtualizer-buffer] {
-            --diffs-bg: ${bg} !important;
-            --diffs-fg: ${fg} !important;
-            --diffs-dark-bg: ${bg};
-            --diffs-light-bg: ${bg};
-            --diffs-dark: ${fg};
-            --diffs-light: ${fg};
-          }
-          pre, code { background-color: ${bg} !important; }
-          [data-column-number] { background-color: ${bg} !important; }
-          [data-file-info] { display: none !important; }
-          [data-diffs-header] { display: none !important; }
-          ${fontCSS}
-        `,
+        type: resolvedMode ?? 'dark',
+        css: buildPierreCSS(resolvedMode ?? 'dark', state.fontFamily, state.fontSize),
       });
     });
     return () => cancelAnimationFrame(rafId);
   }, [resolvedMode, state.fontFamily, state.fontSize]);
 
-  if (!fileDiff) return null;
+  if (!fileDiff) {
+    return (
+      <div className="px-3 py-2 text-[11px] text-muted-foreground/30 italic">
+        Diff not available
+      </div>
+    );
+  }
 
   return (
     <div className={`rounded overflow-hidden border border-border/20 ${className ?? ''}`}>
@@ -97,8 +120,6 @@ export const DiffHunkPreview: React.FC<DiffHunkPreviewProps> = ({
             unsafeCSS: pierreTheme.css,
             diffStyle: 'unified',
             disableLineNumbers: true,
-            disableFileHeader: true,
-            disableBackground: true,
             overflow: 'wrap',
           }}
         />

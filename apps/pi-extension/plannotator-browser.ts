@@ -2,6 +2,7 @@ import { existsSync, readFileSync, realpathSync, rmSync, statSync } from "node:f
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
+import { createWorktreePool, type WorktreePool } from "./generated/worktree-pool.js";
 import { fileURLToPath } from "node:url";
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import {
@@ -181,7 +182,9 @@ export async function openCodeReview(
 	let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
 	let diffType: DiffType | undefined;
 	let agentCwd: string | undefined;
+	let initialBase: string | undefined;
 	let worktreeCleanup: (() => void | Promise<void>) | undefined;
+	let worktreePool: WorktreePool | undefined;
 	let exitHandler: (() => void) | undefined;
 
 	if (isPRMode && urlArg) {
@@ -217,13 +220,16 @@ export async function openCodeReview(
 
 		// Create local worktree for agent file access (--local is the default for PR reviews)
 		let localPath: string | undefined;
+		let sessionDir: string | undefined;
 		try {
 			const repoDir = options.cwd ?? ctx.cwd;
 			const identifier = prMetadata.platform === "github"
 				? `${prMetadata.owner}-${prMetadata.repo}-${prMetadata.number}`
 				: `${prMetadata.projectPath.replace(/\//g, "-")}-${prMetadata.iid}`;
 			const suffix = Math.random().toString(36).slice(2, 8);
-			localPath = join(realpathSync(tmpdir()), `plannotator-pr-${identifier}-${suffix}`);
+			const prNumber = prMetadata.platform === "github" ? prMetadata.number : prMetadata.iid;
+			sessionDir = join(realpathSync(tmpdir()), `plannotator-pr-${identifier}-${suffix}`);
+			localPath = join(sessionDir, "pool", `pr-${prNumber}`);
 			const fetchRefStr = prMetadata.platform === "github"
 				? `refs/pull/${prMetadata.number}/head`
 				: `refs/merge-requests/${prMetadata.iid}/head`;
@@ -265,14 +271,19 @@ export async function openCodeReview(
 					cwd: repoDir,
 				});
 
-				const worktreePath = localPath;
 				const wtRepoDir = repoDir;
 				exitHandler = () => {
-					try { spawnSync("git", ["worktree", "remove", "--force", worktreePath], { cwd: wtRepoDir }); } catch {}
+					try {
+						for (const entry of worktreePool?.entries() ?? []) {
+							spawnSync("git", ["worktree", "remove", "--force", entry.path], { cwd: wtRepoDir });
+						}
+					} catch {}
+					if (sessionDir) try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
 				};
-				worktreeCleanup = () => {
+				worktreeCleanup = async () => {
 					if (exitHandler) { process.removeListener("exit", exitHandler); exitHandler = undefined; }
-					return removeWorktree(reviewRuntime, worktreePath, { force: true, cwd: wtRepoDir });
+					if (worktreePool) await worktreePool.cleanup(reviewRuntime);
+					if (sessionDir) try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
 				};
 				process.once("exit", exitHandler);
 			} else {
@@ -311,25 +322,29 @@ export async function openCodeReview(
 				await reviewRuntime.runGit(["branch", "--", prMetadata.baseBranch, prMetadata.baseSha], { cwd: localPath });
 				await reviewRuntime.runGit(["update-ref", `refs/remotes/origin/${prMetadata.baseBranch}`, prMetadata.baseSha], { cwd: localPath });
 
-				const clonePath = localPath;
 				exitHandler = () => {
-					try { rmSync(clonePath, { recursive: true, force: true }); } catch {}
+					if (sessionDir) try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
 				};
 				worktreeCleanup = () => {
 					if (exitHandler) { process.removeListener("exit", exitHandler); exitHandler = undefined; }
-					try { rmSync(clonePath, { recursive: true, force: true }); } catch {}
+					if (sessionDir) try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
 				};
 				process.once("exit", exitHandler);
 			}
 
 			agentCwd = localPath;
+			worktreePool = createWorktreePool(
+				{ sessionDir: sessionDir!, repoDir, isSameRepo },
+				{ path: localPath, prUrl: prMetadata.url, number: prNumber, ready: true },
+			);
 			console.error(`Local checkout ready at ${localPath}`);
 		} catch (err) {
 			console.error("Warning: local worktree creation failed, falling back to remote diff");
 			console.error(err instanceof Error ? err.message : String(err));
 			if (exitHandler) { process.removeListener("exit", exitHandler); exitHandler = undefined; }
-			if (localPath) try { rmSync(localPath, { recursive: true, force: true }); } catch {}
+			if (sessionDir) try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
 			agentCwd = undefined;
+			worktreePool = undefined;
 			worktreeCleanup = undefined;
 		}
 	} else {
@@ -342,6 +357,10 @@ export async function openCodeReview(
 		rawPatch = result.patch;
 		gitRef = result.label;
 		diffError = result.error;
+		// Remember which base the initial diff was computed against so it can
+		// be forwarded to the server below. Only matters when the caller
+		// overrode the detected default; otherwise it matches gitCtx already.
+		initialBase = defaultBranch;
 	}
 
 	const server = await startReviewServer({
@@ -351,11 +370,14 @@ export async function openCodeReview(
 		origin: "pi",
 		diffType,
 		gitContext: gitCtx,
+		initialBase,
 		prMetadata,
 		agentCwd,
+		worktreePool,
 		htmlContent: reviewHtmlContent,
 		sharingEnabled: process.env.PLANNOTATOR_SHARE !== "disabled",
 		shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
+		pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
 		onCleanup: worktreeCleanup,
 	});
 
@@ -369,7 +391,9 @@ export async function openMarkdownAnnotation(
 	mode: AnnotateMode,
 	folderPath?: string,
 	sourceInfo?: string,
-): Promise<{ feedback: string; exit?: boolean }> {
+	sourceConverted?: boolean,
+	gate?: boolean,
+): Promise<{ feedback: string; exit?: boolean; approved?: boolean }> {
 	if (!ctx.hasUI || !planHtmlContent) {
 		throw new Error("Plannotator annotation browser is unavailable in this session.");
 	}
@@ -393,6 +417,8 @@ export async function openMarkdownAnnotation(
 		mode,
 		folderPath,
 		sourceInfo,
+		sourceConverted,
+		gate,
 		htmlContent: planHtmlContent,
 		sharingEnabled: process.env.PLANNOTATOR_SHARE !== "disabled",
 		shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
@@ -405,8 +431,9 @@ export async function openMarkdownAnnotation(
 export async function openLastMessageAnnotation(
 	ctx: ExtensionContext,
 	lastText: string,
-): Promise<{ feedback: string; exit?: boolean }> {
-	return openMarkdownAnnotation(ctx, "last-message", lastText, "annotate-last");
+	gate?: boolean,
+): Promise<{ feedback: string; exit?: boolean; approved?: boolean }> {
+	return openMarkdownAnnotation(ctx, "last-message", lastText, "annotate-last", undefined, undefined, undefined, gate);
 }
 
 export async function openArchiveBrowserAction(
