@@ -1418,7 +1418,7 @@ const ReviewApp: React.FC = () => {
         }];
       }
 
-      const openUrls: string[] = targets.filter(t => t.status === 'success' && t.prUrl).map(t => t.prUrl);
+      const openUrls: string[] = [];
       const results = await Promise.allSettled(
         targets.map(async (target): Promise<SubmissionTarget> => {
           if (target.status === 'success') return target;
