@@ -276,7 +276,7 @@ export async function getGitContext(
     diffOptions.push({ id: "merge-base", label: "Committed changes" });
   }
 
-  diffOptions.push({ id: "all", label: "All files" });
+  diffOptions.push({ id: "all", label: "All files (HEAD)" });
 
   const [worktrees, currentTreePathResult] = await Promise.all([
     getWorktrees(runtime, cwd),

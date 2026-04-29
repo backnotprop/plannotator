@@ -28,8 +28,8 @@ const OPTIONS: { value: DefaultDiffType; label: string; description: string }[] 
   },
   {
     value: 'all',
-    label: 'All Files',
-    description: "Every tracked file in the repo, shown as additions",
+    label: 'All Files (HEAD)',
+    description: "Every tracked file at HEAD, shown as additions",
   },
 ];
 

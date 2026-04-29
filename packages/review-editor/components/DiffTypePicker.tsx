@@ -22,7 +22,7 @@ const OPTION_HINTS: Record<string, string> = {
   'last-commit': "Just your most recent commit.",
   branch: "Straight compare against the base branch (picked below). Can show commits that aren't yours if the base has new commits.",
   'merge-base': "Only what you've added on top of the base branch (picked below). Same as GitHub's PR view.",
-  all: "Every tracked file in the repo, shown as additions. Useful for reviewing an entire codebase.",
+  all: "Every tracked file at HEAD, shown as additions. Unlike Committed, which shows what changed vs a base branch, this shows the entire codebase.",
 };
 
 export const DiffTypePicker: React.FC<DiffTypePickerProps> = ({

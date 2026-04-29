@@ -126,7 +126,7 @@ const DEFAULT_DIFF_TYPE_OPTIONS = [
   { value: 'unstaged' as const, label: 'Unstaged', description: "Only changes you haven't staged yet" },
   { value: 'staged' as const, label: 'Staged', description: "Only changes you've staged for commit" },
   { value: 'merge-base' as const, label: 'Committed', description: "Everything you've committed on this branch" },
-  { value: 'all' as const, label: 'All Files', description: "Every tracked file in the repo, shown as additions" },
+  { value: 'all' as const, label: 'All Files (HEAD)', description: "Every tracked file at HEAD, shown as additions" },
 ];
 
 function SegmentedControl<T extends string>({ options, value, onChange }: {
