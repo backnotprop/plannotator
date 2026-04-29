@@ -38,6 +38,7 @@ function describeDiff(ctx: FeedbackDiffContext): string {
     case "last-commit":  label = "Last commit"; break;
     case "branch":       label = base ? `Branch diff vs \`${base}\`` : "Branch diff"; break;
     case "merge-base":   label = base ? `Committed changes vs \`${base}\`` : "Committed changes"; break;
+    case "all":          label = "All files"; break;
     default:             label = mode; // p4-* or anything else — show raw
   }
   return worktreePath ? `${label} _(worktree: ${worktreePath})_` : label;

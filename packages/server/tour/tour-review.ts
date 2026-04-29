@@ -338,6 +338,8 @@ function buildTourUserMessage(
       const base = options?.defaultBranch || "main";
       return `Walk the reviewer through the PR-style diff against base '${base}' as a guided tour. First find the common ancestor with \`git merge-base ${base} HEAD\`, then run \`git diff <merge-base>..HEAD\` using that commit to inspect only the changes introduced on this branch (matches GitHub's PR view).`;
     }
+    case "all":
+      return "Walk the reviewer through every file in the repository as a guided tour. All files are shown as additions (diffed against an empty tree).";
     default:
       return [
         "Walk the reviewer through the following code changes as a guided tour.",

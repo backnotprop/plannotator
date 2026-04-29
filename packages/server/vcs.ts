@@ -72,7 +72,7 @@ export interface VcsProvider {
 
 // --- Git provider ---
 
-const GIT_DIFF_TYPES = new Set(["uncommitted", "staged", "unstaged", "last-commit", "branch", "merge-base"]);
+const GIT_DIFF_TYPES = new Set(["uncommitted", "staged", "unstaged", "last-commit", "branch", "merge-base", "all"]);
 
 const gitProvider: VcsProvider = {
   id: "git",

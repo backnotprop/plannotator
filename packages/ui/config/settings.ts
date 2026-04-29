@@ -36,18 +36,18 @@ export const SETTINGS = {
   // --- Diff display options (namespaced under diffOptions in config.json) ---
 
   defaultDiffType: {
-    defaultValue: 'unstaged' as 'uncommitted' | 'unstaged' | 'staged' | 'merge-base',
+    defaultValue: 'unstaged' as 'uncommitted' | 'unstaged' | 'staged' | 'merge-base' | 'all',
     fromCookie: () => {
       const v = storage.getItem('plannotator-default-diff-type');
       if (v === 'branch') return 'merge-base' as const;
-      return v === 'uncommitted' || v === 'unstaged' || v === 'staged' || v === 'merge-base' ? v : undefined;
+      return v === 'uncommitted' || v === 'unstaged' || v === 'staged' || v === 'merge-base' || v === 'all' ? v : undefined;
     },
     toCookie: (v: string) => storage.setItem('plannotator-default-diff-type', v),
     serverKey: 'diffOptions',
     fromServer: (sc: Record<string, unknown>) => {
       const v = (sc.diffOptions as Record<string, unknown> | undefined)?.defaultDiffType;
       if (v === 'branch') return 'merge-base' as const;
-      return v === 'uncommitted' || v === 'unstaged' || v === 'staged' || v === 'merge-base' ? v : undefined;
+      return v === 'uncommitted' || v === 'unstaged' || v === 'staged' || v === 'merge-base' || v === 'all' ? v : undefined;
     },
     toServer: (v: string) => ({ diffOptions: { defaultDiffType: v } }),
   },

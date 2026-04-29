@@ -223,6 +223,9 @@ export function buildCodexReviewUserMessage(
       return `Review the PR-style diff against base '${base}'. First find the common ancestor with \`git merge-base ${base} HEAD\`, then run \`git diff <merge-base>..HEAD\` using that commit to inspect only the changes introduced on this branch (matches GitHub's PR view). Provide prioritized, actionable findings.`;
     }
 
+    case "all":
+      return "Review every file in the repository (all files shown as additions, diffed against an empty tree). Provide prioritized, actionable findings.";
+
     default:
       // p4 or unknown — fall back to generic with inlined diff
       return [

@@ -14,6 +14,7 @@ export type DiffType =
   | "last-commit"
   | "branch"
   | "merge-base"
+  | "all"
   | `worktree:${string}`
   | "p4-default"
   | `p4-changelist:${string}`;
@@ -275,6 +276,8 @@ export async function getGitContext(
     diffOptions.push({ id: "merge-base", label: "Committed changes" });
   }
 
+  diffOptions.push({ id: "all", label: "All files" });
+
   const [worktrees, currentTreePathResult] = await Promise.all([
     getWorktrees(runtime, cwd),
     runtime.runGit(["rev-parse", "--show-toplevel"], { cwd }),
@@ -368,6 +371,7 @@ const WORKTREE_SUB_TYPES = new Set([
   "last-commit",
   "branch",
   "merge-base",
+  "all",
 ]);
 
 export function parseWorktreeDiffType(
@@ -539,6 +543,29 @@ export async function runGitDiff(
         break;
       }
 
+      case "all": {
+        // Diff from the empty tree to HEAD — shows every tracked file as an addition.
+        const emptyTreeResult = await runtime.runGit(["hash-object", "-t", "tree", "/dev/null"], { cwd });
+        const emptyTree = emptyTreeResult.exitCode === 0
+          ? emptyTreeResult.stdout.trim()
+          : "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+        const allDiffArgs = [
+          "diff",
+          "--no-ext-diff",
+          "--src-prefix=a/",
+          "--dst-prefix=b/",
+          "--end-of-options",
+          `${emptyTree}..HEAD`,
+        ];
+        const allDiff = assertGitSuccess(
+          await runtime.runGit(allDiffArgs, { cwd }),
+          allDiffArgs,
+        );
+        patch = allDiff.stdout;
+        label = "All files";
+        break;
+      }
+
       default:
         return { patch: "", label: "Unknown diff type" };
     }
@@ -637,6 +664,11 @@ export async function getFileContentsForDiff(
         newContent: await gitShow("HEAD", filePath),
       };
     }
+    case "all":
+      return {
+        oldContent: null,
+        newContent: await gitShow("HEAD", filePath),
+      };
     default:
       return { oldContent: null, newContent: null };
   }
