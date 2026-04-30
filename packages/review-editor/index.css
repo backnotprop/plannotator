@@ -241,26 +241,30 @@ diffs-container {
   background: oklch(from var(--primary) l c h / 0.3) !important;
 }
 
-/* Hover utility button (GitHub-style +) */
+/* Hover utility button — matches Pierre's [data-utility-button] sizing */
 .hover-add-comment {
+  appearance: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 1.25rem;
-  height: 1.25rem;
-  border-radius: 0.25rem;
-  background: var(--primary);
-  color: var(--primary-foreground);
-  font-size: 0.75rem;
-  font-weight: 600;
+  width: 1lh;
+  height: 1lh;
+  font-size: var(--diffs-font-size, 13px);
+  line-height: var(--diffs-line-height, 20px);
+  border: none;
+  border-radius: 4px;
+  background-color: var(--diffs-modified-base);
+  color: var(--diffs-bg);
+  fill: currentColor;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 150ms;
+  position: relative;
+  z-index: 4;
+  padding: 0;
+  margin-right: calc(1ch - 1lh);
 }
 
 .hover-add-comment:hover {
-  opacity: 1;
-  background: oklch(0.70 0.20 280);
+  filter: brightness(1.2);
 }
 
 /* File tree styling */

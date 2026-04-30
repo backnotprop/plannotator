@@ -497,16 +497,19 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     );
   }, [filePath, onSelectAnnotation, handleEdit, onDeleteAnnotation, onClickAIMarker]);
 
-  // Render hover utility (+ button)
+  // Render hover utility (+ button).
+  // Pierre manages visibility imperatively — it inserts/removes the slot
+  // container on line hover. We must always return a button; calling
+  // getHoveredLine() to gate rendering would return stale data because
+  // Pierre's hover state changes don't trigger React re-renders.
   const renderHoverUtility = useCallback((getHoveredLine: () => { lineNumber: number; side: 'deletions' | 'additions' } | undefined) => {
-    const line = getHoveredLine();
-    if (!line) return null;
-
     return (
       <button
         className="hover-add-comment"
         onClick={(e) => {
           e.stopPropagation();
+          const line = getHoveredLine();
+          if (!line) return;
           toolbar.handleLineSelectionEnd({
             start: line.lineNumber,
             end: line.lineNumber,

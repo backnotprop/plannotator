@@ -8,7 +8,7 @@
         "@anthropic-ai/claude-agent-sdk": "^0.2.92",
         "@openai/codex-sdk": "^0.118.0",
         "@opencode-ai/sdk": "^1.3.0",
-        "@pierre/diffs": "^1.1.12",
+        "@pierre/diffs": "^1.1.20",
         "diff": "^8.0.4",
         "dockview-react": "^5.2.0",
         "dompurify": "^3.3.3",
@@ -64,7 +64,7 @@
     },
     "apps/opencode-plugin": {
       "name": "@plannotator/opencode",
-      "version": "0.19.1",
+      "version": "0.19.3",
       "dependencies": {
         "@opencode-ai/plugin": "^1.1.10",
       },
@@ -86,7 +86,7 @@
     },
     "apps/pi-extension": {
       "name": "@plannotator/pi-extension",
-      "version": "0.19.1",
+      "version": "0.19.3",
       "dependencies": {
         "@joplin/turndown-plugin-gfm": "^1.0.64",
         "turndown": "^7.2.4",
@@ -189,7 +189,7 @@
     },
     "packages/server": {
       "name": "@plannotator/server",
-      "version": "0.19.1",
+      "version": "0.19.3",
       "dependencies": {
         "@plannotator/ai": "workspace:*",
         "@plannotator/shared": "workspace:*",
@@ -664,7 +664,7 @@
 
     "@oven/bun-windows-x64-baseline": ["@oven/bun-windows-x64-baseline@1.3.5", "", { "os": "win32", "cpu": "x64" }, "sha512-rtVQB9/1XK8FWJgFtsOthbPifRMYypgJwxu+pK3NHx8WvFKmq7HcPDqNr8xLzGULjQEO7eAo2aOZfONOwYz+5g=="],
 
-    "@pierre/diffs": ["@pierre/diffs@1.1.12", "", { "dependencies": { "@pierre/theme": "0.0.28", "@shikijs/transformers": "^3.0.0", "diff": "8.0.3", "hast-util-to-html": "9.0.5", "lru_map": "0.4.1", "shiki": "^3.0.0" }, "peerDependencies": { "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0" } }, "sha512-InssHHM7f0nkazIRkuaiNCy6GkBLfwJlqc7LtTkMD/KSqsuc6bnL2V9sIQoG5PZu9jwinQiXUb/gT7itFa6U9A=="],
+    "@pierre/diffs": ["@pierre/diffs@1.1.20", "", { "dependencies": { "@pierre/theme": "0.0.28", "@shikijs/transformers": "^3.0.0", "diff": "8.0.3", "hast-util-to-html": "9.0.5", "lru_map": "0.4.1", "shiki": "^3.0.0" }, "peerDependencies": { "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0" } }, "sha512-lLi+3sLCm3QDd5/aLO9pw+WbF6UzhrkWm2oTZ5WZJTGemOyUNRJ4DDhcEKmVusu4C4bXx9Nssh6fF+wQcapb5w=="],
 
     "@pierre/theme": ["@pierre/theme@0.0.28", "", {}, "sha512-1j/H/fECBuc9dEvntdWI+l435HZapw+RCJTlqCA6BboQ5TjlnE005j/ROWutXIs8aq5OAc82JI2Kwk4A1WWBgw=="],
 
