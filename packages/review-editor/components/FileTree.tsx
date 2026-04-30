@@ -156,14 +156,15 @@ export const FileTree: React.FC<FileTreeProps> = ({
   }, [annotationCountMap]);
 
   const tree = useMemo(() => buildFileTree(files), [files]);
+  const allFolderPaths = useMemo(() => getAllFolderPaths(tree), [tree]);
 
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set(getAllFolderPaths(tree)));
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set(allFolderPaths));
   const [prevTree, setPrevTree] = useState(tree);
 
   // Expand all folders when tree changes (initial render + diff switch)
   if (tree !== prevTree) {
     setPrevTree(tree);
-    setExpandedFolders(new Set(getAllFolderPaths(tree)));
+    setExpandedFolders(new Set(allFolderPaths));
   }
 
   // Auto-expand ancestors of the active file so j/k nav always reveals the target
@@ -191,6 +192,12 @@ export const FileTree: React.FC<FileTreeProps> = ({
       return next;
     });
   }, []);
+
+  const areAllFoldersExpanded = allFolderPaths.length > 0 && allFolderPaths.every(path => expandedFolders.has(path));
+
+  const handleToggleAllFolders = useCallback(() => {
+    setExpandedFolders(areAllFoldersExpanded ? new Set() : new Set(allFolderPaths));
+  }, [allFolderPaths, areAllFoldersExpanded]);
 
   return (
     <aside className="border-r border-border/50 bg-card/30 flex flex-col flex-shrink-0 overflow-hidden" style={{ width: width ?? 256 }}>
@@ -224,24 +231,22 @@ export const FileTree: React.FC<FileTreeProps> = ({
               </button>
             )}
             <button
-              onClick={() => setExpandedFolders(new Set(getAllFolderPaths(tree)))}
-              className="p-1 rounded transition-colors hover:bg-muted text-muted-foreground"
-              title="Expand all folders"
+              onClick={handleToggleAllFolders}
+              disabled={allFolderPaths.length === 0}
+              className="p-1 rounded transition-colors hover:bg-muted text-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+              title={areAllFoldersExpanded ? 'Collapse all folders' : 'Expand all folders'}
             >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 8l7-6 7 6" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 16l7 6 7-6" />
-              </svg>
-            </button>
-            <button
-              onClick={() => setExpandedFolders(new Set())}
-              className="p-1 rounded transition-colors hover:bg-muted text-muted-foreground"
-              title="Collapse all folders"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 2l7 6 7-6" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 22l7-6 7 6" />
-              </svg>
+              {areAllFoldersExpanded ? (
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 2l7 6 7-6" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 22l7-6 7 6" />
+                </svg>
+              ) : (
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 8l7-6 7 6" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 16l7 6 7-6" />
+                </svg>
+              )}
             </button>
             {onToggleHideViewed && (
               <button
