@@ -126,7 +126,7 @@ export const reviewRuntime: ReviewGitRuntime = {
 		options?: { cwd?: string; timeoutMs?: number },
 	): Promise<GitCommandResult> {
 		return new Promise((resolve) => {
-			const proc = spawn("git", args, {
+			const proc = spawn("git", ["-c", "core.quotePath=false", ...args], {
 				cwd: options?.cwd,
 				stdio: ["ignore", "pipe", "pipe"],
 			});

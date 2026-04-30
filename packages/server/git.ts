@@ -38,7 +38,7 @@ async function runGit(
   args: string[],
   options?: { cwd?: string; timeoutMs?: number },
 ): Promise<GitCommandResult> {
-  const proc = Bun.spawn(["git", ...args], {
+  const proc = Bun.spawn(["git", "-c", "core.quotePath=false", ...args], {
     cwd: options?.cwd,
     stdout: "pipe",
     stderr: "pipe",
