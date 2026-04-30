@@ -73,7 +73,7 @@ export function getDatabaseConfig() {
         connectionString: config.DATABASE_URL,
         pool: {
             min: 2,
-            max: config.NODE_ENV === 'production' ? 20 : 5,
+            max: config.NODE_ENV === 'production' ? 20 : 10,
         },
         ssl: config.NODE_ENV === 'production',
     };
@@ -335,7 +335,7 @@ index 5678901..efghijk 100644
 +        connectionString: config.DATABASE_URL,
 +        pool: {
 +            min: 2,
-+            max: config.NODE_ENV === 'production' ? 20 : 5,
++            max: config.NODE_ENV === 'production' ? 20 : 10,
 +        },
 +        ssl: config.NODE_ENV === 'production',
 +    };

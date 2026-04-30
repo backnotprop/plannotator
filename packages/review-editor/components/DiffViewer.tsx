@@ -300,10 +300,10 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     if (!fileContents || fileContents.forPath !== filePath || (fileContents.old == null && fileContents.new == null)) return fileDiff;
     try {
       if (hideWhitespace && fileContents.old != null && fileContents.new != null) {
+        const normalize = (s: string) => s.split('\n').map(l => l.replace(/\s+/g, ' ').trim()).join('\n');
         return parseDiffFromFile(
-          { name: oldPath || filePath, contents: fileContents.old },
-          { name: filePath, contents: fileContents.new },
-          { ignoreWhitespace: true },
+          { name: oldPath || filePath, contents: normalize(fileContents.old) },
+          { name: filePath, contents: normalize(fileContents.new) },
         );
       }
       const result = processFile(patch, {

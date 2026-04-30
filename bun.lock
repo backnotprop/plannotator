@@ -26,7 +26,6 @@
       "version": "0.0.1",
       "dependencies": {
         "@plannotator/editor": "workspace:*",
-        "@plannotator/review-editor": "workspace:*",
         "@plannotator/server": "workspace:*",
         "@plannotator/shared": "workspace:*",
         "@plannotator/ui": "workspace:*",
@@ -214,7 +213,6 @@
       "version": "0.0.1",
       "dependencies": {
         "@pierre/diffs": "^1.1.12",
-        "@plannotator/review-editor": "workspace:*",
         "@plannotator/shared": "workspace:*",
         "@plannotator/web-highlighter": "^0.8.1",
         "@radix-ui/react-dialog": "^1.1.15",
