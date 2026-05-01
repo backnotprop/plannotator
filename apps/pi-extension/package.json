@@ -21,6 +21,8 @@
   },
   "files": [
     "index.ts",
+    "assistant-message.ts",
+    "current-pi-session.ts",
     "plannotator-browser.ts",
     "plannotator-events.ts",
     "server.ts",
