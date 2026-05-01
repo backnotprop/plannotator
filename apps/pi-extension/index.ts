@@ -26,6 +26,7 @@ import type {
 } from "@mariozechner/pi-coding-agent";
 import { Key } from "@mariozechner/pi-tui";
 import { buildPromptVariables, formatTodoList, loadPlannotatorConfig, renderTemplate, resolvePhaseProfile } from "./config.js";
+import { initI18n, t } from "./i18n.js";
 import {
 	type ChecklistItem,
 	markCompletedSteps,
@@ -116,6 +117,8 @@ function getPlanReviewAvailabilityWarning(options: { hasUI: boolean; hasPlanHtml
 }
 
 export default function plannotator(pi: ExtensionAPI): void {
+	initI18n(pi);
+
 	let phase: Phase = "idle";
 	void registerPlannotatorEventListeners(pi);
 	let lastSubmittedPath: string | null = null;
@@ -292,13 +295,13 @@ export default function plannotator(pi: ExtensionAPI): void {
 	pi.registerCommand("plannotator-status", {
 		description: "Show plannotator status",
 		handler: async (_args, ctx) => {
-			const parts = [`Phase: ${phase}`];
+			const parts = [t("status.phase", "Phase: {phase}", { phase })];
 			if (lastSubmittedPath) {
-				parts.push(`Plan file: ${lastSubmittedPath}`);
+				parts.push(t("status.planFile", "Plan file: {path}", { path: lastSubmittedPath }));
 			}
 			if (checklistItems.length > 0) {
-				const done = checklistItems.filter((t) => t.completed).length;
-				parts.push(`Progress: ${done}/${checklistItems.length}`);
+				const done = checklistItems.filter((item) => item.completed).length;
+				parts.push(t("status.progress", "Progress: {done}/{total}", { done, total: checklistItems.length }));
 			}
 			ctx.ui.notify(parts.join("\n"), "info");
 		},
