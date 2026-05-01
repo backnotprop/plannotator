@@ -67,6 +67,13 @@ import {
 	hasSessionMovedPastEntry,
 } from "./assistant-message.js";
 import {
+	isStalePiContextError,
+	notifyCurrentPiSession,
+	registerCurrentPiSession,
+	sendUserMessageToCurrentPiSession,
+	withCurrentPiSessionFallbackHeader,
+} from "./current-pi-session.js";
+import {
 	getToolsForPhase,
 	isPlanWritePathAllowed,
 	PLAN_SUBMIT_TOOL,
@@ -109,6 +116,7 @@ function safeNotify(
 	try {
 		ctx.ui.notify(message, type);
 	} catch (err) {
+		if (isStalePiContextError(err) && notifyCurrentPiSession(message, type)) return;
 		console.error(`Plannotator notification failed: ${err instanceof Error ? err.message : String(err)}`);
 	}
 }
@@ -141,13 +149,55 @@ User feedback:
 ${feedback}`;
 }
 
+function shouldAnchorLastMessageFeedback(ctx: ExtensionContext, entryId: string): boolean {
+	try {
+		return hasSessionMovedPastEntry(ctx, entryId);
+	} catch (err) {
+		if (isStalePiContextError(err)) return true;
+		throw err;
+	}
+}
+
+function sendUserMessageWithCurrentSessionFallback(
+	pi: ExtensionAPI,
+	content: Parameters<ExtensionAPI["sendUserMessage"]>[0],
+	options: Parameters<ExtensionAPI["sendUserMessage"]>[1],
+	errorMessage: string,
+): void {
+	try {
+		pi.sendUserMessage(content, options);
+		return;
+	} catch (err) {
+		if (!isStalePiContextError(err)) throw err;
+
+		const result = sendUserMessageToCurrentPiSession(
+			withCurrentPiSessionFallbackHeader(content),
+			options,
+		);
+		if (result.ok) return;
+
+		const detail = getStartupErrorMessage(result.error);
+		console.error(`${errorMessage}: ${detail}`);
+		notifyCurrentPiSession(`${errorMessage}: ${detail}`, "error");
+	}
+}
+
 export default function plannotator(pi: ExtensionAPI): void {
+	const currentPiSession = registerCurrentPiSession(pi);
 	let phase: Phase = "idle";
 	void registerPlannotatorEventListeners(pi);
 	let lastSubmittedPath: string | null = null;
 	let checklistItems: ChecklistItem[] = [];
 	let savedState: SavedPhaseState | null = null;
 	let plannotatorConfig = {};
+
+	pi.on("session_start", (_event, ctx) => {
+		currentPiSession.update(ctx);
+	});
+
+	pi.on("session_shutdown", () => {
+		currentPiSession.clear();
+	});
 
 	// ── Flags ────────────────────────────────────────────────────────────
 
@@ -355,7 +405,12 @@ export default function plannotator(pi: ExtensionAPI): void {
 								return;
 							}
 							if (result.approved) {
-								pi.sendUserMessage(getReviewApprovedPrompt("pi", loadConfig()), { deliverAs: "followUp" });
+								sendUserMessageWithCurrentSessionFallback(
+									pi,
+									getReviewApprovedPrompt("pi", loadConfig()),
+									{ deliverAs: "followUp" },
+									"Plannotator code review feedback could not be sent",
+								);
 								return;
 							}
 							if (!result.feedback) {
@@ -365,12 +420,20 @@ export default function plannotator(pi: ExtensionAPI): void {
 							if (isPRReview) {
 								// Platform PR actions (approve/comment) return approved:false with a
 								// status message — don't tell the agent to "address" a platform action.
-								pi.sendUserMessage(result.feedback, { deliverAs: "followUp" });
+								sendUserMessageWithCurrentSessionFallback(
+									pi,
+									result.feedback,
+									{ deliverAs: "followUp" },
+									"Plannotator code review feedback could not be sent",
+								);
 								return;
 							}
-							pi.sendUserMessage(`${result.feedback}${getReviewDeniedSuffix("pi", loadConfig())}`, {
-								deliverAs: "followUp",
-							});
+							sendUserMessageWithCurrentSessionFallback(
+								pi,
+								`${result.feedback}${getReviewDeniedSuffix("pi", loadConfig())}`,
+								{ deliverAs: "followUp" },
+								"Plannotator code review feedback could not be sent",
+							);
 						} catch (err) {
 							reportBackgroundError(ctx, "Plannotator code review feedback could not be sent", err);
 						}
@@ -509,13 +572,15 @@ export default function plannotator(pi: ExtensionAPI): void {
 								safeNotify(ctx, "Annotation closed (no feedback).", "info");
 								return;
 							}
-							pi.sendUserMessage(
+							sendUserMessageWithCurrentSessionFallback(
+								pi,
 								getAnnotateFileFeedbackPrompt("pi", loadConfig(), {
 									fileHeader: isFolder ? "Folder" : "File",
 									filePath: absolutePath,
 									feedback: result.feedback,
 								}),
 								{ deliverAs: "followUp" },
+								"Plannotator annotation feedback could not be sent",
 							);
 						} catch (err) {
 							reportBackgroundError(ctx, "Plannotator annotation feedback could not be sent", err);
@@ -574,14 +639,16 @@ export default function plannotator(pi: ExtensionAPI): void {
 								safeNotify(ctx, "Annotation closed (no feedback).", "info");
 								return;
 							}
-							const feedback = hasSessionMovedPastEntry(ctx, snapshot.entryId)
+							const feedback = shouldAnchorLastMessageFeedback(ctx, snapshot.entryId)
 								? anchorMessageFeedback(result.feedback, snapshot.text)
 								: result.feedback;
-							pi.sendUserMessage(
+							sendUserMessageWithCurrentSessionFallback(
+								pi,
 								getAnnotateMessageFeedbackPrompt("pi", loadConfig(), {
 									feedback,
 								}),
 								{ deliverAs: "followUp" },
+								"Plannotator message annotation feedback could not be sent",
 							);
 						} catch (err) {
 							reportBackgroundError(ctx, "Plannotator message annotation feedback could not be sent", err);
