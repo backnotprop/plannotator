@@ -10,6 +10,9 @@ import {
 	openCodeReview,
 	openLastMessageAnnotation,
 	openMarkdownAnnotation,
+	startCodeReviewBrowserSession,
+	startLastMessageAnnotationSession,
+	startMarkdownAnnotationSession,
 	startPlanReviewBrowserSession,
 } from "./plannotator-browser.js";
 
@@ -318,6 +321,9 @@ export {
 	getLastAssistantMessageText,
 	hasPlanBrowserHtml,
 	hasReviewBrowserHtml,
+	startCodeReviewBrowserSession,
+	startLastMessageAnnotationSession,
+	startMarkdownAnnotationSession,
 	getStartupErrorMessage,
 	openArchiveBrowserAction,
 	openCodeReview,

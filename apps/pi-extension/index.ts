@@ -56,9 +56,9 @@ import {
 	hasReviewBrowserHtml,
 	getStartupErrorMessage,
 	openArchiveBrowserAction,
-	openCodeReview,
-	openLastMessageAnnotation,
-	openMarkdownAnnotation,
+	startCodeReviewBrowserSession,
+	startLastMessageAnnotationSession,
+	startMarkdownAnnotationSession,
 	openPlanReviewBrowser,
 	registerPlannotatorEventListeners,
 } from "./plannotator-events.js";
@@ -318,26 +318,32 @@ export default function plannotator(pi: ExtensionAPI): void {
 			try {
 				const prUrl = args?.trim() || undefined;
 				const isPRReview = prUrl?.startsWith("http://") || prUrl?.startsWith("https://");
-				const result = await openCodeReview(ctx, { prUrl });
-				if (result.exit) {
-					ctx.ui.notify("Code review session closed.", "info");
-				} else if (result.feedback) {
-					if (result.approved) {
-						pi.sendUserMessage(
-							getReviewApprovedPrompt("pi", loadConfig()),
-						);
-					} else if (isPRReview) {
-						// Platform PR actions (approve/comment) return approved:false with a
-						// status message — don't tell the agent to "address" a platform action.
-						pi.sendUserMessage(result.feedback);
-					} else {
-						pi.sendUserMessage(
-							`${result.feedback}${getReviewDeniedSuffix("pi", loadConfig())}`,
-						);
-					}
-				} else {
-					ctx.ui.notify("Code review closed (no feedback).", "info");
-				}
+				const session = await startCodeReviewBrowserSession(ctx, { prUrl });
+				ctx.ui.notify("Code review opened. You can keep chatting while it runs.", "info");
+				void session
+					.waitForDecision()
+					.then((result) => {
+						if (result.exit) {
+							return;
+						}
+						if (!result.feedback) {
+							return;
+						}
+						if (result.approved) {
+							pi.sendUserMessage(getReviewApprovedPrompt("pi", loadConfig()));
+							return;
+						}
+						if (isPRReview) {
+							// Platform PR actions (approve/comment) return approved:false with a
+							// status message — don't tell the agent to "address" a platform action.
+							pi.sendUserMessage(result.feedback);
+							return;
+						}
+						pi.sendUserMessage(`${result.feedback}${getReviewDeniedSuffix("pi", loadConfig())}`);
+					})
+					.catch(() => {
+						// Browser/session startup already reported a visible error.
+					});
 			} catch (err) {
 				ctx.ui.notify(
 					`Failed to start code review UI: ${getStartupErrorMessage(err)}`,
@@ -442,20 +448,34 @@ export default function plannotator(pi: ExtensionAPI): void {
 			}
 
 			try {
-				const result = await openMarkdownAnnotation(ctx, absolutePath, markdown, mode ?? "annotate", folderPath, sourceInfo, sourceConverted, gate);
-				if (result.approved) {
-					ctx.ui.notify("Annotation approved.", "info");
-				} else if (result.exit) {
-					ctx.ui.notify("Annotation session closed.", "info");
-				} else if (result.feedback) {
-					pi.sendUserMessage(getAnnotateFileFeedbackPrompt("pi", loadConfig(), {
-						fileHeader: isFolder ? "Folder" : "File",
-						filePath: absolutePath,
-						feedback: result.feedback,
-					}));
-				} else {
-					ctx.ui.notify("Annotation closed (no feedback).", "info");
-				}
+				const session = await startMarkdownAnnotationSession(
+					ctx,
+					absolutePath,
+					markdown,
+					mode ?? "annotate",
+					folderPath,
+					sourceInfo,
+					sourceConverted,
+					gate,
+				);
+				ctx.ui.notify("Annotation opened. You can keep chatting while it runs.", "info");
+				void session
+					.waitForDecision()
+					.then((result) => {
+						if (result.exit || result.approved || !result.feedback) {
+							return;
+						}
+						pi.sendUserMessage(
+							getAnnotateFileFeedbackPrompt("pi", loadConfig(), {
+								fileHeader: isFolder ? "Folder" : "File",
+								filePath: absolutePath,
+								feedback: result.feedback,
+							}),
+						);
+					})
+					.catch(() => {
+						// Browser/session startup already reported a visible error.
+					});
 			} catch (err) {
 				ctx.ui.notify(
 					`Failed to start annotation UI: ${getStartupErrorMessage(err)}`,
@@ -488,18 +508,23 @@ export default function plannotator(pi: ExtensionAPI): void {
 			ctx.ui.notify("Opening annotation UI for last message...", "info");
 
 			try {
-				const result = await openLastMessageAnnotation(ctx, lastText, gate);
-				if (result.approved) {
-					ctx.ui.notify("Message approved.", "info");
-				} else if (result.exit) {
-					ctx.ui.notify("Annotation session closed.", "info");
-				} else if (result.feedback) {
-					pi.sendUserMessage(getAnnotateMessageFeedbackPrompt("pi", loadConfig(), {
-						feedback: result.feedback,
-					}));
-				} else {
-					ctx.ui.notify("Annotation closed (no feedback).", "info");
-				}
+				const session = await startLastMessageAnnotationSession(ctx, lastText, gate);
+				ctx.ui.notify("Last-message annotation opened. You can keep chatting while it runs.", "info");
+				void session
+					.waitForDecision()
+					.then((result) => {
+						if (result.exit || result.approved || !result.feedback) {
+							return;
+						}
+						pi.sendUserMessage(
+							getAnnotateMessageFeedbackPrompt("pi", loadConfig(), {
+								feedback: result.feedback,
+							}),
+						);
+					})
+					.catch(() => {
+						// Browser/session startup already reported a visible error.
+					});
 			} catch (err) {
 				ctx.ui.notify(
 					`Failed to start annotation UI: ${getStartupErrorMessage(err)}`,

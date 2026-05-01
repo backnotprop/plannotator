@@ -44,6 +44,12 @@ export interface PlanReviewBrowserSession {
 	stop: () => void;
 }
 
+export interface BrowserDecisionSession<T> {
+	url: string;
+	waitForDecision: () => Promise<T>;
+	stop: () => void;
+}
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let planHtmlContent = "";
 let reviewHtmlContent = "";
@@ -168,6 +174,22 @@ export async function openCodeReview(
 	ctx: ExtensionContext,
 	options: { cwd?: string; defaultBranch?: string; diffType?: DiffType; prUrl?: string } = {},
 ): Promise<{ approved: boolean; feedback?: string; annotations?: unknown[]; agentSwitch?: string; exit?: boolean }> {
+	const session = await startCodeReviewBrowserSession(ctx, options);
+	return session.waitForDecision();
+}
+
+export async function startCodeReviewBrowserSession(
+	ctx: ExtensionContext,
+	options: { cwd?: string; defaultBranch?: string; diffType?: DiffType; prUrl?: string } = {},
+): Promise<
+	BrowserDecisionSession<{
+		approved: boolean;
+		feedback?: string;
+		annotations?: unknown[];
+		agentSwitch?: string;
+		exit?: boolean;
+	}>
+> {
 	if (!ctx.hasUI || !reviewHtmlContent) {
 		throw new Error("Plannotator code review browser is unavailable in this session.");
 	}
@@ -384,7 +406,18 @@ export async function openCodeReview(
 		onCleanup: worktreeCleanup,
 	});
 
-	return openBrowserAndWait(server, ctx, server.waitForDecision);
+	openBrowserForServer(server.url, ctx);
+	const waitForDecision = async () => {
+		const result = await server.waitForDecision();
+		await delay(1500);
+		server.stop();
+		return result;
+	};
+	return {
+		url: server.url,
+		waitForDecision,
+		stop: server.stop,
+	};
 }
 
 export async function openMarkdownAnnotation(
@@ -397,6 +430,29 @@ export async function openMarkdownAnnotation(
 	sourceConverted?: boolean,
 	gate?: boolean,
 ): Promise<{ feedback: string; exit?: boolean; approved?: boolean }> {
+	const session = await startMarkdownAnnotationSession(
+		ctx,
+		filePath,
+		markdown,
+		mode,
+		folderPath,
+		sourceInfo,
+		sourceConverted,
+		gate,
+	);
+	return session.waitForDecision();
+}
+
+export async function startMarkdownAnnotationSession(
+	ctx: ExtensionContext,
+	filePath: string,
+	markdown: string,
+	mode: AnnotateMode,
+	folderPath?: string,
+	sourceInfo?: string,
+	sourceConverted?: boolean,
+	gate?: boolean,
+): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean }>> {
 	if (!ctx.hasUI || !planHtmlContent) {
 		throw new Error("Plannotator annotation browser is unavailable in this session.");
 	}
@@ -428,7 +484,18 @@ export async function openMarkdownAnnotation(
 		pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
 	});
 
-	return openBrowserAndWait(server, ctx, server.waitForDecision);
+	openBrowserForServer(server.url, ctx);
+	const waitForDecision = async () => {
+		const result = await server.waitForDecision();
+		await delay(1500);
+		server.stop();
+		return result;
+	};
+	return {
+		url: server.url,
+		waitForDecision,
+		stop: server.stop,
+	};
 }
 
 export async function openLastMessageAnnotation(
@@ -437,6 +504,23 @@ export async function openLastMessageAnnotation(
 	gate?: boolean,
 ): Promise<{ feedback: string; exit?: boolean; approved?: boolean }> {
 	return openMarkdownAnnotation(ctx, "last-message", lastText, "annotate-last", undefined, undefined, undefined, gate);
+}
+
+export async function startLastMessageAnnotationSession(
+	ctx: ExtensionContext,
+	lastText: string,
+	gate?: boolean,
+): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean }>> {
+	return startMarkdownAnnotationSession(
+		ctx,
+		"last-message",
+		lastText,
+		"annotate-last",
+		undefined,
+		undefined,
+		undefined,
+		gate,
+	);
 }
 
 export async function openArchiveBrowserAction(
