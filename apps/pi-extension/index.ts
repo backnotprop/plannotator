@@ -62,6 +62,7 @@ import {
 	openPlanReviewBrowser,
 	registerPlannotatorEventListeners,
 } from "./plannotator-events.js";
+import { initI18n, t } from "./i18n.js";
 import {
 	getToolsForPhase,
 	isPlanWritePathAllowed,
@@ -116,6 +117,7 @@ function getPlanReviewAvailabilityWarning(options: { hasUI: boolean; hasPlanHtml
 }
 
 export default function plannotator(pi: ExtensionAPI): void {
+	initI18n(pi);
 	let phase: Phase = "idle";
 	void registerPlannotatorEventListeners(pi);
 	let lastSubmittedPath: string | null = null;
@@ -126,7 +128,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 	// ── Flags ────────────────────────────────────────────────────────────
 
 	pi.registerFlag("plan", {
-		description: "Start in plan mode (restricted exploration and planning)",
+		description: t("flag.plan.description", "Start in plan mode (restricted exploration and planning)"),
 		type: "boolean",
 		default: false,
 	});
@@ -251,7 +253,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 		await applyPhaseConfig(ctx, { restoreSavedState: false });
 		persistState();
 		ctx.ui.notify(
-			"Plannotator: planning mode enabled. Write a markdown plan, then submit it for review.",
+			t("notify.planning.enabled", "Plannotator: planning mode enabled. Write a markdown plan, then submit it for review."),
 		);
 		const warning = getPlanReviewAvailabilityWarning({ hasUI: ctx.hasUI, hasPlanHtml: hasPlanBrowserHtml() });
 		if (warning) {
@@ -269,7 +271,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 		updateStatus(ctx);
 		updateWidget(ctx);
 		persistState();
-		ctx.ui.notify("Plannotator: disabled. Full access restored.");
+		ctx.ui.notify(t("notify.disabled", "Plannotator: disabled. Full access restored."));
 	}
 
 	async function togglePlanMode(ctx: ExtensionContext): Promise<void> {
@@ -283,14 +285,14 @@ export default function plannotator(pi: ExtensionAPI): void {
 	// ── Commands & Shortcuts ─────────────────────────────────────────────
 
 	pi.registerCommand("plannotator", {
-		description: "Toggle plannotator planning mode",
+		description: t("cmd.toggle.description", "Toggle plannotator planning mode"),
 		handler: async (_args, ctx) => {
 			await togglePlanMode(ctx);
 		},
 	});
 
 	pi.registerCommand("plannotator-status", {
-		description: "Show plannotator status",
+		description: t("cmd.status.description", "Show plannotator status"),
 		handler: async (_args, ctx) => {
 			const parts = [`Phase: ${phase}`];
 			if (lastSubmittedPath) {
@@ -305,11 +307,11 @@ export default function plannotator(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("plannotator-review", {
-		description: "Open interactive code review for current changes or a PR URL",
+		description: t("cmd.review.description", "Open interactive code review for current changes or a PR URL"),
 		handler: async (args, ctx) => {
 			if (!hasReviewBrowserHtml()) {
 				ctx.ui.notify(
-					"Code review UI not available. Run 'bun run build' in the pi-extension directory.",
+					t("notify.review.assetsMissing", "Code review UI not available. Run 'bun run build' in the pi-extension directory."),
 					"error",
 				);
 				return;
@@ -320,7 +322,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				const isPRReview = prUrl?.startsWith("http://") || prUrl?.startsWith("https://");
 				const result = await openCodeReview(ctx, { prUrl });
 				if (result.exit) {
-					ctx.ui.notify("Code review session closed.", "info");
+					ctx.ui.notify(t("notify.review.closed", "Code review session closed."), "info");
 				} else if (result.feedback) {
 					if (result.approved) {
 						pi.sendUserMessage(
@@ -336,11 +338,12 @@ export default function plannotator(pi: ExtensionAPI): void {
 						);
 					}
 				} else {
-					ctx.ui.notify("Code review closed (no feedback).", "info");
+					ctx.ui.notify(t("notify.review.noFeedback", "Code review closed (no feedback)."), "info");
 				}
 			} catch (err) {
+				const message = getStartupErrorMessage(err);
 				ctx.ui.notify(
-					`Failed to start code review UI: ${getStartupErrorMessage(err)}`,
+					t("notify.review.failedStart", `Failed to start code review UI: ${message}`, { message }),
 					"error",
 				);
 			}
@@ -348,7 +351,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("plannotator-annotate", {
-		description: "Open markdown file or folder in annotation UI",
+		description: t("cmd.annotate.description", "Open markdown file or folder in annotation UI"),
 		handler: async (args, ctx) => {
 			// #570: split --gate / --json from the path. --json is silently
 			// accepted (Pi writes back via sendUserMessage, not stdout).
@@ -356,7 +359,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			// (scoped-package-style names).
 			const { filePath, rawFilePath, gate } = parseAnnotateArgs(args ?? "");
 			if (!filePath) {
-				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.html | https://... | folder/> [--gate] [--json]", "error");
+				ctx.ui.notify(t("notify.annotate.usage", "Usage: /plannotator-annotate <file.md | file.html | https://... | folder/> [--gate] [--json]"), "error");
 				return;
 			}
 			if (!hasPlanBrowserHtml()) {
@@ -380,13 +383,15 @@ export default function plannotator(pi: ExtensionAPI): void {
 
 			if (isUrl) {
 				const useJina = resolveUseJina(false, loadConfig());
-				ctx.ui.notify(`Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}...`, "info");
+				const fetchMode = useJina ? " (via Jina Reader)" : " (via fetch+Turndown)";
+				ctx.ui.notify(t("notify.annotate.fetching", `Fetching: ${filePath}${fetchMode}...`, { path: filePath, mode: fetchMode }), "info");
 				try {
 					const result = await urlToMarkdown(filePath, { useJina });
 					markdown = result.markdown;
 					sourceConverted = isConvertedSource(result.source);
 				} catch (err) {
-					ctx.ui.notify(`Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}`, "error");
+					const message = err instanceof Error ? err.message : String(err);
+					ctx.ui.notify(t("notify.annotate.failedFetch", `Failed to fetch URL: ${message}`, { message }), "error");
 					return;
 				}
 				absolutePath = filePath;
@@ -402,7 +407,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				});
 				if (resolvedCandidate === null) {
 					absolutePath = resolveUserPath(filePath, ctx.cwd);
-					ctx.ui.notify(`File not found: ${absolutePath}`, "error");
+					ctx.ui.notify(t("notify.annotate.fileNotFound", `File not found: ${absolutePath}`, { path: absolutePath }), "error");
 					return;
 				}
 				absolutePath = resolveUserPath(resolvedCandidate, ctx.cwd);
@@ -410,43 +415,44 @@ export default function plannotator(pi: ExtensionAPI): void {
 				try {
 					isFolder = statSync(absolutePath).isDirectory();
 				} catch {
-					ctx.ui.notify(`Cannot access: ${absolutePath}`, "error");
+					ctx.ui.notify(t("notify.annotate.cannotAccess", `Cannot access: ${absolutePath}`, { path: absolutePath }), "error");
 					return;
 				}
 
 				if (isFolder) {
 					if (!hasMarkdownFiles(absolutePath, FILE_BROWSER_EXCLUDED, /\.(mdx?|html?)$/i)) {
-						ctx.ui.notify(`No markdown or HTML files found in ${absolutePath}`, "error");
+						ctx.ui.notify(t("notify.annotate.noMarkdown", `No markdown or HTML files found in ${absolutePath}`, { path: absolutePath }), "error");
 						return;
 					}
 					markdown = "";
 					folderPath = absolutePath;
 					mode = "annotate-folder";
-					ctx.ui.notify(`Opening annotation UI for folder ${filePath}...`, "info");
+					ctx.ui.notify(t("notify.annotate.openFolder", `Opening annotation UI for folder ${filePath}...`, { path: filePath }), "info");
 				} else if (/\.html?$/i.test(absolutePath)) {
 					// HTML file annotation — convert to markdown via Turndown
 					const fileSize = statSync(absolutePath).size;
 					if (fileSize > 10 * 1024 * 1024) {
-						ctx.ui.notify(`File too large (${Math.round(fileSize / 1024 / 1024)}MB, max 10MB)`, "error");
+						const mb = Math.round(fileSize / 1024 / 1024);
+						ctx.ui.notify(t("notify.annotate.tooLarge", `File too large (${mb}MB, max 10MB)`, { mb }), "error");
 						return;
 					}
 					const html = readFileSync(absolutePath, "utf-8");
 					markdown = htmlToMarkdown(html);
 					sourceInfo = basename(absolutePath);
 					sourceConverted = true;
-					ctx.ui.notify(`Opening annotation UI for ${filePath}...`, "info");
+					ctx.ui.notify(t("notify.annotate.openFile", `Opening annotation UI for ${filePath}...`, { path: filePath }), "info");
 				} else {
 					markdown = readFileSync(absolutePath, "utf-8");
-					ctx.ui.notify(`Opening annotation UI for ${filePath}...`, "info");
+					ctx.ui.notify(t("notify.annotate.openFile", `Opening annotation UI for ${filePath}...`, { path: filePath }), "info");
 				}
 			}
 
 			try {
 				const result = await openMarkdownAnnotation(ctx, absolutePath, markdown, mode ?? "annotate", folderPath, sourceInfo, sourceConverted, gate);
 				if (result.approved) {
-					ctx.ui.notify("Annotation approved.", "info");
+					ctx.ui.notify(t("notify.annotate.approved", "Annotation approved."), "info");
 				} else if (result.exit) {
-					ctx.ui.notify("Annotation session closed.", "info");
+					ctx.ui.notify(t("notify.annotate.closed", "Annotation session closed."), "info");
 				} else if (result.feedback) {
 					pi.sendUserMessage(getAnnotateFileFeedbackPrompt("pi", loadConfig(), {
 						fileHeader: isFolder ? "Folder" : "File",
@@ -454,11 +460,12 @@ export default function plannotator(pi: ExtensionAPI): void {
 						feedback: result.feedback,
 					}));
 				} else {
-					ctx.ui.notify("Annotation closed (no feedback).", "info");
+					ctx.ui.notify(t("notify.annotate.noFeedback", "Annotation closed (no feedback)."), "info");
 				}
 			} catch (err) {
+				const message = getStartupErrorMessage(err);
 				ctx.ui.notify(
-					`Failed to start annotation UI: ${getStartupErrorMessage(err)}`,
+					t("notify.annotate.failedStart", `Failed to start annotation UI: ${message}`, { message }),
 					"error",
 				);
 			}
@@ -466,7 +473,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("plannotator-last", {
-		description: "Annotate the last assistant message",
+		description: t("cmd.annotateMessage.description", "Annotate the last assistant message"),
 		handler: async (args, ctx) => {
 			// #570: support --gate on /plannotator-last for Stop-hook review gate.
 			const { gate } = parseAnnotateArgs(args ?? "");
@@ -481,28 +488,29 @@ export default function plannotator(pi: ExtensionAPI): void {
 
 			const lastText = await getLastAssistantMessageText(ctx);
 			if (!lastText) {
-				ctx.ui.notify("No assistant message found in session.", "error");
+				ctx.ui.notify(t("notify.message.noAssistant", "No assistant message found in session."), "error");
 				return;
 			}
 
-			ctx.ui.notify("Opening annotation UI for last message...", "info");
+			ctx.ui.notify(t("notify.message.open", "Opening annotation UI for last message..."), "info");
 
 			try {
 				const result = await openLastMessageAnnotation(ctx, lastText, gate);
 				if (result.approved) {
-					ctx.ui.notify("Message approved.", "info");
+					ctx.ui.notify(t("notify.message.approved", "Message approved."), "info");
 				} else if (result.exit) {
-					ctx.ui.notify("Annotation session closed.", "info");
+					ctx.ui.notify(t("notify.annotate.closed", "Annotation session closed."), "info");
 				} else if (result.feedback) {
 					pi.sendUserMessage(getAnnotateMessageFeedbackPrompt("pi", loadConfig(), {
 						feedback: result.feedback,
 					}));
 				} else {
-					ctx.ui.notify("Annotation closed (no feedback).", "info");
+					ctx.ui.notify(t("notify.annotate.noFeedback", "Annotation closed (no feedback)."), "info");
 				}
 			} catch (err) {
+				const message = getStartupErrorMessage(err);
 				ctx.ui.notify(
-					`Failed to start annotation UI: ${getStartupErrorMessage(err)}`,
+					t("notify.annotate.failedStart", `Failed to start annotation UI: ${message}`, { message }),
 					"error",
 				);
 			}
@@ -510,7 +518,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("plannotator-archive", {
-		description: "Browse saved plan decisions",
+		description: t("cmd.archive.description", "Browse saved plan decisions"),
 		handler: async (_args, ctx) => {
 			if (!hasPlanBrowserHtml()) {
 				ctx.ui.notify(
@@ -520,14 +528,15 @@ export default function plannotator(pi: ExtensionAPI): void {
 				return;
 			}
 
-			ctx.ui.notify("Opening plan archive...", "info");
+			ctx.ui.notify(t("notify.archive.open", "Opening plan archive..."), "info");
 
 			try {
 				await openArchiveBrowserAction(ctx);
-				ctx.ui.notify("Archive browser closed.", "info");
+				ctx.ui.notify(t("notify.archive.closed", "Archive browser closed."), "info");
 			} catch (err) {
+				const message = getStartupErrorMessage(err);
 				ctx.ui.notify(
-					`Failed to start archive: ${getStartupErrorMessage(err)}`,
+					t("notify.archive.failedStart", `Failed to start archive: ${message}`, { message }),
 					"error",
 				);
 			}
@@ -535,7 +544,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 	});
 
 	pi.registerShortcut(Key.ctrlAlt("p"), {
-		description: "Toggle plannotator",
+		description: t("cmd.shortcut.description", "Toggle plannotator"),
 		handler: async (ctx) => {
 			await togglePlanMode(ctx);
 		},
