@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useEffect, useLayoutEffect, useCallback, useState } from 'react';
 import { FileDiff, type DiffLineAnnotation } from '@pierre/diffs/react';
-import { getSingularPatch, processFile, parseDiffFromFile } from '@pierre/diffs';
+import { getSingularPatch, processFile } from '@pierre/diffs';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/types';
 import type { DiffTokenEventBaseProps } from '@pierre/diffs';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
@@ -127,7 +127,6 @@ interface DiffViewerProps {
   lineDiffType?: 'word-alt' | 'word' | 'char' | 'none';
   disableLineNumbers?: boolean;
   disableBackground?: boolean;
-  hideWhitespace?: boolean;
   fontFamily?: string;
   fontSize?: string;
   annotations: CodeAnnotation[];
@@ -173,7 +172,6 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   lineDiffType,
   disableLineNumbers,
   disableBackground,
-  hideWhitespace,
   fontFamily,
   fontSize,
   annotations,
@@ -294,18 +292,9 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 
   // Re-parse the patch with full file contents so hunk indices are computed
   // against the complete file (isPartial: false), enabling expansion.
-  // When hideWhitespace is on, recompute the diff from file contents to
-  // exclude whitespace-only changes (like GitHub's ?w=1).
   const augmentedDiff = useMemo(() => {
     if (!fileContents || fileContents.forPath !== filePath || (fileContents.old == null && fileContents.new == null)) return fileDiff;
     try {
-      if (hideWhitespace && fileContents.old != null && fileContents.new != null) {
-        const normalize = (s: string) => s.split('\n').map(l => l.replace(/\s+/g, ' ').trim()).join('\n');
-        return parseDiffFromFile(
-          { name: oldPath || filePath, contents: normalize(fileContents.old) },
-          { name: filePath, contents: normalize(fileContents.new) },
-        );
-      }
       const result = processFile(patch, {
         oldFile: fileContents.old != null ? { name: oldPath || filePath, contents: fileContents.old } : undefined,
         newFile: fileContents.new != null ? { name: filePath, contents: fileContents.new } : undefined,
@@ -314,7 +303,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     } catch {
       return fileDiff;
     }
-  }, [patch, filePath, oldPath, fileContents, fileDiff, hideWhitespace]);
+  }, [patch, filePath, oldPath, fileContents, fileDiff]);
 
   const previousScrollFilePathRef = useRef(filePath);
   useLayoutEffect(() => {

@@ -1016,7 +1016,7 @@ const ReviewApp: React.FC = () => {
   // Shared helper: fetch a diff switch and update state.
   // Returns true on success, false on failure — callers that optimistically
   // updated UI state (e.g. the base picker) can use this to revert.
-  const fetchDiffSwitch = useCallback(async (fullDiffType: string, baseOverride?: string): Promise<boolean> => {
+  const fetchDiffSwitch = useCallback(async (fullDiffType: string, baseOverride?: string, options?: { preserveFile?: boolean }): Promise<boolean> => {
     setIsLoadingDiff(true);
     try {
       const res = await fetch('/api/diff/switch', {
@@ -1027,6 +1027,7 @@ const ReviewApp: React.FC = () => {
           // Server ignores base for modes that don't use it (uncommitted/staged/etc),
           // so forwarding unconditionally is safe and keeps the request shape uniform.
           ...((baseOverride ?? selectedBase) && { base: baseOverride ?? selectedBase }),
+          hideWhitespace: diffHideWhitespace,
         }),
       });
 
@@ -1042,46 +1043,59 @@ const ReviewApp: React.FC = () => {
       };
 
       const nextFiles = parseDiffToFiles(data.rawPatch);
-      dockApi?.getPanel(REVIEW_DIFF_PANEL_ID)?.api.close();
-      needsInitialDiffPanel.current = true;
-      setDiffData(prev => prev ? { ...prev, rawPatch: data.rawPatch, gitRef: data.gitRef, diffType: data.diffType } : prev);
-      setFiles(nextFiles);
-      setDiffType(data.diffType);
-      // Adopt the server's echoed base. The server trusts whatever we sent
-      // verbatim — this sync just makes sure selectedBase and committedBase
-      // match the server's view (important when the caller didn't send a
-      // base and the server used the detected default instead).
-      if (data.base) {
-        setSelectedBase(data.base);
-        setCommittedBase(data.base);
+
+      if (options?.preserveFile) {
+        // Whitespace toggle: update patch in-place, keep the active file.
+        // If the current file was removed (whitespace-only), retarget the
+        // dock panel to the first remaining file.
+        setDiffData(prev => prev ? { ...prev, rawPatch: data.rawPatch, gitRef: data.gitRef } : prev);
+        setFiles(nextFiles);
+        const currentPath = files[activeFileIndex]?.path;
+        const nextIdx = currentPath ? nextFiles.findIndex(f => f.path === currentPath) : -1;
+        if (nextIdx !== -1) {
+          setActiveFileIndex(nextIdx);
+        } else if (nextFiles.length > 0) {
+          setActiveFileIndex(0);
+          openDiffFile(nextFiles[0].path);
+        }
+      } else {
+        dockApi?.getPanel(REVIEW_DIFF_PANEL_ID)?.api.close();
+        needsInitialDiffPanel.current = true;
+        setDiffData(prev => prev ? { ...prev, rawPatch: data.rawPatch, gitRef: data.gitRef, diffType: data.diffType } : prev);
+        setFiles(nextFiles);
+        setDiffType(data.diffType);
+        if (data.base) {
+          setSelectedBase(data.base);
+          setCommittedBase(data.base);
+        }
+        // Merge only the per-cwd fields so the sidebar reflects the worktree
+        // we're now in. Keep the original `worktrees` list (already filtered to
+        // exclude the server's startup cwd — replacing it with the new context's
+        // list would duplicate the "Main repo" entry) and `availableBranches`
+        // (shared across worktrees of the same repo).
+        //
+        // IMPORTANT: we deliberately do NOT overwrite `currentBranch`. The
+        // WorktreePicker's top "launch" row uses it as a label, and that row
+        // represents the cwd plannotator was launched in — not whichever
+        // worktree is currently active. Freezing `currentBranch` at its
+        // initial-load value keeps that label truthful. `defaultBranch` and
+        // `diffOptions` update because they describe the active diff, which
+        // other UI (empty-state text, diff-type picker) should see fresh.
+        if (data.gitContext) {
+          setGitContext((prev) => {
+            if (!prev) return data.gitContext!;
+            return {
+              ...prev,
+              defaultBranch: data.gitContext!.defaultBranch,
+              diffOptions: data.gitContext!.diffOptions,
+            };
+          });
+        }
+        setActiveFileIndex(0);
+        setPendingSelection(null);
+        resetStagedFiles();
       }
-      // Merge only the per-cwd fields so the sidebar reflects the worktree
-      // we're now in. Keep the original `worktrees` list (already filtered to
-      // exclude the server's startup cwd — replacing it with the new context's
-      // list would duplicate the "Main repo" entry) and `availableBranches`
-      // (shared across worktrees of the same repo).
-      //
-      // IMPORTANT: we deliberately do NOT overwrite `currentBranch`. The
-      // WorktreePicker's top "launch" row uses it as a label, and that row
-      // represents the cwd plannotator was launched in — not whichever
-      // worktree is currently active. Freezing `currentBranch` at its
-      // initial-load value keeps that label truthful. `defaultBranch` and
-      // `diffOptions` update because they describe the active diff, which
-      // other UI (empty-state text, diff-type picker) should see fresh.
-      if (data.gitContext) {
-        setGitContext((prev) => {
-          if (!prev) return data.gitContext!;
-          return {
-            ...prev,
-            defaultBranch: data.gitContext!.defaultBranch,
-            diffOptions: data.gitContext!.diffOptions,
-          };
-        });
-      }
-      setActiveFileIndex(0);
-      setPendingSelection(null);
       setDiffError(data.error || null);
-      resetStagedFiles();
       return true;
     } catch (err) {
       console.error('Failed to switch diff:', err);
@@ -1090,7 +1104,7 @@ const ReviewApp: React.FC = () => {
     } finally {
       setIsLoadingDiff(false);
     }
-  }, [dockApi, resetStagedFiles, selectedBase]);
+  }, [dockApi, resetStagedFiles, selectedBase, diffHideWhitespace, files, activeFileIndex, openDiffFile]);
 
   // Switch the base branch the current diff compares against.
   // Only triggers a refetch when the active mode actually uses a base.
@@ -1129,6 +1143,18 @@ const ReviewApp: React.FC = () => {
       : activeDiffBase;
     await fetchDiffSwitch(fullDiffType);
   }, [activeWorktreePath, activeDiffBase, fetchDiffSwitch]);
+
+  // Re-fetch diff when hideWhitespace toggles so the server applies git diff -w.
+  // Preserves the active file since only whitespace hunks change.
+  const hideWhitespaceInitialized = useRef(false);
+  useEffect(() => {
+    if (!origin || !gitContext) return;
+    if (!hideWhitespaceInitialized.current) {
+      hideWhitespaceInitialized.current = true;
+      return;
+    }
+    fetchDiffSwitch(diffType, selectedBase, { preserveFile: true });
+  }, [diffHideWhitespace, origin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Select annotation - switches file if needed and scrolls to it
   const handleSelectAnnotation = useCallback((id: string | null) => {
@@ -1192,7 +1218,6 @@ const ReviewApp: React.FC = () => {
     lineDiffType: diffLineDiffType,
     disableLineNumbers: !diffShowLineNumbers,
     disableBackground: !diffShowBackground,
-    hideWhitespace: diffHideWhitespace,
     fontFamily: diffFontFamily || undefined,
     fontSize: diffFontSize || undefined,
     // Only propagate base for modes where it affects old/new content. Avoids
@@ -1249,7 +1274,7 @@ const ReviewApp: React.FC = () => {
     openTourPanel: handleOpenTour,
   }), [
     files, activeFileIndex, diffStyle, diffOverflow, diffIndicators,
-    diffLineDiffType, diffShowLineNumbers, diffShowBackground, diffHideWhitespace,
+    diffLineDiffType, diffShowLineNumbers, diffShowBackground,
     diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope,
     allAnnotations, externalAnnotations,
     selectedAnnotationId, pendingSelection, handleLineSelection,

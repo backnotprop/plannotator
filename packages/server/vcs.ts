@@ -14,6 +14,7 @@ import {
   type DiffResult,
   type DiffType,
   type GitContext,
+  type GitDiffOptions,
 } from "@plannotator/shared/review-core";
 
 import {
@@ -49,7 +50,7 @@ export interface VcsProvider {
   getContext(cwd?: string): Promise<GitContext>;
 
   /** Get unified diff patch for the given diff type */
-  runDiff(diffType: DiffType, defaultBranch: string, cwd?: string): Promise<DiffResult>;
+  runDiff(diffType: DiffType, defaultBranch: string, cwd?: string, options?: GitDiffOptions): Promise<DiffResult>;
 
   /** Get old/new file contents for hunk expansion */
   getFileContents(
@@ -97,8 +98,8 @@ const gitProvider: VcsProvider = {
 
   getContext: getGitContext,
 
-  runDiff(diffType: DiffType, defaultBranch: string, cwd?: string) {
-    return runGitDiff(diffType, defaultBranch, cwd);
+  runDiff(diffType: DiffType, defaultBranch: string, cwd?: string, options?: GitDiffOptions) {
+    return runGitDiff(diffType, defaultBranch, cwd, options);
   },
 
   getFileContents(diffType, defaultBranch, filePath, oldPath?, cwd?) {
@@ -132,7 +133,7 @@ const p4Provider: VcsProvider = {
 
   getContext: getP4Context,
 
-  runDiff(diffType: DiffType, _defaultBranch: string, cwd?: string) {
+  runDiff(diffType: DiffType, _defaultBranch: string, cwd?: string, _options?: GitDiffOptions) {
     return runP4Diff(diffType, cwd);
   },
 
@@ -199,9 +200,10 @@ export async function runVcsDiff(
   diffType: DiffType,
   defaultBranch: string = "main",
   cwd?: string,
+  options?: GitDiffOptions,
 ): Promise<DiffResult> {
   const provider = getProviderForDiffType(diffType);
-  return provider.runDiff(diffType, defaultBranch, cwd);
+  return provider.runDiff(diffType, defaultBranch, cwd, options);
 }
 
 export async function getVcsFileContentsForDiff(

@@ -500,8 +500,11 @@ if (args[0] === "sessions") {
   } else {
     // --- Local Review Mode ---
     gitContext = await getVcsContext();
-    initialDiffType = gitContext.vcsType === "p4" ? "p4-default" : resolveDefaultDiffType(loadConfig());
-    const diffResult = await runVcsDiff(initialDiffType, gitContext.defaultBranch);
+    const config = loadConfig();
+    initialDiffType = gitContext.vcsType === "p4" ? "p4-default" : resolveDefaultDiffType(config);
+    const diffResult = await runVcsDiff(initialDiffType, gitContext.defaultBranch, undefined, {
+      hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
+    });
     rawPatch = diffResult.patch;
     gitRef = diffResult.label;
     diffError = diffResult.error;

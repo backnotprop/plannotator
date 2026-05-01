@@ -92,8 +92,11 @@ export async function handleReviewCommand(
     client.app.log({ level: "info", message: "Opening code review UI..." });
 
     gitContext = await getGitContext(directory);
-    userDiffType = resolveDefaultDiffType(loadConfig());
-    const diffResult = await runGitDiffWithContext(userDiffType, gitContext);
+    const config = loadConfig();
+    userDiffType = resolveDefaultDiffType(config);
+    const diffResult = await runGitDiffWithContext(userDiffType, gitContext, {
+      hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
+    });
     rawPatch = diffResult.patch;
     gitRef = diffResult.label;
     diffError = diffResult.error;

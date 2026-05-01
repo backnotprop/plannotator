@@ -65,6 +65,10 @@ export interface ReviewGitRuntime {
   readTextFile: (path: string) => Promise<string | null>;
 }
 
+export interface GitDiffOptions {
+  hideWhitespace?: boolean;
+}
+
 export async function getCurrentBranch(
   runtime: ReviewGitRuntime,
   cwd?: string,
@@ -303,6 +307,7 @@ async function getUntrackedFileDiffs(
   srcPrefix = "a/",
   dstPrefix = "b/",
   cwd?: string,
+  options?: GitDiffOptions,
 ): Promise<string> {
   // git ls-files scopes to the CWD subtree and returns CWD-relative paths,
   // unlike git diff HEAD which always covers the full repo with root-relative
@@ -334,6 +339,7 @@ async function getUntrackedFileDiffs(
         [
           "diff",
           "--no-ext-diff",
+          ...(options?.hideWhitespace ? ["-w"] : []),
           "--no-index",
           `--src-prefix=${srcPrefix}`,
           `--dst-prefix=${dstPrefix}`,
@@ -396,6 +402,7 @@ export async function runGitDiff(
   diffType: DiffType,
   defaultBranch: string = "main",
   externalCwd?: string,
+  options?: GitDiffOptions,
 ): Promise<DiffResult> {
   let patch = "";
   let label = "";
@@ -415,12 +422,15 @@ export async function runGitDiff(
     effectiveDiffType = parsed.subType;
   }
 
+  const wFlag = options?.hideWhitespace ? ["-w"] : [];
+
   try {
     switch (effectiveDiffType) {
       case "uncommitted": {
         const trackedDiffArgs = [
           "diff",
           "--no-ext-diff",
+          ...wFlag,
           "HEAD",
           "--src-prefix=a/",
           "--dst-prefix=b/",
@@ -439,6 +449,7 @@ export async function runGitDiff(
           "a/",
           "b/",
           cwd,
+          options,
         );
         patch = trackedPatch + untrackedDiff;
         label = "Uncommitted changes";
@@ -449,6 +460,7 @@ export async function runGitDiff(
         const stagedDiffArgs = [
           "diff",
           "--no-ext-diff",
+          ...wFlag,
           "--staged",
           "--src-prefix=a/",
           "--dst-prefix=b/",
@@ -463,7 +475,13 @@ export async function runGitDiff(
       }
 
       case "unstaged": {
-        const trackedDiffArgs = ["diff", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/"];
+        const trackedDiffArgs = [
+          "diff",
+          "--no-ext-diff",
+          ...wFlag,
+          "--src-prefix=a/",
+          "--dst-prefix=b/",
+        ];
         const trackedDiff = assertGitSuccess(
           await runtime.runGit(trackedDiffArgs, { cwd }),
           trackedDiffArgs,
@@ -473,6 +491,7 @@ export async function runGitDiff(
           "a/",
           "b/",
           cwd,
+          options,
         );
         patch = trackedDiff.stdout + untrackedDiff;
         label = "Unstaged changes";
@@ -486,8 +505,8 @@ export async function runGitDiff(
         );
         const args =
           hasParent.exitCode === 0
-            ? ["diff", "--no-ext-diff", "HEAD~1..HEAD", "--src-prefix=a/", "--dst-prefix=b/"]
-            : ["diff", "--no-ext-diff", "--root", "HEAD", "--src-prefix=a/", "--dst-prefix=b/"];
+            ? ["diff", "--no-ext-diff", ...wFlag, "HEAD~1..HEAD", "--src-prefix=a/", "--dst-prefix=b/"]
+            : ["diff", "--no-ext-diff", ...wFlag, "--root", "HEAD", "--src-prefix=a/", "--dst-prefix=b/"];
         const lastCommitDiff = assertGitSuccess(
           await runtime.runGit(args, { cwd }),
           args,
@@ -505,6 +524,7 @@ export async function runGitDiff(
         const branchDiffArgs = [
           "diff",
           "--no-ext-diff",
+          ...wFlag,
           "--src-prefix=a/",
           "--dst-prefix=b/",
           "--end-of-options",
@@ -529,6 +549,7 @@ export async function runGitDiff(
         const mergeBaseDiffArgs = [
           "diff",
           "--no-ext-diff",
+          ...wFlag,
           "--src-prefix=a/",
           "--dst-prefix=b/",
           "--end-of-options",
@@ -552,6 +573,7 @@ export async function runGitDiff(
         const allDiffArgs = [
           "diff",
           "--no-ext-diff",
+          ...wFlag,
           "--src-prefix=a/",
           "--dst-prefix=b/",
           "--end-of-options",
@@ -597,8 +619,9 @@ export async function runGitDiffWithContext(
   runtime: ReviewGitRuntime,
   diffType: DiffType,
   gitContext: GitContext,
+  options?: GitDiffOptions,
 ): Promise<DiffResult> {
-  return runGitDiff(runtime, diffType, gitContext.defaultBranch, gitContext.cwd);
+  return runGitDiff(runtime, diffType, gitContext.defaultBranch, gitContext.cwd, options);
 }
 
 export async function getFileContentsForDiff(

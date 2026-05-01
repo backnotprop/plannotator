@@ -352,8 +352,11 @@ export async function openCodeReview(
 		const cwd = options.cwd ?? ctx.cwd;
 		gitCtx = await getGitContext(cwd);
 		const defaultBranch = options.defaultBranch ?? gitCtx.defaultBranch;
-		diffType = options.diffType ?? resolveDefaultDiffType(loadConfig());
-		const result = await runGitDiff(diffType, defaultBranch, cwd);
+		const config = loadConfig();
+		diffType = options.diffType ?? resolveDefaultDiffType(config);
+		const result = await runGitDiff(diffType, defaultBranch, cwd, {
+			hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
+		});
 		rawPatch = result.patch;
 		gitRef = result.label;
 		diffError = result.error;

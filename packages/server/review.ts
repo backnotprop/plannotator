@@ -44,7 +44,7 @@ import {
   transformClaudeFindings,
 } from "./claude-review";
 import { createTourSession, TOUR_EMPTY_OUTPUT_ERROR } from "./tour/tour-review";
-import { saveConfig, detectGitUser, getServerConfig } from "./config";
+import { loadConfig, saveConfig, detectGitUser, getServerConfig } from "./config";
 import { type PRMetadata, type PRReviewFileComment, type PRStackTree, type PRListItem, fetchPR, fetchPRFileContent, fetchPRContext, submitPRReview, fetchPRViewedFiles, markPRFilesViewed, fetchPRStack, fetchPRList, getPRUser, parsePRUrl, prRefFromMetadata, isSameProject, getDisplayRepo, getMRLabel, getMRNumberLabel } from "./pr";
 import { createAIEndpoints, ProviderRegistry, SessionManager, createProvider, type AIEndpoints, type PiSDKConfig } from "@plannotator/ai";
 import { isWSL } from "./browser";
@@ -150,6 +150,7 @@ export async function startReviewServer(
   let currentGitRef = options.gitRef;
   let currentDiffType: DiffType = options.diffType || "uncommitted";
   let currentError = options.error;
+  let currentHideWhitespace = loadConfig().diffOptions?.hideWhitespace ?? false;
   let originalPRPatch = options.rawPatch;
   let originalPRGitRef = options.gitRef;
   let originalPRError = options.error;
@@ -515,6 +516,7 @@ export async function startReviewServer(
               // the picker to what the server is actually using — not the
               // detected default.
               base: hasLocalAccess ? currentBase : undefined,
+              hideWhitespace: currentHideWhitespace,
               gitContext: hasLocalAccess ? gitContext : undefined,
               sharingEnabled,
               shareBaseUrl,
@@ -544,7 +546,7 @@ export async function startReviewServer(
               );
             }
             try {
-              const body = (await req.json()) as { diffType: DiffType; base?: string };
+              const body = (await req.json()) as { diffType: DiffType; base?: string; hideWhitespace?: boolean };
               let newDiffType = body.diffType;
 
               if (!newDiffType) {
@@ -552,6 +554,10 @@ export async function startReviewServer(
                   { error: "Missing diffType" },
                   { status: 400 }
                 );
+              }
+
+              if (typeof body.hideWhitespace === "boolean") {
+                currentHideWhitespace = body.hideWhitespace;
               }
 
               const detectedBase = gitContext?.defaultBranch || "main";
@@ -563,7 +569,9 @@ export async function startReviewServer(
               const defaultCwd = gitContext?.cwd;
 
               // Run the new diff
-              const result = await runVcsDiff(newDiffType, base, defaultCwd);
+              const result = await runVcsDiff(newDiffType, base, defaultCwd, {
+                hideWhitespace: currentHideWhitespace,
+              });
 
               // Update state
               currentPatch = result.patch;
@@ -597,6 +605,7 @@ export async function startReviewServer(
                 // confirm the request landed (and pick it up when the client
                 // didn't supply one and we fell back to detected default).
                 base: currentBase,
+                hideWhitespace: currentHideWhitespace,
                 ...(updatedContext && { gitContext: updatedContext }),
                 ...(currentError && { error: currentError }),
               });

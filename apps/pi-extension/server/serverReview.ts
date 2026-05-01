@@ -6,7 +6,7 @@ import os from "node:os";
 import { Readable } from "node:stream";
 
 import { contentHash, deleteDraft } from "../generated/draft.js";
-import { saveConfig, detectGitUser, getServerConfig } from "../generated/config.js";
+import { loadConfig, saveConfig, detectGitUser, getServerConfig } from "../generated/config.js";
 
 export type {
 	DiffOption,
@@ -27,6 +27,7 @@ import {
 	type DiffType,
 	type GitCommandResult,
 	type GitContext,
+	type GitDiffOptions,
 	detectRemoteDefaultBranch,
 	getFileContentsForDiff as getFileContentsForDiffCore,
 	getGitContext as getGitContextCore,
@@ -174,8 +175,9 @@ export function runGitDiff(
 	diffType: DiffType,
 	defaultBranch = "main",
 	cwd?: string,
+	options?: GitDiffOptions,
 ): Promise<{ patch: string; label: string; error?: string }> {
-	return runGitDiffCore(reviewRuntime, diffType, defaultBranch, cwd);
+	return runGitDiffCore(reviewRuntime, diffType, defaultBranch, cwd, options);
 }
 
 export async function startReviewServer(options: {
@@ -269,6 +271,7 @@ export async function startReviewServer(options: {
 	let currentGitRef = options.gitRef;
 	let currentDiffType: DiffType = options.diffType || "uncommitted";
 	let currentError = options.error;
+	let currentHideWhitespace = loadConfig().diffOptions?.hideWhitespace ?? false;
 	let originalPRPatch = options.rawPatch;
 	let originalPRGitRef = options.gitRef;
 	let originalPRError = options.error;
@@ -606,6 +609,7 @@ export async function startReviewServer(options: {
 				// Echo the active base so page refresh/reconnect rehydrates the
 				// picker to what the server is actually using, not the detected default.
 				base: hasLocalAccess ? currentBase : undefined,
+				hideWhitespace: currentHideWhitespace,
 				gitContext: hasLocalAccess ? options.gitContext : undefined,
 				sharingEnabled,
 				shareBaseUrl,
@@ -637,13 +641,18 @@ export async function startReviewServer(options: {
 					json(res, { error: "Missing diffType" }, 400);
 					return;
 				}
+				if (typeof body.hideWhitespace === "boolean") {
+					currentHideWhitespace = body.hideWhitespace;
+				}
 				const detectedBase = options.gitContext?.defaultBranch || "main";
 				const base = resolveBaseBranch(
 					typeof body.base === "string" ? body.base : undefined,
 					detectedBase,
 				);
 				const defaultCwd = options.gitContext?.cwd;
-				const result = await runGitDiff(newType, base, defaultCwd);
+				const result = await runGitDiff(newType, base, defaultCwd, {
+					hideWhitespace: currentHideWhitespace,
+				});
 				currentPatch = result.patch;
 				currentGitRef = result.label;
 				currentDiffType = newType;
@@ -674,6 +683,7 @@ export async function startReviewServer(options: {
 					// confirm the request landed (and pick it up when the client
 					// didn't supply one and we fell back to detected default).
 					base: currentBase,
+					hideWhitespace: currentHideWhitespace,
 					...(updatedContext ? { gitContext: updatedContext } : {}),
 					...(currentError ? { error: currentError } : {}),
 				});
