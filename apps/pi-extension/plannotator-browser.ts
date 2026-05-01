@@ -26,6 +26,7 @@ import {
 import { parseRemoteUrl } from "./generated/repo.js";
 import { fetchRef, createWorktree, removeWorktree, ensureObjectAvailable } from "./generated/worktree.js";
 import { loadConfig, resolveDefaultDiffType } from "./generated/config.js";
+export { getLastAssistantMessageText } from "./assistant-message.js";
 
 export type AnnotateMode = "annotate" | "annotate-folder" | "annotate-last";
 export interface PlanReviewDecision {
@@ -79,33 +80,6 @@ export function getStartupErrorMessage(err: unknown): string {
 	return err instanceof Error ? err.message : "Unknown error";
 }
 
-type AssistantTextBlock = { type?: string; text?: string };
-
-type AssistantMessageLike = { role?: unknown; content?: unknown };
-
-function isAssistantMessage(message: AssistantMessageLike): message is { role: "assistant"; content: AssistantTextBlock[] } {
-	return message.role === "assistant" && Array.isArray(message.content);
-}
-
-function getTextContent(message: { content: AssistantTextBlock[] }): string {
-	return message.content
-		.filter((block): block is { type: "text"; text: string } => block.type === "text")
-		.map((block) => block.text)
-		.join("\n");
-}
-
-export async function getLastAssistantMessageText(ctx: ExtensionContext): Promise<string | null> {
-	const entries = ctx.sessionManager.getEntries();
-	for (let i = entries.length - 1; i >= 0; i--) {
-		const entry = entries[i] as { type: string; message?: AssistantMessageLike };
-		if (entry.type === "message" && entry.message && isAssistantMessage(entry.message)) {
-			const text = getTextContent(entry.message);
-			if (text.trim()) return text;
-		}
-	}
-	return null;
-}
-
 function openBrowserForServer(serverUrl: string, ctx: ExtensionContext): void {
 	const browserResult = openBrowser(serverUrl);
 	if (browserResult.isRemote) {
@@ -143,10 +117,39 @@ function startBrowserDecisionSession<T>(
 	waitForResult: () => Promise<T>,
 ): BrowserDecisionSession<T> {
 	openBrowserForServer(server.url, ctx);
+	let stopped = false;
+	let stopReject: ((err: Error) => void) | undefined;
+	let decisionPromise: Promise<T> | undefined;
+	const createStoppedError = () => new Error("Plannotator browser session was stopped.");
+	const stop = () => {
+		if (stopped) return;
+		stopped = true;
+		server.stop();
+		stopReject?.(createStoppedError());
+		stopReject = undefined;
+	};
+
 	return {
 		url: server.url,
-		waitForDecision: () => waitForDecisionWithCleanup(server, waitForResult),
-		stop: server.stop,
+		waitForDecision: () => {
+			if (decisionPromise) return decisionPromise;
+			if (stopped) return Promise.reject(createStoppedError());
+			decisionPromise ??= (async () => {
+				const stoppedPromise = new Promise<never>((_, reject) => {
+					stopReject = reject;
+				});
+				try {
+					const result = await Promise.race([waitForResult(), stoppedPromise]);
+					stopReject = undefined;
+					await delay(1500);
+					return result;
+				} finally {
+					stop();
+				}
+			})();
+			return decisionPromise;
+		},
+		stop,
 	};
 }
 
@@ -167,17 +170,15 @@ export async function startPlanReviewBrowserSession(
 		pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
 	});
 
-	openBrowserForServer(server.url, ctx);
+	const session = startBrowserDecisionSession(server, ctx, server.waitForDecision);
 	server.onDecision(() => {
-		setTimeout(() => server.stop(), 1500);
+		setTimeout(() => session.stop(), 1500);
 	});
 
 	return {
+		...session,
 		reviewId: server.reviewId,
-		url: server.url,
-		waitForDecision: server.waitForDecision,
 		onDecision: server.onDecision,
-		stop: server.stop,
 	};
 }
 

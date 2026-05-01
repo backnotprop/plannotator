@@ -62,6 +62,11 @@ import {
 	registerPlannotatorEventListeners,
 } from "./plannotator-events.js";
 import {
+	getAssistantMessageText,
+	getLastAssistantMessageSnapshot,
+	hasSessionMovedPastEntry,
+} from "./assistant-message.js";
+import {
 	getToolsForPhase,
 	isPlanWritePathAllowed,
 	PLAN_SUBMIT_TOOL,
@@ -83,35 +88,6 @@ type PersistedPlannotatorState = {
 	lastSubmittedPath?: string;
 	savedState?: SavedPhaseState;
 };
-
-type AssistantTextBlock = { type?: string; text?: string };
-
-type AssistantMessageLike = {
-	role?: unknown;
-	content?: unknown;
-};
-
-type SessionEntryLike = {
-	id: string;
-	type: string;
-	message?: AssistantMessageLike;
-};
-
-type LastAssistantMessageSnapshot = {
-	entryId: string;
-	text: string;
-};
-
-function isAssistantMessage(m: AssistantMessageLike): m is { role: "assistant"; content: AssistantTextBlock[] } {
-	return m.role === "assistant" && Array.isArray(m.content);
-}
-
-function getTextContent(message: { content: AssistantTextBlock[] }): string {
-	return message.content
-		.filter((block): block is { type: "text"; text: string } => block.type === "text")
-		.map((block) => block.text)
-		.join("\n");
-}
 
 function getPlanReviewAvailabilityWarning(options: { hasUI: boolean; hasPlanHtml: boolean }): string | null {
 	const { hasUI, hasPlanHtml } = options;
@@ -141,28 +117,6 @@ function reportBackgroundError(ctx: ExtensionContext, message: string, err: unkn
 	const detail = getStartupErrorMessage(err);
 	console.error(`${message}: ${detail}`);
 	safeNotify(ctx, `${message}: ${detail}`, "error");
-}
-
-function getLastAssistantMessageSnapshot(ctx: ExtensionContext): LastAssistantMessageSnapshot | null {
-	const branch = ctx.sessionManager.getBranch() as SessionEntryLike[];
-	for (let i = branch.length - 1; i >= 0; i--) {
-		const entry = branch[i];
-		if (entry.type === "message" && entry.message && isAssistantMessage(entry.message)) {
-			const text = getTextContent(entry.message);
-			if (text.trim()) return { entryId: entry.id, text };
-		}
-	}
-	return null;
-}
-
-function hasSessionMovedPastEntry(ctx: ExtensionContext, entryId: string): boolean {
-	if (!ctx.isIdle()) return true;
-
-	const branch = ctx.sessionManager.getBranch() as SessionEntryLike[];
-	const index = branch.findIndex((entry) => entry.id === entryId);
-	if (index === -1) return true;
-
-	return branch.slice(index + 1).some((entry) => entry.type === "message");
 }
 
 function excerptText(text: string, maxChars = 1000): string {
@@ -1062,9 +1016,9 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 	// Track execution progress
 	pi.on("turn_end", async (event, ctx) => {
 		if (phase !== "executing" || checklistItems.length === 0) return;
-		if (!isAssistantMessage(event.message as AssistantMessageLike)) return;
 
-		const text = getTextContent(event.message as { content: AssistantTextBlock[] });
+		const text = getAssistantMessageText(event.message);
+		if (!text) return;
 		if (markCompletedSteps(text, checklistItems) > 0) {
 			updateStatus(ctx);
 			updateWidget(ctx);
@@ -1148,13 +1102,9 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 
 					for (let i = executeIndex + 1; i < entries.length; i++) {
 						const entry = entries[i];
-						if (
-							entry.type === "message" &&
-							"message" in entry &&
-							isAssistantMessage(entry.message as AssistantMessageLike)
-						) {
-							const text = getTextContent(entry.message as { content: AssistantTextBlock[] });
-							markCompletedSteps(text, checklistItems);
+						if (entry.type === "message" && "message" in entry) {
+							const text = getAssistantMessageText(entry.message);
+							if (text) markCompletedSteps(text, checklistItems);
 						}
 					}
 				} else {
