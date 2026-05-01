@@ -46,6 +46,8 @@ function getCurrentBranch(ctx: ExtensionContext): SessionEntryLike[] {
 }
 
 export function getLastAssistantMessageSnapshot(ctx: ExtensionContext): LastAssistantMessageSnapshot | null {
+	// "Last" means the active conversation branch, not the newest message anywhere
+	// in the append-only session file.
 	const branch = getCurrentBranch(ctx);
 	for (let i = branch.length - 1; i >= 0; i--) {
 		const entry = branch[i];

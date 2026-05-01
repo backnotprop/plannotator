@@ -67,8 +67,10 @@ import {
 	hasSessionMovedPastEntry,
 } from "./assistant-message.js";
 import {
-	isStalePiContextError,
+	getPiSessionIdentity,
+	isCurrentPiSessionDifferentFrom,
 	notifyCurrentPiSession,
+	type PiSessionIdentity,
 	registerCurrentPiSession,
 	sendUserMessageToCurrentPiSession,
 	withCurrentPiSessionFallbackHeader,
@@ -112,19 +114,20 @@ function safeNotify(
 	ctx: ExtensionContext,
 	message: string,
 	type: "info" | "warning" | "error" = "info",
+	origin?: PiSessionIdentity,
 ): void {
 	try {
 		ctx.ui.notify(message, type);
 	} catch (err) {
-		if (isStalePiContextError(err) && notifyCurrentPiSession(message, type)) return;
+		if (notifyCurrentPiSession(message, type, origin)) return;
 		console.error(`Plannotator notification failed: ${err instanceof Error ? err.message : String(err)}`);
 	}
 }
 
-function reportBackgroundError(ctx: ExtensionContext, message: string, err: unknown): void {
+function reportBackgroundError(ctx: ExtensionContext, message: string, err: unknown, origin?: PiSessionIdentity): void {
 	const detail = getStartupErrorMessage(err);
 	console.error(`${message}: ${detail}`);
-	safeNotify(ctx, `${message}: ${detail}`, "error");
+	safeNotify(ctx, `${message}: ${detail}`, "error", origin);
 }
 
 function excerptText(text: string, maxChars = 1000): string {
@@ -149,13 +152,38 @@ User feedback:
 ${feedback}`;
 }
 
-function shouldAnchorLastMessageFeedback(ctx: ExtensionContext, entryId: string): boolean {
+function shouldAnchorLastMessageFeedback(ctx: ExtensionContext, entryId: string, origin: PiSessionIdentity): boolean {
+	if (isCurrentPiSessionDifferentFrom(origin)) return true;
 	try {
 		return hasSessionMovedPastEntry(ctx, entryId);
-	} catch (err) {
-		if (isStalePiContextError(err)) return true;
-		throw err;
+	} catch {
+		return true;
 	}
+}
+
+function reportCurrentSessionSendFailure(errorMessage: string, err: unknown, origin: PiSessionIdentity): void {
+	const detail = getStartupErrorMessage(err);
+	console.error(`${errorMessage}: ${detail}`);
+	notifyCurrentPiSession(`${errorMessage}: ${detail}`, "error", origin);
+}
+
+function trySendUserMessageToDifferentCurrentSession(
+	content: Parameters<ExtensionAPI["sendUserMessage"]>[0],
+	options: Parameters<ExtensionAPI["sendUserMessage"]>[1],
+	errorMessage: string,
+	origin: PiSessionIdentity,
+): boolean {
+	const result = sendUserMessageToCurrentPiSession(
+		withCurrentPiSessionFallbackHeader(content),
+		options,
+		origin,
+	);
+	if (result.ok) return true;
+	if (result.reason === "send-failed") {
+		reportCurrentSessionSendFailure(errorMessage, result.error, origin);
+		return true;
+	}
+	return false;
 }
 
 function sendUserMessageWithCurrentSessionFallback(
@@ -163,22 +191,16 @@ function sendUserMessageWithCurrentSessionFallback(
 	content: Parameters<ExtensionAPI["sendUserMessage"]>[0],
 	options: Parameters<ExtensionAPI["sendUserMessage"]>[1],
 	errorMessage: string,
+	origin: PiSessionIdentity,
 ): void {
+	if (trySendUserMessageToDifferentCurrentSession(content, options, errorMessage, origin)) return;
+
 	try {
 		pi.sendUserMessage(content, options);
 		return;
 	} catch (err) {
-		if (!isStalePiContextError(err)) throw err;
-
-		const result = sendUserMessageToCurrentPiSession(
-			withCurrentPiSessionFallbackHeader(content),
-			options,
-		);
-		if (result.ok) return;
-
-		const detail = getStartupErrorMessage(result.error);
-		console.error(`${errorMessage}: ${detail}`);
-		notifyCurrentPiSession(`${errorMessage}: ${detail}`, "error");
+		if (trySendUserMessageToDifferentCurrentSession(content, options, errorMessage, origin)) return;
+		throw err;
 	}
 }
 
@@ -391,6 +413,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 				return;
 			}
 
+			currentPiSession.update(ctx);
+			const origin = getPiSessionIdentity(ctx);
+
 			try {
 				const prUrl = args?.trim() || undefined;
 				const isPRReview = prUrl?.startsWith("http://") || prUrl?.startsWith("https://");
@@ -401,7 +426,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 					.then((result) => {
 						try {
 							if (result.exit) {
-								safeNotify(ctx, "Code review session closed.", "info");
+								safeNotify(ctx, "Code review session closed.", "info", origin);
 								return;
 							}
 							if (result.approved) {
@@ -410,11 +435,12 @@ export default function plannotator(pi: ExtensionAPI): void {
 									getReviewApprovedPrompt("pi", loadConfig()),
 									{ deliverAs: "followUp" },
 									"Plannotator code review feedback could not be sent",
+									origin,
 								);
 								return;
 							}
 							if (!result.feedback) {
-								safeNotify(ctx, "Code review closed (no feedback).", "info");
+								safeNotify(ctx, "Code review closed (no feedback).", "info", origin);
 								return;
 							}
 							if (isPRReview) {
@@ -425,6 +451,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 									result.feedback,
 									{ deliverAs: "followUp" },
 									"Plannotator code review feedback could not be sent",
+									origin,
 								);
 								return;
 							}
@@ -433,13 +460,14 @@ export default function plannotator(pi: ExtensionAPI): void {
 								`${result.feedback}${getReviewDeniedSuffix("pi", loadConfig())}`,
 								{ deliverAs: "followUp" },
 								"Plannotator code review feedback could not be sent",
+								origin,
 							);
 						} catch (err) {
-							reportBackgroundError(ctx, "Plannotator code review feedback could not be sent", err);
+							reportBackgroundError(ctx, "Plannotator code review feedback could not be sent", err, origin);
 						}
 					})
 					.catch((err) => {
-						reportBackgroundError(ctx, "Plannotator code review session failed", err);
+						reportBackgroundError(ctx, "Plannotator code review session failed", err, origin);
 					});
 			} catch (err) {
 				ctx.ui.notify(
@@ -544,6 +572,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 				}
 			}
 
+			currentPiSession.update(ctx);
+			const origin = getPiSessionIdentity(ctx);
+
 			try {
 				const session = await startMarkdownAnnotationSession(
 					ctx,
@@ -561,15 +592,15 @@ export default function plannotator(pi: ExtensionAPI): void {
 					.then((result) => {
 						try {
 							if (result.exit) {
-								safeNotify(ctx, "Annotation session closed.", "info");
+								safeNotify(ctx, "Annotation session closed.", "info", origin);
 								return;
 							}
 							if (result.approved) {
-								safeNotify(ctx, "Annotation approved.", "info");
+								safeNotify(ctx, "Annotation approved.", "info", origin);
 								return;
 							}
 							if (!result.feedback) {
-								safeNotify(ctx, "Annotation closed (no feedback).", "info");
+								safeNotify(ctx, "Annotation closed (no feedback).", "info", origin);
 								return;
 							}
 							sendUserMessageWithCurrentSessionFallback(
@@ -581,13 +612,14 @@ export default function plannotator(pi: ExtensionAPI): void {
 								}),
 								{ deliverAs: "followUp" },
 								"Plannotator annotation feedback could not be sent",
+								origin,
 							);
 						} catch (err) {
-							reportBackgroundError(ctx, "Plannotator annotation feedback could not be sent", err);
+							reportBackgroundError(ctx, "Plannotator annotation feedback could not be sent", err, origin);
 						}
 					})
 					.catch((err) => {
-						reportBackgroundError(ctx, "Plannotator annotation session failed", err);
+						reportBackgroundError(ctx, "Plannotator annotation session failed", err, origin);
 					});
 			} catch (err) {
 				ctx.ui.notify(
@@ -612,6 +644,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 				return;
 			}
 
+			currentPiSession.update(ctx);
+			const origin = getPiSessionIdentity(ctx);
+
 			const snapshot = getLastAssistantMessageSnapshot(ctx);
 			if (!snapshot) {
 				ctx.ui.notify("No assistant message found in session.", "error");
@@ -628,18 +663,18 @@ export default function plannotator(pi: ExtensionAPI): void {
 					.then((result) => {
 						try {
 							if (result.exit) {
-								safeNotify(ctx, "Annotation session closed.", "info");
+								safeNotify(ctx, "Annotation session closed.", "info", origin);
 								return;
 							}
 							if (result.approved) {
-								safeNotify(ctx, "Message approved.", "info");
+								safeNotify(ctx, "Message approved.", "info", origin);
 								return;
 							}
 							if (!result.feedback) {
-								safeNotify(ctx, "Annotation closed (no feedback).", "info");
+								safeNotify(ctx, "Annotation closed (no feedback).", "info", origin);
 								return;
 							}
-							const feedback = shouldAnchorLastMessageFeedback(ctx, snapshot.entryId)
+							const feedback = shouldAnchorLastMessageFeedback(ctx, snapshot.entryId, origin)
 								? anchorMessageFeedback(result.feedback, snapshot.text)
 								: result.feedback;
 							sendUserMessageWithCurrentSessionFallback(
@@ -649,13 +684,14 @@ export default function plannotator(pi: ExtensionAPI): void {
 								}),
 								{ deliverAs: "followUp" },
 								"Plannotator message annotation feedback could not be sent",
+								origin,
 							);
 						} catch (err) {
-							reportBackgroundError(ctx, "Plannotator message annotation feedback could not be sent", err);
+							reportBackgroundError(ctx, "Plannotator message annotation feedback could not be sent", err, origin);
 						}
 					})
 					.catch((err) => {
-						reportBackgroundError(ctx, "Plannotator message annotation session failed", err);
+						reportBackgroundError(ctx, "Plannotator message annotation session failed", err, origin);
 					});
 			} catch (err) {
 				ctx.ui.notify(

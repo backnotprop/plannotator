@@ -134,7 +134,7 @@ function startBrowserDecisionSession<T>(
 		waitForDecision: () => {
 			if (decisionPromise) return decisionPromise;
 			if (stopped) return Promise.reject(createStoppedError());
-			decisionPromise ??= (async () => {
+			decisionPromise = (async () => {
 				const stoppedPromise = new Promise<never>((_, reject) => {
 					stopReject = reject;
 				});
