@@ -4,3 +4,7 @@ export function isCodeFilePath(input: string): boolean {
 	return CODE_FILE_REGEX.test(input.replace(/#.*$/, ''))
 		&& !input.startsWith('http://') && !input.startsWith('https://');
 }
+
+export function isCodeFilePathStrict(input: string): boolean {
+	return input.includes('/') && isCodeFilePath(input);
+}

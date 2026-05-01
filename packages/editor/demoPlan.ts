@@ -28,10 +28,10 @@ export const COLLAB_CONFIG = {
 
 | File | Role |
 | --- | --- |
-| [App.tsx](packages/editor/App.tsx) | Editor entry point |
-| [resolve-file.ts](packages/shared/resolve-file.ts) | Path resolution |
-| [nonexistent.ts](packages/fake/nope.ts) | Should fail silently |
-| [package.json](package.json) | Root config |
+| \`packages/editor/App.tsx\` | Editor entry point |
+| \`packages/shared/resolve-file.ts\` | Path resolution |
+| \`packages/fake/nope.ts\` | Should fail silently |
+| \`package.json\` | Root config |
 
 ## Overview
 Add real-time collaboration features to the editor using _**[WebSocket API](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API)**_ and *[operational transforms](https://en.wikipedia.org/wiki/Operational_transformation)*.
@@ -366,6 +366,21 @@ digraph CollaborationStack {
 \`\`\`
 
 ---
+
+## Phase 4: File Changes
+
+### Modified files
+
+The core connection logic lives in \`packages/ui/components/InlineMarkdown.tsx\` which handles rendering inline tokens. The detection utility is in \`packages/shared/code-file.ts\` and the popout viewer is wired through \`packages/ui/hooks/useCodeFilePopout.ts\`.
+
+On the server side, update packages/server/index.ts to register the new WebSocket routes and packages/server/reference-handlers.ts for the file resolution endpoint. The editor entry point \`packages/editor/App.tsx\` needs the collaboration provider wrapper.
+
+### Build and deploy
+
+- Update the \`Dockerfile\` to expose the new WebSocket port
+- Run \`package.json\` scripts for the build pipeline
+- Config files like \`.env\` and \`README.md\` do not need changes
+- Commands like \`npm install\` and \`bun run build\` remain unchanged
 
 **Target:** Ship MVP in next sprint
 `;

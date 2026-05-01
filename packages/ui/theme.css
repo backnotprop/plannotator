@@ -195,6 +195,42 @@ body {
   100% { background: transparent; }
 }
 
+/* Clickable code file paths — subtle ambient shimmer so users discover they
+   are interactive without disrupting the familiar inline-code look. */
+.code-file-link {
+  position: relative;
+  overflow: hidden;
+}
+.code-file-link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 60%;
+  background: linear-gradient(
+    120deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.06) 35%,
+    rgba(255, 255, 255, 0.14) 50%,
+    rgba(255, 255, 255, 0.06) 65%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: code-file-shimmer 6s ease-in-out infinite;
+  pointer-events: none;
+  border-radius: inherit;
+}
+@keyframes code-file-shimmer {
+  0%  { transform: translateX(-100%); }
+  35% { transform: translateX(calc(100% / 0.6 + 100%)); }
+  100%{ transform: translateX(calc(100% / 0.6 + 100%)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .code-file-link::after {
+    animation: none;
+    display: none;
+  }
+}
+
 /* Word-level diff markers inside modified plan-diff blocks. Emitted as
    <ins>/<del> by PlanCleanDiffView's inline renderer; keep the decoration
    compact across line wraps via box-decoration-break: clone. */
