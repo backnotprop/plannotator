@@ -121,11 +121,20 @@ async function openBrowserAndWait<T>(
 	waitForResult: () => Promise<T>,
 ): Promise<T> {
 	openBrowserForServer(server.url, ctx);
+	return waitForDecisionWithCleanup(server, waitForResult);
+}
 
-	const result = await waitForResult();
-	await delay(1500);
-	server.stop();
-	return result;
+async function waitForDecisionWithCleanup<T>(
+	server: { url: string; stop: () => void },
+	waitForResult: () => Promise<T>,
+): Promise<T> {
+	try {
+		const result = await waitForResult();
+		await delay(1500);
+		return result;
+	} finally {
+		server.stop();
+	}
 }
 
 function startBrowserDecisionSession<T>(
@@ -136,12 +145,7 @@ function startBrowserDecisionSession<T>(
 	openBrowserForServer(server.url, ctx);
 	return {
 		url: server.url,
-		waitForDecision: async () => {
-			const result = await waitForResult();
-			await delay(1500);
-			server.stop();
-			return result;
-		},
+		waitForDecision: () => waitForDecisionWithCleanup(server, waitForResult),
 		stop: server.stop,
 	};
 }
