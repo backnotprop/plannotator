@@ -36,18 +36,15 @@ export interface PlanReviewDecision {
 	permissionMode?: string;
 }
 
-export interface PlanReviewBrowserSession {
-	reviewId: string;
-	url: string;
-	waitForDecision: () => Promise<PlanReviewDecision>;
-	onDecision: (listener: (result: PlanReviewDecision) => void | Promise<void>) => () => void;
-	stop: () => void;
-}
-
 export interface BrowserDecisionSession<T> {
 	url: string;
 	waitForDecision: () => Promise<T>;
 	stop: () => void;
+}
+
+export interface PlanReviewBrowserSession extends BrowserDecisionSession<PlanReviewDecision> {
+	reviewId: string;
+	onDecision: (listener: (result: PlanReviewDecision) => void | Promise<void>) => () => void;
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -129,6 +126,24 @@ async function openBrowserAndWait<T>(
 	await delay(1500);
 	server.stop();
 	return result;
+}
+
+function startBrowserDecisionSession<T>(
+	server: { url: string; stop: () => void },
+	ctx: ExtensionContext,
+	waitForResult: () => Promise<T>,
+): BrowserDecisionSession<T> {
+	openBrowserForServer(server.url, ctx);
+	return {
+		url: server.url,
+		waitForDecision: async () => {
+			const result = await waitForResult();
+			await delay(1500);
+			server.stop();
+			return result;
+		},
+		stop: server.stop,
+	};
 }
 
 export async function startPlanReviewBrowserSession(
@@ -406,18 +421,7 @@ export async function startCodeReviewBrowserSession(
 		onCleanup: worktreeCleanup,
 	});
 
-	openBrowserForServer(server.url, ctx);
-	const waitForDecision = async () => {
-		const result = await server.waitForDecision();
-		await delay(1500);
-		server.stop();
-		return result;
-	};
-	return {
-		url: server.url,
-		waitForDecision,
-		stop: server.stop,
-	};
+	return startBrowserDecisionSession(server, ctx, server.waitForDecision);
 }
 
 export async function openMarkdownAnnotation(
@@ -484,18 +488,7 @@ export async function startMarkdownAnnotationSession(
 		pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
 	});
 
-	openBrowserForServer(server.url, ctx);
-	const waitForDecision = async () => {
-		const result = await server.waitForDecision();
-		await delay(1500);
-		server.stop();
-		return result;
-	};
-	return {
-		url: server.url,
-		waitForDecision,
-		stop: server.stop,
-	};
+	return startBrowserDecisionSession(server, ctx, server.waitForDecision);
 }
 
 export async function openLastMessageAnnotation(

@@ -51,7 +51,6 @@ import {
 import { parseAnnotateArgs } from "./generated/annotate-args.js";
 import { resolveAtReference } from "./generated/at-reference.js";
 import {
-	getLastAssistantMessageText,
 	hasPlanBrowserHtml,
 	hasReviewBrowserHtml,
 	getStartupErrorMessage,
@@ -92,6 +91,17 @@ type AssistantMessageLike = {
 	content?: unknown;
 };
 
+type SessionEntryLike = {
+	id: string;
+	type: string;
+	message?: AssistantMessageLike;
+};
+
+type LastAssistantMessageSnapshot = {
+	entryId: string;
+	text: string;
+};
+
 function isAssistantMessage(m: AssistantMessageLike): m is { role: "assistant"; content: AssistantTextBlock[] } {
 	return m.role === "assistant" && Array.isArray(m.content);
 }
@@ -113,6 +123,68 @@ function getPlanReviewAvailabilityWarning(options: { hasUI: boolean; hasPlanHtml
 		return "Plannotator: interactive plan review is unavailable in this session (no UI support). Plans will auto-approve on exit_plan_mode.";
 	}
 	return "Plannotator: interactive plan review assets are missing. Rebuild the extension to restore the browser UI. Plans will auto-approve on exit_plan_mode.";
+}
+
+function safeNotify(
+	ctx: ExtensionContext,
+	message: string,
+	type: "info" | "warning" | "error" = "info",
+): void {
+	try {
+		ctx.ui.notify(message, type);
+	} catch (err) {
+		console.error(`Plannotator notification failed: ${err instanceof Error ? err.message : String(err)}`);
+	}
+}
+
+function reportBackgroundError(ctx: ExtensionContext, message: string, err: unknown): void {
+	const detail = getStartupErrorMessage(err);
+	console.error(`${message}: ${detail}`);
+	safeNotify(ctx, `${message}: ${detail}`, "error");
+}
+
+function getLastAssistantMessageSnapshot(ctx: ExtensionContext): LastAssistantMessageSnapshot | null {
+	const branch = ctx.sessionManager.getBranch() as SessionEntryLike[];
+	for (let i = branch.length - 1; i >= 0; i--) {
+		const entry = branch[i];
+		if (entry.type === "message" && entry.message && isAssistantMessage(entry.message)) {
+			const text = getTextContent(entry.message);
+			if (text.trim()) return { entryId: entry.id, text };
+		}
+	}
+	return null;
+}
+
+function hasSessionMovedPastEntry(ctx: ExtensionContext, entryId: string): boolean {
+	if (!ctx.isIdle()) return true;
+
+	const branch = ctx.sessionManager.getBranch() as SessionEntryLike[];
+	const index = branch.findIndex((entry) => entry.id === entryId);
+	if (index === -1) return true;
+
+	return branch.slice(index + 1).some((entry) => entry.type === "message");
+}
+
+function excerptText(text: string, maxChars = 1000): string {
+	const trimmed = text.trim();
+	if (trimmed.length <= maxChars) return trimmed;
+	return `${trimmed.slice(0, maxChars).trimEnd()}...`;
+}
+
+function blockquote(text: string): string {
+	return text
+		.split("\n")
+		.map((line) => `> ${line}`)
+		.join("\n");
+}
+
+function anchorMessageFeedback(feedback: string, originalMessage: string): string {
+	return `This feedback applies to the earlier assistant response excerpted below:
+
+${blockquote(excerptText(originalMessage))}
+
+User feedback:
+${feedback}`;
 }
 
 export default function plannotator(pi: ExtensionAPI): void {
@@ -323,26 +395,34 @@ export default function plannotator(pi: ExtensionAPI): void {
 				void session
 					.waitForDecision()
 					.then((result) => {
-						if (result.exit) {
-							return;
+						try {
+							if (result.exit) {
+								safeNotify(ctx, "Code review session closed.", "info");
+								return;
+							}
+							if (result.approved) {
+								pi.sendUserMessage(getReviewApprovedPrompt("pi", loadConfig()), { deliverAs: "followUp" });
+								return;
+							}
+							if (!result.feedback) {
+								safeNotify(ctx, "Code review closed (no feedback).", "info");
+								return;
+							}
+							if (isPRReview) {
+								// Platform PR actions (approve/comment) return approved:false with a
+								// status message — don't tell the agent to "address" a platform action.
+								pi.sendUserMessage(result.feedback, { deliverAs: "followUp" });
+								return;
+							}
+							pi.sendUserMessage(`${result.feedback}${getReviewDeniedSuffix("pi", loadConfig())}`, {
+								deliverAs: "followUp",
+							});
+						} catch (err) {
+							reportBackgroundError(ctx, "Plannotator code review feedback could not be sent", err);
 						}
-						if (!result.feedback) {
-							return;
-						}
-						if (result.approved) {
-							pi.sendUserMessage(getReviewApprovedPrompt("pi", loadConfig()));
-							return;
-						}
-						if (isPRReview) {
-							// Platform PR actions (approve/comment) return approved:false with a
-							// status message — don't tell the agent to "address" a platform action.
-							pi.sendUserMessage(result.feedback);
-							return;
-						}
-						pi.sendUserMessage(`${result.feedback}${getReviewDeniedSuffix("pi", loadConfig())}`);
 					})
-					.catch(() => {
-						// Browser/session startup already reported a visible error.
+					.catch((err) => {
+						reportBackgroundError(ctx, "Plannotator code review session failed", err);
 					});
 			} catch (err) {
 				ctx.ui.notify(
@@ -462,19 +542,33 @@ export default function plannotator(pi: ExtensionAPI): void {
 				void session
 					.waitForDecision()
 					.then((result) => {
-						if (result.exit || result.approved || !result.feedback) {
-							return;
+						try {
+							if (result.exit) {
+								safeNotify(ctx, "Annotation session closed.", "info");
+								return;
+							}
+							if (result.approved) {
+								safeNotify(ctx, "Annotation approved.", "info");
+								return;
+							}
+							if (!result.feedback) {
+								safeNotify(ctx, "Annotation closed (no feedback).", "info");
+								return;
+							}
+							pi.sendUserMessage(
+								getAnnotateFileFeedbackPrompt("pi", loadConfig(), {
+									fileHeader: isFolder ? "Folder" : "File",
+									filePath: absolutePath,
+									feedback: result.feedback,
+								}),
+								{ deliverAs: "followUp" },
+							);
+						} catch (err) {
+							reportBackgroundError(ctx, "Plannotator annotation feedback could not be sent", err);
 						}
-						pi.sendUserMessage(
-							getAnnotateFileFeedbackPrompt("pi", loadConfig(), {
-								fileHeader: isFolder ? "Folder" : "File",
-								filePath: absolutePath,
-								feedback: result.feedback,
-							}),
-						);
 					})
-					.catch(() => {
-						// Browser/session startup already reported a visible error.
+					.catch((err) => {
+						reportBackgroundError(ctx, "Plannotator annotation session failed", err);
 					});
 			} catch (err) {
 				ctx.ui.notify(
@@ -499,8 +593,8 @@ export default function plannotator(pi: ExtensionAPI): void {
 				return;
 			}
 
-			const lastText = await getLastAssistantMessageText(ctx);
-			if (!lastText) {
+			const snapshot = getLastAssistantMessageSnapshot(ctx);
+			if (!snapshot) {
 				ctx.ui.notify("No assistant message found in session.", "error");
 				return;
 			}
@@ -508,22 +602,39 @@ export default function plannotator(pi: ExtensionAPI): void {
 			ctx.ui.notify("Opening annotation UI for last message...", "info");
 
 			try {
-				const session = await startLastMessageAnnotationSession(ctx, lastText, gate);
+				const session = await startLastMessageAnnotationSession(ctx, snapshot.text, gate);
 				ctx.ui.notify("Last-message annotation opened. You can keep chatting while it runs.", "info");
 				void session
 					.waitForDecision()
 					.then((result) => {
-						if (result.exit || result.approved || !result.feedback) {
-							return;
+						try {
+							if (result.exit) {
+								safeNotify(ctx, "Annotation session closed.", "info");
+								return;
+							}
+							if (result.approved) {
+								safeNotify(ctx, "Message approved.", "info");
+								return;
+							}
+							if (!result.feedback) {
+								safeNotify(ctx, "Annotation closed (no feedback).", "info");
+								return;
+							}
+							const feedback = hasSessionMovedPastEntry(ctx, snapshot.entryId)
+								? anchorMessageFeedback(result.feedback, snapshot.text)
+								: result.feedback;
+							pi.sendUserMessage(
+								getAnnotateMessageFeedbackPrompt("pi", loadConfig(), {
+									feedback,
+								}),
+								{ deliverAs: "followUp" },
+							);
+						} catch (err) {
+							reportBackgroundError(ctx, "Plannotator message annotation feedback could not be sent", err);
 						}
-						pi.sendUserMessage(
-							getAnnotateMessageFeedbackPrompt("pi", loadConfig(), {
-								feedback: result.feedback,
-							}),
-						);
 					})
-					.catch(() => {
-						// Browser/session startup already reported a visible error.
+					.catch((err) => {
+						reportBackgroundError(ctx, "Plannotator message annotation session failed", err);
 					});
 			} catch (err) {
 				ctx.ui.notify(
