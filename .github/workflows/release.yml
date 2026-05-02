@@ -170,7 +170,7 @@ jobs:
             local ok=0
 
             for _ in $(seq 1 60); do
-              if curl -sf "http://localhost:${port}${endpoint}" -o /dev/null 2>/dev/null; then
+              if curl -sf "http://127.0.0.1:${port}${endpoint}" -o /dev/null 2>/dev/null; then
                 ok=1
                 break
               fi
@@ -218,16 +218,27 @@ jobs:
             )
 
             $env:PLANNOTATOR_PORT = $Port
-            $process = Start-Process -FilePath $binary -ArgumentList $Arguments -PassThru -NoNewWindow
+            $stdout = New-TemporaryFile
+            $stderr = New-TemporaryFile
+            $process = Start-Process `
+              -FilePath $binary `
+              -ArgumentList $Arguments `
+              -PassThru `
+              -NoNewWindow `
+              -RedirectStandardOutput $stdout `
+              -RedirectStandardError $stderr
             $ok = $false
 
             try {
               for ($i = 0; $i -lt 60; $i++) {
                 try {
-                  Invoke-WebRequest -Uri "http://localhost:$Port$Endpoint" -UseBasicParsing -TimeoutSec 1 | Out-Null
+                  Invoke-WebRequest -Uri "http://127.0.0.1:$Port$Endpoint" -UseBasicParsing -TimeoutSec 1 | Out-Null
                   $ok = $true
                   break
                 } catch {
+                  if ($process.HasExited) {
+                    break
+                  }
                   Start-Sleep -Milliseconds 500
                 }
               }
@@ -240,6 +251,10 @@ jobs:
             }
 
             if (-not $ok) {
+              Write-Host "stdout:"
+              Get-Content $stdout -ErrorAction SilentlyContinue
+              Write-Host "stderr:"
+              Get-Content $stderr -ErrorAction SilentlyContinue
               throw "FAIL: $Label did not respond on :$Port$Endpoint"
             }
 
