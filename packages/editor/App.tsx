@@ -15,6 +15,7 @@ import { TaterSpriteRunning } from '@plannotator/ui/components/TaterSpriteRunnin
 import { TaterSpritePullup } from '@plannotator/ui/components/TaterSpritePullup';
 import { Settings } from '@plannotator/ui/components/Settings';
 import { FeedbackButton, ApproveButton, ExitButton } from '@plannotator/ui/components/ToolbarButtons';
+import { ApproveDropdown } from '@plannotator/ui/components/ApproveDropdown';
 import { useSharing } from '@plannotator/ui/hooks/useSharing';
 import { getCallbackConfig, CallbackAction, executeCallback, type ToastPayload } from '@plannotator/ui/utils/callback';
 import { useAgents } from '@plannotator/ui/hooks/useAgents';
@@ -918,7 +919,6 @@ const App: React.FC = () => {
       const obsidianSettings = getObsidianSettings();
       const bearSettings = getBearSettings();
       const octarineSettings = getOctarineSettings();
-      const agentSwitchSettings = getAgentSwitchSettings();
       const planSaveSettings = getPlanSaveSettings();
       const autoSaveResults = bearSettings.autoSave && autoSavePromiseRef.current
         ? await autoSavePromiseRef.current
@@ -932,8 +932,7 @@ const App: React.FC = () => {
         body.permissionMode = permissionMode;
       }
 
-      // Include agent switch setting for OpenCode (effective name handles custom agents)
-      const effectiveAgent = getEffectiveAgentName(agentSwitchSettings);
+      const effectiveAgent = getEffectiveAgentName(getAgentSwitchSettings());
       if (effectiveAgent) {
         body.agentSwitch = effectiveAgent;
       }
@@ -1606,48 +1605,64 @@ const App: React.FC = () => {
                   />
                 )}
 
-                {(!annotateMode || gate) && <div className="relative group/approve">
-                  <ApproveButton
-                    onClick={() => {
-                      // Annotate gate mode: guard against dropping annotations via the existing
-                      // showExitWarning dialog (routed via exitWarningAction='approve').
-                      if (annotateMode) {
-                        if (hasAnyAnnotations) {
-                          setExitWarningAction('approve');
-                          setShowExitWarning(true);
-                          return;
-                        }
-                        handleAnnotateApprove();
-                        return;
-                      }
-                      // Plan mode: existing Claude-Code / OpenCode guards.
-                      if (origin === 'claude-code' && (allAnnotations.length > 0 || codeAnnotations.length > 0)) {
-                        setShowClaudeCodeWarning(true);
-                        return;
-                      }
-                      if (origin === 'opencode') {
+                {(!annotateMode || gate) && (
+                  origin === 'opencode' && !annotateMode && availableAgents.length > 0 ? (
+                    <ApproveDropdown
+                      onApprove={() => {
                         const warning = getAgentWarning();
                         if (warning) {
                           setAgentWarningMessage(warning);
                           setShowAgentWarning(true);
                           return;
                         }
-                      }
-                      handleApprove();
-                    }}
-                    disabled={isSubmitting || (annotateMode && isExiting)}
-                    isLoading={isSubmitting}
-                    dimmed={!annotateMode && (origin === 'claude-code' || origin === 'gemini-cli') && (allAnnotations.length > 0 || codeAnnotations.length > 0)}
-                    title={annotateMode ? 'Approve — no changes requested' : undefined}
-                  />
-                  {!annotateMode && (origin === 'claude-code' || origin === 'gemini-cli') && (allAnnotations.length > 0 || codeAnnotations.length > 0) && (
-                    <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
-                      <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
-                      <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
-                      {agentName} doesn't support feedback on approval. Your annotations won't be seen.
+                        handleApprove();
+                      }}
+                      agents={availableAgents}
+                      disabled={isSubmitting}
+                      isLoading={isSubmitting}
+                    />
+                  ) : (
+                    <div className="relative group/approve">
+                      <ApproveButton
+                        onClick={() => {
+                          if (annotateMode) {
+                            if (hasAnyAnnotations) {
+                              setExitWarningAction('approve');
+                              setShowExitWarning(true);
+                              return;
+                            }
+                            handleAnnotateApprove();
+                            return;
+                          }
+                          if (origin === 'claude-code' && (allAnnotations.length > 0 || codeAnnotations.length > 0)) {
+                            setShowClaudeCodeWarning(true);
+                            return;
+                          }
+                          if (origin === 'opencode') {
+                            const warning = getAgentWarning();
+                            if (warning) {
+                              setAgentWarningMessage(warning);
+                              setShowAgentWarning(true);
+                              return;
+                            }
+                          }
+                          handleApprove();
+                        }}
+                        disabled={isSubmitting || (annotateMode && isExiting)}
+                        isLoading={isSubmitting}
+                        dimmed={!annotateMode && (origin === 'claude-code' || origin === 'gemini-cli') && (allAnnotations.length > 0 || codeAnnotations.length > 0)}
+                        title={annotateMode ? 'Approve — no changes requested' : undefined}
+                      />
+                      {!annotateMode && (origin === 'claude-code' || origin === 'gemini-cli') && (allAnnotations.length > 0 || codeAnnotations.length > 0) && (
+                        <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
+                          <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
+                          <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
+                          {agentName} doesn't support feedback on approval. Your annotations won't be seen.
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>}
+                  )
+                )}
 
                 <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
               </>

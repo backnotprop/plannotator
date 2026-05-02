@@ -49,7 +49,7 @@ export const FeedbackButton: React.FC<FeedbackButtonProps> = ({
   </button>
 );
 
-interface ApproveButtonProps {
+export interface ApproveButtonProps {
   onClick: () => void;
   disabled?: boolean;
   isLoading?: boolean;

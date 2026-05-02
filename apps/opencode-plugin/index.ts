@@ -531,6 +531,9 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
                 planFilePath: sourceFilePath,
                 doneMsg: result.savedPath ? `Saved to: ${result.savedPath}` : "",
                 feedback: result.feedback,
+                proceedSuffix: shouldSwitchAgent
+                  ? "\n\nProceed with implementation, incorporating these notes where applicable."
+                  : "",
               });
             }
 

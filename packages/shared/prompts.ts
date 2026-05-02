@@ -166,7 +166,7 @@ export function getPlanApprovedPrompt(
 }
 
 const PLAN_APPROVED_WITH_NOTES_RUNTIME_DEFAULTS: Partial<Record<PromptRuntime, string>> = {
-  opencode: "Plan approved with notes!\n{{doneMsg}}\n\n## Implementation Notes\n\nThe user approved your plan but added the following notes to consider during implementation:\n\n{{feedback}}\n\nProceed with implementation, incorporating these notes where applicable.",
+  opencode: "Plan approved with notes!\n{{doneMsg}}\n\n## Implementation Notes\n\nThe user approved your plan but added the following notes to consider during implementation:\n\n{{feedback}}{{proceedSuffix}}",
 };
 
 export function getPlanApprovedWithNotesPrompt(
@@ -182,7 +182,7 @@ export function getPlanApprovedWithNotesPrompt(
     fallback: DEFAULT_PLAN_APPROVED_WITH_NOTES_PROMPT,
     runtimeFallbacks: PLAN_APPROVED_WITH_NOTES_RUNTIME_DEFAULTS,
   });
-  return resolveTemplate(template, vars ?? {});
+  return resolveTemplate(template, { proceedSuffix: "", ...vars });
 }
 
 export function getPlanAutoApprovedPrompt(
