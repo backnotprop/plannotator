@@ -135,8 +135,6 @@ jobs:
         include:
           - os: ubuntu-latest
             binary: plannotator-linux-x64
-          - os: macos-13
-            binary: plannotator-darwin-x64
           - os: windows-latest
             binary: plannotator-win32-x64.exe
 
@@ -278,8 +276,6 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact: plannotator-linux-x64
-          - os: macos-13
-            artifact: plannotator-darwin-x64
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
