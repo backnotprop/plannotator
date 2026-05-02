@@ -82,6 +82,13 @@ describe("install.sh", () => {
     expect(script).toContain("Codex config uses inline features");
     expect(script).toContain('grep -Eq \'^[[:space:]]*features[[:space:]]*=\' "$CODEX_CONFIG"');
   });
+
+  test("preserves custom Codex Plannotator hook wrappers", () => {
+    expect(script).toContain("isManagedPlannotatorCommand");
+    expect(script).toContain("foundCustomPlannotatorHook");
+    expect(script).toContain("Existing custom Codex Plannotator hook found");
+    expect(script).not.toContain('hook.command.includes("plannotator")) {\n      hook.command = command;');
+  });
 });
 
 describe("install.ps1", () => {

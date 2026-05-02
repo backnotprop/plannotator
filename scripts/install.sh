@@ -412,24 +412,37 @@ CODEX_HOOKS_EOF
         echo "Created Codex hooks at ${CODEX_HOOKS}"
         codex_hook_configured=1
     elif command -v node >/dev/null 2>&1; then
-        if node - "$CODEX_HOOKS" "$PLANNOTATOR_BIN" <<'NODE'
+        if codex_merge_result=$(node - "$CODEX_HOOKS" "$PLANNOTATOR_BIN" <<'NODE'
 const fs = require("fs");
+const path = require("path");
 const [hooksPath, command] = process.argv.slice(2);
 const config = JSON.parse(fs.readFileSync(hooksPath, "utf8"));
 config.hooks ||= {};
 const stopHooks = Array.isArray(config.hooks.Stop) ? config.hooks.Stop : [];
 let updated = false;
+let foundCustomPlannotatorHook = false;
+
+function isManagedPlannotatorCommand(value) {
+  const current = value.trim();
+  if (current === "plannotator" || current === command) return true;
+  return current.startsWith("/") && path.posix.basename(current) === "plannotator";
+}
+
 for (const entry of stopHooks) {
   const hooks = Array.isArray(entry?.hooks) ? entry.hooks : [];
   for (const hook of hooks) {
-    if (hook?.type === "command" && typeof hook.command === "string" && hook.command.includes("plannotator")) {
+    if (hook?.type !== "command" || typeof hook.command !== "string") continue;
+
+    if (isManagedPlannotatorCommand(hook.command)) {
       hook.command = command;
       hook.timeout = 345600;
       updated = true;
+    } else if (hook.command.includes("plannotator")) {
+      foundCustomPlannotatorHook = true;
     }
   }
 }
-if (!updated) {
+if (!updated && !foundCustomPlannotatorHook) {
   stopHooks.push({
     hooks: [
       {
@@ -441,10 +454,23 @@ if (!updated) {
   });
 }
 config.hooks.Stop = stopHooks;
-fs.writeFileSync(hooksPath, JSON.stringify(config, null, 2) + "\n");
+if (updated || !foundCustomPlannotatorHook) {
+  fs.writeFileSync(hooksPath, JSON.stringify(config, null, 2) + "\n");
+}
+process.stdout.write(updated ? "updated" : foundCustomPlannotatorHook ? "custom" : "added");
 NODE
-        then
-            echo "Updated Codex hooks at ${CODEX_HOOKS}"
+        ); then
+            case "$codex_merge_result" in
+                custom)
+                    echo "Existing custom Codex Plannotator hook found at ${CODEX_HOOKS}; left it unchanged."
+                    ;;
+                added)
+                    echo "Added Codex hooks at ${CODEX_HOOKS}"
+                    ;;
+                *)
+                    echo "Updated Codex hooks at ${CODEX_HOOKS}"
+                    ;;
+            esac
             codex_hook_configured=1
         else
             echo ""

@@ -85,8 +85,6 @@ import { AGENT_CONFIG, type Origin } from "@plannotator/shared/agents";
 import {
   findSessionLogsByAncestorWalk,
   findSessionLogsForCwd,
-  resolveSessionLogByPpid,
-  findSessionLogsByAncestorWalk,
   getLastRenderedMessage,
   resolveSessionLogByAncestorPids,
   resolveSessionLogByCwdScan,
