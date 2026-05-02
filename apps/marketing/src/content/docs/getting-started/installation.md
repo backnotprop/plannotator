@@ -1,6 +1,6 @@
 ---
 title: "Installation"
-description: "How to install Plannotator for Claude Code, OpenCode, Pi, and other agent hosts."
+description: "How to install Plannotator for Claude Code, Codex, OpenCode, Pi, and other agent hosts."
 sidebar:
   order: 1
 section: "Getting Started"

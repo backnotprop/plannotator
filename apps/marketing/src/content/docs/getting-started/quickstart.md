@@ -1,6 +1,6 @@
 ---
 title: "Quickstart"
-description: "Your first plan review with Plannotator — from ExitPlanMode to approval."
+description: "Your first plan review with Plannotator — from agent plan to approval."
 sidebar:
   order: 2
 section: "Getting Started"
@@ -8,19 +8,21 @@ section: "Getting Started"
 
 Once Plannotator is installed, it works automatically. Here's what a plan review looks like.
 
-## 1. Claude generates a plan
+## 1. Your agent generates a plan
 
-Ask Claude to do something that requires planning. When Claude calls `ExitPlanMode`, the Plannotator hook intercepts the request and opens the review UI in your browser.
+Ask your agent to do something that requires planning. When the agent reaches its plan handoff point, Plannotator opens the review UI in your browser.
 
 ```
-Claude calls ExitPlanMode
+Agent proposes a plan
         ↓
-PermissionRequest hook fires
+Plannotator hook or plugin fires
         ↓
 Plannotator reads the plan from stdin
         ↓
 Browser opens with the plan review UI
 ```
+
+Claude Code uses an `ExitPlanMode` hook. Codex uses a `Stop` hook after a plan turn completes. Both flows open Plannotator automatically after installation.
 
 ## 2. Review the plan
 
@@ -47,14 +49,14 @@ Switch between annotation modes using the mode switcher at the top of the docume
 
 When you're done reviewing:
 
-- **Approve** (`Cmd/Ctrl+Enter` with no annotations) — Claude proceeds with implementation
-- **Send Feedback** (`Cmd/Ctrl+Enter` with annotations) — Your annotations are formatted and sent back to Claude, who revises the plan
+- **Approve** (`Cmd/Ctrl+Enter` with no annotations) — The agent proceeds through its normal post-plan flow
+- **Send Feedback** (`Cmd/Ctrl+Enter` with annotations) — Your annotations are formatted and sent back to the agent, which revises the plan
 
-Your annotations are exported as structured feedback that Claude can act on directly.
+Your annotations are exported as structured feedback that the agent can act on directly.
 
-## 5. Claude continues
+## 5. The agent continues
 
-After approval, Claude implements the plan. After feedback, Claude revises the plan and presents it again for review. When the revised plan arrives, a diff badge shows what changed — click it to toggle between normal and diff view. The cycle continues until you approve.
+After approval, the agent continues through its native implementation workflow. In interactive Codex, that means Codex can show its normal post-plan implementation prompt. After feedback, the agent revises the plan and presents it again for review. When the revised plan arrives, a diff badge shows what changed — click it to toggle between normal and diff view. The cycle continues until you approve.
 
 ## Other commands
 

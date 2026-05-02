@@ -55,6 +55,8 @@ Plannotator reopens only if the revised plan actually changed
 
 This means Codex plan review is post-render rather than pre-submit, but you still get the same annotations, plan history, diff view, and revision loop.
 
+The macOS, Linux, and WSL installer enables this hook automatically when Codex is installed or `~/.codex` already exists. Restart Codex Desktop or CLI after installing so the hook configuration is loaded.
+
 ## Annotation types
 
 When you select text in the plan, the annotation toolbar appears with these options:
@@ -84,7 +86,7 @@ Images are stored as temporary files and referenced by name in the feedback sent
 **Approve** (no annotations):
 - Click "Approve" or press `Cmd/Ctrl+Enter`
 - Optionally saves plan to disk or Obsidian/Bear
-- Agent proceeds with implementation
+- Agent proceeds through its normal post-plan workflow
 
 **Approve with annotations** (Claude Code):
 - Claude Code doesn't yet support feedback on approval
