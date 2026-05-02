@@ -226,6 +226,8 @@ after installing or changing hooks.
 irm https://plannotator.ai/install.ps1 | iex
 ```
 
+Codex plan review is automatic on macOS, Linux, and WSL. Codex hooks are currently disabled on Windows in the official Codex docs, so the Windows installer does not enable them automatically; the direct `!plannotator` commands still work.
+
 **Then in Codex — feedback flows back into the agent loop automatically:**
 
 ```

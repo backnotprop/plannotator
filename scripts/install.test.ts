@@ -67,6 +67,21 @@ describe("install.sh", () => {
     expect(script).toContain("CLAUDE_COMMANDS_DIR");
     expect(script).toContain("OPENCODE_COMMANDS_DIR");
   });
+
+  test("enables Codex hooks only after Stop hook setup succeeds", () => {
+    const hookSetupIndex = script.indexOf('if [ ! -f "$CODEX_HOOKS" ]; then');
+    const enableConfigIndex = script.indexOf('enable_codex_hooks_config || true');
+    expect(hookSetupIndex).toBeGreaterThan(0);
+    expect(enableConfigIndex).toBeGreaterThan(hookSetupIndex);
+    expect(script).toContain('codex_hook_configured=1');
+    expect(script).toContain('if [ "$codex_hook_configured" -eq 1 ]; then');
+    expect(script).toContain("Leaving Codex hook support unchanged");
+  });
+
+  test("does not rewrite inline Codex features config", () => {
+    expect(script).toContain("Codex config uses inline features");
+    expect(script).toContain('grep -Eq \'^[[:space:]]*features[[:space:]]*=\' "$CODEX_CONFIG"');
+  });
 });
 
 describe("install.ps1", () => {

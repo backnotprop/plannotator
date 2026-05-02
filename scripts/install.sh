@@ -319,33 +319,77 @@ if command -v codex >/dev/null 2>&1 || [ -d "$HOME/.codex" ]; then
     CODEX_CONFIG="$CODEX_DIR/config.toml"
     CODEX_HOOKS="$CODEX_DIR/hooks.json"
     PLANNOTATOR_BIN="${INSTALL_DIR}/plannotator"
+    codex_hook_configured=0
 
     mkdir -p "$CODEX_DIR"
 
-    if [ ! -f "$CODEX_CONFIG" ]; then
-        cat > "$CODEX_CONFIG" << 'CODEX_CONFIG_EOF'
+    enable_codex_hooks_config() {
+        if [ ! -f "$CODEX_CONFIG" ]; then
+            cat > "$CODEX_CONFIG" << 'CODEX_CONFIG_EOF'
 [features]
 codex_hooks = true
 CODEX_CONFIG_EOF
-        echo "Created Codex config at ${CODEX_CONFIG}"
-    elif grep -Eq '^[[:space:]]*codex_hooks[[:space:]]*=' "$CODEX_CONFIG"; then
-        tmp_config="$(mktemp)"
-        awk '{ if ($0 ~ /^[[:space:]]*codex_hooks[[:space:]]*=/) print "codex_hooks = true"; else print }' "$CODEX_CONFIG" > "$tmp_config"
-        mv "$tmp_config" "$CODEX_CONFIG"
-        echo "Enabled codex_hooks in ${CODEX_CONFIG}"
-    elif grep -Eq '^[[:space:]]*\[features\][[:space:]]*$' "$CODEX_CONFIG"; then
-        tmp_config="$(mktemp)"
-        awk 'BEGIN{done=0} { print; if (!done && $0 ~ /^[[:space:]]*\[features\][[:space:]]*$/) { print "codex_hooks = true"; done=1 } }' "$CODEX_CONFIG" > "$tmp_config"
-        mv "$tmp_config" "$CODEX_CONFIG"
-        echo "Enabled codex_hooks in ${CODEX_CONFIG}"
-    else
-        cat >> "$CODEX_CONFIG" << 'CODEX_CONFIG_EOF'
+            echo "Created Codex config at ${CODEX_CONFIG}"
+            return 0
+        fi
 
-[features]
-codex_hooks = true
-CODEX_CONFIG_EOF
-        echo "Enabled codex_hooks in ${CODEX_CONFIG}"
-    fi
+        if grep -Eq '^[[:space:]]*features[[:space:]]*=' "$CODEX_CONFIG"; then
+            echo ""
+            echo "Codex config uses inline features in ${CODEX_CONFIG}; leaving it unchanged."
+            echo "Add this manually to enable Plannotator plan review:"
+            echo ""
+            echo "  [features]"
+            echo "  codex_hooks = true"
+            return 1
+        fi
+
+        tmp_config="$(mktemp)"
+        if awk '
+            function is_table(line) {
+                return line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*$/
+            }
+            BEGIN {
+                in_features = 0
+                saw_features = 0
+                saw_hook = 0
+            }
+            {
+                if (is_table($0)) {
+                    if (in_features && !saw_hook) {
+                        print "codex_hooks = true"
+                        saw_hook = 1
+                    }
+                    in_features = ($0 ~ /^[[:space:]]*\[features\][[:space:]]*$/)
+                    if (in_features) saw_features = 1
+                }
+
+                if (in_features && $0 ~ /^[[:space:]]*codex_hooks[[:space:]]*=/) {
+                    print "codex_hooks = true"
+                    saw_hook = 1
+                    next
+                }
+
+                print
+            }
+            END {
+                if (saw_features && in_features && !saw_hook) {
+                    print "codex_hooks = true"
+                } else if (!saw_features) {
+                    print ""
+                    print "[features]"
+                    print "codex_hooks = true"
+                }
+            }
+        ' "$CODEX_CONFIG" > "$tmp_config"; then
+            mv "$tmp_config" "$CODEX_CONFIG"
+            echo "Enabled codex_hooks in ${CODEX_CONFIG}"
+            return 0
+        fi
+
+        rm -f "$tmp_config"
+        echo "Could not update ${CODEX_CONFIG}; add codex_hooks manually." >&2
+        return 1
+    }
 
     if [ ! -f "$CODEX_HOOKS" ]; then
         cat > "$CODEX_HOOKS" << CODEX_HOOKS_EOF
@@ -366,6 +410,7 @@ CODEX_CONFIG_EOF
 }
 CODEX_HOOKS_EOF
         echo "Created Codex hooks at ${CODEX_HOOKS}"
+        codex_hook_configured=1
     elif command -v node >/dev/null 2>&1; then
         if node - "$CODEX_HOOKS" "$PLANNOTATOR_BIN" <<'NODE'
 const fs = require("fs");
@@ -400,10 +445,11 @@ fs.writeFileSync(hooksPath, JSON.stringify(config, null, 2) + "\n");
 NODE
         then
             echo "Updated Codex hooks at ${CODEX_HOOKS}"
+            codex_hook_configured=1
         else
             echo ""
             echo "Codex hooks file already exists at ${CODEX_HOOKS}, but it could not be merged automatically."
-            echo "Add or update this Stop hook manually:"
+            echo "Leaving Codex hook support unchanged. Add or update this Stop hook manually:"
             echo ""
             echo "  command: ${PLANNOTATOR_BIN}"
             echo "  timeout: 345600"
@@ -411,10 +457,14 @@ NODE
     else
         echo ""
         echo "Codex hooks file already exists at ${CODEX_HOOKS}, but node was not found to merge it safely."
-        echo "Add or update this Stop hook manually:"
+        echo "Leaving Codex hook support unchanged. Add or update this Stop hook manually:"
         echo ""
         echo "  command: ${PLANNOTATOR_BIN}"
         echo "  timeout: 345600"
+    fi
+
+    if [ "$codex_hook_configured" -eq 1 ]; then
+        enable_codex_hooks_config || true
     fi
 fi
 

@@ -21,8 +21,8 @@ Stop hooks automatically.
 irm https://plannotator.ai/install.ps1 | iex
 ```
 
-Codex hooks are experimental on Windows; the Windows installer prints manual setup guidance instead of enabling them
-automatically.
+Codex hooks are currently disabled on Windows in the official Codex docs. The Windows installer does not enable them
+automatically; it only prints manual guidance for future/manual experimentation.
 
 ## Enable Codex hooks
 

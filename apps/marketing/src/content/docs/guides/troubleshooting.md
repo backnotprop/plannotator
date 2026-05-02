@@ -76,7 +76,7 @@ If a Codex plan turn completes without opening Plannotator:
 4. Check `~/.codex/hooks.json` has a `Stop` hook whose command points to `plannotator`
 5. Run `plannotator sessions` in case the browser failed to open but the session is running
 
-Windows Codex hooks are experimental, so the Windows installer prints manual setup guidance instead of changing Codex config automatically.
+Codex hooks are currently disabled on Windows in the official Codex docs, so the Windows installer prints manual guidance instead of changing Codex config automatically.
 
 ## OpenCode build agent cannot call `submit_plan`
 

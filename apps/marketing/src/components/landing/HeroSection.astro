@@ -163,9 +163,6 @@ import AnnoReplace from './AnnoReplace.astro';
     var commandEl = document.getElementById('install-command');
     var detailEl = document.getElementById('install-detail');
     var stepsEl = document.getElementById('install-steps');
-    var step1El = document.getElementById('install-step-1');
-    var step2El = document.getElementById('install-step-2');
-    var step3El = document.getElementById('install-step-3');
     var videoLink = document.getElementById('watch-demo-link');
     var copyBtn = document.getElementById('install-copy-btn');
 
@@ -283,14 +280,15 @@ import AnnoReplace from './AnnoReplace.astro';
       installBlock.style.display = '';
 
       // Clear all steps completely, then rebuild
-      var allSteps = [step1El, step2El, step3El];
-      allSteps.forEach(function(el) { el.innerHTML = ''; el.style.display = 'none'; });
+      stepsEl.innerHTML = '';
 
       if (config.steps && config.steps.length) {
         stepsEl.classList.remove('hidden');
-        for (var i = 0; i < config.steps.length && i < allSteps.length; i++) {
-          allSteps[i].style.display = '';
-          makeStep(allSteps[i], config.steps[i]);
+        for (var i = 0; i < config.steps.length; i++) {
+          var stepEl = document.createElement('div');
+          stepEl.className = 'hero-detail-step';
+          stepsEl.appendChild(stepEl);
+          makeStep(stepEl, config.steps[i]);
         }
       } else {
         stepsEl.classList.add('hidden');
