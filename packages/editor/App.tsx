@@ -210,6 +210,14 @@ const App: React.FC = () => {
   // Sidebar (shared TOC + Version Browser)
   const sidebar = useSidebar(getUIPreferences().tocEnabled);
 
+  // Whether the document has any TOC-eligible headings (level <= 3, matching
+  // buildTocHierarchy). Drives the empty-doc auto-close behavior below — must
+  // be declared before the effects that reference it (TDZ in dep arrays).
+  const hasTocEntries = useMemo(
+    () => blocks.some(b => b.type === 'heading' && (b.level ?? 0) <= 3),
+    [blocks]
+  );
+
   const exitWideMode = useCallback((options?: {
     restore?: boolean;
     sidebarTab?: SidebarTab;
@@ -535,10 +543,6 @@ const App: React.FC = () => {
 
   // Track active section for TOC highlighting
   const headingCount = useMemo(() => blocks.filter(b => b.type === 'heading').length, [blocks]);
-  const hasTocEntries = useMemo(
-    () => blocks.some(b => b.type === 'heading' && (b.level ?? 0) <= 3),
-    [blocks]
-  );
   const activeSection = useActiveSection(containerRef, headingCount, scrollViewport);
 
   const { editorAnnotations, deleteEditorAnnotation } = useEditorAnnotations();
