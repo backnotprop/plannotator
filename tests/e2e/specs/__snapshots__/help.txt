@@ -1,0 +1,20 @@
+Usage:
+  plannotator daemon start [--foreground]
+  plannotator daemon stop
+  plannotator daemon status
+  plannotator start
+  plannotator stop
+  plannotator status
+  plannotator submit [file] [--mode plan|annotate] [--no-browser] [--commit-message <msg>] [--json]
+  plannotator review [--diff-type <uncommitted|staged|unstaged|last-commit|branch|worktree:...>] [--json]
+  plannotator annotate <file> [--json]
+  plannotator wait [--json]
+  plannotator clear [--force]
+  plannotator open
+
+Exit codes:
+  0   approved or command completed successfully
+  1   denied, collision, not running (daemon status), or daemon-delivered cancellation
+  2   illegal-state rejection
+  3   daemon failure or lost daemon connection after retry
+  130 local CLI cancellation via signal
