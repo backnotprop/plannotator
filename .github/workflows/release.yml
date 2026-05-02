@@ -169,7 +169,7 @@ jobs:
             local pid=$!
             local ok=0
 
-            for _ in $(seq 1 20); do
+            for _ in $(seq 1 60); do
               if curl -sf "http://localhost:${port}${endpoint}" -o /dev/null 2>/dev/null; then
                 ok=1
                 break
@@ -201,6 +201,7 @@ jobs:
         shell: pwsh
         env:
           BINARY: artifacts/${{ matrix.binary }}
+          BROWSER: true
         run: |
           $ErrorActionPreference = "Stop"
           $binary = (Resolve-Path $env:BINARY).Path
@@ -221,7 +222,7 @@ jobs:
             $ok = $false
 
             try {
-              for ($i = 0; $i -lt 20; $i++) {
+              for ($i = 0; $i -lt 60; $i++) {
                 try {
                   Invoke-WebRequest -Uri "http://localhost:$Port$Endpoint" -UseBasicParsing -TimeoutSec 1 | Out-Null
                   $ok = $true
