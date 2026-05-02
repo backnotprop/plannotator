@@ -127,7 +127,10 @@ function parseRolloutEntries(rolloutPath: string): RolloutEntry[] {
     });
 }
 
-function getMessageText(entry: RolloutEntry): string | null {
+function getMessageText(
+  entry: RolloutEntry,
+  allowedContentTypes: readonly string[]
+): string | null {
   if (entry.type !== "response_item") return null;
   if (entry.payload?.type !== "message") return null;
 
@@ -135,6 +138,7 @@ function getMessageText(entry: RolloutEntry): string | null {
   if (!Array.isArray(contentBlocks)) return null;
 
   const textParts = contentBlocks
+    .filter((block) => allowedContentTypes.includes(block.type))
     .map((block) => (typeof block.text === "string" ? block.text.trim() : ""))
     .filter(Boolean);
 
@@ -201,7 +205,7 @@ function isHookPromptMessage(entry: RolloutEntry): boolean {
   if (entry.payload?.type !== "message") return false;
   if (entry.payload?.role !== "user") return false;
 
-  const messageText = getMessageText(entry);
+  const messageText = getMessageText(entry, ["input_text"]);
   return !!messageText?.includes("<hook_prompt");
 }
 
@@ -235,7 +239,7 @@ function getAssistantProposedPlanText(entry: RolloutEntry): string | null {
   if (entry.payload?.type !== "message") return null;
   if (entry.payload?.role !== "assistant") return null;
 
-  const messageText = getMessageText(entry);
+  const messageText = getMessageText(entry, ["output_text"]);
   if (!messageText) return null;
 
   return extractLastProposedPlan(messageText);
@@ -302,7 +306,7 @@ export function getLastCodexMessage(
     if (entry.payload?.type !== "message") continue;
     if (entry.payload?.role !== "assistant") continue;
 
-    const messageText = getMessageText(entry);
+    const messageText = getMessageText(entry, ["output_text"]);
     if (messageText) return { text: messageText };
   }
 

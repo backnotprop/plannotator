@@ -228,6 +228,23 @@ describe("getLastCodexMessage", () => {
     expect(result!.text).toBe("First part.\nSecond part.");
   });
 
+  test("ignores non-output assistant text blocks", () => {
+    const path = writeTempRollout(
+      buildRollout(
+        sessionMeta(),
+        assistantMessage("Renderable response"),
+        rolloutLine("response_item", {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "refusal", text: "Hidden refusal text" }],
+        })
+      )
+    );
+    const result = getLastCodexMessage(path);
+    expect(result).not.toBeNull();
+    expect(result!.text).toBe("Renderable response");
+  });
+
   test("skips event_msg and turn_context entries", () => {
     const path = writeTempRollout(
       buildRollout(
