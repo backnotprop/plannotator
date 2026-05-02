@@ -12,15 +12,22 @@ Plan review uses Codex's experimental `Stop` hook. This is a post-render review 
 curl -fsSL https://plannotator.ai/install.sh | bash
 ```
 
+The installer adds the `plannotator` binary and, when Codex is installed or `~/.codex` already exists, enables Codex
+Stop hooks automatically.
+
 **Windows PowerShell:**
 
 ```powershell
 irm https://plannotator.ai/install.ps1 | iex
 ```
 
+Codex hooks are experimental on Windows; the Windows installer prints manual setup guidance instead of enabling them
+automatically.
+
 ## Enable Codex hooks
 
-Codex hooks are currently experimental and require a feature flag.
+The installer handles this automatically on macOS, Linux, and WSL. If you are setting it up manually, Codex hooks
+require a feature flag.
 
 Add this to `~/.codex/config.toml` or `<repo>/.codex/config.toml`:
 
@@ -52,8 +59,10 @@ Then create `~/.codex/hooks.json` or `<repo>/.codex/hooks.json`:
 Notes:
 
 - Codex loads `hooks.json` next to active config layers, so either the global `~/.codex` or repo-local `.codex` location works.
+- Prefer an absolute `plannotator` command path in `hooks.json` for Codex Desktop, because app-launched processes may not inherit your shell `PATH`.
 - This currently depends on Codex hooks, which are experimental and disabled on Windows in the current official docs.
 - Because this uses `Stop`, the review happens after Codex renders the plan turn, not at a dedicated `ExitPlanMode` interception point.
+- Restart Codex Desktop after installing or changing hooks.
 
 ## Usage
 

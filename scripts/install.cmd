@@ -382,6 +382,26 @@ echo }
     echo Updated plugin hooks at !PLUGIN_HOOKS!
 )
 
+REM Codex hooks on Windows are still experimental upstream. Do not mutate
+REM %%USERPROFILE%%\.codex automatically from the cmd installer until that path
+REM is verified end-to-end.
+where codex >nul 2>&1
+if !ERRORLEVEL! equ 0 (
+    echo.
+    echo Codex detected.
+    echo Codex plan review hooks are experimental on Windows. To try them manually:
+    echo.
+    echo   1. Add this to %%USERPROFILE%%\.codex\config.toml:
+    echo.
+    echo      [features]
+    echo      codex_hooks = true
+    echo.
+    echo   2. Add a Stop hook in %%USERPROFILE%%\.codex\hooks.json that runs:
+    echo.
+    echo      !INSTALL_PATH!
+    echo.
+)
+
 REM Clear any cached OpenCode plugin to force fresh download on next run
 if exist "%USERPROFILE%\.cache\opencode\node_modules\@plannotator" rmdir /s /q "%USERPROFILE%\.cache\opencode\node_modules\@plannotator" >nul 2>&1
 if exist "%USERPROFILE%\.cache\opencode\packages\@plannotator" rmdir /s /q "%USERPROFILE%\.cache\opencode\packages\@plannotator" >nul 2>&1

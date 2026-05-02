@@ -313,6 +313,111 @@ if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
     echo "  source ${shell_config}"
 fi
 
+# --- Codex CLI / Desktop app support (only if Codex is installed or configured) ---
+if command -v codex >/dev/null 2>&1 || [ -d "$HOME/.codex" ]; then
+    CODEX_DIR="$HOME/.codex"
+    CODEX_CONFIG="$CODEX_DIR/config.toml"
+    CODEX_HOOKS="$CODEX_DIR/hooks.json"
+    PLANNOTATOR_BIN="${INSTALL_DIR}/plannotator"
+
+    mkdir -p "$CODEX_DIR"
+
+    if [ ! -f "$CODEX_CONFIG" ]; then
+        cat > "$CODEX_CONFIG" << 'CODEX_CONFIG_EOF'
+[features]
+codex_hooks = true
+CODEX_CONFIG_EOF
+        echo "Created Codex config at ${CODEX_CONFIG}"
+    elif grep -Eq '^[[:space:]]*codex_hooks[[:space:]]*=' "$CODEX_CONFIG"; then
+        tmp_config="$(mktemp)"
+        awk '{ if ($0 ~ /^[[:space:]]*codex_hooks[[:space:]]*=/) print "codex_hooks = true"; else print }' "$CODEX_CONFIG" > "$tmp_config"
+        mv "$tmp_config" "$CODEX_CONFIG"
+        echo "Enabled codex_hooks in ${CODEX_CONFIG}"
+    elif grep -Eq '^[[:space:]]*\[features\][[:space:]]*$' "$CODEX_CONFIG"; then
+        tmp_config="$(mktemp)"
+        awk 'BEGIN{done=0} { print; if (!done && $0 ~ /^[[:space:]]*\[features\][[:space:]]*$/) { print "codex_hooks = true"; done=1 } }' "$CODEX_CONFIG" > "$tmp_config"
+        mv "$tmp_config" "$CODEX_CONFIG"
+        echo "Enabled codex_hooks in ${CODEX_CONFIG}"
+    else
+        cat >> "$CODEX_CONFIG" << 'CODEX_CONFIG_EOF'
+
+[features]
+codex_hooks = true
+CODEX_CONFIG_EOF
+        echo "Enabled codex_hooks in ${CODEX_CONFIG}"
+    fi
+
+    if [ ! -f "$CODEX_HOOKS" ]; then
+        cat > "$CODEX_HOOKS" << CODEX_HOOKS_EOF
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PLANNOTATOR_BIN}",
+            "timeout": 345600
+          }
+        ]
+      }
+    ]
+  }
+}
+CODEX_HOOKS_EOF
+        echo "Created Codex hooks at ${CODEX_HOOKS}"
+    elif command -v node >/dev/null 2>&1; then
+        if node - "$CODEX_HOOKS" "$PLANNOTATOR_BIN" <<'NODE'
+const fs = require("fs");
+const [hooksPath, command] = process.argv.slice(2);
+const config = JSON.parse(fs.readFileSync(hooksPath, "utf8"));
+config.hooks ||= {};
+const stopHooks = Array.isArray(config.hooks.Stop) ? config.hooks.Stop : [];
+let updated = false;
+for (const entry of stopHooks) {
+  const hooks = Array.isArray(entry?.hooks) ? entry.hooks : [];
+  for (const hook of hooks) {
+    if (hook?.type === "command" && typeof hook.command === "string" && hook.command.includes("plannotator")) {
+      hook.command = command;
+      hook.timeout = 345600;
+      updated = true;
+    }
+  }
+}
+if (!updated) {
+  stopHooks.push({
+    hooks: [
+      {
+        type: "command",
+        command,
+        timeout: 345600,
+      },
+    ],
+  });
+}
+config.hooks.Stop = stopHooks;
+fs.writeFileSync(hooksPath, JSON.stringify(config, null, 2) + "\n");
+NODE
+        then
+            echo "Updated Codex hooks at ${CODEX_HOOKS}"
+        else
+            echo ""
+            echo "Codex hooks file already exists at ${CODEX_HOOKS}, but it could not be merged automatically."
+            echo "Add or update this Stop hook manually:"
+            echo ""
+            echo "  command: ${PLANNOTATOR_BIN}"
+            echo "  timeout: 345600"
+        fi
+    else
+        echo ""
+        echo "Codex hooks file already exists at ${CODEX_HOOKS}, but node was not found to merge it safely."
+        echo "Add or update this Stop hook manually:"
+        echo ""
+        echo "  command: ${PLANNOTATOR_BIN}"
+        echo "  timeout: 345600"
+    fi
+fi
+
 # Validate plugin hooks.json if plugin is already installed
 PLUGIN_HOOKS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/marketplaces/plannotator/apps/hook/hooks/hooks.json"
 if [ -f "$PLUGIN_HOOKS" ]; then

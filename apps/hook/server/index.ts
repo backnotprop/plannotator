@@ -1043,6 +1043,9 @@ if (args[0] === "sessions") {
 
   // Read hook event from stdin
   const eventJson = await Bun.stdin.text();
+  if (!eventJson.trim()) {
+    process.exit(0);
+  }
 
   let event: Record<string, any>;
   try {

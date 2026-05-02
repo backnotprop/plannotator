@@ -6,7 +6,7 @@
 # make it easy to inspect rollout files, Plannotator history, and active URLs.
 #
 # Usage:
-#   ./tests/manual/local/test-codex-plan-review-e2e.sh [--keep] [--detach]
+#   ./tests/manual/local/test-codex-plan-review-e2e.sh [--keep] [--detach] [--setup-only]
 #     [--skip-build] [--root-dir DIR] [--model MODEL] [--sandbox MODE]
 #     [--codex-bin PATH] [--prompt-file FILE]
 
@@ -21,6 +21,7 @@ Runs a real Codex exec in a disposable HOME/workspace with Plannotator Stop hook
 Options:
   --keep              Keep the sandbox directory after exit
   --detach            Best-effort background launch; foreground mode is the validated path
+  --setup-only        Create the isolated HOME/workspace/hooks and exit without running Codex
   --skip-build        Reuse existing build artifacts
   --root-dir DIR      Use DIR instead of a temp sandbox root
   --model MODEL       Codex model to use (default: gpt-5.4-mini)
@@ -61,6 +62,7 @@ resolve_cmd() {
 
 KEEP_SANDBOX=false
 DETACH=false
+SETUP_ONLY=false
 SKIP_BUILD=false
 ROOT_DIR=""
 MODEL="${PLANNOTATOR_CODEX_MODEL:-gpt-5.4-mini}"
@@ -76,6 +78,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --detach)
       DETACH=true
+      KEEP_SANDBOX=true
+      ;;
+    --setup-only)
+      SETUP_ONLY=true
       KEEP_SANDBOX=true
       ;;
     --skip-build)
@@ -223,7 +229,16 @@ EOF
 cat > "$BIN_DIR/plannotator" <<EOF
 #!/bin/sh
 export PATH="$(dirname "$BUN_BIN"):\$PATH"
-exec "$BUN_BIN" run "$PROJECT_ROOT/apps/hook/server/index.ts" "\$@"
+payload_file="$ARTIFACTS_DIR/hook-payload.\$\$.\$(date +%s).json"
+cat > "\$payload_file"
+{
+  printf -- '--- %s ---\\n' "\$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf 'pid=%s cwd=%s args=%s\\n' "\$\$" "\$(pwd)" "\$*"
+  printf 'HOME=%s CODEX_HOME=%s PATH=%s\\n' "\$HOME" "\${CODEX_HOME:-}" "\$PATH"
+  cat "\$payload_file"
+  printf '\\n'
+} >> "$ARTIFACTS_DIR/plannotator-hook-events.log"
+PLANNOTATOR_DEBUG=1 exec "$BUN_BIN" run "$PROJECT_ROOT/apps/hook/server/index.ts" "\$@" < "\$payload_file" 2>> "$ARTIFACTS_DIR/plannotator-hook.stderr.log"
 EOF
 chmod +x "$BIN_DIR/plannotator"
 
@@ -312,6 +327,7 @@ PROMPT_CONTENT="$(cat "$PROMPT_PATH")"
   echo "#!/bin/bash"
   echo "set -euo pipefail"
   printf 'export HOME=%q\n' "$TEMP_HOME"
+  printf 'export CODEX_HOME=%q\n' "$TEMP_HOME/.codex"
   printf 'export PATH=%q\n' "$BIN_DIR:$PATH"
   printf 'cd %q\n' "$WORKSPACE_DIR"
   printf 'PROMPT_CONTENT="$(cat %q)"\n' "$PROMPT_PATH"
@@ -328,6 +344,22 @@ echo "Artifacts:    $ARTIFACTS_DIR"
 echo "Codex binary: $CODEX_BIN"
 echo "Model:        $MODEL"
 echo
+
+if [[ "$SETUP_ONLY" == "true" ]]; then
+  echo "Setup complete. Codex was not started."
+  echo
+  echo "To run the isolated Codex command manually:"
+  echo "  $RUNNER_SCRIPT"
+  echo
+  echo "Or enter the isolated workspace yourself:"
+  echo "  export HOME=\"$TEMP_HOME\""
+  echo "  export CODEX_HOME=\"$TEMP_HOME/.codex\""
+  echo "  export PATH=\"$BIN_DIR:\$PATH\""
+  echo "  cd \"$WORKSPACE_DIR\""
+  echo
+  echo "Then run Codex however you want. The sandbox will be preserved."
+  exit 0
+fi
 
 if [[ "$DETACH" == "true" ]]; then
   nohup "$RUNNER_SCRIPT" >"$CODEX_LOG" 2>&1 < /dev/null &

@@ -266,6 +266,26 @@ if (Test-Path $pluginHooks) {
     Write-Host "Updated plugin hooks at $pluginHooks"
 }
 
+# Codex hooks on Windows are still experimental upstream. Do not mutate
+# $env:USERPROFILE\.codex automatically from the Windows installer until that
+# path is verified end-to-end.
+$codexDir = "$env:USERPROFILE\.codex"
+if ((Get-Command codex -ErrorAction SilentlyContinue) -or (Test-Path $codexDir)) {
+    $codexExePath = "$installDir\plannotator.exe"
+    Write-Host ""
+    Write-Host "Codex detected."
+    Write-Host "Codex plan review hooks are experimental on Windows. To try them manually:"
+    Write-Host ""
+    Write-Host "  1. Add this to $env:USERPROFILE\.codex\config.toml:"
+    Write-Host ""
+    Write-Host "     [features]"
+    Write-Host "     codex_hooks = true"
+    Write-Host ""
+    Write-Host "  2. Add a Stop hook in $env:USERPROFILE\.codex\hooks.json that runs:"
+    Write-Host ""
+    Write-Host "     $codexExePath"
+}
+
 # Clear OpenCode plugin cache
 Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\opencode\node_modules\@plannotator" -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\opencode\packages\@plannotator" -ErrorAction SilentlyContinue
