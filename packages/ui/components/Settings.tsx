@@ -105,6 +105,8 @@ const DIFF_FONT_OPTIONS = [
 export const DIFF_STYLE_OPTIONS = [
   { value: 'split' as const, label: 'Split' },
   { value: 'unified' as const, label: 'Unified' },
+  { value: 'old' as const, label: 'Old' },
+  { value: 'new' as const, label: 'New' },
 ];
 export const OVERFLOW_OPTIONS = [
   { value: 'scroll' as const, label: 'Scroll' },

@@ -59,6 +59,22 @@ function getLineSelector(match: ReviewSearchMatch): string {
   ].join(', ');
 }
 
+function findLineElement(root: ParentNode, match: ReviewSearchMatch): Element | null {
+  const primary = root.querySelector(getLineSelector(match));
+  if (primary) return primary;
+
+  const fallbackLines = [match.lineNumber, match.altLineNumber].filter(
+    (lineNumber): lineNumber is number => typeof lineNumber === 'number'
+  );
+
+  for (const lineNumber of fallbackLines) {
+    const fallback = root.querySelector(`[data-line="${lineNumber}"]`);
+    if (fallback) return fallback;
+  }
+
+  return null;
+}
+
 function decorateSearchMatch(mark: HTMLElement, isActive: boolean) {
   mark.className = 'review-search-highlight';
   mark.style.background = isActive ? ACTIVE_MATCH_BACKGROUND : PASSIVE_MATCH_BACKGROUND;
@@ -100,7 +116,7 @@ export function applySearchHighlights(
   });
 
   lineGroups.forEach((matches) => {
-    const lineEl = root.querySelector(getLineSelector(matches[0]));
+    const lineEl = findLineElement(root, matches[0]);
     if (!lineEl) return;
 
     const textWalker = document.createTreeWalker(lineEl, NodeFilter.SHOW_TEXT, {
@@ -208,7 +224,7 @@ export function scrollToSearchMatch(
   root: ParentNode,
   match: ReviewSearchMatch,
 ): boolean {
-  const lineEl = root.querySelector(getLineSelector(match)) as HTMLElement | null;
+  const lineEl = findLineElement(root, match) as HTMLElement | null;
   if (!lineEl) return false;
 
   const mark = root.querySelector(`mark[data-review-search-match="${match.id}"]`) as HTMLElement | null;

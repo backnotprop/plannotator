@@ -53,16 +53,16 @@ export const SETTINGS = {
   },
 
   diffStyle: {
-    defaultValue: 'split' as 'split' | 'unified',
+    defaultValue: 'split' as 'split' | 'unified' | 'old' | 'new',
     fromCookie: () => {
       const v = storage.getItem('plannotator-diff-style') ?? storage.getItem('review-diff-style');
-      return v === 'split' || v === 'unified' ? v : undefined;
+      return v === 'split' || v === 'unified' || v === 'old' || v === 'new' ? v : undefined;
     },
     toCookie: (v: string) => storage.setItem('plannotator-diff-style', v),
     serverKey: 'diffOptions',
     fromServer: (sc: Record<string, unknown>) => {
       const v = (sc.diffOptions as Record<string, unknown> | undefined)?.diffStyle;
-      return v === 'split' || v === 'unified' ? v : undefined;
+      return v === 'split' || v === 'unified' || v === 'old' || v === 'new' ? v : undefined;
     },
     toServer: (v: string) => ({ diffOptions: { diffStyle: v } }),
   },

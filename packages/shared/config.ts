@@ -13,7 +13,7 @@ import { execSync } from "child_process";
 export type DefaultDiffType = 'uncommitted' | 'unstaged' | 'staged' | 'merge-base' | 'all';
 
 export interface DiffOptions {
-  diffStyle?: 'split' | 'unified';
+  diffStyle?: 'split' | 'unified' | 'old' | 'new';
   overflow?: 'scroll' | 'wrap';
   diffIndicators?: 'bars' | 'classic' | 'none';
   lineDiffType?: 'word-alt' | 'word' | 'char' | 'none';

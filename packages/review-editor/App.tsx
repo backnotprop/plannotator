@@ -812,7 +812,7 @@ const ReviewApp: React.FC = () => {
     }
   }, [diffTypeSetupPending, aiCheckComplete, showAISetup]);
 
-  const handleDiffStyleChange = useCallback((style: 'split' | 'unified') => {
+  const handleDiffStyleChange = useCallback((style: 'split' | 'unified' | 'old' | 'new') => {
     configStore.set('diffStyle', style);
   }, []);
 
@@ -1803,26 +1803,24 @@ const ReviewApp: React.FC = () => {
           <div className="flex items-center gap-1 md:gap-2">
             {/* Diff style toggle */}
             <div className="flex items-center gap-1 bg-muted rounded-lg p-0.5">
-              <button
-                onClick={() => handleDiffStyleChange('split')}
-                className={`px-2 py-1 text-xs rounded-md transition-colors ${
-                  diffStyle === 'split'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                Split
-              </button>
-              <button
-                onClick={() => handleDiffStyleChange('unified')}
-                className={`px-2 py-1 text-xs rounded-md transition-colors ${
-                  diffStyle === 'unified'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                Unified
-              </button>
+              {([
+                ['split', 'Split'],
+                ['unified', 'Unified'],
+                ['old', 'Old'],
+                ['new', 'New'],
+              ] as const).map(([style, label]) => (
+                <button
+                  key={style}
+                  onClick={() => handleDiffStyleChange(style)}
+                  className={`px-2 py-1 text-xs rounded-md transition-colors ${
+                    diffStyle === style
+                      ? 'bg-background text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
 
             {origin ? (

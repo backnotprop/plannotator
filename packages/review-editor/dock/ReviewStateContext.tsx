@@ -20,7 +20,7 @@ export interface ReviewState {
   files: DiffFile[];
   focusedFileIndex: number;
   focusedFilePath: string | null;
-  diffStyle: 'split' | 'unified';
+  diffStyle: 'split' | 'unified' | 'old' | 'new';
   diffOverflow?: 'scroll' | 'wrap';
   diffIndicators?: 'bars' | 'classic' | 'none';
   lineDiffType?: 'word-alt' | 'word' | 'char' | 'none';

@@ -1,12 +1,12 @@
 import React, { useMemo, useRef, useEffect, useLayoutEffect, useCallback, useState } from 'react';
 import { FileDiff, type DiffLineAnnotation } from '@pierre/diffs/react';
-import { getSingularPatch, processFile } from '@pierre/diffs';
+import { getSingularPatch, processFile, type DiffTokenEventBaseProps, type SelectedLineRange as PierreSelectedLineRange } from '@pierre/diffs';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/types';
-import type { DiffTokenEventBaseProps } from '@pierre/diffs';
 import { usePierreTheme } from '../hooks/usePierreTheme';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { storage } from '@plannotator/ui/utils/storage';
 import { detectLanguage } from '../utils/detectLanguage';
+import { getChangedLineNumbersFromPatch } from '../utils/patchParser';
 import { useAnnotationToolbar } from '../hooks/useAnnotationToolbar';
 import { useConfigValue } from '@plannotator/ui/config';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
@@ -19,6 +19,7 @@ import { InlineAIMarker } from './InlineAIMarker';
 import { AnnotationToolbar } from './AnnotationToolbar';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import { SuggestionModal } from './SuggestionModal';
+import { PierreFileView } from './PierreFileView';
 import { type ReviewSearchMatch } from '../utils/reviewSearch';
 import {
   applySearchHighlights,
@@ -69,7 +70,6 @@ const PierreDiffContent = React.memo(({
 }: PierreDiffContentProps) => {
   return (
     <FileDiff
-      key={filePath}
       fileDiff={fileDiff}
       options={{
         themeType: pierreTheme.type,
@@ -122,7 +122,7 @@ interface DiffViewerProps {
   /** Base branch override used for file-content lookups (branch / merge-base modes only). */
   reviewBase?: string;
   isFocused?: boolean;
-  diffStyle: 'split' | 'unified';
+  diffStyle: 'split' | 'unified' | 'old' | 'new';
   diffOverflow?: 'scroll' | 'wrap';
   diffIndicators?: 'bars' | 'classic' | 'none';
   lineDiffType?: 'word-alt' | 'word' | 'char' | 'none';
@@ -226,6 +226,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     }
     return false;
   }, [patch, diffStyle]);
+  const isSingleFileStyle = diffStyle === 'old' || diffStyle === 'new';
+  const singleFileSide = diffStyle === 'old' ? 'deletions' as const : 'additions' as const;
 
   const [splitRatio, setSplitRatio] = useState(() => {
     const saved = storage.getItem('review-split-ratio');
@@ -272,23 +274,31 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   // Parse patch into FileDiffMetadata for @pierre/diffs FileDiff component
   const fileDiff = useMemo(() => getSingularPatch(patch), [patch]);
 
-  // Fetch full file contents for expandable context
+  // Fetch full file contents for expandable diff context and single-side views.
   const [fileContents, setFileContents] = useState<{ forPath: string; old: string | null; new: string | null } | null>(null);
+  const [didLoadFileContents, setDidLoadFileContents] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
     setFileContents(null);
+    setDidLoadFileContents(false);
     const params = new URLSearchParams({ path: filePath });
     if (oldPath) params.set('oldPath', oldPath);
     if (reviewBase) params.set('base', reviewBase);
     fetch(`/api/file-content?${params}`, { signal: controller.signal })
       .then(res => res.ok ? res.json() : null)
       .then((data: { oldContent: string | null; newContent: string | null } | null) => {
-        if (data && (data.oldContent != null || data.newContent != null)) {
-          setFileContents({ forPath: filePath, old: data.oldContent, new: data.newContent });
-        }
+        setFileContents({
+          forPath: filePath,
+          old: data?.oldContent ?? null,
+          new: data?.newContent ?? null,
+        });
+        setDidLoadFileContents(true);
       })
-      .catch(() => {}); // Silent fallback — no expansion in demo mode
+      .catch(() => {
+        setFileContents({ forPath: filePath, old: null, new: null });
+        setDidLoadFileContents(true);
+      });
     return () => controller.abort();
   }, [filePath, oldPath, reviewBase]);
 
@@ -465,14 +475,45 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     [lineAnnotations, aiLineAnnotations],
   );
 
+  const singleFileAnnotations = useMemo(
+    () => mergedAnnotations
+      .filter((annotation) => annotation.side === singleFileSide)
+      .map((annotation) => ({
+        lineNumber: annotation.lineNumber,
+        metadata: annotation.metadata,
+      })),
+    [mergedAnnotations, singleFileSide],
+  );
+
+  const singleFileSelectedLines = useMemo<PierreSelectedLineRange | undefined>(() => {
+    if (!pendingSelection || pendingSelection.side !== singleFileSide) return undefined;
+    return {
+      start: Math.min(pendingSelection.start, pendingSelection.end),
+      end: Math.max(pendingSelection.start, pendingSelection.end),
+    };
+  }, [pendingSelection, singleFileSide]);
+
+  const changedLineNumbers = useMemo(() => getChangedLineNumbersFromPatch(patch), [patch]);
+  const singleFileDisplayPath = diffStyle === 'old' ? (oldPath || filePath) : filePath;
+  const singleFileContents = diffStyle === 'old' ? fileContents?.old ?? null : fileContents?.new ?? null;
+  const singleFileUnavailableMessage = useMemo(() => {
+    if (!didLoadFileContents) return `Loading ${diffStyle} file…`;
+    if (fileContents && fileContents.old == null && fileContents.new == null) {
+      return 'Unable to load file contents for this view.';
+    }
+    return diffStyle === 'old'
+      ? 'No previous version is available for this file.'
+      : 'No new version is available for this file.';
+  }, [didLoadFileContents, diffStyle, fileContents]);
+
   // Handle edit: find annotation and start editing in toolbar
   const handleEdit = useCallback((id: string) => {
     const ann = annotations.find(a => a.id === id);
     if (ann) toolbar.startEdit(ann);
   }, [annotations, toolbar.startEdit]);
 
-  // Render annotation or AI marker in diff
-  const renderAnnotation = useCallback((annotation: { side: string; lineNumber: number; metadata?: DiffAnnotationMetadata }) => {
+  // Render annotation or AI marker in diff / single-file modes
+  const renderAnnotation = useCallback((annotation: { lineNumber: number; metadata?: DiffAnnotationMetadata }) => {
     if (!annotation.metadata) return null;
 
     if (annotation.metadata.kind === 'ai-marker') {
@@ -523,6 +564,34 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     );
   }, [toolbar.handleLineSelectionEnd]);
 
+  const renderGutterUtility = useCallback((getHoveredLine: () => { lineNumber: number } | undefined) => {
+    return (
+      <button
+        className="hover-add-comment"
+        onClick={(e) => {
+          e.stopPropagation();
+          const line = getHoveredLine();
+          if (!line) return;
+          toolbar.handleLineSelectionEnd({
+            start: line.lineNumber,
+            end: line.lineNumber,
+            side: singleFileSide,
+          });
+        }}
+      >
+        +
+      </button>
+    );
+  }, [singleFileSide, toolbar.handleLineSelectionEnd]);
+
+  const handleSingleFileLineSelectionEnd = useCallback((range: PierreSelectedLineRange | null) => {
+    toolbar.handleLineSelectionEnd(range ? {
+      start: range.start,
+      end: range.end,
+      side: singleFileSide,
+    } : null);
+  }, [singleFileSide, toolbar.handleLineSelectionEnd]);
+
   useEffect(() => {
     const root = diffContentRef.current;
     if (!root) return;
@@ -534,7 +603,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         const focusLine = getLineNumberFromNode(selection.focusNode);
         if (anchorLine == null || focusLine == null) return;
         if (anchorLine === focusLine) return;
-        const side = getSideFromNode(selection.anchorNode);
+        const side = isSingleFileStyle ? singleFileSide : getSideFromNode(selection.anchorNode);
         toolbar.handleLineSelectionEnd({
           start: Math.min(anchorLine, focusLine),
           end: Math.max(anchorLine, focusLine),
@@ -545,18 +614,22 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     };
     root.addEventListener('mouseup', handler, true);
     return () => root.removeEventListener('mouseup', handler, true);
-  }, [toolbar.handleLineSelectionEnd]);
+  }, [isSingleFileStyle, singleFileSide, toolbar.handleLineSelectionEnd]);
 
   // Token interaction handlers (code area clicks)
   const handleTokenClick = useCallback((props: DiffTokenEventBaseProps, event: MouseEvent) => {
     toolbar.handleTokenClick(props, event);
   }, [toolbar.handleTokenClick]);
 
-  const handleTokenEnter = useCallback((props: DiffTokenEventBaseProps) => {
+  const handleSingleFileTokenClick = useCallback((props: any, event: MouseEvent) => {
+    toolbar.handleTokenClick({ ...props, side: singleFileSide }, event);
+  }, [singleFileSide, toolbar.handleTokenClick]);
+
+  const handleTokenEnter = useCallback((props: { tokenElement: HTMLElement }) => {
     props.tokenElement.classList.add('pn-token-hover');
   }, []);
 
-  const handleTokenLeave = useCallback((props: DiffTokenEventBaseProps) => {
+  const handleTokenLeave = useCallback((props: { tokenElement: HTMLElement }) => {
     props.tokenElement.classList.remove('pn-token-hover');
   }, []);
 
@@ -590,37 +663,66 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         onMouseMove={toolbar.handleMouseMove}
       >
         <div className="p-4" ref={diffContentRef}>
-          <div ref={splitSurfaceRef} className="relative min-w-0" style={splitGridStyle}>
-            {isSplitLayout && diffOverflow !== 'wrap' && (
-              <div
-                className="absolute top-0 bottom-0 z-10 cursor-col-resize group"
-                style={{ left: `${splitRatio * 100}%`, width: 9, marginLeft: -4 }}
-                onPointerDown={handleSplitDragStart}
-                onDoubleClick={resetSplitRatio}
-              >
-                <div className="pointer-events-none absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-border transition-[width,background-color] group-hover:w-0.5 group-hover:bg-primary/50 group-active:w-0.5 group-active:bg-primary/70" />
+          {isSingleFileStyle ? (
+            !didLoadFileContents || singleFileContents == null ? (
+              <div className="rounded-lg border border-border/50 bg-muted/20 px-4 py-6 text-sm text-muted-foreground">
+                {singleFileUnavailableMessage}
               </div>
-            )}
-            <PierreDiffContent
-              filePath={filePath}
-              fileDiff={augmentedDiff}
-              pierreTheme={pierreTheme}
-              diffStyle={diffStyle}
-              diffOverflow={diffOverflow}
-              diffIndicators={diffIndicators}
-              lineDiffType={lineDiffType}
-              disableLineNumbers={disableLineNumbers}
-              disableBackground={disableBackground}
-              mergedAnnotations={mergedAnnotations}
-              pendingSelection={pendingSelection}
-              onLineSelectionEnd={toolbar.handleLineSelectionEnd}
-              renderAnnotation={renderAnnotation}
-              renderHoverUtility={renderHoverUtility}
-              onTokenClick={handleTokenClick}
-              onTokenEnter={handleTokenEnter}
-              onTokenLeave={handleTokenLeave}
-            />
-          </div>
+            ) : (
+              <PierreFileView
+                filePath={filePath}
+                displayPath={singleFileDisplayPath}
+                contents={singleFileContents}
+                pierreTheme={pierreTheme}
+                overflow={diffOverflow}
+                diffIndicators={diffIndicators}
+                disableLineNumbers={disableLineNumbers}
+                disableBackground={disableBackground}
+                changedLineNumbers={diffStyle === 'old' ? changedLineNumbers.oldLines : changedLineNumbers.newLines}
+                changedLineType={diffStyle === 'old' ? 'change-deletion' : 'change-addition'}
+                lineAnnotations={singleFileAnnotations}
+                selectedLines={singleFileSelectedLines}
+                renderAnnotation={renderAnnotation}
+                renderGutterUtility={renderGutterUtility}
+                onLineSelectionEnd={handleSingleFileLineSelectionEnd}
+                onTokenClick={handleSingleFileTokenClick}
+                onTokenEnter={handleTokenEnter}
+                onTokenLeave={handleTokenLeave}
+              />
+            )
+          ) : (
+            <div ref={splitSurfaceRef} className="relative min-w-0" style={splitGridStyle}>
+              {isSplitLayout && diffOverflow !== 'wrap' && (
+                <div
+                  className="absolute top-0 bottom-0 z-10 cursor-col-resize group"
+                  style={{ left: `${splitRatio * 100}%`, width: 9, marginLeft: -4 }}
+                  onPointerDown={handleSplitDragStart}
+                  onDoubleClick={resetSplitRatio}
+                >
+                  <div className="pointer-events-none absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-border transition-[width,background-color] group-hover:w-0.5 group-hover:bg-primary/50 group-active:w-0.5 group-active:bg-primary/70" />
+                </div>
+              )}
+              <PierreDiffContent
+                filePath={filePath}
+                fileDiff={augmentedDiff}
+                pierreTheme={pierreTheme}
+                diffStyle={diffStyle}
+                diffOverflow={diffOverflow}
+                diffIndicators={diffIndicators}
+                lineDiffType={lineDiffType}
+                disableLineNumbers={disableLineNumbers}
+                disableBackground={disableBackground}
+                mergedAnnotations={mergedAnnotations}
+                pendingSelection={pendingSelection}
+                onLineSelectionEnd={toolbar.handleLineSelectionEnd}
+                renderAnnotation={renderAnnotation}
+                renderHoverUtility={renderHoverUtility}
+                onTokenClick={handleTokenClick}
+                onTokenEnter={handleTokenEnter}
+                onTokenLeave={handleTokenLeave}
+              />
+            </div>
+          )}
         </div>
 
       {toolbar.toolbarState && !toolbar.showCodeModal && (

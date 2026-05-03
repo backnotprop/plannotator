@@ -1,5 +1,4 @@
 import React, { useMemo, useCallback, useRef, useState, useEffect } from 'react';
-import { type DiffLineAnnotation } from '@pierre/diffs/react';
 import { getSingularPatch } from '@pierre/diffs';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/types';
 import { usePierreTheme } from '../hooks/usePierreTheme';
@@ -28,7 +27,7 @@ interface AllFilesDiffViewProps {
   onEditAnnotation: (id: string, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel | null, decorations?: ConventionalDecoration[]) => void;
   onSelectAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
-  diffStyle: 'split' | 'unified';
+  diffStyle: 'split' | 'unified' | 'old' | 'new';
   diffOverflow?: 'scroll' | 'wrap';
   diffIndicators?: 'bars' | 'classic' | 'none';
   lineDiffType?: 'word-alt' | 'word' | 'char' | 'none';
@@ -465,7 +464,7 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
                 }}
                 annotations={fileAnnotations}
                 selectedLines={activeFilePath === file.path ? (pendingSelection || undefined) : undefined}
-                renderAnnotation={(annotation: DiffLineAnnotation<DiffAnnotationMetadata>) => {
+                renderAnnotation={(annotation) => {
                   if (!annotation.metadata) return null;
                   return (
                     <InlineAnnotation

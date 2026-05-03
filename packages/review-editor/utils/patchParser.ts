@@ -56,3 +56,52 @@ export function extractLinesFromPatch(
 
   return result.join('\n');
 }
+
+/**
+ * Return the exact old/new line numbers that are changed in a unified diff.
+ * Context lines are excluded.
+ */
+export function getChangedLineNumbersFromPatch(patch: string): {
+  oldLines: Set<number>;
+  newLines: Set<number>;
+} {
+  const lines = patch.split('\n');
+  const oldLines = new Set<number>();
+  const newLines = new Set<number>();
+
+  let oldLine = 0;
+  let newLine = 0;
+
+  for (const line of lines) {
+    const hunkMatch = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunkMatch) {
+      oldLine = parseInt(hunkMatch[1], 10) - 1;
+      newLine = parseInt(hunkMatch[2], 10) - 1;
+      continue;
+    }
+
+    if (line.startsWith('diff ') || line.startsWith('index ') ||
+        line.startsWith('--- ') || line.startsWith('+++ ') ||
+        line.startsWith('new file mode ') || line.startsWith('deleted file mode ') ||
+        line.startsWith('similarity index ') || line.startsWith('rename from ') ||
+        line.startsWith('rename to ') || line.startsWith('old mode ') ||
+        line.startsWith('new mode ')) {
+      continue;
+    }
+
+    const prefix = line[0];
+
+    if (prefix === ' ') {
+      oldLine++;
+      newLine++;
+    } else if (prefix === '-') {
+      oldLine++;
+      oldLines.add(oldLine);
+    } else if (prefix === '+') {
+      newLine++;
+      newLines.add(newLine);
+    }
+  }
+
+  return { oldLines, newLines };
+}
