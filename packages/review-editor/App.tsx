@@ -707,12 +707,17 @@ const ReviewApp: React.FC = () => {
         if (reviewSidebar.isOpen) reviewSidebar.close();
         else reviewSidebar.open();
       }
+      // F to toggle between new/old single-file views
+      if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f' && !isTypingTarget(e.target)) {
+        e.preventDefault();
+        configStore.set('diffStyle', diffStyle === 'new' ? 'old' : 'new');
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showExportModal, showDestinationMenu, isSearchOpen, searchQuery, searchMatches, isSearchPending, openSearch, stepSearchMatch, clearSearch, closeSearch, hasSearchableFiles, reviewSidebar.isOpen, reviewSidebar.open, reviewSidebar.close, isFileTreeOpen]);
+  }, [showExportModal, showDestinationMenu, isSearchOpen, searchQuery, searchMatches, isSearchPending, openSearch, stepSearchMatch, clearSearch, closeSearch, hasSearchableFiles, reviewSidebar.isOpen, reviewSidebar.open, reviewSidebar.close, isFileTreeOpen, diffStyle]);
 
 
   // Load diff content - try API first, fall back to demo
