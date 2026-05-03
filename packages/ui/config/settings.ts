@@ -12,6 +12,10 @@
 import { storage } from '../utils/storage';
 import { generateIdentity } from '../utils/generateIdentity';
 
+function isDiffStyle(v: unknown): v is 'split' | 'unified' | 'old' | 'new' {
+  return v === 'split' || v === 'unified' || v === 'old' || v === 'new';
+}
+
 export interface SettingDef<T> {
   defaultValue: T | (() => T);
   fromCookie: () => T | undefined;
@@ -56,13 +60,13 @@ export const SETTINGS = {
     defaultValue: 'split' as 'split' | 'unified' | 'old' | 'new',
     fromCookie: () => {
       const v = storage.getItem('plannotator-diff-style') ?? storage.getItem('review-diff-style');
-      return v === 'split' || v === 'unified' || v === 'old' || v === 'new' ? v : undefined;
+      return isDiffStyle(v) ? v : undefined;
     },
     toCookie: (v: string) => storage.setItem('plannotator-diff-style', v),
     serverKey: 'diffOptions',
     fromServer: (sc: Record<string, unknown>) => {
       const v = (sc.diffOptions as Record<string, unknown> | undefined)?.diffStyle;
-      return v === 'split' || v === 'unified' || v === 'old' || v === 'new' ? v : undefined;
+      return isDiffStyle(v) ? v : undefined;
     },
     toServer: (v: string) => ({ diffOptions: { diffStyle: v } }),
   },

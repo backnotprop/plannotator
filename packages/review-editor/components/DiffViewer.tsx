@@ -565,24 +565,11 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   }, [toolbar.handleLineSelectionEnd]);
 
   const renderGutterUtility = useCallback((getHoveredLine: () => { lineNumber: number } | undefined) => {
-    return (
-      <button
-        className="hover-add-comment"
-        onClick={(e) => {
-          e.stopPropagation();
-          const line = getHoveredLine();
-          if (!line) return;
-          toolbar.handleLineSelectionEnd({
-            start: line.lineNumber,
-            end: line.lineNumber,
-            side: singleFileSide,
-          });
-        }}
-      >
-        +
-      </button>
-    );
-  }, [singleFileSide, toolbar.handleLineSelectionEnd]);
+    return renderHoverUtility(() => {
+      const line = getHoveredLine();
+      return line ? { lineNumber: line.lineNumber, side: singleFileSide } : undefined;
+    });
+  }, [renderHoverUtility, singleFileSide]);
 
   const handleSingleFileLineSelectionEnd = useCallback((range: PierreSelectedLineRange | null) => {
     toolbar.handleLineSelectionEnd(range ? {
