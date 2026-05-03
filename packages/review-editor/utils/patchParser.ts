@@ -63,3 +63,52 @@ export function getChangedLineNumbersFromPatch(patch: string): {
   }
   return { oldLines, newLines };
 }
+
+/**
+ * Return old/new line numbers for hunks that contain BOTH additions and
+ * deletions (i.e. modifications, not pure adds/removes).  These are the lines
+ * where toggling to the opposite single-file view would reveal a counterpart
+ * change.
+ */
+export function getModifiedHunkLineNumbers(patch: string): {
+  oldLines: Set<number>;
+  newLines: Set<number>;
+} {
+  const oldLinesResult = new Set<number>();
+  const newLinesResult = new Set<number>();
+
+  let hunkOldLines: number[] = [];
+  let hunkNewLines: number[] = [];
+
+  function flushHunk() {
+    if (hunkOldLines.length > 0 && hunkNewLines.length > 0) {
+      for (const n of hunkOldLines) oldLinesResult.add(n);
+      for (const n of hunkNewLines) newLinesResult.add(n);
+    }
+    hunkOldLines = [];
+    hunkNewLines = [];
+  }
+
+  let oldLine = 0;
+  let newLine = 0;
+  let inHunk = false;
+
+  for (const line of patch.split('\n')) {
+    const hunkMatch = line.match(HUNK_HEADER_RE);
+    if (hunkMatch) {
+      flushHunk();
+      oldLine = parseInt(hunkMatch[1], 10) - 1;
+      newLine = parseInt(hunkMatch[2], 10) - 1;
+      inHunk = true;
+      continue;
+    }
+    if (!inHunk) continue;
+    const prefix = line[0];
+    if (prefix === ' ') { oldLine++; newLine++; }
+    else if (prefix === '-') { oldLine++; hunkOldLines.push(oldLine); }
+    else if (prefix === '+') { newLine++; hunkNewLines.push(newLine); }
+  }
+  flushHunk();
+
+  return { oldLines: oldLinesResult, newLines: newLinesResult };
+}

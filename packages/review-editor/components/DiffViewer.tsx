@@ -6,7 +6,7 @@ import { usePierreTheme } from '../hooks/usePierreTheme';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { storage } from '@plannotator/ui/utils/storage';
 import { detectLanguage } from '../utils/detectLanguage';
-import { getChangedLineNumbersFromPatch } from '../utils/patchParser';
+import { getChangedLineNumbersFromPatch, getModifiedHunkLineNumbers } from '../utils/patchParser';
 import { useAnnotationToolbar } from '../hooks/useAnnotationToolbar';
 import { useConfigValue } from '@plannotator/ui/config';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
@@ -494,6 +494,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   }, [pendingSelection, singleFileSide]);
 
   const changedLineNumbers = useMemo(() => getChangedLineNumbersFromPatch(patch), [patch]);
+  const modifiedHunkLineNumbers = useMemo(() => getModifiedHunkLineNumbers(patch), [patch]);
   const singleFileDisplayPath = diffStyle === 'old' ? (oldPath || filePath) : filePath;
   const singleFileContents = diffStyle === 'old' ? fileContents?.old ?? null : fileContents?.new ?? null;
   const singleFileUnavailableMessage = useMemo(() => {
@@ -667,6 +668,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                 disableBackground={disableBackground}
                 changedLineNumbers={diffStyle === 'old' ? changedLineNumbers.oldLines : changedLineNumbers.newLines}
                 changedLineType={diffStyle === 'old' ? 'change-deletion' : 'change-addition'}
+                peerChangedLineNumbers={diffStyle === 'old' ? modifiedHunkLineNumbers.oldLines : modifiedHunkLineNumbers.newLines}
+                peerChangedLineType={diffStyle === 'old' ? 'change-addition' : 'change-deletion'}
                 lineAnnotations={singleFileAnnotations}
                 selectedLines={singleFileSelectedLines}
                 renderAnnotation={renderAnnotation}

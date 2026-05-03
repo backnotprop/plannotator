@@ -4,7 +4,7 @@ import type { FileDiffMetadata, SelectedLineRange as PierreSelectedLineRange } f
 import { processFile } from '@pierre/diffs';
 import type { DiffAnnotationMetadata, SelectedLineRange } from '@plannotator/ui/types';
 import type { DiffFile } from '../types';
-import { getChangedLineNumbersFromPatch } from '../utils/patchParser';
+import { getChangedLineNumbersFromPatch, getModifiedHunkLineNumbers } from '../utils/patchParser';
 import { PierreFileView } from './PierreFileView';
 
 interface LazyFileDiffProps {
@@ -107,6 +107,7 @@ export const LazyFileDiff: React.FC<LazyFileDiffProps> = ({
   }, [file.patch, file.path, file.oldPath, fileContents, baseDiff]);
 
   const changedLineNumbers = useMemo(() => getChangedLineNumbersFromPatch(file.patch), [file.patch]);
+  const modifiedHunkLineNumbers = useMemo(() => getModifiedHunkLineNumbers(file.patch), [file.patch]);
 
   const singleFileAnnotations = useMemo(
     () => annotations
@@ -191,6 +192,8 @@ export const LazyFileDiff: React.FC<LazyFileDiffProps> = ({
             disableBackground={options.disableBackground as boolean | undefined}
             changedLineNumbers={diffStyle === 'old' ? changedLineNumbers.oldLines : changedLineNumbers.newLines}
             changedLineType={diffStyle === 'old' ? 'change-deletion' : 'change-addition'}
+            peerChangedLineNumbers={diffStyle === 'old' ? modifiedHunkLineNumbers.oldLines : modifiedHunkLineNumbers.newLines}
+            peerChangedLineType={diffStyle === 'old' ? 'change-addition' : 'change-deletion'}
             lineAnnotations={singleFileAnnotations}
             selectedLines={singleFileSelectedLines}
             renderAnnotation={renderAnnotation}

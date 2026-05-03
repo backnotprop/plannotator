@@ -75,6 +75,27 @@ export function usePierreTheme(options?: { fontFamily?: string; fontSize?: strin
             cursor: pointer;
           }
           ${fontCSS}
+          [data-column-number][data-pn-has-peer="deletion"]::after,
+          [data-column-number][data-pn-has-peer="addition"]::after {
+            content: "";
+            -webkit-user-select: none;
+            user-select: none;
+            contain: strict;
+            width: 3px;
+            height: 100%;
+            display: block;
+            position: absolute;
+            top: 0;
+            right: 0;
+          }
+          [data-column-number][data-pn-has-peer="deletion"]::after {
+            background-color: var(--diffs-deletion-base);
+            opacity: 0.55;
+          }
+          [data-column-number][data-pn-has-peer="addition"]::after {
+            background-color: var(--diffs-addition-base);
+            opacity: 0.55;
+          }
         `,
       });
     });

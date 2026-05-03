@@ -14,6 +14,11 @@ interface PierreFileViewProps {
   disableBackground?: boolean;
   changedLineNumbers?: Set<number>;
   changedLineType?: 'change-addition' | 'change-deletion';
+  /** Lines in the current view whose counterpart on the *other* side also has
+   * changes.  A small right-edge bar is rendered to hint the user to toggle. */
+  peerChangedLineNumbers?: Set<number>;
+  /** Which type the *peer* changes are — determines the bar colour. */
+  peerChangedLineType?: 'change-addition' | 'change-deletion';
   lineAnnotations: LineAnnotation<DiffAnnotationMetadata>[];
   selectedLines?: PierreSelectedLineRange;
   renderAnnotation: (annotation: LineAnnotation<DiffAnnotationMetadata>) => React.ReactNode;
@@ -46,6 +51,29 @@ function applySingleFileThemeAttrs(
       element.setAttribute('data-indicators', diffIndicators);
     }
   });
+}
+
+function applyPeerChangedLineHighlights(
+  root: ShadowRoot | HTMLElement,
+  peerChangedLineNumbers: Set<number> | undefined,
+  peerChangedLineType: 'change-addition' | 'change-deletion' | undefined,
+) {
+  root.querySelectorAll('[data-pn-has-peer]').forEach((element) => {
+    if (element instanceof HTMLElement) element.removeAttribute('data-pn-has-peer');
+  });
+
+  if (!peerChangedLineNumbers?.size || !peerChangedLineType) return;
+
+  const peerValue = peerChangedLineType === 'change-deletion' ? 'deletion' : 'addition';
+  for (const lineNumber of peerChangedLineNumbers) {
+    root
+      .querySelectorAll(`[data-column-number="${lineNumber}"]`)
+      .forEach((element) => {
+        if (element instanceof HTMLElement) {
+          element.setAttribute('data-pn-has-peer', peerValue);
+        }
+      });
+  }
 }
 
 function applyChangedLineHighlights(
@@ -85,6 +113,8 @@ export const PierreFileView: React.FC<PierreFileViewProps> = ({
   disableBackground,
   changedLineNumbers,
   changedLineType,
+  peerChangedLineNumbers,
+  peerChangedLineType,
   lineAnnotations,
   selectedLines,
   renderAnnotation,
@@ -117,6 +147,7 @@ export const PierreFileView: React.FC<PierreFileViewProps> = ({
           if (!(root instanceof ShadowRoot || root instanceof HTMLElement)) return;
           applySingleFileThemeAttrs(root, { diffIndicators, disableBackground });
           applyChangedLineHighlights(root, changedLineNumbers, changedLineType);
+          applyPeerChangedLineHighlights(root, peerChangedLineNumbers, peerChangedLineType);
         },
       }}
       lineAnnotations={lineAnnotations}
