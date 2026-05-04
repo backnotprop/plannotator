@@ -19,9 +19,16 @@ export type ValidatedMap = Map<string, ValidationEntry>;
  * renderer dispatches on status — see InlineMarkdown.
  *
  * Empty candidate set short-circuits — no fetch, ready: true immediately.
+ *
+ * `baseDir` is the directory the active document lives in (linked-doc parent
+ * or the annotate source file's parent). When set, the server tries
+ * `<baseDir>/<input>` literal-resolve before its cwd walk so out-of-tree
+ * relative references (e.g. `../script.ts` in `~/notes/foo.md`) don't get
+ * demoted to plain text.
  */
 export function useValidatedCodePaths(
 	markdown: string,
+	baseDir?: string,
 ): { validated: ValidatedMap; ready: boolean } {
 	const [validated, setValidated] = useState<ValidatedMap>(new Map());
 	const [ready, setReady] = useState<boolean>(false);
@@ -42,7 +49,9 @@ export function useValidatedCodePaths(
 				const res = await fetch("/api/doc/exists", {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ paths: candidates }),
+					body: JSON.stringify(
+						baseDir ? { paths: candidates, base: baseDir } : { paths: candidates },
+					),
 				});
 				if (cancelled) return;
 				if (!res.ok) {
@@ -67,7 +76,7 @@ export function useValidatedCodePaths(
 		return () => {
 			cancelled = true;
 		};
-	}, [markdown]);
+	}, [markdown, baseDir]);
 
 	// Stable reference: only changes when validated/ready actually change.
 	// Without memoization, the parent provider's value is a fresh object every

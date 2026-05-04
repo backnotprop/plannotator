@@ -1969,6 +1969,9 @@ const App: React.FC = () => {
                   onOpenCodeFile={codeFilePopout.open}
                   linkedDocInfo={linkedDocHook.isActive ? { filepath: linkedDocHook.filepath!, onBack: handleLinkedDocBack, label: fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath)?.isVault ? 'Vault File' : fileBrowser.activeFile ? 'File' : undefined, backLabel } : null}
                   imageBaseDir={imageBaseDir}
+                  codePathBaseDir={linkedDocHook.filepath
+                    ? linkedDocHook.filepath.replace(/\/[^/]+$/, '')
+                    : imageBaseDir}
                   copyLabel={annotateSource === 'message' ? 'Copy message' : annotateSource === 'file' || annotateSource === 'folder' ? 'Copy file' : undefined}
                   archiveInfo={archive.currentInfo}
                   sourceInfo={sourceInfo}

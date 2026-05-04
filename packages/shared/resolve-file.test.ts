@@ -82,4 +82,32 @@ describe("resolveCodeFile", () => {
 			expect(r.path).toBe(join(root, "packages/editor/App.tsx"));
 		}
 	});
+
+	test("does NOT strip leading ../ — without baseDir, refuses to fabricate", async () => {
+		// `../foo.tsx` is meaningful (escape parent). With no baseDir context,
+		// we can't honor it, so we must fail rather than silently returning
+		// an unrelated file with the same basename from inside cwd.
+		const r = await resolveCodeFile("../editor/App.tsx", root);
+		expect(r.kind).toBe("not_found");
+	});
+
+	test("resolves via baseDir when input is relative to active doc", async () => {
+		// Linked doc at `<root>/packages/review-editor/...` references `../editor/App.tsx`
+		const baseDir = join(root, "packages/review-editor");
+		const r = await resolveCodeFile("../editor/App.tsx", root, baseDir);
+		expect(r.kind).toBe("found");
+		if (r.kind === "found") {
+			expect(r.path).toBe(join(root, "packages/editor/App.tsx"));
+		}
+	});
+
+	test("baseDir miss falls through to suffix walk", async () => {
+		// baseDir doesn't have the file, but cwd tree does — walk catches it.
+		const baseDir = join(root, "packages/review-editor");
+		const r = await resolveCodeFile("ui/components/Button.tsx", root, baseDir);
+		expect(r.kind).toBe("found");
+		if (r.kind === "found") {
+			expect(r.path).toBe(join(root, "packages/ui/components/Button.tsx"));
+		}
+	});
 });

@@ -21,6 +21,7 @@
     "./favicon": "./favicon.ts",
     "./code-file": "./code-file.ts",
     "./resolve-file": "./resolve-file.ts",
+    "./extract-code-paths": "./extract-code-paths.ts",
     "./external-annotation": "./external-annotation.ts",
     "./agent-jobs": "./agent-jobs.ts",
     "./config": "./config.ts",

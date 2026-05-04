@@ -68,6 +68,10 @@ interface ViewerProps {
   onOpenLinkedDoc?: (path: string) => void;
   onOpenCodeFile?: (path: string) => void;
   imageBaseDir?: string;
+  /** Directory the active document lives in — used by the code-path validator
+   *  so out-of-tree relative references (e.g. `../foo.ts` in a linked doc)
+   *  resolve against the doc's own directory rather than only cwd. */
+  codePathBaseDir?: string;
   linkedDocInfo?: { filepath: string; onBack: () => void; label?: string; backLabel?: string } | null;
   // Plan diff props
   planDiffStats?: { additions: number; deletions: number; modifications: number } | null;
@@ -159,6 +163,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   onOpenCodeFile,
   linkedDocInfo,
   imageBaseDir,
+  codePathBaseDir,
   copyLabel,
   actionsLabelMode = 'full',
   archiveInfo,
@@ -512,7 +517,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     setViewerCommentPopover(null);
   }, []);
 
-  const codePathValidation = useValidatedCodePaths(markdown);
+  const codePathValidation = useValidatedCodePaths(markdown, codePathBaseDir);
 
   return (
     <CodePathValidationContext.Provider value={codePathValidation}>

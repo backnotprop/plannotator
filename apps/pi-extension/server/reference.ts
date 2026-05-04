@@ -201,6 +201,11 @@ export async function handleDocRequest(res: Res, url: URL): Promise<void> {
 /**
  * Batch existence check for code-file paths the renderer wants to linkify.
  * POST /api/doc/exists with { paths: string[] }.
+ *
+ * TODO(security): see packages/server/reference-handlers.ts handleDocExists —
+ * absolute paths are probed verbatim with no project-root containment check,
+ * leaking file existence back to the caller. Fix in lockstep with the Bun
+ * handler (reject absolute inputs or filter results via isWithinProjectRoot).
  */
 export async function handleDocExistsRequest(res: Res, req: IncomingMessage): Promise<void> {
 	const body = await parseBody(req);
@@ -213,6 +218,10 @@ export async function handleDocExistsRequest(res: Res, req: IncomingMessage): Pr
 		json(res, { error: "Too many paths (max 500)" }, 400);
 		return;
 	}
+	const baseRaw = (body as { base?: unknown }).base;
+	const baseDir = typeof baseRaw === "string" && baseRaw.length > 0
+		? resolveUserPath(baseRaw)
+		: undefined;
 
 	const projectRoot = process.cwd();
 	const results: Record<
@@ -225,7 +234,7 @@ export async function handleDocExistsRequest(res: Res, req: IncomingMessage): Pr
 
 	await Promise.all(
 		(paths as string[]).map(async (p) => {
-			const r = await resolveCodeFile(p, projectRoot);
+			const r = await resolveCodeFile(p, projectRoot, baseDir);
 			if (r.kind === "found") {
 				results[p] = { status: "found", resolved: r.path };
 			} else if (r.kind === "ambiguous") {

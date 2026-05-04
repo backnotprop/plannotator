@@ -281,15 +281,23 @@ export function warmFileListCache(
  * Strategies:
  *   1. Absolute path → use as-is.
  *   2. Exact relative from project root.
- *   3. Case-insensitive suffix match against the cached file list:
+ *   3. If `baseDir` provided, literal `<baseDir>/<input>` existence check —
+ *      lets out-of-tree linked docs resolve their own relative references
+ *      (e.g. `../script.ts` in `~/notes/foo.md` finds `~/script.ts`).
+ *   4. Case-insensitive suffix match against the cached file list:
  *      - bare basename input → match any file with that basename;
  *      - input with `/` → match files whose path equals or ends with `/<input>`
  *        on a segment boundary (so `editor/App.tsx` matches `packages/editor/App.tsx`
  *        but not `myeditor/App.tsx`).
+ *
+ * `..` segments in the input are honored: only `./` is stripped before suffix
+ * matching. `../foo.ts` without a `baseDir` correctly falls through to
+ * not_found rather than fabricating a match against `foo.ts` somewhere in cwd.
  */
 export async function resolveCodeFile(
 	input: string,
 	projectRoot: string,
+	baseDir?: string,
 ): Promise<ResolveResult> {
 	const originalInput = input.trim();
 	const unquotedInput = stripWrappingQuotes(originalInput);
@@ -313,15 +321,25 @@ export async function resolveCodeFile(
 		return { kind: "found", path: fromRoot };
 	}
 
+	if (baseDir) {
+		const fromBase = resolve(baseDir, searchInput);
+		if (fileExists(fromBase)) {
+			return { kind: "found", path: fromBase };
+		}
+	}
+
 	const fileList = await warmFileListCache(projectRoot, "code");
 	if (fileList === null) {
 		return { kind: "unavailable", input: originalInput };
 	}
 
-	// Strip leading `./` or `../` so suffix matching works on inputs like
-	// `./editor/App.tsx` — file list entries never carry those segments.
-	const cleanedInput = searchInput.replace(/^(?:\.\.?\/)+/, "");
-	if (!cleanedInput) {
+	// Strip leading `./` so suffix matching works on inputs like
+	// `./editor/App.tsx` — file list entries never carry that segment.
+	// `../` is intentionally NOT stripped: `..` is meaningful (escape parent),
+	// not noise. If we can't honor it via baseDir, the input has no
+	// suffix-match equivalent in the in-tree file list.
+	const cleanedInput = searchInput.replace(/^(?:\.\/)+/, "");
+	if (!cleanedInput || cleanedInput.startsWith("../")) {
 		return { kind: "not_found", input: originalInput };
 	}
 	const target = cleanedInput.toLowerCase();
