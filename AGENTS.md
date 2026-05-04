@@ -220,6 +220,7 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/reference/obsidian/doc`   | GET | Read a vault markdown file (`?vaultPath=<path>&path=<file>`) |
 | `/api/plan/vscode-diff` | POST   | Open diff in VS Code (body: baseVersion)   |
 | `/api/doc`              | GET    | Serve linked .md/.mdx file (`?path=<path>`) |
+| `/api/doc/exists`       | POST   | Batch-validate code-file paths (body: `{ paths: string[], base?: string }`) returns `{ results: { [path]: { status: "found"\|"ambiguous"\|"missing"\|"unavailable", … } } }` |
 | `/api/draft`          | GET/POST/DELETE | Auto-save annotation drafts to survive server crashes |
 | `/api/editor-annotations` | GET | List editor annotations (VS Code only) |
 | `/api/editor-annotation` | POST/DELETE | Add or remove an editor annotation (VS Code only) |
@@ -276,6 +277,8 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/exit`           | POST   | Close session without feedback |
 | `/api/image`          | GET    | Serve image by path query param            |
 | `/api/upload`         | POST   | Upload image, returns `{ path, originalName }` |
+| `/api/doc`            | GET    | Serve linked .md/.mdx/.html file or code file (`?path=<path>&base=<dir>`) |
+| `/api/doc/exists`     | POST   | Batch-validate code-file paths (body: `{ paths: string[], base?: string }`) |
 | `/api/draft`          | GET/POST/DELETE | Auto-save annotation drafts to survive server crashes |
 | `/api/external-annotations/stream` | GET | SSE stream for real-time external annotations |
 | `/api/external-annotations` | GET | Snapshot of external annotations (polling fallback, `?since=N` for version gating) |

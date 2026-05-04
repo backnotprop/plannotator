@@ -202,7 +202,7 @@ function emitPlainTextWithBareUrls(
       const gate = gateCodePath(cleanPath, validation ?? null);
       if (gate.render === 'plain') {
         // Bare prose, file doesn't exist — emit as plain text, no link styling.
-        parts.push(span.value);
+        parts.push(transformPlainText(span.value));
       } else {
         parts.push(
           <CodeFileLink

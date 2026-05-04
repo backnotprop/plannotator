@@ -468,6 +468,12 @@ export const CodeFilePopout: React.FC<CodeFilePopoutProps> = ({
   };
 
   if (error) {
+    // The server's error string distinguishes "File not found", "Ambiguous
+    // path '…'", and other failures (e.g. permission). Earlier this dialog
+    // hardcoded "File not found in repo" regardless of cause, which was
+    // misleading when an optimistic-link click hit an ambiguous response
+    // before validation completed.
+    const isNotFound = /^file not found/i.test(error);
     return (
       <PopoutDialog
         open={open}
@@ -477,14 +483,16 @@ export const CodeFilePopout: React.FC<CodeFilePopoutProps> = ({
         className="w-[min(520px,calc(100vw-4rem))]"
       >
         <div className="flex flex-col gap-2 px-5 py-6 text-sm">
-          <div className="font-medium text-foreground">File not found in repo</div>
+          <div className="font-medium text-foreground">{error}</div>
           <code className="text-xs font-mono text-muted-foreground break-all">
             {requestedPath ?? filepath}
           </code>
-          <p className="text-xs text-muted-foreground mt-1">
-            The path was referenced in the document but no matching file was found
-            in this project. It may describe a planned/future file.
-          </p>
+          {isNotFound && (
+            <p className="text-xs text-muted-foreground mt-1">
+              The path was referenced in the document but no matching file was found
+              in this project. It may describe a planned/future file.
+            </p>
+          )}
         </div>
       </PopoutDialog>
     );
