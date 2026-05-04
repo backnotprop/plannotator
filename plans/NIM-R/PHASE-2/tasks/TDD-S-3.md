@@ -1,5 +1,5 @@
 ---
-id: NIM-15
+id: TDD-S-3
 trackerStatus:
   type: task
 title: TDD for S-3 multiplexed router behavior
@@ -35,10 +35,10 @@ Process rule:
 
 ### Comment (2026-04-30T16:18:48.738Z)
 
-Delegated [[NIM-15]] proof authoring to child session `f86c2767-9f6e-4100-9769-417960ff8426` (`gpt-5.4`) in worktree `/home/dzack/gitclones/plannotator-dzg-fork_worktrees/wild-nebula`.
+Delegated [[TDD-S-3]] proof authoring to child session `f86c2767-9f6e-4100-9769-417960ff8426` (`gpt-5.4`) in worktree `/home/dzack/gitclones/plannotator-dzg-fork_worktrees/wild-nebula`.
 
 Handoff included:
-- full [[NIM-15]] tracker specification
+- full [[TDD-S-3]] tracker specification
 - [[S-9.5]] TDD constraints
 - [[S-3]] target implementation context
 - explicit instruction not to implement the router itself
@@ -46,7 +46,7 @@ Handoff included:
 
 ### Comment (2026-04-30T16:26:02.235Z)
 
-Accepted delegated [[NIM-15]] proof authoring and integrated it into `main` as commit `39b000a` (`test: author [[NIM-15]] multiplexed router proof`).
+Accepted delegated [[TDD-S-3]] proof authoring and integrated it into `main` as commit `39b000a` (`test: author [[TDD-S-3]] multiplexed router proof`).
 
 Final acceptance phase:
 - `bun test tests/nim-15.multiplexed-router-proof.test.ts`

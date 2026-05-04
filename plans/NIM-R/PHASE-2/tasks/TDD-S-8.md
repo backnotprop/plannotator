@@ -1,5 +1,5 @@
 ---
-id: NIM-20
+id: TDD-S-8
 trackerStatus:
   type: task
 title: TDD for S-8 agent wrapper behavior
@@ -38,16 +38,16 @@ Process rule:
 Delegated to child session `c1051204-95b6-48ca-8a98-bfb582ee06af` in worktree `/home/dzack/gitclones/plannotator-dzg-fork_worktrees/radiant-birch` after checkpoint commit `90a55b1`.
 
 Acceptance target:
-- new [[NIM-20]] proof file with a real CLI/wrapper-behavior harness
+- new [[TDD-S-8]] proof file with a real CLI/wrapper-behavior harness
 - child-worktree verification should yield a clean red phase for the missing [[S-8]] implementation surface
 
 ### Comment (2026-05-01T16:29:54.728Z)
 
-The current delegate `c1051204-95b6-48ca-8a98-bfb582ee06af` is being explicitly abandoned after repeated polling showed a stable partial diff, no completion commit, and no response to a forced finish-or-blocker prompt. Taking over [[NIM-20]] locally to salvage the proof and keep the workflow moving.
+The current delegate `c1051204-95b6-48ca-8a98-bfb582ee06af` is being explicitly abandoned after repeated polling showed a stable partial diff, no completion commit, and no response to a forced finish-or-blocker prompt. Taking over [[TDD-S-8]] locally to salvage the proof and keep the workflow moving.
 
 ### Comment (2026-05-01T16:38:19.104Z)
 
-Accepted in `main` as `eb8ddbf` `test: add [[NIM-20]] agent wrapper proof`.
+Accepted in `main` as `eb8ddbf` `test: add [[TDD-S-8]] agent wrapper proof`.
 
 Verification in `main`:
 - `bun test tests/nim-20.agent-wrapper-proof.test.ts`

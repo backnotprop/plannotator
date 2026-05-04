@@ -1,5 +1,5 @@
 ---
-id: NIM-13
+id: TDD-S-1
 trackerStatus:
   type: task
 title: TDD for S-1 remote-surface deletion and build invariants
@@ -36,7 +36,7 @@ Process rule:
 
 ### Comment (2026-04-29T06:08:47.311Z)
 
-Accepted delegated proof authoring output and integrated it into `main` as commit `f8820d2` (`test: add [[NIM-13]] remote surface proof`).
+Accepted delegated proof authoring output and integrated it into `main` as commit `f8820d2` (`test: add [[TDD-S-1]] remote surface proof`).
 
 Review result:
 - proof now fails fast for the intended S-1 repo-state violations

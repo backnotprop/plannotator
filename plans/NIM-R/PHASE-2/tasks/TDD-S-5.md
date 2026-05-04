@@ -1,5 +1,5 @@
 ---
-id: NIM-17
+id: TDD-S-5
 trackerStatus:
   type: task
 title: TDD for S-5 submit/wait/verdict semantics
@@ -35,7 +35,7 @@ Process rule:
 
 ### Comment (2026-04-30T23:50:34.187Z)
 
-Delegating [[NIM-17]] proof authoring after accepting [[S-4]] commit `7abdda4` and checkpointing `main` at `989843a`. Verification target for the proof task is `bun test tests/nim-17.submit-wait-proof.test.ts`.
+Delegating [[TDD-S-5]] proof authoring after accepting [[S-4]] commit `7abdda4` and checkpointing `main` at `989843a`. Verification target for the proof task is `bun test tests/nim-17.submit-wait-proof.test.ts`.
 
 ### Comment (2026-05-01T00:00:01.974Z)
 

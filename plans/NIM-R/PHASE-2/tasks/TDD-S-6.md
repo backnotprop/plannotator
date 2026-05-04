@@ -1,5 +1,5 @@
 ---
-id: NIM-18
+id: TDD-S-6
 trackerStatus:
   type: task
 title: TDD for S-6 CLI contract and collision UX
@@ -35,7 +35,7 @@ Process rule:
 
 ### Comment (2026-05-01T00:10:47.939Z)
 
-Delegating [[NIM-18]] proof authoring after accepting [[S-5]] commit `a85fa40` and checkpointing `main` at `7c8b877`. Verification target for the proof task is `bun test tests/nim-18.cli-contract-proof.test.ts`.
+Delegating [[TDD-S-6]] proof authoring after accepting [[S-5]] commit `a85fa40` and checkpointing `main` at `7c8b877`. Verification target for the proof task is `bun test tests/nim-18.cli-contract-proof.test.ts`.
 
 ### Comment (2026-05-01T00:24:29.797Z)
 

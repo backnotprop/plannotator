@@ -1,5 +1,5 @@
 ---
-id: NIM-19
+id: TDD-S-7
 trackerStatus:
   type: task
 title: TDD for S-7 notification behavior
@@ -35,11 +35,11 @@ Process rule:
 
 ### Comment (2026-05-01T04:54:50.072Z)
 
-Delegating [[NIM-19]] proof authoring after accepting [[S-6]] commit `5b18e10` and checkpointing `main` at `5e2ed5d`. Verification target for the proof task is `bun test tests/nim-19.notification-proof.test.ts`.
+Delegating [[TDD-S-7]] proof authoring after accepting [[S-6]] commit `5b18e10` and checkpointing `main` at `5e2ed5d`. Verification target for the proof task is `bun test tests/nim-19.notification-proof.test.ts`.
 
 ### Comment (2026-05-01T05:03:54.204Z)
 
-Accepted in `main` as `f41cc95` `test: add [[NIM-19]] notification proof`.
+Accepted in `main` as `f41cc95` `test: add [[TDD-S-7]] notification proof`.
 
 Verification in `main`:
 - `bun test tests/nim-19.notification-proof.test.ts`

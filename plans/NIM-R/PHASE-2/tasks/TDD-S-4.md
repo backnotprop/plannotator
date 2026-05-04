@@ -1,5 +1,5 @@
 ---
-id: NIM-16
+id: TDD-S-4
 trackerStatus:
   type: task
 title: TDD for S-4 daemon lifecycle and recovery
@@ -36,10 +36,10 @@ Process rule:
 
 ### Comment (2026-04-30T17:12:41.673Z)
 
-Delegated [[NIM-16]] proof authoring to child session `52e9aec9-551f-4c2c-a58a-7ac552de5685` (`gpt-5.4`) in worktree `/home/dzack/gitclones/plannotator-dzg-fork_worktrees/silver-vapor`.
+Delegated [[TDD-S-4]] proof authoring to child session `52e9aec9-551f-4c2c-a58a-7ac552de5685` (`gpt-5.4`) in worktree `/home/dzack/gitclones/plannotator-dzg-fork_worktrees/silver-vapor`.
 
 Handoff included:
-- full [[NIM-16]] tracker specification
+- full [[TDD-S-4]] tracker specification
 - [[S-9.5]] TDD constraints
 - [[S-4]] target implementation context
 - explicit instruction not to implement daemon lifecycle production code
@@ -47,7 +47,7 @@ Handoff included:
 
 ### Comment (2026-04-30T23:26:12.731Z)
 
-Replacing prior empty delegate `52e9aec9-551f-4c2c-a58a-7ac552de5685` after verifying its worktree stayed at checkpoint `cb978ff` with no edits and no reported result. Reassigning [[NIM-16]] to a fresh proof-authoring child session with the full tracker spec and explicit non-goals.
+Replacing prior empty delegate `52e9aec9-551f-4c2c-a58a-7ac552de5685` after verifying its worktree stayed at checkpoint `cb978ff` with no edits and no reported result. Reassigning [[TDD-S-4]] to a fresh proof-authoring child session with the full tracker spec and explicit non-goals.
 
 ### Comment (2026-04-30T23:38:35.001Z)
 
@@ -55,11 +55,11 @@ Rejected child commit `0a5bc8d` during review. Local verification in child workt
 
 ### Comment (2026-04-30T23:40:03.549Z)
 
-Explicitly replacing child session `8fc924bd-b822-4124-8579-a6624618bc69` after repeated noncompliant proof revisions. Verified twice in the child worktree that the draft still targets the invented surface `packages/server/daemon-lifecycle.ts` instead of the actual [[S-4]] target `packages/server/daemon.ts`. Main agent is taking over [[NIM-16]] locally.
+Explicitly replacing child session `8fc924bd-b822-4124-8579-a6624618bc69` after repeated noncompliant proof revisions. Verified twice in the child worktree that the draft still targets the invented surface `packages/server/daemon-lifecycle.ts` instead of the actual [[S-4]] target `packages/server/daemon.ts`. Main agent is taking over [[TDD-S-4]] locally.
 
 ### Comment (2026-04-30T23:42:46.224Z)
 
-Accepted local takeover for [[NIM-16]] after replacing the noncompliant delegate. Verified in `main` with `bun test tests/nim-16.daemon-lifecycle-proof.test.ts`; the proof now fails cleanly on the correct missing [[S-4]] surface `packages/server/daemon.ts` and defines the expected lifecycle/recovery semantics for later implementation.
+Accepted local takeover for [[TDD-S-4]] after replacing the noncompliant delegate. Verified in `main` with `bun test tests/nim-16.daemon-lifecycle-proof.test.ts`; the proof now fails cleanly on the correct missing [[S-4]] surface `packages/server/daemon.ts` and defines the expected lifecycle/recovery semantics for later implementation.
 
 ## Activity Log
 

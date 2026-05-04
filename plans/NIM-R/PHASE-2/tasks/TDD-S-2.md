@@ -1,5 +1,5 @@
 ---
-id: NIM-14
+id: TDD-S-2
 trackerStatus:
   type: task
 title: TDD for S-2 state transition correctness
@@ -35,10 +35,10 @@ Process rule:
 
 ### Comment (2026-04-30T15:10:29.734Z)
 
-Delegated [[NIM-14]] proof authoring to child session `6501aa6a-8f72-4414-82ff-e2451a4a4720` (`gpt-5.4`) in worktree `/home/dzack/gitclones/plannotator-dzg-fork_worktrees/hollow-quartz`.
+Delegated [[TDD-S-2]] proof authoring to child session `6501aa6a-8f72-4414-82ff-e2451a4a4720` (`gpt-5.4`) in worktree `/home/dzack/gitclones/plannotator-dzg-fork_worktrees/hollow-quartz`.
 
 Handoff included:
-- full [[NIM-14]] tracker specification
+- full [[TDD-S-2]] tracker specification
 - [[S-9.5]] TDD constraints
 - [[S-2]] target implementation context
 - explicit instruction not to implement `packages/server/state.ts`
@@ -46,7 +46,7 @@ Handoff included:
 
 ### Comment (2026-04-30T15:27:06.548Z)
 
-Accepted delegated [[NIM-14]] proof authoring and integrated it into `main` as commits `57847a2` (`test: author [[NIM-14]] daemon state proof`) and `7abb111` (`test: tighten [[NIM-14]] proof gating`).
+Accepted delegated [[TDD-S-2]] proof authoring and integrated it into `main` as commits `57847a2` (`test: author [[TDD-S-2]] daemon state proof`) and `7abb111` (`test: tighten [[TDD-S-2]] proof gating`).
 
 Final acceptance phase:
 - `bun test tests/nim-14.state-machine-proof.test.ts`

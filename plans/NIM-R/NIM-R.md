@@ -27,7 +27,7 @@ Single root task certifying: daemon implementation exists, all slice-level tests
 
 ## Structural rules
 
-1. **TDD blocks only its implementation slice** — [[NIM-14]] blocks [[S-2]] but not [[S-3]]
+1. **TDD blocks only its implementation slice** — [[TDD-S-2]] blocks [[S-2]] but not [[S-3]]
 2. **Semantic decisions block specs and implementations that encode those semantics** — [[D2]] blocks [[E03]], [[E04]], [[E06]], [[E13]]
 3. **Integration specs have multiple parents** — [[E08]] crash recovery depends on [[D3]], [[D4]], [[D5]], [[S-2]], [[S-4]], [[S-5]], [[S-6]], [[NIM-23]]
 4. **Single terminal meaning of completion** — root is not satisfied by passing unit tests alone; requires fresh E2E run from built artifacts

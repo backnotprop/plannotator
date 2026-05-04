@@ -13,7 +13,7 @@ tags:
   - cli
 progress: 100
 dependsOn:
-  - "[[NIM-21]]"
+  - "[[TDD-S-9]]"
 ---
 
 ## Description
@@ -96,15 +96,15 @@ Implementation slices:
 
 Testing and proof tasks:
 - [[S-9.5]]: Sprint-wide proof policy and shared TDD phase
-- [[NIM-13]]: TDD for S-1 remote-surface deletion and build invariants
-- [[NIM-14]]: TDD for S-2 state transition correctness
-- [[NIM-15]]: TDD for S-3 multiplexed router behavior
-- [[NIM-16]]: TDD for S-4 daemon lifecycle and recovery
-- [[NIM-17]]: TDD for S-5 submit/wait/verdict semantics
-- [[NIM-18]]: TDD for S-6 CLI contract and collision UX
-- [[NIM-19]]: TDD for S-7 notification behavior
-- [[NIM-20]]: TDD for S-8 agent wrapper behavior
-- [[NIM-21]]: TDD for S-9 build, packaging, and install flow
+- [[TDD-S-1]]: TDD for S-1 remote-surface deletion and build invariants
+- [[TDD-S-2]]: TDD for S-2 state transition correctness
+- [[TDD-S-3]]: TDD for S-3 multiplexed router behavior
+- [[TDD-S-4]]: TDD for S-4 daemon lifecycle and recovery
+- [[TDD-S-5]]: TDD for S-5 submit/wait/verdict semantics
+- [[TDD-S-6]]: TDD for S-6 CLI contract and collision UX
+- [[TDD-S-7]]: TDD for S-7 notification behavior
+- [[TDD-S-8]]: TDD for S-8 agent wrapper behavior
+- [[TDD-S-9]]: TDD for S-9 build, packaging, and install flow
 - [[S-10]]: Final verification and proof execution
 
 # Testing and validation policy
@@ -495,15 +495,15 @@ Implementation slices:
 
 Testing and proof tasks:
 - [[S-9.5]]: Sprint-wide proof policy and shared TDD phase
-- [[NIM-13]]: TDD for S-1 remote-surface deletion and build invariants
-- [[NIM-14]]: TDD for S-2 state transition correctness
-- [[NIM-15]]: TDD for S-3 multiplexed router behavior
-- [[NIM-16]]: TDD for S-4 daemon lifecycle and recovery
-- [[NIM-17]]: TDD for S-5 submit/wait/verdict semantics
-- [[NIM-18]]: TDD for S-6 CLI contract and collision UX
-- [[NIM-19]]: TDD for S-7 notification behavior
-- [[NIM-20]]: TDD for S-8 agent wrapper behavior
-- [[NIM-21]]: TDD for S-9 build, packaging, and install flow
+- [[TDD-S-1]]: TDD for S-1 remote-surface deletion and build invariants
+- [[TDD-S-2]]: TDD for S-2 state transition correctness
+- [[TDD-S-3]]: TDD for S-3 multiplexed router behavior
+- [[TDD-S-4]]: TDD for S-4 daemon lifecycle and recovery
+- [[TDD-S-5]]: TDD for S-5 submit/wait/verdict semantics
+- [[TDD-S-6]]: TDD for S-6 CLI contract and collision UX
+- [[TDD-S-7]]: TDD for S-7 notification behavior
+- [[TDD-S-8]]: TDD for S-8 agent wrapper behavior
+- [[TDD-S-9]]: TDD for S-9 build, packaging, and install flow
 - [[S-10]]: Final verification and proof execution
 
 # Testing and validation policy
