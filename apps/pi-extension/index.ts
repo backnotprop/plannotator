@@ -82,6 +82,7 @@ import {
 	type Phase,
 	stripPlanningOnlyTools,
 } from "./tool-scope.ts";
+import { registerPlannotatorAgentTools } from "./plannotator-agent-tools.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -208,6 +209,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 	const currentPiSession = registerCurrentPiSession(pi);
 	let phase: Phase = "idle";
 	void registerPlannotatorEventListeners(pi);
+	registerPlannotatorAgentTools(pi);
 	let lastSubmittedPath: string | null = null;
 	let checklistItems: ChecklistItem[] = [];
 	let savedState: SavedPhaseState | null = null;
