@@ -248,8 +248,19 @@ export const InlineMarkdown: React.FC<{
   let previousChar = "";
 
   while (remaining.length > 0) {
+    // HTML comments: skip entirely — they should be invisible per CommonMark.
+    // The parser doesn't recognize <!-- --> as a block-level construct, so
+    // comments inside paragraphs land here. Without this, path detection
+    // would linkify paths inside comments.
+    let match = remaining.match(/^<!--[\s\S]*?-->/);
+    if (match) {
+      remaining = remaining.slice(match[0].length);
+      previousChar = ">";
+      continue;
+    }
+
     // Backslash escaping: \. \* \_ \` \[ \~ etc. — emit literal char, hide backslash
-    let match = remaining.match(/^\\([\\*_`\[\]~!.()\-#>+|{}&])/);
+    match = remaining.match(/^\\([\\*_`\[\]~!.()\-#>+|{}&])/);
     if (match) {
       parts.push(match[1]);
       remaining = remaining.slice(2);
