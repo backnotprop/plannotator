@@ -185,7 +185,7 @@ export async function handleDocRequest(res: Res, url: URL): Promise<void> {
 		return;
 	}
 
-	if (result.kind === "not_found") {
+	if (result.kind === "not_found" || result.kind === "unavailable") {
 		json(res, { error: `File not found: ${result.input}` }, 404);
 		return;
 	}

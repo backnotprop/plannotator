@@ -152,7 +152,7 @@ export async function handleDoc(req: Request): Promise<Response> {
 		);
 	}
 
-	if (result.kind === "not_found") {
+	if (result.kind === "not_found" || result.kind === "unavailable") {
 		return Response.json(
 			{ error: `File not found: ${result.input}` },
 			{ status: 404 },
