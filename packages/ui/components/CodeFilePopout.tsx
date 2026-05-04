@@ -22,6 +22,8 @@ interface CodeFilePopoutProps {
   filepath: string;
   contents: string;
   prerenderedHTML?: string;
+  error?: string;
+  requestedPath?: string;
   annotations?: CodeAnnotation[];
   selectedAnnotationId?: string | null;
   onAddAnnotation?: (annotation: CodeFileAnnotationInput) => void;
@@ -286,6 +288,8 @@ export const CodeFilePopout: React.FC<CodeFilePopoutProps> = ({
   filepath,
   contents,
   prerenderedHTML,
+  error,
+  requestedPath,
   annotations = [],
   selectedAnnotationId,
   onAddAnnotation,
@@ -462,6 +466,29 @@ export const CodeFilePopout: React.FC<CodeFilePopoutProps> = ({
       console.error('Failed to copy:', err);
     }
   };
+
+  if (error) {
+    return (
+      <PopoutDialog
+        open={open}
+        onClose={onClose}
+        title={requestedPath ?? displayName}
+        container={container}
+        className="w-[min(520px,calc(100vw-4rem))]"
+      >
+        <div className="flex flex-col gap-2 px-5 py-6 text-sm">
+          <div className="font-medium text-foreground">File not found in repo</div>
+          <code className="text-xs font-mono text-muted-foreground break-all">
+            {requestedPath ?? filepath}
+          </code>
+          <p className="text-xs text-muted-foreground mt-1">
+            The path was referenced in the document but no matching file was found
+            in this project. It may describe a planned/future file.
+          </p>
+        </div>
+      </PopoutDialog>
+    );
+  }
 
   return (
     <PopoutDialog

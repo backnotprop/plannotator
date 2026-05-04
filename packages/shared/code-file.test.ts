@@ -1,5 +1,10 @@
 import { describe, test, expect } from 'bun:test';
-import { isCodeFilePath, isCodeFilePathStrict } from './code-file';
+import {
+  isCodeFilePath,
+  isCodeFilePathStrict,
+  isPlausibleCodeFilePath,
+  CODE_PATH_BARE_REGEX,
+} from './code-file';
 
 describe('isCodeFilePath', () => {
   test('matches common extensions', () => {
@@ -60,5 +65,48 @@ describe('isCodeFilePathStrict', () => {
   test('rejects non-code paths with /', () => {
     expect(isCodeFilePathStrict('path/to/readme.txt')).toBe(false);
     expect(isCodeFilePathStrict('some/dir/.env')).toBe(false);
+  });
+
+  test('rejects shape-implausible bare prose', () => {
+    expect(isCodeFilePathStrict('packages/ui/{a,b}.ts')).toBe(false);
+  });
+});
+
+describe('isPlausibleCodeFilePath', () => {
+  test('accepts plain code paths', () => {
+    expect(isPlausibleCodeFilePath('packages/editor/App.tsx')).toBe(true);
+    expect(isPlausibleCodeFilePath('foo.ts')).toBe(true);
+  });
+
+  test('accepts Next.js dynamic routes', () => {
+    expect(isPlausibleCodeFilePath('app/[slug]/page.tsx')).toBe(true);
+    expect(isPlausibleCodeFilePath('app/[...rest]/page.tsx')).toBe(true);
+  });
+
+  test('rejects shell brace expansion', () => {
+    expect(isPlausibleCodeFilePath('packages/ui/{a,b,c}.ts')).toBe(false);
+  });
+
+  test('rejects glob wildcards', () => {
+    expect(isPlausibleCodeFilePath('src/*.ts')).toBe(false);
+    expect(isPlausibleCodeFilePath('src/foo?.ts')).toBe(false);
+  });
+
+  test('rejects whitespace', () => {
+    expect(isPlausibleCodeFilePath('path with space.ts')).toBe(false);
+  });
+});
+
+describe('CODE_PATH_BARE_REGEX', () => {
+  test('matches abbreviated paths', () => {
+    const re = new RegExp(CODE_PATH_BARE_REGEX.source, 'g');
+    const m = 'see editor/App.tsx for details'.match(re);
+    expect(m).toContain('editor/App.tsx');
+  });
+
+  test('matches Next.js dynamic-route paths', () => {
+    const re = new RegExp(CODE_PATH_BARE_REGEX.source, 'g');
+    const m = 'visit app/[slug]/page.tsx'.match(re);
+    expect(m).toContain('app/[slug]/page.tsx');
   });
 });

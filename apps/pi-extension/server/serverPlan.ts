@@ -40,11 +40,13 @@ import { saveConfig, detectGitUser, getServerConfig } from "../generated/config.
 import { detectProjectName, getRepoInfo } from "./project.js";
 import {
 	handleDocRequest,
+	handleDocExistsRequest,
 	handleFileBrowserRequest,
 	handleObsidianDocRequest,
 	handleObsidianFilesRequest,
 	handleObsidianVaultsRequest,
 } from "./reference.js";
+import { warmFileListCache } from "../generated/resolve-file.js";
 
 export interface PlanReviewDecision {
 	approved: boolean;
@@ -76,6 +78,8 @@ export async function startPlanReviewServer(options: {
 	mode?: "archive";
 	customPlanPath?: string | null;
 }): Promise<PlanServerResult> {
+	// Side-channel pre-warm so /api/doc/exists POSTs land on warm cache.
+	void warmFileListCache(process.cwd(), "code");
 	const gitUser = detectGitUser();
 	const sharingEnabled =
 		options.sharingEnabled ?? process.env.PLANNOTATOR_SHARE !== "disabled";
@@ -247,6 +251,8 @@ export async function startPlanReviewServer(options: {
 			return;
 		} else if (url.pathname === "/api/doc" && req.method === "GET") {
 			await handleDocRequest(res, url);
+		} else if (url.pathname === "/api/doc/exists" && req.method === "POST") {
+			await handleDocExistsRequest(res, req);
 		} else if (url.pathname === "/api/obsidian/vaults") {
 			handleObsidianVaultsRequest(res);
 		} else if (url.pathname === "/api/reference/obsidian/files" && req.method === "GET") {

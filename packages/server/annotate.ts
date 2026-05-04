@@ -15,7 +15,8 @@ import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
 import { getRepoInfo } from "./repo";
 import type { Origin } from "@plannotator/shared/agents";
 import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon } from "./shared-handlers";
-import { handleDoc, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc } from "./reference-handlers";
+import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc } from "./reference-handlers";
+import { warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash, deleteDraft } from "./draft";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { saveConfig, detectGitUser, getServerConfig } from "./config";
@@ -93,6 +94,9 @@ const RETRY_DELAY_MS = 500;
 export async function startAnnotateServer(
   options: AnnotateServerOptions
 ): Promise<AnnotateServerResult> {
+  // Side-channel pre-warm so /api/doc/exists POSTs land on warm cache.
+  void warmFileListCache(process.cwd(), "code");
+
   const {
     markdown,
     filePath,
@@ -202,6 +206,11 @@ export async function startAnnotateServer(
               return handleDoc(new Request(docUrl.toString()));
             }
             return handleDoc(req);
+          }
+
+          // API: Batch existence check for code-file paths the renderer detected
+          if (url.pathname === "/api/doc/exists" && req.method === "POST") {
+            return handleDocExists(req);
           }
 
           // API: Detect Obsidian vaults

@@ -230,6 +230,18 @@ body {
     display: none;
   }
 }
+/* Ambiguous matches — paint a softer shimmer in a different hue so users
+   notice that clicking will surface a picker rather than open one file. */
+.code-file-link[data-ambiguous="true"]::after {
+  background: linear-gradient(
+    120deg,
+    transparent 0%,
+    rgba(168, 85, 247, 0.08) 35%,
+    rgba(168, 85, 247, 0.18) 50%,
+    rgba(168, 85, 247, 0.08) 65%,
+    transparent 100%
+  );
+}
 
 /* Word-level diff markers inside modified plan-diff blocks. Emitted as
    <ins>/<del> by PlanCleanDiffView's inline renderer; keep the decoration

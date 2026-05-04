@@ -17,11 +17,13 @@ import { listenOnPort } from "./network.js";
 import { getRepoInfo } from "./project.js";
 import {
 	handleDocRequest,
+	handleDocExistsRequest,
 	handleFileBrowserRequest,
 	handleObsidianVaultsRequest,
 	handleObsidianFilesRequest,
 	handleObsidianDocRequest,
 } from "./reference.js";
+import { warmFileListCache } from "../generated/resolve-file.js";
 import { createExternalAnnotationHandler } from "./external-annotations.js";
 
 export interface AnnotateServerResult {
@@ -46,6 +48,8 @@ export async function startAnnotateServer(options: {
 	sourceConverted?: boolean;
 	gate?: boolean;
 }): Promise<AnnotateServerResult> {
+	// Side-channel pre-warm so /api/doc/exists POSTs land on warm cache.
+	void warmFileListCache(process.cwd(), "code");
 	const gitUser = detectGitUser();
 	const sharingEnabled =
 		options.sharingEnabled ?? process.env.PLANNOTATOR_SHARE !== "disabled";
@@ -127,6 +131,8 @@ export async function startAnnotateServer(options: {
 				url.searchParams.set("base", dirname(resolvePath(options.filePath)));
 			}
 			await handleDocRequest(res, url);
+		} else if (url.pathname === "/api/doc/exists" && req.method === "POST") {
+			await handleDocExistsRequest(res, req);
 		} else if (url.pathname === "/api/obsidian/vaults") {
 			handleObsidianVaultsRequest(res);
 		} else if (url.pathname === "/api/reference/obsidian/files" && req.method === "GET") {

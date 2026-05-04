@@ -44,7 +44,8 @@ import { detectProjectName } from "./project";
 import { saveConfig, detectGitUser, getServerConfig } from "./config";
 import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft } from "./draft";
-import { handleDoc, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, handleFileBrowserFiles } from "./reference-handlers";
+import { handleDoc, handleDocExists, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, handleFileBrowserFiles } from "./reference-handlers";
+import { warmFileListCache } from "@plannotator/shared/resolve-file";
 import { createEditorAnnotationHandler } from "./editor-annotations";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { isWSL } from "./browser";
@@ -128,6 +129,10 @@ export async function startPlannotatorServer(
   const configuredPort = getServerPort();
   const wslFlag = await isWSL();
   const gitUser = detectGitUser();
+
+  // Side-channel pre-warm: kick off the code-file walk now so the
+  // renderer's POST /api/doc/exists lands on warm cache.
+  void warmFileListCache(process.cwd(), "code");
 
   // --- Archive mode setup ---
   let archivePlans: ArchivedPlan[] = [];
@@ -283,6 +288,11 @@ export async function startPlannotatorServer(
           // API: Serve a linked markdown document
           if (url.pathname === "/api/doc" && req.method === "GET") {
             return handleDoc(req);
+          }
+
+          // API: Batch existence check for code-file paths the renderer detected
+          if (url.pathname === "/api/doc/exists" && req.method === "POST") {
+            return handleDocExists(req);
           }
 
           // API: Update user config (write-back to ~/.plannotator/config.json)

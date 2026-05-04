@@ -12,10 +12,13 @@ import { detectObsidianVaults } from "./integrations";
 import {
 	isAbsoluteUserPath,
 	isCodeFilePath,
+	resolveCodeFile,
 	resolveMarkdownFile,
 	resolveUserPath,
 	isWithinProjectRoot,
+	warmFileListCache,
 } from "@plannotator/shared/resolve-file";
+import { extractCandidateCodePaths } from "@plannotator/shared/extract-code-paths";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { preloadFile } from "@pierre/diffs/ssr";
 
@@ -28,6 +31,10 @@ export async function handleDoc(req: Request): Promise<Response> {
 	if (!requestedPath) {
 		return Response.json({ error: "Missing path parameter" }, { status: 400 });
 	}
+
+	// Side-channel: kick off a code-file walk for the project root so that any
+	// /api/doc/exists POST issued by the rendered linked-doc lands on warm cache.
+	void warmFileListCache(process.cwd(), "code");
 
 	// If a base directory is provided, try resolving relative to it first
 	// (used by annotate mode to resolve paths relative to the source file).
@@ -74,34 +81,64 @@ export async function handleDoc(req: Request): Promise<Response> {
 		return Response.json({ error: `File not found: ${requestedPath}` }, { status: 404 });
 	}
 
-	// Code files: resolve directly, return raw contents (no markdown conversion)
+	// Code files: try literal resolve first; on miss, fall back to the smart
+	// resolver which walks the project for case-insensitive / suffix matches.
 	if (isCodeFilePath(requestedPath)) {
-		const resolvedCode = resolveUserPath(requestedPath, resolvedBase || projectRoot);
-		if (!resolvedBase && !isWithinProjectRoot(resolvedCode, projectRoot)) {
-			return Response.json({ error: "Access denied: path is outside project root" }, { status: 403 });
+		const literalPath = resolveUserPath(requestedPath, resolvedBase || projectRoot);
+		const literalAllowed = resolvedBase || isWithinProjectRoot(literalPath, projectRoot);
+
+		let resolvedCode: string | null = null;
+		if (literalAllowed) {
+			try {
+				const file = Bun.file(literalPath);
+				if (await file.exists()) resolvedCode = literalPath;
+			} catch { /* fall through */ }
 		}
+
+		if (!resolvedCode) {
+			const result = await resolveCodeFile(requestedPath, projectRoot);
+			if (result.kind === "found") {
+				resolvedCode = result.path;
+			} else if (result.kind === "ambiguous") {
+				const prefix = `${projectRoot}/`;
+				const relative = result.matches.map((m) =>
+					m.startsWith(prefix) ? m.slice(prefix.length) : m,
+				);
+				return Response.json(
+					{ error: `Ambiguous path '${requestedPath}'`, matches: relative },
+					{ status: 400 },
+				);
+			} else if (result.kind === "unavailable") {
+				return Response.json({ error: `Cannot scan project: ${requestedPath}` }, { status: 404 });
+			} else {
+				return Response.json({ error: `File not found: ${requestedPath}` }, { status: 404 });
+			}
+			if (!isWithinProjectRoot(resolvedCode, projectRoot)) {
+				return Response.json({ error: "Access denied: path is outside project root" }, { status: 403 });
+			}
+		}
+
 		try {
 			const file = Bun.file(resolvedCode);
-			if (await file.exists()) {
-				if (file.size > 2 * 1024 * 1024) {
-					return Response.json({ error: "File too large (max 2MB)" }, { status: 413 });
-				}
-				const contents = await file.text();
-				const displayName = resolvedCode.split("/").pop() || resolvedCode;
-				let prerenderedHTML: string | undefined;
-				try {
-					const result = await preloadFile({
-						file: { name: displayName, contents },
-						options: { disableFileHeader: true },
-					});
-					prerenderedHTML = result.prerenderedHTML;
-				} catch {
-					// Fall back to client-side rendering
-				}
-				return Response.json({ codeFile: true, contents, filepath: resolvedCode, prerenderedHTML });
+			if (file.size > 2 * 1024 * 1024) {
+				return Response.json({ error: "File too large (max 2MB)" }, { status: 413 });
 			}
-		} catch { /* fall through */ }
-		return Response.json({ error: `File not found: ${requestedPath}` }, { status: 404 });
+			const contents = await file.text();
+			const displayName = resolvedCode.split("/").pop() || resolvedCode;
+			let prerenderedHTML: string | undefined;
+			try {
+				const result = await preloadFile({
+					file: { name: displayName, contents },
+					options: { disableFileHeader: true },
+				});
+				prerenderedHTML = result.prerenderedHTML;
+			} catch {
+				// Fall back to client-side rendering
+			}
+			return Response.json({ codeFile: true, contents, filepath: resolvedCode, prerenderedHTML });
+		} catch {
+			return Response.json({ error: `File not found: ${requestedPath}` }, { status: 404 });
+		}
 	}
 
 	const result = resolveMarkdownFile(requestedPath, projectRoot);
@@ -129,6 +166,57 @@ export async function handleDoc(req: Request): Promise<Response> {
 	} catch {
 		return Response.json({ error: "Failed to read file" }, { status: 500 });
 	}
+}
+
+/**
+ * Batch existence check for code-file paths the renderer wants to linkify.
+ * POST /api/doc/exists with { paths: string[] } returns { results: { [path]: ValidationEntry } }.
+ * Reads from the warm file-list cache populated at plan/annotate load.
+ */
+export async function handleDocExists(req: Request): Promise<Response> {
+	let body: unknown;
+	try {
+		body = await req.json();
+	} catch {
+		return Response.json({ error: "Invalid JSON" }, { status: 400 });
+	}
+	const paths = (body as { paths?: unknown })?.paths;
+	if (!Array.isArray(paths) || !paths.every((p) => typeof p === "string")) {
+		return Response.json({ error: "Expected { paths: string[] }" }, { status: 400 });
+	}
+	if (paths.length > 500) {
+		return Response.json({ error: "Too many paths (max 500)" }, { status: 400 });
+	}
+
+	const projectRoot = process.cwd();
+	const results: Record<
+		string,
+		| { status: "found"; resolved: string }
+		| { status: "ambiguous"; matches: string[] }
+		| { status: "missing" }
+		| { status: "unavailable" }
+	> = {};
+
+	await Promise.all(
+		(paths as string[]).map(async (p) => {
+			const r = await resolveCodeFile(p, projectRoot);
+			if (r.kind === "found") {
+				results[p] = { status: "found", resolved: r.path };
+			} else if (r.kind === "ambiguous") {
+				const prefix = `${projectRoot}/`;
+				results[p] = {
+					status: "ambiguous",
+					matches: r.matches.map((m) => (m.startsWith(prefix) ? m.slice(prefix.length) : m)),
+				};
+			} else if (r.kind === "unavailable") {
+				results[p] = { status: "unavailable" };
+			} else {
+				results[p] = { status: "missing" };
+			}
+		}),
+	);
+
+	return Response.json({ results });
 }
 
 /** Detect available Obsidian vaults. */

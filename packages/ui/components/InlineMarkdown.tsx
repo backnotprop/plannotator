@@ -1,7 +1,91 @@
 import React from "react";
-import { isCodeFilePath, isCodeFilePathStrict } from "@plannotator/shared/code-file";
+import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX } from "@plannotator/shared/code-file";
 import { transformPlainText } from "../utils/inlineTransforms";
 import { getImageSrc } from "./ImageThumbnail";
+import { useCodePathValidation, type CodePathValidationContextValue } from "./CodePathValidationContext";
+import type { ValidationEntry } from "../hooks/useValidatedCodePaths";
+import { CodeFilePicker } from "./CodeFilePicker";
+
+/**
+ * Decide how a candidate code-file path should render based on validation state:
+ *   - 'link'           → clickable, opens directly via onOpenCodeFile(resolvedOrInput)
+ *   - 'ambiguous-link' → clickable, opens a picker over `matches`
+ *   - 'plain'          → not a link (file does not exist anywhere in the repo)
+ *
+ * No provider or `ready: false` falls back to optimistic 'link' behavior.
+ */
+function gateCodePath(
+  candidate: string,
+  validation: CodePathValidationContextValue | null,
+): { render: 'link'; resolved?: string } | { render: 'ambiguous-link'; matches: string[] } | { render: 'plain' } {
+  if (!validation || !validation.ready) return { render: 'link' };
+  const entry = validation.validated.get(candidate);
+  if (!entry) return { render: 'link' };
+  switch ((entry as ValidationEntry).status) {
+    case 'found':       return { render: 'link', resolved: (entry as Extract<ValidationEntry, { status: 'found' }>).resolved };
+    case 'ambiguous':   return { render: 'ambiguous-link', matches: (entry as Extract<ValidationEntry, { status: 'ambiguous' }>).matches };
+    case 'unavailable': return { render: 'link' };
+    case 'missing':     return { render: 'plain' };
+    default:            return { render: 'link' }; // unknown status — degrade to optimistic
+  }
+}
+
+const CodeFileLink: React.FC<{
+  candidate: string;
+  display: string;
+  onOpenCodeFile: (path: string) => void;
+}> = ({ candidate, display, onOpenCodeFile }) => {
+  const validation = useCodePathValidation();
+  const gate = gateCodePath(candidate, validation);
+  const [pickerOpen, setPickerOpen] = React.useState(false);
+  const anchorRef = React.useRef<HTMLElement | null>(null);
+
+  if (gate.render === 'plain') {
+    return (
+      <code className="px-1.5 py-0.5 rounded bg-muted text-sm font-mono">
+        {display}
+      </code>
+    );
+  }
+
+  const isAmbiguous = gate.render === 'ambiguous-link';
+  const handleClick = () => {
+    if (isAmbiguous) {
+      setPickerOpen(true);
+      return;
+    }
+    onOpenCodeFile(gate.render === 'link' && gate.resolved ? gate.resolved : candidate);
+  };
+
+  return (
+    <>
+      <code
+        ref={(el) => { anchorRef.current = el; }}
+        role="button"
+        tabIndex={0}
+        data-ambiguous={isAmbiguous ? "true" : undefined}
+        onClick={handleClick}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleClick(); } }}
+        className="code-file-link px-1.5 py-0.5 rounded bg-muted text-sm font-mono cursor-pointer hover:text-primary inline-flex items-center gap-1 transition-colors"
+        title={isAmbiguous ? `${display} — multiple matches` : `View: ${display}`}
+      >
+        {display}
+        <CodeFileIcon />
+        {isAmbiguous && (
+          <sup className="text-[0.6rem] opacity-70 -ml-0.5">{(gate as { matches: string[] }).matches.length}</sup>
+        )}
+      </code>
+      {pickerOpen && isAmbiguous && (
+        <CodeFilePicker
+          anchorEl={anchorRef.current}
+          matches={(gate as { matches: string[] }).matches}
+          onPick={(path) => { setPickerOpen(false); onOpenCodeFile(path); }}
+          onDismiss={() => setPickerOpen(false)}
+        />
+      )}
+    </>
+  );
+};
 
 const DANGEROUS_PROTOCOL = /^\s*(javascript|data|vbscript|file)\s*:/i;
 function sanitizeLinkUrl(url: string): string | null {
@@ -54,6 +138,7 @@ function emitPlainTextWithBareUrls(
   parts: React.ReactNode[],
   nextKey: () => number,
   onOpenCodeFile?: (path: string) => void,
+  validation?: CodePathValidationContextValue | null,
 ): void {
   if (text.length === 0) return;
 
@@ -76,7 +161,7 @@ function emitPlainTextWithBareUrls(
 
   // Collect bare code file paths (require /)
   if (onOpenCodeFile) {
-    const pathRe = /(?:\.{0,2}\/)?(?:[a-zA-Z0-9_@.\-]+\/)+[a-zA-Z0-9_.\-]+\.[a-zA-Z0-9]+/g;
+    const pathRe = new RegExp(CODE_PATH_BARE_REGEX.source, 'g');
     while ((m = pathRe.exec(text)) !== null) {
       const before = m.index === 0 ? previousChar : text[m.index - 1];
       if (/\w/.test(before)) continue;
@@ -114,20 +199,20 @@ function emitPlainTextWithBareUrls(
       );
     } else {
       const cleanPath = span.value.replace(/#.*$/, '');
-      parts.push(
-        <code
-          key={nextKey()}
-          role="button"
-          tabIndex={0}
-          onClick={() => onOpenCodeFile!(cleanPath)}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenCodeFile!(cleanPath); } }}
-          className="code-file-link px-1.5 py-0.5 rounded bg-muted text-sm font-mono cursor-pointer hover:text-primary inline-flex items-center gap-1 transition-colors"
-          title={`View: ${span.value}`}
-        >
-          {span.value}
-          <CodeFileIcon />
-        </code>,
-      );
+      const gate = gateCodePath(cleanPath, validation ?? null);
+      if (gate.render === 'plain') {
+        // Bare prose, file doesn't exist — emit as plain text, no link styling.
+        parts.push(span.value);
+      } else {
+        parts.push(
+          <CodeFileLink
+            key={nextKey()}
+            candidate={cleanPath}
+            display={span.value}
+            onOpenCodeFile={onOpenCodeFile!}
+          />,
+        );
+      }
     }
     last = span.end;
   }
@@ -153,6 +238,7 @@ export const InlineMarkdown: React.FC<{
   onImageClick?: (src: string, alt: string) => void;
   githubRepo?: string;
 }> = ({ text, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo }) => {
+  const validation = useCodePathValidation();
   const parts: React.ReactNode[] = [];
   let remaining = text;
   let key = 0;
@@ -348,18 +434,12 @@ export const InlineMarkdown: React.FC<{
       if (isCodeFilePath(codeContent) && onOpenCodeFile) {
         const cleanPath = codeContent.replace(/#.*$/, '');
         parts.push(
-          <code
+          <CodeFileLink
             key={key++}
-            role="button"
-            tabIndex={0}
-            onClick={() => onOpenCodeFile(cleanPath)}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenCodeFile(cleanPath); } }}
-            className="code-file-link px-1.5 py-0.5 rounded bg-muted text-sm font-mono cursor-pointer hover:text-primary inline-flex items-center gap-1 transition-colors"
-            title={`View: ${codeContent}`}
-          >
-            {codeContent}
-            <CodeFileIcon />
-          </code>,
+            candidate={cleanPath}
+            display={codeContent}
+            onOpenCodeFile={onOpenCodeFile}
+          />,
         );
       } else {
         parts.push(
@@ -716,7 +796,7 @@ export const InlineMarkdown: React.FC<{
     // detected inline via emitPlainTextWithBareUrls() below.
     const nextSpecial = remaining.slice(1).search(/[\*_`\[!~\\<#@]/);
     const plainText = nextSpecial === -1 ? remaining : remaining.slice(0, nextSpecial + 1);
-    emitPlainTextWithBareUrls(plainText, previousChar, parts, () => key++, onOpenCodeFile);
+    emitPlainTextWithBareUrls(plainText, previousChar, parts, () => key++, onOpenCodeFile, validation);
     previousChar = plainText[plainText.length - 1] || previousChar;
     if (nextSpecial === -1) {
       break;

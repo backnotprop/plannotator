@@ -9,6 +9,8 @@ import { CodeBlock } from './blocks/CodeBlock';
 import { TableBlock } from './blocks/TableBlock';
 import { TableToolbar } from './blocks/TableToolbar';
 import { TablePopout } from './blocks/TablePopout';
+import { CodePathValidationContext } from './CodePathValidationContext';
+import { useValidatedCodePaths } from '../hooks/useValidatedCodePaths';
 import { ListMarker } from './ListMarker';
 import { AnnotationToolbar } from './AnnotationToolbar';
 import { FloatingQuickLabelPicker } from './FloatingQuickLabelPicker';
@@ -510,7 +512,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     setViewerCommentPopover(null);
   }, []);
 
+  const codePathValidation = useValidatedCodePaths(markdown);
+
   return (
+    <CodePathValidationContext.Provider value={codePathValidation}>
     <div className="relative z-50 w-full" style={maxWidth === null ? undefined : { maxWidth: maxWidth ?? 832 }}>
       {taterMode && <TaterSpriteSitting />}
       <article
@@ -855,6 +860,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         document.body
       )}
     </div>
+    </CodePathValidationContext.Provider>
   );
 });
 
