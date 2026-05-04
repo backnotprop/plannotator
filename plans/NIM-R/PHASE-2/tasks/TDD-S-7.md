@@ -4,7 +4,6 @@ trackerStatus:
   type: task
 title: TDD for S-7 notification behavior
 status: needs-review
-priority: medium
 owner: child-session:b59b10aa-0635-41d2-aea1-90e95830ca68 (gpt-5.4)
 tags:
 - plannotator

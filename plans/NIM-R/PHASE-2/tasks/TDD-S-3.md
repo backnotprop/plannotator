@@ -4,7 +4,6 @@ trackerStatus:
   type: task
 title: TDD for S-3 multiplexed router behavior
 status: needs-review
-priority: high
 owner: child-session:f86c2767-9f6e-4100-9769-417960ff8426 (gpt-5.4)
 tags:
 - plannotator

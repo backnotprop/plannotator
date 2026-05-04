@@ -4,7 +4,6 @@ trackerStatus:
   type: task
 title: TDD for S-2 state transition correctness
 status: needs-review
-priority: high
 owner: child-session:6501aa6a-8f72-4414-82ff-e2451a4a4720 (gpt-5.4)
 tags:
 - plannotator

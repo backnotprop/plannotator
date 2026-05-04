@@ -4,7 +4,6 @@ trackerStatus:
   type: plan
 title: 'Root: Daemon refactor implemented and E2E-certified'
 status: in-progress
-priority: critical
 tags:
 - plannotator
 - daemon-refactor

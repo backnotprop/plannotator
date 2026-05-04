@@ -4,7 +4,6 @@ trackerStatus:
   type: task
 title: TDD for S-4 daemon lifecycle and recovery
 status: needs-review
-priority: high
 owner: main-session:1c85b90e-e99c-4c79-979e-1785cb0f493c (local takeover after failed
   delegate)
 tags:

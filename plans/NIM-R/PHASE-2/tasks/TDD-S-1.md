@@ -4,7 +4,6 @@ trackerStatus:
   type: task
 title: TDD for S-1 remote-surface deletion and build invariants
 status: needs-review
-priority: high
 owner: child-session:f6eebc74-f5d8-4ce9-a41c-c7cb628feb17 (gpt-5.4)
 tags:
 - plannotator

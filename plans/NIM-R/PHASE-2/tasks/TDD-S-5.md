@@ -4,7 +4,6 @@ trackerStatus:
   type: task
 title: TDD for S-5 submit/wait/verdict semantics
 status: needs-review
-priority: high
 owner: child-session:4c609eeb-a84a-47c9-b27b-3b57f7d81cf2 (gpt-5.4)
 tags:
 - plannotator

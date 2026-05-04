@@ -4,7 +4,6 @@ trackerStatus:
   type: phase
 title: 'Phase 3: Cross-slice E2E specs complete'
 status: in-progress
-priority: critical
 tags:
 - plannotator
 - e2e

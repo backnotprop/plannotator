@@ -4,7 +4,6 @@ trackerStatus:
   type: task
 title: TDD for S-9 build, packaging, and install flow
 status: needs-review
-priority: medium
 tags:
 - plannotator
 - daemon-refactor

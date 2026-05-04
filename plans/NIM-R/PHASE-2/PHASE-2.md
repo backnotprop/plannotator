@@ -4,7 +4,6 @@ trackerStatus:
   type: phase
 title: "Phase 2: Slice TDD + implementation complete"
 status: needs-review
-priority: critical
 tags:
   - plannotator
   - implementation

@@ -4,7 +4,6 @@ trackerStatus:
   type: phase
 title: "Phase 4: Final integration verification"
 status: needs-review
-priority: critical
 tags:
   - plannotator
   - verification

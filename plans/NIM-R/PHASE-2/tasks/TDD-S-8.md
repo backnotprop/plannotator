@@ -4,7 +4,6 @@ trackerStatus:
   type: task
 title: TDD for S-8 agent wrapper behavior
 status: needs-review
-priority: high
 owner: child-session:c1051204-95b6-48ca-8a98-bfb582ee06af (gpt-5.4)
 tags:
 - plannotator

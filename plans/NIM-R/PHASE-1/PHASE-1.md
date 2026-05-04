@@ -4,7 +4,6 @@ trackerStatus:
   type: phase
 title: "Phase 1: E2E infrastructure usable"
 status: needs-review
-priority: critical
 tags:
   - plannotator
   - infrastructure

@@ -4,7 +4,6 @@ trackerStatus:
   type: plan
 title: Plannotator local daemon refactor sprint
 status: needs-review
-priority: high
 tags:
   - plannotator
   - daemon-refactor

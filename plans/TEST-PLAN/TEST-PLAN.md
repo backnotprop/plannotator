@@ -4,7 +4,6 @@ trackerStatus:
   type: plan
 title: "Plannotator Daemon \u2014 E2E Test Plan"
 status: unstarted
-priority: high
 tags:
 - plannotator
 - e2e

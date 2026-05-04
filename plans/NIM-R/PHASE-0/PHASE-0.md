@@ -4,7 +4,6 @@ trackerStatus:
   type: phase
 title: "Phase 0: Semantics frozen — all open questions converted to explicit contracts"
 status: unstarted
-priority: critical
 tags:
   - plannotator
   - semantics
