@@ -30,7 +30,7 @@ Requirements:
 - Prove that the trimmed tree still builds and the remaining local-only flows still work.
 
 Process rule:
-- This proof task must be authored separately from implementation, and [[NIM-2]] writers may not weaken or rewrite the tests after handoff.
+- This proof task must be authored separately from implementation, and [[S-1]] writers may not weaken or rewrite the tests after handoff.
 
 ## Comments
 

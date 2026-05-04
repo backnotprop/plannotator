@@ -29,7 +29,7 @@ Requirements:
 - Validate real browser-facing paths, not just internal handler composition.
 
 Process rule:
-- This proof task must be authored separately from implementation, and [[NIM-4]] writers may not weaken or rewrite the tests after handoff.
+- This proof task must be authored separately from implementation, and [[S-3]] writers may not weaken or rewrite the tests after handoff.
 
 ## Comments
 
@@ -39,8 +39,8 @@ Delegated [[NIM-15]] proof authoring to child session `f86c2767-9f6e-4100-9769-4
 
 Handoff included:
 - full [[NIM-15]] tracker specification
-- [[NIM-12]] TDD constraints
-- [[NIM-4]] target implementation context
+- [[S-9.5]] TDD constraints
+- [[S-3]] target implementation context
 - explicit instruction not to implement the router itself
 - required verification via direct `bun test ...` on the new proof file
 
@@ -54,8 +54,8 @@ Final acceptance phase:
 - failure is the expected missing implementation signal: `packages/server/daemon-router.ts` does not yet exist
 
 Outcome:
-- pre-[[NIM-4]] red state is now high-signal and controlled
-- ready for implementation task [[NIM-4]]
+- pre-[[S-3]] red state is now high-signal and controlled
+- ready for implementation task [[S-3]]
 
 ## Activity Log
 

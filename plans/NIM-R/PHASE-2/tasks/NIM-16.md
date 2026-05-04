@@ -30,7 +30,7 @@ Requirements:
 - Avoid fake process stubs as the primary proof surface.
 
 Process rule:
-- This proof task must be authored separately from implementation, and [[NIM-5]] writers may not weaken or rewrite the tests after handoff.
+- This proof task must be authored separately from implementation, and [[S-4]] writers may not weaken or rewrite the tests after handoff.
 
 ## Comments
 
@@ -40,8 +40,8 @@ Delegated [[NIM-16]] proof authoring to child session `52e9aec9-551f-4c2c-a58a-7
 
 Handoff included:
 - full [[NIM-16]] tracker specification
-- [[NIM-12]] TDD constraints
-- [[NIM-5]] target implementation context
+- [[S-9.5]] TDD constraints
+- [[S-4]] target implementation context
 - explicit instruction not to implement daemon lifecycle production code
 - required verification via direct `bun test ...` on the new proof file
 
@@ -51,15 +51,15 @@ Replacing prior empty delegate `52e9aec9-551f-4c2c-a58a-7ac552de5685` after veri
 
 ### Comment (2026-04-30T23:38:35.001Z)
 
-Rejected child commit `0a5bc8d` during review. Local verification in child worktree still failed on the wrong invented surface `packages/server/daemon-lifecycle.ts` / `runDaemonCommand(options)` instead of the actual [[NIM-5]] target `packages/server/daemon.ts`. Sent a stricter revision request covering both target-surface mismatch and missing recovered-verdict proof semantics.
+Rejected child commit `0a5bc8d` during review. Local verification in child worktree still failed on the wrong invented surface `packages/server/daemon-lifecycle.ts` / `runDaemonCommand(options)` instead of the actual [[S-4]] target `packages/server/daemon.ts`. Sent a stricter revision request covering both target-surface mismatch and missing recovered-verdict proof semantics.
 
 ### Comment (2026-04-30T23:40:03.549Z)
 
-Explicitly replacing child session `8fc924bd-b822-4124-8579-a6624618bc69` after repeated noncompliant proof revisions. Verified twice in the child worktree that the draft still targets the invented surface `packages/server/daemon-lifecycle.ts` instead of the actual [[NIM-5]] target `packages/server/daemon.ts`. Main agent is taking over [[NIM-16]] locally.
+Explicitly replacing child session `8fc924bd-b822-4124-8579-a6624618bc69` after repeated noncompliant proof revisions. Verified twice in the child worktree that the draft still targets the invented surface `packages/server/daemon-lifecycle.ts` instead of the actual [[S-4]] target `packages/server/daemon.ts`. Main agent is taking over [[NIM-16]] locally.
 
 ### Comment (2026-04-30T23:42:46.224Z)
 
-Accepted local takeover for [[NIM-16]] after replacing the noncompliant delegate. Verified in `main` with `bun test tests/nim-16.daemon-lifecycle-proof.test.ts`; the proof now fails cleanly on the correct missing [[NIM-5]] surface `packages/server/daemon.ts` and defines the expected lifecycle/recovery semantics for later implementation.
+Accepted local takeover for [[NIM-16]] after replacing the noncompliant delegate. Verified in `main` with `bun test tests/nim-16.daemon-lifecycle-proof.test.ts`; the proof now fails cleanly on the correct missing [[S-4]] surface `packages/server/daemon.ts` and defines the expected lifecycle/recovery semantics for later implementation.
 
 ## Activity Log
 

@@ -29,7 +29,7 @@ Requirements:
 - No mock-only proof surface; the tests must reflect real state transitions the daemon will consume.
 
 Process rule:
-- This proof task must be authored separately from implementation, and [[NIM-3]] writers may not weaken or rewrite the tests after handoff.
+- This proof task must be authored separately from implementation, and [[S-2]] writers may not weaken or rewrite the tests after handoff.
 
 ## Comments
 
@@ -39,8 +39,8 @@ Delegated [[NIM-14]] proof authoring to child session `6501aa6a-8f72-4414-82ff-e
 
 Handoff included:
 - full [[NIM-14]] tracker specification
-- [[NIM-12]] TDD constraints
-- [[NIM-3]] target implementation context
+- [[S-9.5]] TDD constraints
+- [[S-2]] target implementation context
 - explicit instruction not to implement `packages/server/state.ts`
 - required verification via direct `bun test ...` on the new proof file
 
@@ -54,9 +54,9 @@ Final acceptance phase:
 - failure is the expected missing implementation signal: `packages/server/state.ts` does not yet exist
 
 Outcome:
-- pre-[[NIM-3]] red state is now high-signal and controlled
+- pre-[[S-2]] red state is now high-signal and controlled
 - detailed transition/persistence/recovery proof cases activate once `packages/server/state.ts` exists
-- ready for implementation task [[NIM-3]]
+- ready for implementation task [[S-2]]
 
 ## Activity Log
 

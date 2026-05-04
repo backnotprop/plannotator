@@ -29,7 +29,7 @@ Requirements:
 - Avoid mock-only wrapper tests that never exercise the actual CLI contract.
 
 Process rule:
-- This proof task must be authored separately from implementation, and [[NIM-9]] writers may not weaken or rewrite the tests after handoff.
+- This proof task must be authored separately from implementation, and [[S-8]] writers may not weaken or rewrite the tests after handoff.
 
 ## Comments
 
@@ -39,7 +39,7 @@ Delegated to child session `c1051204-95b6-48ca-8a98-bfb582ee06af` in worktree `/
 
 Acceptance target:
 - new [[NIM-20]] proof file with a real CLI/wrapper-behavior harness
-- child-worktree verification should yield a clean red phase for the missing [[NIM-9]] implementation surface
+- child-worktree verification should yield a clean red phase for the missing [[S-8]] implementation surface
 
 ### Comment (2026-05-01T16:29:54.728Z)
 
@@ -56,7 +56,7 @@ Verification in `main`:
   - Claude hook wrapper cannot load because `apps/hook/server/index.ts` still imports `@plannotator/server` directly in the disposable CLI environment
   - OpenCode wrapper cannot load because `apps/opencode-plugin/index.ts` still imports `@plannotator/server` directly in the disposable CLI environment
 
-This is the expected missing [[NIM-9]] thin-wrapper surface.
+This is the expected missing [[S-8]] thin-wrapper surface.
 
 ## Activity Log
 
