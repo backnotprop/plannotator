@@ -3,7 +3,7 @@ id: NIM-5
 trackerStatus:
   type: task
 title: S-4 Implement daemon process lifecycle
-status: in-review
+status: needs-review
 priority: high
 tags:
 - plannotator
@@ -53,6 +53,6 @@ Accepted child implementation commit `5422218` and integrated it into `main` as 
 - 2026-04-30T23:43:19.627Z: updated (owner) -> child-session:600049f0-2fb8-42a7-bc6b-776a19ec0043 (gpt-5.4)
 - 2026-04-30T23:43:19.627Z: updated (progress) -> 1
 - 2026-04-30T23:43:19.841Z: commented
-- 2026-04-30T23:50:05.124Z: status_changed (status) -> in-review
+- 2026-04-30T23:50:05.124Z: status_changed (status) -> needs-review
 - 2026-04-30T23:50:05.124Z: updated (progress) -> 100
 - 2026-04-30T23:50:05.375Z: commented

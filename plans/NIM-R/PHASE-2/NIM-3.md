@@ -3,7 +3,7 @@ id: NIM-3
 trackerStatus:
   type: task
 title: S-2 Define daemon state machine module
-status: in-review
+status: needs-review
 priority: high
 tags:
 - plannotator
@@ -65,6 +65,6 @@ Outcome:
 - 2026-04-30T16:07:10.066Z: updated (owner) -> child-session:1d234b76-a894-4452-a84e-10e4619448a5 (gpt-5.4)
 - 2026-04-30T16:07:10.066Z: updated (progress) -> 1
 - 2026-04-30T16:07:10.262Z: commented
-- 2026-04-30T16:18:09.404Z: status_changed (status) -> in-review
+- 2026-04-30T16:18:09.404Z: status_changed (status) -> needs-review
 - 2026-04-30T16:18:09.404Z: updated (progress) -> 100
 - 2026-04-30T16:18:09.646Z: commented

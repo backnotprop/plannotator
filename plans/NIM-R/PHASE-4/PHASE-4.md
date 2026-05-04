@@ -2,22 +2,22 @@
 id: PHASE-4
 trackerStatus:
   type: phase
-title: 'Phase 4: Final integration verification'
-status: unstarted
+title: "Phase 4: Final integration verification"
+status: needs-review
 priority: critical
 tags:
-- plannotator
-- verification
-- phase
-- integration
+  - plannotator
+  - verification
+  - phase
+  - integration
 progress: 0
 parents:
-- NIM-R
+  - NIM-R
 dependsOn:
-- PHASE-0
-- PHASE-1
-- PHASE-2
-- PHASE-3
+  - PHASE-0
+  - PHASE-1
+  - PHASE-2
+  - PHASE-3
 ---
 
 ## Description

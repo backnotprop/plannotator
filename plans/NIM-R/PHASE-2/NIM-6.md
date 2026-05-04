@@ -3,7 +3,7 @@ id: NIM-6
 trackerStatus:
   type: task
 title: S-5 Add submit, wait, state, and clear daemon endpoints
-status: in-review
+status: needs-review
 priority: high
 tags:
 - plannotator
@@ -53,6 +53,6 @@ Accepted child implementation commit `59dd78c` and integrated it into `main`. Ve
 - 2026-05-01T00:00:28.309Z: updated (owner) -> child-session:c4202a9a-4139-4547-a980-45b435e618d3 (gpt-5.4)
 - 2026-05-01T00:00:28.309Z: updated (progress) -> 1
 - 2026-05-01T00:00:28.593Z: commented
-- 2026-05-01T00:10:21.870Z: status_changed (status) -> in-review
+- 2026-05-01T00:10:21.870Z: status_changed (status) -> needs-review
 - 2026-05-01T00:10:21.870Z: updated (progress) -> 100
 - 2026-05-01T00:10:22.016Z: commented

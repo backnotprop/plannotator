@@ -2,17 +2,17 @@
 id: PHASE-2
 trackerStatus:
   type: phase
-title: 'Phase 2: Slice TDD + implementation complete'
-status: in-progress
+title: "Phase 2: Slice TDD + implementation complete"
+status: needs-review
 priority: critical
 tags:
-- plannotator
-- implementation
-- tdd
-- phase
+  - plannotator
+  - implementation
+  - tdd
+  - phase
 progress: 50
 parents:
-- NIM-R
+  - NIM-R
 ---
 
 ## Description
@@ -23,16 +23,16 @@ Phase: for each slice, the corresponding TDD task exists before or alongside imp
 
 | TDD | Implementation | Slice | Status |
 |-----|----------------|-------|--------|
-| NIM-12 | — | Shared TDD policy | in-review, 100% |
-| NIM-13 | NIM-2 | S-1: Delete remote surface | in-review, 100% |
-| NIM-14 | NIM-3 | S-2: State machine | in-review, 100% |
-| NIM-15 | NIM-4 | S-3: Multiplexed router | in-review, 100% |
-| NIM-16 | NIM-5 | S-4: Daemon lifecycle | in-review, 100% |
-| NIM-17 | NIM-6 | S-5: Submit/Wait/Clear endpoints | in-review, 100% |
-| NIM-18 | NIM-7 | S-6: CLI surface | in-review, 100% |
-| NIM-19 | NIM-8 | S-7: Notifications | in-review, 100% |
-| NIM-20 | NIM-9 | S-8: Agent wrappers | in-review, 100% |
-| NIM-21 | NIM-10 | S-9: Build and packaging | in-review, 100% |
+| NIM-12 | — | Shared TDD policy | needs-review, 100% |
+| NIM-13 | NIM-2 | S-1: Delete remote surface | needs-review, 100% |
+| NIM-14 | NIM-3 | S-2: State machine | needs-review, 100% |
+| NIM-15 | NIM-4 | S-3: Multiplexed router | needs-review, 100% |
+| NIM-16 | NIM-5 | S-4: Daemon lifecycle | needs-review, 100% |
+| NIM-17 | NIM-6 | S-5: Submit/Wait/Clear endpoints | needs-review, 100% |
+| NIM-18 | NIM-7 | S-6: CLI surface | needs-review, 100% |
+| NIM-19 | NIM-8 | S-7: Notifications | needs-review, 100% |
+| NIM-20 | NIM-9 | S-8: Agent wrappers | needs-review, 100% |
+| NIM-21 | NIM-10 | S-9: Build and packaging | needs-review, 100% |
 
 ## Acceptance criteria
 

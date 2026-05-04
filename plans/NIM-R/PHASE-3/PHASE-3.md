@@ -23,7 +23,7 @@ Phase: each E2E spec declares its semantic-decision dependencies and implementat
 
 | Spec | Task | Semantic deps | Implementation deps | Infra deps | Status |
 |------|------|---------------|---------------------|------------|--------|
-| E01 | E01 | — | NIM-10 | NIM-23 | in-review, 100% |
+| E01 | E01 | — | NIM-10 | NIM-23 | needs-review, 100% |
 | E02 | E02 | D3, D4, D5 | NIM-5, NIM-7 | NIM-23 | unstarted |
 | E03 | E03 | D1, D2 | NIM-3, NIM-6, NIM-7 | NIM-23 | unstarted |
 | E04 | E04 | D2 | NIM-3, NIM-4, NIM-6 | NIM-23 | unstarted |

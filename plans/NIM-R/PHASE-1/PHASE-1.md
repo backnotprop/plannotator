@@ -2,16 +2,16 @@
 id: PHASE-1
 trackerStatus:
   type: phase
-title: 'Phase 1: E2E infrastructure usable'
-status: in-progress
+title: "Phase 1: E2E infrastructure usable"
+status: needs-review
 priority: critical
 tags:
-- plannotator
-- infrastructure
-- phase
+  - plannotator
+  - infrastructure
+  - phase
 progress: 80
 parents:
-- NIM-R
+  - NIM-R
 ---
 
 ## Description
@@ -22,7 +22,7 @@ Phase: a test can build the binary, create an isolated home, start the daemon, w
 
 | Task | Description | Status |
 |------|-------------|--------|
-| NIM-23 | E2E test infrastructure: helpers, fixtures, playwright config | in-review, 100% |
+| NIM-23 | E2E test infrastructure: helpers, fixtures, playwright config | needs-review, 100% |
 
 ## Acceptance criteria
 
@@ -33,4 +33,4 @@ Phase: a test can build the binary, create an isolated home, start the daemon, w
 
 ## Activity Log
 
-- 2026-05-04T08:00:02.000Z: created (unified phase, currently depends on NIM-23 which is in-review at 100%)
+- 2026-05-04T08:00:02.000Z: created (unified phase, currently depends on NIM-23 which is needs-review at 100%)

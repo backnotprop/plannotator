@@ -3,7 +3,7 @@ id: NIM-23
 trackerStatus:
   type: task
 title: 'E2E test infrastructure: helpers, fixtures, playwright config'
-status: in-review
+status: needs-review
 priority: high
 tags:
 - plannotator
@@ -64,5 +64,5 @@ The daemon opens the system browser by default. Tests must defeat that: either s
 
 - 2026-05-02T04:03:25.604Z: created
 - 2026-05-02T04:07:50.901Z: status_changed (status) -> in-progress
-- 2026-05-02T17:02:55.752Z: status_changed (status) -> in-review
+- 2026-05-02T17:02:55.752Z: status_changed (status) -> needs-review
 - 2026-05-02T17:02:55.752Z: updated (progress) -> 100

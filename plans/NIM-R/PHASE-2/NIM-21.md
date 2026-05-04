@@ -3,7 +3,7 @@ id: NIM-21
 trackerStatus:
   type: task
 title: TDD for S-9 build, packaging, and install flow
-status: in-review
+status: needs-review
 priority: medium
 tags:
 - plannotator
@@ -34,5 +34,5 @@ Process rule:
 
 - 2026-04-29T04:15:31.906Z: created
 - 2026-05-01T17:07:23.466Z: status_changed (status) -> in-progress
-- 2026-05-01T21:55:32.078Z: status_changed (status) -> in-review
+- 2026-05-01T21:55:32.078Z: status_changed (status) -> needs-review
 - 2026-05-01T21:55:32.078Z: updated (progress) -> 100

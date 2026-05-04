@@ -3,7 +3,7 @@ id: NIM-15
 trackerStatus:
   type: task
 title: TDD for S-3 multiplexed router behavior
-status: in-review
+status: needs-review
 priority: high
 owner: child-session:f86c2767-9f6e-4100-9769-417960ff8426 (gpt-5.4)
 tags:
@@ -64,6 +64,6 @@ Outcome:
 - 2026-04-30T16:18:48.550Z: updated (owner) -> child-session:f86c2767-9f6e-4100-9769-417960ff8426 (gpt-5.4)
 - 2026-04-30T16:18:48.550Z: updated (progress) -> 1
 - 2026-04-30T16:18:48.738Z: commented
-- 2026-04-30T16:26:02.058Z: status_changed (status) -> in-review
+- 2026-04-30T16:26:02.058Z: status_changed (status) -> needs-review
 - 2026-04-30T16:26:02.058Z: updated (progress) -> 100
 - 2026-04-30T16:26:02.235Z: commented

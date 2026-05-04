@@ -3,7 +3,7 @@ id: NIM-16
 trackerStatus:
   type: task
 title: TDD for S-4 daemon lifecycle and recovery
-status: in-review
+status: needs-review
 priority: high
 owner: main-session:1c85b90e-e99c-4c79-979e-1785cb0f493c (local takeover after failed
   delegate)
@@ -77,6 +77,6 @@ Accepted local takeover for NIM-16 after replacing the noncompliant delegate. Ve
 - 2026-04-30T23:40:03.884Z: status_changed (status) -> in-progress
 - 2026-04-30T23:40:03.884Z: updated (owner) -> main-session:1c85b90e-e99c-4c79-979e-1785cb0f493c (local takeover after failed delegate)
 - 2026-04-30T23:40:03.884Z: updated (progress) -> 10
-- 2026-04-30T23:42:45.976Z: status_changed (status) -> in-review
+- 2026-04-30T23:42:45.976Z: status_changed (status) -> needs-review
 - 2026-04-30T23:42:45.977Z: updated (progress) -> 100
 - 2026-04-30T23:42:46.224Z: commented

@@ -3,7 +3,7 @@ id: NIM-12
 trackerStatus:
   type: task
 title: S-9.5 Create real end-to-end proof harness and TDD phase
-status: in-review
+status: needs-review
 priority: high
 tags:
 - plannotator
@@ -87,5 +87,5 @@ Deliverables:
 Why this exists:
 - GUI correctness and workflow correctness are hard to validate by late ad hoc tests. This task establishes the standard that the paired TDD tasks and the final verification task must enforce.
 - 2026-05-01T22:21:08.619Z: status_changed (status) -> in-progress
-- 2026-05-02T03:37:01.210Z: status_changed (status) -> in-review
+- 2026-05-02T03:37:01.210Z: status_changed (status) -> needs-review
 - 2026-05-02T03:37:01.210Z: updated (progress) -> 100

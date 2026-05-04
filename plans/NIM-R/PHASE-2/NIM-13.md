@@ -3,7 +3,7 @@ id: NIM-13
 trackerStatus:
   type: task
 title: TDD for S-1 remote-surface deletion and build invariants
-status: in-review
+status: needs-review
 priority: high
 owner: child-session:f6eebc74-f5d8-4ce9-a41c-c7cb628feb17 (gpt-5.4)
 tags:
@@ -56,6 +56,6 @@ This task is now ready for S-1 implementation to drive the proof green.
 - 2026-04-29T05:02:43.530Z: updated (owner) -> Aristotle (gpt-5.4/high)
 - 2026-04-29T05:27:12.444Z: status_changed (status) -> in-progress
 - 2026-04-29T05:27:12.444Z: updated (owner) -> child-session:f6eebc74-f5d8-4ce9-a41c-c7cb628feb17 (gpt-5.4)
-- 2026-04-29T06:08:47.145Z: status_changed (status) -> in-review
+- 2026-04-29T06:08:47.145Z: status_changed (status) -> needs-review
 - 2026-04-29T06:08:47.145Z: updated (progress) -> 100
 - 2026-04-29T06:08:47.311Z: commented

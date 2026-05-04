@@ -3,7 +3,7 @@ id: NIM-7
 trackerStatus:
   type: task
 title: S-6 Define the CLI surface around the daemon
-status: in-review
+status: needs-review
 priority: high
 tags:
 - plannotator
@@ -92,6 +92,6 @@ Why this matters:
 - 2026-05-01T00:25:27.239Z: updated (owner) -> child-session:ec8824e7-c8a1-4416-9886-b334c0a06e89 (gpt-5.4)
 - 2026-05-01T00:25:27.239Z: updated (progress) -> 1
 - 2026-05-01T00:25:27.504Z: commented
-- 2026-05-01T04:53:19.333Z: status_changed (status) -> in-review
+- 2026-05-01T04:53:19.333Z: status_changed (status) -> needs-review
 - 2026-05-01T04:53:19.333Z: updated (progress) -> 100
 - 2026-05-01T04:53:19.608Z: commented

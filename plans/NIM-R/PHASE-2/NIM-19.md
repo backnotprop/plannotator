@@ -3,7 +3,7 @@ id: NIM-19
 trackerStatus:
   type: task
 title: TDD for S-7 notification behavior
-status: in-review
+status: needs-review
 priority: medium
 owner: child-session:b59b10aa-0635-41d2-aea1-90e95830ca68 (gpt-5.4)
 tags:
@@ -57,6 +57,6 @@ This is the expected missing implementation surface for `NIM-8`.
 - 2026-05-01T04:54:56.579Z: status_changed (status) -> in-progress
 - 2026-05-01T04:54:56.579Z: updated (owner) -> child-session:b59b10aa-0635-41d2-aea1-90e95830ca68 (gpt-5.4)
 - 2026-05-01T04:54:56.579Z: updated (progress) -> 1
-- 2026-05-01T05:03:53.966Z: status_changed (status) -> in-review
+- 2026-05-01T05:03:53.966Z: status_changed (status) -> needs-review
 - 2026-05-01T05:03:53.966Z: updated (progress) -> 100
 - 2026-05-01T05:03:54.204Z: commented

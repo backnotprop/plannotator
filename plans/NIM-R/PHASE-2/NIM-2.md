@@ -3,7 +3,7 @@ id: NIM-2
 trackerStatus:
   type: task
 title: S-1 Strip remote collaboration surface area
-status: in-review
+status: needs-review
 priority: high
 owner: child-session:887ddd9f-5710-4cbc-b25a-0651d07a13d2 (gpt-5.4)
 tags:
@@ -73,6 +73,6 @@ Task is ready for the next dependent proof task (`NIM-14`).
 - 2026-04-29T08:21:44.087Z: updated (owner) -> child-session:887ddd9f-5710-4cbc-b25a-0651d07a13d2 (gpt-5.4)
 - 2026-04-29T08:21:44.087Z: updated (progress) -> 1
 - 2026-04-29T08:21:44.280Z: commented
-- 2026-04-29T09:05:43.223Z: status_changed (status) -> in-review
+- 2026-04-29T09:05:43.223Z: status_changed (status) -> needs-review
 - 2026-04-29T09:05:43.223Z: updated (progress) -> 100
 - 2026-04-29T09:05:43.408Z: commented

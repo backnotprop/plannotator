@@ -3,7 +3,7 @@ id: NIM-8
 trackerStatus:
   type: task
 title: S-7 Add notifications for state transitions
-status: in-review
+status: needs-review
 priority: medium
 tags:
 - plannotator
@@ -93,6 +93,6 @@ Note: the root `build:hook` script change was retained because the previous scri
 - 2026-05-01T05:14:07.064Z: updated (owner) -> worker-agent:019de1f5-2bea-74f0-a632-2c42cd8a8a16 (Bohr)
 - 2026-05-01T05:14:07.064Z: updated (progress) -> 1
 - 2026-05-01T05:14:07.341Z: commented
-- 2026-05-01T05:21:23.898Z: status_changed (status) -> in-review
+- 2026-05-01T05:21:23.898Z: status_changed (status) -> needs-review
 - 2026-05-01T05:21:23.898Z: updated (progress) -> 100
 - 2026-05-01T05:21:24.131Z: commented

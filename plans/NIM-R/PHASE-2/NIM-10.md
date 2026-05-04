@@ -3,7 +3,7 @@ id: NIM-10
 trackerStatus:
   type: task
 title: S-9 Update build and packaging around the daemon artifact
-status: in-review
+status: needs-review
 priority: medium
 tags:
 - plannotator
@@ -37,5 +37,5 @@ Goal:
 - 2026-04-29T02:30:34.552Z: created
 - 2026-04-29T03:12:00.879Z: updated (complexityScore) -> 49
 - 2026-05-01T21:55:32.366Z: status_changed (status) -> in-progress
-- 2026-05-01T22:00:57.496Z: status_changed (status) -> in-review
+- 2026-05-01T22:00:57.496Z: status_changed (status) -> needs-review
 - 2026-05-01T22:00:57.496Z: updated (progress) -> 100

@@ -3,7 +3,7 @@ id: NIM-20
 trackerStatus:
   type: task
 title: TDD for S-8 agent wrapper behavior
-status: in-review
+status: needs-review
 priority: high
 owner: child-session:c1051204-95b6-48ca-8a98-bfb582ee06af (gpt-5.4)
 tags:
@@ -66,6 +66,6 @@ This is the expected missing NIM-9 thin-wrapper surface.
 - 2026-05-01T05:21:46.776Z: updated (progress) -> 1
 - 2026-05-01T05:21:47.150Z: commented
 - 2026-05-01T16:29:54.728Z: commented
-- 2026-05-01T16:38:18.988Z: status_changed (status) -> in-review
+- 2026-05-01T16:38:18.988Z: status_changed (status) -> needs-review
 - 2026-05-01T16:38:18.988Z: updated (progress) -> 100
 - 2026-05-01T16:38:19.104Z: commented

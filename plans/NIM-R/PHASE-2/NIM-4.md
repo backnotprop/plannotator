@@ -3,7 +3,7 @@ id: NIM-4
 trackerStatus:
   type: task
 title: S-3 Refactor per-mode servers into a multiplexed router
-status: in-review
+status: needs-review
 priority: high
 tags:
 - plannotator
@@ -66,6 +66,6 @@ Outcome:
 - 2026-04-30T16:29:06.325Z: updated (owner) -> child-session:4aec33b5-707b-4fa9-a031-1ae5f0bfa30f (gpt-5.4)
 - 2026-04-30T16:29:06.325Z: updated (progress) -> 1
 - 2026-04-30T16:29:06.563Z: commented
-- 2026-04-30T17:12:02.604Z: status_changed (status) -> in-review
+- 2026-04-30T17:12:02.604Z: status_changed (status) -> needs-review
 - 2026-04-30T17:12:02.605Z: updated (progress) -> 100
 - 2026-04-30T17:12:02.834Z: commented

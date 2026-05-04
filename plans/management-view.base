@@ -1,9 +1,18 @@
 filters:
   and:
     - file.inFolder("plans")
+    - '!file.name.startsWith("management-view")'
 views:
   - type: branches-tree
     name: Planning Tree
+    groupBy:
+      property: file.folder
+      direction: ASC
+    order:
+      - file.name
+    sort:
+      - property: file.name
+        direction: ASC
     markers: bullet
     indentProperties: false
     parentProp: note.parents
@@ -23,5 +32,5 @@ views:
     boardColumns:
       - unstarted
       - in-progress
-      - in-review
+      - needs-review
       - (No value)

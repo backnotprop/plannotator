@@ -3,7 +3,7 @@ id: NIM-17
 trackerStatus:
   type: task
 title: TDD for S-5 submit/wait/verdict semantics
-status: in-review
+status: needs-review
 priority: high
 owner: child-session:4c609eeb-a84a-47c9-b27b-3b57f7d81cf2 (gpt-5.4)
 tags:
@@ -50,6 +50,6 @@ Accepted child proof commit `48ec43a` and integrated it into `main`. Verifying i
 - 2026-04-30T23:50:40.274Z: status_changed (status) -> in-progress
 - 2026-04-30T23:50:40.274Z: updated (owner) -> child-session:4c609eeb-a84a-47c9-b27b-3b57f7d81cf2 (gpt-5.4)
 - 2026-04-30T23:50:40.274Z: updated (progress) -> 1
-- 2026-05-01T00:00:01.756Z: status_changed (status) -> in-review
+- 2026-05-01T00:00:01.756Z: status_changed (status) -> needs-review
 - 2026-05-01T00:00:01.756Z: updated (progress) -> 100
 - 2026-05-01T00:00:01.974Z: commented

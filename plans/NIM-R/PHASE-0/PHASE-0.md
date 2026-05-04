@@ -2,25 +2,24 @@
 id: PHASE-0
 trackerStatus:
   type: phase
-title: "Phase 0: Semantics frozen \u2014 all open questions converted to explicit\
-  \ contracts"
-status: in-progress
+title: "Phase 0: Semantics frozen — all open questions converted to explicit contracts"
+status: unstarted
 priority: critical
 tags:
-- plannotator
-- semantics
-- contracts
-- phase
+  - plannotator
+  - semantics
+  - contracts
+  - phase
 progress: 10
 parents:
-- NIM-R
+  - NIM-R
 dependsOn:
-- D1
-- D2
-- D3
-- D4
-- D5
-- D6
+  - D1
+  - D2
+  - D3
+  - D4
+  - D5
+  - D6
 ---
 
 ## Description

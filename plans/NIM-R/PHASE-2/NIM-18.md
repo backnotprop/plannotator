@@ -3,7 +3,7 @@ id: NIM-18
 trackerStatus:
   type: task
 title: TDD for S-6 CLI contract and collision UX
-status: in-review
+status: needs-review
 priority: high
 owner: child-session:5aa00d19-2daf-498c-952f-46ef7c0f07e6 (gpt-5.4)
 tags:
@@ -50,6 +50,6 @@ Accepted child proof commit `1be9652` and integrated it into `main`. Verifying i
 - 2026-05-01T00:10:54.060Z: status_changed (status) -> in-progress
 - 2026-05-01T00:10:54.060Z: updated (owner) -> child-session:5aa00d19-2daf-498c-952f-46ef7c0f07e6 (gpt-5.4)
 - 2026-05-01T00:10:54.060Z: updated (progress) -> 1
-- 2026-05-01T00:24:29.651Z: status_changed (status) -> in-review
+- 2026-05-01T00:24:29.651Z: status_changed (status) -> needs-review
 - 2026-05-01T00:24:29.651Z: updated (progress) -> 100
 - 2026-05-01T00:24:29.798Z: commented

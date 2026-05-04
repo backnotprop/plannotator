@@ -3,7 +3,7 @@ id: NIM-11
 trackerStatus:
   type: task
 title: S-10 Run manual and automated verification for the daemon model
-status: in-review
+status: needs-review
 priority: high
 tags:
 - plannotator
@@ -152,5 +152,5 @@ Automated verification:
 Pass criteria:
 - Lifecycle, collision, buffering, recovery, GUI-visible behavior, and integration behavior all match the sprint plan.
 - Regressions in daemon wait semantics or state transitions are caught by real proofs and integration checks rather than by users.
-- 2026-05-02T03:37:01.926Z: status_changed (status) -> in-review
+- 2026-05-02T03:37:01.926Z: status_changed (status) -> needs-review
 - 2026-05-02T03:37:01.926Z: updated (progress) -> 100

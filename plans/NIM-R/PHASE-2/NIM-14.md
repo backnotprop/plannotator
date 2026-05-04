@@ -3,7 +3,7 @@ id: NIM-14
 trackerStatus:
   type: task
 title: TDD for S-2 state transition correctness
-status: in-review
+status: needs-review
 priority: high
 owner: child-session:6501aa6a-8f72-4414-82ff-e2451a4a4720 (gpt-5.4)
 tags:
@@ -65,6 +65,6 @@ Outcome:
 - 2026-04-30T15:10:29.548Z: updated (owner) -> child-session:6501aa6a-8f72-4414-82ff-e2451a4a4720 (gpt-5.4)
 - 2026-04-30T15:10:29.548Z: updated (progress) -> 1
 - 2026-04-30T15:10:29.734Z: commented
-- 2026-04-30T15:27:06.361Z: status_changed (status) -> in-review
+- 2026-04-30T15:27:06.361Z: status_changed (status) -> needs-review
 - 2026-04-30T15:27:06.361Z: updated (progress) -> 100
 - 2026-04-30T15:27:06.548Z: commented

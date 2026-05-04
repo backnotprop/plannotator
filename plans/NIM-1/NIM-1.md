@@ -3,7 +3,7 @@ id: NIM-1
 trackerStatus:
   type: plan
 title: Plannotator local daemon refactor sprint
-status: in-review
+status: needs-review
 priority: high
 tags:
   - plannotator
@@ -537,7 +537,7 @@ Testing and proof tasks:
 7. Real end-to-end proofs exist for each implementation slice, use real fixtures and commands, and pass without mocks or fake substitute data.
 8. `README.md`, `CLAUDE.md`, and `AGENTS.md` describe the daemon model and no longer describe the removed remote-sharing path.
 - 2026-04-29T04:17:09.526Z: commented
-- 2026-05-02T03:41:49.731Z: status_changed (status) -> in-review
+- 2026-05-02T03:41:49.731Z: status_changed (status) -> needs-review
 - 2026-05-02T03:41:49.731Z: updated (progress) -> 100
 
 ## Revised P0 Priority Assessment (post-ChatGPT review - 2026-05-04)
