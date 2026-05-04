@@ -23,21 +23,21 @@ Phase: each E2E spec declares its semantic-decision dependencies and implementat
 
 | Spec | Task | Semantic deps | Implementation deps | Infra deps | Status |
 |------|------|---------------|---------------------|------------|--------|
-| [[E01]] | [[E01]] | — | [[NIM-10]] | [[NIM-23]] | needs-review, 100% |
-| [[E02]] | [[E02]] | [[D3]], [[D4]], [[D5]] | [[NIM-5]], [[NIM-7]] | [[NIM-23]] | unstarted |
-| [[E03]] | [[E03]] | [[D1]], [[D2]] | [[NIM-3]], [[NIM-6]], [[NIM-7]] | [[NIM-23]] | unstarted |
-| [[E04]] | [[E04]] | [[D2]] | [[NIM-3]], [[NIM-4]], [[NIM-6]] | [[NIM-23]] | unstarted |
-| [[E05]] | [[E05]] | — | [[NIM-4]], [[NIM-6]] | [[NIM-23]] | unstarted |
-| [[E06]] | [[E06]] | [[D2]] | [[NIM-6]], [[NIM-7]] | [[NIM-23]] | unstarted |
-| [[E07]] | [[E08]] | [[D1]] | [[NIM-6]], [[NIM-7]] | [[NIM-23]] | unstarted |
-| [[E08]] | [[E07]] | [[D3]], [[D4]], [[D5]] | [[NIM-3]], [[NIM-5]], [[NIM-6]], [[NIM-7]] | [[NIM-23]] | unstarted |
-| [[E09]] | [[E09]] | [[D4]] | [[NIM-5]], [[NIM-6]] | [[NIM-23]] | unstarted |
-| [[E10]] | [[E10]] | — | [[NIM-4]], [[NIM-6]], [[NIM-8]] | [[NIM-23]] | unstarted |
-| [[E11]] | [[E11]] | [[D5]] | [[NIM-6]], [[NIM-7]] | [[NIM-23]] | unstarted |
-| [[E12]] | [[E13]] | [[D1]] | [[NIM-6]], [[NIM-7]], [[NIM-23]] | [[NIM-23]] | unstarted |
-| [[E13]] | [[E12]] | [[D2]], [[D6]] | [[NIM-3]], [[NIM-5]], [[NIM-6]], [[NIM-9]] | [[NIM-23]] | unstarted |
-| [[E14]] | [[E14]] | — | [[NIM-7]], [[NIM-9]] | [[NIM-23]] | unstarted |
-| [[E15]] | [[E15]] | — | [[NIM-2]], [[NIM-10]] | [[NIM-23]] | unstarted |
+| [[E01]] | [[E01]] | — | [[S-9]] | [[NIM-23]] | needs-review, 100% |
+| [[E02]] | [[E02]] | [[D3]], [[D4]], [[D5]] | [[S-4]], [[S-6]] | [[NIM-23]] | unstarted |
+| [[E03]] | [[E03]] | [[D1]], [[D2]] | [[S-2]], [[S-5]], [[S-6]] | [[NIM-23]] | unstarted |
+| [[E04]] | [[E04]] | [[D2]] | [[S-2]], [[S-3]], [[S-5]] | [[NIM-23]] | unstarted |
+| [[E05]] | [[E05]] | — | [[S-3]], [[S-5]] | [[NIM-23]] | unstarted |
+| [[E06]] | [[E06]] | [[D2]] | [[S-5]], [[S-6]] | [[NIM-23]] | unstarted |
+| [[E07]] | [[E08]] | [[D1]] | [[S-5]], [[S-6]] | [[NIM-23]] | unstarted |
+| [[E08]] | [[E07]] | [[D3]], [[D4]], [[D5]] | [[S-2]], [[S-4]], [[S-5]], [[S-6]] | [[NIM-23]] | unstarted |
+| [[E09]] | [[E09]] | [[D4]] | [[S-4]], [[S-5]] | [[NIM-23]] | unstarted |
+| [[E10]] | [[E10]] | — | [[S-3]], [[S-5]], [[S-7]] | [[NIM-23]] | unstarted |
+| [[E11]] | [[E11]] | [[D5]] | [[S-5]], [[S-6]] | [[NIM-23]] | unstarted |
+| [[E12]] | [[E13]] | [[D1]] | [[S-5]], [[S-6]], [[NIM-23]] | [[NIM-23]] | unstarted |
+| [[E13]] | [[E12]] | [[D2]], [[D6]] | [[S-2]], [[S-4]], [[S-5]], [[S-8]] | [[NIM-23]] | unstarted |
+| [[E14]] | [[E14]] | — | [[S-6]], [[S-8]] | [[NIM-23]] | unstarted |
+| [[E15]] | [[E15]] | — | [[S-1]], [[S-9]] | [[NIM-23]] | unstarted |
 | [[E99]] | [[E15]] | — | all [[E01]]-[[E15]] | — | unstarted |
 
 Note: [[E13]] maps to 12-json-output, [[E14]] to 13-claude-hook-shim, [[E15]] to 14-opencode-shim. Re-labeling needed.

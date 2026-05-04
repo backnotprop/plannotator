@@ -84,18 +84,18 @@ Keep in place:
 
 # Tracker backlog map
 Implementation slices:
-- [[NIM-2]]: S-1 Strip remote collaboration surface area
-- [[NIM-3]]: S-2 Define daemon state machine module
-- [[NIM-4]]: S-3 Refactor per-mode servers into a multiplexed router
-- [[NIM-5]]: S-4 Implement daemon process lifecycle
-- [[NIM-6]]: S-5 Add submit, wait, state, and clear daemon endpoints
-- [[NIM-7]]: S-6 Define the CLI surface around the daemon
-- [[NIM-8]]: S-7 Add notifications for state transitions
-- [[NIM-9]]: S-8 Refactor agent integrations into thin CLI clients
-- [[NIM-10]]: S-9 Update build and packaging around the daemon artifact
+- [[S-1]]: S-1 Strip remote collaboration surface area
+- [[S-2]]: S-2 Define daemon state machine module
+- [[S-3]]: S-3 Refactor per-mode servers into a multiplexed router
+- [[S-4]]: S-4 Implement daemon process lifecycle
+- [[S-5]]: S-5 Add submit, wait, state, and clear daemon endpoints
+- [[S-6]]: S-6 Define the CLI surface around the daemon
+- [[S-7]]: S-7 Add notifications for state transitions
+- [[S-8]]: S-8 Refactor agent integrations into thin CLI clients
+- [[S-9]]: S-9 Update build and packaging around the daemon artifact
 
 Testing and proof tasks:
-- [[NIM-12]]: Sprint-wide proof policy and shared TDD phase
+- [[S-9.5]]: Sprint-wide proof policy and shared TDD phase
 - [[NIM-13]]: TDD for S-1 remote-surface deletion and build invariants
 - [[NIM-14]]: TDD for S-2 state transition correctness
 - [[NIM-15]]: TDD for S-3 multiplexed router behavior
@@ -105,7 +105,7 @@ Testing and proof tasks:
 - [[NIM-19]]: TDD for S-7 notification behavior
 - [[NIM-20]]: TDD for S-8 agent wrapper behavior
 - [[NIM-21]]: TDD for S-9 build, packaging, and install flow
-- [[NIM-11]]: Final verification and proof execution
+- [[S-10]]: Final verification and proof execution
 
 # Testing and validation policy
 - The sprint requires a separate TDD and proof-authoring phase before verification is considered meaningful.
@@ -145,16 +145,16 @@ Testing and proof tasks:
 Imported sprint backlog from the daemon refactor plan.
 
 Task map:
-- [[NIM-2]]: S-1 Strip remote collaboration surface area
-- [[NIM-3]]: S-2 Define daemon state machine module
-- [[NIM-4]]: S-3 Refactor per-mode servers into a multiplexed router
-- [[NIM-5]]: S-4 Implement daemon process lifecycle
-- [[NIM-6]]: S-5 Add submit, wait, state, and clear daemon endpoints
-- [[NIM-7]]: S-6 Define the CLI surface around the daemon
-- [[NIM-8]]: S-7 Add notifications for state transitions
-- [[NIM-9]]: S-8 Refactor agent integrations into thin CLI clients
-- [[NIM-10]]: S-9 Update build and packaging around the daemon artifact
-- [[NIM-11]]: S-10 Run manual and automated verification for the daemon model
+- [[S-1]]: S-1 Strip remote collaboration surface area
+- [[S-2]]: S-2 Define daemon state machine module
+- [[S-3]]: S-3 Refactor per-mode servers into a multiplexed router
+- [[S-4]]: S-4 Implement daemon process lifecycle
+- [[S-5]]: S-5 Add submit, wait, state, and clear daemon endpoints
+- [[S-6]]: S-6 Define the CLI surface around the daemon
+- [[S-7]]: S-7 Add notifications for state transitions
+- [[S-8]]: S-8 Refactor agent integrations into thin CLI clients
+- [[S-9]]: S-9 Update build and packaging around the daemon artifact
+- [[S-10]]: S-10 Run manual and automated verification for the daemon model
 
 Notes:
 - The tracker import keeps the sprint as one parent plan plus ten ordered task items.
@@ -166,8 +166,8 @@ Expanded the tracker detail using the newer attached copy of the sprint plan.
 
 What was upgraded:
 - [[NIM-1]] now carries the current-state summary, target daemon architecture, state model, core API, fixed-port model, out-of-scope deletion list, backlog map, deferred decisions, risks, and definition of done.
-- [[NIM-7]] now preserves the CLI command matrix, exit code expectations, and 409-renderer requirements.
-- [[NIM-11]] now preserves the exact manual smoke-test sequence and the automated verification expectations.
+- [[S-6]] now preserves the CLI command matrix, exit code expectations, and 409-renderer requirements.
+- [[S-10]] now preserves the exact manual smoke-test sequence and the automated verification expectations.
 
 The tracker should now be detailed enough to reconstruct the sprint intent even without the original pasted plan file.
 
@@ -183,16 +183,16 @@ Rubric:
 - 81-100: architecture-level or correctness-critical work with broad coupling, recovery concerns, or difficult validation
 
 Current scores:
-- [[NIM-2]]: 58
-- [[NIM-3]]: 76
-- [[NIM-4]]: 91
-- [[NIM-5]]: 83
-- [[NIM-6]]: 94
-- [[NIM-7]]: 78
-- [[NIM-8]]: 34
-- [[NIM-9]]: 74
-- [[NIM-10]]: 49
-- [[NIM-11]]: 57
+- [[S-1]]: 58
+- [[S-2]]: 76
+- [[S-3]]: 91
+- [[S-4]]: 83
+- [[S-5]]: 94
+- [[S-6]]: 78
+- [[S-7]]: 34
+- [[S-8]]: 74
+- [[S-9]]: 49
+- [[S-10]]: 57
 
 Suggested model-routing use:
 - 0-40: small/cheap model
@@ -206,8 +206,8 @@ Per-slice TDD pairing map:
 - - - - - - - - - 
 Intent:
 - every implementation slice has its own separate proof-authoring task
-- the sprint-wide TDD task [[NIM-12]] defines the common standard
-- [[NIM-11]] executes the proof suites and final verification
+- the sprint-wide TDD task [[S-9.5]] defines the common standard
+- [[S-10]] executes the proof suites and final verification
 
 ## Activity Log
 
@@ -277,16 +277,16 @@ Keep in place:
 - `packages/server/draft.ts`
 
 # Tracker backlog map
-- [[NIM-2]]: S-1 Strip remote collaboration surface area
-- [[NIM-3]]: S-2 Define daemon state machine module
-- [[NIM-4]]: S-3 Refactor per-mode servers into a multiplexed router
-- [[NIM-5]]: S-4 Implement daemon process lifecycle
-- [[NIM-6]]: S-5 Add submit, wait, state, and clear daemon endpoints
-- [[NIM-7]]: S-6 Define the CLI surface around the daemon
-- [[NIM-8]]: S-7 Add notifications for state transitions
-- [[NIM-9]]: S-8 Refactor agent integrations into thin CLI clients
-- [[NIM-10]]: S-9 Update build and packaging around the daemon artifact
-- [[NIM-11]]: S-10 Run manual and automated verification for the daemon model
+- [[S-1]]: S-1 Strip remote collaboration surface area
+- [[S-2]]: S-2 Define daemon state machine module
+- [[S-3]]: S-3 Refactor per-mode servers into a multiplexed router
+- [[S-4]]: S-4 Implement daemon process lifecycle
+- [[S-5]]: S-5 Add submit, wait, state, and clear daemon endpoints
+- [[S-6]]: S-6 Define the CLI surface around the daemon
+- [[S-7]]: S-7 Add notifications for state transitions
+- [[S-8]]: S-8 Refactor agent integrations into thin CLI clients
+- [[S-9]]: S-9 Update build and packaging around the daemon artifact
+- [[S-10]]: S-10 Run manual and automated verification for the daemon model
 
 # Deferred decisions
 - VS Code extension: leave untouched during the sprint, but verify compatibility before merge and file follow-up work if needed.
@@ -376,17 +376,17 @@ Keep in place:
 - `packages/server/draft.ts`
 
 # Tracker backlog map
-- [[NIM-2]]: S-1 Strip remote collaboration surface area
-- [[NIM-3]]: S-2 Define daemon state machine module
-- [[NIM-4]]: S-3 Refactor per-mode servers into a multiplexed router
-- [[NIM-5]]: S-4 Implement daemon process lifecycle
-- [[NIM-6]]: S-5 Add submit, wait, state, and clear daemon endpoints
-- [[NIM-7]]: S-6 Define the CLI surface around the daemon
-- [[NIM-8]]: S-7 Add notifications for state transitions
-- [[NIM-9]]: S-8 Refactor agent integrations into thin CLI clients
-- [[NIM-10]]: S-9 Update build and packaging around the daemon artifact
-- [[NIM-12]]: S-9.5 Create real end-to-end proof harness and TDD phase
-- [[NIM-11]]: S-10 Run manual and automated verification for the daemon model
+- [[S-1]]: S-1 Strip remote collaboration surface area
+- [[S-2]]: S-2 Define daemon state machine module
+- [[S-3]]: S-3 Refactor per-mode servers into a multiplexed router
+- [[S-4]]: S-4 Implement daemon process lifecycle
+- [[S-5]]: S-5 Add submit, wait, state, and clear daemon endpoints
+- [[S-6]]: S-6 Define the CLI surface around the daemon
+- [[S-7]]: S-7 Add notifications for state transitions
+- [[S-8]]: S-8 Refactor agent integrations into thin CLI clients
+- [[S-9]]: S-9 Update build and packaging around the daemon artifact
+- [[S-9.5]]: S-9.5 Create real end-to-end proof harness and TDD phase
+- [[S-10]]: S-10 Run manual and automated verification for the daemon model
 
 # Testing and validation policy
 - The sprint requires a separate TDD and proof-authoring phase before verification is considered meaningful.
@@ -483,18 +483,18 @@ Keep in place:
 
 # Tracker backlog map
 Implementation slices:
-- [[NIM-2]]: S-1 Strip remote collaboration surface area
-- [[NIM-3]]: S-2 Define daemon state machine module
-- [[NIM-4]]: S-3 Refactor per-mode servers into a multiplexed router
-- [[NIM-5]]: S-4 Implement daemon process lifecycle
-- [[NIM-6]]: S-5 Add submit, wait, state, and clear daemon endpoints
-- [[NIM-7]]: S-6 Define the CLI surface around the daemon
-- [[NIM-8]]: S-7 Add notifications for state transitions
-- [[NIM-9]]: S-8 Refactor agent integrations into thin CLI clients
-- [[NIM-10]]: S-9 Update build and packaging around the daemon artifact
+- [[S-1]]: S-1 Strip remote collaboration surface area
+- [[S-2]]: S-2 Define daemon state machine module
+- [[S-3]]: S-3 Refactor per-mode servers into a multiplexed router
+- [[S-4]]: S-4 Implement daemon process lifecycle
+- [[S-5]]: S-5 Add submit, wait, state, and clear daemon endpoints
+- [[S-6]]: S-6 Define the CLI surface around the daemon
+- [[S-7]]: S-7 Add notifications for state transitions
+- [[S-8]]: S-8 Refactor agent integrations into thin CLI clients
+- [[S-9]]: S-9 Update build and packaging around the daemon artifact
 
 Testing and proof tasks:
-- [[NIM-12]]: Sprint-wide proof policy and shared TDD phase
+- [[S-9.5]]: Sprint-wide proof policy and shared TDD phase
 - [[NIM-13]]: TDD for S-1 remote-surface deletion and build invariants
 - [[NIM-14]]: TDD for S-2 state transition correctness
 - [[NIM-15]]: TDD for S-3 multiplexed router behavior
@@ -504,7 +504,7 @@ Testing and proof tasks:
 - [[NIM-19]]: TDD for S-7 notification behavior
 - [[NIM-20]]: TDD for S-8 agent wrapper behavior
 - [[NIM-21]]: TDD for S-9 build, packaging, and install flow
-- [[NIM-11]]: Final verification and proof execution
+- [[S-10]]: Final verification and proof execution
 
 # Testing and validation policy
 - The sprint requires a separate TDD and proof-authoring phase before verification is considered meaningful.
