@@ -11,11 +11,11 @@ tags:
 - cli
 progress: 100
 parents:
-- PHASE-2
+- [[PHASE-2]]
 dependsOn:
-- NIM-5
-- NIM-6
-- NIM-18
+- [[NIM-5]]
+- [[NIM-6]]
+- [[NIM-18]]
 ---
 
 ## Description
@@ -50,7 +50,7 @@ Why this matters:
 
 ### Comment (2026-05-01T00:25:27.504Z)
 
-Delegated NIM-7 after accepting NIM-18 proof commit `f7f39ea` and checkpointing `main` at `846f233`. Verification target for this implementation is `bun test tests/nim-18.cli-contract-proof.test.ts`.
+Delegated [[NIM-7]] after accepting [[NIM-18]] proof commit `f7f39ea` and checkpointing `main` at `846f233`. Verification target for this implementation is `bun test tests/nim-18.cli-contract-proof.test.ts`.
 
 ### Comment (2026-05-01T04:53:19.607Z)
 
@@ -59,7 +59,7 @@ Accepted child implementation commit `cfaa7a0` and integrated it into `main`. Ve
 ## Activity Log
 
 - 2026-04-29T02:30:11.186Z: created
-- 2026-04-29T02:34:07.787Z: updated (description) -> Parent plan: NIM-1
+- 2026-04-29T02:34:07.787Z: updated (description) -> Parent plan: [[NIM-1]]
 
 Refactor the CLI entrypoint so the daemon becomes the public interface and the stable user-facing API.
 

@@ -15,7 +15,7 @@ tags:
 - validation
 progress: 100
 parents:
-- PHASE-2
+- [[PHASE-2]]
 ---
 
 ## Description
@@ -29,7 +29,7 @@ Requirements:
 - Avoid mock-only wrapper tests that never exercise the actual CLI contract.
 
 Process rule:
-- This proof task must be authored separately from implementation, and NIM-9 writers may not weaken or rewrite the tests after handoff.
+- This proof task must be authored separately from implementation, and [[NIM-9]] writers may not weaken or rewrite the tests after handoff.
 
 ## Comments
 
@@ -38,16 +38,16 @@ Process rule:
 Delegated to child session `c1051204-95b6-48ca-8a98-bfb582ee06af` in worktree `/home/dzack/gitclones/plannotator-dzg-fork_worktrees/radiant-birch` after checkpoint commit `90a55b1`.
 
 Acceptance target:
-- new NIM-20 proof file with a real CLI/wrapper-behavior harness
-- child-worktree verification should yield a clean red phase for the missing NIM-9 implementation surface
+- new [[NIM-20]] proof file with a real CLI/wrapper-behavior harness
+- child-worktree verification should yield a clean red phase for the missing [[NIM-9]] implementation surface
 
 ### Comment (2026-05-01T16:29:54.728Z)
 
-The current delegate `c1051204-95b6-48ca-8a98-bfb582ee06af` is being explicitly abandoned after repeated polling showed a stable partial diff, no completion commit, and no response to a forced finish-or-blocker prompt. Taking over NIM-20 locally to salvage the proof and keep the workflow moving.
+The current delegate `c1051204-95b6-48ca-8a98-bfb582ee06af` is being explicitly abandoned after repeated polling showed a stable partial diff, no completion commit, and no response to a forced finish-or-blocker prompt. Taking over [[NIM-20]] locally to salvage the proof and keep the workflow moving.
 
 ### Comment (2026-05-01T16:38:19.104Z)
 
-Accepted in `main` as `eb8ddbf` `test: add NIM-20 agent wrapper proof`.
+Accepted in `main` as `eb8ddbf` `test: add [[NIM-20]] agent wrapper proof`.
 
 Verification in `main`:
 - `bun test tests/nim-20.agent-wrapper-proof.test.ts`
@@ -56,7 +56,7 @@ Verification in `main`:
   - Claude hook wrapper cannot load because `apps/hook/server/index.ts` still imports `@plannotator/server` directly in the disposable CLI environment
   - OpenCode wrapper cannot load because `apps/opencode-plugin/index.ts` still imports `@plannotator/server` directly in the disposable CLI environment
 
-This is the expected missing NIM-9 thin-wrapper surface.
+This is the expected missing [[NIM-9]] thin-wrapper surface.
 
 ## Activity Log
 

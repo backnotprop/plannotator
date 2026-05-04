@@ -15,7 +15,7 @@ tags:
 - validation
 progress: 100
 parents:
-- PHASE-2
+- [[PHASE-2]]
 ---
 
 ## Description
@@ -29,24 +29,24 @@ Requirements:
 - No mock-only proof surface; the tests must reflect real state transitions the daemon will consume.
 
 Process rule:
-- This proof task must be authored separately from implementation, and NIM-3 writers may not weaken or rewrite the tests after handoff.
+- This proof task must be authored separately from implementation, and [[NIM-3]] writers may not weaken or rewrite the tests after handoff.
 
 ## Comments
 
 ### Comment (2026-04-30T15:10:29.734Z)
 
-Delegated NIM-14 proof authoring to child session `6501aa6a-8f72-4414-82ff-e2451a4a4720` (`gpt-5.4`) in worktree `/home/dzack/gitclones/plannotator-dzg-fork_worktrees/hollow-quartz`.
+Delegated [[NIM-14]] proof authoring to child session `6501aa6a-8f72-4414-82ff-e2451a4a4720` (`gpt-5.4`) in worktree `/home/dzack/gitclones/plannotator-dzg-fork_worktrees/hollow-quartz`.
 
 Handoff included:
-- full NIM-14 tracker specification
-- NIM-12 TDD constraints
-- NIM-3 target implementation context
+- full [[NIM-14]] tracker specification
+- [[NIM-12]] TDD constraints
+- [[NIM-3]] target implementation context
 - explicit instruction not to implement `packages/server/state.ts`
 - required verification via direct `bun test ...` on the new proof file
 
 ### Comment (2026-04-30T15:27:06.548Z)
 
-Accepted delegated NIM-14 proof authoring and integrated it into `main` as commits `57847a2` (`test: author NIM-14 daemon state proof`) and `7abb111` (`test: tighten NIM-14 proof gating`).
+Accepted delegated [[NIM-14]] proof authoring and integrated it into `main` as commits `57847a2` (`test: author [[NIM-14]] daemon state proof`) and `7abb111` (`test: tighten [[NIM-14]] proof gating`).
 
 Final acceptance phase:
 - `bun test tests/nim-14.state-machine-proof.test.ts`
@@ -54,9 +54,9 @@ Final acceptance phase:
 - failure is the expected missing implementation signal: `packages/server/state.ts` does not yet exist
 
 Outcome:
-- pre-NIM-3 red state is now high-signal and controlled
+- pre-[[NIM-3]] red state is now high-signal and controlled
 - detailed transition/persistence/recovery proof cases activate once `packages/server/state.ts` exists
-- ready for implementation task `NIM-3`
+- ready for implementation task [[NIM-3]]
 
 ## Activity Log
 

@@ -14,9 +14,9 @@ tags:
 - cleanup
 progress: 100
 parents:
-- PHASE-2
+- [[PHASE-2]]
 dependsOn:
-- NIM-13
+- [[NIM-13]]
 ---
 
 ## Description
@@ -42,9 +42,9 @@ Dependency notes:
 Delegated S-1 implementation to child session `887ddd9f-5710-4cbc-b25a-0651d07a13d2` (`gpt-5.4`) in worktree `/home/dzack/gitclones/plannotator-dzg-fork_worktrees/mellow-comet`.
 
 Handoff included:
-- full NIM-2 tracker specification
-- NIM-12 TDD constraints
-- NIM-13 proof context and commit `f8820d2`
+- full [[NIM-2]] tracker specification
+- [[NIM-12]] TDD constraints
+- [[NIM-13]] proof context and commit `f8820d2`
 - explicit instruction not to modify the accepted proof file
 - required verification: `bun test tests/nim-13.remote-surface-proof.test.ts` and surviving local build path
 
@@ -63,7 +63,7 @@ Outcome:
 - surviving local build path remains green
 - built local UIs no longer ship the deleted sharing affordances
 
-Task is ready for the next dependent proof task (`NIM-14`).
+Task is ready for the next dependent proof task ([[NIM-14]]).
 
 ## Activity Log
 

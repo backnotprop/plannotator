@@ -15,7 +15,7 @@ tags:
 - validation
 progress: 100
 parents:
-- PHASE-2
+- [[PHASE-2]]
 ---
 
 ## Description
@@ -29,13 +29,13 @@ Requirements:
 - Validate the human-facing contract, not just argument parsing.
 
 Process rule:
-- This proof task must be authored separately from implementation, and NIM-7 writers may not weaken or rewrite the tests after handoff.
+- This proof task must be authored separately from implementation, and [[NIM-7]] writers may not weaken or rewrite the tests after handoff.
 
 ## Comments
 
 ### Comment (2026-05-01T00:10:47.939Z)
 
-Delegating NIM-18 proof authoring after accepting NIM-6 commit `a85fa40` and checkpointing `main` at `7c8b877`. Verification target for the proof task is `bun test tests/nim-18.cli-contract-proof.test.ts`.
+Delegating [[NIM-18]] proof authoring after accepting [[NIM-6]] commit `a85fa40` and checkpointing `main` at `7c8b877`. Verification target for the proof task is `bun test tests/nim-18.cli-contract-proof.test.ts`.
 
 ### Comment (2026-05-01T00:24:29.797Z)
 

@@ -11,11 +11,11 @@ tags:
 - daemon-lifecycle
 progress: 100
 parents:
-- PHASE-2
+- [[PHASE-2]]
 dependsOn:
-- NIM-3
-- NIM-4
-- NIM-16
+- [[NIM-3]]
+- [[NIM-4]]
+- [[NIM-16]]
 ---
 
 ## Description
@@ -37,11 +37,11 @@ Success criteria:
 
 ### Comment (2026-04-30T23:43:19.841Z)
 
-Delegated NIM-5 to child session `600049f0-2fb8-42a7-bc6b-776a19ec0043` in worktree `/home/dzack/gitclones/plannotator-dzg-fork_worktrees/rushing-star` after accepting NIM-16 proof commit `86da359`. Verification target for this implementation is `bun test tests/nim-16.daemon-lifecycle-proof.test.ts`.
+Delegated [[NIM-5]] to child session `600049f0-2fb8-42a7-bc6b-776a19ec0043` in worktree `/home/dzack/gitclones/plannotator-dzg-fork_worktrees/rushing-star` after accepting [[NIM-16]] proof commit `86da359`. Verification target for this implementation is `bun test tests/nim-16.daemon-lifecycle-proof.test.ts`.
 
 ### Comment (2026-04-30T23:50:05.374Z)
 
-Accepted child implementation commit `5422218` and integrated it into `main` as `7abdda4` `feat: implement daemon lifecycle ownership`. Verification in child worktree passed the full NIM-16 proof suite. Main-branch verification is running against `bun test tests/nim-16.daemon-lifecycle-proof.test.ts`.
+Accepted child implementation commit `5422218` and integrated it into `main` as `7abdda4` `feat: implement daemon lifecycle ownership`. Verification in child worktree passed the full [[NIM-16]] proof suite. Main-branch verification is running against `bun test tests/nim-16.daemon-lifecycle-proof.test.ts`.
 
 ## Activity Log
 

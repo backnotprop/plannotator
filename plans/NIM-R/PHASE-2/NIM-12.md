@@ -14,17 +14,17 @@ tags:
 - validation
 progress: 100
 parents:
-- PHASE-2
+- [[PHASE-2]]
 dependsOn:
-- NIM-3
-- NIM-4
-- NIM-6
-- NIM-7
+- [[NIM-3]]
+- [[NIM-4]]
+- [[NIM-6]]
+- [[NIM-7]]
 ---
 
 ## Description
 
-Parent phase: Phase 2 (Slice TDD + implementation). This is NIM-12, the shared TDD policy that all slice TDD tasks depend on.
+Parent phase: Phase 2 (Slice TDD + implementation). This is [[NIM-12]], the shared TDD policy that all slice TDD tasks depend on.
 
 Create the umbrella testing policy and shared proof-harness direction for the sprint.
 
@@ -32,7 +32,7 @@ Role of this task:
 - Define the real end-to-end proof standard for the sprint.
 - Establish the no-mocks, no-fake-data, real-fixtures, real-commands, real-servers policy.
 - Provide the shared acceptance and proof-writing constraints that the per-slice TDD tasks must follow.
-- This is not the only testing task. The sprint also requires paired TDD tasks for each implementation slice: NIM-13 through NIM-21.
+- This is not the only testing task. The sprint also requires paired TDD tasks for each implementation slice: [[NIM-13]] through [[NIM-21]].
 
 Requirements:
 - No mocks, no faked data, no synthetic substitute backends, and no tests that only prove internal consistency or glue wiring.
@@ -57,7 +57,7 @@ Why this exists:
 ## Activity Log
 
 - 2026-04-29T04:12:52.266Z: created
-- 2026-04-29T04:16:08.378Z: updated (description) -> Parent plan: NIM-1
+- 2026-04-29T04:16:08.378Z: updated (description) -> Parent plan: [[NIM-1]]
 
 Create the umbrella testing policy and shared proof-harness direction for the sprint.
 
@@ -65,7 +65,7 @@ Role of this task:
 - Define the real end-to-end proof standard for the sprint.
 - Establish the no-mocks, no-fake-data, real-fixtures, real-commands, real-servers policy.
 - Provide the shared acceptance and proof-writing constraints that the per-slice TDD tasks must follow.
-- This is not the only testing task. The sprint also requires paired TDD tasks for each implementation slice: NIM-13 through NIM-21.
+- This is not the only testing task. The sprint also requires paired TDD tasks for each implementation slice: [[NIM-13]] through [[NIM-21]].
 
 Requirements:
 - No mocks, no faked data, no synthetic substitute backends, and no tests that only prove internal consistency or glue wiring.

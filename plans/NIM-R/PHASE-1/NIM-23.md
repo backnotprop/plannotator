@@ -12,12 +12,12 @@ tags:
 - infrastructure
 progress: 100
 parents:
-- PHASE-1
+- [[PHASE-1]]
 ---
 
 ## Description
 
-Parent phase: Phase 1 (E2E infrastructure usable). NIM-23 — prerequisite for all E2E specs.
+Parent phase: Phase 1 (E2E infrastructure usable). [[NIM-23]] — prerequisite for all E2E specs.
 
 ## Layout
 

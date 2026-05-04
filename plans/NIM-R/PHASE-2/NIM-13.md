@@ -15,7 +15,7 @@ tags:
 - validation
 progress: 100
 parents:
-- PHASE-2
+- [[PHASE-2]]
 ---
 
 ## Description
@@ -30,13 +30,13 @@ Requirements:
 - Prove that the trimmed tree still builds and the remaining local-only flows still work.
 
 Process rule:
-- This proof task must be authored separately from implementation, and NIM-2 writers may not weaken or rewrite the tests after handoff.
+- This proof task must be authored separately from implementation, and [[NIM-2]] writers may not weaken or rewrite the tests after handoff.
 
 ## Comments
 
 ### Comment (2026-04-29T06:08:47.311Z)
 
-Accepted delegated proof authoring output and integrated it into `main` as commit `f8820d2` (`test: add NIM-13 remote surface proof`).
+Accepted delegated proof authoring output and integrated it into `main` as commit `f8820d2` (`test: add [[NIM-13]] remote surface proof`).
 
 Review result:
 - proof now fails fast for the intended S-1 repo-state violations

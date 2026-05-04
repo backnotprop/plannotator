@@ -15,7 +15,7 @@ tags:
 - validation
 progress: 100
 parents:
-- PHASE-2
+- [[PHASE-2]]
 ---
 
 ## Description
@@ -29,17 +29,17 @@ Requirements:
 - Focus on externally visible semantics, not just internal event-bus consistency.
 
 Process rule:
-- This proof task must be authored separately from implementation, and NIM-6 writers may not weaken or rewrite the tests after handoff.
+- This proof task must be authored separately from implementation, and [[NIM-6]] writers may not weaken or rewrite the tests after handoff.
 
 ## Comments
 
 ### Comment (2026-04-30T23:50:34.187Z)
 
-Delegating NIM-17 proof authoring after accepting NIM-5 commit `7abdda4` and checkpointing `main` at `989843a`. Verification target for the proof task is `bun test tests/nim-17.submit-wait-proof.test.ts`.
+Delegating [[NIM-17]] proof authoring after accepting [[NIM-5]] commit `7abdda4` and checkpointing `main` at `989843a`. Verification target for the proof task is `bun test tests/nim-17.submit-wait-proof.test.ts`.
 
 ### Comment (2026-05-01T00:00:01.974Z)
 
-Accepted child proof commit `48ec43a` and integrated it into `main`. Verifying in `main` with `bun test tests/nim-17.submit-wait-proof.test.ts`; expected red phase is the missing daemon-owned `/api/submit`/`/api/wait`/`/api/clear` surface for NIM-6.
+Accepted child proof commit `48ec43a` and integrated it into `main`. Verifying in `main` with `bun test tests/nim-17.submit-wait-proof.test.ts`; expected red phase is the missing daemon-owned `/api/submit`/`/api/wait`/`/api/clear` surface for [[NIM-6]].
 
 ## Activity Log
 

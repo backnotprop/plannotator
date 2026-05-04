@@ -14,7 +14,7 @@ tags:
 - validation
 progress: 100
 parents:
-- PHASE-2
+- [[PHASE-2]]
 ---
 
 ## Description
@@ -28,7 +28,7 @@ Requirements:
 - Avoid fake package assertions or tests that never exercise the built artifact.
 
 Process rule:
-- This proof task must be authored separately from implementation, and NIM-10 writers may not weaken or rewrite the tests after handoff.
+- This proof task must be authored separately from implementation, and [[NIM-10]] writers may not weaken or rewrite the tests after handoff.
 
 ## Activity Log
 

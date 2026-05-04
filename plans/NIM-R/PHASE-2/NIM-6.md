@@ -11,11 +11,11 @@ tags:
 - endpoints
 progress: 100
 parents:
-- PHASE-2
+- [[PHASE-2]]
 dependsOn:
-- NIM-4
-- NIM-5
-- NIM-17
+- [[NIM-4]]
+- [[NIM-5]]
+- [[NIM-17]]
 ---
 
 ## Description
@@ -37,7 +37,7 @@ Why it matters:
 
 ### Comment (2026-05-01T00:00:28.593Z)
 
-Delegated NIM-6 after accepting NIM-17 proof commit `edd9ac3` and checkpointing `main` at `f0fad5b`. Verification target for this implementation is `bun test tests/nim-17.submit-wait-proof.test.ts`.
+Delegated [[NIM-6]] after accepting [[NIM-17]] proof commit `edd9ac3` and checkpointing `main` at `f0fad5b`. Verification target for this implementation is `bun test tests/nim-17.submit-wait-proof.test.ts`.
 
 ### Comment (2026-05-01T00:10:22.016Z)
 

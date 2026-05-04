@@ -11,11 +11,11 @@ tags:
 - notifications
 progress: 100
 parents:
-- PHASE-2
+- [[PHASE-2]]
 dependsOn:
-- NIM-5
-- NIM-6
-- NIM-19
+- [[NIM-5]]
+- [[NIM-6]]
+- [[NIM-19]]
 ---
 
 ## Description
@@ -42,11 +42,11 @@ Delegated to child session `0dad2ebd-951b-49f6-8280-ca4f8ee39a22` in worktree `/
 Acceptance target:
 - `bun test tests/nim-19.notification-proof.test.ts`
 
-Implementation must satisfy the accepted NIM-19 proof without weakening tests.
+Implementation must satisfy the accepted [[NIM-19]] proof without weakening tests.
 
 ### Comment (2026-05-01T05:06:08.738Z)
 
-The initial delegate `0dad2ebd-951b-49f6-8280-ca4f8ee39a22` was explicitly abandoned and replaced after showing no worktree changes and no session activity beyond creation. Reassigning NIM-8 to a fresh child session.
+The initial delegate `0dad2ebd-951b-49f6-8280-ca4f8ee39a22` was explicitly abandoned and replaced after showing no worktree changes and no session activity beyond creation. Reassigning [[NIM-8]] to a fresh child session.
 
 ### Comment (2026-05-01T05:06:30.343Z)
 
@@ -59,11 +59,11 @@ The first delegate was explicitly abandoned for inactivity.
 
 ### Comment (2026-05-01T05:08:08.433Z)
 
-The second delegate `592727ce-a5af-40c4-b9f5-1e24c7890c5b` was explicitly abandoned and replaced after showing no worktree diff or result output despite repeated polling. Escalating NIM-8 to a direct worker delegate.
+The second delegate `592727ce-a5af-40c4-b9f5-1e24c7890c5b` was explicitly abandoned and replaced after showing no worktree diff or result output despite repeated polling. Escalating [[NIM-8]] to a direct worker delegate.
 
 ### Comment (2026-05-01T05:14:07.341Z)
 
-NIM-8 is now reassigned to direct worker agent `019de1f5-2bea-74f0-a632-2c42cd8a8a16` (`Bohr`) after two inactive meta-session delegates. Acceptance target is unchanged: `bun test tests/nim-19.notification-proof.test.ts`.
+[[NIM-8]] is now reassigned to direct worker agent `019de1f5-2bea-74f0-a632-2c42cd8a8a16` (`Bohr`) after two inactive meta-session delegates. Acceptance target is unchanged: `bun test tests/nim-19.notification-proof.test.ts`.
 
 ### Comment (2026-05-01T05:21:24.131Z)
 

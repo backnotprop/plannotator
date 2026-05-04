@@ -11,11 +11,11 @@ tags:
 - agent-wrappers
 progress: 100
 parents:
-- PHASE-2
+- [[PHASE-2]]
 dependsOn:
-- NIM-6
-- NIM-7
-- NIM-20
+- [[NIM-6]]
+- [[NIM-7]]
+- [[NIM-20]]
 ---
 
 ## Description
@@ -41,7 +41,7 @@ Delegated to child session `a4bc8409-eb8e-4345-9799-9f86474c8e41` in worktree `/
 Acceptance target:
 - `bun test tests/nim-20.agent-wrapper-proof.test.ts`
 
-Production code must satisfy the accepted NIM-20 proof without weakening it.
+Production code must satisfy the accepted [[NIM-20]] proof without weakening it.
 
 ## Activity Log
 

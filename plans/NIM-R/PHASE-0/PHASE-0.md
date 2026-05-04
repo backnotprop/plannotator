@@ -14,12 +14,12 @@ progress: 10
 parents:
   - NIM-R
 dependsOn:
-  - D1
-  - D2
-  - D3
-  - D4
-  - D5
-  - D6
+  - [[D1]]
+  - [[D2]]
+  - [[D3]]
+  - [[D4]]
+  - [[D5]]
+  - [[D6]]
 ---
 
 ## Description
@@ -30,16 +30,16 @@ Phase: no E2E spec may rely on unstated behavior. Each open question becomes a s
 
 | Task | Contract | Blocks |
 |------|----------|--------|
-| D1 | Exit-code table (CLI vs hook shim) | E03, E07, E11, E12 |
-| D2 | Verdict broadcast / wait-consumption semantics | E03, E04, E06, E13 |
-| D3 | Daemon crash/recovery contract | E02, E08 |
-| D4 | PLANNOTATOR_HOME / state-dir contract | E02, E08, E09 |
-| D5 | Signal-handling contract | E02, E08, E11 |
-| D6 | Concurrent hook submission contract | E12, E13 |
+| [[D1]] | Exit-code table (CLI vs hook shim) | [[E03]], [[E07]], [[E11]], [[E12]] |
+| [[D2]] | Verdict broadcast / wait-consumption semantics | [[E03]], [[E04]], [[E06]], [[E13]] |
+| [[D3]] | Daemon crash/recovery contract | [[E02]], [[E08]] |
+| [[D4]] | PLANNOTATOR_HOME / state-dir contract | [[E02]], [[E08]], [[E09]] |
+| [[D5]] | Signal-handling contract | [[E02]], [[E08]], [[E11]] |
+| [[D6]] | Concurrent hook submission contract | [[E12]], [[E13]] |
 
 ## Acceptance criteria
 
-- Each D1-D6 has a written contract in its task file
+- Each [[D1]]-[[D6]] has a written contract in its task file
 - All six contracts reviewed and accepted
 - Every E2E spec references only named contracts for behaviors it tests
 - Exit-code table reviewed and matches actual implementation

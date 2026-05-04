@@ -11,10 +11,10 @@ tags:
 - state-machine
 progress: 100
 parents:
-- PHASE-2
+- [[PHASE-2]]
 dependsOn:
-- NIM-2
-- NIM-14
+- [[NIM-2]]
+- [[NIM-14]]
 ---
 
 ## Description
@@ -36,17 +36,17 @@ Why it matters:
 
 ### Comment (2026-04-30T16:07:10.262Z)
 
-Delegated NIM-3 implementation to child session `1d234b76-a894-4452-a84e-10e4619448a5` (`gpt-5.4`) in worktree `/home/dzack/gitclones/plannotator-dzg-fork_worktrees/noble-fern`.
+Delegated [[NIM-3]] implementation to child session `1d234b76-a894-4452-a84e-10e4619448a5` (`gpt-5.4`) in worktree `/home/dzack/gitclones/plannotator-dzg-fork_worktrees/noble-fern`.
 
 Handoff included:
-- full NIM-3 tracker specification
-- NIM-14 proof context and accepted commits `57847a2` and `7abb111`
+- full [[NIM-3]] tracker specification
+- [[NIM-14]] proof context and accepted commits `57847a2` and `7abb111`
 - explicit instruction not to rewrite or weaken the accepted proof
 - required verification via `bun test tests/nim-14.state-machine-proof.test.ts`
 
 ### Comment (2026-04-30T16:18:09.646Z)
 
-Accepted delegated NIM-3 implementation and integrated it into `main` as commit `e3a98bc` (`feat: add daemon state machine`).
+Accepted delegated [[NIM-3]] implementation and integrated it into `main` as commit `e3a98bc` (`feat: add daemon state machine`).
 
 Final acceptance phase:
 - `bun test tests/nim-14.state-machine-proof.test.ts`
@@ -54,8 +54,8 @@ Final acceptance phase:
 
 Outcome:
 - `packages/server/state.ts` now exists as the authoritative daemon state machine
-- transition legality, persistence, and recovery semantics satisfy the NIM-14 proof surface
-- ready for the next dependent proof task (`NIM-15`)
+- transition legality, persistence, and recovery semantics satisfy the [[NIM-14]] proof surface
+- ready for the next dependent proof task ([[NIM-15]])
 
 ## Activity Log
 

@@ -12,10 +12,10 @@ tags:
 - packaging
 progress: 100
 parents:
-- PHASE-2
+- [[PHASE-2]]
 dependsOn:
-- NIM-8
-- NIM-21
+- [[NIM-8]]
+- [[NIM-21]]
 ---
 
 ## Description

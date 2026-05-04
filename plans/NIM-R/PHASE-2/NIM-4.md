@@ -11,10 +11,10 @@ tags:
 - router
 progress: 100
 parents:
-- PHASE-2
+- [[PHASE-2]]
 dependsOn:
-- NIM-2
-- NIM-15
+- [[NIM-2]]
+- [[NIM-15]]
 ---
 
 ## Description
@@ -37,17 +37,17 @@ Dependency notes:
 
 ### Comment (2026-04-30T16:29:06.563Z)
 
-Delegated NIM-4 implementation to child session `4aec33b5-707b-4fa9-a031-1ae5f0bfa30f` (`gpt-5.4`) in worktree `/home/dzack/gitclones/plannotator-dzg-fork_worktrees/cool-lake`.
+Delegated [[NIM-4]] implementation to child session `4aec33b5-707b-4fa9-a031-1ae5f0bfa30f` (`gpt-5.4`) in worktree `/home/dzack/gitclones/plannotator-dzg-fork_worktrees/cool-lake`.
 
 Handoff included:
-- full NIM-4 tracker specification
-- NIM-15 proof context and accepted commit `39b000a`
+- full [[NIM-4]] tracker specification
+- [[NIM-15]] proof context and accepted commit `39b000a`
 - explicit instruction not to rewrite or weaken the accepted proof
 - required verification via `bun test tests/nim-15.multiplexed-router-proof.test.ts`
 
 ### Comment (2026-04-30T17:12:02.834Z)
 
-Accepted delegated NIM-4 implementation and integrated it into `main` as commit `2662e03` (`feat: add multiplexed daemon router`).
+Accepted delegated [[NIM-4]] implementation and integrated it into `main` as commit `2662e03` (`feat: add multiplexed daemon router`).
 
 Final acceptance phase:
 - `bun test tests/nim-15.multiplexed-router-proof.test.ts`
@@ -55,8 +55,8 @@ Final acceptance phase:
 
 Outcome:
 - multiplexed daemon router implemented
-- mode-sensitive 409 behavior, bundle serving, and no-shutdown behavior satisfy the NIM-15 proof surface
-- ready for next dependent proof task (`NIM-16`)
+- mode-sensitive 409 behavior, bundle serving, and no-shutdown behavior satisfy the [[NIM-15]] proof surface
+- ready for next dependent proof task ([[NIM-16]])
 
 ## Activity Log
 

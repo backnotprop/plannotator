@@ -15,7 +15,7 @@ tags:
 - validation
 progress: 100
 parents:
-- PHASE-2
+- [[PHASE-2]]
 ---
 
 ## Description
@@ -29,24 +29,24 @@ Requirements:
 - Validate real browser-facing paths, not just internal handler composition.
 
 Process rule:
-- This proof task must be authored separately from implementation, and NIM-4 writers may not weaken or rewrite the tests after handoff.
+- This proof task must be authored separately from implementation, and [[NIM-4]] writers may not weaken or rewrite the tests after handoff.
 
 ## Comments
 
 ### Comment (2026-04-30T16:18:48.738Z)
 
-Delegated NIM-15 proof authoring to child session `f86c2767-9f6e-4100-9769-417960ff8426` (`gpt-5.4`) in worktree `/home/dzack/gitclones/plannotator-dzg-fork_worktrees/wild-nebula`.
+Delegated [[NIM-15]] proof authoring to child session `f86c2767-9f6e-4100-9769-417960ff8426` (`gpt-5.4`) in worktree `/home/dzack/gitclones/plannotator-dzg-fork_worktrees/wild-nebula`.
 
 Handoff included:
-- full NIM-15 tracker specification
-- NIM-12 TDD constraints
-- NIM-4 target implementation context
+- full [[NIM-15]] tracker specification
+- [[NIM-12]] TDD constraints
+- [[NIM-4]] target implementation context
 - explicit instruction not to implement the router itself
 - required verification via direct `bun test ...` on the new proof file
 
 ### Comment (2026-04-30T16:26:02.235Z)
 
-Accepted delegated NIM-15 proof authoring and integrated it into `main` as commit `39b000a` (`test: author NIM-15 multiplexed router proof`).
+Accepted delegated [[NIM-15]] proof authoring and integrated it into `main` as commit `39b000a` (`test: author [[NIM-15]] multiplexed router proof`).
 
 Final acceptance phase:
 - `bun test tests/nim-15.multiplexed-router-proof.test.ts`
@@ -54,8 +54,8 @@ Final acceptance phase:
 - failure is the expected missing implementation signal: `packages/server/daemon-router.ts` does not yet exist
 
 Outcome:
-- pre-NIM-4 red state is now high-signal and controlled
-- ready for implementation task `NIM-4`
+- pre-[[NIM-4]] red state is now high-signal and controlled
+- ready for implementation task [[NIM-4]]
 
 ## Activity Log
 
