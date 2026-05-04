@@ -203,9 +203,9 @@ export async function handleDocRequest(res: Res, url: URL): Promise<void> {
  * POST /api/doc/exists with { paths: string[] }.
  *
  * TODO(security): see packages/server/reference-handlers.ts handleDocExists —
- * absolute paths are probed verbatim with no project-root containment check,
- * leaking file existence back to the caller. Fix in lockstep with the Bun
- * handler (reject absolute inputs or filter results via isWithinProjectRoot).
+ * both absolute paths in `paths[]` AND the `base` field are honored verbatim
+ * with no project-root containment check, leaking file existence back to the
+ * caller. Fix in lockstep with the Bun handler.
  */
 export async function handleDocExistsRequest(res: Res, req: IncomingMessage): Promise<void> {
 	const body = await parseBody(req);

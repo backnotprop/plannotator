@@ -172,13 +172,18 @@ export async function handleDoc(req: Request): Promise<Response> {
  * POST /api/doc/exists with { paths: string[] } returns { results: { [path]: ValidationEntry } }.
  * Reads from the warm file-list cache populated at plan/annotate load.
  *
- * TODO(security): absolute paths sent here are probed verbatim against the
- * filesystem — `resolveCodeFile` returns `{ kind: 'found', path: abs }` for any
- * existing absolute file with no project-root containment check. A malicious
- * shared plan with backtick-wrapped absolute paths (e.g. `/Users/x/.aws/…`)
- * leaks file existence + canonical path back to the caller. Mitigation:
- * reject absolute inputs (or `isWithinProjectRoot`-filter `r.path`) before
- * recording a found result. Mirror in apps/pi-extension/server/reference.ts.
+ * TODO(security): two related leaks of arbitrary file existence:
+ *   1. Absolute paths in `paths[]` are probed verbatim — `resolveCodeFile`
+ *      returns `{ kind: 'found', path: abs }` for any existing absolute file
+ *      with no project-root containment check. A malicious shared plan with
+ *      backtick-wrapped absolute paths (e.g. `/Users/x/.aws/…`) leaks file
+ *      existence + canonical path back to the caller.
+ *   2. The `base` field is honored verbatim — a hostile sender can supply
+ *      `base=/Users/x/.aws` + `paths=["credentials.json"]` and the resolver
+ *      will check `<base>/<path>` existence with no containment check.
+ * Mitigation: reject absolute inputs and `isWithinProjectRoot`-filter the
+ * resolved base before passing it to `resolveCodeFile` (or filter `r.path`
+ * before recording a found result). Mirror in apps/pi-extension/server/reference.ts.
  */
 export async function handleDocExists(req: Request): Promise<Response> {
 	let body: unknown;

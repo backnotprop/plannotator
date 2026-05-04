@@ -335,16 +335,23 @@ const App: React.FC = () => {
     viewerRef, sidebar: linkedDocSidebar, sourceFilePath, sourceConverted,
   });
 
+  // Active document's directory — feeds both click-time popout fetches and
+  // the validator hook so they resolve against the same base. Drifting
+  // these would silently re-introduce the demote-correct-link bug.
+  const activeDocBaseDir = useMemo(
+    () => linkedDocHook.filepath
+      ? linkedDocHook.filepath.replace(/\/[^/]+$/, '')
+      : imageBaseDir?.includes('/') ? imageBaseDir : undefined,
+    [linkedDocHook.filepath, imageBaseDir],
+  );
+
   // Code file popout (read-only syntax-highlighted overlay)
   const codeFilePopout = useCodeFilePopout({
     buildUrl: useCallback((codePath: string) => {
-      const baseDir = linkedDocHook.filepath
-        ? linkedDocHook.filepath.replace(/\/[^/]+$/, '')
-        : imageBaseDir?.includes('/') ? imageBaseDir : undefined;
-      return baseDir
-        ? `/api/doc?path=${encodeURIComponent(codePath)}&base=${encodeURIComponent(baseDir)}`
+      return activeDocBaseDir
+        ? `/api/doc?path=${encodeURIComponent(codePath)}&base=${encodeURIComponent(activeDocBaseDir)}`
         : `/api/doc?path=${encodeURIComponent(codePath)}`;
-    }, [linkedDocHook.filepath, imageBaseDir]),
+    }, [activeDocBaseDir]),
   });
 
   // Archive browser
@@ -1969,9 +1976,7 @@ const App: React.FC = () => {
                   onOpenCodeFile={codeFilePopout.open}
                   linkedDocInfo={linkedDocHook.isActive ? { filepath: linkedDocHook.filepath!, onBack: handleLinkedDocBack, label: fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath)?.isVault ? 'Vault File' : fileBrowser.activeFile ? 'File' : undefined, backLabel } : null}
                   imageBaseDir={imageBaseDir}
-                  codePathBaseDir={linkedDocHook.filepath
-                    ? linkedDocHook.filepath.replace(/\/[^/]+$/, '')
-                    : imageBaseDir}
+                  codePathBaseDir={activeDocBaseDir}
                   copyLabel={annotateSource === 'message' ? 'Copy message' : annotateSource === 'file' || annotateSource === 'folder' ? 'Copy file' : undefined}
                   archiveInfo={archive.currentInfo}
                   sourceInfo={sourceInfo}
