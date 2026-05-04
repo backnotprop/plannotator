@@ -1,0 +1,36 @@
+---
+id: PHASE-1
+trackerStatus:
+  type: phase
+title: 'Phase 1: E2E infrastructure usable'
+status: in-progress
+priority: critical
+tags:
+- plannotator
+- infrastructure
+- phase
+progress: 80
+parents:
+- NIM-R
+---
+
+## Description
+
+Phase: a test can build the binary, create an isolated home, start the daemon, wait until reachable, submit a fixture plan, terminate the daemon, and clean up — repeatedly without port/state contamination.
+
+## Task
+
+| Task | Description | Status |
+|------|-------------|--------|
+| NIM-23 | E2E test infrastructure: helpers, fixtures, playwright config | in-review, 100% |
+
+## Acceptance criteria
+
+- `bun test tests/e2e/helpers` passes
+- `bun test tests/e2e/specs/01-binary.spec.ts` passes
+- Start/stop smoke test runs 10x in a loop without port/state contamination
+- Post-run check: no `plannotator` daemon process remains
+
+## Activity Log
+
+- 2026-05-04T08:00:02.000Z: created (unified phase, currently depends on NIM-23 which is in-review at 100%)

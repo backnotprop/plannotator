@@ -1,0 +1,27 @@
+filters:
+  and:
+    - file.inFolder("plans")
+views:
+  - type: branches-tree
+    name: Planning Tree
+    markers: bullet
+    indentProperties: false
+    parentProp: note.parents
+    viewMode: indented
+    layoutDirection: TB
+    avatarShape: circle
+    showChildCount: true
+    showDotGrid: true
+    colorProp: note.status
+    labelProp: note.status
+    childOrderProp: note.id
+  - type: kanban
+    name: Kanban
+    groupBy:
+      property: status
+      direction: ASC
+    boardColumns:
+      - to-do
+      - in-progress
+      - in-review
+      - (No value)
