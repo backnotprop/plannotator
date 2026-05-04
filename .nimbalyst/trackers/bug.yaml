@@ -1,0 +1,64 @@
+type: bug
+displayName: Bug
+displayNamePlural: Bugs
+icon: bug_report
+color: '#dc2626'
+modes:
+  inline: true
+  fullDocument: true
+idPrefix: bug
+fields:
+- name: id
+  type: string
+  readOnly: true
+  displayInline: false
+- name: parents
+  type: array
+  itemType: string
+  displayInline: false
+- name: dependsOn
+  type: array
+  itemType: string
+  displayInline: false
+- name: title
+  type: string
+  required: true
+- name: status
+  type: select
+  default: to-do
+  options:
+  - value: to-do
+    label: To Do
+    icon: circle
+  - value: in-progress
+    label: In Progress
+    icon: motion_photos_on
+  - value: done
+    label: Done
+    icon: check_circle
+- name: priority
+  type: select
+  options:
+  - value: low
+    label: Low
+  - value: medium
+    label: Medium
+  - value: high
+    label: High
+  - value: critical
+    label: Critical
+- name: owner
+  type: string
+- name: description
+  type: text
+- name: tags
+  type: array
+  itemType: string
+  displayInline: false
+inlineTemplate: '{icon} {title} {status} {priority}'
+roles:
+  title: title
+  workflowStatus: status
+  priority: priority
+  assignee: owner
+  tags: tags

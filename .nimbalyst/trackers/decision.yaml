@@ -1,0 +1,71 @@
+type: decision
+displayName: Decision
+displayNamePlural: Decisions
+icon: gavel
+color: '#8b5cf6'
+modes:
+  inline: true
+  fullDocument: true
+idPrefix: dec
+fields:
+- name: id
+  type: string
+  readOnly: true
+  displayInline: false
+- name: parents
+  type: array
+  itemType: string
+  displayInline: false
+- name: dependsOn
+  type: array
+  itemType: string
+  displayInline: false
+- name: title
+  type: string
+  required: true
+- name: status
+  type: select
+  default: to-do
+  options:
+  - value: to-do
+    label: To Decide
+    icon: help
+  - value: in-progress
+    label: Evaluating
+    icon: psychology
+  - value: decided
+    label: Decided
+    icon: check_circle
+  - value: implemented
+    label: Implemented
+    icon: done_all
+- name: chosen
+  type: string
+  displayInline: true
+- name: options
+  type: array
+  itemType: object
+  schema:
+  - name: name
+    type: string
+  - name: pros
+    type: array
+    itemType: string
+  - name: cons
+    type: array
+    itemType: string
+- name: tags
+  type: array
+  itemType: string
+  displayInline: false
+statusBarLayout:
+- row:
+  - field: status
+    width: 200
+  - field: chosen
+    width: 300
+inlineTemplate: '{icon} {title} {status}'
+roles:
+  title: title
+  workflowStatus: status
+  tags: tags

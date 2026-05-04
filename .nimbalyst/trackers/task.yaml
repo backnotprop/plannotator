@@ -1,0 +1,69 @@
+type: task
+displayName: Task
+displayNamePlural: Tasks
+icon: task_alt
+color: '#10b981'
+modes:
+  inline: true
+  fullDocument: true
+idPrefix: tsk
+fields:
+- name: id
+  type: string
+  readOnly: true
+  displayInline: false
+- name: parents
+  type: array
+  itemType: string
+  displayInline: false
+- name: dependsOn
+  type: array
+  itemType: string
+  displayInline: false
+- name: title
+  type: string
+  required: true
+- name: status
+  type: select
+  default: to-do
+  options:
+  - value: to-do
+    label: Not Started
+    icon: circle
+  - value: in-progress
+    label: In Progress
+    icon: motion_photos_on
+  - value: done
+    label: Done
+    icon: check_circle
+- name: priority
+  type: select
+  options:
+  - value: low
+    label: Low
+  - value: medium
+    label: Medium
+  - value: high
+    label: High
+  - value: critical
+    label: Critical
+- name: description
+  type: text
+- name: complexity
+  type: number
+  min: 0
+  max: 100
+- name: progress
+  type: number
+  min: 0
+  max: 100
+- name: tags
+  type: array
+  itemType: string
+  displayInline: false
+inlineTemplate: '{icon} {title} {status} {priority}'
+roles:
+  title: title
+  workflowStatus: status
+  priority: priority
+  tags: tags

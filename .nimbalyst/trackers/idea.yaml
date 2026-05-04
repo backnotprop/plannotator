@@ -1,0 +1,50 @@
+type: idea
+displayName: Idea
+displayNamePlural: Ideas
+icon: lightbulb
+color: '#eab308'
+modes:
+  inline: true
+  fullDocument: true
+idPrefix: ida
+fields:
+- name: id
+  type: string
+  readOnly: true
+  displayInline: false
+- name: parents
+  type: array
+  itemType: string
+  displayInline: false
+- name: dependsOn
+  type: array
+  itemType: string
+  displayInline: false
+- name: title
+  type: string
+  required: true
+- name: status
+  type: select
+  default: proposed
+  options:
+  - value: proposed
+    label: Proposed
+    icon: lightbulb
+  - value: evaluating
+    label: Evaluating
+    icon: psychology
+  - value: accepted
+    label: Accepted
+    icon: check_circle
+  - value: rejected
+    label: Rejected
+    icon: cancel
+- name: tags
+  type: array
+  itemType: string
+  displayInline: false
+inlineTemplate: '{icon} {title} {status}'
+roles:
+  title: title
+  workflowStatus: status
+  tags: tags
