@@ -20,7 +20,10 @@ function gateCodePath(
 ): { render: 'link'; resolved?: string } | { render: 'ambiguous-link'; matches: string[] } | { render: 'plain' } {
   if (!validation || !validation.ready) return { render: 'link' };
   const entry = validation.validated.get(candidate);
-  if (!entry) return { render: 'link' };
+  // If the validator is ready but has no entry for this candidate, the
+  // extractor intentionally excluded it (e.g., inside an HTML comment or
+  // fenced code block). Demote rather than optimistically linking.
+  if (!entry) return { render: 'plain' };
   switch ((entry as ValidationEntry).status) {
     case 'found':       return { render: 'link', resolved: (entry as Extract<ValidationEntry, { status: 'found' }>).resolved };
     case 'ambiguous':   return { render: 'ambiguous-link', matches: (entry as Extract<ValidationEntry, { status: 'ambiguous' }>).matches };
