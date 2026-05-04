@@ -64,6 +64,22 @@ Plannotator lets you privately share plans, annotations, and feedback with colle
 - [OpenCode](#install-for-opencode)
 - [Pi](#install-for-pi)
 - [Codex](#install-for-codex)
+- [Local Development](#local-development)
+
+## Local Development
+
+To make the global `plannotator` command run from this checkout:
+
+```bash
+bun install
+bun link
+```
+
+After linking, commands like `plannotator review` use `apps/hook/server/index.ts` from your local repo. Rebuild the bundled HTML when changing UI code:
+
+```bash
+bun run --cwd apps/review build && bun run build:hook
+```
 
 ## Install for Claude Code
 
