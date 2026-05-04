@@ -41,30 +41,55 @@ effort should own a task.
 
 ## Current Task Poset
 
-Tracker plan: `NIM-1`
+Unified DAG: `NIM-R` replaces legacy `NIM-1` + `NIM-22`. NIM-1 and NIM-22 remain in `.agents/plans/` as historical sources.
 
 ```mermaid
 graph TD
-    N12["NIM-12 Shared TDD Gate"]
+    NR["NIM-R: Daemon refactor + E2E certified"]
 
-    N13["NIM-13 TDD for S-1"] --> N2["NIM-2 S-1 Delete Remote Surface"]
-    N2 --> N14["NIM-14 TDD for S-2"]
-    N14 --> N3["NIM-3 S-2 State Machine"]
-    N3 --> N15["NIM-15 TDD for S-3"]
-    N15 --> N4["NIM-4 S-3 Multiplexed Router"]
-    N4 --> N16["NIM-16 TDD for S-4"]
-    N16 --> N5["NIM-5 S-4 Daemon Lifecycle"]
-    N5 --> N17["NIM-17 TDD for S-5"]
-    N17 --> N6["NIM-6 S-5 Submit/Wait/Clear"]
-    N6 --> N18["NIM-18 TDD for S-6"]
-    N18 --> N7["NIM-7 S-6 CLI Surface"]
-    N7 --> N20["NIM-20 TDD for S-8"]
-    N20 --> N9["NIM-9 S-8 Agent Wrappers"]
-    N9 --> N21["NIM-21 TDD for S-9"]
-    N21 --> N10["NIM-10 S-9 Build and Packaging"]
+    %% GATES
+    G0["G0: Semantics frozen"]
+    G1["G1: E2E infrastructure"]
+    G2["G2: Slice TDD + impl"]
+    G3["G3: E2E specs complete"]
+    G4["G4: Final verification"]
 
-    N6 --> N19["NIM-19 TDD for S-7"]
-    N19 --> N8["NIM-8 S-7 Notifications"]
+    NR --> G0
+    NR --> G1
+    NR --> G2
+    NR --> G3
+    NR --> G4
+
+    %% SEMANTIC DECISIONS
+    D1["D1: Exit codes"]
+    D2["D2: Verdict broadcast"]
+    D3["D3: Crash recovery"]
+    D4["D4: State-dir"]
+    D5["D5: Signals"]
+    D6["D6: Concurrent hooks"]
+
+    G0 --> D1
+    G0 --> D2
+    G0 --> D3
+    G0 --> D4
+    G0 --> D5
+    G0 --> D6
+
+    %% INFRA
+    N23["NIM-23: E2E infra"]
+    G1 --> N23
+
+    %% SLICE TDD → IMPL (local blocking, parallel across slices)
+    N12["NIM-12: TDD policy"]
+    N13["NIM-13: TDD S-1"] --> N2["NIM-2: S-1 Delete remote"]
+    N14["NIM-14: TDD S-2"] --> N3["NIM-3: S-2 State machine"]
+    N15["NIM-15: TDD S-3"] --> N4["NIM-4: S-3 Router"]
+    N16["NIM-16: TDD S-4"] --> N5["NIM-5: S-4 Daemon lifecycle"]
+    N17["NIM-17: TDD S-5"] --> N6["NIM-6: S-5 Submit/Wait/Clear"]
+    N18["NIM-18: TDD S-6"] --> N7["NIM-7: S-6 CLI"]
+    N19["NIM-19: TDD S-7"] --> N8["NIM-8: S-7 Notifications"]
+    N20["NIM-20: TDD S-8"] --> N9["NIM-9: S-8 Agent wrappers"]
+    N21["NIM-21: TDD S-9"] --> N10["NIM-10: S-9 Build/packaging"]
 
     N12 --> N13
     N12 --> N14
@@ -76,18 +101,152 @@ graph TD
     N12 --> N20
     N12 --> N21
 
-    N13 --> N11["NIM-11 Final Verification"]
-    N14 --> N11
-    N15 --> N11
-    N16 --> N11
-    N17 --> N11
-    N18 --> N11
-    N19 --> N11
-    N20 --> N11
-    N21 --> N11
-    N8 --> N11
-    N10 --> N11
+    G2 --> N12
+    G2 --> N2
+    G2 --> N3
+    G2 --> N4
+    G2 --> N5
+    G2 --> N6
+    G2 --> N7
+    G2 --> N8
+    G2 --> N9
+    G2 --> N10
+
+    %% E2E SPECS (integration nodes with multiple parents)
+    E01["E01: Binary surface"]
+    E02["E02: Daemon lifecycle"]
+    E03["E03: State machine"]
+    E04["E04: Submit plan"]
+    E05["E05: Review mode"]
+    E06["E06: Annotate mode"]
+    E07["E07: Clear contingency"]
+    E08["E08: Crash recovery"]
+    E09["E09: History/storage"]
+    E10["E10: UI actions"]
+    E11["E11: Cancel/Reset"]
+    E12["E12: JSON output"]
+    E13["E13: Claude hook shim"]
+    E14["E14: OpenCode shim"]
+    E15["E15: Packaging"]
+    E99["E99: Full scenario"]
+
+    G3 --> E01
+    G3 --> E02
+    G3 --> E03
+    G3 --> E04
+    G3 --> E05
+    G3 --> E06
+    G3 --> E07
+    G3 --> E08
+    G3 --> E09
+    G3 --> E10
+    G3 --> E11
+    G3 --> E12
+    G3 --> E13
+    G3 --> E14
+    G3 --> E15
+    G3 --> E99
+
+    %% Key integration deps (semantic decisions + impl slices)
+    E01 --> N10
+    E02 --> D3
+    E02 --> D4
+    E02 --> D5
+    E02 --> N5
+    E02 --> N7
+    E03 --> D1
+    E03 --> D2
+    E03 --> N3
+    E03 --> N6
+    E03 --> N7
+    E04 --> D2
+    E04 --> N3
+    E04 --> N4
+    E04 --> N6
+    E05 --> N4
+    E05 --> N6
+    E06 --> D2
+    E06 --> N6
+    E06 --> N7
+    E07 --> D1
+    E07 --> N6
+    E07 --> N7
+    E08 --> D3
+    E08 --> D4
+    E08 --> D5
+    E08 --> N3
+    E08 --> N5
+    E08 --> N6
+    E08 --> N7
+    E09 --> D4
+    E09 --> N5
+    E09 --> N6
+    E10 --> N4
+    E10 --> N6
+    E10 --> N8
+    E11 --> D5
+    E11 --> N6
+    E11 --> N7
+    E12 --> D1
+    E12 --> N6
+    E12 --> N7
+    E13 --> D2
+    E13 --> D6
+    E13 --> N3
+    E13 --> N5
+    E13 --> N6
+    E13 --> N9
+    E14 --> N7
+    E14 --> N9
+    E15 --> N2
+    E15 --> N10
+    E99 --> E01
+    E99 --> E02
+    E99 --> E03
+    E99 --> E04
+    E99 --> E05
+    E99 --> E06
+    E99 --> E07
+    E99 --> E08
+    E99 --> E09
+    E99 --> E10
+    E99 --> E11
+    E99 --> E12
+    E99 --> E13
+    E99 --> E14
+    E99 --> E15
+
+    %% G4 depends on all gates
+    G4 --> G0
+    G4 --> G1
+    G4 --> G2
+    G4 --> G3
+
+    %% All specs depend on N23
+    N23 -.-> E01
+    N23 -.-> E02
+    N23 -.-> E03
+    N23 -.-> E04
+    N23 -.-> E05
+    N23 -.-> E06
+    N23 -.-> E07
+    N23 -.-> E08
+    N23 -.-> E09
+    N23 -.-> E10
+    N23 -.-> E11
+    N23 -.-> E12
+    N23 -.-> E13
+    N23 -.-> E14
+    N23 -.-> E15
 ```
+
+### Structural rules
+
+1. **TDD blocks only its implementation slice** — NIM-14 blocks NIM-3 but not NIM-4
+2. **Semantic decisions block specs and implementations that encode those semantics** — D2 blocks E03, E04, E06, E13
+3. **Integration specs have multiple parents** — E08 crash recovery depends on D3, D4, D5, NIM-3, NIM-5, NIM-6, NIM-7, NIM-23
+4. **Single terminal meaning of completion** — root is not satisfied by passing unit tests alone; requires fresh E2E run from built artifacts
+5. **NIM-23 (E2E infrastructure) is a prerequisite for all E2E specs** (dashed lines)
 
 ## Delegation Workflows
 
