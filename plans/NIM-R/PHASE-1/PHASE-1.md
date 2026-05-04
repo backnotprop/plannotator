@@ -22,7 +22,7 @@ Phase: a test can build the binary, create an isolated home, start the daemon, w
 
 | Task | Description | Status |
 |------|-------------|--------|
-| [[NIM-23]] | E2E test infrastructure: helpers, fixtures, playwright config | needs-review, 100% |
+| [[E00]] | E2E test infrastructure: helpers, fixtures, playwright config | needs-review, 100% |
 
 ## Acceptance criteria
 
@@ -33,4 +33,4 @@ Phase: a test can build the binary, create an isolated home, start the daemon, w
 
 ## Activity Log
 
-- 2026-05-04T08:00:02.000Z: created (unified phase, currently depends on [[NIM-23]] which is needs-review at 100%)
+- 2026-05-04T08:00:02.000Z: created (unified phase, currently depends on [[E00]] which is needs-review at 100%)
