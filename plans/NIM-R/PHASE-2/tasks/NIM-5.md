@@ -1,0 +1,58 @@
+---
+id: NIM-5
+trackerStatus:
+  type: task
+title: S-4 Implement daemon process lifecycle
+status: needs-review
+priority: high
+tags:
+- plannotator
+- daemon-refactor
+- daemon-lifecycle
+progress: 100
+parents:
+- "[[PHASE-2]]"
+dependsOn:
+- "[[NIM-3]]"
+- "[[NIM-4]]"
+- "[[NIM-16]]"
+---
+
+## Description
+
+Parent phase: Phase 2 (Slice TDD + implementation). 
+Create `packages/server/daemon.ts` to own daemon startup, detached launch, stop, status, and recovery.
+
+Subtasks:
+- Implement `runDaemon()` for foreground daemon execution with fixed-port bind, signal cleanup, and lockfile write.
+- Implement `startDaemonDetached()` with detached spawn and log redirection.
+- Implement `stopDaemon()` with stale-lockfile handling.
+- Implement `daemonStatus()` with liveness checks based on `process.kill(pid, 0)`.
+- Recover persisted state on startup, preserving `verdict_ready` and downgrading stale `in_review` to a cancelled verdict.
+
+Success criteria:
+- The daemon can be started, stopped, introspected, and recovered cleanly without depending on ephemeral per-invocation server shutdown paths.
+
+## Comments
+
+### Comment (2026-04-30T23:43:19.841Z)
+
+Delegated [[NIM-5]] to child session `600049f0-2fb8-42a7-bc6b-776a19ec0043` in worktree `/home/dzack/gitclones/plannotator-dzg-fork_worktrees/rushing-star` after accepting [[NIM-16]] proof commit `86da359`. Verification target for this implementation is `bun test tests/nim-16.daemon-lifecycle-proof.test.ts`.
+
+### Comment (2026-04-30T23:50:05.374Z)
+
+Accepted child implementation commit `5422218` and integrated it into `main` as `7abdda4` `feat: implement daemon lifecycle ownership`. Verification in child worktree passed the full [[NIM-16]] proof suite. Main-branch verification is running against `bun test tests/nim-16.daemon-lifecycle-proof.test.ts`.
+
+## Activity Log
+
+- 2026-04-29T02:29:54.295Z: created
+- 2026-04-29T03:11:48.743Z: updated (complexityScore) -> 83
+- 2026-04-30T23:43:11.906Z: status_changed (status) -> in-progress
+- 2026-04-30T23:43:11.906Z: updated (progress) -> 1
+- 2026-04-30T23:43:19.627Z: status_changed (status) -> in-progress
+- 2026-04-30T23:43:19.627Z: updated (owner) -> child-session:600049f0-2fb8-42a7-bc6b-776a19ec0043 (gpt-5.4)
+- 2026-04-30T23:43:19.627Z: updated (progress) -> 1
+- 2026-04-30T23:43:19.841Z: commented
+- 2026-04-30T23:50:05.124Z: status_changed (status) -> needs-review
+- 2026-04-30T23:50:05.124Z: updated (progress) -> 100
+- 2026-04-30T23:50:05.375Z: commented

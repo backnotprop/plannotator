@@ -14,10 +14,10 @@ progress: 0
 parents:
   - NIM-R
 dependsOn:
-  - [[PHASE-0]]
-  - [[PHASE-1]]
-  - [[PHASE-2]]
-  - [[PHASE-3]]
+  - "[[PHASE-0]]"
+  - "[[PHASE-1]]"
+  - "[[PHASE-2]]"
+  - "[[PHASE-3]]"
 ---
 
 ## Description

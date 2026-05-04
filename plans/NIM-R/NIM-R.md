@@ -12,11 +12,11 @@ tags:
 - root
 progress: 15
 dependsOn:
-- [[PHASE-0]]
-- [[PHASE-1]]
-- [[PHASE-2]]
-- [[PHASE-3]]
-- [[PHASE-4]]
+- "[[PHASE-0]]"
+- "[[PHASE-1]]"
+- "[[PHASE-2]]"
+- "[[PHASE-3]]"
+- "[[PHASE-4]]"
 ---
 
 ## Description
