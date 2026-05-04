@@ -25,10 +25,10 @@ fields:
   required: true
 - name: status
   type: select
-  default: to-do
+  default: unstarted
   options:
-  - value: to-do
-    label: To Decide
+  - value: unstarted
+    label: Unstarted
     icon: help
   - value: in-progress
     label: Evaluating

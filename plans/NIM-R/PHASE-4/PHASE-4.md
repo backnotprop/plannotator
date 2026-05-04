@@ -3,7 +3,7 @@ id: PHASE-4
 trackerStatus:
   type: phase
 title: 'Phase 4: Final integration verification'
-status: to-do
+status: unstarted
 priority: critical
 tags:
 - plannotator

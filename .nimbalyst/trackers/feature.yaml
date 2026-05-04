@@ -29,10 +29,10 @@ fields:
   required: true
 - name: status
   type: select
-  default: to-do
+  default: unstarted
   options:
-  - value: to-do
-    label: To Do
+  - value: unstarted
+    label: Unstarted
     icon: circle
   - value: in-progress
     label: In Progress

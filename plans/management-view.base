@@ -21,7 +21,7 @@ views:
       property: status
       direction: ASC
     boardColumns:
-      - to-do
+      - unstarted
       - in-progress
       - in-review
       - (No value)

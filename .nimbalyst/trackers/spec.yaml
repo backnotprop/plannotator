@@ -1,12 +1,12 @@
-type: bug
-displayName: Bug
-displayNamePlural: Bugs
-icon: bug_report
-color: '#dc2626'
+type: spec
+displayName: Spec
+displayNamePlural: Specs
+icon: description
+color: '#06b6d4'
 modes:
   inline: true
   fullDocument: true
-idPrefix: bug
+idPrefix: spc
 fields:
 - name: id
   type: string
@@ -33,6 +33,10 @@ fields:
   - value: in-progress
     label: In Progress
     icon: motion_photos_on
+  - value: in-review
+    label: In Review
+    icon: rate_review
+    color: '#3b82f6'
   - value: done
     label: Done
     icon: check_circle
@@ -47,10 +51,11 @@ fields:
     label: High
   - value: critical
     label: Critical
-- name: owner
-  type: string
-- name: description
+- name: requirement
   type: text
+- name: acceptanceCriteria
+  type: array
+  itemType: string
 - name: tags
   type: array
   itemType: string
@@ -60,5 +65,4 @@ roles:
   title: title
   workflowStatus: status
   priority: priority
-  assignee: owner
   tags: tags
