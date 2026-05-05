@@ -1,6 +1,6 @@
 ---
 name: plannotator-setup-goal
-description: Create reviewed Codex goal setup packages for long-running /goal work. Use when the user wants to turn an idea, plan, backlog, project mission, or vague objective into durable goal files under a project goals slug folder, with Plannotator review gates for brief, plan, acceptance, verification, blockers, and the final /goal prompt.
+description: Create reviewed Codex goal setup packages for long-running /goal work. Use when the user wants to turn an idea, backlog, project mission, or vague objective into durable goal files under a project goals slug folder, with Plannotator review gates for brief, narrative plan with acceptance criteria, verification, blockers, and the final /goal prompt.
 ---
 
 # Plannotator Setup Goal
@@ -23,7 +23,6 @@ Create a durable goal package in the current project at `goals/<slug>/` so Codex
 5. Draft and refine the critical documents in this order:
    - `brief.md`
    - `plan.md`
-   - `acceptance.md`
    - `verification.md`
    - `blockers.md`
    - `goal-prompt.md`
@@ -40,9 +39,7 @@ Create a durable goal package in the current project at `goals/<slug>/` so Codex
 
 `brief.md` must state the mission, context, constraints, non-goals, ask-before rules, and concise done condition.
 
-`plan.md` must split the work into concrete slices with sequencing, dependencies, risks, and phase boundaries. For large missions, prefer several sequential goals over one endless goal.
-
-`acceptance.md` must be an auditable checklist. Every important requirement needs observable evidence. Include commands, files, screenshots, PR state, or manual checks as applicable.
+`plan.md` is the central reviewed planning artifact. It must read like a clear solution narrative, not just a technical checklist. Include what is being built, why this approach is appropriate, how the solution will work, the main implementation slices, risks, phase boundaries, and acceptance criteria. Every important acceptance item needs observable evidence. For large missions, prefer several sequential goals over one endless goal.
 
 `verification.md` must list exact verification commands and manual checks. Include expected pass conditions and where evidence should be recorded.
 
@@ -68,7 +65,7 @@ Include:
 - outcome
 - relevant files
 - constraints and non-goals
-- acceptance evidence
+- plan acceptance criteria and evidence
 - verification commands
 - ask-before rules
 - instruction to use `goals/<slug>/` as the durable plan and append evidence to `progress.jsonl`
@@ -84,8 +81,8 @@ Avoid:
 
 Before finalizing, verify:
 - The goal has one clear finish line.
-- The plan can be executed in slices.
-- Acceptance can be audited from real artifacts.
+- The plan explains what, why, and how before listing work slices.
+- The plan acceptance criteria can be audited from real artifacts.
 - Verification commands are concrete.
 - Risky actions have ask-before rules.
 - The final `/goal` prompt tells Codex where the goal files live.

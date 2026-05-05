@@ -55,6 +55,18 @@ def brief(title: str, objective: str) -> str:
 def plan(title: str) -> str:
     return f"""# Plan: {title}
 
+## Solution Overview
+
+TODO: Describe what is being built in plain language. Explain the shape of the solution before diving into tasks.
+
+## Why This Approach
+
+TODO: Explain why this direction is appropriate for the project, user goal, constraints, and risk level.
+
+## How It Will Work
+
+TODO: Describe the main moving parts, data flow, user flow, files, APIs, or systems involved. Keep this narrative enough that a reviewer can understand the intended solution.
+
 ## Slices
 
 | Slice | Purpose | Main files or systems | Done when | Risks |
@@ -73,13 +85,8 @@ def plan(title: str) -> str:
 ## Steering Notes
 
 - TODO: Capture taste calls, product preferences, or review checkpoints the user should steer during execution.
-"""
 
-
-def acceptance(title: str) -> str:
-    return f"""# Acceptance: {title}
-
-## Checklist
+## Acceptance Criteria
 
 - [ ] TODO: Requirement with concrete observable evidence.
 - [ ] TODO: Requirement with concrete observable evidence.
@@ -149,8 +156,7 @@ After every critical document in this folder is approved with Plannotator, paste
 
 Use `goals/{slug}/` as the durable source of truth:
 - Read `brief.md` for the mission, context, constraints, non-goals, and ask-before rules.
-- Follow `plan.md` slice by slice.
-- Treat `acceptance.md` as the completion checklist.
+- Follow `plan.md` for the solution overview, implementation slices, risks, and acceptance criteria.
 - Run the checks in `verification.md` and record evidence.
 - Append concrete progress and proof to `progress.jsonl`.
 - Pause and ask the user for anything listed in `blockers.md` or any similarly risky unresolved decision.
@@ -192,7 +198,6 @@ def main() -> int:
     files = {
         "brief.md": brief(args.title, args.objective),
         "plan.md": plan(args.title),
-        "acceptance.md": acceptance(args.title),
         "verification.md": verification(args.title),
         "blockers.md": blockers(args.title),
         "goal-prompt.md": goal_prompt(slug, args.title, args.objective),
