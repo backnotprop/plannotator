@@ -94,11 +94,6 @@ type NoteAutoSaveResults = {
   octarine?: boolean;
 };
 
-type ApprovalOverride = {
-  permissionMode?: PermissionMode;
-  clearContextNudge?: boolean;
-};
-
 const App: React.FC = () => {
   const [markdown, setMarkdown] = useState(DEMO_PLAN_CONTENT);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
