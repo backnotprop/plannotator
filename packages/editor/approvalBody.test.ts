@@ -36,8 +36,7 @@ describe('buildApprovalRequestBody', () => {
       origin: 'claude-code',
       permissionMode: 'acceptEdits',
       override: {
-        permissionMode: 'bypassPermissions',
-        clearContextNudge: true,
+        permissionMode: 'bypassPermissionsClearReminder',
       },
       planSaveSettings: { enabled: true },
     })).toEqual({

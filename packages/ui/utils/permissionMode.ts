@@ -48,15 +48,19 @@ export const PERMISSION_MODE_OPTIONS: { value: PermissionMode; label: string; de
 
 const DEFAULT_MODE: PermissionMode = 'acceptEdits';
 
+function isPermissionMode(value: string | null): value is PermissionMode {
+  return PERMISSION_MODE_OPTIONS.some((option) => option.value === value);
+}
+
 /**
  * Get current permission mode settings from storage
  */
 export function getPermissionModeSettings(): PermissionModeSettings {
-  const mode = storage.getItem(STORAGE_KEY_MODE) as PermissionMode | null;
+  const mode = storage.getItem(STORAGE_KEY_MODE);
   const configured = storage.getItem(STORAGE_KEY_CONFIGURED) === 'true';
 
   return {
-    mode: mode || DEFAULT_MODE,
+    mode: isPermissionMode(mode) ? mode : DEFAULT_MODE,
     configured,
   };
 }
