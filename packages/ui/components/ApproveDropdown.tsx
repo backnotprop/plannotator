@@ -79,10 +79,10 @@ export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
     setIsOpen(false);
   };
 
-  const agentLabel = getSelectedLabel(setting, agents);
-  const isNoSwitch = setting.switchTo === 'disabled';
-  const isCustom = setting.switchTo === 'custom';
-  const notFound = agentLabel && !isNoSwitch && !isCustom
+  const agentLabel = shouldShowAgentSwitch ? getSelectedLabel(setting, agents) : null;
+  const isNoSwitch = shouldShowAgentSwitch && setting.switchTo === 'disabled';
+  const isCustom = shouldShowAgentSwitch && setting.switchTo === 'custom';
+  const notFound = shouldShowAgentSwitch && agentLabel && !isNoSwitch && !isCustom
     && !agents.some(a => a.id.toLowerCase() === setting.switchTo.toLowerCase());
 
   const baseClasses = disabled
