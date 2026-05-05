@@ -475,6 +475,17 @@ echo Address the annotation feedback above. The user has reviewed your last mess
 echo Installed /plannotator-last command to !CLAUDE_COMMANDS_DIR!\plannotator-last.md
 
 REM Install skills (requires git)
+REM Remove legacy Codex-oriented skills from the older shared agent scope.
+set "LEGACY_AGENTS_SKILLS_DIR=%USERPROFILE%\.agents\skills"
+set "LEGACY_SKILLS_REMOVED=0"
+for %%S in (plannotator-review plannotator-annotate plannotator-last) do (
+    if exist "!LEGACY_AGENTS_SKILLS_DIR!\%%S" (
+        rmdir /s /q "!LEGACY_AGENTS_SKILLS_DIR!\%%S" >nul 2>&1
+        set "LEGACY_SKILLS_REMOVED=1"
+    )
+)
+if "!LEGACY_SKILLS_REMOVED!"=="1" echo Removed legacy Plannotator skills from !LEGACY_AGENTS_SKILLS_DIR!
+
 where git >nul 2>&1
 if !ERRORLEVEL! equ 0 (
     if defined CLAUDE_CONFIG_DIR (
@@ -482,7 +493,7 @@ if !ERRORLEVEL! equ 0 (
     ) else (
         set "CLAUDE_SKILLS_DIR=%USERPROFILE%\.claude\skills"
     )
-    set "AGENTS_SKILLS_DIR=%USERPROFILE%\.agents\skills"
+    set "CODEX_SKILLS_DIR=%USERPROFILE%\.codex\skills"
     set "SKILLS_TMP=%TEMP%\plannotator-skills-%RANDOM%"
     mkdir "!SKILLS_TMP!" >nul 2>&1
 
@@ -493,10 +504,10 @@ if !ERRORLEVEL! equ 0 (
 
         if exist "apps\skills" (
             if not exist "!CLAUDE_SKILLS_DIR!" mkdir "!CLAUDE_SKILLS_DIR!"
-            if not exist "!AGENTS_SKILLS_DIR!" mkdir "!AGENTS_SKILLS_DIR!"
+            if not exist "!CODEX_SKILLS_DIR!" mkdir "!CODEX_SKILLS_DIR!"
             xcopy /s /y /q "apps\skills\*" "!CLAUDE_SKILLS_DIR!\" >nul 2>&1
-            xcopy /s /y /q "apps\skills\*" "!AGENTS_SKILLS_DIR!\" >nul 2>&1
-            echo Installed skills to !CLAUDE_SKILLS_DIR!\ and !AGENTS_SKILLS_DIR!\
+            xcopy /s /y /q "apps\skills\*" "!CODEX_SKILLS_DIR!\" >nul 2>&1
+            echo Installed skills to !CLAUDE_SKILLS_DIR!\ and !CODEX_SKILLS_DIR!\
         )
 
         popd

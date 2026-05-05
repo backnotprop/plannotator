@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const scriptsDir = import.meta.dir;
@@ -56,8 +56,18 @@ describe("install.sh", () => {
     expect(script).toContain("git clone --depth 1 --filter=blob:none --sparse");
     expect(script).toContain("git sparse-checkout set apps/skills");
     expect(script).toContain("CLAUDE_SKILLS_DIR");
-    expect(script).toContain("AGENTS_SKILLS_DIR");
+    expect(script).toContain("CODEX_SKILLS_DIR");
+    expect(script).toContain("$HOME/.codex/skills");
+    expect(script).not.toContain('mkdir -p "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR"');
+    expect(script).not.toContain('cp -r apps/skills/* "$AGENTS_SKILLS_DIR/"');
     expect(script).toContain('Skipping skills install (git not found)');
+  });
+
+  test("cleans only legacy command-overlap agent skills", () => {
+    expect(script).toContain("LEGACY_AGENTS_SKILLS_DIR");
+    expect(script).toContain("plannotator-review plannotator-annotate plannotator-last");
+    expect(script).not.toContain("plannotator-review plannotator-annotate plannotator-last plannotator-compound");
+    expect(script).not.toContain("plannotator-review plannotator-annotate plannotator-last plannotator-setup-goal");
   });
 
   test("installs slash commands for Claude Code and OpenCode", () => {
@@ -147,8 +157,17 @@ describe("install.ps1", () => {
     expect(script).toContain("git clone --depth 1 --filter=blob:none --sparse");
     expect(script).toContain("git sparse-checkout set apps/skills");
     expect(script).toContain("claudeSkillsDir");
-    expect(script).toContain("agentsSkillsDir");
+    expect(script).toContain("codexSkillsDir");
+    expect(script).toContain("$env:USERPROFILE\\.codex\\skills");
+    expect(script).not.toContain('$agentsSkillsDir = "$env:USERPROFILE\\.agents\\skills"');
     expect(script).toContain('Skipping skills install (git not found)');
+  });
+
+  test("cleans only legacy command-overlap agent skills", () => {
+    expect(script).toContain("legacyAgentsSkillsDir");
+    expect(script).toContain('"plannotator-review", "plannotator-annotate", "plannotator-last"');
+    expect(script).not.toContain('"plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-compound"');
+    expect(script).not.toContain('"plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-setup-goal"');
   });
 
   test("installs slash commands", () => {
@@ -208,8 +227,17 @@ describe("install.cmd", () => {
     expect(script).toContain("git clone --depth 1 --filter=blob:none --sparse");
     expect(script).toContain("git sparse-checkout set apps/skills");
     expect(script).toContain("CLAUDE_SKILLS_DIR");
-    expect(script).toContain("AGENTS_SKILLS_DIR");
+    expect(script).toContain("CODEX_SKILLS_DIR");
+    expect(script).toContain("%USERPROFILE%\\.codex\\skills");
+    expect(script).not.toContain('set "AGENTS_SKILLS_DIR=%USERPROFILE%\\.agents\\skills"');
     expect(script).toContain("Skipping skills install");
+  });
+
+  test("cleans only legacy command-overlap agent skills", () => {
+    expect(script).toContain("LEGACY_AGENTS_SKILLS_DIR");
+    expect(script).toContain("plannotator-review plannotator-annotate plannotator-last");
+    expect(script).not.toContain("plannotator-review plannotator-annotate plannotator-last plannotator-compound");
+    expect(script).not.toContain("plannotator-review plannotator-annotate plannotator-last plannotator-setup-goal");
   });
 
   test("installs slash commands", () => {
@@ -243,6 +271,15 @@ describe("install.cmd", () => {
     expect(script).toContain("--skip-attestation");
     // Enforcement: hard-fail when opted in but gh missing
     expect(script).toContain("gh CLI was not found");
+  });
+});
+
+describe("Codex Plannotator skills", () => {
+  test("command-overlap skills include OpenAI agent config", () => {
+    for (const skill of ["plannotator-review", "plannotator-annotate", "plannotator-last"]) {
+      const configPath = join(scriptsDir, "..", "apps", "skills", skill, "agents", "openai.yaml");
+      expect(existsSync(configPath)).toBe(true);
+    }
   });
 });
 

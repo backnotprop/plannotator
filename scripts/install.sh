@@ -624,10 +624,25 @@ COMMAND_EOF
 
 echo "Installed /plannotator-last command to ${OPENCODE_COMMANDS_DIR}/plannotator-last.md"
 
+# Remove legacy Codex-oriented skills from the older shared agent scope.
+LEGACY_AGENTS_SKILLS_DIR="$HOME/.agents/skills"
+legacy_skills_removed=0
+if [ -d "$LEGACY_AGENTS_SKILLS_DIR" ]; then
+    for skill in plannotator-review plannotator-annotate plannotator-last; do
+        if [ -d "$LEGACY_AGENTS_SKILLS_DIR/$skill" ]; then
+            rm -rf "$LEGACY_AGENTS_SKILLS_DIR/$skill"
+            legacy_skills_removed=1
+        fi
+    done
+fi
+if [ "$legacy_skills_removed" -eq 1 ]; then
+    echo "Removed legacy Plannotator skills from ${LEGACY_AGENTS_SKILLS_DIR}"
+fi
+
 # Install skills (requires git)
 if command -v git &>/dev/null; then
     CLAUDE_SKILLS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills"
-    AGENTS_SKILLS_DIR="$HOME/.agents/skills"
+    CODEX_SKILLS_DIR="$HOME/.codex/skills"
     skills_tmp=$(mktemp -d)
 
     # Wrap the cd-bearing block in a subshell so any `cd` is scoped to
@@ -649,11 +664,11 @@ if command -v git &>/dev/null; then
         git sparse-checkout set apps/skills 2>/dev/null &&
         [ -d "apps/skills" ] &&
         [ "$(ls -A apps/skills 2>/dev/null)" ] &&
-        mkdir -p "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR" &&
+        mkdir -p "$CLAUDE_SKILLS_DIR" "$CODEX_SKILLS_DIR" &&
         cp -r apps/skills/* "$CLAUDE_SKILLS_DIR/" &&
-        cp -r apps/skills/* "$AGENTS_SKILLS_DIR/"
+        cp -r apps/skills/* "$CODEX_SKILLS_DIR/"
     ); then
-        echo "Installed skills to ${CLAUDE_SKILLS_DIR}/ and ${AGENTS_SKILLS_DIR}/"
+        echo "Installed skills to ${CLAUDE_SKILLS_DIR}/ and ${CODEX_SKILLS_DIR}/"
     else
         echo "Skipping skills install (git sparse-checkout failed or apps/skills empty)"
     fi

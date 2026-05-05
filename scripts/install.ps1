@@ -394,10 +394,24 @@ description: Annotate the last assistant message
 
 Write-Host "Installed /plannotator-last command to $opencodeCommandsDir\plannotator-last.md"
 
+# Remove legacy Codex-oriented skills from the older shared agent scope.
+$legacyAgentsSkillsDir = "$env:USERPROFILE\.agents\skills"
+$legacySkillsRemoved = $false
+foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last")) {
+    $legacySkillPath = Join-Path $legacyAgentsSkillsDir $skill
+    if (Test-Path $legacySkillPath) {
+        Remove-Item -Recurse -Force $legacySkillPath -ErrorAction SilentlyContinue
+        $legacySkillsRemoved = $true
+    }
+}
+if ($legacySkillsRemoved) {
+    Write-Host "Removed legacy Plannotator skills from $legacyAgentsSkillsDir"
+}
+
 # Install skills (requires git)
 if (Get-Command git -ErrorAction SilentlyContinue) {
     $claudeSkillsDir = if ($env:CLAUDE_CONFIG_DIR) { "$env:CLAUDE_CONFIG_DIR\skills" } else { "$env:USERPROFILE\.claude\skills" }
-    $agentsSkillsDir = "$env:USERPROFILE\.agents\skills"
+    $codexSkillsDir = "$env:USERPROFILE\.codex\skills"
     $skillsTmp = Join-Path ([System.IO.Path]::GetTempPath()) "plannotator-skills-$(Get-Random)"
     New-Item -ItemType Directory -Force -Path $skillsTmp | Out-Null
 
@@ -421,10 +435,10 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
                     $items = Get-ChildItem "apps\skills" -ErrorAction SilentlyContinue
                     if ($items) {
                         New-Item -ItemType Directory -Force -Path $claudeSkillsDir | Out-Null
-                        New-Item -ItemType Directory -Force -Path $agentsSkillsDir | Out-Null
+                        New-Item -ItemType Directory -Force -Path $codexSkillsDir | Out-Null
                         Copy-Item -Recurse -Force "apps\skills\*" $claudeSkillsDir
-                        Copy-Item -Recurse -Force "apps\skills\*" $agentsSkillsDir
-                        Write-Host "Installed skills to $claudeSkillsDir\ and $agentsSkillsDir\"
+                        Copy-Item -Recurse -Force "apps\skills\*" $codexSkillsDir
+                        Write-Host "Installed skills to $claudeSkillsDir\ and $codexSkillsDir\"
                     }
                 }
             } finally {
