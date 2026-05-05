@@ -96,7 +96,8 @@ const PierreDiffContent = React.memo(({
   prev.fileDiff === next.fileDiff &&
   prev.pierreTheme.type === next.pierreTheme.type &&
   prev.pierreTheme.css === next.pierreTheme.css &&
-  prev.pierreTheme.syntaxTheme === next.pierreTheme.syntaxTheme &&
+  prev.pierreTheme.syntaxTheme?.dark === next.pierreTheme.syntaxTheme?.dark &&
+  prev.pierreTheme.syntaxTheme?.light === next.pierreTheme.syntaxTheme?.light &&
   prev.diffStyle === next.diffStyle &&
   prev.diffOverflow === next.diffOverflow &&
   prev.diffIndicators === next.diffIndicators &&

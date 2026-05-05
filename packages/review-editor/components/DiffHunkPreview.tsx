@@ -100,6 +100,8 @@ export const DiffHunkPreview: React.FC<DiffHunkPreviewProps> = ({
     return () => cancelAnimationFrame(rafId);
   }, [resolvedMode, colorTheme, state.fontFamily, state.fontSize]);
 
+  const syntaxTheme = resolveSyntaxTheme(colorTheme, resolvedMode ?? 'dark');
+
   if (!fileDiff) {
     return (
       <div className="px-3 py-2 text-[11px] text-muted-foreground/30 italic">
@@ -119,7 +121,7 @@ export const DiffHunkPreview: React.FC<DiffHunkPreviewProps> = ({
           options={{
             themeType: pierreTheme.type,
             unsafeCSS: pierreTheme.css,
-            ...(resolveSyntaxTheme(colorTheme, resolvedMode ?? 'dark') && { theme: resolveSyntaxTheme(colorTheme, resolvedMode ?? 'dark') }),
+            ...(syntaxTheme && { theme: syntaxTheme }),
             diffStyle: 'unified',
             disableLineNumbers: true,
             overflow: 'wrap',
