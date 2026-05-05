@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getGitContext, runGitDiff, startReviewServer } from "./server";
+import { getGitContext, runGitDiff, startPlanReviewServer, startReviewServer } from "./server";
 
 const tempDirs: string[] = [];
 const originalCwd = process.cwd();
@@ -82,6 +82,45 @@ afterEach(() => {
 });
 
 describe("pi review server", () => {
+  test("plan approve preserves clear context nudge decisions", async () => {
+    const homeDir = makeTempDir("plannotator-pi-home-");
+    const repoDir = makeTempDir("plannotator-pi-plan-");
+    process.env.HOME = homeDir;
+    process.chdir(repoDir);
+    process.env.PLANNOTATOR_PORT = String(await reservePort());
+
+    const server = await startPlanReviewServer({
+      plan: "# Plan\n\nShip it.",
+      htmlContent: "<!doctype html><html><body>plan</body></html>",
+      origin: "pi",
+      permissionMode: "acceptEdits",
+    });
+
+    try {
+      const approveResponse = await fetch(`${server.url}/api/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          permissionMode: "bypassPermissions",
+          clearContextNudge: true,
+          planSave: { enabled: false },
+        }),
+      });
+      expect(approveResponse.status).toBe(200);
+
+      await expect(server.waitForDecision()).resolves.toEqual({
+        approved: true,
+        feedback: undefined,
+        savedPath: undefined,
+        agentSwitch: undefined,
+        permissionMode: "bypassPermissions",
+        clearContextNudge: true,
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
   test("serves review diff parity endpoints including drafts, uploads, and editor annotations", async () => {
     const homeDir = makeTempDir("plannotator-pi-home-");
     const repoDir = initRepo();

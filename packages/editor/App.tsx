@@ -77,6 +77,7 @@ import type { PlanDiffMode } from '@plannotator/ui/components/plan-diff/PlanDiff
 import { DEMO_PLAN_CONTENT as DEFAULT_DEMO_PLAN_CONTENT } from './demoPlan';
 import { DIFF_DEMO_PLAN_CONTENT } from './demoPlanDiffDemo';
 import { canUseAnnotateWideMode, resolveWideModeExitLayout, type WideModeLayoutSnapshot, type WideModeType } from './wideMode';
+import { buildApprovalRequestBody, type ApprovalOverride } from './approvalBody';
 const USE_DIFF_DEMO =
   import.meta.env.VITE_DIFF_DEMO === '1' ||
   import.meta.env.VITE_DIFF_DEMO === 'true';
@@ -89,11 +90,6 @@ type NoteAutoSaveResults = {
   obsidian?: boolean;
   bear?: boolean;
   octarine?: boolean;
-};
-
-type ApprovalOverride = {
-  permissionMode?: PermissionMode;
-  clearContextNudge?: boolean;
 };
 
 const App: React.FC = () => {
@@ -959,27 +955,14 @@ const App: React.FC = () => {
         ? await autoSavePromiseRef.current
         : autoSaveResultsRef.current;
 
-      // Build request body - include integrations if enabled
-      const body: { obsidian?: object; bear?: object; octarine?: object; feedback?: string; agentSwitch?: string; planSave?: { enabled: boolean; customPath?: string }; permissionMode?: string; clearContextNudge?: boolean } = {};
-
-      // Include permission mode for Claude Code
-      if (origin === 'claude-code') {
-        body.permissionMode = override.permissionMode ?? permissionMode;
-        if (override.clearContextNudge) {
-          body.clearContextNudge = true;
-        }
-      }
-
       const effectiveAgent = getEffectiveAgentName(getAgentSwitchSettings());
-      if (effectiveAgent) {
-        body.agentSwitch = effectiveAgent;
-      }
-
-      // Include plan save settings
-      body.planSave = {
-        enabled: planSaveSettings.enabled,
-        ...(planSaveSettings.customPath && { customPath: planSaveSettings.customPath }),
-      };
+      const body = buildApprovalRequestBody({
+        origin,
+        permissionMode,
+        override,
+        effectiveAgent,
+        planSaveSettings,
+      });
 
       const effectiveVaultPath = getEffectiveVaultPath(obsidianSettings);
       if (obsidianSettings.enabled && effectiveVaultPath) {
