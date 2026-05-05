@@ -25,6 +25,31 @@
 @import "./themes/cursor.css";
 @import "./themes/cursor-hc.css";
 @import "./themes/cursor-midnight.css";
+@import "./themes/everforest.css";
+@import "./themes/everforest-hard.css";
+@import "./themes/everforest-soft.css";
+@import "./themes/nord.css";
+@import "./themes/solarized.css";
+@import "./themes/github.css";
+@import "./themes/one-dark-pro.css";
+@import "./themes/night-owl.css";
+@import "./themes/ayu-dark.css";
+@import "./themes/poimandres.css";
+@import "./themes/material.css";
+@import "./themes/vitesse.css";
+@import "./themes/vesper.css";
+@import "./themes/andromeeda.css";
+@import "./themes/aurora-x.css";
+@import "./themes/dark-plus.css";
+@import "./themes/houston.css";
+@import "./themes/laserwave.css";
+@import "./themes/min.css";
+@import "./themes/one-light.css";
+@import "./themes/plastic.css";
+@import "./themes/red.css";
+@import "./themes/slack.css";
+@import "./themes/snazzy-light.css";
+@import "./themes/vitesse-black.css";
 @import "./print.css";
 
 /* Tailwind bridge — maps CSS vars to utility classes */

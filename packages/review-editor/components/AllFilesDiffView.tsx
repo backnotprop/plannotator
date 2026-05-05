@@ -428,6 +428,7 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
                 options={{
                   themeType: pierreTheme.type,
                   unsafeCSS: pierreTheme.css,
+                  ...(pierreTheme.syntaxTheme && { theme: pierreTheme.syntaxTheme }),
                   diffStyle,
                   overflow: diffOverflow,
                   diffIndicators,

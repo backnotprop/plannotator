@@ -1,0 +1,62 @@
+/* Vesper — by raunofreiberg */
+.theme-vesper {
+  --background: #101010;
+  --foreground: #FFFFFF;
+  --card: #161616;
+  --card-foreground: #FFFFFF;
+  --popover: #161616;
+  --popover-foreground: #FFFFFF;
+  --primary: #FFC799;
+  --primary-foreground: #101010;
+  --secondary: #1C1C1C;
+  --secondary-foreground: #A0A0A0;
+  --muted: #1C1C1C;
+  --muted-foreground: #8b8b8b;
+  --accent: #99FFE4;
+  --accent-foreground: #101010;
+  --destructive: #FF8080;
+  --destructive-foreground: #101010;
+  --border: #282828;
+  --input: #1C1C1C;
+  --ring: #FFC799;
+  --success: #99FFE4;
+  --success-foreground: #101010;
+  --warning: #FFC799;
+  --warning-foreground: #101010;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #1C1C1C;
+  --focus-highlight: #FFC799;
+}
+
+.theme-vesper.light {
+  --background: #101010;
+  --foreground: #FFFFFF;
+  --card: #161616;
+  --card-foreground: #FFFFFF;
+  --popover: #161616;
+  --popover-foreground: #FFFFFF;
+  --primary: #FFC799;
+  --primary-foreground: #101010;
+  --secondary: #1C1C1C;
+  --secondary-foreground: #A0A0A0;
+  --muted: #1C1C1C;
+  --muted-foreground: #8b8b8b;
+  --accent: #99FFE4;
+  --accent-foreground: #101010;
+  --destructive: #FF8080;
+  --destructive-foreground: #101010;
+  --border: #282828;
+  --input: #1C1C1C;
+  --ring: #FFC799;
+  --success: #99FFE4;
+  --success-foreground: #101010;
+  --warning: #FFC799;
+  --warning-foreground: #101010;
+
+  --code-bg: #1C1C1C;
+  --focus-highlight: #FFC799;
+}

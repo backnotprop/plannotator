@@ -1,0 +1,66 @@
+/* Plastic — by Will Stone */
+.theme-plastic {
+  --background: #21252b;
+  --foreground: #a9b2c3;
+  --card: #181a1f;
+  --card-foreground: #a9b2c3;
+  --popover: #181a1f;
+  --popover-foreground: #a9b2c3;
+  --primary: #1085ff;
+  --primary-foreground: #ffffff;
+  --secondary: #0d1117;
+  --secondary-foreground: #c6ccd7;
+  --muted: #181a1f;
+  --muted-foreground: #5f6672;
+  --accent: #61afef;
+  --accent-foreground: #0d1117;
+  --destructive: #d74e42;
+  --destructive-foreground: #ffffff;
+  --border: #0d1117;
+  --input: #0d1117;
+  --ring: #1085ff;
+  --success: #98c379;
+  --success-foreground: #0d1117;
+  --warning: #e5c07b;
+  --warning-foreground: #0d1117;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #0d1117;
+  --focus-highlight: #1085ff;
+}
+
+.theme-plastic.light {
+  --background: #21252b;
+  --foreground: #a9b2c3;
+  --card: #181a1f;
+  --card-foreground: #a9b2c3;
+  --popover: #181a1f;
+  --popover-foreground: #a9b2c3;
+  --primary: #1085ff;
+  --primary-foreground: #ffffff;
+  --secondary: #0d1117;
+  --secondary-foreground: #c6ccd7;
+  --muted: #181a1f;
+  --muted-foreground: #5f6672;
+  --accent: #61afef;
+  --accent-foreground: #0d1117;
+  --destructive: #d74e42;
+  --destructive-foreground: #ffffff;
+  --border: #0d1117;
+  --input: #0d1117;
+  --ring: #1085ff;
+  --success: #98c379;
+  --success-foreground: #0d1117;
+  --warning: #e5c07b;
+  --warning-foreground: #0d1117;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #0d1117;
+  --focus-highlight: #1085ff;
+}

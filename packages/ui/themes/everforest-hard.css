@@ -1,0 +1,62 @@
+/* Everforest Hard — by sainnhe (high contrast) */
+.theme-everforest-hard {
+  --background: #272E33;
+  --foreground: #D3C6AA;
+  --card: #2E383C;
+  --card-foreground: #D3C6AA;
+  --popover: #374145;
+  --popover-foreground: #D3C6AA;
+  --primary: #A7C080;
+  --primary-foreground: #272E33;
+  --secondary: #414B50;
+  --secondary-foreground: #D3C6AA;
+  --muted: #414B50;
+  --muted-foreground: #859289;
+  --accent: #83C092;
+  --accent-foreground: #272E33;
+  --destructive: #E67E80;
+  --destructive-foreground: #272E33;
+  --border: #414B50;
+  --input: #2E383C;
+  --ring: #A7C080;
+  --success: #83C092;
+  --success-foreground: #272E33;
+  --warning: #DBBC7F;
+  --warning-foreground: #272E33;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #1E2326;
+  --focus-highlight: #7FBBB3;
+}
+
+.theme-everforest-hard.light {
+  --background: #FFFBEF;
+  --foreground: #5C6A72;
+  --card: #F8F5E4;
+  --card-foreground: #5C6A72;
+  --popover: #F2EFDF;
+  --popover-foreground: #5C6A72;
+  --primary: #8DA101;
+  --primary-foreground: #FFFBEF;
+  --secondary: #EDEADA;
+  --secondary-foreground: #5C6A72;
+  --muted: #EDEADA;
+  --muted-foreground: #939F91;
+  --accent: #35A77C;
+  --accent-foreground: #FFFBEF;
+  --destructive: #F85552;
+  --destructive-foreground: #FFFBEF;
+  --border: #EDEADA;
+  --input: #F8F5E4;
+  --ring: #8DA101;
+  --success: #35A77C;
+  --success-foreground: #FFFBEF;
+  --warning: #DFA000;
+  --warning-foreground: #FFFBEF;
+
+  --code-bg: #F2EFDF;
+  --focus-highlight: #3A94C5;
+}

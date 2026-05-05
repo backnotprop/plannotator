@@ -3,6 +3,7 @@ import { FileDiff } from '@pierre/diffs/react';
 import { getSingularPatch } from '@pierre/diffs';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { useReviewState } from '../dock/ReviewStateContext';
+import { SHIKI_THEME_MAP } from '../hooks/usePierreTheme';
 
 interface DiffHunkPreviewProps {
   /** Raw diff hunk string (unified diff format). */
@@ -59,7 +60,7 @@ export const DiffHunkPreview: React.FC<DiffHunkPreviewProps> = ({
   maxHeight = 128,
   className,
 }) => {
-  const { resolvedMode } = useTheme();
+  const { resolvedMode, colorTheme } = useTheme();
   const state = useReviewState();
   const [expanded, setExpanded] = useState(false);
 
@@ -118,6 +119,7 @@ export const DiffHunkPreview: React.FC<DiffHunkPreviewProps> = ({
           options={{
             themeType: pierreTheme.type,
             unsafeCSS: pierreTheme.css,
+            ...(SHIKI_THEME_MAP[colorTheme] && { theme: SHIKI_THEME_MAP[colorTheme] }),
             diffStyle: 'unified',
             disableLineNumbers: true,
             overflow: 'wrap',

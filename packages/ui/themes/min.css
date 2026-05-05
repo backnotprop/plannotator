@@ -1,0 +1,66 @@
+/* Min — by Miguel Solorio */
+.theme-min {
+  --background: #1f1f1f;
+  --foreground: #b392f0;
+  --card: #242424;
+  --card-foreground: #b392f0;
+  --popover: #242424;
+  --popover-foreground: #b392f0;
+  --primary: #b392f0;
+  --primary-foreground: #1f1f1f;
+  --secondary: #2a2a2a;
+  --secondary-foreground: #bbbbbb;
+  --muted: #2a2a2a;
+  --muted-foreground: #6b737c;
+  --accent: #79b8ff;
+  --accent-foreground: #1f1f1f;
+  --destructive: #ff7a84;
+  --destructive-foreground: #1f1f1f;
+  --border: #383838;
+  --input: #383838;
+  --ring: #b392f0;
+  --success: #3a632a;
+  --success-foreground: #ffffff;
+  --warning: #cd9731;
+  --warning-foreground: #1f1f1f;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #2a2a2a;
+  --focus-highlight: #b392f0;
+}
+
+.theme-min.light {
+  --background: #ffffff;
+  --foreground: #24292e;
+  --card: #f6f6f6;
+  --card-foreground: #24292e;
+  --popover: #f6f6f6;
+  --popover-foreground: #24292e;
+  --primary: #6f42c1;
+  --primary-foreground: #ffffff;
+  --secondary: #eeeeee;
+  --secondary-foreground: #212121;
+  --muted: #f6f6f6;
+  --muted-foreground: #c2c3c5;
+  --accent: #1976d2;
+  --accent-foreground: #ffffff;
+  --destructive: #d32f2f;
+  --destructive-foreground: #ffffff;
+  --border: #e9e9e9;
+  --input: #e9e9e9;
+  --ring: #6f42c1;
+  --success: #77cc00;
+  --success-foreground: #ffffff;
+  --warning: #f29718;
+  --warning-foreground: #ffffff;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #f3f3f3;
+  --focus-highlight: #6f42c1;
+}

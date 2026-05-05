@@ -1,0 +1,66 @@
+/* Slack — dark + light */
+.theme-slack {
+  --background: #222222;
+  --foreground: #e6e6e6;
+  --card: #292929;
+  --card-foreground: #e6e6e6;
+  --popover: #292929;
+  --popover-foreground: #e6e6e6;
+  --primary: #0077b5;
+  --primary-foreground: #ffffff;
+  --secondary: #141414;
+  --secondary-foreground: #e6e6e6;
+  --muted: #141414;
+  --muted-foreground: #6e7681;
+  --accent: #1d978d;
+  --accent-foreground: #ffffff;
+  --destructive: #f44747;
+  --destructive-foreground: #ffffff;
+  --border: #3a3d41;
+  --input: #292929;
+  --ring: #0077b5;
+  --success: #6a9955;
+  --success-foreground: #ffffff;
+  --warning: #cd9731;
+  --warning-foreground: #222222;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #141414;
+  --focus-highlight: #0077b5;
+}
+
+.theme-slack.light {
+  --background: #ffffff;
+  --foreground: #000000;
+  --card: #f3f3f3;
+  --card-foreground: #000000;
+  --popover: #f3f3f3;
+  --popover-foreground: #000000;
+  --primary: #5899c5;
+  --primary-foreground: #ffffff;
+  --secondary: #eeeeee;
+  --secondary-foreground: #000000;
+  --muted: #f3f3f3;
+  --muted-foreground: #6e7681;
+  --accent: #5899c5;
+  --accent-foreground: #ffffff;
+  --destructive: #f44c5e;
+  --destructive-foreground: #ffffff;
+  --border: #dcdedf;
+  --input: #dcdedf;
+  --ring: #5899c5;
+  --success: #91b859;
+  --success-foreground: #161f26;
+  --warning: #ffb62c;
+  --warning-foreground: #161f26;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #eeeeee;
+  --focus-highlight: #5899c5;
+}

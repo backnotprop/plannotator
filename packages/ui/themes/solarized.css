@@ -1,0 +1,66 @@
+/* Solarized — by Ethan Schoonover */
+.theme-solarized {
+  --background: #002b36;
+  --foreground: #839496;
+  --card: #073642;
+  --card-foreground: #839496;
+  --popover: #073642;
+  --popover-foreground: #839496;
+  --primary: #268bd2;
+  --primary-foreground: #002b36;
+  --secondary: #003847;
+  --secondary-foreground: #93a1a1;
+  --muted: #003847;
+  --muted-foreground: #586e75;
+  --accent: #2aa198;
+  --accent-foreground: #002b36;
+  --destructive: #dc322f;
+  --destructive-foreground: #002b36;
+  --border: #094e5a;
+  --input: #003847;
+  --ring: #268bd2;
+  --success: #859900;
+  --success-foreground: #002b36;
+  --warning: #b58900;
+  --warning-foreground: #002b36;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #073642;
+  --focus-highlight: #268bd2;
+}
+
+.theme-solarized.light {
+  --background: #fdf6e3;
+  --foreground: #657b83;
+  --card: #eee8d5;
+  --card-foreground: #657b83;
+  --popover: #eee8d5;
+  --popover-foreground: #657b83;
+  --primary: #268bd2;
+  --primary-foreground: #fdf6e3;
+  --secondary: #eee8d5;
+  --secondary-foreground: #586e75;
+  --muted: #ddd6c1;
+  --muted-foreground: #93a1a1;
+  --accent: #2aa198;
+  --accent-foreground: #002b36;
+  --destructive: #dc322f;
+  --destructive-foreground: #fdf6e3;
+  --border: #ddd6c1;
+  --input: #ddd6c1;
+  --ring: #268bd2;
+  --success: #859900;
+  --success-foreground: #fdf6e3;
+  --warning: #b58900;
+  --warning-foreground: #fdf6e3;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #eee8d5;
+  --focus-highlight: #268bd2;
+}

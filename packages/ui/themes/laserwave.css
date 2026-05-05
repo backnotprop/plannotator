@@ -1,0 +1,66 @@
+/* LaserWave — by Jared Jones */
+.theme-laserwave {
+  --background: #27212e;
+  --foreground: #ffffff;
+  --card: #3a3242;
+  --card-foreground: #ffffff;
+  --popover: #3a3242;
+  --popover-foreground: #ffffff;
+  --primary: #eb64b9;
+  --primary-foreground: #27212e;
+  --secondary: #3e3549;
+  --secondary-foreground: #ffffff;
+  --muted: #3a3242;
+  --muted-foreground: #91889b;
+  --accent: #40b4c4;
+  --accent-foreground: #27212e;
+  --destructive: #ff3e7b;
+  --destructive-foreground: #27212e;
+  --border: #4a4055;
+  --input: #4a4055;
+  --ring: #eb64b9;
+  --success: #74dfc4;
+  --success-foreground: #27212e;
+  --warning: #ffe261;
+  --warning-foreground: #27212e;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #3e3549;
+  --focus-highlight: #eb64b9;
+}
+
+.theme-laserwave.light {
+  --background: #27212e;
+  --foreground: #ffffff;
+  --card: #3a3242;
+  --card-foreground: #ffffff;
+  --popover: #3a3242;
+  --popover-foreground: #ffffff;
+  --primary: #eb64b9;
+  --primary-foreground: #27212e;
+  --secondary: #3e3549;
+  --secondary-foreground: #ffffff;
+  --muted: #3a3242;
+  --muted-foreground: #91889b;
+  --accent: #40b4c4;
+  --accent-foreground: #27212e;
+  --destructive: #ff3e7b;
+  --destructive-foreground: #27212e;
+  --border: #4a4055;
+  --input: #4a4055;
+  --ring: #eb64b9;
+  --success: #74dfc4;
+  --success-foreground: #27212e;
+  --warning: #ffe261;
+  --warning-foreground: #27212e;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #3e3549;
+  --focus-highlight: #eb64b9;
+}

@@ -27,7 +27,7 @@ import {
 interface PierreDiffContentProps {
   filePath: string;
   fileDiff: ReturnType<typeof getSingularPatch>;
-  pierreTheme: { type: 'dark' | 'light'; css: string };
+  pierreTheme: { type: 'dark' | 'light'; css: string; syntaxTheme?: { dark: string; light: string } };
   diffStyle: 'split' | 'unified';
   diffOverflow?: 'scroll' | 'wrap';
   diffIndicators?: 'bars' | 'classic' | 'none';
@@ -70,6 +70,7 @@ const PierreDiffContent = React.memo(({
       options={{
         themeType: pierreTheme.type,
         unsafeCSS: pierreTheme.css,
+        ...(pierreTheme.syntaxTheme && { theme: pierreTheme.syntaxTheme }),
         diffStyle,
         overflow: diffOverflow,
         diffIndicators,
@@ -95,6 +96,7 @@ const PierreDiffContent = React.memo(({
   prev.fileDiff === next.fileDiff &&
   prev.pierreTheme.type === next.pierreTheme.type &&
   prev.pierreTheme.css === next.pierreTheme.css &&
+  prev.pierreTheme.syntaxTheme === next.pierreTheme.syntaxTheme &&
   prev.diffStyle === next.diffStyle &&
   prev.diffOverflow === next.diffOverflow &&
   prev.diffIndicators === next.diffIndicators &&

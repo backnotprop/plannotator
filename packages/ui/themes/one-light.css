@@ -1,0 +1,66 @@
+/* One Light — by Atom */
+.theme-one-light {
+  --background: #fafafa;
+  --foreground: #383a42;
+  --card: #eaeaeb;
+  --card-foreground: #383a42;
+  --popover: #eaeaeb;
+  --popover-foreground: #383a42;
+  --primary: #526fff;
+  --primary-foreground: #ffffff;
+  --secondary: #e5e5e6;
+  --secondary-foreground: #383a42;
+  --muted: #eaeaeb;
+  --muted-foreground: #a0a1a7;
+  --accent: #4078f2;
+  --accent-foreground: #ffffff;
+  --destructive: #e45649;
+  --destructive-foreground: #ffffff;
+  --border: #dbdbdc;
+  --input: #dbdbdc;
+  --ring: #526fff;
+  --success: #3bba54;
+  --success-foreground: #ffffff;
+  --warning: #c18401;
+  --warning-foreground: #ffffff;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #e5e5e6;
+  --focus-highlight: #526fff;
+}
+
+.theme-one-light.light {
+  --background: #fafafa;
+  --foreground: #383a42;
+  --card: #eaeaeb;
+  --card-foreground: #383a42;
+  --popover: #eaeaeb;
+  --popover-foreground: #383a42;
+  --primary: #526fff;
+  --primary-foreground: #ffffff;
+  --secondary: #e5e5e6;
+  --secondary-foreground: #383a42;
+  --muted: #eaeaeb;
+  --muted-foreground: #a0a1a7;
+  --accent: #4078f2;
+  --accent-foreground: #ffffff;
+  --destructive: #e45649;
+  --destructive-foreground: #ffffff;
+  --border: #dbdbdc;
+  --input: #dbdbdc;
+  --ring: #526fff;
+  --success: #3bba54;
+  --success-foreground: #ffffff;
+  --warning: #c18401;
+  --warning-foreground: #ffffff;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #e5e5e6;
+  --focus-highlight: #526fff;
+}

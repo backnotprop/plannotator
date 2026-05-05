@@ -1,0 +1,66 @@
+/* Red — by Thibaut Tiberghien */
+.theme-red {
+  --background: #390000;
+  --foreground: #f8f8f8;
+  --card: #490000;
+  --card-foreground: #f8f8f8;
+  --popover: #490000;
+  --popover-foreground: #f8f8f8;
+  --primary: #cc3333;
+  --primary-foreground: #ffffff;
+  --secondary: #580000;
+  --secondary-foreground: #f8f8f8;
+  --muted: #580000;
+  --muted-foreground: #e7c0c0;
+  --accent: #ffd0aa;
+  --accent-foreground: #390000;
+  --destructive: #f12727;
+  --destructive-foreground: #ffffff;
+  --border: #660000;
+  --input: #580000;
+  --ring: #cc3333;
+  --success: #41a83e;
+  --success-foreground: #390000;
+  --warning: #fec758;
+  --warning-foreground: #390000;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #580000;
+  --focus-highlight: #cc3333;
+}
+
+.theme-red.light {
+  --background: #390000;
+  --foreground: #f8f8f8;
+  --card: #490000;
+  --card-foreground: #f8f8f8;
+  --popover: #490000;
+  --popover-foreground: #f8f8f8;
+  --primary: #cc3333;
+  --primary-foreground: #ffffff;
+  --secondary: #580000;
+  --secondary-foreground: #f8f8f8;
+  --muted: #580000;
+  --muted-foreground: #e7c0c0;
+  --accent: #ffd0aa;
+  --accent-foreground: #390000;
+  --destructive: #f12727;
+  --destructive-foreground: #ffffff;
+  --border: #660000;
+  --input: #580000;
+  --ring: #cc3333;
+  --success: #41a83e;
+  --success-foreground: #390000;
+  --warning: #fec758;
+  --warning-foreground: #390000;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #580000;
+  --focus-highlight: #cc3333;
+}

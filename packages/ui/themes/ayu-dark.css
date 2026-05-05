@@ -1,0 +1,66 @@
+/* Ayu Dark — by dempfi */
+.theme-ayu-dark {
+  --background: #10141c;
+  --foreground: #bfbdb6;
+  --card: #141821;
+  --card-foreground: #bfbdb6;
+  --popover: #141821;
+  --popover-foreground: #bfbdb6;
+  --primary: #e6b450;
+  --primary-foreground: #805600;
+  --secondary: #0d1017;
+  --secondary-foreground: #bfbdb6;
+  --muted: #141821;
+  --muted-foreground: #6c7380;
+  --accent: #73b8ff;
+  --accent-foreground: #10141c;
+  --destructive: #d95757;
+  --destructive-foreground: #10141c;
+  --border: #1b1f29;
+  --input: #10141c;
+  --ring: #e6b450;
+  --success: #70bf56;
+  --success-foreground: #10141c;
+  --warning: #fdb04c;
+  --warning-foreground: #10141c;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #141821;
+  --focus-highlight: #e6b450;
+}
+
+.theme-ayu-dark.light {
+  --background: #10141c;
+  --foreground: #bfbdb6;
+  --card: #141821;
+  --card-foreground: #bfbdb6;
+  --popover: #141821;
+  --popover-foreground: #bfbdb6;
+  --primary: #e6b450;
+  --primary-foreground: #805600;
+  --secondary: #0d1017;
+  --secondary-foreground: #bfbdb6;
+  --muted: #141821;
+  --muted-foreground: #6c7380;
+  --accent: #73b8ff;
+  --accent-foreground: #10141c;
+  --destructive: #d95757;
+  --destructive-foreground: #10141c;
+  --border: #1b1f29;
+  --input: #10141c;
+  --ring: #e6b450;
+  --success: #70bf56;
+  --success-foreground: #10141c;
+  --warning: #fdb04c;
+  --warning-foreground: #10141c;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #141821;
+  --focus-highlight: #e6b450;
+}

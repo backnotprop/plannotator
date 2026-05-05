@@ -582,6 +582,7 @@ const CommentsTab: React.FC = () => {
 
 export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', onUIPreferencesChange, externalOpen, onExternalClose, aiProviders = [], gitUser }) => {
   const [showDialog, setShowDialog] = useState(false);
+  const [themePreview, setThemePreview] = useState(false);
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [identity, setIdentity] = useState('');
   const [obsidian, setObsidian] = useState<ObsidianSettings>({
@@ -814,7 +815,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
         </svg>
       </button>
 
-      {showDialog && createPortal(
+      {showDialog && !themePreview && createPortal(
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm p-4"
           onClick={() => setShowDialog(false)}
@@ -1090,7 +1091,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                 )}
 
                 {/* === THEME TAB === */}
-                {activeTab === 'theme' && <ThemeTab />}
+                {activeTab === 'theme' && <ThemeTab onPreview={() => { setShowDialog(false); setThemePreview(true); }} />}
 
                 {/* === GIT TAB === */}
                 {activeTab === 'git' && mode === 'review' && (
@@ -2066,6 +2067,30 @@ tags: [plan, ...]
 
               </div>
               </OverlayScrollArea>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {themePreview && createPortal(
+        <div className="fixed inset-0 z-[100] flex flex-col pointer-events-none">
+          <div className="flex-1" />
+          <div
+            className="pointer-events-auto w-full bg-card border-t-2 border-primary/30 shadow-[0_-4px_20px_rgba(0,0,0,0.4)] flex flex-col max-h-[35vh] overflow-hidden"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-border flex-shrink-0">
+              <span className="text-xs font-medium text-muted-foreground">Theme Preview</span>
+              <button
+                onClick={() => { setThemePreview(false); setShowDialog(true); }}
+                className="px-2.5 py-1 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+              >
+                Done
+              </button>
+            </div>
+            <div className="p-3 overflow-y-auto flex-1 min-h-0">
+              <ThemeTab compact />
             </div>
           </div>
         </div>,
