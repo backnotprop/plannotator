@@ -3,7 +3,7 @@ import { FileDiff } from '@pierre/diffs/react';
 import { getSingularPatch } from '@pierre/diffs';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { useReviewState } from '../dock/ReviewStateContext';
-import { SHIKI_THEME_MAP } from '../hooks/usePierreTheme';
+import { resolveSyntaxTheme } from '../hooks/usePierreTheme';
 
 interface DiffHunkPreviewProps {
   /** Raw diff hunk string (unified diff format). */
@@ -98,7 +98,7 @@ export const DiffHunkPreview: React.FC<DiffHunkPreviewProps> = ({
       });
     });
     return () => cancelAnimationFrame(rafId);
-  }, [resolvedMode, state.fontFamily, state.fontSize]);
+  }, [resolvedMode, colorTheme, state.fontFamily, state.fontSize]);
 
   if (!fileDiff) {
     return (
@@ -119,7 +119,7 @@ export const DiffHunkPreview: React.FC<DiffHunkPreviewProps> = ({
           options={{
             themeType: pierreTheme.type,
             unsafeCSS: pierreTheme.css,
-            ...(SHIKI_THEME_MAP[colorTheme] && { theme: SHIKI_THEME_MAP[colorTheme] }),
+            ...(resolveSyntaxTheme(colorTheme, resolvedMode ?? 'dark') && { theme: resolveSyntaxTheme(colorTheme, resolvedMode ?? 'dark') }),
             diffStyle: 'unified',
             disableLineNumbers: true,
             overflow: 'wrap',

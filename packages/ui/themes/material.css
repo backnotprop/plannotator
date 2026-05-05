@@ -34,13 +34,13 @@
 
 .theme-material.light {
   --background: #FAFAFA;
-  --foreground: #90A4AE;
+  --foreground: #546E7A;
   --card: #F0F4F5;
-  --card-foreground: #90A4AE;
+  --card-foreground: #546E7A;
   --popover: #FAFAFA;
-  --popover-foreground: #90A4AE;
+  --popover-foreground: #546E7A;
   --primary: #80CBC4;
-  --primary-foreground: #FAFAFA;
+  --primary-foreground: #263238;
   --secondary: #E8EDEF;
   --secondary-foreground: #758a95;
   --muted: #EEEEEE;

@@ -1,43 +1,49 @@
 import { useState, useEffect } from 'react';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 
-export const SHIKI_THEME_MAP: Record<string, { dark: string; light: string }> = {
-  'andromeeda': { dark: 'andromeeda', light: 'andromeeda' },
-  'aurora-x': { dark: 'aurora-x', light: 'aurora-x' },
-  'ayu-dark': { dark: 'ayu-dark', light: 'ayu-dark' },
+export const SHIKI_THEME_MAP: Record<string, { dark: string | null; light: string | null }> = {
+  'andromeeda': { dark: 'andromeeda', light: null },
+  'aurora-x': { dark: 'aurora-x', light: null },
+  'ayu-dark': { dark: 'ayu-dark', light: null },
   'catppuccin': { dark: 'catppuccin-mocha', light: 'catppuccin-latte' },
   'dark-plus': { dark: 'dark-plus', light: 'light-plus' },
-  'dracula': { dark: 'dracula', light: 'dracula' },
+  'dracula': { dark: 'dracula', light: null },
   'everforest': { dark: 'everforest-dark', light: 'everforest-light' },
   'everforest-hard': { dark: 'everforest-dark', light: 'everforest-light' },
   'everforest-soft': { dark: 'everforest-dark', light: 'everforest-light' },
   'github': { dark: 'github-dark', light: 'github-light' },
   'gruvbox': { dark: 'gruvbox-dark-medium', light: 'gruvbox-light-medium' },
-  'houston': { dark: 'houston', light: 'houston' },
-  'kanagawa-dragon': { dark: 'kanagawa-dragon', light: 'kanagawa-dragon' },
-  'kanagawa-lotus': { dark: 'kanagawa-lotus', light: 'kanagawa-lotus' },
-  'kanagawa-wave': { dark: 'kanagawa-wave', light: 'kanagawa-wave' },
-  'laserwave': { dark: 'laserwave', light: 'laserwave' },
+  'houston': { dark: 'houston', light: null },
+  'kanagawa-dragon': { dark: 'kanagawa-dragon', light: null },
+  'kanagawa-lotus': { dark: null, light: 'kanagawa-lotus' },
+  'kanagawa-wave': { dark: 'kanagawa-wave', light: null },
+  'laserwave': { dark: 'laserwave', light: null },
   'material': { dark: 'material-theme', light: 'material-theme-lighter' },
   'min': { dark: 'min-dark', light: 'min-light' },
-  'monokai-pro': { dark: 'monokai', light: 'monokai' },
-  'night-owl': { dark: 'night-owl', light: 'night-owl' },
-  'nord': { dark: 'nord', light: 'nord' },
-  'one-dark-pro': { dark: 'one-dark-pro', light: 'one-dark-pro' },
-  'one-light': { dark: 'one-light', light: 'one-light' },
-  'plastic': { dark: 'plastic', light: 'plastic' },
-  'poimandres': { dark: 'poimandres', light: 'poimandres' },
-  'red': { dark: 'red', light: 'red' },
+  'monokai-pro': { dark: 'monokai', light: null },
+  'night-owl': { dark: 'night-owl', light: null },
+  'nord': { dark: 'nord', light: null },
+  'one-dark-pro': { dark: 'one-dark-pro', light: null },
+  'one-light': { dark: null, light: 'one-light' },
+  'plastic': { dark: 'plastic', light: null },
+  'poimandres': { dark: 'poimandres', light: null },
+  'red': { dark: 'red', light: null },
   'rose-pine': { dark: 'rose-pine', light: 'rose-pine-dawn' },
   'slack': { dark: 'slack-dark', light: 'slack-ochin' },
-  'snazzy-light': { dark: 'snazzy-light', light: 'snazzy-light' },
+  'snazzy-light': { dark: null, light: 'snazzy-light' },
   'solarized': { dark: 'solarized-dark', light: 'solarized-light' },
-  'synthwave-84': { dark: 'synthwave-84', light: 'synthwave-84' },
-  'tokyo-night': { dark: 'tokyo-night', light: 'tokyo-night' },
-  'vesper': { dark: 'vesper', light: 'vesper' },
+  'synthwave-84': { dark: 'synthwave-84', light: null },
+  'tokyo-night': { dark: 'tokyo-night', light: null },
+  'vesper': { dark: 'vesper', light: null },
   'vitesse': { dark: 'vitesse-dark', light: 'vitesse-light' },
-  'vitesse-black': { dark: 'vitesse-black', light: 'vitesse-black' },
+  'vitesse-black': { dark: 'vitesse-black', light: null },
 };
+
+export function resolveSyntaxTheme(colorTheme: string, mode: 'dark' | 'light'): { dark: string; light: string } | undefined {
+  const map = SHIKI_THEME_MAP[colorTheme];
+  if (!map || !map[mode]) return undefined;
+  return { dark: map.dark || 'pierre-dark', light: map.light || 'pierre-light' };
+}
 
 export interface PierreTheme {
   type: 'dark' | 'light';
@@ -55,8 +61,8 @@ export function usePierreTheme(options?: { fontFamily?: string; fontSize?: strin
     const styles = getComputedStyle(document.documentElement);
     const bg = styles.getPropertyValue('--background').trim();
     const fg = styles.getPropertyValue('--foreground').trim();
-    if (!bg || !fg) return { type: resolvedMode ?? 'dark', css: '', syntaxTheme: SHIKI_THEME_MAP[colorTheme] };
-    return { type: resolvedMode ?? 'dark', syntaxTheme: SHIKI_THEME_MAP[colorTheme], css: `
+    if (!bg || !fg) return { type: resolvedMode ?? 'dark', css: '', syntaxTheme: resolveSyntaxTheme(colorTheme, resolvedMode ?? 'dark') };
+    return { type: resolvedMode ?? 'dark', syntaxTheme: resolveSyntaxTheme(colorTheme, resolvedMode ?? 'dark'), css: `
       :host, [data-diff], [data-file], [data-diffs-header], [data-error-wrapper], [data-virtualizer-buffer] {
         --diffs-bg: ${bg} !important; --diffs-fg: ${fg} !important;
         --diffs-dark-bg: ${bg}; --diffs-light-bg: ${bg}; --diffs-dark: ${fg}; --diffs-light: ${fg};
@@ -82,7 +88,7 @@ export function usePierreTheme(options?: { fontFamily?: string; fontSize?: strin
 
       setPierreTheme({
         type: resolvedMode,
-        syntaxTheme: SHIKI_THEME_MAP[colorTheme],
+        syntaxTheme: resolveSyntaxTheme(colorTheme, resolvedMode),
         css: `
           :host, [data-diff], [data-file], [data-diffs-header], [data-error-wrapper], [data-virtualizer-buffer] {
             --diffs-bg: ${bg} !important;
