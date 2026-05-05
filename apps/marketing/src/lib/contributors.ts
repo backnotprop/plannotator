@@ -3,18 +3,49 @@
 
 type Person = { login: string; avatarUrl: string; url: string };
 
-let cached: Person[] | null = null;
+export interface Contributors {
+  authors: Person[];
+  community: Person[];
+}
+
+let cached: Contributors | null = null;
 
 const COAUTHOR_RE = /^Co-authored-by:\s*.+?\s*<([^>]+)>\s*$/gim;
+const NOREPLY_RE = /^(\d+)\+([^@]+)@users\.noreply\.github\.com$/;
 
-export async function getContributors(): Promise<Person[]> {
+async function fetchJSON(url: string, headers: Record<string, string>) {
+  const res = await fetch(url, { headers });
+  return res.ok ? res.json() : null;
+}
+
+export async function getContributors(): Promise<Contributors> {
   if (cached) return cached;
 
-  const people = new Map<string, Person>();
+  const authors = new Map<string, Person>();
+  const headers: Record<string, string> = { 'Accept': 'application/vnd.github.v3+json' };
   const token = import.meta.env.GITHUB_TOKEN || process.env.GITHUB_TOKEN;
+  if (token) headers['Authorization'] = `bearer ${token}`;
+
+  // REST /contributors covers the full commit history (not just last 100).
+  try {
+    const data = await fetchJSON(
+      'https://api.github.com/repos/backnotprop/plannotator/contributors?per_page=100',
+      headers,
+    );
+    if (data) {
+      for (const c of data) {
+        if (c.type === 'User' && c.login) {
+          authors.set(c.login, { login: c.login, avatarUrl: c.avatar_url, url: c.html_url });
+        }
+      }
+    }
+  } catch {}
+
+  const community = new Map<string, Person>();
 
   if (token) {
-    const coAuthorEmails = new Set<string>();
+    // GraphQL adds issue authors, discussion participants, and commit messages
+    // for Co-authored-by parsing — none of which REST /contributors provides.
     try {
       const query = `{
         repository(owner: "backnotprop", name: "plannotator") {
@@ -22,10 +53,7 @@ export async function getContributors(): Promise<Person[]> {
             target {
               ... on Commit {
                 history(first: 100) {
-                  nodes {
-                    author { user { login avatarUrl url } }
-                    message
-                  }
+                  nodes { message }
                 }
               }
             }
@@ -46,73 +74,54 @@ export async function getContributors(): Promise<Person[]> {
       if (res.ok) {
         const json = await res.json();
         const repo = json.data?.repository;
+
+        // Parse co-author emails from commit messages
+        const coAuthorEmails = new Set<string>();
         for (const node of repo?.defaultBranchRef?.target?.history?.nodes || []) {
-          const u = node?.author?.user;
-          if (u?.login) people.set(u.login, u);
           const message: string = node?.message || '';
           for (const match of message.matchAll(COAUTHOR_RE)) {
             coAuthorEmails.add(match[1].toLowerCase());
           }
         }
 
-        // Resolve co-author emails before processing issues/discussions so
-        // they appear alongside commit authors in the natural recency order.
+        // Resolve co-author emails — these are code authors too
         for (const email of coAuthorEmails) {
-          try {
-            const r = await fetch(
-              `https://api.github.com/search/users?q=${encodeURIComponent(email)}+in:email`,
-              {
-                headers: {
-                  'Authorization': `bearer ${token}`,
-                  'Accept': 'application/vnd.github.v3+json',
-                },
-              },
-            );
-            if (r.ok) {
-              const j = await r.json();
-              const item = j?.items?.[0];
-              if (item?.login && item?.type === 'User' && !people.has(item.login)) {
-                people.set(item.login, {
-                  login: item.login,
-                  avatarUrl: item.avatar_url,
-                  url: item.html_url,
-                });
+          if (email.includes('noreply.github.com')) {
+            const m = NOREPLY_RE.exec(email);
+            if (m && !authors.has(m[2])) {
+              const user = await fetchJSON(`https://api.github.com/users/${m[2]}`, headers);
+              if (user?.login && user?.type === 'User') {
+                authors.set(user.login, { login: user.login, avatarUrl: user.avatar_url, url: user.html_url });
               }
             }
-          } catch {}
+          } else {
+            const data = await fetchJSON(
+              `https://api.github.com/search/users?q=${encodeURIComponent(email)}+in:email`,
+              headers,
+            );
+            const item = data?.items?.[0];
+            if (item?.login && item?.type === 'User' && !authors.has(item.login)) {
+              authors.set(item.login, { login: item.login, avatarUrl: item.avatar_url, url: item.html_url });
+            }
+          }
         }
 
+        // Issue and discussion authors who aren't code contributors
         for (const node of repo?.issues?.nodes || []) {
           const u = node?.author;
-          if (u?.login) people.set(u.login, u);
+          if (u?.login && !authors.has(u.login)) community.set(u.login, u);
         }
         for (const node of repo?.discussions?.nodes || []) {
           const u = node?.author;
-          if (u?.login) people.set(u.login, u);
-        }
-      }
-    } catch {}
-  } else {
-    try {
-      const res = await fetch(
-        'https://api.github.com/repos/backnotprop/plannotator/contributors?per_page=100',
-        { headers: { 'Accept': 'application/vnd.github.v3+json' } },
-      );
-      if (res.ok) {
-        const data = await res.json();
-        for (const c of data) {
-          if (c.type === 'User' && c.login) {
-            people.set(c.login, {
-              login: c.login,
-              avatarUrl: c.avatar_url,
-              url: c.html_url,
-            });
-          }
+          if (u?.login && !authors.has(u.login)) community.set(u.login, u);
         }
       }
     } catch {}
   }
 
-  cached = [...people.values()];
+  cached = {
+    authors: [...authors.values()],
+    community: [...community.values()],
+  };
   return cached;
 }

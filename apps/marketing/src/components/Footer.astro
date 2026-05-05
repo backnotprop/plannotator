@@ -2,7 +2,7 @@
 import { getContributors } from '../lib/contributors';
 
 const year = new Date().getFullYear();
-const contributors = await getContributors();
+const { authors, community } = await getContributors();
 ---
 <footer class="py-10 px-8 border-t border-border/30">
   <div class="grid grid-cols-2 sm:grid-cols-3 gap-6 mb-6 text-sm">
@@ -50,11 +50,11 @@ const contributors = await getContributors();
   </p>
 </footer>
 
-{contributors.length > 0 && (
-  <div class="pt-6 pb-12 px-8 border-t border-border/20">
+{authors.length > 0 && (
+  <div class="pt-6 pb-8 px-8 border-t border-border/20">
     <p class="text-[0.6875rem] text-muted-foreground/40 text-center mb-4">Built by</p>
     <div class="flex flex-wrap items-center justify-center gap-2">
-      {contributors.map((c) => (
+      {authors.map((c) => (
         <a
           href={c.url}
           target="_blank"
@@ -67,6 +67,32 @@ const contributors = await getContributors();
             alt={c.login}
             width="36"
             height="36"
+            loading="lazy"
+            class="rounded-full"
+          />
+        </a>
+      ))}
+    </div>
+  </div>
+)}
+
+{community.length > 0 && (
+  <div class="pt-4 pb-12 px-8">
+    <p class="text-[0.6875rem] text-muted-foreground/40 text-center mb-4">With contributions from</p>
+    <div class="flex flex-wrap items-center justify-center gap-1.5">
+      {community.map((c) => (
+        <a
+          href={c.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={`@${c.login}`}
+          class="contributor-avatar"
+        >
+          <img
+            src={`${c.avatarUrl}&s=56`}
+            alt={c.login}
+            width="28"
+            height="28"
             loading="lazy"
             class="rounded-full"
           />
