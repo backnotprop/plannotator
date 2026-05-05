@@ -73,6 +73,7 @@ export interface PlannotatorReviewResultEvent {
 	savedPath?: string;
 	agentSwitch?: string;
 	permissionMode?: string;
+	clearContextNudge?: boolean;
 }
 
 export interface PlannotatorReviewStatusPayload {
@@ -248,6 +249,7 @@ export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
 							savedPath: result.savedPath,
 							agentSwitch: result.agentSwitch,
 							permissionMode: result.permissionMode,
+							clearContextNudge: result.clearContextNudge,
 						} satisfies PlannotatorReviewResultEvent;
 						setStoredReviewStatus(session.reviewId, { status: "completed", ...reviewResult });
 						pi.events.emit(PLANNOTATOR_REVIEW_RESULT_CHANNEL, reviewResult);

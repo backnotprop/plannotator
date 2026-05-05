@@ -78,6 +78,7 @@ import type { PlanDiffMode } from '@plannotator/ui/components/plan-diff/PlanDiff
 import { DEMO_PLAN_CONTENT as DEFAULT_DEMO_PLAN_CONTENT } from './demoPlan';
 import { DIFF_DEMO_PLAN_CONTENT } from './demoPlanDiffDemo';
 import { canUseAnnotateWideMode, resolveWideModeExitLayout, type WideModeLayoutSnapshot, type WideModeType } from './wideMode';
+import { buildApprovalRequestBody, type ApprovalOverride } from './approvalBody';
 const USE_DIFF_DEMO =
   import.meta.env.VITE_DIFF_DEMO === '1' ||
   import.meta.env.VITE_DIFF_DEMO === 'true';
@@ -961,14 +962,6 @@ const App: React.FC = () => {
       const autoSaveResults = bearSettings.autoSave && autoSavePromiseRef.current
         ? await autoSavePromiseRef.current
         : autoSaveResultsRef.current;
-
-      // Build request body - include integrations if enabled
-      const body: { obsidian?: object; bear?: object; octarine?: object; feedback?: string; agentSwitch?: string; planSave?: { enabled: boolean; customPath?: string }; permissionMode?: string } = {};
-
-      // Include permission mode for Claude Code
-      if (origin === 'claude-code') {
-        body.permissionMode = permissionMode;
-      }
 
       const effectiveAgent = getEffectiveAgentName(getAgentSwitchSettings());
       const body = buildApprovalRequestBody({
