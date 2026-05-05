@@ -534,12 +534,94 @@ rm -rf "$HOME/.cache/opencode/node_modules/@plannotator" "$HOME/.cache/opencode/
 # Clear Pi jiti cache to force fresh download on next run
 rm -rf /tmp/jiti 2>/dev/null || true
 
-# Update Pi extension if pi is installed
-if command -v pi &>/dev/null; then
+plannotator_shared_agent_skills_available() {
+    local agents_skills_dir="$HOME/.agents/skills"
+
+    [ -f "$agents_skills_dir/plannotator-compound/SKILL.md" ] &&
+        [ -f "$agents_skills_dir/plannotator-setup-goal/SKILL.md" ]
+}
+
+configure_pi_plannotator_package_filter() {
+    local pi_agent_dir="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+    local pi_settings="$pi_agent_dir/settings.json"
+
+    if [ ! -f "$pi_settings" ]; then
+        return 0
+    fi
+
+    if ! command -v node &>/dev/null; then
+        echo "Skipping Pi settings update (node not found)"
+        return 0
+    fi
+
+    node - "$pi_settings" <<'NODE' || echo "Skipping Pi settings update (could not rewrite settings.json)"
+const fs = require("fs");
+
+const settingsPath = process.argv[2];
+const packagePattern = /^(?:npm:)?@plannotator\/pi-extension(?:@.+)?$/;
+
+let settings;
+try {
+  settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+} catch {
+  console.log("Skipping Pi settings update (could not parse settings.json)");
+  process.exit(0);
+}
+
+if (!settings || !Array.isArray(settings.packages)) {
+  process.exit(0);
+}
+
+let changed = false;
+settings.packages = settings.packages.map((entry) => {
+  if (typeof entry === "string" && packagePattern.test(entry)) {
+    changed = true;
+    return { source: entry, skills: [] };
+  }
+
+  if (
+    entry &&
+    typeof entry === "object" &&
+    typeof entry.source === "string" &&
+    packagePattern.test(entry.source)
+  ) {
+    if (!Array.isArray(entry.skills) || entry.skills.length !== 0) {
+      changed = true;
+      return { ...entry, skills: [] };
+    }
+  }
+
+  return entry;
+});
+
+if (!changed) {
+  process.exit(0);
+}
+
+const tmpPath = `${settingsPath}.${process.pid}.tmp`;
+fs.writeFileSync(tmpPath, `${JSON.stringify(settings, null, 2)}\n`);
+fs.renameSync(tmpPath, settingsPath);
+console.log("Configured Pi to use global Plannotator skills and skip bundled package skills.");
+NODE
+}
+
+update_pi_extension_if_present() {
+    if ! command -v pi &>/dev/null; then
+        return 0
+    fi
+
     echo "Updating Pi extension..."
-    pi install npm:@plannotator/pi-extension
-    echo "Pi extension updated."
-fi
+    if pi install npm:@plannotator/pi-extension; then
+        if plannotator_shared_agent_skills_available; then
+            configure_pi_plannotator_package_filter
+        else
+            echo "Leaving Pi bundled skills enabled (global Plannotator agent skills not found)."
+        fi
+        echo "Pi extension updated."
+    else
+        echo "Skipping Pi settings update (pi install failed)"
+    fi
+}
 
 # Install /review slash command
 CLAUDE_COMMANDS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/commands"
@@ -724,6 +806,11 @@ if command -v git &>/dev/null; then
 else
     echo "Skipping skills install (git not found)"
 fi
+
+# Update Pi extension if pi is installed. When global shared skills are
+# available, keep the extension commands but disable its bundled skill copy to
+# avoid duplicate Pi skill warnings.
+update_pi_extension_if_present
 
 # --- Gemini CLI support (only if Gemini is installed) ---
 if [ -d "$HOME/.gemini" ]; then
