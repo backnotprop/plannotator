@@ -1,6 +1,6 @@
 import { normalizeEditPermission } from "./plan-mode";
 
-export type WorkflowMode = "manual" | "plan-agent" | "all-agents";
+export type WorkflowMode = "manual" | "user-managed" | "plan-agent" | "all-agents";
 
 export interface PlannotatorOpenCodeOptions {
   workflow?: unknown;
@@ -13,7 +13,7 @@ export interface NormalizedWorkflowOptions {
   planningAgentSet: Set<string>;
 }
 
-const WORKFLOWS = new Set<WorkflowMode>(["manual", "plan-agent", "all-agents"]);
+const WORKFLOWS = new Set<WorkflowMode>(["manual", "user-managed", "plan-agent", "all-agents"]);
 const DEFAULT_WORKFLOW: WorkflowMode = "plan-agent";
 const DEFAULT_PLANNING_AGENTS = ["plan"];
 const BUILTIN_PLAN_AGENT = "plan";
@@ -80,15 +80,19 @@ export function shouldRegisterSubmitPlan(options: NormalizedWorkflowOptions): bo
   return options.workflow !== "manual";
 }
 
+export function shouldModifyPrompts(options: NormalizedWorkflowOptions): boolean {
+  return options.workflow !== "manual" && options.workflow !== "user-managed";
+}
+
 export function shouldApplyToolDefinitionRewrites(options: NormalizedWorkflowOptions): boolean {
-  return options.workflow !== "manual";
+  return options.workflow !== "manual" && options.workflow !== "user-managed";
 }
 
 export function shouldInjectFullPlanningPrompt(
   agentName: string | undefined,
   options: NormalizedWorkflowOptions,
 ): boolean {
-  return options.workflow !== "manual" && isPlanningAgent(agentName, options);
+  return shouldModifyPrompts(options) && isPlanningAgent(agentName, options);
 }
 
 export function shouldInjectGenericPlanReminder(
@@ -114,7 +118,7 @@ export function applyWorkflowConfig(
   options: NormalizedWorkflowOptions,
   allowSubagents: boolean,
 ): void {
-  if (options.workflow === "manual") return;
+  if (options.workflow === "manual" || options.workflow === "user-managed") return;
 
   if (!allowSubagents) {
     const existingPrimaryTools = opencodeConfig.experimental?.primary_tools ?? [];

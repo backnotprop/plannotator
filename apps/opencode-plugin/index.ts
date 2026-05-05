@@ -74,6 +74,7 @@ import {
   shouldApplyToolDefinitionRewrites,
   shouldInjectFullPlanningPrompt,
   shouldInjectGenericPlanReminder,
+  shouldModifyPrompts,
   shouldRegisterSubmitPlan,
   shouldRejectSubmitPlanForAgent,
   type PlannotatorOpenCodeOptions,
@@ -259,7 +260,7 @@ export const PlannotatorPlugin: Plugin = async (ctx, rawOptions?: PlannotatorOpe
     // that allows markdown file writing. OpenCode's original blocks ALL file edits,
     // but we need the agent to write plans, specs, docs, etc.
     "experimental.chat.messages.transform": async (input, output) => {
-      if (workflowOptions.workflow === "manual") return;
+      if (!shouldModifyPrompts(workflowOptions)) return;
 
       const lastUserAgent = getLastUserAgentFromMessages(output.messages);
       if (
@@ -313,7 +314,7 @@ tools (except writing markdown files), or otherwise make changes to the system.
 
     // Inject planning instructions into system prompt
     "experimental.chat.system.transform": async (input, output) => {
-      if (workflowOptions.workflow === "manual") return;
+      if (!shouldModifyPrompts(workflowOptions)) return;
 
       const systemText = output.system.join("\n");
       if (systemText.toLowerCase().includes("title generator") || systemText.toLowerCase().includes("generate a title")) {
