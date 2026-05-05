@@ -1,0 +1,96 @@
+---
+id: TASK-S-6
+trackerStatus:
+  type: task
+title: S-6 Define the CLI surface around the daemon
+description: 'Refactor the CLI entrypoint so the daemon becomes the public interface
+  and the stable user-facing API.  Command matrix:'
+successCriteria:
+- The public CLI surface exposes daemon lifecycle, status, submit, review, annotate, wait, clear, and open commands around the daemon model.
+- 'Collision output, reconnect behavior, exit codes, and `--json` behavior match the accepted CLI contract rather than legacy hook-only behavior.'
+- A shared daemon bootstrap path starts or reaches the daemon consistently before CLI commands proceed.
+- The targeted proof for [[TASK-TDD-S-6]] passes without weakening command-surface or collision UX assertions.
+tags:
+- FEATURE-DAEMON-REFACTOR
+- PLAN-NIM-R
+- PHASE-2
+status: needs-review
+parents:
+- '[[PHASE-2]]'
+dependsOn:
+- '[[TASK-S-4]]'
+- '[[TASK-S-5]]'
+- '[[TASK-TDD-S-6]]'
+---
+
+## Description
+- `plannotator daemon start`: start detached, idempotent, print port and URL.
+- `plannotator daemon start --foreground`: internal foreground entrypoint for the spawned daemon process.
+- `plannotator daemon stop`: stop daemon, idempotent.
+- `plannotator daemon status`: print running or not running, URL, and current state summary. Exit 0 when running, 1 when not.
+- `plannotator status`: alias for daemon status plus one-line active document summary.
+- `plannotator submit <file> [--mode plan|annotate] [--no-browser] [--commit-message <msg>]`: auto-start daemon, POST submit, block on wait, return verdict.
+- `plannotator review [--diff-type uncommitted|staged|unstaged|last-commit|branch]`: submit captured diff as review mode.
+- `plannotator annotate <file>`: submit annotation target as annotate mode.
+- `plannotator wait`: consume buffered verdict or block for an active review.
+- `plannotator clear [--force]`: preview what would be cleared unless forced, then reset daemon state.
+- `plannotator open`: open the daemon URL in a browser.
+
+Required behaviors:
+- Implement a shared `withDaemon(fn)` helper that starts the daemon when needed and waits for liveness.
+- Render structured 409 collisions with doc title, mode, submit time, current status, resume URL, and literal `plannotator clear --force` guidance.
+- Implement CLI-side SSE handling with one retry; after a second drop, exit with a clear lost-connection error.
+- Document exit codes in `--help`: 0 approved, 1 denied, 2 illegal-state rejection, 3 daemon failure, 130 cancelled.
+- Remove legacy `plannotator sessions` subcommands.
+
+Why this matters:
+- This is the primary human interface to the daemon, and the 409 error path is one of the most important UX surfaces in the project.
+## Comments
+
+### Comment (2026-05-01T00:25:27.504Z)
+
+Delegated [[TASK-S-6]] after accepting [[TASK-TDD-S-6]] proof commit `f7f39ea` and checkpointing `main` at `846f233`. Verification target for this implementation is `bun test tests/nim-18.cli-contract-proof.test.ts`.
+
+### Comment (2026-05-01T04:53:19.607Z)
+
+Accepted child implementation commit `cfaa7a0` and integrated it into `main`. Verification in `main` is running against `bun test tests/nim-18.cli-contract-proof.test.ts`.
+
+## Activity Log
+
+- 2026-04-29T02:30:11.186Z: created
+- 2026-04-29T02:34:07.787Z: updated (description) -> Parent plan: [[PLAN-NIM-R]]
+
+Refactor the CLI entrypoint so the daemon becomes the public interface and the stable user-facing API.
+
+Command matrix:
+- `plannotator daemon start`: start detached, idempotent, print port and URL.
+- `plannotator daemon start --foreground`: internal foreground entrypoint for the spawned daemon process.
+- `plannotator daemon stop`: stop daemon, idempotent.
+- `plannotator daemon status`: print running or not running, URL, and current state summary. Exit 0 when running, 1 when not.
+- `plannotator status`: alias for daemon status plus one-line active document summary.
+- `plannotator submit <file> [--mode plan|annotate] [--no-browser] [--commit-message <msg>]`: auto-start daemon, POST submit, block on wait, return verdict.
+- `plannotator review [--diff-type uncommitted|staged|unstaged|last-commit|branch]`: submit captured diff as review mode.
+- `plannotator annotate <file>`: submit annotation target as annotate mode.
+- `plannotator wait`: consume buffered verdict or block for an active review.
+- `plannotator clear [--force]`: preview what would be cleared unless forced, then reset daemon state.
+- `plannotator open`: open the daemon URL in a browser.
+
+Required behaviors:
+- Implement a shared `withDaemon(fn)` helper that starts the daemon when needed and waits for liveness.
+- Render structured 409 collisions with doc title, mode, submit time, current status, resume URL, and literal `plannotator clear --force` guidance.
+- Implement CLI-side SSE handling with one retry; after a second drop, exit with a clear lost-connection error.
+- Document exit codes in `--help`: 0 approved, 1 denied, 2 illegal-state rejection, 3 daemon failure, 130 cancelled.
+- Remove legacy `plannotator sessions` subcommands.
+
+Why this matters:
+- This is the primary human interface to the daemon, and the 409 error path is one of the most important UX surfaces in the project.
+- 2026-04-29T03:11:54.188Z: updated (complexityScore) -> 78
+- 2026-05-01T00:25:19.238Z: status_changed (status) -> in-progress
+- 2026-05-01T00:25:19.238Z: updated (progress) -> 1
+- 2026-05-01T00:25:27.239Z: status_changed (status) -> in-progress
+- 2026-05-01T00:25:27.239Z: updated (owner) -> child-session:ec8824e7-c8a1-4416-9886-b334c0a06e89 (gpt-5.4)
+- 2026-05-01T00:25:27.239Z: updated (progress) -> 1
+- 2026-05-01T00:25:27.504Z: commented
+- 2026-05-01T04:53:19.333Z: status_changed (status) -> needs-review
+- 2026-05-01T04:53:19.333Z: updated (progress) -> 100
+- 2026-05-01T04:53:19.608Z: commented

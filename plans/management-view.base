@@ -2,6 +2,7 @@ filters:
   and:
     - file.inFolder("plans")
     - '!file.name.startsWith("management-view")'
+    - '!file.name.startsWith("plan-dag")'
 views:
   - type: branches-tree
     name: Planning Tree

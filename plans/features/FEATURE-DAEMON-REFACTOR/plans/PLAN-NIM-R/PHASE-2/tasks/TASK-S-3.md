@@ -1,0 +1,70 @@
+---
+id: TASK-S-3
+trackerStatus:
+  type: task
+title: S-3 Refactor per-mode servers into a multiplexed router
+description: Unify the existing plan, review, and annotate server routers behind one
+  daemon fetch handler.
+successCriteria:
+- A multiplexed daemon router serves plan, review, and annotate flows behind one daemon fetch surface.
+- Mode-sensitive endpoints read daemon state rather than per-invocation closure state and reject mismatches with the accepted 409 behavior.
+- Browser actions update daemon state through event-bus-driven verdict handling instead of per-invocation shutdown promises.
+- The targeted proof for [[TASK-TDD-S-3]] passes without weakening the accepted router test surface.
+tags:
+- FEATURE-DAEMON-REFACTOR
+- PLAN-NIM-R
+- PHASE-2
+status: needs-review
+parents:
+- '[[PHASE-2]]'
+dependsOn:
+- '[[TASK-S-1]]'
+- '[[TASK-TDD-S-3]]'
+---
+
+## Subtasks
+- Extract a `createDaemonRouter(state, eventBus)` that owns the combined Bun fetch handling.
+- Move the overlapping endpoints into the daemon router and have them read from daemon state instead of closure-captured per-invocation locals.
+- Return 409 for mode-specific endpoints when the active state does not match the requested mode.
+- Serve the matching UI bundle at `/` based on the active mode.
+- Replace closure-promise resolution with event-bus-driven approve/deny/cancel handling.
+- Remove `/api/shutdown`; browser actions should update state only.
+
+Dependency notes:
+- This should be built directly on top of the state module so endpoint behavior stays consistent with the daemon lifecycle and wait semantics.
+## Comments
+
+### Comment (2026-04-30T16:29:06.563Z)
+
+Delegated [[TASK-S-3]] implementation to child session `4aec33b5-707b-4fa9-a031-1ae5f0bfa30f` (`gpt-5.4`) in worktree `/home/dzack/gitclones/plannotator-dzg-fork_worktrees/cool-lake`.
+
+Handoff included:
+- full [[TASK-S-3]] tracker specification
+- [[TASK-TDD-S-3]] proof context and accepted commit `39b000a`
+- explicit instruction not to rewrite or weaken the accepted proof
+- required verification via `bun test tests/nim-15.multiplexed-router-proof.test.ts`
+
+### Comment (2026-04-30T17:12:02.834Z)
+
+Accepted delegated [[TASK-S-3]] implementation and integrated it into `main` as commit `2662e03` (`feat: add multiplexed daemon router`).
+
+Final acceptance phase:
+- `bun test tests/nim-15.multiplexed-router-proof.test.ts`
+- result: 6 pass, 0 fail
+
+Outcome:
+- multiplexed daemon router implemented
+- mode-sensitive 409 behavior, bundle serving, and no-shutdown behavior satisfy the [[TASK-TDD-S-3]] proof surface
+- ready for next dependent proof task ([[TASK-TDD-S-4]])
+
+## Activity Log
+
+- 2026-04-29T02:29:48.067Z: created
+- 2026-04-29T03:11:45.315Z: updated (complexityScore) -> 91
+- 2026-04-30T16:29:06.325Z: status_changed (status) -> in-progress
+- 2026-04-30T16:29:06.325Z: updated (owner) -> child-session:4aec33b5-707b-4fa9-a031-1ae5f0bfa30f (gpt-5.4)
+- 2026-04-30T16:29:06.325Z: updated (progress) -> 1
+- 2026-04-30T16:29:06.563Z: commented
+- 2026-04-30T17:12:02.604Z: status_changed (status) -> needs-review
+- 2026-04-30T17:12:02.605Z: updated (progress) -> 100
+- 2026-04-30T17:12:02.834Z: commented
