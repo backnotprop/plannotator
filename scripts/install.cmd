@@ -486,6 +486,17 @@ for %%S in (plannotator-review plannotator-annotate plannotator-last) do (
 )
 if "!LEGACY_SKILLS_REMOVED!"=="1" echo Removed legacy Plannotator skills from !LEGACY_AGENTS_SKILLS_DIR!
 
+REM Remove Plannotator skills that belong in the shared agent scope from Codex.
+set "STALE_CODEX_SKILLS_DIR=%USERPROFILE%\.codex\skills"
+set "STALE_CODEX_SKILLS_REMOVED=0"
+for %%S in (plannotator-compound plannotator-setup-goal) do (
+    if exist "!STALE_CODEX_SKILLS_DIR!\%%S" (
+        rmdir /s /q "!STALE_CODEX_SKILLS_DIR!\%%S" >nul 2>&1
+        set "STALE_CODEX_SKILLS_REMOVED=1"
+    )
+)
+if "!STALE_CODEX_SKILLS_REMOVED!"=="1" echo Removed shared-agent Plannotator skills from !STALE_CODEX_SKILLS_DIR!
+
 where git >nul 2>&1
 if !ERRORLEVEL! equ 0 (
     if defined CLAUDE_CONFIG_DIR (
@@ -494,6 +505,7 @@ if !ERRORLEVEL! equ 0 (
         set "CLAUDE_SKILLS_DIR=%USERPROFILE%\.claude\skills"
     )
     set "CODEX_SKILLS_DIR=%USERPROFILE%\.codex\skills"
+    set "AGENTS_SKILLS_DIR=%USERPROFILE%\.agents\skills"
     set "SKILLS_TMP=%TEMP%\plannotator-skills-%RANDOM%"
     mkdir "!SKILLS_TMP!" >nul 2>&1
 
@@ -505,9 +517,14 @@ if !ERRORLEVEL! equ 0 (
         if exist "apps\skills" (
             if not exist "!CLAUDE_SKILLS_DIR!" mkdir "!CLAUDE_SKILLS_DIR!"
             if not exist "!CODEX_SKILLS_DIR!" mkdir "!CODEX_SKILLS_DIR!"
+            if not exist "!AGENTS_SKILLS_DIR!" mkdir "!AGENTS_SKILLS_DIR!"
             xcopy /s /y /q "apps\skills\*" "!CLAUDE_SKILLS_DIR!\" >nul 2>&1
-            xcopy /s /y /q "apps\skills\*" "!CODEX_SKILLS_DIR!\" >nul 2>&1
-            echo Installed skills to !CLAUDE_SKILLS_DIR!\ and !CODEX_SKILLS_DIR!\
+            xcopy /s /i /y /q "apps\skills\plannotator-review" "!CODEX_SKILLS_DIR!\plannotator-review\" >nul 2>&1
+            xcopy /s /i /y /q "apps\skills\plannotator-annotate" "!CODEX_SKILLS_DIR!\plannotator-annotate\" >nul 2>&1
+            xcopy /s /i /y /q "apps\skills\plannotator-last" "!CODEX_SKILLS_DIR!\plannotator-last\" >nul 2>&1
+            xcopy /s /i /y /q "apps\skills\plannotator-compound" "!AGENTS_SKILLS_DIR!\plannotator-compound\" >nul 2>&1
+            xcopy /s /i /y /q "apps\skills\plannotator-setup-goal" "!AGENTS_SKILLS_DIR!\plannotator-setup-goal\" >nul 2>&1
+            echo Installed skills to !CLAUDE_SKILLS_DIR!\, Codex command skills to !CODEX_SKILLS_DIR!\, and shared agent skills to !AGENTS_SKILLS_DIR!\
         )
 
         popd

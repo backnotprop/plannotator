@@ -57,8 +57,15 @@ describe("install.sh", () => {
     expect(script).toContain("git sparse-checkout set apps/skills");
     expect(script).toContain("CLAUDE_SKILLS_DIR");
     expect(script).toContain("CODEX_SKILLS_DIR");
+    expect(script).toContain("AGENTS_SKILLS_DIR");
     expect(script).toContain("$HOME/.codex/skills");
-    expect(script).not.toContain('mkdir -p "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR"');
+    expect(script).toContain("$HOME/.agents/skills");
+    expect(script).toContain('cp -r apps/skills/plannotator-review "$CODEX_SKILLS_DIR/"');
+    expect(script).toContain('cp -r apps/skills/plannotator-annotate "$CODEX_SKILLS_DIR/"');
+    expect(script).toContain('cp -r apps/skills/plannotator-last "$CODEX_SKILLS_DIR/"');
+    expect(script).toContain('cp -r apps/skills/plannotator-compound "$AGENTS_SKILLS_DIR/"');
+    expect(script).toContain('cp -r apps/skills/plannotator-setup-goal "$AGENTS_SKILLS_DIR/"');
+    expect(script).not.toContain('cp -r apps/skills/* "$CODEX_SKILLS_DIR/"');
     expect(script).not.toContain('cp -r apps/skills/* "$AGENTS_SKILLS_DIR/"');
     expect(script).toContain('Skipping skills install (git not found)');
   });
@@ -68,6 +75,11 @@ describe("install.sh", () => {
     expect(script).toContain("plannotator-review plannotator-annotate plannotator-last");
     expect(script).not.toContain("plannotator-review plannotator-annotate plannotator-last plannotator-compound");
     expect(script).not.toContain("plannotator-review plannotator-annotate plannotator-last plannotator-setup-goal");
+  });
+
+  test("removes shared-agent Plannotator skills from Codex scope", () => {
+    expect(script).toContain("STALE_CODEX_SKILLS_DIR");
+    expect(script).toContain("plannotator-compound plannotator-setup-goal");
   });
 
   test("installs slash commands for Claude Code and OpenCode", () => {
@@ -158,8 +170,16 @@ describe("install.ps1", () => {
     expect(script).toContain("git sparse-checkout set apps/skills");
     expect(script).toContain("claudeSkillsDir");
     expect(script).toContain("codexSkillsDir");
+    expect(script).toContain("agentsSkillsDir");
     expect(script).toContain("$env:USERPROFILE\\.codex\\skills");
-    expect(script).not.toContain('$agentsSkillsDir = "$env:USERPROFILE\\.agents\\skills"');
+    expect(script).toContain("$env:USERPROFILE\\.agents\\skills");
+    expect(script).toContain('Copy-Item -Recurse -Force "apps\\skills\\plannotator-review" $codexSkillsDir');
+    expect(script).toContain('Copy-Item -Recurse -Force "apps\\skills\\plannotator-annotate" $codexSkillsDir');
+    expect(script).toContain('Copy-Item -Recurse -Force "apps\\skills\\plannotator-last" $codexSkillsDir');
+    expect(script).toContain('Copy-Item -Recurse -Force "apps\\skills\\plannotator-compound" $agentsSkillsDir');
+    expect(script).toContain('Copy-Item -Recurse -Force "apps\\skills\\plannotator-setup-goal" $agentsSkillsDir');
+    expect(script).not.toContain('Copy-Item -Recurse -Force "apps\\skills\\*" $codexSkillsDir');
+    expect(script).not.toContain('Copy-Item -Recurse -Force "apps\\skills\\*" $agentsSkillsDir');
     expect(script).toContain('Skipping skills install (git not found)');
   });
 
@@ -168,6 +188,11 @@ describe("install.ps1", () => {
     expect(script).toContain('"plannotator-review", "plannotator-annotate", "plannotator-last"');
     expect(script).not.toContain('"plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-compound"');
     expect(script).not.toContain('"plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-setup-goal"');
+  });
+
+  test("removes shared-agent Plannotator skills from Codex scope", () => {
+    expect(script).toContain("staleCodexSkillsDir");
+    expect(script).toContain('"plannotator-compound", "plannotator-setup-goal"');
   });
 
   test("installs slash commands", () => {
@@ -228,8 +253,16 @@ describe("install.cmd", () => {
     expect(script).toContain("git sparse-checkout set apps/skills");
     expect(script).toContain("CLAUDE_SKILLS_DIR");
     expect(script).toContain("CODEX_SKILLS_DIR");
+    expect(script).toContain("AGENTS_SKILLS_DIR");
     expect(script).toContain("%USERPROFILE%\\.codex\\skills");
-    expect(script).not.toContain('set "AGENTS_SKILLS_DIR=%USERPROFILE%\\.agents\\skills"');
+    expect(script).toContain("%USERPROFILE%\\.agents\\skills");
+    expect(script).toContain('xcopy /s /i /y /q "apps\\skills\\plannotator-review" "!CODEX_SKILLS_DIR!\\plannotator-review\\"');
+    expect(script).toContain('xcopy /s /i /y /q "apps\\skills\\plannotator-annotate" "!CODEX_SKILLS_DIR!\\plannotator-annotate\\"');
+    expect(script).toContain('xcopy /s /i /y /q "apps\\skills\\plannotator-last" "!CODEX_SKILLS_DIR!\\plannotator-last\\"');
+    expect(script).toContain('xcopy /s /i /y /q "apps\\skills\\plannotator-compound" "!AGENTS_SKILLS_DIR!\\plannotator-compound\\"');
+    expect(script).toContain('xcopy /s /i /y /q "apps\\skills\\plannotator-setup-goal" "!AGENTS_SKILLS_DIR!\\plannotator-setup-goal\\"');
+    expect(script).not.toContain('xcopy /s /y /q "apps\\skills\\*" "!CODEX_SKILLS_DIR!\\"');
+    expect(script).not.toContain('xcopy /s /y /q "apps\\skills\\*" "!AGENTS_SKILLS_DIR!\\"');
     expect(script).toContain("Skipping skills install");
   });
 
@@ -238,6 +271,11 @@ describe("install.cmd", () => {
     expect(script).toContain("plannotator-review plannotator-annotate plannotator-last");
     expect(script).not.toContain("plannotator-review plannotator-annotate plannotator-last plannotator-compound");
     expect(script).not.toContain("plannotator-review plannotator-annotate plannotator-last plannotator-setup-goal");
+  });
+
+  test("removes shared-agent Plannotator skills from Codex scope", () => {
+    expect(script).toContain("STALE_CODEX_SKILLS_DIR");
+    expect(script).toContain("plannotator-compound plannotator-setup-goal");
   });
 
   test("installs slash commands", () => {
