@@ -1738,6 +1738,7 @@ const App: React.FC = () => {
                 onIdentityChange={handleIdentityChange}
                 origin={origin}
                 onUIPreferencesChange={setUiPrefs}
+                onPermissionModeChange={setPermissionMode}
                 externalOpen={mobileSettingsOpen}
                 onExternalClose={() => setMobileSettingsOpen(false)}
                 gitUser={gitUser}
