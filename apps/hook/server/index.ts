@@ -1261,6 +1261,10 @@ if (args[0] === "sessions") {
 
       console.log(
         JSON.stringify({
+          ...(result.clearContextNudge && {
+            systemMessage:
+              "Plannotator requested bypass mode. Hooks cannot clear context. Run /clear before continuing if you want a fresh implementation session.",
+          }),
           hookSpecificOutput: {
             hookEventName: "PermissionRequest",
             decision: {

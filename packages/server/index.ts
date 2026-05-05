@@ -99,6 +99,7 @@ export interface ServerResult {
     savedPath?: string;
     agentSwitch?: string;
     permissionMode?: string;
+    clearContextNudge?: boolean;
   }>;
   /** Wait for user to close (archive mode only) */
   waitForDone?: () => Promise<void>;
@@ -170,6 +171,7 @@ export async function startPlannotatorServer(
     savedPath?: string;
     agentSwitch?: string;
     permissionMode?: string;
+    clearContextNudge?: boolean;
   }) => void;
   let decisionPromise: Promise<{
     approved: boolean;
@@ -177,6 +179,7 @@ export async function startPlannotatorServer(
     savedPath?: string;
     agentSwitch?: string;
     permissionMode?: string;
+    clearContextNudge?: boolean;
   }>;
 
   if (mode !== "archive") {
@@ -431,6 +434,7 @@ export async function startPlannotatorServer(
             let feedback: string | undefined;
             let agentSwitch: string | undefined;
             let requestedPermissionMode: string | undefined;
+            let clearContextNudge: boolean | undefined;
             let planSaveEnabled = true; // default to enabled for backwards compat
             let planSaveCustomPath: string | undefined;
             try {
@@ -442,6 +446,7 @@ export async function startPlannotatorServer(
                 agentSwitch?: string;
                 planSave?: { enabled: boolean; customPath?: string };
                 permissionMode?: string;
+                clearContextNudge?: boolean;
               };
 
               // Capture feedback if provided (for "approve with notes")
@@ -457,6 +462,11 @@ export async function startPlannotatorServer(
               // Capture permission mode from client request (Claude Code)
               if (body.permissionMode) {
                 requestedPermissionMode = body.permissionMode;
+              }
+
+              // Capture optional /clear reminder request for Claude Code approval flow
+              if (body.clearContextNudge === true) {
+                clearContextNudge = true;
               }
 
               // Capture plan save settings
@@ -504,7 +514,7 @@ export async function startPlannotatorServer(
 
             // Use permission mode from client request if provided, otherwise fall back to hook input
             const effectivePermissionMode = requestedPermissionMode || permissionMode;
-            resolveDecision({ approved: true, feedback, savedPath, agentSwitch, permissionMode: effectivePermissionMode });
+            resolveDecision({ approved: true, feedback, savedPath, agentSwitch, permissionMode: effectivePermissionMode, clearContextNudge });
             return Response.json({ ok: true, savedPath });
           }
 
