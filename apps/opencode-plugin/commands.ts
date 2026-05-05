@@ -114,7 +114,12 @@ export async function handleReviewCommand(
     shareBaseUrl: getShareBaseUrl(),
     htmlContent: reviewHtmlContent,
     opencodeClient: client,
-    onReady: handleReviewServerReady,
+    onReady: (url, isRemote, port) => {
+      handleReviewServerReady(url, isRemote, port);
+      if (isRemote) {
+        client.app.log({ level: "info", message: `[Plannotator] Open in browser: ${url}` });
+      }
+    },
   });
 
   const result = await server.waitForDecision();
@@ -275,7 +280,12 @@ export async function handleAnnotateCommand(
     pasteApiUrl: getPasteApiUrl(),
     gate,
     htmlContent,
-    onReady: handleAnnotateServerReady,
+    onReady: (url, isRemote, port) => {
+      handleAnnotateServerReady(url, isRemote, port);
+      if (isRemote) {
+        client.app.log({ level: "info", message: `[Plannotator] Open in browser: ${url}` });
+      }
+    },
   });
 
   const result = await server.waitForDecision();
@@ -376,7 +386,12 @@ export async function handleAnnotateLastCommand(
     pasteApiUrl: getPasteApiUrl(),
     gate,
     htmlContent,
-    onReady: handleAnnotateServerReady,
+    onReady: (url, isRemote, port) => {
+      handleAnnotateServerReady(url, isRemote, port);
+      if (isRemote) {
+        client.app.log({ level: "info", message: `[Plannotator] Open in browser: ${url}` });
+      }
+    },
   });
 
   const result = await server.waitForDecision();
@@ -407,7 +422,12 @@ export async function handleArchiveCommand(
     shareBaseUrl: getShareBaseUrl(),
     pasteApiUrl: getPasteApiUrl(),
     htmlContent,
-    onReady: handleServerReady,
+    onReady: (url, isRemote, port) => {
+      handleServerReady(url, isRemote, port);
+      if (isRemote) {
+        client.app.log({ level: "info", message: `[Plannotator] Open in browser: ${url}` });
+      }
+    },
   });
 
   if (server.waitForDone) {

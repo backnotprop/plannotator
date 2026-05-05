@@ -14,7 +14,7 @@ import {
 	startReviewServer,
 	type DiffType,
 } from "./server.js";
-import { openBrowser } from "./server/network.js";
+import { openBrowser, isRemoteSession } from "./server/network.js";
 import { parsePRUrl, checkPRAuth, fetchPR } from "./server/pr.js";
 import {
 	getMRLabel,
@@ -82,8 +82,8 @@ export function getStartupErrorMessage(err: unknown): string {
 
 function openBrowserForServer(serverUrl: string, ctx: ExtensionContext): void {
 	const browserResult = openBrowser(serverUrl);
-	if (browserResult.isRemote) {
-		ctx.ui.notify(`Remote session. Open manually: ${browserResult.url}`, "info");
+	if (isRemoteSession()) {
+		ctx.ui.notify(`Remote session. Open manually: ${serverUrl}`, "info");
 	} else if (!browserResult.opened) {
 		ctx.ui.notify(`Open this URL to review: ${serverUrl}`, "info");
 	}

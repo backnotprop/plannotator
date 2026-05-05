@@ -481,6 +481,9 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
             opencodeClient: ctx.client,
             onReady: async (url, isRemote, port) => {
               handleServerReady(url, isRemote, port);
+              if (isRemote) {
+                ctx.client.app.log({ level: "info", message: `[Plannotator] Open in browser: ${url}` });
+              }
             },
           });
 
