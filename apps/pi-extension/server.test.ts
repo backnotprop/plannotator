@@ -4,14 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  getGitContext,
-  getVcsContext,
-  prepareLocalReviewDiff,
-  runGitDiff,
-  startPlanReviewServer,
-  startReviewServer,
-} from "./server";
+import { getGitContext, runGitDiff, startPlanReviewServer, startReviewServer } from "./server";
 
 const tempDirs: string[] = [];
 const originalCwd = process.cwd();
@@ -133,8 +126,6 @@ afterEach(() => {
 });
 
 describe("pi review server", () => {
-  const testIfJj = hasJj() ? test : test.skip;
-
   test("plan approve preserves clear context nudge decisions", async () => {
     const homeDir = makeTempDir("plannotator-pi-home-");
     const repoDir = makeTempDir("plannotator-pi-plan-");
@@ -168,39 +159,6 @@ describe("pi review server", () => {
         agentSwitch: undefined,
         permissionMode: "bypassPermissions",
         clearContextNudge: true,
-      });
-    } finally {
-      server.stop();
-    }
-  });
-
-  test("plan clear-context setting endpoints are explicit unsupported fallbacks", async () => {
-    const homeDir = makeTempDir("plannotator-pi-home-");
-    const repoDir = makeTempDir("plannotator-pi-plan-");
-    process.env.HOME = homeDir;
-    process.chdir(repoDir);
-    process.env.PLANNOTATOR_PORT = String(await reservePort());
-
-    const server = await startPlanReviewServer({
-      plan: "# Plan\n\nShip it.",
-      htmlContent: "<!doctype html><html><body>plan</body></html>",
-      origin: "pi",
-      permissionMode: "acceptEdits",
-    });
-
-    try {
-      const statusResponse = await fetch(`${server.url}/api/settings-status`);
-      await expect(statusResponse.json()).resolves.toEqual({
-        settingEnabled: false,
-        consentGiven: false,
-      });
-
-      const enableResponse = await fetch(`${server.url}/api/enable-clear-context`, {
-        method: "POST",
-      });
-      await expect(enableResponse.json()).resolves.toEqual({
-        ok: false,
-        reason: "not-supported-in-pi-extension",
       });
     } finally {
       server.stop();

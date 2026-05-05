@@ -15,6 +15,9 @@ import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolst
 import { StickyHeaderLane } from '@plannotator/ui/components/StickyHeaderLane';
 import { TaterSpriteRunning } from '@plannotator/ui/components/TaterSpriteRunning';
 import { TaterSpritePullup } from '@plannotator/ui/components/TaterSpritePullup';
+import { Settings } from '@plannotator/ui/components/Settings';
+import { FeedbackButton, ApproveButton, ExitButton } from '@plannotator/ui/components/ToolbarButtons';
+import { ApproveDropdown, type ApproveExtraEntry } from '@plannotator/ui/components/ApproveDropdown';
 import { useSharing } from '@plannotator/ui/hooks/useSharing';
 import { getCallbackConfig, CallbackAction, executeCallback } from '@plannotator/ui/utils/callback';
 import { useAgents } from '@plannotator/ui/hooks/useAgents';
@@ -76,7 +79,6 @@ import { DEMO_PLAN_CONTENT as DEFAULT_DEMO_PLAN_CONTENT } from './demoPlan';
 import { DIFF_DEMO_PLAN_CONTENT } from './demoPlanDiffDemo';
 import { canUseAnnotateWideMode, resolveWideModeExitLayout, type WideModeLayoutSnapshot, type WideModeType } from './wideMode';
 import { buildApprovalRequestBody, type ApprovalOverride } from './approvalBody';
-import type { ApproveExtraEntry } from '@plannotator/ui/components/ApproveDropdown';
 const USE_DIFF_DEMO =
   import.meta.env.VITE_DIFF_DEMO === '1' ||
   import.meta.env.VITE_DIFF_DEMO === 'true';
@@ -104,6 +106,7 @@ const App: React.FC = () => {
   const [showImport, setShowImport] = useState(false);
   const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
   const [showClaudeCodeWarning, setShowClaudeCodeWarning] = useState(false);
+  const [pendingApprovalOverride, setPendingApprovalOverride] = useState<ApprovalOverride | null>(null);
   const [showExitWarning, setShowExitWarning] = useState(false);
   // When the warning dialog confirms, route to the handler matching the button that opened it.
   const [exitWarningAction, setExitWarningAction] = useState<'close' | 'approve'>('close');
@@ -951,6 +954,7 @@ const App: React.FC = () => {
 
   // API mode handlers
   const handleApprove = async (override: ApprovalOverride = {}) => {
+    setPendingApprovalOverride(null);
     setIsSubmitting(true);
     try {
       const obsidianSettings = getObsidianSettings();
@@ -961,19 +965,6 @@ const App: React.FC = () => {
         ? await autoSavePromiseRef.current
         : autoSaveResultsRef.current;
 
-      const shouldUseNativeClear =
-        origin === 'claude-code' &&
-        pendingToolName === 'ExitPlanMode' &&
-        (override.deferToNativeForClear || (override.permissionMode ?? permissionMode) === 'bypassPermissionsClearReminder');
-      if (shouldUseNativeClear) {
-        try {
-          const response = await fetch('/api/enable-clear-context', { method: 'POST' });
-          if (response.ok) setShowClearContextBanner(false);
-        } catch {
-          setShowClearContextBanner(true);
-        }
-      }
-
       const effectiveAgent = getEffectiveAgentName(getAgentSwitchSettings());
       const body = buildApprovalRequestBody({
         origin,
@@ -981,7 +972,6 @@ const App: React.FC = () => {
         override,
         effectiveAgent,
         planSaveSettings,
-        toolName: pendingToolName,
       });
 
       const effectiveVaultPath = getEffectiveVaultPath(obsidianSettings);
@@ -1062,29 +1052,15 @@ const App: React.FC = () => {
     handleApprove(override);
   }, [allAnnotations.length, codeAnnotations.length, origin, handleApprove]);
 
-  const claudeCodeExtraEntries = useMemo<ApproveExtraEntry[]>(() => {
-    if (origin !== 'claude-code') return [];
-    if (pendingToolName === 'ExitPlanMode') {
-      return [{
-        id: 'approve-bypass-native-clear',
-        label: 'Approve + Bypass + Clear Context (native)',
-        description: "Defers to Claude Code's native plan-accept dialog so it can clear context and set bypass permissions.",
-        onSelect: () => approveWithClaudeCodeWarning({
-          permissionMode: 'bypassPermissions',
-          deferToNativeForClear: true,
-        }),
-      }];
-    }
-    return [{
-      id: 'approve-bypass-clear-reminder',
-      label: 'Approve + Bypass + /clear Reminder',
-      description: 'Requests bypass mode and reminds you to run /clear. Hooks cannot clear context directly outside plan acceptance.',
-      onSelect: () => approveWithClaudeCodeWarning({
-        permissionMode: 'bypassPermissions',
-        clearContextNudge: true,
-      }),
-    }];
-  }, [approveWithClaudeCodeWarning, origin, pendingToolName]);
+  const claudeCodeExtraEntries = useMemo<ApproveExtraEntry[]>(() => (origin === 'claude-code' ? [{
+    id: 'approve-bypass-clear-reminder',
+    label: 'Approve + Bypass + /clear Reminder',
+    description: 'Requests bypass mode and reminds you to run /clear. Hooks cannot clear context directly.',
+    onSelect: () => approveWithClaudeCodeWarning({
+      permissionMode: 'bypassPermissions',
+      clearContextNudge: true,
+    }),
+  }] : []), [approveWithClaudeCodeWarning, origin]);
 
   // Annotate mode handler — sends feedback via /api/feedback
   const handleAnnotateFeedback = async () => {
@@ -1666,58 +1642,234 @@ const App: React.FC = () => {
     <ThemeProvider defaultTheme="dark">
       <TooltipProvider delayDuration={900} skipDelayDuration={200} disableHoverableContent>
       <div data-print-region="root" className="h-screen flex flex-col bg-background overflow-hidden">
-        <AppHeader
-          isApiMode={isApiMode}
-          annotateMode={annotateMode}
-          archiveMode={archive.archiveMode}
-          gate={gate}
-          isSharedSession={isSharedSession}
-          origin={origin}
-          isSubmitting={isSubmitting}
-          isExiting={isExiting}
-          isPanelOpen={isPanelOpen}
-          hasAnyAnnotations={hasAnyAnnotations}
-          linkedDocIsActive={linkedDocHook.isActive}
-          callbackShareUrlReady={callbackConfig ? Boolean(shareUrl || shortShareUrl) : true}
-          canShareCurrentSession={canShareCurrentSession}
-          agentName={agentName}
-          availableAgents={availableAgents}
-          approveExtraEntries={claudeCodeExtraEntries}
-          showAnnotationsWarning={allAnnotations.length > 0 || codeAnnotations.length > 0}
-          callbackConfig={callbackConfig}
-          taterMode={taterMode}
-          mobileSettingsOpen={mobileSettingsOpen}
-          gitUser={gitUser}
-          onCallbackFeedback={handleCallbackFeedback}
-          onCallbackApprove={handleCallbackApprove}
-          onAnnotateExit={handleHeaderAnnotateExit}
-          onAnnotateFeedback={handleHeaderAnnotateFeedback}
-          onAnnotateApprove={handleHeaderAnnotateApprove}
-          onFeedback={handleHeaderFeedback}
-          onApprove={handleHeaderApprove}
-          onAnnotationPanelToggle={handleAnnotationPanelToggle}
-          onArchiveCopy={archive.copy}
-          onArchiveDone={archive.done}
-          onTaterModeChange={handleTaterModeChange}
-          onIdentityChange={handleIdentityChange}
-          onUIPreferencesChange={setUiPrefs}
-          onOpenSettings={handleOpenSettings}
-          onCloseSettings={handleCloseSettings}
-          onOpenExport={handleOpenExport}
-          onCopyAgentInstructions={handleHeaderCopyAgentInstructions}
-          onDownloadAnnotations={handleHeaderDownloadAnnotations}
-          onPrint={handlePrint}
-          onCopyShareLink={handleHeaderCopyShareLink}
-          onOpenImport={handleOpenImport}
-          onSaveToObsidian={handleSaveToObsidian}
-          onSaveToBear={handleSaveToBear}
-          onSaveToOctarine={handleSaveToOctarine}
-          appVersion={typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0'}
-          agentInstructionsEnabled={isApiMode && !archive.archiveMode && !annotateMode}
-          obsidianConfigured={isObsidianConfigured()}
-          bearConfigured={getBearSettings().enabled}
-          octarineConfigured={isOctarineConfigured()}
-        />
+        {/* Minimal Header */}
+        <header data-app-header="true" className="h-12 flex items-center justify-between px-2 md:px-4 border-b border-border/50 bg-card/50 backdrop-blur-xl sticky top-0 z-[50]">
+          <div className="flex items-center gap-2 md:gap-3">
+            <a
+              href="https://plannotator.ai"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 md:gap-2 hover:opacity-80 transition-opacity"
+            >
+              <span className="text-sm font-semibold tracking-tight">Plannotator</span>
+            </a>
+          </div>
+
+          <div className="flex items-center gap-1 md:gap-2">
+            {/* Bot callback buttons — only shown when ?cb=&ct= params are present */}
+            {callbackConfig && !isApiMode && isSharedSession && (
+              <>
+                <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
+                <FeedbackButton
+                  onClick={handleCallbackFeedback}
+                  disabled={isSubmitting || !shareUrl}
+                  isLoading={isSubmitting}
+                  title="Send feedback to bot"
+                />
+                <ApproveButton
+                  onClick={handleCallbackApprove}
+                  disabled={isSubmitting || !shareUrl}
+                  isLoading={isSubmitting}
+                  title="Approve design and notify bot"
+                />
+              </>
+            )}
+
+            {isApiMode && !linkedDocHook.isActive && archive.archiveMode && (
+              <>
+                <button
+                  onClick={archive.copy}
+                  className="px-2.5 py-1 rounded-md text-xs font-medium transition-all bg-muted text-foreground hover:bg-muted/80 border border-border"
+                  title="Copy plan content"
+                >
+                  <span className="hidden md:inline">Copy</span>
+                  <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                </button>
+                <button
+                  onClick={archive.done}
+                  className="px-2.5 py-1 rounded-md text-xs font-medium transition-all bg-success text-success-foreground hover:opacity-90"
+                  title="Close archive"
+                >
+                  Done
+                </button>
+              </>
+            )}
+
+            {isApiMode && (!linkedDocHook.isActive || annotateMode) && !archive.archiveMode && (
+              <>
+                {annotateMode ? (
+                  // Annotate mode: Close always visible, Send Annotations when annotations exist,
+                  // Approve only when gate (review) mode is enabled (#570).
+                  <>
+                    <ExitButton
+                      onClick={() => {
+                        if (hasAnyAnnotations) {
+                          setExitWarningAction('close');
+                          setShowExitWarning(true);
+                        } else {
+                          handleAnnotateExit();
+                        }
+                      }}
+                      disabled={isSubmitting || isExiting}
+                      isLoading={isExiting}
+                    />
+                    {hasAnyAnnotations && (
+                      <FeedbackButton
+                        onClick={handleAnnotateFeedback}
+                        disabled={isSubmitting || isExiting}
+                        isLoading={isSubmitting}
+                        label="Send Annotations"
+                        title="Send Annotations"
+                      />
+                    )}
+                  </>
+                ) : (
+                  // Plan mode: Send Feedback
+                  <FeedbackButton
+                    onClick={() => {
+                      const docAnnotations = linkedDocHook.getDocAnnotations();
+                      const hasDocAnnotations = Array.from(docAnnotations.values()).some(
+                        (d) => d.annotations.length > 0 || d.globalAttachments.length > 0
+                      );
+                      if (allAnnotations.length === 0 && codeAnnotations.length === 0 && editorAnnotations.length === 0 && !hasDocAnnotations) {
+                        setShowFeedbackPrompt(true);
+                      } else {
+                        handleDeny();
+                      }
+                    }}
+                    disabled={isSubmitting}
+                    isLoading={isSubmitting}
+                    label="Send Feedback"
+                    title="Send Feedback"
+                  />
+                )}
+
+                {(!annotateMode || gate) && (
+                  !annotateMode && (
+                    (origin === 'opencode' && availableAgents.length > 0) ||
+                    (origin === 'claude-code' && claudeCodeExtraEntries.length > 0)
+                  ) ? (
+                    <ApproveDropdown
+                      onApprove={() => {
+                        if (origin === 'opencode') {
+                          const warning = getAgentWarning();
+                          if (warning) {
+                            setAgentWarningMessage(warning);
+                            setShowAgentWarning(true);
+                            return;
+                          }
+                        }
+                        approveWithClaudeCodeWarning();
+                      }}
+                      agents={origin === 'opencode' ? availableAgents : []}
+                      extraEntries={claudeCodeExtraEntries}
+                      disabled={isSubmitting}
+                      isLoading={isSubmitting}
+                    />
+                  ) : (
+                    <div className="relative group/approve">
+                      <ApproveButton
+                        onClick={() => {
+                          if (annotateMode) {
+                            if (hasAnyAnnotations) {
+                              setExitWarningAction('approve');
+                              setShowExitWarning(true);
+                              return;
+                            }
+                            handleAnnotateApprove();
+                            return;
+                          }
+                          if (origin === 'claude-code' && (allAnnotations.length > 0 || codeAnnotations.length > 0)) {
+                            setPendingApprovalOverride({});
+                            setShowClaudeCodeWarning(true);
+                            return;
+                          }
+                          if (origin === 'opencode') {
+                            const warning = getAgentWarning();
+                            if (warning) {
+                              setAgentWarningMessage(warning);
+                              setShowAgentWarning(true);
+                              return;
+                            }
+                          }
+                          handleApprove();
+                        }}
+                        disabled={isSubmitting || (annotateMode && isExiting)}
+                        isLoading={isSubmitting}
+                        dimmed={!annotateMode && (origin === 'claude-code' || origin === 'gemini-cli') && (allAnnotations.length > 0 || codeAnnotations.length > 0)}
+                        title={annotateMode ? 'Approve — no changes requested' : undefined}
+                      />
+                      {!annotateMode && (origin === 'claude-code' || origin === 'gemini-cli') && (allAnnotations.length > 0 || codeAnnotations.length > 0) && (
+                        <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
+                          <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
+                          <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
+                          {agentName} doesn't support feedback on approval. Your annotations won't be seen.
+                        </div>
+                      )}
+                    </div>
+                  )
+                )}
+
+                <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
+              </>
+            )}
+
+            {/* Annotations panel toggle — top-level header button */}
+            <button
+              onClick={handleAnnotationPanelToggle}
+              className={`p-1.5 rounded-md text-xs font-medium transition-all ${
+                isPanelOpen
+                  ? 'bg-primary/15 text-primary'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+              }`}
+              title={isPanelOpen ? 'Hide annotations' : 'Show annotations'}
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+              </svg>
+            </button>
+
+            {/* Settings dialog (controlled, button hidden — opened from PlanHeaderMenu) */}
+            <div className="hidden">
+              <Settings
+                taterMode={taterMode}
+                onTaterModeChange={handleTaterModeChange}
+                onIdentityChange={handleIdentityChange}
+                origin={origin}
+                onUIPreferencesChange={setUiPrefs}
+                onPermissionModeChange={setPermissionMode}
+                externalOpen={mobileSettingsOpen}
+                onExternalClose={() => setMobileSettingsOpen(false)}
+                gitUser={gitUser}
+              />
+            </div>
+
+            <PlanHeaderMenu
+              appVersion={typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0'}
+              onOpenSettings={() => {
+                setMobileSettingsOpen(true);
+              }}
+              onOpenExport={() => { setInitialExportTab(undefined); setShowExport(true); }}
+              onCopyAgentInstructions={handleCopyAgentInstructions}
+              onDownloadAnnotations={handleDownloadAnnotations}
+              onPrint={() => window.print()}
+              onCopyShareLink={handleCopyShareLink}
+              onOpenImport={() => setShowImport(true)}
+              onSaveToObsidian={() => handleQuickSaveToNotes('obsidian')}
+              onSaveToBear={() => handleQuickSaveToNotes('bear')}
+              onSaveToOctarine={() => handleQuickSaveToNotes('octarine')}
+              sharingEnabled={canShareCurrentSession}
+              isApiMode={isApiMode}
+              agentInstructionsEnabled={isApiMode && !archive.archiveMode && !annotateMode}
+              obsidianConfigured={isObsidianConfigured()}
+              bearConfigured={getBearSettings().enabled}
+              octarineConfigured={isOctarineConfigured()}
+            />
+          </div>
+        </header>
+
         {/* Linked document error banner */}
         {linkedDocHook.error && (
           <div className="bg-destructive/10 border-b border-destructive/20 px-4 py-2 flex items-center gap-2 flex-shrink-0">
@@ -2059,11 +2211,14 @@ const App: React.FC = () => {
         {/* Claude Code annotation warning dialog */}
         <ConfirmDialog
           isOpen={showClaudeCodeWarning}
-          onClose={() => setShowClaudeCodeWarning(false)}
-          onConfirm={() => {
+          onClose={() => {
             setShowClaudeCodeWarning(false);
-            const override = pendingApprovalOverride;
-            setPendingApprovalOverride({});
+            setPendingApprovalOverride(null);
+          }}
+          onConfirm={() => {
+            const override = pendingApprovalOverride ?? {};
+            setShowClaudeCodeWarning(false);
+            setPendingApprovalOverride(null);
             handleApprove(override);
           }}
           title="Annotations Won't Be Sent"

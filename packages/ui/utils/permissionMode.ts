@@ -6,7 +6,7 @@
  *
  * Available modes:
  * - bypassPermissions: Auto-approve all tool calls
- * - bypassPermissionsClearReminder: Persisted UI mode that bypasses permissions and emits a /clear reminder after plan approval
+ * - bypassPermissionsClearReminder: Persisted UI mode that sends bypassPermissions plus a /clear reminder nudge
  * - acceptEdits: Auto-approve file edits only
  * - default: Manually approve each tool call
  */
@@ -37,7 +37,7 @@ export const PERMISSION_MODE_OPTIONS: { value: PermissionMode; label: string; de
   {
     value: 'bypassPermissionsClearReminder',
     label: 'Bypass + /clear Reminder',
-    description: 'Bypass permissions after plan approval and emit a /clear reminder without invoking the native fresh-thread flow.',
+    description: 'Auto-approve all tool calls and emit a system message reminding you to run /clear (hooks cannot clear context directly).',
   },
   {
     value: 'default',
