@@ -1,27 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { buildApprovalRequestBody, shouldEnableNativeClearBeforeApprove } from './approvalBody';
-
-describe('shouldEnableNativeClearBeforeApprove', () => {
-  test('enables native clear only for explicit Claude Code ExitPlanMode overrides', () => {
-    expect(shouldEnableNativeClearBeforeApprove({
-      origin: 'claude-code',
-      toolName: 'ExitPlanMode',
-      override: { deferToNativeForClear: true },
-    })).toBe(true);
-
-    expect(shouldEnableNativeClearBeforeApprove({
-      origin: 'claude-code',
-      toolName: 'ExitPlanMode',
-      override: { permissionMode: 'bypassPermissionsClearReminder' },
-    })).toBe(false);
-
-    expect(shouldEnableNativeClearBeforeApprove({
-      origin: 'claude-code',
-      toolName: 'OtherTool',
-      override: { deferToNativeForClear: true },
-    })).toBe(false);
-  });
-});
+import { buildApprovalRequestBody } from './approvalBody';
 
 describe('buildApprovalRequestBody', () => {
   test('maps bypass clear reminder mode to Claude Code wire fields', () => {

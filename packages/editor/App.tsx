@@ -78,7 +78,7 @@ import type { PlanDiffMode } from '@plannotator/ui/components/plan-diff/PlanDiff
 import { DEMO_PLAN_CONTENT as DEFAULT_DEMO_PLAN_CONTENT } from './demoPlan';
 import { DIFF_DEMO_PLAN_CONTENT } from './demoPlanDiffDemo';
 import { canUseAnnotateWideMode, resolveWideModeExitLayout, type WideModeLayoutSnapshot, type WideModeType } from './wideMode';
-import { buildApprovalRequestBody, shouldEnableNativeClearBeforeApprove, type ApprovalOverride } from './approvalBody';
+import { buildApprovalRequestBody, type ApprovalOverride } from './approvalBody';
 const USE_DIFF_DEMO =
   import.meta.env.VITE_DIFF_DEMO === '1' ||
   import.meta.env.VITE_DIFF_DEMO === 'true';
@@ -965,15 +965,6 @@ const App: React.FC = () => {
         ? await autoSavePromiseRef.current
         : autoSaveResultsRef.current;
 
-      if (shouldEnableNativeClearBeforeApprove({ origin, toolName: pendingToolName, override })) {
-        try {
-          const response = await fetch('/api/enable-clear-context', { method: 'POST' });
-          if (response.ok) setShowClearContextBanner(false);
-        } catch {
-          setShowClearContextBanner(true);
-        }
-      }
-
       const effectiveAgent = getEffectiveAgentName(getAgentSwitchSettings());
       const body = buildApprovalRequestBody({
         origin,
@@ -981,7 +972,6 @@ const App: React.FC = () => {
         override,
         effectiveAgent,
         planSaveSettings,
-        toolName: pendingToolName,
       });
 
       const effectiveVaultPath = getEffectiveVaultPath(obsidianSettings);
@@ -1062,29 +1052,15 @@ const App: React.FC = () => {
     handleApprove(override);
   }, [allAnnotations.length, codeAnnotations.length, origin, handleApprove]);
 
-  const claudeCodeExtraEntries = useMemo<ApproveExtraEntry[]>(() => {
-    if (origin !== 'claude-code') return [];
-    if (pendingToolName === 'ExitPlanMode') {
-      return [{
-        id: 'approve-bypass-native-clear',
-        label: 'Approve + Bypass + Fresh Thread / Native Clear',
-        description: "Defers to the native plan-accept dialog. This may restart or open a fresh thread while setting bypass permissions.",
-        onSelect: () => approveWithClaudeCodeWarning({
-          permissionMode: 'bypassPermissions',
-          deferToNativeForClear: true,
-        }),
-      }];
-    }
-    return [{
-      id: 'approve-bypass-clear-reminder',
-      label: 'Approve + Bypass + /clear Reminder',
-      description: 'Requests bypass mode and reminds you to run /clear. Hooks cannot clear context directly outside plan acceptance.',
-      onSelect: () => approveWithClaudeCodeWarning({
-        permissionMode: 'bypassPermissions',
-        clearContextNudge: true,
-      }),
-    }];
-  }, [approveWithClaudeCodeWarning, origin, pendingToolName]);
+  const claudeCodeExtraEntries = useMemo<ApproveExtraEntry[]>(() => (origin === 'claude-code' ? [{
+    id: 'approve-bypass-clear-reminder',
+    label: 'Approve + Bypass + /clear Reminder',
+    description: 'Requests bypass mode and reminds you to run /clear. Hooks cannot clear context directly.',
+    onSelect: () => approveWithClaudeCodeWarning({
+      permissionMode: 'bypassPermissions',
+      clearContextNudge: true,
+    }),
+  }] : []), [approveWithClaudeCodeWarning, origin]);
 
   // Annotate mode handler — sends feedback via /api/feedback
   const handleAnnotateFeedback = async () => {
