@@ -587,7 +587,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   useEffect(() => {
     if (!themePreview) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { setThemePreview(false); setShowDialog(true); }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setThemePreview(false); setShowDialog(true); }
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
