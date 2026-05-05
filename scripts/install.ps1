@@ -576,7 +576,6 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
                         Copy-Item -Recurse -Force "apps\skills\*" $claudeSkillsDir
                         Copy-SkillIfPresent "apps\skills\plannotator-compound" $agentsSkillsDir
                         Copy-SkillIfPresent "apps\skills\plannotator-setup-goal" $agentsSkillsDir
-                        Copy-SkillIfPresent "apps\skills\plannotator-visual-explainer" $agentsSkillsDir
                         if ($codexAvailable) {
                             New-Item -ItemType Directory -Force -Path $codexSkillsDir | Out-Null
                             Copy-SkillIfPresent "apps\skills\plannotator-review" $codexSkillsDir
