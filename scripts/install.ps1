@@ -270,7 +270,15 @@ if (Test-Path $pluginHooks) {
 # $env:USERPROFILE\.codex automatically from the Windows installer until that
 # path is verified end-to-end.
 $codexDir = "$env:USERPROFILE\.codex"
-if ((Get-Command codex -ErrorAction SilentlyContinue) -or (Test-Path $codexDir)) {
+$codexHomeHasUserConfig = $false
+if (Test-Path $codexDir) {
+    $codexHomeHasUserConfig = [bool](Get-ChildItem -Force $codexDir -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -ne "skills" -and $_.Name -ne ".DS_Store" } |
+        Select-Object -First 1)
+}
+$codexAvailable = [bool](Get-Command codex -ErrorAction SilentlyContinue) -or $codexHomeHasUserConfig
+
+if ($codexAvailable) {
     $codexExePath = "$installDir\plannotator.exe"
     Write-Host ""
     Write-Host "Codex detected."
@@ -430,6 +438,17 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
     $skillsTmp = Join-Path ([System.IO.Path]::GetTempPath()) "plannotator-skills-$(Get-Random)"
     New-Item -ItemType Directory -Force -Path $skillsTmp | Out-Null
 
+    function Copy-SkillIfPresent {
+        param(
+            [string]$SourceDir,
+            [string]$TargetDir
+        )
+
+        if (Test-Path $SourceDir) {
+            Copy-Item -Recurse -Force $SourceDir $TargetDir
+        }
+    }
+
     try {
         git clone --depth 1 --filter=blob:none --sparse "https://github.com/$repo.git" --branch $latestTag "$skillsTmp\repo" 2>$null
         # git is a native executable — it does not throw under
@@ -450,15 +469,19 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
                     $items = Get-ChildItem "apps\skills" -ErrorAction SilentlyContinue
                     if ($items) {
                         New-Item -ItemType Directory -Force -Path $claudeSkillsDir | Out-Null
-                        New-Item -ItemType Directory -Force -Path $codexSkillsDir | Out-Null
                         New-Item -ItemType Directory -Force -Path $agentsSkillsDir | Out-Null
                         Copy-Item -Recurse -Force "apps\skills\*" $claudeSkillsDir
-                        Copy-Item -Recurse -Force "apps\skills\plannotator-review" $codexSkillsDir
-                        Copy-Item -Recurse -Force "apps\skills\plannotator-annotate" $codexSkillsDir
-                        Copy-Item -Recurse -Force "apps\skills\plannotator-last" $codexSkillsDir
-                        Copy-Item -Recurse -Force "apps\skills\plannotator-compound" $agentsSkillsDir
-                        Copy-Item -Recurse -Force "apps\skills\plannotator-setup-goal" $agentsSkillsDir
-                        Write-Host "Installed skills to $claudeSkillsDir\, Codex command skills to $codexSkillsDir\, and shared agent skills to $agentsSkillsDir\"
+                        Copy-SkillIfPresent "apps\skills\plannotator-compound" $agentsSkillsDir
+                        Copy-SkillIfPresent "apps\skills\plannotator-setup-goal" $agentsSkillsDir
+                        if ($codexAvailable) {
+                            New-Item -ItemType Directory -Force -Path $codexSkillsDir | Out-Null
+                            Copy-SkillIfPresent "apps\skills\plannotator-review" $codexSkillsDir
+                            Copy-SkillIfPresent "apps\skills\plannotator-annotate" $codexSkillsDir
+                            Copy-SkillIfPresent "apps\skills\plannotator-last" $codexSkillsDir
+                            Write-Host "Installed skills to $claudeSkillsDir\, Codex command skills to $codexSkillsDir\, and shared agent skills to $agentsSkillsDir\"
+                        } else {
+                            Write-Host "Installed skills to $claudeSkillsDir\ and shared agent skills to $agentsSkillsDir\"
+                        }
                     }
                 }
             } finally {

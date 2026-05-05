@@ -314,7 +314,17 @@ if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
 fi
 
 # --- Codex CLI / Desktop app support (only if Codex is installed or configured) ---
-if command -v codex >/dev/null 2>&1 || [ -d "$HOME/.codex" ]; then
+codex_home_has_user_config() {
+    [ -d "$HOME/.codex" ] || return 1
+    [ -n "$(find "$HOME/.codex" -mindepth 1 -maxdepth 1 ! -name skills ! -name .DS_Store -print -quit 2>/dev/null)" ]
+}
+
+codex_available=0
+if command -v codex >/dev/null 2>&1 || codex_home_has_user_config; then
+    codex_available=1
+fi
+
+if [ "$codex_available" -eq 1 ]; then
     CODEX_DIR="$HOME/.codex"
     CODEX_CONFIG="$CODEX_DIR/config.toml"
     CODEX_HOOKS="$CODEX_DIR/hooks.json"
@@ -661,6 +671,15 @@ if command -v git &>/dev/null; then
     AGENTS_SKILLS_DIR="$HOME/.agents/skills"
     skills_tmp=$(mktemp -d)
 
+    copy_skill_if_present() {
+        local source_dir="$1"
+        local target_dir="$2"
+
+        if [ -d "$source_dir" ]; then
+            cp -r "$source_dir" "$target_dir/"
+        fi
+    }
+
     # Wrap the cd-bearing block in a subshell so any `cd` is scoped to
     # the subshell and can't leave the parent script with a dangling CWD.
     # Previous version chained `cd` inside an `&&` condition, and if
@@ -673,22 +692,30 @@ if command -v git &>/dev/null; then
     # equivalent — the parent shell's CWD is inherited in, and any
     # cd inside the subshell disappears when the subshell exits.
     if (
-        cd "$skills_tmp" &&
+        set -e
+        cd "$skills_tmp"
         git clone --depth 1 --filter=blob:none --sparse \
-            "https://github.com/${REPO}.git" --branch "$latest_tag" repo 2>/dev/null &&
-        cd repo &&
-        git sparse-checkout set apps/skills 2>/dev/null &&
-        [ -d "apps/skills" ] &&
-        [ "$(ls -A apps/skills 2>/dev/null)" ] &&
-        mkdir -p "$CLAUDE_SKILLS_DIR" "$CODEX_SKILLS_DIR" "$AGENTS_SKILLS_DIR" &&
-        cp -r apps/skills/* "$CLAUDE_SKILLS_DIR/" &&
-        cp -r apps/skills/plannotator-review "$CODEX_SKILLS_DIR/" &&
-        cp -r apps/skills/plannotator-annotate "$CODEX_SKILLS_DIR/" &&
-        cp -r apps/skills/plannotator-last "$CODEX_SKILLS_DIR/" &&
-        cp -r apps/skills/plannotator-compound "$AGENTS_SKILLS_DIR/" &&
-        cp -r apps/skills/plannotator-setup-goal "$AGENTS_SKILLS_DIR/"
+            "https://github.com/${REPO}.git" --branch "$latest_tag" repo 2>/dev/null
+        cd repo
+        git sparse-checkout set apps/skills 2>/dev/null
+        [ -d "apps/skills" ]
+        [ "$(ls -A apps/skills 2>/dev/null)" ]
+        mkdir -p "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR"
+        cp -r apps/skills/* "$CLAUDE_SKILLS_DIR/"
+        copy_skill_if_present apps/skills/plannotator-compound "$AGENTS_SKILLS_DIR"
+        copy_skill_if_present apps/skills/plannotator-setup-goal "$AGENTS_SKILLS_DIR"
+        if [ "$codex_available" -eq 1 ]; then
+            mkdir -p "$CODEX_SKILLS_DIR"
+            copy_skill_if_present apps/skills/plannotator-review "$CODEX_SKILLS_DIR"
+            copy_skill_if_present apps/skills/plannotator-annotate "$CODEX_SKILLS_DIR"
+            copy_skill_if_present apps/skills/plannotator-last "$CODEX_SKILLS_DIR"
+        fi
     ); then
-        echo "Installed skills to ${CLAUDE_SKILLS_DIR}/, Codex command skills to ${CODEX_SKILLS_DIR}/, and shared agent skills to ${AGENTS_SKILLS_DIR}/"
+        if [ "$codex_available" -eq 1 ]; then
+            echo "Installed skills to ${CLAUDE_SKILLS_DIR}/, Codex command skills to ${CODEX_SKILLS_DIR}/, and shared agent skills to ${AGENTS_SKILLS_DIR}/"
+        else
+            echo "Installed skills to ${CLAUDE_SKILLS_DIR}/ and shared agent skills to ${AGENTS_SKILLS_DIR}/"
+        fi
     else
         echo "Skipping skills install (git sparse-checkout failed or apps/skills empty)"
     fi
