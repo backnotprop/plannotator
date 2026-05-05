@@ -28,8 +28,11 @@ export function buildApprovalRequestBody(options: {
   const body: ApprovalRequestBody = {};
 
   if (origin === 'claude-code') {
-    body.permissionMode = override.permissionMode ?? permissionMode;
-    if (override.clearContextNudge) {
+    const effectivePermissionMode = override.permissionMode ?? permissionMode;
+    body.permissionMode = effectivePermissionMode === 'bypassPermissionsClearReminder'
+      ? 'bypassPermissions'
+      : effectivePermissionMode;
+    if (override.clearContextNudge || effectivePermissionMode === 'bypassPermissionsClearReminder') {
       body.clearContextNudge = true;
     }
   }
