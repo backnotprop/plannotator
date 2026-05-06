@@ -965,6 +965,19 @@ const App: React.FC = () => {
         ? await autoSavePromiseRef.current
         : autoSaveResultsRef.current;
 
+      const shouldUseNativeClear =
+        origin === 'claude-code' &&
+        pendingToolName === 'ExitPlanMode' &&
+        (override.deferToNativeForClear || (override.permissionMode ?? permissionMode) === 'bypassPermissionsClearReminder');
+      if (shouldUseNativeClear) {
+        try {
+          const response = await fetch('/api/enable-clear-context', { method: 'POST' });
+          if (response.ok) setShowClearContextBanner(false);
+        } catch {
+          setShowClearContextBanner(true);
+        }
+      }
+
       const effectiveAgent = getEffectiveAgentName(getAgentSwitchSettings());
       const body = buildApprovalRequestBody({
         origin,
@@ -972,6 +985,7 @@ const App: React.FC = () => {
         override,
         effectiveAgent,
         planSaveSettings,
+        toolName: pendingToolName,
       });
 
       const effectiveVaultPath = getEffectiveVaultPath(obsidianSettings);
@@ -1052,15 +1066,29 @@ const App: React.FC = () => {
     handleApprove(override);
   }, [allAnnotations.length, codeAnnotations.length, origin, handleApprove]);
 
-  const claudeCodeExtraEntries = useMemo<ApproveExtraEntry[]>(() => (origin === 'claude-code' ? [{
-    id: 'approve-bypass-clear-reminder',
-    label: 'Approve + Bypass + /clear Reminder',
-    description: 'Requests bypass mode and reminds you to run /clear. Hooks cannot clear context directly.',
-    onSelect: () => approveWithClaudeCodeWarning({
-      permissionMode: 'bypassPermissions',
-      clearContextNudge: true,
-    }),
-  }] : []), [approveWithClaudeCodeWarning, origin]);
+  const claudeCodeExtraEntries = useMemo<ApproveExtraEntry[]>(() => {
+    if (origin !== 'claude-code') return [];
+    if (pendingToolName === 'ExitPlanMode') {
+      return [{
+        id: 'approve-bypass-native-clear',
+        label: 'Approve + Bypass + Clear Context (native)',
+        description: "Defers to Claude Code's native plan-accept dialog so it can clear context and set bypass permissions.",
+        onSelect: () => approveWithClaudeCodeWarning({
+          permissionMode: 'bypassPermissions',
+          deferToNativeForClear: true,
+        }),
+      }];
+    }
+    return [{
+      id: 'approve-bypass-clear-reminder',
+      label: 'Approve + Bypass + /clear Reminder',
+      description: 'Requests bypass mode and reminds you to run /clear. Hooks cannot clear context directly outside plan acceptance.',
+      onSelect: () => approveWithClaudeCodeWarning({
+        permissionMode: 'bypassPermissions',
+        clearContextNudge: true,
+      }),
+    }];
+  }, [approveWithClaudeCodeWarning, origin, pendingToolName]);
 
   // Annotate mode handler — sends feedback via /api/feedback
   const handleAnnotateFeedback = async () => {

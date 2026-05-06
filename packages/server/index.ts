@@ -111,6 +111,7 @@ export interface ServerResult {
     agentSwitch?: string;
     permissionMode?: string;
     clearContextNudge?: boolean;
+    deferToNativeForClear?: boolean;
   }>;
   /** Wait for user to close (archive mode only) */
   waitForDone?: () => Promise<void>;
@@ -241,6 +242,7 @@ export async function startPlannotatorServer(
     agentSwitch?: string;
     permissionMode?: string;
     clearContextNudge?: boolean;
+    deferToNativeForClear?: boolean;
   }) => void;
   let decisionPromise: Promise<{
     approved: boolean;
@@ -249,6 +251,7 @@ export async function startPlannotatorServer(
     agentSwitch?: string;
     permissionMode?: string;
     clearContextNudge?: boolean;
+    deferToNativeForClear?: boolean;
   }>;
 
   if (mode !== "archive") {
@@ -526,6 +529,7 @@ export async function startPlannotatorServer(
             let agentSwitch: string | undefined;
             let requestedPermissionMode: string | undefined;
             let clearContextNudge: boolean | undefined;
+            let deferToNativeForClear: boolean | undefined;
             let planSaveEnabled = true; // default to enabled for backwards compat
             let planSaveCustomPath: string | undefined;
             try {
@@ -538,6 +542,7 @@ export async function startPlannotatorServer(
                 planSave?: { enabled: boolean; customPath?: string };
                 permissionMode?: string;
                 clearContextNudge?: boolean;
+                deferToNativeForClear?: boolean;
               };
 
               // Capture feedback if provided (for "approve with notes")
@@ -558,6 +563,9 @@ export async function startPlannotatorServer(
               // Capture optional /clear reminder request for Claude Code approval flow
               if (body.clearContextNudge === true) {
                 clearContextNudge = true;
+              }
+              if (body.deferToNativeForClear === true) {
+                deferToNativeForClear = true;
               }
 
               // Capture plan save settings
@@ -605,7 +613,7 @@ export async function startPlannotatorServer(
 
             // Use permission mode from client request if provided, otherwise fall back to hook input
             const effectivePermissionMode = requestedPermissionMode || permissionMode;
-            resolveDecision({ approved: true, feedback, savedPath, agentSwitch, permissionMode: effectivePermissionMode, clearContextNudge });
+            resolveDecision({ approved: true, feedback, savedPath, agentSwitch, permissionMode: effectivePermissionMode, clearContextNudge, deferToNativeForClear });
             return Response.json({ ok: true, savedPath });
           }
 
