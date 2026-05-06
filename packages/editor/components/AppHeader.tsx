@@ -2,7 +2,7 @@ import React from 'react';
 import type { Origin } from '@plannotator/shared/agents';
 import type { Agent } from '@plannotator/ui/hooks/useAgents';
 import { FeedbackButton, ApproveButton, ExitButton } from '@plannotator/ui/components/ToolbarButtons';
-import { ApproveDropdown } from '@plannotator/ui/components/ApproveDropdown';
+import { ApproveDropdown, type ApproveExtraEntry } from '@plannotator/ui/components/ApproveDropdown';
 import { Settings } from '@plannotator/ui/components/Settings';
 import { PlanHeaderMenu } from '@plannotator/ui/components/PlanHeaderMenu';
 import type { CallbackConfig } from '@plannotator/ui/utils/callback';
@@ -27,6 +27,7 @@ interface AppHeaderProps {
   canShareCurrentSession: boolean;
   agentName: string;
   availableAgents: Agent[];
+  approveExtraEntries?: ApproveExtraEntry[];
   showAnnotationsWarning: boolean;
 
   // Callback config (null when no bot callback)
@@ -87,6 +88,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   canShareCurrentSession,
   agentName,
   availableAgents,
+  approveExtraEntries = [],
   showAnnotationsWarning,
   callbackConfig,
   taterMode,
@@ -198,10 +200,12 @@ export const AppHeader = React.memo<AppHeaderProps>(({
             )}
 
             {(!annotateMode || gate) && (
-              origin === 'opencode' && !annotateMode && availableAgents.length > 0 ? (
+              !annotateMode && ((origin === 'opencode' && availableAgents.length > 0) || approveExtraEntries.length > 0) ? (
                 <ApproveDropdown
                   onApprove={onApprove}
-                  agents={availableAgents}
+                  agents={origin === 'opencode' ? availableAgents : []}
+                  extraEntries={approveExtraEntries}
+                  showAgentSwitch={origin === 'opencode' && availableAgents.length > 0}
                   disabled={isSubmitting}
                   isLoading={isSubmitting}
                 />
