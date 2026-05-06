@@ -465,10 +465,13 @@ describe("03-state-machine", () => {
     }
   });
 
-  test("3.3.4 concurrent wait: second CLI blocks during active, receives verdict on approve", async () => {
+  // ADR D2 §3.3.4a — single-waiter model: a second agent that tries to submit
+  // while an active review is in progress receives an immediate collision error.
+  // It is NOT permitted to attach as a second waiter.
+  test("3.3.4a collision: second agent submits while in_review gets exit 2, NOT allowed to wait", async () => {
     const daemon = await startDaemon({ port, home: sandbox.home, binary });
     try {
-      const submitHandle = runCliBackground(["submit", join(FIXTURES_DIR, "small.md"), "--no-browser"], {
+      const firstSubmit = runCliBackground(["submit", join(FIXTURES_DIR, "small.md"), "--no-browser"], {
         env: env(),
       });
 
@@ -480,22 +483,69 @@ describe("03-state-machine", () => {
         await new Promise((r) => setTimeout(r, 100));
       }
 
-      // Start a wait from a "second CLI terminal" while active
-      const waitHandle = runCliBackground(["wait"], { env: env() });
+      // Second agent tries to submit — must get collision rejection, exit 2 per D1/D6.
+      // It must NOT be silently queued as a second waiter.
+      const collision = await runCli(
+        ["submit", join(FIXTURES_DIR, "multi-section.md"), "--no-browser"],
+        { env: env(), timeoutMs: 10_000 },
+      );
+      expect(collision.exitCode).toBe(2);
+      const combined = `${collision.stdout}\n${collision.stderr}`;
+      expect(combined).toContain("plannotator clear --force");
 
-      // Approve via HTTP to deliver the verdict
+      // Clean up
+      await fetch(daemonUrl("/api/cancel"), { method: "POST" });
+      await firstSubmit.waitForExit();
+    } finally {
+      await daemon.stop();
+    }
+  });
+
+  // ADR D2 §3.3.4b — recovery: if the original submitter process dies while
+  // the daemon holds `in_review(R)`, a fresh CLI running `wait` (with the
+  // document id, once --request-id is implemented, or plain `wait` before
+  // verdict while still `awaiting-response`) becomes the sole waiter and
+  // receives the verdict when the user acts via the UI.
+  test("3.3.4b recovery: submitter dies, fresh wait during in_review receives verdict on approve", async () => {
+    const daemon = await startDaemon({ port, home: sandbox.home, binary });
+    try {
+      const firstSubmit = runCliBackground(["submit", join(FIXTURES_DIR, "small.md"), "--no-browser"], {
+        env: env(),
+      });
+
+      // Wait until active
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const resp = await fetch(daemonUrl("/api/state"));
+        const body = (await resp.json()) as { status: string };
+        if (body.status === "awaiting-response") break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      // Original agent process dies — daemon still holds the request
+      firstSubmit.kill("SIGKILL");
+      await firstSubmit.waitForExit(5_000);
+
+      // State must still be awaiting-response (not lost on submitter death)
+      const stateResp = await fetch(daemonUrl("/api/state"));
+      const state = (await stateResp.json()) as { status: string };
+      expect(state.status).toBe("awaiting-response");
+
+      // Fresh CLI becomes the sole recovery waiter while still in_review
+      // (D2: wait without requestId is allowed while state is in_review)
+      const recoveryWait = runCliBackground(["wait"], { env: env() });
+
+      // UI approves
       await fetch(daemonUrl("/api/approve"), {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ feedback: "approved", annotations: [] }),
+        body: JSON.stringify({ feedback: "looks good", annotations: [] }),
       });
 
-      const submitResult = await submitHandle.waitForExit();
-      expect(submitResult.exitCode).toBe(0);
+      const result = await recoveryWait.waitForExit();
+      expect(result.exitCode).toBe(0);
 
-      const waitResult = await waitHandle.waitForExit();
-      // The wait command must receive the verdict (approved) and exit
-      expect(waitResult.exitCode).toBe(0);
+      await expectIdle(port);
     } finally {
       await daemon.stop();
     }
