@@ -15,3 +15,19 @@ validate target="plans/features" schema_dir=".nimbalyst/trackers" out="plans/pla
 
 install-planning-schemas dest=".nimbalyst/trackers":
   @just --justfile {{planning_justfile}} install-schemas {{repo_root / dest}}
+
+# Build recipes
+build-hook:
+  bun run build:hook
+
+build-opencode:
+  bun run build:opencode
+
+build-vscode:
+  bun run build:vscode
+
+build:
+  bun run build
+
+test:
+  bun test
