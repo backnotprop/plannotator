@@ -6,7 +6,7 @@ title: 'Phase 2-TDD: Per-slice proof tasks'
 tags:
 - FEATURE-DAEMON-REFACTOR
 - PLAN-NIM-R
-status: needs-review
+status: blocked
 description: Centralize TDD proof tasks in a dedicated phase while keeping per-slice
   implementation slices in PHASE-2.
 successCriteria:
@@ -38,6 +38,15 @@ TDD proof tasks live here so they can be reviewed separately from implementation
 | [[TASK-TDD-S-7]] | [[TASK-S-7]] | S-7 |
 | [[TASK-TDD-S-8]] | [[TASK-S-8]] | S-8 |
 | [[TASK-TDD-S-9]] | [[TASK-S-9]] | S-9 |
+
+## Review Findings (2026-05-05)
+
+**Kick back.** Frontmatter has `dependsOn: PHASE-2`, but the parent plan ([[PLAN-NIM-R]]) explicitly states: "TDD blocks only its implementation slice" and lists PHASE-2-TDD as blocking PHASE-2. The dependency is reversed. Either:
+
+- remove `dependsOn: PHASE-2` (this phase only depends on PHASE-0 and PHASE-1), and add `dependsOn: [[PHASE-2-TDD]]` to PHASE-2, or
+- if the intent is actually PHASE-2 → PHASE-2-TDD ordering, update [[PLAN-NIM-R]] and the TDD-blocks-implementation rule accordingly.
+
+Secondary issue: the slice table duplicates the table in [[PHASE-2]]; consolidate per "No Static Metadata Rollups".
 
 ## Activity Log
 

@@ -1,5 +1,4 @@
 # Dependency DAG
-
 ```mermaid
 graph LR
   subgraph group_feature["Features"]
@@ -22,15 +21,15 @@ graph LR
   end
   subgraph group_phase["Phases"]
     direction TB
-    PHASE_0["PHASE-0 [needs-review]"]
+    PHASE_0["PHASE-0 [complete]"]
     class PHASE_0 internal-link
-    class PHASE_0 status_needs_review
-    PHASE_1["PHASE-1 [needs-review]"]
+    class PHASE_0 status_complete
+    PHASE_1["PHASE-1 [complete]"]
     class PHASE_1 internal-link
-    class PHASE_1 status_needs_review
-    PHASE_4["PHASE-4 [needs-review]"]
+    class PHASE_1 status_complete
+    PHASE_4["PHASE-4 [unstarted]"]
     class PHASE_4 internal-link
-    class PHASE_4 status_needs_review
+    class PHASE_4 status_unstarted
     PHASE_2["PHASE-2 [needs-review]"]
     class PHASE_2 internal-link
     class PHASE_2 status_needs_review
@@ -43,39 +42,39 @@ graph LR
   end
   subgraph group_task["Tasks"]
     direction TB
-    TASK_S_9_5["TASK-S-9.5 [needs-review]"]
+    TASK_S_9_5["TASK-S-9.5 [complete]"]
     class TASK_S_9_5 internal-link
-    class TASK_S_9_5 status_needs_review
-    TASK_TDD_S_9["TASK-TDD-S-9 [needs-review]"]
+    class TASK_S_9_5 status_complete
+    TASK_TDD_S_9["TASK-TDD-S-9 [complete]"]
     class TASK_TDD_S_9 internal-link
-    class TASK_TDD_S_9 status_needs_review
-    TASK_TDD_S_2["TASK-TDD-S-2 [needs-review]"]
+    class TASK_TDD_S_9 status_complete
+    TASK_TDD_S_2["TASK-TDD-S-2 [complete]"]
     class TASK_TDD_S_2 internal-link
-    class TASK_TDD_S_2 status_needs_review
-    TASK_TDD_S_8["TASK-TDD-S-8 [needs-review]"]
+    class TASK_TDD_S_2 status_complete
+    TASK_TDD_S_8["TASK-TDD-S-8 [complete]"]
     class TASK_TDD_S_8 internal-link
-    class TASK_TDD_S_8 status_needs_review
-    TASK_TDD_S_4["TASK-TDD-S-4 [needs-review]"]
+    class TASK_TDD_S_8 status_complete
+    TASK_TDD_S_4["TASK-TDD-S-4 [complete]"]
     class TASK_TDD_S_4 internal-link
-    class TASK_TDD_S_4 status_needs_review
-    TASK_TDD_S_6["TASK-TDD-S-6 [needs-review]"]
+    class TASK_TDD_S_4 status_complete
+    TASK_TDD_S_6["TASK-TDD-S-6 [complete]"]
     class TASK_TDD_S_6 internal-link
-    class TASK_TDD_S_6 status_needs_review
-    TASK_TDD_S_7["TASK-TDD-S-7 [needs-review]"]
+    class TASK_TDD_S_6 status_complete
+    TASK_TDD_S_7["TASK-TDD-S-7 [complete]"]
     class TASK_TDD_S_7 internal-link
-    class TASK_TDD_S_7 status_needs_review
-    TASK_TDD_S_3["TASK-TDD-S-3 [needs-review]"]
+    class TASK_TDD_S_7 status_complete
+    TASK_TDD_S_3["TASK-TDD-S-3 [complete]"]
     class TASK_TDD_S_3 internal-link
-    class TASK_TDD_S_3 status_needs_review
-    TASK_TDD_S_1["TASK-TDD-S-1 [needs-review]"]
+    class TASK_TDD_S_3 status_complete
+    TASK_TDD_S_1["TASK-TDD-S-1 [complete]"]
     class TASK_TDD_S_1 internal-link
-    class TASK_TDD_S_1 status_needs_review
-    TASK_TDD_S_5["TASK-TDD-S-5 [needs-review]"]
+    class TASK_TDD_S_1 status_complete
+    TASK_TDD_S_5["TASK-TDD-S-5 [complete]"]
     class TASK_TDD_S_5 internal-link
-    class TASK_TDD_S_5 status_needs_review
-    TASK_E01["TASK-E01 [needs-review]"]
+    class TASK_TDD_S_5 status_complete
+    TASK_E01["TASK-E01 [unstarted]"]
     class TASK_E01 internal-link
-    class TASK_E01 status_needs_review
+    class TASK_E01 status_unstarted
     TASK_E06["TASK-E06 [unstarted]"]
     class TASK_E06 internal-link
     class TASK_E06 status_unstarted
@@ -85,90 +84,90 @@ graph LR
     TASK_E10["TASK-E10 [unstarted]"]
     class TASK_E10 internal-link
     class TASK_E10 status_unstarted
-    TASK_E07["TASK-E07 [unstarted]"]
+    TASK_E07["TASK-E07 [needs-review]"]
     class TASK_E07 internal-link
-    class TASK_E07 status_unstarted
+    class TASK_E07 status_needs_review
     TASK_E02["TASK-E02 [unstarted]"]
     class TASK_E02 internal-link
     class TASK_E02 status_unstarted
-    TASK_E11["TASK-E11 [unstarted]"]
+    TASK_E11["TASK-E11 [needs-review]"]
     class TASK_E11 internal-link
-    class TASK_E11 status_unstarted
-    TASK_E08["TASK-E08 [unstarted]"]
+    class TASK_E11 status_needs_review
+    TASK_E08["TASK-E08 [needs-review]"]
     class TASK_E08 internal-link
-    class TASK_E08 status_unstarted
-    TASK_E12["TASK-E12 [unstarted]"]
+    class TASK_E08 status_needs_review
+    TASK_E12["TASK-E12 [needs-review]"]
     class TASK_E12 internal-link
-    class TASK_E12 status_unstarted
+    class TASK_E12 status_needs_review
     TASK_E14["TASK-E14 [unstarted]"]
     class TASK_E14 internal-link
     class TASK_E14 status_unstarted
     TASK_E05["TASK-E05 [unstarted]"]
     class TASK_E05 internal-link
     class TASK_E05 status_unstarted
-    TASK_E15["TASK-E15 [unstarted]"]
+    TASK_E15["TASK-E15 [needs-review]"]
     class TASK_E15 internal-link
-    class TASK_E15 status_unstarted
-    TASK_E03["TASK-E03 [unstarted]"]
+    class TASK_E15 status_needs_review
+    TASK_E03["TASK-E03 [needs-review]"]
     class TASK_E03 internal-link
-    class TASK_E03 status_unstarted
-    TASK_E09["TASK-E09 [unstarted]"]
+    class TASK_E03 status_needs_review
+    TASK_E09["TASK-E09 [needs-review]"]
     class TASK_E09 internal-link
-    class TASK_E09 status_unstarted
-    TASK_E13["TASK-E13 [unstarted]"]
+    class TASK_E09 status_needs_review
+    TASK_E13["TASK-E13 [needs-review]"]
     class TASK_E13 internal-link
-    class TASK_E13 status_unstarted
-    TASK_S_1["TASK-S-1 [needs-review]"]
+    class TASK_E13 status_needs_review
+    TASK_S_1["TASK-S-1 [complete]"]
     class TASK_S_1 internal-link
-    class TASK_S_1 status_needs_review
-    TASK_S_9["TASK-S-9 [needs-review]"]
+    class TASK_S_1 status_complete
+    TASK_S_9["TASK-S-9 [complete]"]
     class TASK_S_9 internal-link
-    class TASK_S_9 status_needs_review
-    TASK_S_3["TASK-S-3 [needs-review]"]
+    class TASK_S_9 status_complete
+    TASK_S_3["TASK-S-3 [complete]"]
     class TASK_S_3 internal-link
-    class TASK_S_3 status_needs_review
+    class TASK_S_3 status_complete
     TASK_S_8["TASK-S-8 [needs-review]"]
     class TASK_S_8 internal-link
     class TASK_S_8 status_needs_review
-    TASK_S_4["TASK-S-4 [needs-review]"]
+    TASK_S_4["TASK-S-4 [complete]"]
     class TASK_S_4 internal-link
-    class TASK_S_4 status_needs_review
-    TASK_S_6["TASK-S-6 [needs-review]"]
+    class TASK_S_4 status_complete
+    TASK_S_6["TASK-S-6 [complete]"]
     class TASK_S_6 internal-link
-    class TASK_S_6 status_needs_review
-    TASK_S_2["TASK-S-2 [needs-review]"]
+    class TASK_S_6 status_complete
+    TASK_S_2["TASK-S-2 [complete]"]
     class TASK_S_2 internal-link
-    class TASK_S_2 status_needs_review
-    TASK_S_5["TASK-S-5 [needs-review]"]
+    class TASK_S_2 status_complete
+    TASK_S_5["TASK-S-5 [complete]"]
     class TASK_S_5 internal-link
-    class TASK_S_5 status_needs_review
-    TASK_S_7["TASK-S-7 [needs-review]"]
+    class TASK_S_5 status_complete
+    TASK_S_7["TASK-S-7 [complete]"]
     class TASK_S_7 internal-link
-    class TASK_S_7 status_needs_review
-    TASK_S_10["TASK-S-10 [needs-review]"]
+    class TASK_S_7 status_complete
+    TASK_S_10["TASK-S-10 [unstarted]"]
     class TASK_S_10 internal-link
-    class TASK_S_10 status_needs_review
-    TASK_E00["TASK-E00 [needs-review]"]
+    class TASK_S_10 status_unstarted
+    TASK_E00["TASK-E00 [complete]"]
     class TASK_E00 internal-link
-    class TASK_E00 status_needs_review
-    TASK_D6["TASK-D6 [needs-review]"]
+    class TASK_E00 status_complete
+    TASK_D6["TASK-D6 [complete]"]
     class TASK_D6 internal-link
-    class TASK_D6 status_needs_review
-    TASK_D1["TASK-D1 [needs-review]"]
+    class TASK_D6 status_complete
+    TASK_D1["TASK-D1 [complete]"]
     class TASK_D1 internal-link
-    class TASK_D1 status_needs_review
-    TASK_D2["TASK-D2 [needs-review]"]
+    class TASK_D1 status_complete
+    TASK_D2["TASK-D2 [complete]"]
     class TASK_D2 internal-link
-    class TASK_D2 status_needs_review
-    TASK_D5["TASK-D5 [needs-review]"]
+    class TASK_D2 status_complete
+    TASK_D5["TASK-D5 [complete]"]
     class TASK_D5 internal-link
-    class TASK_D5 status_needs_review
-    TASK_D3["TASK-D3 [needs-review]"]
+    class TASK_D5 status_complete
+    TASK_D3["TASK-D3 [complete]"]
     class TASK_D3 internal-link
-    class TASK_D3 status_needs_review
-    TASK_D4["TASK-D4 [needs-review]"]
+    class TASK_D3 status_complete
+    TASK_D4["TASK-D4 [complete]"]
     class TASK_D4 internal-link
-    class TASK_D4 status_needs_review
+    class TASK_D4 status_complete
   end
   subgraph group_decision["Decisions"]
     direction TB
@@ -322,6 +321,7 @@ graph LR
   DECISION_D5 --> TASK_D5
   DECISION_D3 --> TASK_D3
   DECISION_D4 --> TASK_D4
+  classDef status_complete fill:#d8f5e7,stroke:#16a34a,color:#14532d
   classDef status_decided fill:#d8f5e7,stroke:#16a34a,color:#14532d
   classDef status_in_progress fill:#d7f3ff,stroke:#0284c7,color:#0f172a
   classDef status_needs_review fill:#fff1c2,stroke:#d97706,color:#7c2d12
@@ -351,15 +351,15 @@ graph LR
   end
   subgraph group_phase["Phases"]
     direction TB
-    PHASE_0["PHASE-0 [needs-review]"]
+    PHASE_0["PHASE-0 [complete]"]
     class PHASE_0 internal-link
-    class PHASE_0 status_needs_review
-    PHASE_1["PHASE-1 [needs-review]"]
+    class PHASE_0 status_complete
+    PHASE_1["PHASE-1 [complete]"]
     class PHASE_1 internal-link
-    class PHASE_1 status_needs_review
-    PHASE_4["PHASE-4 [needs-review]"]
+    class PHASE_1 status_complete
+    PHASE_4["PHASE-4 [unstarted]"]
     class PHASE_4 internal-link
-    class PHASE_4 status_needs_review
+    class PHASE_4 status_unstarted
     PHASE_2["PHASE-2 [needs-review]"]
     class PHASE_2 internal-link
     class PHASE_2 status_needs_review
@@ -372,39 +372,39 @@ graph LR
   end
   subgraph group_task["Tasks"]
     direction TB
-    TASK_S_9_5["TASK-S-9.5 [needs-review]"]
+    TASK_S_9_5["TASK-S-9.5 [complete]"]
     class TASK_S_9_5 internal-link
-    class TASK_S_9_5 status_needs_review
-    TASK_TDD_S_9["TASK-TDD-S-9 [needs-review]"]
+    class TASK_S_9_5 status_complete
+    TASK_TDD_S_9["TASK-TDD-S-9 [complete]"]
     class TASK_TDD_S_9 internal-link
-    class TASK_TDD_S_9 status_needs_review
-    TASK_TDD_S_2["TASK-TDD-S-2 [needs-review]"]
+    class TASK_TDD_S_9 status_complete
+    TASK_TDD_S_2["TASK-TDD-S-2 [complete]"]
     class TASK_TDD_S_2 internal-link
-    class TASK_TDD_S_2 status_needs_review
-    TASK_TDD_S_8["TASK-TDD-S-8 [needs-review]"]
+    class TASK_TDD_S_2 status_complete
+    TASK_TDD_S_8["TASK-TDD-S-8 [complete]"]
     class TASK_TDD_S_8 internal-link
-    class TASK_TDD_S_8 status_needs_review
-    TASK_TDD_S_4["TASK-TDD-S-4 [needs-review]"]
+    class TASK_TDD_S_8 status_complete
+    TASK_TDD_S_4["TASK-TDD-S-4 [complete]"]
     class TASK_TDD_S_4 internal-link
-    class TASK_TDD_S_4 status_needs_review
-    TASK_TDD_S_6["TASK-TDD-S-6 [needs-review]"]
+    class TASK_TDD_S_4 status_complete
+    TASK_TDD_S_6["TASK-TDD-S-6 [complete]"]
     class TASK_TDD_S_6 internal-link
-    class TASK_TDD_S_6 status_needs_review
-    TASK_TDD_S_7["TASK-TDD-S-7 [needs-review]"]
+    class TASK_TDD_S_6 status_complete
+    TASK_TDD_S_7["TASK-TDD-S-7 [complete]"]
     class TASK_TDD_S_7 internal-link
-    class TASK_TDD_S_7 status_needs_review
-    TASK_TDD_S_3["TASK-TDD-S-3 [needs-review]"]
+    class TASK_TDD_S_7 status_complete
+    TASK_TDD_S_3["TASK-TDD-S-3 [complete]"]
     class TASK_TDD_S_3 internal-link
-    class TASK_TDD_S_3 status_needs_review
-    TASK_TDD_S_1["TASK-TDD-S-1 [needs-review]"]
+    class TASK_TDD_S_3 status_complete
+    TASK_TDD_S_1["TASK-TDD-S-1 [complete]"]
     class TASK_TDD_S_1 internal-link
-    class TASK_TDD_S_1 status_needs_review
-    TASK_TDD_S_5["TASK-TDD-S-5 [needs-review]"]
+    class TASK_TDD_S_1 status_complete
+    TASK_TDD_S_5["TASK-TDD-S-5 [complete]"]
     class TASK_TDD_S_5 internal-link
-    class TASK_TDD_S_5 status_needs_review
-    TASK_E01["TASK-E01 [needs-review]"]
+    class TASK_TDD_S_5 status_complete
+    TASK_E01["TASK-E01 [unstarted]"]
     class TASK_E01 internal-link
-    class TASK_E01 status_needs_review
+    class TASK_E01 status_unstarted
     TASK_E06["TASK-E06 [unstarted]"]
     class TASK_E06 internal-link
     class TASK_E06 status_unstarted
@@ -414,90 +414,90 @@ graph LR
     TASK_E10["TASK-E10 [unstarted]"]
     class TASK_E10 internal-link
     class TASK_E10 status_unstarted
-    TASK_E07["TASK-E07 [unstarted]"]
+    TASK_E07["TASK-E07 [needs-review]"]
     class TASK_E07 internal-link
-    class TASK_E07 status_unstarted
+    class TASK_E07 status_needs_review
     TASK_E02["TASK-E02 [unstarted]"]
     class TASK_E02 internal-link
     class TASK_E02 status_unstarted
-    TASK_E11["TASK-E11 [unstarted]"]
+    TASK_E11["TASK-E11 [needs-review]"]
     class TASK_E11 internal-link
-    class TASK_E11 status_unstarted
-    TASK_E08["TASK-E08 [unstarted]"]
+    class TASK_E11 status_needs_review
+    TASK_E08["TASK-E08 [needs-review]"]
     class TASK_E08 internal-link
-    class TASK_E08 status_unstarted
-    TASK_E12["TASK-E12 [unstarted]"]
+    class TASK_E08 status_needs_review
+    TASK_E12["TASK-E12 [needs-review]"]
     class TASK_E12 internal-link
-    class TASK_E12 status_unstarted
+    class TASK_E12 status_needs_review
     TASK_E14["TASK-E14 [unstarted]"]
     class TASK_E14 internal-link
     class TASK_E14 status_unstarted
     TASK_E05["TASK-E05 [unstarted]"]
     class TASK_E05 internal-link
     class TASK_E05 status_unstarted
-    TASK_E15["TASK-E15 [unstarted]"]
+    TASK_E15["TASK-E15 [needs-review]"]
     class TASK_E15 internal-link
-    class TASK_E15 status_unstarted
-    TASK_E03["TASK-E03 [unstarted]"]
+    class TASK_E15 status_needs_review
+    TASK_E03["TASK-E03 [needs-review]"]
     class TASK_E03 internal-link
-    class TASK_E03 status_unstarted
-    TASK_E09["TASK-E09 [unstarted]"]
+    class TASK_E03 status_needs_review
+    TASK_E09["TASK-E09 [needs-review]"]
     class TASK_E09 internal-link
-    class TASK_E09 status_unstarted
-    TASK_E13["TASK-E13 [unstarted]"]
+    class TASK_E09 status_needs_review
+    TASK_E13["TASK-E13 [needs-review]"]
     class TASK_E13 internal-link
-    class TASK_E13 status_unstarted
-    TASK_S_1["TASK-S-1 [needs-review]"]
+    class TASK_E13 status_needs_review
+    TASK_S_1["TASK-S-1 [complete]"]
     class TASK_S_1 internal-link
-    class TASK_S_1 status_needs_review
-    TASK_S_9["TASK-S-9 [needs-review]"]
+    class TASK_S_1 status_complete
+    TASK_S_9["TASK-S-9 [complete]"]
     class TASK_S_9 internal-link
-    class TASK_S_9 status_needs_review
-    TASK_S_3["TASK-S-3 [needs-review]"]
+    class TASK_S_9 status_complete
+    TASK_S_3["TASK-S-3 [complete]"]
     class TASK_S_3 internal-link
-    class TASK_S_3 status_needs_review
+    class TASK_S_3 status_complete
     TASK_S_8["TASK-S-8 [needs-review]"]
     class TASK_S_8 internal-link
     class TASK_S_8 status_needs_review
-    TASK_S_4["TASK-S-4 [needs-review]"]
+    TASK_S_4["TASK-S-4 [complete]"]
     class TASK_S_4 internal-link
-    class TASK_S_4 status_needs_review
-    TASK_S_6["TASK-S-6 [needs-review]"]
+    class TASK_S_4 status_complete
+    TASK_S_6["TASK-S-6 [complete]"]
     class TASK_S_6 internal-link
-    class TASK_S_6 status_needs_review
-    TASK_S_2["TASK-S-2 [needs-review]"]
+    class TASK_S_6 status_complete
+    TASK_S_2["TASK-S-2 [complete]"]
     class TASK_S_2 internal-link
-    class TASK_S_2 status_needs_review
-    TASK_S_5["TASK-S-5 [needs-review]"]
+    class TASK_S_2 status_complete
+    TASK_S_5["TASK-S-5 [complete]"]
     class TASK_S_5 internal-link
-    class TASK_S_5 status_needs_review
-    TASK_S_7["TASK-S-7 [needs-review]"]
+    class TASK_S_5 status_complete
+    TASK_S_7["TASK-S-7 [complete]"]
     class TASK_S_7 internal-link
-    class TASK_S_7 status_needs_review
-    TASK_S_10["TASK-S-10 [needs-review]"]
+    class TASK_S_7 status_complete
+    TASK_S_10["TASK-S-10 [unstarted]"]
     class TASK_S_10 internal-link
-    class TASK_S_10 status_needs_review
-    TASK_E00["TASK-E00 [needs-review]"]
+    class TASK_S_10 status_unstarted
+    TASK_E00["TASK-E00 [complete]"]
     class TASK_E00 internal-link
-    class TASK_E00 status_needs_review
-    TASK_D6["TASK-D6 [needs-review]"]
+    class TASK_E00 status_complete
+    TASK_D6["TASK-D6 [complete]"]
     class TASK_D6 internal-link
-    class TASK_D6 status_needs_review
-    TASK_D1["TASK-D1 [needs-review]"]
+    class TASK_D6 status_complete
+    TASK_D1["TASK-D1 [complete]"]
     class TASK_D1 internal-link
-    class TASK_D1 status_needs_review
-    TASK_D2["TASK-D2 [needs-review]"]
+    class TASK_D1 status_complete
+    TASK_D2["TASK-D2 [complete]"]
     class TASK_D2 internal-link
-    class TASK_D2 status_needs_review
-    TASK_D5["TASK-D5 [needs-review]"]
+    class TASK_D2 status_complete
+    TASK_D5["TASK-D5 [complete]"]
     class TASK_D5 internal-link
-    class TASK_D5 status_needs_review
-    TASK_D3["TASK-D3 [needs-review]"]
+    class TASK_D5 status_complete
+    TASK_D3["TASK-D3 [complete]"]
     class TASK_D3 internal-link
-    class TASK_D3 status_needs_review
-    TASK_D4["TASK-D4 [needs-review]"]
+    class TASK_D3 status_complete
+    TASK_D4["TASK-D4 [complete]"]
     class TASK_D4 internal-link
-    class TASK_D4 status_needs_review
+    class TASK_D4 status_complete
   end
   subgraph group_decision["Decisions"]
     direction TB
@@ -520,13 +520,13 @@ graph LR
     class DECISION_D4 internal-link
     class DECISION_D4 status_decided
   end
-  FEATURE_DAEMON_REFACTOR --> SPEC_DAEMON_E2E_CERTIFICATION
   FEATURE_DAEMON_REFACTOR --> DECISION_D3
   FEATURE_DAEMON_REFACTOR --> DECISION_D5
   FEATURE_DAEMON_REFACTOR --> DECISION_D1
   FEATURE_DAEMON_REFACTOR --> DECISION_D2
   FEATURE_DAEMON_REFACTOR --> DECISION_D6
   FEATURE_DAEMON_REFACTOR --> DECISION_D4
+  FEATURE_DAEMON_REFACTOR --> SPEC_DAEMON_E2E_CERTIFICATION
   FEATURE_DAEMON_REFACTOR --> PLAN_NIM_R
   PLAN_NIM_R --> PHASE_0
   PLAN_NIM_R --> PHASE_1
@@ -576,6 +576,7 @@ graph LR
   PHASE_0 --> TASK_D5
   PHASE_0 --> TASK_D3
   PHASE_0 --> TASK_D4
+  classDef status_complete fill:#d8f5e7,stroke:#16a34a,color:#14532d
   classDef status_decided fill:#d8f5e7,stroke:#16a34a,color:#14532d
   classDef status_in_progress fill:#d7f3ff,stroke:#0284c7,color:#0f172a
   classDef status_needs_review fill:#fff1c2,stroke:#d97706,color:#7c2d12

@@ -28,7 +28,7 @@ tags:
 - FEATURE-DAEMON-REFACTOR
 - PLAN-NIM-R
 - PHASE-3
-status: needs-review
+status: blocked
 parents:
 - '[[PHASE-3]]'
 dependsOn:
@@ -38,6 +38,14 @@ dependsOn:
 - '[[TASK-E01]]'
 ---
 
+
+## Review Findings (2026-05-05)
+
+**Kick back.** §99.11 contains decision language: "`apps/pi-extension/` — codify whether it stays or goes".
+
+This is the same unresolved decision flagged on [[TASK-S-8]]. Resolve the pi-extension fate during task authoring (delete vs. keep as thin shell-out) and update §99.11 to assert the chosen state — either `apps/pi-extension/` does not exist, or it exists and contains only a thin CLI wrapper. Once decided, mirror the decision into [[TASK-S-8]].
+
+Secondary: §99.9 deliberately ships an "expected to FAIL today" assertion. Per framework, expected-failing E2E specs are not release evidence — replace with a doc-debt task that fixes `AGENTS.md` before this assertion goes green, rather than encoding the failure as test data.
 
 ## Activity Log
 

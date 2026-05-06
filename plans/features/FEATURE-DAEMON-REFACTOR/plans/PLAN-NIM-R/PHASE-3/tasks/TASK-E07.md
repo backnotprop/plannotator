@@ -25,7 +25,7 @@ tags:
 - FEATURE-DAEMON-REFACTOR
 - PLAN-NIM-R
 - PHASE-3
-status: needs-review
+status: blocked
 parents:
 - '[[PHASE-3]]'
 dependsOn:
@@ -39,6 +39,15 @@ dependsOn:
 - '[[TASK-E00]]'
 ---
 
+
+## Review Findings (2026-05-05)
+
+**Kick back.** Unresolved decision language and a stale cross-reference:
+
+- §7.4: "blocks until verdict; then behaves per §3.3.4 decision" — depends on a section that itself contains decision language ([[TASK-E03]] §3.3.4). After E03 is reauthored to cite [[TASK-D2]] directly, fix this reference.
+- §7.6: "codify the behavior: (a) state recovered as `verdict_ready{cancelled}`...; (b) state lost, daemon comes up `idle`, original CLI produces useful error" — [[TASK-D3]] settled durability: accepted in_review and durable verdicts persist; restart preserves state. Replace the (a)/(b) options with the single behavior implied by D3 and assert it.
+
+Per framework: tasks must not leave acceptance criteria for the implementation agent to invent.
 
 ## Activity Log
 

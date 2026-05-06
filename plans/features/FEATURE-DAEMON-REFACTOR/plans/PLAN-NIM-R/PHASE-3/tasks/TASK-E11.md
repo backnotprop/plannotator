@@ -21,7 +21,7 @@ tags:
 - FEATURE-DAEMON-REFACTOR
 - PLAN-NIM-R
 - PHASE-3
-status: needs-review
+status: blocked
 parents:
 - '[[PHASE-3]]'
 dependsOn:
@@ -31,6 +31,12 @@ dependsOn:
 - '[[TASK-E00]]'
 ---
 
+
+## Review Findings (2026-05-05)
+
+**Kick back.** §11.5 contains decision language: "verdict either flushed to wait clients or persisted to state file (codify); daemon stops cleanly".
+
+[[TASK-D3]] settled this: a verdict after durable write restarts as `verdict_ready(R)`. [[TASK-D5]] settled SIGTERM during `verdict_ready(R)`: restarts as `verdict_ready(R)` and permits exact-ID recovery. Replace the "either/or" with the assertion implied by D3+D5.
 
 ## Activity Log
 

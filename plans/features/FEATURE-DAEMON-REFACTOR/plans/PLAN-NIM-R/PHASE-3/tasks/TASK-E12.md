@@ -24,7 +24,7 @@ tags:
 - FEATURE-DAEMON-REFACTOR
 - PLAN-NIM-R
 - PHASE-3
-status: needs-review
+status: blocked
 parents:
 - '[[PHASE-3]]'
 dependsOn:
@@ -39,6 +39,12 @@ dependsOn:
 - '[[TASK-E00]]'
 ---
 
+
+## Review Findings (2026-05-05)
+
+**Kick back.** §12.x.4 contains decision language: "Timeout case | `{ decision: "timeout" }` (or actual marker — codify)".
+
+[[TASK-D1]] settled the JSON timeout shape: `{ ok: false, error: { code: "timeout", ... } }` (CLI exit 124). Update §12.x.4 to assert the D1 shape, and align the assertion in §12.x.1–§12.x.3 with the D1 verdict envelope (`{ ok: true, result: { verdict: "approve|deny|cancel" } }`) rather than the legacy `{ decision: ... }` shape, or document that the wrapper layer translates D1 into a `{ decision: ... }` outer shape.
 
 ## Activity Log
 

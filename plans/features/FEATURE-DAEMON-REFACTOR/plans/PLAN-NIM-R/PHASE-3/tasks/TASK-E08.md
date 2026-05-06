@@ -22,7 +22,7 @@ tags:
 - FEATURE-DAEMON-REFACTOR
 - PLAN-NIM-R
 - PHASE-3
-status: needs-review
+status: blocked
 parents:
 - '[[PHASE-3]]'
 dependsOn:
@@ -32,6 +32,14 @@ dependsOn:
 - '[[TASK-E00]]'
 ---
 
+
+## Review Findings (2026-05-05)
+
+**Kick back.** §8.7 (in the description body) contains decision language: "rejected with descriptive error (or accepted unconditionally — codify)".
+
+[[TASK-D1]] / [[TASK-D6]] settled the clear contract; encode the chosen behavior (rejected without confirmation, with the documented error code), and drop the alternative.
+
+Per framework: tasks must not leave acceptance criteria for the implementation agent to invent.
 
 ## Activity Log
 

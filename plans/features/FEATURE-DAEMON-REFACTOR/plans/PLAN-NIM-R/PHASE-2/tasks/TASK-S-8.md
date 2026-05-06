@@ -14,7 +14,7 @@ tags:
 - FEATURE-DAEMON-REFACTOR
 - PLAN-NIM-R
 - PHASE-2
-status: needs-review
+status: blocked
 parents:
 - '[[PHASE-2]]'
 dependsOn:
@@ -31,6 +31,12 @@ dependsOn:
 
 Architectural rule:
 - The daemon must stay general-purpose. Agent policy belongs in the wrappers, not in daemon state transitions or transport logic.
+## Review Findings (2026-05-05)
+
+**Kick back.** Subtasks contain unresolved decision language: "Decide the fate of `apps/pi-extension/`; preferred path is deletion or the same thin shell-out model."
+
+Per framework rules in `/home/dzack/gitclones/ai/planning/AGENTS.md` §Task Cards: tasks must not contain "decide whether", "figure out", or "choose an approach". Resolve the pi-extension fate during task authoring (decide between delete vs. thin shell-out, encode the chosen contract, and update the wrapper proof in [[TASK-TDD-S-8]] / [[TASK-E15]] to assert that exact state). Either reflect the decision already made by the integrated implementation, or open a feature-level decision card if the choice is genuinely open.
+
 ## Comments
 
 ### Comment (2026-05-01T16:39:19.398Z)

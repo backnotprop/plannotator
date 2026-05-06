@@ -13,7 +13,7 @@ tags:
 - FEATURE-DAEMON-REFACTOR
 - PLAN-NIM-R
 - PHASE-3
-status: needs-review
+status: blocked
 parents:
 - '[[PHASE-3]]'
 dependsOn:
@@ -54,6 +54,16 @@ Parent phase: Phase 3 (Cross-slice E2E specs). Alias: [[TASK-E03]].
 | 3.3.2 | Submit + deny with feedback, then `plannotator wait` | wait exits with deny code; feedback in output; state → `idle` |
 | 3.3.3 | Submit + UI Cancel, then `plannotator wait` | wait exits with cancel code; state → `idle` |
 | 3.3.4 | Submit; while `active`, run `plannotator wait` from different CLI | blocks; on UI approve, document broadcast vs. FIFO behavior — pick one and codify |
+
+## Review Findings (2026-05-05)
+
+**Kick back.** Three pieces of unresolved decision language:
+
+- §3.1: "`active` → `POST /api/approve` → `verdict_ready` (or `idle` — verify which)" — [[TASK-D2]] settled this: approve durably records the verdict and the daemon enters `verdict_ready(R)` until consumed by an eligible exact-ID waiter. Drop the alternative.
+- §3.2.4: "must literally contain `plannotator clear --force` (or whatever the implementation chose); string-match assertion" — the recovery command is fixed by [[TASK-D1]] / [[TASK-D6]]. Drop "or whatever the implementation chose"; assert the exact required string.
+- §3.3.4: "blocks; on UI approve, document broadcast vs. FIFO behavior — pick one and codify" — [[TASK-D2]] already settled this contract: broadcast to all eligible waiters, no FIFO. Replace with the assertion implied by D2.
+
+Per framework: tasks must not leave acceptance criteria for the implementation agent to invent.
 
 ## Activity Log
 

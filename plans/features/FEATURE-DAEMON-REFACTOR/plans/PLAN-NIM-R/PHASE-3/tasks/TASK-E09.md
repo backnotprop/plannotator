@@ -26,7 +26,7 @@ tags:
 - FEATURE-DAEMON-REFACTOR
 - PLAN-NIM-R
 - PHASE-3
-status: needs-review
+status: blocked
 parents:
 - '[[PHASE-3]]'
 dependsOn:
@@ -36,6 +36,15 @@ dependsOn:
 - '[[TASK-E00]]'
 ---
 
+
+## Review Findings (2026-05-05)
+
+**Kick back.** §9.7 contains conditional acceptance language: "or drop to smoke test if not realistically testable".
+
+Per framework: tasks must define a single acceptance contract, not an implementation-time downgrade option. Either:
+
+- assert the full Obsidian-vault behavior (frontmatter fields, backlink format) and require that path to be testable, or
+- restrict §9.7 to the smoke check up front (file appears in vault) and move richer assertions to a separate task.
 
 ## Activity Log
 

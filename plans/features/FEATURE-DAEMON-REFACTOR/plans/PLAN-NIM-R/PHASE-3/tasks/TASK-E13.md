@@ -22,7 +22,7 @@ tags:
 - FEATURE-DAEMON-REFACTOR
 - PLAN-NIM-R
 - PHASE-3
-status: needs-review
+status: blocked
 parents:
 - '[[PHASE-3]]'
 dependsOn:
@@ -39,6 +39,12 @@ dependsOn:
 
 ## Description
 13.5 is the worst-case real-world scenario (user has Claude open in two tabs). P0 if it hangs or loses data.
+## Review Findings (2026-05-05)
+
+**Kick back.** §13.3 contains decision language: "binary either auto-starts daemon (preferred) or fails with clear stderr message — codify which".
+
+[[TASK-D3]] settled autostart eligibility: "`submit`, `open`, and `state` may autostart only for the same canonical home and only when no live mismatched daemon owns the fixed port." The Claude hook shim's `submit` invocation falls under that rule. Update §13.3 to assert autostart-on-eligible-state and `daemon_unavailable` failure (per [[TASK-D1]]) on ineligible state. Drop the alternative.
+
 ## Activity Log
 
 - 2026-05-02T04:05:38.712Z: created

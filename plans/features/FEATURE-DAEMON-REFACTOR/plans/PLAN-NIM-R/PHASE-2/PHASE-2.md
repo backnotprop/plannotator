@@ -17,7 +17,7 @@ successCriteria:
 tags:
 - FEATURE-DAEMON-REFACTOR
 - PLAN-NIM-R
-status: needs-review
+status: blocked
 parents:
 - PLAN-NIM-R
 ---
@@ -37,6 +37,12 @@ parents:
 | [[TASK-TDD-S-7]] | [[TASK-S-7]] | S-7: Notifications |
 | [[TASK-TDD-S-8]] | [[TASK-S-8]] | S-8: Agent wrappers |
 | [[TASK-TDD-S-9]] | [[TASK-S-9]] | S-9: Build and packaging |
+
+## Review Findings (2026-05-05)
+
+**Kick back.** Per framework rule "Do not approve a phase if any child task still requires operational decisions": child task [[TASK-S-8]] still contains decision language ("Decide the fate of `apps/pi-extension/`..."). Approve PHASE-2 only after [[TASK-S-8]] is reauthored to encode the chosen contract.
+
+Secondary issue: the slice table mirrors the table in [[PHASE-2-TDD]], duplicating cross-phase task references. Once both phases are reauthored, keep TDD task references in PHASE-2-TDD only and reference implementation tasks in PHASE-2 only — see framework "No Static Metadata Rollups".
 
 ## Activity Log
 
