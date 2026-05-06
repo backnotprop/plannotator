@@ -27,7 +27,7 @@ import {
 //   { hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "deny", message: "YOUR PLAN WAS NOT APPROVED..." } } }
 
 const FIXTURES_DIR = resolve(
-  fileURLToPath(new URL("../../", import.meta.url)),
+  fileURLToPath(new URL("../", import.meta.url)),
   "fixtures/plans",
 );
 

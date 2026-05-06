@@ -19,12 +19,12 @@ import {
 //   slug = {heading-kebab}-YYYY-MM-DD, or plan-YYYY-MM-DD if no heading
 
 const FIXTURES_DIR = resolve(
-  fileURLToPath(new URL("../../", import.meta.url)),
+  fileURLToPath(new URL("../", import.meta.url)),
   "fixtures/plans",
 );
 
 const REPOS_DIR = resolve(
-  fileURLToPath(new URL("../../", import.meta.url)),
+  fileURLToPath(new URL("../", import.meta.url)),
   "fixtures/repos",
 );
 

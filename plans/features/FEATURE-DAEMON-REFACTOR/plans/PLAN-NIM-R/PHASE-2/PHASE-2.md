@@ -17,33 +17,41 @@ successCriteria:
 tags:
 - FEATURE-DAEMON-REFACTOR
 - PLAN-NIM-R
-status: blocked
+status: complete
 parents:
-- PLAN-NIM-R
+- '[[PLAN-NIM-R]]'
+dependsOn:
+- '[[PHASE-2-TDD]]'
+tasks:
+- '[[TASK-S-1]]'
+- '[[TASK-S-2]]'
+- '[[TASK-S-3]]'
+- '[[TASK-S-4]]'
+- '[[TASK-S-5]]'
+- '[[TASK-S-6]]'
+- '[[TASK-S-7]]'
+- '[[TASK-S-8]]'
+- '[[TASK-S-9]]'
 ---
 
 
-## Slice tasks (TDD → implementation, local blocking only)
+## Implementation Slices
 
-| TDD | Implementation | Slice |
-|-----|----------------|-------|
-| [[TASK-S-9.5]] | — | Shared TDD policy |
-| [[TASK-TDD-S-1]] | [[TASK-S-1]] | S-1: Delete remote surface |
-| [[TASK-TDD-S-2]] | [[TASK-S-2]] | S-2: State machine |
-| [[TASK-TDD-S-3]] | [[TASK-S-3]] | S-3: Multiplexed router |
-| [[TASK-TDD-S-4]] | [[TASK-S-4]] | S-4: Daemon lifecycle |
-| [[TASK-TDD-S-5]] | [[TASK-S-5]] | S-5: Submit/Wait/Clear endpoints |
-| [[TASK-TDD-S-6]] | [[TASK-S-6]] | S-6: CLI surface |
-| [[TASK-TDD-S-7]] | [[TASK-S-7]] | S-7: Notifications |
-| [[TASK-TDD-S-8]] | [[TASK-S-8]] | S-8: Agent wrappers |
-| [[TASK-TDD-S-9]] | [[TASK-S-9]] | S-9: Build and packaging |
+Each slice owns one CLI/daemon surface. Cross-phase TDD pairings live in [[PHASE-2-TDD]].
 
-## Review Findings (2026-05-05)
-
-**Kick back.** Per framework rule "Do not approve a phase if any child task still requires operational decisions": child task [[TASK-S-8]] still contains decision language ("Decide the fate of `apps/pi-extension/`..."). Approve PHASE-2 only after [[TASK-S-8]] is reauthored to encode the chosen contract.
-
-Secondary issue: the slice table mirrors the table in [[PHASE-2-TDD]], duplicating cross-phase task references. Once both phases are reauthored, keep TDD task references in PHASE-2-TDD only and reference implementation tasks in PHASE-2 only — see framework "No Static Metadata Rollups".
+| Task | Slice |
+|------|-------|
+| [[TASK-S-1]] | Delete remote surface |
+| [[TASK-S-2]] | State machine |
+| [[TASK-S-3]] | Multiplexed router |
+| [[TASK-S-4]] | Daemon lifecycle |
+| [[TASK-S-5]] | Submit/Wait/Clear endpoints |
+| [[TASK-S-6]] | CLI surface |
+| [[TASK-S-7]] | Notifications |
+| [[TASK-S-8]] | Agent wrappers |
+| [[TASK-S-9]] | Build and packaging |
 
 ## Activity Log
 
 - 2026-05-04T08:00:03.000Z: created (unified phase for all 9 implementation slices)
+- 2026-05-05T00:00:00.000Z: deduplicated TDD slice table (now lives only in PHASE-2-TDD); fixed parents wikilink; added explicit dependsOn PHASE-2-TDD per plan card sequencing rule

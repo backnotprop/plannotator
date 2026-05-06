@@ -19,7 +19,7 @@ import {
 // once @playwright/test is installed and a playwright.config.ts is added.
 
 const REPOS_DIR = resolve(
-  fileURLToPath(new URL("../../", import.meta.url)),
+  fileURLToPath(new URL("../", import.meta.url)),
   "fixtures/repos",
 );
 

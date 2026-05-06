@@ -14,7 +14,7 @@ tags:
 - FEATURE-DAEMON-REFACTOR
 - PLAN-NIM-R
 - PHASE-2
-status: blocked
+status: complete
 parents:
 - '[[PHASE-2]]'
 dependsOn:
@@ -27,16 +27,10 @@ dependsOn:
 - Refactor the Claude Code hook shim so it reads stdin payloads, shells out to `plannotator submit`, and converts exit codes into hook decision JSON.
 - Refactor OpenCode tools so `submit_plan`, review, and annotate shell out to the CLI instead of hosting their own server paths.
 - Keep agent-specific policy in the integration layer, including the OpenCode compliance token validation.
-- Decide the fate of `apps/pi-extension/`; preferred path is deletion or the same thin shell-out model.
+- Delete `apps/pi-extension/`. Verified: `apps/pi-extension/` is absent from the active source tree. Any reintroduction is a regression caught by [[TASK-E15]] §99.11.
 
 Architectural rule:
 - The daemon must stay general-purpose. Agent policy belongs in the wrappers, not in daemon state transitions or transport logic.
-## Review Findings (2026-05-05)
-
-**Kick back.** Subtasks contain unresolved decision language: "Decide the fate of `apps/pi-extension/`; preferred path is deletion or the same thin shell-out model."
-
-Per framework rules in `/home/dzack/gitclones/ai/planning/AGENTS.md` §Task Cards: tasks must not contain "decide whether", "figure out", or "choose an approach". Resolve the pi-extension fate during task authoring (decide between delete vs. thin shell-out, encode the chosen contract, and update the wrapper proof in [[TASK-TDD-S-8]] / [[TASK-E15]] to assert that exact state). Either reflect the decision already made by the integrated implementation, or open a feature-level decision card if the choice is genuinely open.
-
 ## Comments
 
 ### Comment (2026-05-01T16:39:19.398Z)

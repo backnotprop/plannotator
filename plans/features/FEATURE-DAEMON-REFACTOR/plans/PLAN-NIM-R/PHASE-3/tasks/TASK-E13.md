@@ -3,17 +3,9 @@ id: TASK-E13
 trackerStatus:
   type: task
 title: Claude Code hook shim (PermissionRequest stdin flow)
-description: '| # | Test | Pass condition | |---|------|----------------| | 13.1 |
-  Pipe real `PermissionRequest` JSON event into stdin of binary (no subcommand) |
-  binary forwards plan to daemon; UI shows plan; on approve, stdout emits exact `hookSpecificOutput.decision.behavior=allow`
-  JSON envelope | | 13.2 | Same but UI denies | stdout emits `behavior=deny` with
-  `message` containing feedback and documented prefix `"YOUR PLAN WAS NOT APPROVED.
-  ..."` | | 13.3 | Daemon not running when hook fires | binary either auto-starts
-  daemon (preferred) or fails with clear stderr message — codify which | | 13.4 |
-  Malformed stdin JSON | exits non-zero with clear stderr error; does not corrupt
-  daemon state | | 13.5 | Concurrent hook invocations (two Claude sessions submit
-  at once) | second one hits §3.2 illegal-state path; error reaches Claude via deny
-  envelope''s `message` so Claude can act on it — does not hang or lose data |'
+description: Prove the Claude Code hook shim stdin parsing, daemon-shellout
+  behavior, hook envelopes, and collision handling per the [[TASK-D1]] hook-envelope
+  contract, [[TASK-D3]] autostart rule, and [[TASK-D6]] collision contract.
 successCriteria:
 - Hook-mode E2E coverage proves real PermissionRequest stdin handling, approve and deny envelopes, daemon-unavailable behavior, malformed-stdin behavior, and concurrent hook collisions.
 - Hook-envelope output remains protocol-valid while still surfacing actionable collision or failure information back to Claude Code.
@@ -22,7 +14,7 @@ tags:
 - FEATURE-DAEMON-REFACTOR
 - PLAN-NIM-R
 - PHASE-3
-status: blocked
+status: unstarted
 parents:
 - '[[PHASE-3]]'
 dependsOn:
@@ -37,15 +29,20 @@ dependsOn:
 - '[[TASK-E00]]'
 ---
 
-## Description
-13.5 is the worst-case real-world scenario (user has Claude open in two tabs). P0 if it hangs or loses data.
-## Review Findings (2026-05-05)
+## Test Matrix
 
-**Kick back.** §13.3 contains decision language: "binary either auto-starts daemon (preferred) or fails with clear stderr message — codify which".
-
-[[TASK-D3]] settled autostart eligibility: "`submit`, `open`, and `state` may autostart only for the same canonical home and only when no live mismatched daemon owns the fixed port." The Claude hook shim's `submit` invocation falls under that rule. Update §13.3 to assert autostart-on-eligible-state and `daemon_unavailable` failure (per [[TASK-D1]]) on ineligible state. Drop the alternative.
+| # | Test | Pass condition |
+|---|------|----------------|
+| 13.1 | Pipe real `PermissionRequest` JSON event into stdin of the binary (no subcommand) | binary forwards plan to daemon; UI shows plan; on approve, stdout emits the exact `hookSpecificOutput.decision.behavior = "allow"` JSON envelope per [[TASK-D1]] hook-envelope contract; CLI exits 0 |
+| 13.2 | Same but UI denies | stdout emits `hookSpecificOutput.decision.behavior = "deny"` with `message` containing the user feedback and the documented `"YOUR PLAN WAS NOT APPROVED. ..."` prefix per [[TASK-D1]]; CLI exits 0 (deny semantics carried in JSON, not exit code, per Claude hook contract) |
+| 13.3a | Daemon not running, fixed port free, same canonical home | binary autostarts daemon per [[TASK-D3]] autostart rule for `submit`; flow proceeds as in 13.1 |
+| 13.3b | Daemon not running, fixed port owned by a non-Plannotator process | hook emits a protocol-valid block envelope whose `message` carries the `port_occupied` recovery guidance from [[TASK-D1]]; never approves implicitly |
+| 13.3c | Daemon not running, stale daemon metadata for a different canonical home | hook emits a protocol-valid block envelope carrying `home_mismatch` recovery guidance from [[TASK-D1]]; never autostarts into the wrong home |
+| 13.4 | Malformed stdin JSON | hook emits a protocol-valid block envelope (per [[TASK-D1]] "fail closed: malformed hook input emits a valid block or error envelope instead of approval"); never approves; daemon state unchanged |
+| 13.5 | Concurrent hook invocations (two Claude sessions submit at once — the worst-case real-world scenario, P0 if it hangs or loses data) | the first submission is accepted; the second hits the [[TASK-D6]] collision path and emits a protocol-valid block envelope whose `message` carries the `active_request_collision` recovery guidance per [[TASK-D1]]; second hook never receives the first request's verdict; neither hook hangs |
 
 ## Activity Log
 
 - 2026-05-02T04:05:38.712Z: created
 - 2026-05-05T00:00:00.000Z: status_changed (status) -> needs-review
+- 2026-05-05T01:00:00.000Z: split §13.3 into 13.3a/b/c against [[TASK-D3]] autostart eligibility rule; pinned malformed-input and collision behavior to D1+D6 fail-closed envelopes

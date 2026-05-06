@@ -2,22 +2,10 @@
 id: TASK-E09
 trackerStatus:
   type: task
-title: history and storage (git versioning, drafts, Obsidian)
-description: 'Tests verify disk side-effects without touching the UI.  | # | Test
-  | Pass condition | |---|------|----------------| | 9.1 | Submit + approve → inspect
-  `${PLANNOTATOR_HOME}/.plannotator/plans/{project}/` | directory exists; is a git
-  repo; contains `{slug}.md` with plan content | | 9.2 | `git log --format=%s` in
-  that dir | first commit message contains `--commit-message` value; empty commit
-  follows with approval feedback in body | | 9.3 | Project name detection: cwd inside
-  git repo | `{project}` matches repo''s root directory name (sanitized) | | 9.4 |
-  Project name detection: cwd NOT inside git repo | `{project}` falls back to current
-  directory name | | 9.5 | Submit-deny-resubmit-approve cycle | git log shows: content
-  commit, deny event commit (feedback in body), revised content commit, approve event
-  commit | | 9.6 | `~/.plannotator/drafts/` persistence | annotation in progress saved
-  to disk; killing browser tab and reopening restores draft | | 9.7 | Obsidian integration
-  | approved plan appears in vault as markdown file with YAML frontmatter (`created`,
-  `source`, `tags`) and [[Plannotator Plans]] backlink — or drop to smoke test if
-  not realistically testable |'
+title: history and storage (git versioning, drafts, Obsidian smoke)
+description: 'Prove disk-side effects of approve/deny/resubmit flows under the
+  [[TASK-D4]] canonical-home contract: history repo creation, project-name detection,
+  commit-message propagation, deny-resubmit sequencing, and draft persistence.'
 successCriteria:
 - E2E coverage proves history repo creation, commit-message propagation, project-name detection, deny-resubmit-approve history sequencing, and draft persistence.
 - Disk-side effects are asserted directly from the generated storage paths rather than inferred through UI behavior alone.
@@ -26,7 +14,7 @@ tags:
 - FEATURE-DAEMON-REFACTOR
 - PLAN-NIM-R
 - PHASE-3
-status: blocked
+status: unstarted
 parents:
 - '[[PHASE-3]]'
 dependsOn:
@@ -37,16 +25,22 @@ dependsOn:
 ---
 
 
-## Review Findings (2026-05-05)
+## Test Matrix
 
-**Kick back.** §9.7 contains conditional acceptance language: "or drop to smoke test if not realistically testable".
+Tests verify disk side-effects under an isolated `PLANNOTATOR_HOME` per [[TASK-D4]].
 
-Per framework: tasks must define a single acceptance contract, not an implementation-time downgrade option. Either:
-
-- assert the full Obsidian-vault behavior (frontmatter fields, backlink format) and require that path to be testable, or
-- restrict §9.7 to the smoke check up front (file appears in vault) and move richer assertions to a separate task.
+| # | Test | Pass condition |
+|---|------|----------------|
+| 9.1 | Submit + approve → inspect `${PLANNOTATOR_HOME}/.plannotator/plans/{project}/` | directory exists; is a git repo; contains `{slug}.md` with plan content |
+| 9.2 | `git log --format=%s` in that dir | first commit subject contains the `--commit-message` value; an empty commit follows with the approval feedback in the body |
+| 9.3 | Project-name detection: cwd inside git repo | `{project}` matches the repo's root directory name (sanitized) |
+| 9.4 | Project-name detection: cwd NOT inside git repo | `{project}` falls back to the current directory name |
+| 9.5 | Submit → deny → resubmit → approve cycle | git log shows, in order: content commit, deny event commit (feedback in body), revised content commit, approve event commit |
+| 9.6 | `${PLANNOTATOR_HOME}/.plannotator/drafts/` persistence | annotation in progress saved to disk; killing the browser tab and reopening restores the draft |
+| 9.7 | Obsidian integration smoke | when an Obsidian vault is configured, an approved plan appears in the configured vault directory as a markdown file with non-empty contents. Richer assertions (frontmatter shape, backlink format) are deferred to a separate dedicated task; this task only smokes the integration end-to-end. |
 
 ## Activity Log
 
 - 2026-05-02T04:04:55.736Z: created
 - 2026-05-05T00:00:00.000Z: status_changed (status) -> needs-review
+- 2026-05-05T01:00:00.000Z: §9.7 narrowed to a single smoke acceptance (file exists, non-empty); richer Obsidian-frontmatter assertions deferred to a future task per framework rule against conditional acceptance

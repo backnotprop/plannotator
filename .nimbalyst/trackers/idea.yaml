@@ -6,7 +6,7 @@ color: '#eab308'
 modes:
   inline: true
   fullDocument: true
-idPrefix: ida
+idPrefix: IDEA
 fields:
 - name: id
   type: string

@@ -10,7 +10,7 @@ creatable: false
 sync:
   mode: local
   scope: project
-idPrefix: aut
+idPrefix: AUTOMATION
 idFormat: ulid
 fields:
 - name: id

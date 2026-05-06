@@ -19,7 +19,7 @@ import {
 //   2   = illegal-state (no active session at all)
 
 const FIXTURES_DIR = resolve(
-  fileURLToPath(new URL("../../", import.meta.url)),
+  fileURLToPath(new URL("../", import.meta.url)),
   "fixtures/plans",
 );
 

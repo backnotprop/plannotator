@@ -6,7 +6,7 @@ color: '#dc2626'
 modes:
   inline: true
   fullDocument: true
-idPrefix: bug
+idPrefix: BUG
 fields:
 - name: id
   type: string

@@ -13,7 +13,7 @@ tags:
 - FEATURE-DAEMON-REFACTOR
 - PLAN-NIM-R
 - PHASE-3
-status: blocked
+status: unstarted
 parents:
 - '[[PHASE-3]]'
 dependsOn:
@@ -30,12 +30,15 @@ dependsOn:
 Parent phase: Phase 3 (Cross-slice E2E specs). Alias: [[TASK-E03]].
 
 ## 3.1 Legal transitions
-- `idle` → `POST /api/submit` → `active`
-- `active` → `POST /api/approve` → `verdict_ready` (or `idle` — verify which)
-- `active` → `POST /api/deny` → `verdict_ready`
-- `active` → UI Cancel → `idle`
-- `verdict_ready` → `GET /api/wait` consumes verdict → `idle`
-- any → `POST /api/clear` → `idle`
+
+Per [[TASK-D2]] state contract:
+
+- `idle` → `POST /api/submit` (accepted) → `in_review(R)`
+- `in_review(R)` → `POST /api/approve` durably recorded → `verdict_ready(R)`
+- `in_review(R)` → `POST /api/deny` durably recorded → `verdict_ready(R)`
+- `in_review(R)` → UI Cancel → `verdict_ready(R)` with `verdict=cancel`
+- `verdict_ready(R)` → eligible `GET /api/wait?requestId=R` consumes verdict → `idle`
+- any → `POST /api/clear --force` → `idle`
 
 ## 3.2 Illegal transitions (P0 if not implemented)
 
@@ -44,7 +47,7 @@ Parent phase: Phase 3 (Cross-slice E2E specs). Alias: [[TASK-E03]].
 | 3.2.1 | Submit while `active`; second submit from different terminal | returns non-success; exit non-zero; error names in-flight doc, states daemon URL, explains recovery |
 | 3.2.2 | Submit while `verdict_ready` | same blocking behavior; references unfetched verdict |
 | 3.2.3 | Raw `POST /api/submit` while active | HTTP 409; JSON body with current state, mode, doc title, hint string |
-| 3.2.4 | Error string is actionable | must literally contain `plannotator clear --force` (or whatever the implementation chose); string-match assertion |
+| 3.2.4 | Error string is actionable | human stderr literally contains `plannotator clear --force` per [[TASK-D1]] / [[TASK-D6]] recovery contract; string-match assertion |
 
 ## 3.3 Verdict-consumption semantics
 
@@ -53,19 +56,11 @@ Parent phase: Phase 3 (Cross-slice E2E specs). Alias: [[TASK-E03]].
 | 3.3.1 | Submit + approve (UI), then `plannotator wait` | wait exits 0; stdout contains verdict; state → `idle` |
 | 3.3.2 | Submit + deny with feedback, then `plannotator wait` | wait exits with deny code; feedback in output; state → `idle` |
 | 3.3.3 | Submit + UI Cancel, then `plannotator wait` | wait exits with cancel code; state → `idle` |
-| 3.3.4 | Submit; while `active`, run `plannotator wait` from different CLI | blocks; on UI approve, document broadcast vs. FIFO behavior — pick one and codify |
-
-## Review Findings (2026-05-05)
-
-**Kick back.** Three pieces of unresolved decision language:
-
-- §3.1: "`active` → `POST /api/approve` → `verdict_ready` (or `idle` — verify which)" — [[TASK-D2]] settled this: approve durably records the verdict and the daemon enters `verdict_ready(R)` until consumed by an eligible exact-ID waiter. Drop the alternative.
-- §3.2.4: "must literally contain `plannotator clear --force` (or whatever the implementation chose); string-match assertion" — the recovery command is fixed by [[TASK-D1]] / [[TASK-D6]]. Drop "or whatever the implementation chose"; assert the exact required string.
-- §3.3.4: "blocks; on UI approve, document broadcast vs. FIFO behavior — pick one and codify" — [[TASK-D2]] already settled this contract: broadcast to all eligible waiters, no FIFO. Replace with the assertion implied by D2.
-
-Per framework: tasks must not leave acceptance criteria for the implementation agent to invent.
+| 3.3.4 | Submit; while `in_review(R)`, run `plannotator wait --request-id R` from a second CLI | both waiters block; on UI approve, both receive the same verdict (broadcast per [[TASK-D2]]); neither receives stale verdicts; both exit with the same approve code |
+| 3.3.5 | After 3.3.4 completes and daemon returns to `idle`, run `plannotator wait --request-id R` from a third CLI | exits with `410 verdict_consumed_or_unknown` per [[TASK-D2]]; does not block |
 
 ## Activity Log
 
 - 2026-05-02T04:03:57.645Z: created
 - 2026-05-05T00:00:00.000Z: status_changed (status) -> needs-review
+- 2026-05-05T01:00:00.000Z: rewrote §3.1, §3.2.4, §3.3.4 against decided D1/D2/D6 contracts; added §3.3.5 for stale-verdict isolation per D2

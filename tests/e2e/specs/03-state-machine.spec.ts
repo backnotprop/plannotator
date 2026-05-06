@@ -27,7 +27,7 @@ import { resolve, join } from "node:path";
 //   130 = local signal cancel
 
 const FIXTURES_DIR = resolve(
-  fileURLToPath(new URL("../../", import.meta.url)),
+  fileURLToPath(new URL("../", import.meta.url)),
   "fixtures/plans",
 );
 

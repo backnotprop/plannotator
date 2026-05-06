@@ -22,17 +22,17 @@ import {
 //     agentSwitch?: string, permissionMode?: string }
 
 const FIXTURES_DIR = resolve(
-  fileURLToPath(new URL("../../", import.meta.url)),
+  fileURLToPath(new URL("../", import.meta.url)),
   "fixtures/plans",
 );
 
 const REPOS_DIR = resolve(
-  fileURLToPath(new URL("../../", import.meta.url)),
+  fileURLToPath(new URL("../", import.meta.url)),
   "fixtures/repos",
 );
 
 const MARKDOWN_DIR = resolve(
-  fileURLToPath(new URL("../../", import.meta.url)),
+  fileURLToPath(new URL("../", import.meta.url)),
   "fixtures/markdown",
 );
 
