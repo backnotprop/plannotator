@@ -110,17 +110,14 @@ process.on("exit", () => unregisterSession());
 
 function usageText(): string {
   return [
+    "plannotator — daemon-backed plan & code review CLI",
+    "",
     "Usage:",
-    "  plannotator daemon start [--foreground]",
-    "  plannotator daemon stop",
-    "  plannotator daemon status",
-    "  plannotator start",
-    "  plannotator stop",
-    "  plannotator status",
-    "  plannotator submit [file] [--mode plan|annotate] [--no-browser] [--commit-message <msg>] [--json]",
+    "  plannotator daemon",
+    "  plannotator plan [--json]",
     "  plannotator review [--diff-type <uncommitted|staged|unstaged|last-commit|branch|worktree:...>] [--json]",
     "  plannotator annotate <file> [--json]",
-    "  plannotator wait [--json]",
+    "  plannotator wait [--request-id <id>] [--json]",
     "  plannotator clear [--force]",
     "  plannotator open",
     "",
@@ -514,12 +511,15 @@ function extractVerdictEvents(buffer: string): { events: VerdictPayload[]; rest:
   return { events, rest: remaining };
 }
 
-async function waitForVerdict(): Promise<VerdictPayload> {
+async function waitForVerdict(requestId?: string): Promise<VerdictPayload> {
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt <= WAIT_STREAM_RETRIES; attempt++) {
     try {
-      const response = await fetch(`${getDaemonUrl()}/api/wait`);
+      const waitUrl = requestId
+        ? `${getDaemonUrl()}/api/wait?requestId=${encodeURIComponent(requestId)}`
+        : `${getDaemonUrl()}/api/wait`;
+      const response = await fetch(waitUrl);
       if (response.status === 409) {
         const body = await response.text();
         fail(body || "No active or buffered daemon verdict is available.", EXIT_ILLEGAL_STATE);
@@ -536,36 +536,22 @@ async function waitForVerdict(): Promise<VerdictPayload> {
         throw new Error("Daemon /api/wait returned no readable response body.");
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
+      const events = await collectEventStreamEvents(response.body);
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          break;
-        }
+      validateStreamEvents(events);
 
-        buffer += decoder.decode(value, { stream: true });
-        const parsed = extractVerdictEvents(buffer);
-        buffer = parsed.rest;
-        if (parsed.events.length > 0) {
-          return parsed.events[parsed.events.length - 1];
-        }
-      }
-
-      throw new Error("Daemon verdict stream closed before a verdict arrived.");
+      return parseStreamEvents(events);
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
+
       if (attempt < WAIT_STREAM_RETRIES) {
-        continue;
+        await sleep(WAIT_STREAM_RETRY_INTERVAL_MS);
       }
     }
   }
 
-  throw new Error(
-    `Lost connection to the daemon verdict stream after retry: ${lastError?.message ?? "unknown error"}`,
-  );
+  const message = lastError ? `${lastError.message} (after ${WAIT_STREAM_RETRIES} retries)` : "Failed to wait for verdict.";
+  fail(message, EXIT_DAEMON_FAILURE);
 }
 
 function renderPlainVerdict(payload: VerdictPayload): never {
@@ -874,9 +860,10 @@ async function runOpen(): Promise<never> {
 
 async function runWait(args: string[]): Promise<never> {
   const json = takeFlag(args, "--json");
+  const requestId = takeOption(args, "--request-id");
 
   await withDaemon(async () => {
-    const verdict = await waitForVerdict().catch((error) => {
+    const verdict = await waitForVerdict(requestId).catch((error) => {
       const message = error instanceof Error ? error.message : String(error);
       fail(message, EXIT_DAEMON_FAILURE);
     });
