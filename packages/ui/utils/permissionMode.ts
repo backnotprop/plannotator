@@ -6,7 +6,6 @@
  *
  * Available modes:
  * - bypassPermissions: Auto-approve all tool calls
- * - bypassPermissionsClearReminder: Persisted UI mode that sends bypassPermissions plus a /clear reminder nudge
  * - acceptEdits: Auto-approve file edits only
  * - default: Manually approve each tool call
  */
@@ -16,7 +15,7 @@ import { storage } from './storage';
 const STORAGE_KEY_MODE = 'plannotator-permission-mode';
 const STORAGE_KEY_CONFIGURED = 'plannotator-permission-mode-configured';
 
-export type PermissionMode = 'bypassPermissions' | 'bypassPermissionsClearReminder' | 'acceptEdits' | 'default';
+export type PermissionMode = 'bypassPermissions' | 'acceptEdits' | 'default';
 
 export interface PermissionModeSettings {
   mode: PermissionMode;
@@ -35,11 +34,6 @@ export const PERMISSION_MODE_OPTIONS: { value: PermissionMode; label: string; de
     description: 'Auto-approve all tool calls (equivalent to --dangerously-skip-permissions)',
   },
   {
-    value: 'bypassPermissionsClearReminder',
-    label: 'Bypass + /clear Reminder',
-    description: 'Auto-approve all tool calls and emit a system message reminding you to run /clear (hooks cannot clear context directly).',
-  },
-  {
     value: 'default',
     label: 'Manual Approval',
     description: 'Manually approve each tool call',
@@ -48,19 +42,15 @@ export const PERMISSION_MODE_OPTIONS: { value: PermissionMode; label: string; de
 
 const DEFAULT_MODE: PermissionMode = 'acceptEdits';
 
-function isPermissionMode(value: string | null): value is PermissionMode {
-  return PERMISSION_MODE_OPTIONS.some((option) => option.value === value);
-}
-
 /**
  * Get current permission mode settings from storage
  */
 export function getPermissionModeSettings(): PermissionModeSettings {
-  const mode = storage.getItem(STORAGE_KEY_MODE);
+  const mode = storage.getItem(STORAGE_KEY_MODE) as PermissionMode | null;
   const configured = storage.getItem(STORAGE_KEY_CONFIGURED) === 'true';
 
   return {
-    mode: isPermissionMode(mode) ? mode : DEFAULT_MODE,
+    mode: mode || DEFAULT_MODE,
     configured,
   };
 }
