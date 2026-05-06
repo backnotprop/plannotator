@@ -15,6 +15,7 @@ import {
   type DiffType,
   type GitContext,
   type GitDiffOptions,
+  detectRemoteDefaultBranch,
 } from "@plannotator/shared/review-core";
 
 import {
@@ -25,6 +26,7 @@ import {
   gitResetFile,
   parseWorktreeDiffType,
   validateFilePath,
+  runtime as gitRuntime,
 } from "./git";
 
 import {
@@ -33,6 +35,12 @@ import {
   runP4Diff,
   getP4FileContentsForDiff,
 } from "./p4";
+import {
+  detectJjWorkspace,
+  getJjContext,
+  runJjDiff,
+  getJjFileContentsForDiff,
+} from "./jj";
 
 // --- VCS Provider interface ---
 
@@ -69,6 +77,9 @@ export interface VcsProvider {
 
   /** Resolve effective cwd from a diff type (e.g. worktree path) */
   resolveCwd?(diffType: string, fallbackCwd?: string): string | undefined;
+
+  /** Detect a remote/default compare target when supported */
+  detectRemoteDefaultCompareTarget?(cwd?: string): Promise<string | null>;
 }
 
 // --- Git provider ---
@@ -109,12 +120,44 @@ const gitProvider: VcsProvider = {
   stageFile: gitAddFile,
   unstageFile: gitResetFile,
 
+  detectRemoteDefaultCompareTarget(cwd?: string): Promise<string | null> {
+    return detectRemoteDefaultBranch(gitRuntime, cwd);
+  },
+
   resolveCwd(diffType: string, fallbackCwd?: string): string | undefined {
     if (diffType.startsWith("worktree:")) {
       const parsed = parseWorktreeDiffType(diffType);
-      if (parsed) return parsed.path;
+      if (parsed) {
+        return parsed.path;
+      }
     }
     return fallbackCwd;
+  },
+};
+
+// --- JJ provider ---
+
+const JJ_DIFF_TYPES = new Set(["jj-current", "jj-last", "jj-line", "jj-all"]);
+
+const jjProvider: VcsProvider = {
+  id: "jj",
+
+  async detect(cwd?: string): Promise<boolean> {
+    return (await detectJjWorkspace(cwd)) !== null;
+  },
+
+  ownsDiffType(diffType: string): boolean {
+    return JJ_DIFF_TYPES.has(diffType);
+  },
+
+  getContext: getJjContext,
+
+  runDiff(diffType: DiffType, defaultBranch: string, cwd?: string) {
+    return runJjDiff(diffType, defaultBranch, cwd);
+  },
+
+  getFileContents(diffType, defaultBranch, filePath, oldPath?, cwd?) {
+    return getJjFileContentsForDiff(diffType, defaultBranch, filePath, oldPath, cwd);
   },
 };
 
@@ -147,7 +190,7 @@ const p4Provider: VcsProvider = {
 // --- Provider registry ---
 
 /** Providers in detection priority order. First match wins. */
-const providers: VcsProvider[] = [gitProvider, p4Provider];
+const providers: VcsProvider[] = [jjProvider, gitProvider, p4Provider];
 
 // Re-export types consumers need
 export type {
@@ -167,7 +210,9 @@ const vcsCache = new Map<string, VcsProvider>();
 export async function detectVcs(cwd?: string): Promise<VcsProvider> {
   const key = cwd ?? process.cwd();
   const cached = vcsCache.get(key);
-  if (cached) return cached;
+  if (cached) {
+    return cached;
+  }
 
   for (const provider of providers) {
     if (await provider.detect(cwd)) {
@@ -182,11 +227,20 @@ export async function detectVcs(cwd?: string): Promise<VcsProvider> {
 }
 
 /** Find the provider that owns a given diff type */
-function getProviderForDiffType(diffType: string): VcsProvider {
+function getProviderForDiffType(diffType: string): VcsProvider | null {
   for (const provider of providers) {
-    if (provider.ownsDiffType(diffType)) return provider;
+    if (provider.ownsDiffType(diffType)) {
+      return provider;
+    }
   }
-  return gitProvider;
+  return null;
+}
+
+async function getProviderForOperation(
+  diffType: string,
+  cwd?: string,
+): Promise<VcsProvider> {
+  return getProviderForDiffType(diffType) ?? detectVcs(cwd);
 }
 
 // --- Public API ---
@@ -196,13 +250,33 @@ export async function getVcsContext(cwd?: string): Promise<GitContext> {
   return provider.getContext(cwd);
 }
 
+export async function detectRemoteDefaultCompareTarget(cwd?: string): Promise<string | null> {
+  const provider = await detectVcs(cwd);
+  return provider.detectRemoteDefaultCompareTarget?.(cwd) ?? null;
+}
+
+export function resolveInitialDiffType(
+  gitContext: GitContext,
+  configuredDiffType: DiffType,
+): DiffType {
+  if (gitContext.vcsType === "p4") {
+    return "p4-default";
+  }
+  if (gitContext.diffOptions.some((option) => option.id === configuredDiffType)) {
+    return configuredDiffType;
+  }
+
+  const fallback = gitContext.diffOptions[0]?.id;
+  return fallback ? fallback as DiffType : configuredDiffType;
+}
+
 export async function runVcsDiff(
   diffType: DiffType,
   defaultBranch: string = "main",
   cwd?: string,
   options?: GitDiffOptions,
 ): Promise<DiffResult> {
-  const provider = getProviderForDiffType(diffType);
+  const provider = await getProviderForOperation(diffType, cwd);
   return provider.runDiff(diffType, defaultBranch, cwd, options);
 }
 
@@ -213,13 +287,13 @@ export async function getVcsFileContentsForDiff(
   oldPath?: string,
   cwd?: string,
 ): Promise<{ oldContent: string | null; newContent: string | null }> {
-  const provider = getProviderForDiffType(diffType);
+  const provider = await getProviderForOperation(diffType, cwd);
   return provider.getFileContents(diffType, defaultBranch, filePath, oldPath, cwd);
 }
 
 /** Check if the given diff type supports file staging */
-export function canStageFiles(diffType: string): boolean {
-  const provider = getProviderForDiffType(diffType);
+export async function canStageFiles(diffType: string, cwd?: string): Promise<boolean> {
+  const provider = await getProviderForOperation(diffType, cwd);
   return provider.stageFile !== undefined;
 }
 
@@ -229,7 +303,7 @@ export async function stageFile(
   filePath: string,
   cwd?: string,
 ): Promise<void> {
-  const provider = getProviderForDiffType(diffType);
+  const provider = await getProviderForOperation(diffType, cwd);
   if (!provider.stageFile) {
     throw new Error(`Staging not available for ${provider.id}`);
   }
@@ -242,18 +316,25 @@ export async function unstageFile(
   filePath: string,
   cwd?: string,
 ): Promise<void> {
-  const provider = getProviderForDiffType(diffType);
+  const provider = await getProviderForOperation(diffType, cwd);
   if (!provider.unstageFile) {
     throw new Error(`Unstaging not available for ${provider.id}`);
   }
   return provider.unstageFile(filePath, cwd);
 }
 
-/** Resolve the effective cwd for a diff type (e.g. worktree paths) */
+/**
+ * Resolve the operation cwd for diff types that encode their own workspace
+ * path (for example Git worktree diffs), otherwise preserve the fallback cwd.
+ */
 export function resolveVcsCwd(
   diffType: string,
   fallbackCwd?: string,
 ): string | undefined {
-  const provider = getProviderForDiffType(diffType);
-  return provider.resolveCwd?.(diffType, fallbackCwd) ?? fallbackCwd;
+  if (diffType.startsWith("worktree:")) {
+    const provider = getProviderForDiffType(diffType);
+    return provider?.resolveCwd?.(diffType, fallbackCwd) ?? fallbackCwd;
+  }
+
+  return fallbackCwd;
 }

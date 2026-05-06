@@ -63,7 +63,7 @@ import {
   startAnnotateServer,
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
-import { type DiffType, getVcsContext, runVcsDiff, gitRuntime } from "@plannotator/server/vcs";
+import { type DiffType, getVcsContext, runVcsDiff, resolveInitialDiffType, gitRuntime } from "@plannotator/server/vcs";
 import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
 import { stripAtPrefix, resolveAtReference } from "@plannotator/shared/at-reference";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
@@ -501,8 +501,8 @@ if (args[0] === "sessions") {
     // --- Local Review Mode ---
     gitContext = await getVcsContext();
     const config = loadConfig();
-    initialDiffType = gitContext.vcsType === "p4" ? "p4-default" : resolveDefaultDiffType(config);
-    const diffResult = await runVcsDiff(initialDiffType, gitContext.defaultBranch, undefined, {
+    initialDiffType = resolveInitialDiffType(gitContext, resolveDefaultDiffType(config));
+    const diffResult = await runVcsDiff(initialDiffType, gitContext.defaultBranch, gitContext.cwd, {
       hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
     });
     rawPatch = diffResult.patch;

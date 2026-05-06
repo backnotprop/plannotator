@@ -12,6 +12,10 @@ export type DiffType =
   | "staged"
   | "unstaged"
   | "last-commit"
+  | "jj-current"
+  | "jj-last"
+  | "jj-line"
+  | "jj-all"
   | "branch"
   | "merge-base"
   | "all"
@@ -35,14 +39,36 @@ export interface AvailableBranches {
   remote: string[];
 }
 
+export interface CompareTargetPickerCopy {
+  rowLabel: string;
+  triggerLabel: string;
+  triggerTitlePrefix: string;
+  searchPlaceholder: string;
+  emptyText: string;
+  localGroupLabel: string;
+  remoteGroupLabel: string;
+}
+
+export interface CompareTargetConfig {
+  diffTypes: string[];
+  fallback: string;
+  picker: CompareTargetPickerCopy;
+}
+
+export interface RepositoryContext {
+  displayFallback?: string;
+}
+
 export interface GitContext {
   currentBranch: string;
   defaultBranch: string;
   diffOptions: DiffOption[];
   worktrees: WorktreeInfo[];
   availableBranches: AvailableBranches;
+  compareTarget?: CompareTargetConfig;
+  repository?: RepositoryContext;
   cwd?: string;
-  vcsType?: "git" | "p4";
+  vcsType?: "git" | "jj" | "p4";
 }
 
 export interface DiffResult {
@@ -298,7 +324,21 @@ export async function getGitContext(
     diffOptions,
     worktrees: worktrees.filter((wt) => wt.path !== currentTreePath),
     availableBranches,
+    compareTarget: {
+      diffTypes: ["branch", "merge-base"],
+      fallback: "main",
+      picker: {
+        rowLabel: "compare against",
+        triggerLabel: "base",
+        triggerTitlePrefix: "Review base",
+        searchPlaceholder: "Search branches…",
+        emptyText: "No branches match.",
+        localGroupLabel: "Local",
+        remoteGroupLabel: "Remote",
+      },
+    },
     cwd,
+    vcsType: "git",
   };
 }
 
