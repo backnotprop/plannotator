@@ -495,9 +495,53 @@ export function createDaemonRouter(
       }
 
       if (url.pathname === "/api/wait" && req.method === "GET") {
+        const requestId = url.searchParams.get("requestId") ?? undefined;
+
         if (currentState.status === "idle") {
           return Response.json(
-            { error: "No active or buffered daemon verdict is available." },
+            { error: "No active or buffered daemon verdict is available.", code: "verdict_consumed_or_unknown" },
+            { status: 409 },
+          );
+        }
+
+        // D2: in resolved (verdict_ready), plain wait without requestId is a stale-verdict
+        // risk — a later unrelated command could inadvertently consume an old verdict.
+        // Only an exact-ID waiter may recover the buffered verdict.
+        if (currentState.status === "resolved") {
+          if (!requestId) {
+            return Response.json(
+              {
+                error:
+                  "Cannot deliver buffered verdict without a requestId. Use: plannotator wait --request-id " +
+                  currentState.document.id,
+                code: "illegal_state",
+                activeRequestId: currentState.document.id,
+                recovery: "plannotator wait --request-id " + currentState.document.id,
+              },
+              { status: 409 },
+            );
+          }
+          if (requestId !== currentState.document.id) {
+            return Response.json(
+              {
+                error: `requestId mismatch: active request is ${currentState.document.id}.`,
+                code: "request_id_mismatch",
+                activeRequestId: currentState.document.id,
+              },
+              { status: 409 },
+            );
+          }
+          // Correct requestId: fall through to SSE delivery below.
+        }
+
+        // D2: in awaiting-response (in_review), validate requestId if provided.
+        if (currentState.status === "awaiting-response" && requestId && requestId !== currentState.document.id) {
+          return Response.json(
+            {
+              error: `requestId mismatch: active request is ${currentState.document.id}.`,
+              code: "request_id_mismatch",
+              activeRequestId: currentState.document.id,
+            },
             { status: 409 },
           );
         }
