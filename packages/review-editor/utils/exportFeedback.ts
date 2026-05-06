@@ -36,6 +36,10 @@ function describeDiff(ctx: FeedbackDiffContext): string {
     case "staged":       label = "Staged changes"; break;
     case "unstaged":     label = "Unstaged changes"; break;
     case "last-commit":  label = "Last commit"; break;
+    case "jj-current":   label = "Current change"; break;
+    case "jj-last":      label = "Last change"; break;
+    case "jj-line":      label = base ? `Line of work vs \`${base}\`` : "Line of work"; break;
+    case "jj-all":       label = "All files"; break;
     case "branch":       label = base ? `Branch diff vs \`${base}\`` : "Branch diff"; break;
     case "merge-base":   label = base ? `Committed changes vs \`${base}\`` : "Committed changes"; break;
     case "all":          label = "All files"; break;

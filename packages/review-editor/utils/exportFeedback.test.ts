@@ -69,6 +69,14 @@ describe("exportReviewFeedback", () => {
     expect(result).toContain("**Diff:** Committed changes vs `release/v2`");
   });
 
+  it("local mode with jj line of work: labels compare target in the header", () => {
+    const result = exportReviewFeedback([ann()], undefined, {
+      mode: "jj-line",
+      base: "main",
+    });
+    expect(result).toContain("**Diff:** Line of work vs `main`");
+  });
+
   it("local mode with worktree path: appends worktree info", () => {
     const result = exportReviewFeedback([ann()], undefined, {
       mode: "uncommitted",

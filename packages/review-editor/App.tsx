@@ -760,7 +760,7 @@ const ReviewApp: React.FC = () => {
           // Prefer the server's active base (survives page refresh / reconnect)
           // over the detected default, so the picker rehydrates to what the
           // server is actually using.
-          const initial = data.base || data.gitContext.defaultBranch || null;
+          const initial = data.base || data.gitContext.defaultBranch || data.gitContext.compareTarget?.fallback || null;
           setSelectedBase(initial);
           setCommittedBase(initial);
         }
@@ -782,7 +782,7 @@ const ReviewApp: React.FC = () => {
         if (data.error) setDiffError(data.error);
         if (data.isWSL) setIsWSL(true);
         // Mark diff type setup as pending on first run (local mode only)
-        if (data.diffType && !data.prMetadata && data.gitContext?.vcsType !== 'p4' && needsDiffTypeSetup()) {
+        if (data.diffType && !data.prMetadata && data.gitContext?.vcsType !== 'p4' && data.gitContext?.vcsType !== 'jj' && needsDiffTypeSetup()) {
           setDiffTypeSetupPending(true);
         }
       })
@@ -1163,6 +1163,7 @@ const ReviewApp: React.FC = () => {
               ...prev,
               defaultBranch: data.gitContext!.defaultBranch,
               diffOptions: data.gitContext!.diffOptions,
+              compareTarget: data.gitContext!.compareTarget,
             };
           });
         }
@@ -1190,7 +1191,7 @@ const ReviewApp: React.FC = () => {
       if (branch === selectedBase) return;
       const previous = selectedBase;
       setSelectedBase(branch);
-      if (activeDiffBase === 'branch' || activeDiffBase === 'merge-base') {
+      if (activeDiffBase === 'branch' || activeDiffBase === 'merge-base' || activeDiffBase === 'jj-line') {
         const ok = await fetchDiffSwitch(diffType, branch);
         if (!ok) setSelectedBase(previous);
       }
@@ -1304,7 +1305,7 @@ const ReviewApp: React.FC = () => {
     // the new patch to arrive before refetching — otherwise the viewer can
     // briefly pair an old patch with the new base's content.
     reviewBase:
-      (activeDiffBase === 'branch' || activeDiffBase === 'merge-base')
+        (activeDiffBase === 'branch' || activeDiffBase === 'merge-base' || activeDiffBase === 'jj-line')
         ? committedBase ?? undefined
         : undefined,
     activeDiffBase,
@@ -2078,8 +2079,9 @@ const ReviewApp: React.FC = () => {
                 currentBranch={gitContext?.currentBranch}
                 availableBranches={prMetadata ? undefined : gitContext?.availableBranches}
                 selectedBase={prMetadata ? undefined : selectedBase ?? undefined}
-                detectedBase={prMetadata ? undefined : gitContext?.defaultBranch}
+                detectedBase={prMetadata ? undefined : gitContext?.defaultBranch || gitContext?.compareTarget?.fallback}
                 onSelectBase={prMetadata ? undefined : handleBaseSelect}
+                compareTarget={gitContext?.compareTarget}
                 stagedFiles={stagedFiles}
                 onCopyRawDiff={handleCopyDiff}
                 canCopyRawDiff={!!diffData?.rawPatch}
@@ -2156,6 +2158,10 @@ const ReviewApp: React.FC = () => {
                           {activeDiffBase === 'staged' && "No staged changes. Stage some files with git add."}
                           {activeDiffBase === 'unstaged' && "No unstaged changes. All changes are staged."}
                           {activeDiffBase === 'last-commit' && `No changes in the last commit${activeWorktreePath ? ' in this worktree' : ''}.`}
+                          {activeDiffBase === 'jj-current' && "No changes in the current jj change."}
+                          {activeDiffBase === 'jj-last' && "No changes in the last jj change."}
+                          {activeDiffBase === 'jj-line' && `No changes in your line of work vs ${selectedBase || gitContext?.defaultBranch || '@-'}.`}
+                          {activeDiffBase === 'jj-all' && "No files at the current jj change."}
                           {activeDiffBase === 'branch' && `No changes vs ${selectedBase || gitContext?.defaultBranch || 'main'}${activeWorktreePath ? ' in this worktree' : ''}.`}
                           {activeDiffBase === 'merge-base' && `No changes vs ${selectedBase || gitContext?.defaultBranch || 'main'}${activeWorktreePath ? ' in this worktree' : ''}.`}
                           {activeDiffBase === 'all' && `No tracked files${activeWorktreePath ? ' in this worktree' : ' in this repository'}.`}

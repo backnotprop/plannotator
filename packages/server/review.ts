@@ -11,8 +11,8 @@
 
 import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
 import type { Origin } from "@plannotator/shared/agents";
-import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath, getVcsContext, gitRuntime } from "./vcs";
-import { parseWorktreeDiffType, detectRemoteDefaultBranch, resolveBaseBranch } from "@plannotator/shared/review-core";
+import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath, getVcsContext, detectRemoteDefaultCompareTarget, gitRuntime } from "./vcs";
+import { parseWorktreeDiffType, resolveBaseBranch } from "@plannotator/shared/review-core";
 import {
   getPRDiffScopeOptions,
   getPRStackInfo,
@@ -164,15 +164,20 @@ export async function startReviewServer(
   // read this (not gitContext.defaultBranch) so they analyze the same diff
   // the reviewer is currently looking at. Honors an explicit initialBase from
   // the caller — e.g. programmatic Pi callers can request a non-detected base.
-  let currentBase = options.initialBase || gitContext?.defaultBranch || "main";
+  const detectedCompareTarget = (): string => gitContext?.defaultBranch || gitContext?.compareTarget?.fallback || "main";
+  let currentBase = options.initialBase || detectedCompareTarget();
   let baseEverSwitched = false;
+
+  const resolveReviewBase = (requestedBase?: string): string => {
+    return resolveBaseBranch(requestedBase, detectedCompareTarget());
+  };
 
   // Fire-and-forget: query the remote for its actual default branch. If it
   // arrives before the user interacts, quietly upgrade currentBase from the
   // local fallback (e.g. "main") to the upstream ref (e.g. "origin/main").
   // Non-blocking — the server is already listening by the time this resolves.
   if (gitContext && !options.initialBase && !isPRMode) {
-    detectRemoteDefaultBranch(gitRuntime, gitContext.cwd).then((remote) => {
+    detectRemoteDefaultCompareTarget(gitContext.cwd).then((remote) => {
       if (remote && !baseEverSwitched) currentBase = remote;
     });
   }
@@ -415,6 +420,9 @@ export async function startReviewServer(
   let repoInfo = isPRMode && prMetadata
     ? { display: getDisplayRepo(prMetadata), branch: `${getMRLabel(prMetadata)} ${getMRNumberLabel(prMetadata)}` }
     : await getRepoInfo();
+  if (gitContext?.repository?.displayFallback) {
+    repoInfo = { display: repoInfo?.display || gitContext.repository.displayFallback };
+  }
 
   // Fetch current platform user (for own-PR/MR detection)
   let prRef = isPRMode && prMetadata ? prRefFromMetadata(prMetadata) : null;
@@ -560,12 +568,11 @@ export async function startReviewServer(
                 currentHideWhitespace = body.hideWhitespace;
               }
 
-              const detectedBase = gitContext?.defaultBranch || "main";
               // Guard against non-string payloads — resolveBaseBranch calls
               // string methods and would throw a TypeError otherwise. Mirrors
               // Pi's guard so both runtimes validate identically.
               const requestedBase = typeof body.base === "string" ? body.base : undefined;
-              const base = resolveBaseBranch(requestedBase, detectedBase);
+              const base = resolveReviewBase(requestedBase);
               const defaultCwd = gitContext?.cwd;
 
               // Run the new diff
@@ -863,11 +870,8 @@ export async function startReviewServer(
 
             // Local review: read file contents from local git
             if (hasLocalAccess) {
-              const detectedBase = gitContext?.defaultBranch || "main";
-              const base = resolveBaseBranch(
-                url.searchParams.get("base") ?? undefined,
-                detectedBase,
-              );
+              const requestedBase = url.searchParams.get("base") ?? undefined;
+              const base = resolveReviewBase(requestedBase);
               const defaultCwd = gitContext?.cwd;
               const result = await getVcsFileContentsForDiff(
                 currentDiffType,
@@ -896,7 +900,8 @@ export async function startReviewServer(
 
           // API: Stage / unstage a file (disabled when VCS doesn't support it)
           if (url.pathname === "/api/git-add" && req.method === "POST") {
-            if (isPRMode || !canStageFiles(currentDiffType)) {
+            const stageCwd = resolveVcsCwd(currentDiffType, gitContext?.cwd);
+            if (isPRMode || !(await canStageFiles(currentDiffType, stageCwd))) {
               return Response.json(
                 { error: "Staging not available" },
                 { status: 400 },
@@ -908,12 +913,10 @@ export async function startReviewServer(
                 return Response.json({ error: "Missing filePath" }, { status: 400 });
               }
 
-              const cwd = resolveVcsCwd(currentDiffType, gitContext?.cwd);
-
               if (body.undo) {
-                await unstageFile(currentDiffType, body.filePath, cwd);
+                await unstageFile(currentDiffType, body.filePath, stageCwd);
               } else {
-                await stageFile(currentDiffType, body.filePath, cwd);
+                await stageFile(currentDiffType, body.filePath, stageCwd);
               }
 
               return Response.json({ ok: true });

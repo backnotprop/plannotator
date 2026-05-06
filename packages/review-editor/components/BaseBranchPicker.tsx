@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
 import * as Popover from '@radix-ui/react-popover';
-import type { AvailableBranches } from '@plannotator/shared/types';
+import type { AvailableBranches, CompareTargetPickerCopy } from '@plannotator/shared/types';
 
 interface BaseBranchPickerProps {
   availableBranches: AvailableBranches;
@@ -8,6 +8,7 @@ interface BaseBranchPickerProps {
   detectedBase: string;
   onSelectBase: (branch: string) => void;
   disabled?: boolean;
+  copy: CompareTargetPickerCopy;
 }
 
 export const BaseBranchPicker: React.FC<BaseBranchPickerProps> = ({
@@ -16,6 +17,7 @@ export const BaseBranchPicker: React.FC<BaseBranchPickerProps> = ({
   detectedBase,
   onSelectBase,
   disabled,
+  copy,
 }) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -57,7 +59,7 @@ export const BaseBranchPicker: React.FC<BaseBranchPickerProps> = ({
         <button
           type="button"
           disabled={disabled}
-          title={`Review base: ${selectedBase}`}
+          title={`${copy.triggerTitlePrefix}: ${selectedBase}`}
           className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed ${
             isCustom
               ? 'bg-primary/10 border border-primary/30 text-foreground'
@@ -65,7 +67,7 @@ export const BaseBranchPicker: React.FC<BaseBranchPickerProps> = ({
           }`}
         >
           <span className="text-[10px] uppercase tracking-wide opacity-60 flex-shrink-0">
-            base
+            {copy.triggerLabel}
           </span>
           <span className="truncate flex-1 text-left">{selectedBase}</span>
           <svg
@@ -96,19 +98,19 @@ export const BaseBranchPicker: React.FC<BaseBranchPickerProps> = ({
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search branches…"
+              placeholder={copy.searchPlaceholder}
               className="w-full px-2 py-1.5 bg-muted rounded text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
             />
           </div>
           <div className="max-h-72 overflow-y-auto py-1">
             {filtered.local.length === 0 && filtered.remote.length === 0 && (
               <div className="px-3 py-2 text-xs text-muted-foreground">
-                No branches match.
+                {copy.emptyText}
               </div>
             )}
             {filtered.local.length > 0 && (
               <BranchGroup
-                title="Local"
+                title={copy.localGroupLabel}
                 branches={filtered.local}
                 selectedBase={selectedBase}
                 detectedBase={detectedBase}
@@ -117,7 +119,7 @@ export const BaseBranchPicker: React.FC<BaseBranchPickerProps> = ({
             )}
             {filtered.remote.length > 0 && (
               <BranchGroup
-                title="Remote"
+                title={copy.remoteGroupLabel}
                 branches={filtered.remote}
                 selectedBase={selectedBase}
                 detectedBase={detectedBase}
