@@ -60,6 +60,27 @@ describe("02-daemon-lifecycle", () => {
     }
   });
 
+  // ─── 2.2 Idempotent start ──────────────────────────────────────────────────
+  test("2.2 idempotent start: daemon start while running exits 0, PID unchanged", async () => {
+    const daemon = await startDaemon({ port, home: sandbox.home, binary });
+    try {
+      const metadataPath = join(sandbox.home, ".plannotator", "daemon.json");
+      const firstMeta = JSON.parse(readFileSync(metadataPath, "utf8")) as { pid: number; port: number };
+      const firstPid = firstMeta.pid;
+
+      const result = await runCli(["daemon", "start"], {
+        env: daemonEnv(),
+        timeoutMs: 15_000,
+      });
+      expect(result.exitCode).toBe(0);
+
+      const secondMeta = JSON.parse(readFileSync(metadataPath, "utf8")) as { pid: number; port: number };
+      expect(secondMeta.pid).toBe(firstPid);
+    } finally {
+      await daemon.stop();
+    }
+  });
+
   // ─── 2.3 daemon status while running ───────────────────────────────────────
   test("2.3 daemon status while running: exits 0, prints status and URL", async () => {
     const daemon = await startDaemon({ port, home: sandbox.home, binary });

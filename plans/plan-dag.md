@@ -30,15 +30,15 @@ graph LR
     PHASE_4["PHASE-4 [unstarted]"]
     class PHASE_4 internal-link
     class PHASE_4 status_unstarted
-    PHASE_2["PHASE-2 [needs-review]"]
+    PHASE_2["PHASE-2 [complete]"]
     class PHASE_2 internal-link
-    class PHASE_2 status_needs_review
-    PHASE_3["PHASE-3 [in-progress]"]
+    class PHASE_2 status_complete
+    PHASE_3["PHASE-3 [unstarted]"]
     class PHASE_3 internal-link
-    class PHASE_3 status_in_progress
-    PHASE_2_TDD["PHASE-2-TDD [needs-review]"]
+    class PHASE_3 status_unstarted
+    PHASE_2_TDD["PHASE-2-TDD [complete]"]
     class PHASE_2_TDD internal-link
-    class PHASE_2_TDD status_needs_review
+    class PHASE_2_TDD status_complete
   end
   subgraph group_task["Tasks"]
     direction TB
@@ -84,39 +84,39 @@ graph LR
     TASK_E10["TASK-E10 [unstarted]"]
     class TASK_E10 internal-link
     class TASK_E10 status_unstarted
-    TASK_E07["TASK-E07 [needs-review]"]
+    TASK_E07["TASK-E07 [unstarted]"]
     class TASK_E07 internal-link
-    class TASK_E07 status_needs_review
+    class TASK_E07 status_unstarted
     TASK_E02["TASK-E02 [unstarted]"]
     class TASK_E02 internal-link
     class TASK_E02 status_unstarted
-    TASK_E11["TASK-E11 [needs-review]"]
+    TASK_E11["TASK-E11 [unstarted]"]
     class TASK_E11 internal-link
-    class TASK_E11 status_needs_review
-    TASK_E08["TASK-E08 [needs-review]"]
+    class TASK_E11 status_unstarted
+    TASK_E08["TASK-E08 [unstarted]"]
     class TASK_E08 internal-link
-    class TASK_E08 status_needs_review
-    TASK_E12["TASK-E12 [needs-review]"]
+    class TASK_E08 status_unstarted
+    TASK_E12["TASK-E12 [unstarted]"]
     class TASK_E12 internal-link
-    class TASK_E12 status_needs_review
+    class TASK_E12 status_unstarted
     TASK_E14["TASK-E14 [unstarted]"]
     class TASK_E14 internal-link
     class TASK_E14 status_unstarted
     TASK_E05["TASK-E05 [unstarted]"]
     class TASK_E05 internal-link
     class TASK_E05 status_unstarted
-    TASK_E15["TASK-E15 [needs-review]"]
+    TASK_E15["TASK-E15 [unstarted]"]
     class TASK_E15 internal-link
-    class TASK_E15 status_needs_review
-    TASK_E03["TASK-E03 [needs-review]"]
+    class TASK_E15 status_unstarted
+    TASK_E03["TASK-E03 [unstarted]"]
     class TASK_E03 internal-link
-    class TASK_E03 status_needs_review
-    TASK_E09["TASK-E09 [needs-review]"]
+    class TASK_E03 status_unstarted
+    TASK_E09["TASK-E09 [unstarted]"]
     class TASK_E09 internal-link
-    class TASK_E09 status_needs_review
-    TASK_E13["TASK-E13 [needs-review]"]
+    class TASK_E09 status_unstarted
+    TASK_E13["TASK-E13 [unstarted]"]
     class TASK_E13 internal-link
-    class TASK_E13 status_needs_review
+    class TASK_E13 status_unstarted
     TASK_S_1["TASK-S-1 [complete]"]
     class TASK_S_1 internal-link
     class TASK_S_1 status_complete
@@ -126,9 +126,9 @@ graph LR
     TASK_S_3["TASK-S-3 [complete]"]
     class TASK_S_3 internal-link
     class TASK_S_3 status_complete
-    TASK_S_8["TASK-S-8 [needs-review]"]
+    TASK_S_8["TASK-S-8 [complete]"]
     class TASK_S_8 internal-link
-    class TASK_S_8 status_needs_review
+    class TASK_S_8 status_complete
     TASK_S_4["TASK-S-4 [complete]"]
     class TASK_S_4 internal-link
     class TASK_S_4 status_complete
@@ -200,7 +200,9 @@ graph LR
   PHASE_1 --> PHASE_4
   PHASE_2 --> PHASE_4
   PHASE_3 --> PHASE_4
-  PHASE_2 --> PHASE_2_TDD
+  PHASE_2_TDD --> PHASE_2
+  PHASE_0 --> PHASE_2_TDD
+  PHASE_1 --> PHASE_2_TDD
   TASK_S_2 --> TASK_S_9_5
   TASK_S_3 --> TASK_S_9_5
   TASK_S_5 --> TASK_S_9_5
@@ -324,7 +326,6 @@ graph LR
   classDef status_complete fill:#d8f5e7,stroke:#16a34a,color:#14532d
   classDef status_decided fill:#d8f5e7,stroke:#16a34a,color:#14532d
   classDef status_in_progress fill:#d7f3ff,stroke:#0284c7,color:#0f172a
-  classDef status_needs_review fill:#fff1c2,stroke:#d97706,color:#7c2d12
   classDef status_unstarted fill:#eef2f7,stroke:#64748b,color:#334155
 ```
 
@@ -360,15 +361,15 @@ graph LR
     PHASE_4["PHASE-4 [unstarted]"]
     class PHASE_4 internal-link
     class PHASE_4 status_unstarted
-    PHASE_2["PHASE-2 [needs-review]"]
+    PHASE_2["PHASE-2 [complete]"]
     class PHASE_2 internal-link
-    class PHASE_2 status_needs_review
-    PHASE_3["PHASE-3 [in-progress]"]
+    class PHASE_2 status_complete
+    PHASE_3["PHASE-3 [unstarted]"]
     class PHASE_3 internal-link
-    class PHASE_3 status_in_progress
-    PHASE_2_TDD["PHASE-2-TDD [needs-review]"]
+    class PHASE_3 status_unstarted
+    PHASE_2_TDD["PHASE-2-TDD [complete]"]
     class PHASE_2_TDD internal-link
-    class PHASE_2_TDD status_needs_review
+    class PHASE_2_TDD status_complete
   end
   subgraph group_task["Tasks"]
     direction TB
@@ -414,39 +415,39 @@ graph LR
     TASK_E10["TASK-E10 [unstarted]"]
     class TASK_E10 internal-link
     class TASK_E10 status_unstarted
-    TASK_E07["TASK-E07 [needs-review]"]
+    TASK_E07["TASK-E07 [unstarted]"]
     class TASK_E07 internal-link
-    class TASK_E07 status_needs_review
+    class TASK_E07 status_unstarted
     TASK_E02["TASK-E02 [unstarted]"]
     class TASK_E02 internal-link
     class TASK_E02 status_unstarted
-    TASK_E11["TASK-E11 [needs-review]"]
+    TASK_E11["TASK-E11 [unstarted]"]
     class TASK_E11 internal-link
-    class TASK_E11 status_needs_review
-    TASK_E08["TASK-E08 [needs-review]"]
+    class TASK_E11 status_unstarted
+    TASK_E08["TASK-E08 [unstarted]"]
     class TASK_E08 internal-link
-    class TASK_E08 status_needs_review
-    TASK_E12["TASK-E12 [needs-review]"]
+    class TASK_E08 status_unstarted
+    TASK_E12["TASK-E12 [unstarted]"]
     class TASK_E12 internal-link
-    class TASK_E12 status_needs_review
+    class TASK_E12 status_unstarted
     TASK_E14["TASK-E14 [unstarted]"]
     class TASK_E14 internal-link
     class TASK_E14 status_unstarted
     TASK_E05["TASK-E05 [unstarted]"]
     class TASK_E05 internal-link
     class TASK_E05 status_unstarted
-    TASK_E15["TASK-E15 [needs-review]"]
+    TASK_E15["TASK-E15 [unstarted]"]
     class TASK_E15 internal-link
-    class TASK_E15 status_needs_review
-    TASK_E03["TASK-E03 [needs-review]"]
+    class TASK_E15 status_unstarted
+    TASK_E03["TASK-E03 [unstarted]"]
     class TASK_E03 internal-link
-    class TASK_E03 status_needs_review
-    TASK_E09["TASK-E09 [needs-review]"]
+    class TASK_E03 status_unstarted
+    TASK_E09["TASK-E09 [unstarted]"]
     class TASK_E09 internal-link
-    class TASK_E09 status_needs_review
-    TASK_E13["TASK-E13 [needs-review]"]
+    class TASK_E09 status_unstarted
+    TASK_E13["TASK-E13 [unstarted]"]
     class TASK_E13 internal-link
-    class TASK_E13 status_needs_review
+    class TASK_E13 status_unstarted
     TASK_S_1["TASK-S-1 [complete]"]
     class TASK_S_1 internal-link
     class TASK_S_1 status_complete
@@ -456,9 +457,9 @@ graph LR
     TASK_S_3["TASK-S-3 [complete]"]
     class TASK_S_3 internal-link
     class TASK_S_3 status_complete
-    TASK_S_8["TASK-S-8 [needs-review]"]
+    TASK_S_8["TASK-S-8 [complete]"]
     class TASK_S_8 internal-link
-    class TASK_S_8 status_needs_review
+    class TASK_S_8 status_complete
     TASK_S_4["TASK-S-4 [complete]"]
     class TASK_S_4 internal-link
     class TASK_S_4 status_complete
@@ -579,6 +580,5 @@ graph LR
   classDef status_complete fill:#d8f5e7,stroke:#16a34a,color:#14532d
   classDef status_decided fill:#d8f5e7,stroke:#16a34a,color:#14532d
   classDef status_in_progress fill:#d7f3ff,stroke:#0284c7,color:#0f172a
-  classDef status_needs_review fill:#fff1c2,stroke:#d97706,color:#7c2d12
   classDef status_unstarted fill:#eef2f7,stroke:#64748b,color:#334155
 ```

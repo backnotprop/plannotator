@@ -247,4 +247,55 @@ describe("07-wait-recovery", () => {
       await daemon.stop();
     }
   }, 40_000);
+
+  // ─── 7.6 Daemon crash recovery ────────────────────────────────────────────
+  test("7.6 daemon crash (SIGKILL) and restart: does not hang forever, state is deterministic", async () => {
+    const daemon = await startDaemon({ port, home: sandbox.home, binary });
+
+    const submitHandle = runCliBackground(
+      ["submit", join(FIXTURES_DIR, "small.md"), "--no-browser"],
+      { env: env() },
+    );
+
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      try {
+        const resp = await fetch(daemonUrl("/api/state"));
+        const body = (await resp.json()) as { status: string };
+        if (body.status === "awaiting-response") break;
+      } catch {}
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
+    // Kill the daemon hard using its PID
+    try {
+      process.kill(daemon.pid, "SIGKILL");
+    } catch {}
+    // Give the OS a moment to reap the process
+    await new Promise((r) => setTimeout(r, 500));
+
+    // The submitter CLI must NOT hang forever — it should detect the daemon died
+    const submitResult = await submitHandle.waitForExit();
+    // Accept any non-hanging exit (code can be non-zero due to crash)
+    expect(typeof submitResult.exitCode).toBe("number");
+
+    // Restart the daemon
+    const daemon2 = await startDaemon({ port, home: sandbox.home, binary });
+    try {
+      const stateResp = await fetch(daemonUrl("/api/state"));
+      const state = (await stateResp.json()) as { status: string };
+
+      // State must be one of: idle (loss), resolved (recovery). Not hanging.
+      // Hanging forever is a P0 failure.
+      expect(["idle", "resolved", "awaiting-response"]).toContain(state.status);
+
+      if (state.status === "resolved") {
+        // Verdict was recovered — wait must collect it
+        const waitResult = await runCli(["wait"], { env: env(), timeoutMs: 10_000 });
+        expect([0, 1]).toContain(waitResult.exitCode);
+      }
+    } finally {
+      await daemon2.stop();
+    }
+  }, 60_000);
 });

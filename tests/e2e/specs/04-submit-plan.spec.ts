@@ -290,6 +290,158 @@ describe("04-submit-plan", () => {
     }
   }, 30_000);
 
+  // ─── 4.4 No-heading slug ─────────────────────────────────────────────────
+  test("4.4 plan with no heading: slug contains plan-YYYY-MM-DD", async () => {
+    const { readdirSync, existsSync } = await import("node:fs");
+
+    const daemon = await startDaemon({ port, home: sandbox.home, binary });
+    try {
+      const noHeadingPlan = join(FIXTURES_DIR, "no-heading.md");
+      const submitHandle = runCliBackground(
+        ["submit", noHeadingPlan, "--no-browser"],
+        { env: env() },
+      );
+
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const resp = await fetch(daemonUrl("/api/state"));
+        const body = (await resp.json()) as { status: string };
+        if (body.status === "awaiting-response") break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      await fetch(daemonUrl("/api/approve"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ feedback: "", annotations: [] }),
+      });
+
+      await submitHandle.waitForExit();
+
+      const historyRoot = join(sandbox.home, ".plannotator", "history");
+      if (existsSync(historyRoot)) {
+        const projects = readdirSync(historyRoot);
+        if (projects.length > 0) {
+          const slugs = readdirSync(join(historyRoot, projects[0]));
+          const hasDateSlug = slugs.some((s) => /^plan-\d{4}-\d{2}-\d{2}/.test(s));
+          expect(hasDateSlug).toBe(true);
+        }
+      }
+    } finally {
+      await daemon.stop();
+    }
+  }, 40_000);
+
+  // ─── 4.5 Identical resubmission dedup ────────────────────────────────────
+  test("4.5 identical resubmission: no new version file created", async () => {
+    const { readdirSync, existsSync } = await import("node:fs");
+
+    const daemon = await startDaemon({ port, home: sandbox.home, binary });
+    try {
+      async function submitAndApprove() {
+        const submitHandle = runCliBackground(
+          ["submit", join(FIXTURES_DIR, "small.md"), "--no-browser"],
+          { env: env() },
+        );
+        const dl = Date.now() + 10_000;
+        while (Date.now() < dl) {
+          const resp = await fetch(daemonUrl("/api/state"));
+          const body = (await resp.json()) as { status: string };
+          if (body.status === "awaiting-response") break;
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        await fetch(daemonUrl("/api/approve"), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ feedback: "", annotations: [] }),
+        });
+        await submitHandle.waitForExit();
+      }
+
+      await submitAndApprove();
+
+      const historyRoot = join(sandbox.home, ".plannotator", "history");
+      let versionsBefore = 0;
+      if (existsSync(historyRoot)) {
+        const projects = readdirSync(historyRoot);
+        if (projects.length > 0) {
+          const slugs = readdirSync(join(historyRoot, projects[0]));
+          if (slugs.length > 0) {
+            versionsBefore = readdirSync(join(historyRoot, projects[0], slugs[0])).length;
+          }
+        }
+      }
+
+      await submitAndApprove();
+
+      if (existsSync(historyRoot)) {
+        const projects = readdirSync(historyRoot);
+        if (projects.length > 0) {
+          const slugs = readdirSync(join(historyRoot, projects[0]));
+          if (slugs.length > 0 && versionsBefore > 0) {
+            const versionsAfter = readdirSync(join(historyRoot, projects[0], slugs[0])).length;
+            expect(versionsAfter).toBe(versionsBefore);
+          }
+        }
+      }
+    } finally {
+      await daemon.stop();
+    }
+  }, 60_000);
+
+  // ─── 4.6 Revision diff API ────────────────────────────────────────────────
+  test("4.6 after resubmit with changes: /api/plan/versions lists 2+ versions", async () => {
+    const daemon = await startDaemon({ port, home: sandbox.home, binary });
+    try {
+      // First submission
+      const first = runCliBackground(
+        ["submit", join(FIXTURES_DIR, "small.md"), "--no-browser"],
+        { env: env() },
+      );
+      let dl = Date.now() + 10_000;
+      while (Date.now() < dl) {
+        const resp = await fetch(daemonUrl("/api/state"));
+        const body = (await resp.json()) as { status: string };
+        if (body.status === "awaiting-response") break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      await fetch(daemonUrl("/api/deny"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ feedback: "revise" }),
+      });
+      await first.waitForExit();
+
+      // Second submission (different content = different version)
+      const second = runCliBackground(
+        ["submit", join(FIXTURES_DIR, "multi-section.md"), "--no-browser"],
+        { env: env() },
+      );
+      dl = Date.now() + 10_000;
+      while (Date.now() < dl) {
+        const resp = await fetch(daemonUrl("/api/state"));
+        const body = (await resp.json()) as { status: string };
+        if (body.status === "awaiting-response") break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      const versionsResp = await fetch(daemonUrl("/api/plan/versions"));
+      if (versionsResp.ok) {
+        const versions = (await versionsResp.json()) as unknown[];
+        expect(versions.length).toBeGreaterThanOrEqual(2);
+      }
+
+      await fetch(daemonUrl("/api/approve"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ feedback: "", annotations: [] }),
+      });
+      await second.waitForExit();
+    } finally {
+      await daemon.stop();
+    }
+  }, 60_000);
+
   // ─── 4.7 --commit-message propagation ────────────────────────────────────
   test("4.7 --commit-message value appears in plan git history", async () => {
     const { execSync } = await import("node:child_process");

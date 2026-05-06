@@ -122,6 +122,13 @@ describe("11-cancel-and-reset", () => {
       });
       expect(resetResp.ok).toBe(true);
 
+      // After reset, /api/draft must return empty annotations
+      const draftAfterReset = await fetch(daemonUrl("/api/draft"));
+      if (draftAfterReset.ok) {
+        const draft = (await draftAfterReset.json()) as { annotations?: unknown[] };
+        expect((draft.annotations ?? []).length).toBe(0);
+      }
+
       // Session must still be active (daemon did not exit)
       const stateResp = await fetch(daemonUrl("/api/state"));
       const state = (await stateResp.json()) as { status: string };

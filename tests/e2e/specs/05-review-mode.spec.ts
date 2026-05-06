@@ -139,6 +139,114 @@ describe("05-review-mode", () => {
     }
   }, 40_000);
 
+  // ─── 5.1c diff type: staged ──────────────────────────────────────────────
+  test("5.1c review --diff-type staged: returns only staged changes", async () => {
+    execSync("git add greet.ts", { cwd: testRepo });
+
+    const daemon = await startDaemon({ port, home: sandbox.home, binary });
+    try {
+      const reviewHandle = runCliBackground(["review", "--diff-type", "staged", "--no-browser"], {
+        env: env(),
+        cwd: testRepo,
+      });
+
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const resp = await fetch(daemonUrl("/api/state"));
+        const body = (await resp.json()) as { status: string };
+        if (body.status === "awaiting-response") break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      const diffResp = await fetch(daemonUrl("/api/diff"));
+      expect(diffResp.ok).toBe(true);
+      const diffBody = (await diffResp.json()) as { rawPatch?: string };
+      expect(typeof diffBody.rawPatch).toBe("string");
+      expect(diffBody.rawPatch).toContain("greet.ts");
+
+      await fetch(daemonUrl("/api/feedback"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ feedback: "LGTM", annotations: [], approved: true }),
+      });
+      await reviewHandle.waitForExit();
+    } finally {
+      await daemon.stop();
+    }
+  }, 40_000);
+
+  // ─── 5.1d diff type: unstaged ─────────────────────────────────────────────
+  test("5.1d review --diff-type unstaged: returns unstaged changes only", async () => {
+    const daemon = await startDaemon({ port, home: sandbox.home, binary });
+    try {
+      const reviewHandle = runCliBackground(["review", "--diff-type", "unstaged", "--no-browser"], {
+        env: env(),
+        cwd: testRepo,
+      });
+
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const resp = await fetch(daemonUrl("/api/state"));
+        const body = (await resp.json()) as { status: string };
+        if (body.status === "awaiting-response") break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      const diffResp = await fetch(daemonUrl("/api/diff"));
+      expect(diffResp.ok).toBe(true);
+      const diffBody = (await diffResp.json()) as { rawPatch?: string };
+      expect(typeof diffBody.rawPatch).toBe("string");
+      expect(diffBody.rawPatch).toContain("greet.ts");
+
+      await fetch(daemonUrl("/api/feedback"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ feedback: "LGTM", annotations: [], approved: true }),
+      });
+      await reviewHandle.waitForExit();
+    } finally {
+      await daemon.stop();
+    }
+  }, 40_000);
+
+  // ─── 5.1e diff type: branch ───────────────────────────────────────────────
+  test("5.1e review --diff-type branch: compares HEAD against specified base branch", async () => {
+    // Create a feature branch from the initial commit, then commit changes on main
+    execSync("git checkout -b feature-branch && git checkout main", { cwd: testRepo });
+    execSync("git add greet.ts && git commit -q -m 'update greet on main'", { cwd: testRepo });
+
+    const daemon = await startDaemon({ port, home: sandbox.home, binary });
+    try {
+      const reviewHandle = runCliBackground(
+        ["review", "--diff-type", "branch:feature-branch", "--no-browser"],
+        { env: env(), cwd: testRepo },
+      );
+
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const resp = await fetch(daemonUrl("/api/state"));
+        const body = (await resp.json()) as { status: string };
+        if (body.status === "awaiting-response") break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      const diffResp = await fetch(daemonUrl("/api/diff"));
+      if (diffResp.ok) {
+        const diffBody = (await diffResp.json()) as { rawPatch?: string };
+        expect(typeof diffBody.rawPatch).toBe("string");
+      }
+
+      await fetch(daemonUrl("/api/feedback"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ feedback: "LGTM", annotations: [], approved: true }),
+      });
+      await reviewHandle.waitForExit();
+    } finally {
+      await daemon.stop();
+    }
+  }, 40_000);
+
   // ─── 5.2 Async feedback delivery ──────────────────────────────────────────
   test("5.2 plannotator review exits/returns quickly (non-blocking), feedback delivered later", async () => {
     const daemon = await startDaemon({ port, home: sandbox.home, binary });

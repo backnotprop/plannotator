@@ -265,6 +265,48 @@ describe("03-state-machine", () => {
     }
   });
 
+  test("3.2.2 submitting while verdict_ready: CLI exits 1, references unfetched verdict", async () => {
+    const daemon = await startDaemon({ port, home: sandbox.home, binary });
+    try {
+      // Submit and then approve to reach verdict_ready (resolved) state
+      const firstSubmit = runCliBackground(["submit", join(FIXTURES_DIR, "small.md"), "--no-browser"], {
+        env: env(),
+      });
+
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const resp = await fetch(daemonUrl("/api/state"));
+        const body = (await resp.json()) as { status: string };
+        if (body.status === "awaiting-response") break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      await fetch(daemonUrl("/api/approve"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ feedback: "", annotations: [] }),
+      });
+
+      await expectVerdictReady(port);
+
+      // Second submit while in verdict_ready should be rejected
+      const secondResult = await runCli(
+        ["submit", join(FIXTURES_DIR, "multi-section.md"), "--no-browser"],
+        { env: env(), timeoutMs: 10_000 },
+      );
+      expect(secondResult.exitCode).toBe(1);
+
+      const combined = `${secondResult.stdout}\n${secondResult.stderr}`;
+      expect(combined.toLowerCase()).toMatch(/verdict|wait|resolved|clear/);
+
+      // Consume the verdict to clean up
+      await firstSubmit.waitForExit();
+      await runCli(["wait"], { env: env(), timeoutMs: 10_000 });
+    } finally {
+      await daemon.stop();
+    }
+  });
+
   test("3.2.3 raw POST /api/submit while active returns HTTP 409", async () => {
     const daemon = await startDaemon({ port, home: sandbox.home, binary });
     try {
@@ -422,4 +464,40 @@ describe("03-state-machine", () => {
       await daemon.stop();
     }
   });
+
+  test("3.3.4 concurrent wait: second CLI blocks during active, receives verdict on approve", async () => {
+    const daemon = await startDaemon({ port, home: sandbox.home, binary });
+    try {
+      const submitHandle = runCliBackground(["submit", join(FIXTURES_DIR, "small.md"), "--no-browser"], {
+        env: env(),
+      });
+
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const resp = await fetch(daemonUrl("/api/state"));
+        const body = (await resp.json()) as { status: string };
+        if (body.status === "awaiting-response") break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      // Start a wait from a "second CLI terminal" while active
+      const waitHandle = runCliBackground(["wait"], { env: env() });
+
+      // Approve via HTTP to deliver the verdict
+      await fetch(daemonUrl("/api/approve"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ feedback: "approved", annotations: [] }),
+      });
+
+      const submitResult = await submitHandle.waitForExit();
+      expect(submitResult.exitCode).toBe(0);
+
+      const waitResult = await waitHandle.waitForExit();
+      // The wait command must receive the verdict (approved) and exit
+      expect(waitResult.exitCode).toBe(0);
+    } finally {
+      await daemon.stop();
+    }
+  }, 30_000);
 });

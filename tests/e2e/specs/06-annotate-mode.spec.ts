@@ -191,9 +191,9 @@ describe("06-annotate-mode", () => {
       });
 
       const result = await annotateHandle.waitForExit();
-      // Cancel delivers a cancellation message to the CLI
+      // Cancel delivers exact message including the file path
       const combined = `${result.stdout}\n${result.stderr}`;
-      expect(combined.toLowerCase()).toMatch(/cancel/);
+      expect(combined).toContain(`Annotation of ${annotateTarget} cancelled by user.`);
 
       await new Promise((r) => setTimeout(r, 300));
       await expectIdle(port);

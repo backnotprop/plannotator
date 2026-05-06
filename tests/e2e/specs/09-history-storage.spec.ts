@@ -258,7 +258,112 @@ describe("09-history-storage", () => {
     }
   }, 60_000);
 
-  // ─── 9.6 plan-no-heading slug fallback ────────────────────────────────────
+  // ─── 9.4 Project name detection: cwd NOT inside git repo ─────────────────
+  test("9.4 project name falls back to cwd directory name when not in a git repo", async () => {
+    const { mkdirSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const nonGitDir = join(tmpdir(), `plannotator-e2e-nongit-${Date.now()}`);
+    mkdirSync(nonGitDir, { recursive: true });
+
+    const daemon = await startDaemon({ port, home: sandbox.home, binary });
+    try {
+      const submitHandle = runCliBackground(
+        ["submit", join(FIXTURES_DIR, "small.md"), "--no-browser"],
+        { env: env(), cwd: nonGitDir },
+      );
+
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const resp = await fetch(daemonUrl("/api/state"));
+        const body = (await resp.json()) as { status: string };
+        if (body.status === "awaiting-response") break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      await fetch(daemonUrl("/api/approve"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ feedback: "", annotations: [] }),
+      });
+
+      await submitHandle.waitForExit();
+
+      const plansRoot = join(sandbox.home, ".plannotator", "plans");
+      if (existsSync(plansRoot)) {
+        const projects = readdirSync(plansRoot);
+        expect(projects.length).toBeGreaterThan(0);
+        // Project name should be derived from the non-git directory name
+        const lastName = nonGitDir.split("/").pop() ?? "";
+        const sanitized = lastName.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
+        expect(projects.some((p) => p.includes(sanitized.slice(0, 10)))).toBe(true);
+      }
+    } finally {
+      await daemon.stop();
+    }
+  }, 40_000);
+
+  // ─── 9.6 Draft persistence via /api/draft ─────────────────────────────────
+  test("9.6 annotation draft saved to /api/draft persists between requests", async () => {
+    const daemon = await startDaemon({ port, home: sandbox.home, binary });
+    try {
+      const submitHandle = runCliBackground(
+        ["submit", join(FIXTURES_DIR, "small.md"), "--no-browser"],
+        { env: env() },
+      );
+
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const resp = await fetch(daemonUrl("/api/state"));
+        const body = (await resp.json()) as { status: string };
+        if (body.status === "awaiting-response") break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      const draft = { annotations: [{ id: "a1", type: "COMMENT", text: "test note", originalText: "foo" }] };
+
+      // Save draft
+      const saveResp = await fetch(daemonUrl("/api/draft"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(draft),
+      });
+      expect(saveResp.ok).toBe(true);
+
+      // Retrieve draft
+      const getResp = await fetch(daemonUrl("/api/draft"));
+      expect(getResp.ok).toBe(true);
+      const retrieved = (await getResp.json()) as { annotations?: unknown[] };
+      expect(Array.isArray(retrieved.annotations)).toBe(true);
+      expect((retrieved.annotations ?? []).length).toBeGreaterThan(0);
+
+      await fetch(daemonUrl("/api/approve"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ feedback: "", annotations: [] }),
+      });
+      await submitHandle.waitForExit();
+    } finally {
+      await daemon.stop();
+    }
+  }, 40_000);
+
+  // ─── 9.7 Obsidian integration smoke test ──────────────────────────────────
+  test("9.7 /api/obsidian/vaults endpoint responds without crashing daemon", async () => {
+    const daemon = await startDaemon({ port, home: sandbox.home, binary });
+    try {
+      const resp = await fetch(daemonUrl("/api/obsidian/vaults"));
+      // Endpoint must exist (200 or 404 is OK; crash/500 is not)
+      expect([200, 404]).toContain(resp.status);
+      if (resp.ok) {
+        const body = (await resp.json()) as unknown;
+        expect(Array.isArray(body)).toBe(true);
+      }
+    } finally {
+      await daemon.stop();
+    }
+  });
+
+  // ─── 9.x plan-no-heading slug fallback ────────────────────────────────────
   test("9.4 plan with no heading uses fallback slug plan-YYYY-MM-DD", async () => {
     const daemon = await startDaemon({ port, home: sandbox.home, binary });
     try {

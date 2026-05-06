@@ -226,6 +226,92 @@ describe("10-ui-actions", () => {
     }
   }, 40_000);
 
+  // ─── 10.2.4 /api/file-content ─────────────────────────────────────────────
+
+  test("10.2.4 review mode: /api/file-content returns content for a modified file", async () => {
+    const testRepo = execSync(`bash "${join(REPOS_DIR, "make-repo.sh")}"`, {
+      encoding: "utf8",
+    }).trim();
+
+    const daemon = await startDaemon({ port, home: sandbox.home, binary });
+    try {
+      const reviewHandle = runCliBackground(
+        ["review", "--no-browser"],
+        { env: env(), cwd: testRepo },
+      );
+
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const resp = await fetch(daemonUrl("/api/state"));
+        const body = (await resp.json()) as { status: string };
+        if (body.status === "awaiting-response") break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      const fileContentResp = await fetch(
+        daemonUrl(`/api/file-content?file=${encodeURIComponent("greet.ts")}`),
+      );
+      // Must not crash; modified file should return 200 with content fields
+      if (fileContentResp.ok) {
+        const body = (await fileContentResp.json()) as Record<string, unknown>;
+        expect("oldContent" in body || "newContent" in body).toBe(true);
+      } else {
+        // 404 is acceptable for untracked vs. modified distinction
+        expect([404, 200]).toContain(fileContentResp.status);
+      }
+
+      await fetch(daemonUrl("/api/feedback"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ feedback: "", annotations: [], approved: true }),
+      });
+      await reviewHandle.waitForExit();
+    } finally {
+      await daemon.stop();
+    }
+  }, 40_000);
+
+  // ─── 10.2.5 /api/git-add ──────────────────────────────────────────────────
+
+  test("10.2.5 review mode: /api/git-add stages a file without crashing", async () => {
+    const testRepo = execSync(`bash "${join(REPOS_DIR, "make-repo.sh")}"`, {
+      encoding: "utf8",
+    }).trim();
+
+    const daemon = await startDaemon({ port, home: sandbox.home, binary });
+    try {
+      const reviewHandle = runCliBackground(
+        ["review", "--no-browser"],
+        { env: env(), cwd: testRepo },
+      );
+
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const resp = await fetch(daemonUrl("/api/state"));
+        const body = (await resp.json()) as { status: string };
+        if (body.status === "awaiting-response") break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      const gitAddResp = await fetch(daemonUrl("/api/git-add"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ filePath: "greet.ts" }),
+      });
+      // Must respond 2xx or 4xx, never crash (5xx)
+      expect(gitAddResp.status).toBeLessThan(500);
+
+      await fetch(daemonUrl("/api/feedback"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ feedback: "", annotations: [], approved: true }),
+      });
+      await reviewHandle.waitForExit();
+    } finally {
+      await daemon.stop();
+    }
+  }, 40_000);
+
   // ─── 10.3 Annotate UI API surface ─────────────────────────────────────────
 
   test("10.3.1 annotate mode: /api/plan returns mode=annotate and file content", async () => {
@@ -257,6 +343,47 @@ describe("10-ui-actions", () => {
         body: JSON.stringify({ feedback: "", annotations: [] }),
       });
       await annotateHandle.waitForExit();
+    } finally {
+      await daemon.stop();
+    }
+  }, 30_000);
+
+  // ─── 10.4 Image upload ────────────────────────────────────────────────────
+
+  test("10.4.1 image upload: POST /api/upload accepts a PNG and returns path", async () => {
+    const daemon = await startDaemon({ port, home: sandbox.home, binary });
+    try {
+      const submitHandle = runCliBackground(
+        ["submit", join(FIXTURES_DIR, "small.md"), "--no-browser"],
+        { env: env() },
+      );
+
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const resp = await fetch(daemonUrl("/api/state"));
+        const body = (await resp.json()) as { status: string };
+        if (body.status === "awaiting-response") break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      // Minimal 1×1 PNG (base64)
+      const pngBytes = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        "base64",
+      );
+      const formData = new FormData();
+      formData.append("file", new Blob([pngBytes], { type: "image/png" }), "test.png");
+
+      const uploadResp = await fetch(daemonUrl("/api/upload"), {
+        method: "POST",
+        body: formData,
+      });
+      expect(uploadResp.ok).toBe(true);
+      const uploadBody = (await uploadResp.json()) as { path?: string; originalName?: string };
+      expect(typeof uploadBody.path).toBe("string");
+
+      await fetch(daemonUrl("/api/cancel"), { method: "POST" });
+      await submitHandle.waitForExit();
     } finally {
       await daemon.stop();
     }

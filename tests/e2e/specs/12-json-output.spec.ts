@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,6 +24,16 @@ import {
 const FIXTURES_DIR = resolve(
   fileURLToPath(new URL("../../", import.meta.url)),
   "fixtures/plans",
+);
+
+const REPOS_DIR = resolve(
+  fileURLToPath(new URL("../../", import.meta.url)),
+  "fixtures/repos",
+);
+
+const MARKDOWN_DIR = resolve(
+  fileURLToPath(new URL("../../", import.meta.url)),
+  "fixtures/markdown",
 );
 
 const SNAPSHOTS_DIR = resolve(
@@ -231,6 +242,156 @@ describe("12-json-output", () => {
       const result = await submitHandle.waitForExit();
 
       // stdout must contain exactly one non-empty line (the JSON object)
+      const stdoutLines = result.stdout
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
+      expect(stdoutLines.length).toBe(1);
+      expect(() => JSON.parse(stdoutLines[0])).not.toThrow();
+    } finally {
+      await daemon.stop();
+    }
+  }, 40_000);
+
+  // ─── review --json ─────────────────────────────────────────────────────────
+  test("12.7 review --json: stdout is a single JSON object on approve", async () => {
+    const testRepo = execSync(`bash "${join(REPOS_DIR, "make-repo.sh")}"`, {
+      encoding: "utf8",
+    }).trim();
+
+    const daemon = await startDaemon({ port, home: sandbox.home, binary });
+    try {
+      const reviewHandle = runCliBackground(
+        ["review", "--no-browser", "--json"],
+        { env: env(), cwd: testRepo },
+      );
+
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const resp = await fetch(daemonUrl("/api/state"));
+        const body = (await resp.json()) as { status: string };
+        if (body.status === "awaiting-response") break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      await fetch(daemonUrl("/api/feedback"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ feedback: "LGTM", annotations: [], approved: true }),
+      });
+
+      const result = await reviewHandle.waitForExit();
+      expect(result.exitCode).toBe(0);
+
+      const lines = result.stdout.trim().split("\n").filter((l) => l.trim());
+      expect(lines.length).toBe(1);
+      const parsed = JSON.parse(lines[0]) as Record<string, unknown>;
+      expect(typeof parsed.approved).toBe("boolean");
+      expect(parsed.approved).toBe(true);
+    } finally {
+      await daemon.stop();
+    }
+  }, 40_000);
+
+  // ─── review --json: stdout purity ─────────────────────────────────────────
+  test("12.8 review --json: daemon diagnostics go to stderr, not stdout", async () => {
+    const testRepo = execSync(`bash "${join(REPOS_DIR, "make-repo.sh")}"`, {
+      encoding: "utf8",
+    }).trim();
+
+    const daemon = await startDaemon({ port, home: sandbox.home, binary });
+    try {
+      const reviewHandle = runCliBackground(
+        ["review", "--no-browser", "--json"],
+        { env: env(), cwd: testRepo },
+      );
+
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const resp = await fetch(daemonUrl("/api/state"));
+        const body = (await resp.json()) as { status: string };
+        if (body.status === "awaiting-response") break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      await fetch(daemonUrl("/api/feedback"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ feedback: "", annotations: [], approved: true }),
+      });
+
+      const result = await reviewHandle.waitForExit();
+      const stdoutLines = result.stdout
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
+      expect(stdoutLines.length).toBe(1);
+      expect(() => JSON.parse(stdoutLines[0])).not.toThrow();
+    } finally {
+      await daemon.stop();
+    }
+  }, 40_000);
+
+  // ─── annotate --json ───────────────────────────────────────────────────────
+  test("12.9 annotate --json: stdout is a single JSON object on feedback submit", async () => {
+    const daemon = await startDaemon({ port, home: sandbox.home, binary });
+    try {
+      const annotateHandle = runCliBackground(
+        ["annotate", join(MARKDOWN_DIR, "annotate-target.md"), "--no-browser", "--json"],
+        { env: env() },
+      );
+
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const resp = await fetch(daemonUrl("/api/state"));
+        const body = (await resp.json()) as { status: string };
+        if (body.status === "awaiting-response") break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      await fetch(daemonUrl("/api/feedback"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ feedback: "looks good", annotations: [] }),
+      });
+
+      const result = await annotateHandle.waitForExit();
+      expect(result.exitCode).toBe(0);
+
+      const lines = result.stdout.trim().split("\n").filter((l) => l.trim());
+      expect(lines.length).toBe(1);
+      const parsed = JSON.parse(lines[0]) as Record<string, unknown>;
+      expect(typeof parsed.mode).toBe("string");
+      expect(parsed.mode).toBe("annotate");
+    } finally {
+      await daemon.stop();
+    }
+  }, 40_000);
+
+  // ─── annotate --json: stdout purity ───────────────────────────────────────
+  test("12.10 annotate --json: diagnostics go to stderr, not stdout", async () => {
+    const daemon = await startDaemon({ port, home: sandbox.home, binary });
+    try {
+      const annotateHandle = runCliBackground(
+        ["annotate", join(MARKDOWN_DIR, "annotate-target.md"), "--no-browser", "--json"],
+        { env: env() },
+      );
+
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const resp = await fetch(daemonUrl("/api/state"));
+        const body = (await resp.json()) as { status: string };
+        if (body.status === "awaiting-response") break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      await fetch(daemonUrl("/api/feedback"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ feedback: "", annotations: [] }),
+      });
+
+      const result = await annotateHandle.waitForExit();
       const stdoutLines = result.stdout
         .split("\n")
         .map((l) => l.trim())
