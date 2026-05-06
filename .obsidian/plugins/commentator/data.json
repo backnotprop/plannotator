@@ -1,0 +1,83 @@
+{
+  "version": "0.2.3",
+  "default_edit_mode": 1,
+  "default_preview_mode": 0,
+  "comment_style": "icon",
+  "editor_styling": false,
+  "markup_focus": {
+    "0": {
+      "show_styling": true,
+      "show_syntax": true,
+      "show_metadata": true,
+      "focus_annotation": true,
+      "show_comment": true
+    },
+    "1": {
+      "show_styling": true,
+      "show_syntax": false,
+      "show_metadata": false,
+      "focus_annotation": true,
+      "show_comment": false
+    },
+    "2": {
+      "show_styling": true,
+      "show_syntax": false,
+      "show_metadata": false,
+      "focus_annotation": true,
+      "show_comment": false
+    }
+  },
+  "diff_gutter": true,
+  "diff_gutter_hide_empty": true,
+  "annotation_gutter": true,
+  "annotation_gutter_included_types": 31,
+  "annotation_gutter_hide_empty": true,
+  "annotation_gutter_default_fold_state": false,
+  "annotation_gutter_fold_button": true,
+  "annotation_gutter_resize_handle": true,
+  "annotation_gutter_focus_on_click": true,
+  "annotation_gutter_width": 300,
+  "tag_completion": true,
+  "tag_correcter": true,
+  "clipboard_remove_syntax": true,
+  "edit_info": true,
+  "toolbar_preview_button": true,
+  "toolbar_edit_button": true,
+  "toolbar_show_buttons_labels": true,
+  "status_bar_preview_button": true,
+  "status_bar_edit_button": true,
+  "status_bar_metadata_button": true,
+  "database_workers": 2,
+  "post_processor": true,
+  "live_preview": true,
+  "alternative_cursor_movement": true,
+  "enable_metadata": true,
+  "enable_author_metadata": true,
+  "enable_timestamp_metadata": true,
+  "enable_completed_metadata": true,
+  "enable_style_metadata": true,
+  "enable_color_metadata": true,
+  "add_metadata": false,
+  "add_author_metadata": false,
+  "add_timestamp_metadata": false,
+  "add_completed_metadata": false,
+  "add_style_metadata": false,
+  "add_color_metadata": false,
+  "author": "",
+  "suggestion_mode_operations": {
+    "cursor_movement": {
+      "addition": "ignore_metadata",
+      "deletion": "ignore_metadata",
+      "substitution": "ignore_metadata",
+      "highlight": "ignore_metadata",
+      "comment": "ignore_completely"
+    },
+    "bracket_movement": {
+      "addition": "stay_inside",
+      "deletion": "stay_inside",
+      "substitution": "stay_inside",
+      "highlight": "stay_inside",
+      "comment": "stay_inside"
+    }
+  }
+}

@@ -1,0 +1,510 @@
+- generic [ref=e1]:
+  - link "Skip to content" [ref=e98] [cursor=pointer]:
+    - /url: "#main"
+  - generic [ref=e102]:
+    - generic [ref=e104]:
+      - navigation "Sidebar" [ref=e105]:
+        - button "Open sidebar" [ref=e109]:
+          - img [ref=e110]
+        - generic [ref=e112]:
+          - link "New chat" [ref=e114] [cursor=pointer]:
+            - /url: /
+            - img [ref=e116]
+            - generic [ref=e118]: New chat
+          - button "Search chats" [ref=e120] [cursor=pointer]:
+            - img [ref=e122]
+            - generic [ref=e124]: Search chats
+          - button "Recents" [ref=e126] [cursor=pointer]:
+            - img [ref=e128]
+            - generic [ref=e130]: Recents
+        - button "Open profile menu" [ref=e133] [cursor=pointer]:
+          - img "Profile image" [ref=e136]
+      - generic:
+        - heading "Chat history" [level=2]
+        - generic:
+          - navigation "Chat history":
+            - generic:
+              - generic:
+                - generic:
+                  - link "Home":
+                    - /url: /
+                    - generic: ChatGPT
+                  - generic:
+                    - button "Close sidebar":
+                      - img
+            - generic:
+              - list:
+                - listitem:
+                  - link "New chat Control Shift O":
+                    - /url: /
+                    - generic:
+                      - generic:
+                        - img
+                      - generic:
+                        - generic: New chat
+                    - generic:
+                      - generic:
+                        - generic "Control":
+                          - generic: Ctrl
+                          - text: +
+                        - generic "Shift":
+                          - generic: Shift
+                          - text: +
+                        - generic:
+                          - generic: O
+                - listitem:
+                  - button "Search chats Control K":
+                    - generic:
+                      - generic:
+                        - img
+                      - generic:
+                        - generic: Search chats
+                    - generic:
+                      - generic:
+                        - generic "Control":
+                          - generic: Ctrl
+                          - text: +
+                        - generic:
+                          - generic: K
+            - link "Codex":
+              - /url: /codex/cloud
+              - generic:
+                - generic:
+                  - img
+                - generic:
+                  - generic: Codex
+              - generic:
+                - img
+            - generic:
+              - generic:
+                - generic:
+                  - img
+                - generic:
+                  - generic: More
+            - generic:
+              - generic:
+                - button "GPTs" [expanded]:
+                  - heading "GPTs" [level=2]
+              - list:
+                - listitem:
+                  - link "Calendar and email Assistant":
+                    - /url: /g/g-F4eevrFo4-calendar-and-email-assistant
+                    - generic:
+                      - generic:
+                        - generic "Calendar and email Assistant"
+                    - button [ref=e199] [cursor=pointer]:
+                      - img [ref=e201]
+                - listitem:
+                  - link "Audio Analyzer":
+                    - /url: /g/g-g0Ob3Qbue-audio-analyzer
+                    - generic:
+                      - generic:
+                        - generic: Audio Analyzer
+                    - button [ref=e203] [cursor=pointer]:
+                      - img [ref=e205]
+                - listitem:
+                  - link "のYouTube Video Summarizer ✏️ のYouTube Unaffiliated":
+                    - /url: /g/g-GvcYCKPIH-noyoutube-video-summarizer-noyoutube-unaffiliated
+                    - generic:
+                      - generic:
+                        - generic "のYouTube Video Summarizer ✏️ のYouTube Unaffiliated"
+                    - button [ref=e207] [cursor=pointer]:
+                      - img [ref=e209]
+              - link "Explore GPTs":
+                - /url: /gpts
+                - generic:
+                  - img
+                - generic:
+                  - generic: Explore GPTs
+            - generic:
+              - generic:
+                - button "Projects" [expanded]:
+                  - heading "Projects" [level=2]
+              - list:
+                - listitem:
+                  - button "New project":
+                    - generic:
+                      - img
+                    - generic:
+                      - generic: New project
+                - listitem:
+                  - link "Show chats COBLE Open project options for COBLE":
+                    - /url: /g/g-p-69d4f82e30b88191b3e4ebae25d5c09b-coble/project
+                    - generic:
+                      - generic:
+                        - button "Show chats":
+                          - generic:
+                            - generic:
+                              - generic:
+                                - generic:
+                                  - img
+                            - generic:
+                              - generic:
+                                - img
+                      - generic:
+                        - generic: COBLE
+                    - button "Open project options for COBLE" [ref=e211] [cursor=pointer]:
+                      - img [ref=e213]
+                - listitem:
+                  - link "Show chats Category Theory Open project options for Category Theory":
+                    - /url: /g/g-p-6925c3c7d8888191a5e37001950c54ef-category-theory/project
+                    - generic:
+                      - generic:
+                        - button "Show chats":
+                          - generic:
+                            - generic:
+                              - generic:
+                                - generic:
+                                  - img
+                            - generic:
+                              - generic:
+                                - img
+                      - generic:
+                        - generic: Category Theory
+                    - button "Open project options for Category Theory" [ref=e215] [cursor=pointer]:
+                      - img [ref=e217]
+            - generic:
+              - generic:
+                - button "Recents" [expanded]:
+                  - heading "Recents" [level=2]
+              - generic:
+                - list:
+                  - listitem:
+                    - link "Sprint Tasks for Compliance, pinned conversation":
+                      - /url: /c/69f62e7f-55fc-8323-bbc0-df4adb1b1429
+                      - generic:
+                        - generic:
+                          - text: Sprint Tasks for Compliance
+                          - generic: Pinned
+                      - generic:
+                        - generic:
+                          - generic:
+                            - generic:
+                              - img
+                            - button "Open conversation options for Sprint Tasks for Compliance" [ref=e219] [cursor=pointer]:
+                              - img [ref=e221]
+                        - generic:
+                          - generic:
+                            - img
+                - list:
+                  - listitem:
+                    - link "Feature Plan Guidance":
+                      - /url: /c/69f9aa3f-7c90-8322-b45b-7e506390bbdf
+                      - generic:
+                        - generic: Feature Plan Guidance
+                      - button "Open conversation options for Feature Plan Guidance" [ref=e223] [cursor=pointer]:
+                        - img [ref=e225]
+                  - listitem:
+                    - link "Repository Tagging System Design":
+                      - /url: /c/69f988bb-1674-8324-a2b7-74923529b9c5
+                      - generic:
+                        - generic "Repository Tagging System Design"
+                      - button "Open conversation options for Repository Tagging System Design" [ref=e227] [cursor=pointer]:
+                        - img [ref=e229]
+                  - listitem:
+                    - link "Information architecture guidance":
+                      - /url: /c/69f9879a-2d20-8323-b88e-d3fdc38120b7
+                      - generic:
+                        - generic "Information architecture guidance"
+                      - button "Open conversation options for Information architecture guidance" [ref=e231] [cursor=pointer]:
+                        - img [ref=e233]
+                  - listitem:
+                    - link "Obsidian plugins for projects":
+                      - /url: /c/69f86554-eb30-8322-b1b9-1079d5d5a2dd
+                      - generic:
+                        - generic: Obsidian plugins for projects
+                      - button "Open conversation options for Obsidian plugins for projects" [ref=e235] [cursor=pointer]:
+                        - img [ref=e237]
+                  - listitem:
+                    - link "DAG for Sprint Planning":
+                      - /url: /c/69f84d87-a64c-8324-b9f6-972f84805808
+                      - generic:
+                        - generic: DAG for Sprint Planning
+                      - button "Open conversation options for DAG for Sprint Planning" [ref=e239] [cursor=pointer]:
+                        - img [ref=e241]
+                  - listitem:
+                    - link "AI Coding Agent Guidance":
+                      - /url: /c/69f8493c-78b8-8321-b92a-c0833de6c424
+                      - generic:
+                        - generic: AI Coding Agent Guidance
+                      - button "Open conversation options for AI Coding Agent Guidance" [ref=e243] [cursor=pointer]:
+                        - img [ref=e245]
+                  - listitem:
+                    - link "Codex Skill Audit":
+                      - /url: /c/69f8461c-40b0-8321-a3a9-4840ee4cdb7e
+                      - generic:
+                        - generic: Codex Skill Audit
+                      - button "Open conversation options for Codex Skill Audit" [ref=e247] [cursor=pointer]:
+                        - img [ref=e249]
+                  - listitem:
+                    - link "Headed Cleanup Request":
+                      - /url: /c/69f8428d-4bdc-8320-8791-09a97456e84c
+                      - generic:
+                        - generic: Headed Cleanup Request
+                      - button "Open conversation options for Headed Cleanup Request" [ref=e251] [cursor=pointer]:
+                        - img [ref=e253]
+                  - listitem:
+                    - link "CLI Workflow Documentation Plan":
+                      - /url: /c/69f83fdf-2a9c-8321-8632-577831ba79bc
+                      - generic:
+                        - generic "CLI Workflow Documentation Plan"
+                      - button "Open conversation options for CLI Workflow Documentation Plan" [ref=e255] [cursor=pointer]:
+                        - img [ref=e257]
+                  - listitem:
+                    - link "CHATGPT_EXTENSION_POC_OK":
+                      - /url: /c/69f83eff-3b9c-8324-8594-f5744d216156
+                      - generic:
+                        - generic "CHATGPT_EXTENSION_POC_OK"
+                      - button "Open conversation options for CHATGPT_EXTENSION_POC_OK" [ref=e259] [cursor=pointer]:
+                        - img [ref=e261]
+                  - listitem:
+                    - link "E2E Test Plan Review":
+                      - /url: /c/69f83571-eff0-8322-b1e9-cd1b3edf4a7e
+                      - generic:
+                        - generic: E2E Test Plan Review
+                      - button "Open conversation options for E2E Test Plan Review" [ref=e263] [cursor=pointer]:
+                        - img [ref=e265]
+                  - listitem:
+                    - link "Markdown-based Kanban Tools":
+                      - /url: /c/69f82176-b360-8320-8594-2dfb72b7adf7
+                      - generic:
+                        - generic: Markdown-based Kanban Tools
+                      - button "Open conversation options for Markdown-based Kanban Tools" [ref=e267] [cursor=pointer]:
+                        - img [ref=e269]
+                  - listitem:
+                    - link "Battery and Charging Specs":
+                      - /url: /c/69f7f839-fdb0-8323-af81-9859a806777f
+                      - generic:
+                        - generic: Battery and Charging Specs
+                      - button "Open conversation options for Battery and Charging Specs" [ref=e271] [cursor=pointer]:
+                        - img [ref=e273]
+                  - listitem:
+                    - link "Improving Agent Capabilities":
+                      - /url: /c/69f6e90f-9514-8323-9db4-0734dd6aee05
+                      - generic:
+                        - generic: Improving Agent Capabilities
+                      - button "Open conversation options for Improving Agent Capabilities" [ref=e275] [cursor=pointer]:
+                        - img [ref=e277]
+                  - listitem:
+                    - link "Accessing Nimbalyst Database":
+                      - /url: /c/69f65f53-a17c-8323-90e8-bf026566854d
+                      - generic:
+                        - generic: Accessing Nimbalyst Database
+                      - button "Open conversation options for Accessing Nimbalyst Database" [ref=e279] [cursor=pointer]:
+                        - img [ref=e281]
+                  - listitem:
+                    - link "Organizing Agent Projects":
+                      - /url: /c/69f687eb-3e20-8322-9c75-9d096f26f737
+                      - generic:
+                        - generic: Organizing Agent Projects
+                      - button "Open conversation options for Organizing Agent Projects" [ref=e283] [cursor=pointer]:
+                        - img [ref=e285]
+                  - listitem:
+                    - link "Organizing Agent Projects":
+                      - /url: /c/69f6899a-d3d8-8322-ab1d-1fb79a167271
+                      - generic:
+                        - generic: Organizing Agent Projects
+                      - button "Open conversation options for Organizing Agent Projects" [ref=e287] [cursor=pointer]:
+                        - img [ref=e289]
+                  - listitem:
+                    - link "Nimbalyst Agent Project System":
+                      - /url: /c/69f689aa-a808-8321-bc88-d755f1d898c5
+                      - generic:
+                        - generic: Nimbalyst Agent Project System
+                      - button "Open conversation options for Nimbalyst Agent Project System" [ref=e291] [cursor=pointer]:
+                        - img [ref=e293]
+                  - listitem:
+                    - link "Nimbalyst Task Management":
+                      - /url: /c/69f68242-d424-8322-adfa-968d7134eab4
+                      - generic:
+                        - generic: Nimbalyst Task Management
+                      - button "Open conversation options for Nimbalyst Task Management" [ref=e295] [cursor=pointer]:
+                        - img [ref=e297]
+                  - listitem:
+                    - link "Nimbalyst setup question":
+                      - /url: /c/69f644f1-8528-8323-bd3d-7abba9076449
+                      - generic:
+                        - generic: Nimbalyst setup question
+                      - button "Open conversation options for Nimbalyst setup question" [ref=e299] [cursor=pointer]:
+                        - img [ref=e301]
+                  - listitem:
+                    - link "Doff Meaning Diff":
+                      - /url: /c/69f146e8-193c-83ab-bb97-c91092b802e9
+                      - generic:
+                        - generic: Doff Meaning Diff
+                      - button "Open conversation options for Doff Meaning Diff" [ref=e303] [cursor=pointer]:
+                        - img [ref=e305]
+                  - listitem:
+                    - link "Haskell Infinite Sets Lazy Eval":
+                      - /url: /c/69ef582e-51bc-8322-8707-cb09b25131f3
+                      - generic:
+                        - generic: Haskell Infinite Sets Lazy Eval
+                      - button "Open conversation options for Haskell Infinite Sets Lazy Eval" [ref=e307] [cursor=pointer]:
+                        - img [ref=e309]
+                  - listitem:
+                    - link "Projectivity of Ideals":
+                      - /url: /c/69e4426b-477c-83a4-b237-dbd8f72135f9
+                      - generic:
+                        - generic: Projectivity of Ideals
+                      - button "Open conversation options for Projectivity of Ideals" [ref=e311] [cursor=pointer]:
+                        - img [ref=e313]
+                  - listitem:
+                    - link "Lattice Bilinear Forms":
+                      - /url: /c/69e414e0-2fb0-83a2-9d30-b69e2a1b2806
+                      - generic:
+                        - generic: Lattice Bilinear Forms
+                      - button "Open conversation options for Lattice Bilinear Forms" [ref=e315] [cursor=pointer]:
+                        - img [ref=e317]
+                  - listitem:
+                    - link "Maximal Algebraic Structure on GL_n":
+                      - /url: /c/69e3e6e6-76d0-83a2-bc66-31418e4d0409
+                      - generic:
+                        - generic "Maximal Algebraic Structure on GL_n"
+                      - button "Open conversation options for Maximal Algebraic Structure on GL_n" [ref=e319] [cursor=pointer]:
+                        - img [ref=e321]
+                  - listitem:
+                    - link "R-Mod Implication Chain":
+                      - /url: /c/69e3ad1c-ce60-83ab-adf6-10add68d0b5b
+                      - generic:
+                        - generic: R-Mod Implication Chain
+                      - button "Open conversation options for R-Mod Implication Chain" [ref=e323] [cursor=pointer]:
+                        - img [ref=e325]
+                  - listitem:
+                    - link "Torsion Module Spanning Set":
+                      - /url: /c/69e39f34-9a50-83a9-8f0c-5bf0116ddcbb
+                      - generic:
+                        - generic: Torsion Module Spanning Set
+                      - button "Open conversation options for Torsion Module Spanning Set" [ref=e327] [cursor=pointer]:
+                        - img [ref=e329]
+                  - listitem:
+                    - link "R/(r) Not Torsion":
+                      - /url: /c/69e20942-5478-83a7-9b53-5c678c52eddc
+                      - generic:
+                        - generic: R/(r) Not Torsion
+                      - button "Open conversation options for R/(r) Not Torsion" [ref=e331] [cursor=pointer]:
+                        - img [ref=e333]
+          - generic:
+            - generic:
+              - button "Zack Garza, open profile menu":
+                - generic:
+                  - generic:
+                    - img "Profile image"
+                - generic:
+                  - generic:
+                    - generic: Zack Garza
+                  - generic:
+                    - generic:
+                      - generic: Pro
+    - generic [ref=e138]:
+      - banner
+      - main [ref=e150]:
+        - generic [ref=e151]:
+          - generic [ref=e335]:
+            - generic [ref=e336]:
+              - heading "You said:" [level=4] [ref=e337]
+              - generic [ref=e339]:
+                - generic [ref=e344]:
+                  - text: "I am a weaker coding agent seeking frontier-model planning/audit guidance. This problem is well enough specified for concrete decision recommendations, but I want pushback if any decision remains under-specified. Task goal: Resolve six top-level decision cards for a daemon refactor feature so blocked contract-writing and E2E planning work can proceed. The output should be recommended choices for D1-D6, rationale, interactions between decisions, concrete behavioral contracts, and what evidence would change the recommendation. Repository/project context: - Project: Plannotator, moving from per-invocation local servers to one persistent local single-user daemon plus CLI plus thin Claude/OpenCode wrappers. - Planning hierarchy: feature -> spec + plans -> phases -> tasks. Decision cards are top-level under the feature and block planning/implementation where semantics are unresolved. - We want durable, implementation-agnostic decisions that can be encoded into contract tasks and later proven by real E2E tests against built artifacts. Current facts: - Feature scope is local-only, single active review slot, deterministic collision handling, built-artifact E2E certification, and thin agent integrations. - Phase 0 is blocked until D1-D6 are resolved and translated into explicit contracts. - The feature card and spec card are already written; the current open work is specifically deciding daemon semantics. Please provide: 1. A recommended choice for each of D1-D6. 2. The strongest argument against each chosen option. 3. The interactions between decisions, especially places where one choice constrains another. 4. A concrete contract for each decision in observable terms: state before, operation, state after, stdout/stderr or JSON envelope shape, exit behavior, persistence effect, and recovery guidance where relevant. 5. Specific E2E or integration checks that should prove each decision. 6. Any unresolved point that truly still needs a separate human decision rather than agent inference. 7. Evidence or future conditions that would justify revisiting a recommendation. Do not merely affirm the apparent default direction. Push back where the current framing is weak, but if it is strong enough, make hard recommendations. Prefer a coherent overall contract to locally optimal but inconsistent decisions. === FEATURE CARD === --- id: FEATURE-DAEMON-REFACTOR trackerStatus: type: feature parents: [] dependsOn: [] plans: - '[[PLAN-NIM-R]]' title: Local daemon refactor with E2E certification status: in-progress priority: critical owner: dzack description: Replace Plannotator's per-invocation server model with a persistent local single-user daemon, a stable CLI surface, and thin Claude Code/OpenCode wrappers, with completion certified by real built-artifact E2E tests. releaseVersion: daemon-refactor releaseNotes: 'Ships a local daemon-backed Plannotator workflow: one active review slot, daemon lifecycle commands, submit/wait/clear recovery, local-only operation, thin agent integrations, and proof-backed packaging.' --- ## Purpose This feature defines the daemon refactor. Plannotator moves from a per-invocation ephemeral-server tool to a local single-user daemon with a clean CLI as the primary interface. Claude Code and OpenCode integrations become thin wrappers around that CLI and keep only agent-specific policy. The feature card is the hierarchy root. Plans and specs are children of this feature, not peers and not duplicate source nodes. ## Child Cards - [[SPEC-DAEMON-E2E-CERTIFICATION]] defines the proof and acceptance contract. - [[PLAN-NIM-R]] executes the implementation and verification phases. ## User Outcome Agents interact with Plannotator through a stable local CLI instead of launching a fresh server for each invocation. A user can start the daemon once, submit plans or review documents repeatedly, recover from interrupted clients, clear stuck state, and verify that Claude Code and OpenCode wrappers pass decisions through the same daemon-backed contract. ## Scope - Local-only operation with no share URLs, paste service, public portal, or remote collaboration surface. - Single active document slot with deterministic collision handling. - Daemon lifecycle commands for start, stop, status, foreground mode, stale lock recovery, and fixed-port ownership. - Submit, wait, state, clear, approve, deny, cancel, review, annotate, draft, upload, and feedback paths served through the daemon. - CLI output and exit-code behavior stable enough for shell users, Claude hook JSON envelopes, and OpenCode JSON consumers. - Claude Code and OpenCode integrations reduced to thin CLI clients with agent-specific policy only. - Build and packaging aligned around one compiled daemon-plus-CLI artifact. - E2E proof coverage that drives real binaries, real daemon processes, real HTTP endpoints, real fixtures, and browser-visible behavior. ## Current Architecture Plannotator currently has per-invocation server entry points: - Plan review uses"
+                  - code [ref=e345]: packages/server/index.ts
+                  - text: through
+                  - code [ref=e346]: startPlannotatorServer()
+                  - text: . - Code review uses
+                  - code [ref=e347]: packages/server/review.ts
+                  - text: through
+                  - code [ref=e348]: startReviewServer()
+                  - text: . - Markdown annotation uses
+                  - code [ref=e349]: packages/server/annotate.ts
+                  - text: through
+                  - code [ref=e350]: startAnnotateServer()
+                  - text: . Each invocation binds a local port, opens a browser, blocks on a decision promise, and then exits through cleanup paths such as
+                  - code [ref=e351]: /api/shutdown
+                  - text: ", signals, or explicit stop handles. ## Target Architecture The target model is one long-running Bun daemon on a local port, serving a singleton review state machine and a browser-plus-CLI HTTP API. State model: -"
+                  - code [ref=e352]: idle
+                  - text: ": no active document; submissions are accepted. -"
+                  - code [ref=e353]: in_review
+                  - text: ": a document is submitted; the user is reviewing; agent CLI clients wait on a verdict. -"
+                  - code [ref=e354]: verdict_ready
+                  - text: ": the user acted, but the verdict has not been fully consumed under the accepted wait contract. Core daemon API: -"
+                  - code [ref=e355]: GET /
+                  - text: ": serve the UI matching the current mode. -"
+                  - code [ref=e356]: GET /api/state
+                  - text: or
+                  - code [ref=e357]: /api/status
+                  - text: ": return the current daemon state snapshot, according to the accepted API contract. -"
+                  - code [ref=e358]: GET /api/wait
+                  - text: ": wait for the verdict of the current active request. -"
+                  - code [ref=e359]: POST /api/submit
+                  - text: ": accept a new document only when idle; otherwise return structured collision guidance. -"
+                  - code [ref=e360]: POST /api/approve
+                  - text: ","
+                  - code [ref=e361]: /api/deny
+                  - text: ", and"
+                  - code [ref=e362]: /api/cancel
+                  - text: ": apply browser-driven state transitions. -"
+                  - code [ref=e363]: POST /api/clear
+                  - text: ": force reset to idle under the accepted clear contract. Persistent files: -"
+                  - code [ref=e364]: ~/.plannotator/daemon.json
+                  - text: "-"
+                  - code [ref=e365]: ~/.plannotator/state.json
+                  - text: "-"
+                  - code [ref=e366]: ~/.plannotator/history/...
+                  - text: "-"
+                  - code [ref=e367]: ~/.plannotator/drafts/...
+                  - text: "Port and locality model: - The daemon binds locally. - The CLI and integrations communicate with the local daemon. - Headless or remote use goes through user-managed port forwarding, not a Plannotator-hosted sharing service. ## Non-Goals - Queueing multiple active review documents. - Reintroducing share links, paste services, marketing portals, or public collaboration endpoints. - Treating mocks, fake backends, or package-level approximations as release certification. - Accepting passing unit tests as the terminal completion signal without fresh E2E runs from built artifacts. ## Retained Surfaces -"
+                  - code [ref=e368]: packages/server/integrations.ts
+                  - text: "-"
+                  - code [ref=e369]: apps/vscode-extension/
+                  - text: "-"
+                  - code [ref=e370]: packages/server/storage.ts
+                  - text: "-"
+                  - code [ref=e371]: packages/server/draft.ts
+                  - text: "## Primary Contracts The feature is not complete until the Phase 0 contracts are explicit and all dependent implementation/spec work conforms to them: - [[TASK-D1]] defines CLI and hook-shim exit codes. - [[TASK-D2]] defines verdict broadcast and wait-consumption semantics. - [[TASK-D3]] defines daemon crash and recovery behavior. - [[TASK-D4]] defines"
+                  - code [ref=e372]: PLANNOTATOR_HOME
+                  - text: "and state-directory behavior. - [[TASK-D5]] defines signal handling. - [[TASK-D6]] defines concurrent hook submission behavior. ## Implementation Slices The implementation work remains decomposed by [[PHASE-2]] and [[PHASE-2-TDD]]: - [[TASK-S-1]] removes remote collaboration surface area. - [[TASK-S-2]] creates the daemon state machine. - [[TASK-S-3]] creates the multiplexed daemon router. - [[TASK-S-4]] owns daemon lifecycle. - [[TASK-S-5]] adds submit, wait, state, and clear endpoints. - [[TASK-S-6]] defines the public CLI. - [[TASK-S-7]] adds local notifications. - [[TASK-S-8]] converts agent integrations into thin wrappers. - [[TASK-S-9]] updates build and packaging. - [[TASK-S-10]] performs final verification. ## Acceptance Summary This feature reaches"
+                  - code [ref=e373]: done
+                  - text: "only when [[PHASE-4]] passes: all semantic decisions are frozen, implementation slices satisfy their paired proof tasks, cross-slice E2E specs pass from clean state, and the final verification run proves the built artifact rather than TypeScript source alone. ## Risks - Detached daemon spawning may be cross-platform fragile. - Browser-side state may assume one fresh random port per session. - Wait and verdict delivery can lose or duplicate decisions if request identity is underspecified. - Removing share and marketing surfaces can expose hidden build assumptions. - Collision handling is a user-facing recovery surface and needs explicit proof. === SPEC CARD === --- id: SPEC-DAEMON-E2E-CERTIFICATION trackerStatus: type: spec parents: - '[[FEATURE-DAEMON-REFACTOR]]' dependsOn: [] title: Daemon refactor E2E certification spec status: in-progress priority: critical requirement: The daemon refactor must be accepted only after a built Plannotator artifact satisfies the daemon lifecycle, singleton state, submit/wait/clear, crash recovery, CLI, hook, plugin, storage, UI, packaging, and deleted-surface contracts. acceptanceCriteria: - The E2E harness builds the binary, creates isolated state, starts and stops the daemon, submits real fixtures, drives the UI/API, and cleans up daemon processes. - Verdict delivery, crash recovery, exit codes, state-directory routing, signal behavior, and concurrent submission behavior are specified before dependent E2E assertions are accepted. - Cross-surface tests cover lifecycle, state machine, submit/wait/clear, review, annotate, storage, UI actions, JSON output, Claude hook behavior, OpenCode plugin behavior, packaging, deleted surfaces, and composed full-scenario behavior. - Final verification runs from the built CLI/binary from empty state and leaves no daemon process or contaminated state behind. tags: - FEATURE-DAEMON-REFACTOR --- ## Requirement The daemon refactor is a correctness-critical feature. Acceptance requires executable evidence that the local daemon model works end to end for shell users, Claude Code hooks, and OpenCode plugin calls. The detailed test inventory lives in the phase and task cards under [[PLAN-NIM-R]]. This spec records the cross-cutting release contract that plan must satisfy. ## Contract Precedence Use this precedence order when a test or implementation detail conflicts: - [[FEATURE-DAEMON-REFACTOR]] defines the feature boundary and non-goals. - This spec defines the release contract and proof obligations. - Semantic decision cards define still-open behavior such as exit codes, verdict delivery, crash recovery, state directory routing, signal handling, and concurrent submissions. - E2E task cards define the executable proof inventory. ## Required Behavior - The daemon exposes one local singleton review slot and rejects concurrent submissions deterministically. - The CLI exposes daemon lifecycle, submit, review, annotate, wait, clear, and open commands with stable human and JSON output. - Browser actions transition daemon state through approve, deny, cancel, feedback, upload, and draft flows without per-invocation server shutdown. - Waiting clients receive verdicts according to the accepted [[TASK-D2]] contract. - Crashes, signals, stale lockfiles, port conflicts, and mismatched state directories follow the accepted [[TASK-D3]], [[TASK-D4]], and [[TASK-D5]] contracts. - Claude Code and OpenCode wrappers call the CLI and preserve their protocol-specific envelopes. - Removed remote/share surfaces stay absent from code, docs, package scripts, and UI. ## Required Semantic Contracts The E2E suite must pin down these contracts before release: - CLI exit codes and Claude hook JSON-envelope behavior for approve, deny, cancel, timeout, illegal state, daemon unavailable, daemon crash, malformed daemon response, port collision, schema mismatch, forced clear, storage failure, and malformed hook stdin. - Verdict delivery by request identity: eligible waiters for the same request receive the same verdict, unrelated later waits do not receive stale verdicts, and verdicts are never lost, duplicated to unrelated commands, or delivered to the wrong waiter. - Daemon crash behavior while submitters or waiters are blocked, after verdict persistence, before verdict persistence, and during reconnect or autostart. -"
+                  - code [ref=e374]: PLANNOTATOR_HOME
+                  - text: routing when daemon and client invocations use different state directories. - Public
+                  - code [ref=e375]: "--no-browser"
+                  - text: "behavior if the flag remains part of the CLI contract. - Recovery command behavior: human stderr and JSON output include an executable recovery command, and running it actually restores the daemon to a usable state. - Signal behavior for waiting CLIs, active submitters, hook stdin interruption, broken pipes, and daemon termination during active or verdict-ready states. - Fixed-port ownership when a non-Plannotator process occupies the port, stale daemon metadata exists, a second daemon starts, or a client reaches a daemon from the wrong state directory. ## Proof Surface The certification suite must use real artifacts and observable outcomes: - Build the CLI/binary before daemon E2E tests. - Spawn real daemon processes and assert their PID, port, lockfile, and cleanup behavior. - Drive real HTTP endpoints on"
+                  - code [ref=e376]: localhost
+                  - text: ". - Use real markdown, plan, git, and browser fixtures. - Assert stdout, stderr, exit codes, JSON shapes, state files, git history, draft files, DOM behavior, and process cleanup. - Run daemon tests serially where fixed port or singleton state makes parallelism unsafe. ## Certification Groups The executable certification inventory must cover: - Binary surface and packaging gates. - Daemon lifecycle, state machine, submit, wait, clear, crash recovery, and storage behavior. - Review, annotate, UI actions, image upload, cancel, reset, and draft behavior. - JSON output schema lock for programmatic consumers. - Claude Code hook shim and OpenCode plugin contract behavior. - Deleted-surface and documentation consistency checks. - Full scenario coverage that composes the earlier specs. ## Verification Coverage [[PLAN-NIM-R]] currently owns execution. [[PHASE-3]] and its"
+                  - code [ref=e377]: TASK-E*
+                  - text: "children own the cross-surface E2E proof inventory. [[PHASE-4]] owns final built-artifact verification. ## Release Gate The release gate is [[PHASE-4]]. It must run after the semantic, infrastructure, implementation, and E2E phases are accepted. Passing means the built artifact satisfies the daemon contract from empty state twice, without hidden mocks, stale daemon processes, or remote-surface regressions. ## Open Decision Dependencies This spec remains"
+                  - code [ref=e378]: in-progress
+                  - text: "while any Phase 0 semantic card is unresolved. E2E specs may be drafted before those decisions close, but they must reference the accepted decision cards before they can become release-blocking proof. === DECISION CARDS === --- id: DECISION-D1 trackerStatus: type: decision parents: - '[[FEATURE-DAEMON-REFACTOR]]' dependsOn: [] title: Exit-code and hook-envelope contract status: unstarted chosen: '' options: - name: Conventional CLI codes with protocol-specific hook envelopes pros: - Preserves shell semantics while keeping Claude hook output protocol-valid. - Matches the existing draft direction for approve, deny, cancel, illegal state, and daemon-down cases. cons: - Requires a complete row-by-row table for daemon failures, malformed responses, storage failures, clear behavior, and signals. - name: Uniform nonzero CLI failures with hook-level translation pros: - Keeps CLI behavior simple and conventional for shell users. - Isolates Claude hook quirks in the shim layer. cons: - Requires careful proof that hook shims never leak CLI exit semantics into protocol envelopes. - name: Fully protocol-neutral exit model pros: - Gives every caller the same numeric code model. cons: - Risks violating hook expectations where JSON envelopes, not process exit codes, carry decisions. tags: - FEATURE-DAEMON-REFACTOR --- ## Decision Question What exact exit-code and JSON-envelope contract must the CLI and agent shims expose for approve, deny, cancel, timeout, illegal state, daemon unavailable, daemon crash while waiting, malformed daemon response, occupied port, schema mismatch, forced clear, storage failure, malformed hook stdin, and interrupted waits? ## Constraints - Hook shims must remain protocol-valid even when the daemon reports errors. - Shell users need stable nonzero behavior for operational failures. - E2E tests must be able to assert both process exit status and output shape. ## Decision Output Required - A complete table for CLI exit codes. - A complete table for Claude hook JSON-envelope behavior. - Any OpenCode-specific translation rules. - Recovery-command output requirements for actionable failures. --- id: DECISION-D2 trackerStatus: type: decision parents: - '[[FEATURE-DAEMON-REFACTOR]]' dependsOn: [] title: Verdict delivery and wait-consumption semantics status: unstarted chosen: '' options: - name: FIFO consumption pros: - Simple single-consumer model. - Avoids repeated stale verdict delivery by construction. cons: - Original submitter plus explicit waiters can race or starve. - Weak fit for multiple clients waiting on the same active request. - name: Broadcast to eligible waiters pros: - Original submitter and explicit waiters can all receive the same verdict. - Supports request-identity-based delivery without queueing. cons: - Requires explicit rules for late waiters and state cleanup after all eligible waiters resolve. - name: Persistent until explicit clear pros: - Makes late recovery straightforward. - Avoids losing verdicts after daemon restart. cons: - High stale-verdict risk unless request identity and clear semantics are strict. tags: - FEATURE-DAEMON-REFACTOR --- ## Decision Question Are verdicts addressed to request IDs and broadcast to all eligible waiters, consumed by one waiter, or persisted until explicit clear? ## Constraints - Later unrelated waits must never receive stale verdicts. - Multiple eligible clients may wait on the same active request. - State must return to idle under a deterministic rule after verdict delivery. ## Decision Output Required - Eligibility rules for waiters. - Late-waiter behavior after verdict resolution. - State cleanup rule after eligible waiters receive the verdict. - Stale-verdict isolation rule for later unrelated waits. --- id: DECISION-D3 trackerStatus: type: decision parents: - '[[FEATURE-DAEMON-REFACTOR]]' dependsOn: [] title: Daemon crash and recovery durability model status: unstarted chosen: '' options: - name: Durable active and verdict state pros: - Restart can recover active reviews and resolved verdicts. - Strongest recovery story for interrupted clients. cons: - Requires strict persisted-state schema and corruption behavior. - name: Ephemeral active state with explicit client failure pros: - Simpler daemon restart behavior. - Avoids reconstructing partially active browser/client state. cons: - Clients must receive clear failure and recovery guidance after daemon death. - name: Partial durability by state pros: - Can persist submitted plans, history, and verdicts without overpromising all active browser state. cons: - Requires exact per-state persistence rules and more nuanced E2E coverage. tags: - FEATURE-DAEMON-REFACTOR --- ## Decision Question Which daemon states survive daemon death, and what must blocked submitters or waiters do after reconnect, autostart, or daemon-down failure? ## Constraints - Crash recovery must distinguish daemon death from client death. - Verdicts must not be lost after they are durably accepted. - E2E tests must cover crash before and after verdict persistence. ## Decision Output Required - Durability rule for idle, active review, and verdict-ready states. - CLI behavior for reconnect, autostart, and daemon-down cases. - Recovery guidance for stale clients and persisted state. --- id: DECISION-D4 trackerStatus: type: decision parents: - '[[FEATURE-DAEMON-REFACTOR]]' dependsOn: [] title: PLANNOTATOR_HOME and daemon state-directory routing status: unstarted chosen: '' options: - name: Daemon-start-time home is authoritative pros: - One daemon owns one state directory for its lifetime. - Easy to reject mismatched clients deterministically. cons: - Clients must surface clear errors when their environment points elsewhere. - name: Per-invocation home routes to matching daemon pros: - Test isolation and multi-home workflows can be explicit. cons: - Requires port or registry logic for multiple homes. - name: Global daemon with per-request state roots pros: - Avoids multiple daemon processes. cons: - Blurs isolation and makes cleanup/state contamination harder to prove. tags: - FEATURE-DAEMON-REFACTOR --- ## Decision Question Does"
+                  - code [ref=e379]: PLANNOTATOR_HOME
+                  - text: "define daemon-start-time state, per-invocation routing, or another state ownership model? ## Constraints - E2E tests need isolated and cleanup-verifiable state roots. - Fixed-port behavior must be deterministic. - Mismatched daemon/client state directories must not silently corrupt or cross-read state. ## Decision Output Required - Cross-home client behavior. - Fixed-port and daemon metadata behavior. - Test serialization or port-override requirement. - Cleanup paths that the harness must inspect. --- id: DECISION-D5 trackerStatus: type: decision parents: - '[[FEATURE-DAEMON-REFACTOR]]' dependsOn: [] title: Signal handling for clients and daemon status: unstarted chosen: '' options: - name: Client SIGINT cancels only the client wait pros: - Keeps daemon alive and avoids implicit review cancellation. - Matches conventional terminal interruption behavior. cons: - Requires clear state rule for the still-active review. - name: Client SIGINT cancels the active request pros: - User interruption has visible product effect. cons: - Risky for hook clients and multiple waiters unless ownership is explicit. - name: Signals map to daemon shutdown semantics pros: - Simple operational model for process termination. cons: - Can conflate graceful shutdown, crash recovery, and user cancellation. tags: - FEATURE-DAEMON-REFACTOR --- ## Decision Question How do SIGINT, SIGTERM, broken stdin, and broken pipes affect waiting clients, active reviews, hook shims, and daemon lifecycle? ## Constraints - Graceful shutdown and crash recovery must remain distinguishable. - Hook shims must emit protocol-valid output or documented failure behavior. - Waiting CLI interruption must have stable exit behavior. ## Decision Output Required - Client SIGINT behavior and exit code. - Daemon state after interrupted submitters or waiters. - Hook stdin and broken-pipe behavior. - Daemon SIGTERM behavior during active and verdict-ready states. --- id: DECISION-D6 trackerStatus: type: decision parents: - '[[FEATURE-DAEMON-REFACTOR]]' dependsOn: [] title: Concurrent submission behavior status: unstarted chosen: '' options: - name: Single active review with deterministic collision rejection pros: - Matches the feature's singleton review-slot direction. - Keeps verdict routing and active state simple. cons: - Concurrent callers need actionable recovery guidance. - name: Queue submissions pros: - Allows multiple callers to submit without immediate rejection. cons: - Expands feature scope into ordering, persistence, cancellation, and multi-verdict routing. - name: Replace active request pros: - Keeps only one active slot while accepting later submissions. cons: - High risk of data loss and misdelivered verdicts. tags: - FEATURE-DAEMON-REFACTOR --- ## Decision Question What happens when multiple hooks or CLI clients attempt concurrent submissions while a review is already active? ## Constraints - The feature target is a single active review slot. - The first active request must not be overwritten accidentally. - The caller rejected by collision behavior needs protocol-valid output and an executable recovery path. ## Decision Output Required - Collision status code and CLI/hook output behavior. - Persistence rule for rejected submissions. - Verdict routing rule for the first active request. - Required recovery guidance for later callers."
+                - generic [ref=e380]:
+                  - group "Your message actions":
+                    - button "Copy message":
+                      - generic:
+                        - img
+            - generic [ref=e382]:
+              - heading "ChatGPT said:" [level=4] [ref=e383]
+              - generic [ref=e390]: Thinking
+          - generic [ref=e163]:
+            - generic:
+              - generic:
+                - button:
+                  - img
+            - generic [ref=e168]:
+              - generic [ref=e172]:
+                - button "Add files and more" [ref=e175] [cursor=pointer]:
+                  - img
+                - textbox "Chat with ChatGPT" [active] [ref=e178]:
+                  - paragraph [ref=e391]: Ask anything
+                - generic [ref=e180]:
+                  - button "Heavy" [ref=e185] [cursor=pointer]:
+                    - generic [ref=e186]: Heavy
+                    - img
+                  - generic [ref=e187]:
+                    - button "Start dictation" [ref=e188] [cursor=pointer]:
+                      - img
+                    - button "Stop answering" [ref=e392] [cursor=pointer]:
+                      - img [ref=e393]
+              - button [ref=e193]
+              - button [ref=e194]
+            - generic [ref=e400]: ChatGPT can make mistakes. Check important info. See Cookie Preferences.
+  - alert [ref=e95]
+  - status [ref=e96]

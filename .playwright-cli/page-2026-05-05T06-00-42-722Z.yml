@@ -1,0 +1,26 @@
+- generic [ref=e1]:
+  - link "Skip to content" [ref=e3] [cursor=pointer]:
+    - /url: "#main"
+  - generic [ref=e9]:
+    - banner:
+      - generic [ref=e13]:
+        - button "Start a group chat" [ref=e14] [cursor=pointer]:
+          - img [ref=e15]
+        - button "Turn on temporary chat" [ref=e18] [cursor=pointer]:
+          - img [ref=e19]
+    - main [ref=e21]:
+      - generic [ref=e22]:
+        - heading "Where should we begin?" [level=1] [ref=e30]:
+          - generic [ref=e31]: Where should we begin?
+        - generic [ref=e37]:
+          - generic [ref=e41]:
+            - button "Add files and more" [ref=e44] [cursor=pointer]:
+              - img
+            - textbox "Chat with ChatGPT" [active] [ref=e47]:
+              - /placeholder: Ask anything
+            - button "Send prompt" [disabled] [ref=e51]:
+              - img [ref=e52]
+          - button [ref=e54]
+          - button [ref=e55]
+  - alert [ref=e56]
+  - status [ref=e57]

@@ -1,0 +1,204 @@
+{
+  "main": {
+    "id": "683a79ec54863f2b",
+    "type": "split",
+    "children": [
+      {
+        "id": "3ac8e3b9f15153fc",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "55c3005c944c7771",
+            "type": "leaf",
+            "state": {
+              "type": "bases",
+              "state": {
+                "file": "Boards/Boards.base",
+                "viewName": "Tree"
+              },
+              "icon": "lucide-network",
+              "title": "Boards"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "4aef6558c369550b",
+    "type": "split",
+    "children": [
+      {
+        "id": "420364c52b1eaa61",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "badcc0aa8c786afe",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "aa0f150961f32057",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "f31d3b1f1117aa65",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 200
+  },
+  "right": {
+    "id": "187436f11f6fce21",
+    "type": "split",
+    "children": [
+      {
+        "id": "b51b6681e6c92099",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "b9f777e377f7eafb",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "Boards/Boards.base",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks for Boards"
+            }
+          },
+          {
+            "id": "2d41cf52ba6dbafa",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "Boards/Boards.base",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links from Boards"
+            }
+          },
+          {
+            "id": "a72f419401dc6ecd",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "d71c8c9aee29fb89",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          },
+          {
+            "id": "15c2798b0b78176b",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "Boards/Boards.base",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline of Boards"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false,
+      "obsidian42-brat:BRAT": false
+    }
+  },
+  "active": "55c3005c944c7771",
+  "lastOpenFiles": [
+    "Boards/Tasks/Build first feature.md",
+    "Boards/Boards.base",
+    "Boards/Tasks/testautomation.md",
+    "Boards/Tasks/README.md",
+    "Boards/Tasks/Fix onboarding bug.md",
+    "Boards/Tasks/Untitled 1.md",
+    "Boards/Tasks/Plan project.md",
+    "Boards/Tasks/testfeature.md",
+    "Boards/Tasks/testbug.md",
+    "Boards/Tasks/Research and discovery.md",
+    "Boards/Tasks/Untitled.md",
+    "Boards/Tasks/Write documentation.md",
+    "Boards/Tasks",
+    "Boards",
+    "plans"
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "pluginList": [
+    "sabidurian/branches-tree-view",
+    "Fevol/obsidian-criticmarkup",
+    "mderazon/obsidian-base-board"
+  ],
+  "pluginSubListFrozenVersion": [
+    {
+      "repo": "sabidurian/branches-tree-view",
+      "version": "latest"
+    },
+    {
+      "repo": "Fevol/obsidian-criticmarkup",
+      "version": "latest"
+    },
+    {
+      "repo": "mderazon/obsidian-base-board",
+      "version": "latest"
+    }
+  ],
+  "themesList": [],
+  "updateAtStartup": true,
+  "updateThemesAtStartup": true,
+  "enableAfterInstall": true,
+  "loggingEnabled": false,
+  "loggingPath": "BRAT-log",
+  "loggingVerboseEnabled": false,
+  "debuggingMode": false,
+  "notificationsEnabled": true,
+  "globalTokenName": "",
+  "personalAccessToken": "",
+  "selectLatestPluginVersionByDefault": false,
+  "allowIncompatiblePlugins": false
+}

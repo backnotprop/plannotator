@@ -1,0 +1,98 @@
+- generic [ref=e1]:
+  - link "Skip to content" [ref=e3] [cursor=pointer]:
+    - /url: "#main"
+  - generic [ref=e7]:
+    - generic [ref=e9]:
+      - navigation "Sidebar" [ref=e10]:
+        - button "Open sidebar" [ref=e14]:
+          - img [ref=e15]
+        - generic [ref=e17]:
+          - link "New chat" [ref=e19] [cursor=pointer]:
+            - /url: /
+            - img [ref=e21]
+            - generic [ref=e23]: New chat
+          - button "Search chats" [ref=e25] [cursor=pointer]:
+            - img [ref=e27]
+            - generic [ref=e29]: Search chats
+          - button "Recents" [ref=e31] [cursor=pointer]:
+            - img [ref=e33]
+            - generic [ref=e35]: Recents
+        - button "Open profile menu" [ref=e38] [cursor=pointer]
+      - generic:
+        - heading "Chat history" [level=2]
+        - generic:
+          - navigation "Chat history":
+            - generic:
+              - generic:
+                - generic:
+                  - link "Home":
+                    - /url: /
+                    - generic: ChatGPT
+                  - generic:
+                    - button "Close sidebar":
+                      - img
+            - generic:
+              - list:
+                - listitem:
+                  - link "New chat":
+                    - /url: /
+                    - generic:
+                      - img
+                    - generic:
+                      - generic: New chat
+                - listitem:
+                  - button "Search chats":
+                    - generic:
+                      - img
+                    - generic:
+                      - generic: Search chats
+            - link "Codex":
+              - /url: /codex/cloud
+              - generic:
+                - generic:
+                  - img
+                - generic:
+                  - generic: Codex
+              - generic:
+                - img
+            - generic:
+              - generic:
+                - generic:
+                  - img
+                - generic:
+                  - generic: More
+          - generic:
+            - generic:
+              - button "Zack Garza, open profile menu":
+                - generic:
+                  - generic:
+                    - generic: Zack Garza
+                  - generic:
+                    - generic:
+                      - generic: Pro
+    - generic [ref=e42]:
+      - banner:
+        - generic [ref=e46]:
+          - button "Start a group chat" [ref=e47] [cursor=pointer]:
+            - img [ref=e48]
+          - button "Turn on temporary chat" [ref=e51] [cursor=pointer]:
+            - img [ref=e52]
+      - main [ref=e54]:
+        - generic [ref=e55]:
+          - heading "How can I help, Zack ?" [level=1] [ref=e63]:
+            - generic [ref=e64]:
+              - text: How can I help,
+              - button "Zack" [ref=e66] [cursor=pointer]
+              - text: "?"
+          - generic [ref=e72]:
+            - generic [ref=e76]:
+              - button "Add files and more" [ref=e79] [cursor=pointer]:
+                - img
+              - textbox "Chat with ChatGPT" [active] [ref=e82]:
+                - /placeholder: Ask anything
+              - button "Send prompt" [disabled] [ref=e86]:
+                - img [ref=e87]
+            - button [ref=e89]
+            - button [ref=e90]
+  - alert [ref=e95]
+  - status [ref=e96]

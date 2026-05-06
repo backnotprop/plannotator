@@ -1,0 +1,152 @@
+.brat-modal .modal-button-container {
+  margin-top: 5px;
+}
+
+.brat-modal .disabled-setting {
+  opacity: 0.5;
+}
+
+.brat-modal .disabled-setting:hover {
+  cursor: not-allowed;
+}
+
+/* Input validation styles */
+.brat-settings .valid-input,
+.brat-modal .valid-repository {
+  border-color: var(--color-green);
+}
+.brat-settings .invalid-input,
+.brat-modal .invalid-repository {
+  border-color: var(--color-red);
+}
+.brat-settings .validation-error,
+.brat-modal .validation-error {
+  border-color: var(--color-orange);
+}
+
+/* Version selector */
+.brat-version-selector {
+  width: 100%;
+  max-width: 400px;
+  justify-content: left;
+}
+
+.brat-token-input {
+  min-width: 33%;
+}
+
+/* Token info container styles */
+.brat-token-info {
+  margin-top: 8px;
+  font-size: 0.8em;
+  padding: 8px;
+  border-radius: 4px;
+  background-color: var(--background-secondary);
+}
+
+/* Token status indicators */
+.brat-token-info.valid,
+.brat-token-status.valid {
+  color: var(--color-green);
+}
+
+.brat-token-info.invalid,
+.brat-token-status.invalid {
+  color: var(--color-red);
+}
+
+.brat-token-info.valid {
+  border-left: 3px solid var(--color-green);
+}
+
+.brat-token-info.invalid {
+  border-left: 3px solid var(--color-red);
+}
+
+/* Token details and status */
+.brat-token-status {
+  margin-bottom: 4px;
+}
+
+.brat-token-details {
+  margin-top: 4px;
+  color: var(--text-muted);
+}
+
+/* Token warnings */
+.brat-token-warning {
+  color: var(--color-orange);
+  margin-top: 4px;
+}
+
+/* Token additional info */
+.brat-token-scopes,
+.brat-token-rate {
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* Flex break utility */
+.brat-modal .break {
+  flex-basis: 100%;
+  height: 0;
+}
+
+/* Validation status */
+.brat-modal .validation-status-error {
+  color: var(--text-error);
+}
+
+.brat-modal .validation-status {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+  font-size: 0.8em;
+  text-align: left;
+}
+
+.confirm-modal .ok-button {
+  margin-right: 10px;
+  margin-top: 20px;
+}
+
+/* Hide filtered plugin items */
+.brat-plugin-item[hidden] {
+  display: none !important;
+}
+
+/* Hide filtered theme items */
+.brat-theme-item[hidden] {
+  display: none !important;
+}
+
+/* Filter and button layout */
+.brat-filter-and-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0.75em 0;
+}
+
+.brat-filter-input {
+  max-width: 300px;
+  padding: 4px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+}
+
+.brat-filter-input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+.brat-filter-and-button .setting-item {
+  border: none;
+  padding: 0;
+}
+
+.brat-filter-and-button .setting-item-control {
+  justify-content: flex-end;
+}

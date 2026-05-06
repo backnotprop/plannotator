@@ -1,0 +1,1174 @@
+/* ══════════════════════════════════════════════
+   Style Settings Integration
+   Install the "Style Settings" community plugin
+   to customize these values from the Settings panel.
+   ══════════════════════════════════════════════ */
+
+/* @settings
+
+name: Branches
+id: branches-tree-view
+settings:
+    -
+        id: branches-cards-heading
+        title: Node Cards
+        type: heading
+        level: 2
+        collapsed: true
+    -
+        id: branches-node-bg
+        title: Card background
+        type: variable-themed-color
+        format: hex
+        opacity: false
+        default-light: '#ffffff'
+        default-dark: '#1e1e1e'
+    -
+        id: branches-node-border-radius
+        title: Card border radius (px)
+        type: variable-number-slider
+        default: 8
+        min: 0
+        max: 16
+        step: 1
+        format: px
+    -
+        id: branches-node-shadow-opacity
+        title: Card shadow opacity
+        description: Shadow intensity of node cards at rest
+        type: variable-number-slider
+        default: 0.08
+        min: 0
+        max: 0.3
+        step: 0.01
+    -
+        id: branches-node-hover-shadow-opacity
+        title: Card hover shadow opacity
+        type: variable-number-slider
+        default: 0.12
+        min: 0
+        max: 0.4
+        step: 0.01
+    -
+        id: branches-node-padding-x
+        title: Card horizontal padding (px)
+        type: variable-number-slider
+        default: 12
+        min: 4
+        max: 24
+        step: 2
+        format: px
+    -
+        id: branches-node-title-size
+        title: Title font size (px)
+        type: variable-number-slider
+        default: 13
+        min: 10
+        max: 18
+        step: 1
+        format: px
+    -
+        id: branches-node-subtitle-size
+        title: Subtitle font size (px)
+        type: variable-number-slider
+        default: 11
+        min: 9
+        max: 15
+        step: 1
+        format: px
+    -
+        id: branches-node-color-stripe-width
+        title: Color stripe width (px)
+        description: Width of the colored indicator stripe on the left of cards
+        type: variable-number-slider
+        default: 4
+        min: 0
+        max: 8
+        step: 1
+        format: px
+    -
+        id: branches-avatar-heading
+        title: Avatars
+        type: heading
+        level: 2
+        collapsed: true
+    -
+        id: branches-avatar-size
+        title: Avatar size (px)
+        type: variable-number-slider
+        default: 36
+        min: 20
+        max: 56
+        step: 2
+        format: px
+    -
+        id: branches-avatar-border-width
+        title: Avatar border width (px)
+        type: variable-number-slider
+        default: 2
+        min: 0
+        max: 4
+        step: 1
+        format: px
+    -
+        id: branches-edges-heading
+        title: Edges
+        type: heading
+        level: 2
+        collapsed: true
+    -
+        id: branches-edge-width
+        title: Edge stroke width (px)
+        description: Width of single-parent edges
+        type: variable-number-slider
+        default: 1.5
+        min: 0.5
+        max: 4
+        step: 0.5
+        format: px
+    -
+        id: branches-edge-multi-width
+        title: Multi-parent edge width (px)
+        type: variable-number-slider
+        default: 2.5
+        min: 1
+        max: 5
+        step: 0.5
+        format: px
+    -
+        id: branches-edge-multi-opacity
+        title: Multi-parent edge opacity
+        type: variable-number-slider
+        default: 0.9
+        min: 0.3
+        max: 1
+        step: 0.05
+    -
+        id: branches-edge-partner-width
+        title: Partnership edge width (px)
+        type: variable-number-slider
+        default: 1.5
+        min: 0.5
+        max: 4
+        step: 0.5
+        format: px
+    -
+        id: branches-edge-partner-dash
+        title: Partnership dash pattern
+        description: "SVG stroke-dasharray (e.g. 6 4)"
+        type: variable-text
+        default: 6 4
+    -
+        id: branches-canvas-heading
+        title: Canvas
+        type: heading
+        level: 2
+        collapsed: true
+    -
+        id: branches-canvas-bg-mix
+        title: Canvas background mix (%)
+        description: How much secondary color to blend into the canvas background (0 = primary only)
+        type: variable-number-slider
+        default: 35
+        min: 0
+        max: 100
+        step: 5
+    -
+        id: branches-canvas-dot-size
+        title: Dot grid size (px)
+        description: Spacing of the background dot grid
+        type: variable-number-slider
+        default: 20
+        min: 10
+        max: 40
+        step: 2
+        format: px
+    -
+        id: branches-controls-heading
+        title: Zoom Controls
+        type: heading
+        level: 2
+        collapsed: true
+    -
+        id: branches-controls-radius
+        title: Control panel border radius (px)
+        type: variable-number-slider
+        default: 8
+        min: 0
+        max: 16
+        step: 1
+        format: px
+    -
+        id: branches-controls-btn-size
+        title: Control button size (px)
+        type: variable-number-slider
+        default: 28
+        min: 20
+        max: 40
+        step: 2
+        format: px
+    -
+        id: branches-controls-shadow-opacity
+        title: Control panel shadow opacity
+        type: variable-number-slider
+        default: 0.1
+        min: 0
+        max: 0.3
+        step: 0.02
+    -
+        id: branches-badge-heading
+        title: Badges
+        type: heading
+        level: 2
+        collapsed: true
+    -
+        id: branches-badge-font-size
+        title: Badge font size (px)
+        description: Font size of the child-count badge on cards
+        type: variable-number-slider
+        default: 11
+        min: 9
+        max: 14
+        step: 1
+        format: px
+    -
+        id: branches-badge-overlay-size
+        title: Overlay badge size (px)
+        description: Size of the badge overlaying the avatar
+        type: variable-number-slider
+        default: 16
+        min: 12
+        max: 24
+        step: 1
+        format: px
+    -
+        id: branches-indented-heading
+        title: Indented (List) View
+        type: heading
+        level: 2
+        collapsed: true
+    -
+        id: branches-indented-row-height
+        title: Row min-height (px)
+        type: variable-number-slider
+        default: 32
+        min: 24
+        max: 48
+        step: 2
+        format: px
+    -
+        id: branches-indented-avatar-size
+        title: List avatar size (px)
+        type: variable-number-slider
+        default: 22
+        min: 16
+        max: 36
+        step: 2
+        format: px
+    -
+        id: branches-indented-title-size
+        title: List title font size (px)
+        type: variable-number-slider
+        default: 13
+        min: 10
+        max: 18
+        step: 1
+        format: px
+    -
+        id: branches-indented-subtitle-size
+        title: List subtitle font size (px)
+        type: variable-number-slider
+        default: 11
+        min: 9
+        max: 15
+        step: 1
+        format: px
+    -
+        id: branches-indented-dot-size
+        title: Color dot size (px)
+        type: variable-number-slider
+        default: 8
+        min: 4
+        max: 14
+        step: 1
+        format: px
+    -
+        id: branches-indented-badge-size
+        title: List badge font size (px)
+        type: variable-number-slider
+        default: 10
+        min: 8
+        max: 14
+        step: 1
+        format: px
+    -
+        id: branches-tooltip-heading
+        title: Tooltips
+        type: heading
+        level: 2
+        collapsed: true
+    -
+        id: branches-tooltip-font-size
+        title: Tooltip font size (px)
+        type: variable-number-slider
+        default: 11
+        min: 9
+        max: 14
+        step: 1
+        format: px
+    -
+        id: branches-tooltip-bg
+        title: Tooltip background
+        type: variable-themed-color
+        format: hex
+        opacity: false
+        default-light: '#ffffff'
+        default-dark: '#1e1e1e'
+    -
+        id: branches-tooltip-border-radius
+        title: Tooltip border radius (px)
+        type: variable-number-slider
+        default: 8
+        min: 0
+        max: 12
+        step: 1
+        format: px
+    -
+        id: branches-tooltip-shadow-opacity
+        title: Tooltip shadow opacity
+        type: variable-number-slider
+        default: 0.14
+        min: 0
+        max: 0.3
+        step: 0.02
+    -
+        id: branches-tooltip-max-width
+        title: Tooltip max width (px)
+        type: variable-number-slider
+        default: 280
+        min: 180
+        max: 400
+        step: 10
+        format: px
+
+*/
+
+/* ═══════════════════════════════════════════════════════════════
+   Branches — Tree View for Obsidian Bases
+   Phase 3: Spatial canvas, node cards, edges, pan/zoom controls
+   ═══════════════════════════════════════════════════════════════ */
+
+.branches-container {
+  width: 100%;
+  height: 100%;
+  min-height: 300px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: var(--font-interface);
+}
+
+/* In embeds, the parent has no fixed height so 100% collapses.
+   Provide a sensible default so the view is always visible. */
+.internal-embed .branches-container,
+.markdown-embed .branches-container {
+  height: auto;
+  min-height: 420px;
+  max-height: 70vh;
+}
+
+/* ── Header bar ── */
+.branches-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+  z-index: 10;
+  background: var(--background-primary);
+}
+
+.branches-header-icon {
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+}
+
+.branches-header-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.branches-header-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-normal);
+}
+
+/* Header toggle group — pushes all toggles to the right */
+.branches-header-toggles {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* Individual toggle wrapper */
+.branches-spacing-toggle {
+  flex-shrink: 0;
+}
+
+.branches-spacing-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 120ms ease-in, color 120ms ease-in;
+}
+
+.branches-spacing-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.branches-spacing-btn--active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.branches-spacing-btn--active:hover {
+  background: var(--interactive-accent-hover);
+  color: var(--text-on-accent);
+}
+
+.branches-spacing-icon {
+  display: flex;
+  align-items: center;
+}
+
+.branches-spacing-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.branches-spacing-label {
+  font-weight: 500;
+}
+
+.branches-header-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ── Empty state ── */
+.branches-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 40px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.branches-empty h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-normal);
+  margin-bottom: 8px;
+}
+
+.branches-empty p {
+  font-size: 13px;
+  max-width: 360px;
+  line-height: 1.5;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Spatial Canvas
+   ═══════════════════════════════════════════════════════════════ */
+
+.branches-spatial {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+  background: color-mix(
+    in srgb,
+    var(--background-secondary) var(--branches-canvas-bg-mix, 35%),
+    var(--background-primary)
+  );
+}
+
+.branches-spatial--dotgrid {
+  background-image: radial-gradient(circle, var(--background-modifier-border) 1px, transparent 1px);
+  background-size: var(--branches-canvas-dot-size, 20px) var(--branches-canvas-dot-size, 20px);
+}
+
+.branches-canvas-wrapper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.branches-nodes {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+/* ── Node cards ── */
+.branches-node {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--branches-node-padding-x, 12px);
+  background: var(--branches-node-bg, var(--background-primary));
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--branches-node-border-radius, 8px);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, var(--branches-node-shadow-opacity, 0.08));
+  cursor: pointer;
+  user-select: none;
+  transition:
+    box-shadow 150ms ease,
+    border-color 150ms ease,
+    filter 150ms ease,
+    opacity 250ms ease,
+    transform 300ms cubic-bezier(0.4, 0, 0.2, 1);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.branches-node:hover {
+  box-shadow: 0 6px 16px rgba(0, 0, 0, var(--branches-node-hover-shadow-opacity, 0.12));
+  border-color: var(--background-modifier-border-hover);
+  filter: brightness(1.02);
+  overflow: visible;
+  z-index: 5;
+}
+
+/* Node enter/exit animations */
+.branches-node--entering {
+  opacity: 0;
+  transform: scale(0.85);
+}
+
+.branches-node--exiting {
+  opacity: 0;
+  transform: scale(0.85);
+  transition:
+    opacity 250ms ease,
+    transform 250ms ease;
+  pointer-events: none;
+}
+
+.branches-node--selected {
+  border-color: var(--interactive-accent);
+  box-shadow:
+    0 0 0 2px var(--interactive-accent),
+    0 0 12px rgba(var(--interactive-accent-rgb, 99, 102, 241), 0.2),
+    0 4px 12px rgba(0, 0, 0, var(--branches-node-hover-shadow-opacity, 0.12));
+}
+
+/* ── Drag-to-link handles ── */
+.branches-drag-handle {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 10px;
+  cursor: crosshair;
+  z-index: 5;
+  opacity: 0;
+  transition: opacity 150ms ease-in;
+}
+
+/* Top / bottom handles (parent/child) */
+.branches-drag-handle--top {
+  top: -2px;
+  border-radius: var(--branches-node-border-radius, 8px) var(--branches-node-border-radius, 8px) 0 0;
+}
+
+.branches-drag-handle--bottom {
+  bottom: -2px;
+  border-radius: 0 0 var(--branches-node-border-radius, 8px) var(--branches-node-border-radius, 8px);
+}
+
+/* Left / right handles (partnership) */
+.branches-drag-handle--left,
+.branches-drag-handle--right {
+  top: 0;
+  width: 10px;
+  height: 100%;
+  left: auto;
+  right: auto;
+}
+
+.branches-drag-handle--left {
+  left: -2px;
+  border-radius: var(--branches-node-border-radius, 8px) 0 0 var(--branches-node-border-radius, 8px);
+}
+
+.branches-drag-handle--right {
+  right: -2px;
+  left: auto;
+  border-radius: 0 var(--branches-node-border-radius, 8px) var(--branches-node-border-radius, 8px) 0;
+}
+
+.branches-node:hover .branches-drag-handle {
+  opacity: 1;
+}
+
+.branches-drag-handle::after {
+  content: '';
+  position: absolute;
+  border-radius: 2px;
+  background: var(--interactive-accent);
+  opacity: 0.5;
+  transition: opacity 120ms ease-in;
+}
+
+/* Horizontal bar for top/bottom handles */
+.branches-drag-handle--top::after,
+.branches-drag-handle--bottom::after {
+  left: 50%;
+  transform: translateX(-50%);
+  width: 24px;
+  height: 3px;
+  transition: opacity 120ms ease-in, width 120ms ease-in;
+}
+
+.branches-drag-handle--top::after {
+  top: 0;
+}
+
+.branches-drag-handle--bottom::after {
+  bottom: 0;
+}
+
+.branches-drag-handle--top:hover::after,
+.branches-drag-handle--bottom:hover::after {
+  opacity: 1;
+  width: 36px;
+}
+
+/* Vertical bar for left/right handles */
+.branches-drag-handle--left::after,
+.branches-drag-handle--right::after {
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  transition: opacity 120ms ease-in, height 120ms ease-in;
+}
+
+.branches-drag-handle--left::after {
+  left: 0;
+}
+
+.branches-drag-handle--right::after {
+  right: 0;
+}
+
+.branches-drag-handle--left:hover::after,
+.branches-drag-handle--right:hover::after {
+  opacity: 1;
+  height: 30px;
+}
+
+/* Locked state: hide all drag handles */
+.branches-spatial--locked .branches-drag-handle {
+  display: none;
+}
+
+/* Drag active states */
+.branches-node--dragging {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--interactive-accent), 0 4px 12px rgba(0, 0, 0, 0.15);
+  opacity: 0.85;
+}
+
+.branches-node--drop-target {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 3px var(--interactive-accent), 0 8px 20px rgba(0, 0, 0, 0.2);
+  background: color-mix(in srgb, var(--interactive-accent) 8%, var(--branches-node-bg, var(--background-primary)));
+}
+
+/* Expand/collapse toggle */
+.branches-node-expand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  color: var(--text-faint);
+  transition: color 120ms ease-in, background 120ms ease-in;
+}
+
+.branches-node-expand:hover {
+  color: var(--text-muted);
+  background: var(--background-modifier-hover);
+}
+
+.branches-node-expand svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Node content */
+.branches-node-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* Color indicator stripe */
+.branches-node-color {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  width: var(--branches-node-color-stripe-width, 4px);
+  border-radius: 0 3px 3px 0;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+/* Bump left padding when color stripe is present */
+.branches-node:has(.branches-node-color) {
+  padding-left: calc(var(--branches-node-padding-x, 12px) + 2px);
+}
+
+.branches-node-title {
+  font-size: var(--branches-node-title-size, 13px);
+  font-weight: 600;
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4;
+}
+
+/* Subtitle below title */
+.branches-node-subtitle {
+  font-size: var(--branches-node-subtitle-size, 11px);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+  margin-top: -1px;
+}
+
+/* Secondary subtitle — slightly more faded */
+.branches-node-subtitle2 {
+  color: var(--text-faint);
+}
+
+/* Child count badge */
+.branches-node-badge {
+  font-size: var(--branches-badge-font-size, 11px);
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  padding: 1px 6px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+
+/* ── Node avatar ── */
+.branches-node-avatar-wrap {
+  position: relative;
+  flex-shrink: 0;
+  width: var(--branches-avatar-size, 36px);
+  height: var(--branches-avatar-size, 36px);
+}
+
+.branches-node-avatar {
+  width: var(--branches-avatar-size, 36px);
+  height: var(--branches-avatar-size, 36px);
+  border-radius: 50%;
+  object-fit: cover;
+  border: var(--branches-avatar-border-width, 2px) solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  pointer-events: none;
+  transition: border-radius 200ms ease;
+}
+
+/* Rounded-square avatar variant */
+.branches-node-avatar--square {
+  border-radius: 20%;
+}
+
+/* Badge overlaid on avatar bottom-right */
+.branches-node-badge--overlay {
+  position: absolute;
+  bottom: -2px;
+  right: -4px;
+  font-size: 9px;
+  min-width: var(--branches-badge-overlay-size, 16px);
+  height: var(--branches-badge-overlay-size, 16px);
+  padding: 0 4px;
+  border-radius: calc(var(--branches-badge-overlay-size, 16px) / 2);
+  background: var(--interactive-accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* ── Hover tooltip ── */
+.branches-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 160px;
+  max-width: var(--branches-tooltip-max-width, 280px);
+  padding: 8px 10px;
+  background: var(--branches-tooltip-bg, var(--background-primary));
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--branches-tooltip-border-radius, 8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, var(--branches-tooltip-shadow-opacity, 0.14));
+  z-index: 40;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 150ms ease, transform 150ms ease;
+  transform: translateX(-50%) translateY(4px);
+}
+
+.branches-node:hover .branches-tooltip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.branches-tooltip-row {
+  display: flex;
+  gap: 6px;
+  font-size: var(--branches-tooltip-font-size, 11px);
+  line-height: 1.5;
+}
+
+.branches-tooltip-row + .branches-tooltip-row {
+  margin-top: 2px;
+}
+
+.branches-tooltip-label {
+  color: var(--text-faint);
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+.branches-tooltip-label::after {
+  content: ':';
+}
+
+.branches-tooltip-value {
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── SVG Edges ── */
+.branches-edges {
+  overflow: visible;
+}
+
+/* Edge draw-in animation */
+@keyframes branches-edge-draw {
+  from {
+    stroke-dashoffset: var(--edge-length, 1000);
+    opacity: 0.3;
+  }
+  to {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+
+.branches-edge--animated {
+  animation: branches-edge-draw 400ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.branches-edge {
+  fill: none;
+  /* stroke is set inline per-edge (parent color or default gray) */
+  stroke-width: var(--branches-edge-width, 1.5px);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Multi-parent edges: colored per-parent, rendered on top */
+.branches-edge--multi {
+  /* stroke is set inline per-parent from EDGE_PALETTE */
+  stroke-width: var(--branches-edge-multi-width, 2.5px);
+  stroke-opacity: var(--branches-edge-multi-opacity, 0.9);
+}
+
+/* Partnership edges: dashed horizontal between peers */
+.branches-edge--partner {
+  fill: none;
+  stroke-width: var(--branches-edge-partner-width, 1.5px);
+  stroke-dasharray: var(--branches-edge-partner-dash, 6 4);
+  stroke-linecap: round;
+}
+
+/* ── Zoom Controls ── */
+.branches-controls {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 20;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--branches-controls-radius, 8px);
+  padding: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, var(--branches-controls-shadow-opacity, 0.1));
+}
+
+.branches-control-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--branches-controls-btn-size, 28px);
+  height: var(--branches-controls-btn-size, 28px);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: background 120ms ease-in, color 120ms ease-in;
+}
+
+.branches-control-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.branches-control-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ── Create-on-drop inline input ── */
+.branches-create-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--branches-node-bg, var(--background-primary));
+  border: 2px solid var(--interactive-accent);
+  border-radius: var(--branches-node-border-radius, 8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  z-index: 30;
+  white-space: nowrap;
+}
+
+.branches-create-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--interactive-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.branches-create-field {
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: var(--branches-node-title-size, 13px);
+  font-weight: 600;
+  color: var(--text-normal);
+  font-family: var(--font-interface);
+  width: 180px;
+  padding: 2px 0;
+}
+
+.branches-create-field::placeholder {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+/* ── Indented (List) view ─────────────────────────────── */
+
+.branches-indented {
+  padding: 8px 0;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.branches-indented-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  min-height: var(--branches-indented-row-height, 32px);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 120ms ease, filter 120ms ease;
+}
+
+.branches-indented-row {
+  position: relative;
+}
+
+.branches-indented-row:hover {
+  background: var(--background-modifier-hover);
+  filter: brightness(1.02);
+  z-index: 5;
+}
+
+.branches-indented-row--selected {
+  background: var(--background-modifier-hover);
+  border-left: 2px solid var(--interactive-accent);
+  box-shadow: inset 3px 0 0 0 var(--interactive-accent);
+}
+
+.branches-indented-row--selected:hover {
+  background: var(--background-modifier-active-hover, var(--background-modifier-hover));
+}
+
+/* List-view tooltip: positioned above the row */
+.branches-tooltip--list {
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+}
+
+.branches-indented-row:hover .branches-tooltip--list {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* Near-top rows: show tooltip below to avoid clipping under the Bases header */
+.branches-tooltip--bottom {
+  bottom: auto;
+  top: calc(100% + 4px);
+  transform: translateX(-50%) translateY(-4px);
+}
+
+.branches-indented-row:hover .branches-tooltip--bottom {
+  transform: translateX(-50%) translateY(0);
+}
+
+.branches-indented-chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: var(--text-faint);
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.branches-indented-chevron:hover {
+  color: var(--text-muted);
+  background: var(--background-modifier-hover);
+}
+
+.branches-indented-chevron--empty {
+  visibility: hidden;
+}
+
+.branches-indented-chevron svg {
+  width: 14px;
+  height: 14px;
+}
+
+.branches-indented-dot {
+  width: var(--branches-indented-dot-size, 8px);
+  height: var(--branches-indented-dot-size, 8px);
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.branches-indented-avatar {
+  width: var(--branches-indented-avatar-size, 22px);
+  height: var(--branches-indented-avatar-size, 22px);
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  transition: border-radius 200ms ease;
+}
+
+.branches-indented-avatar--square {
+  border-radius: 20%;
+}
+
+.branches-indented-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.branches-indented-title {
+  font-size: var(--branches-indented-title-size, 13px);
+  font-weight: 500;
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.branches-indented-subtitle {
+  font-size: var(--branches-indented-subtitle-size, 11px);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+}
+
+.branches-indented-subtitle2 {
+  color: var(--text-faint);
+}
+
+.branches-indented-badge {
+  font-size: var(--branches-indented-badge-size, 10px);
+  font-weight: 600;
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+  border-radius: 8px;
+  padding: 0 6px;
+  min-width: 16px;
+  text-align: center;
+  line-height: 16px;
+  flex-shrink: 0;
+}
+
+.branches-indented-children {
+  /* no extra styling needed — depth is handled by paddingLeft */
+}
