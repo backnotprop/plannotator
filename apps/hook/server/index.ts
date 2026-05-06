@@ -110,6 +110,7 @@ import {
   isTopLevelHelpInvocation,
   isVersionInvocation,
 } from "./cli";
+import { ensureClearContextSettingEnabled } from "./clearContextSetting";
 import path from "path";
 import { tmpdir } from "os";
 
@@ -1202,6 +1203,12 @@ if (args[0] === "sessions") {
   }
 
   permissionMode = event.permission_mode || "default";
+  const toolName: string =
+    typeof event.tool_name === "string"
+      ? event.tool_name
+      : typeof event.toolName === "string"
+        ? event.toolName
+        : "";
 
   if (!planContent) {
     console.error("No plan content in hook event");
@@ -1215,6 +1222,7 @@ if (args[0] === "sessions") {
     plan: planContent,
     origin: isGemini ? "gemini-cli" : detectedOrigin,
     permissionMode,
+    toolName,
     sharingEnabled,
     shareBaseUrl,
     pasteApiUrl,
@@ -1265,6 +1273,19 @@ if (args[0] === "sessions") {
     }
   } else {
     // Claude Code: PermissionRequest hook decision
+    if (
+      result.approved &&
+      result.deferToNativeForClear &&
+      toolName === "ExitPlanMode"
+    ) {
+      const nativeClearEnabled = await ensureClearContextSettingEnabled();
+      if (nativeClearEnabled) {
+        process.exit(0);
+      }
+      result.clearContextNudge = true;
+      result.permissionMode ||= "bypassPermissions";
+    }
+
     if (result.approved) {
       const updatedPermissions = [];
       if (result.permissionMode) {

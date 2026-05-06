@@ -174,6 +174,39 @@ describe("pi review server", () => {
     }
   });
 
+  test("plan clear-context setting endpoints are explicit unsupported fallbacks", async () => {
+    const homeDir = makeTempDir("plannotator-pi-home-");
+    const repoDir = makeTempDir("plannotator-pi-plan-");
+    process.env.HOME = homeDir;
+    process.chdir(repoDir);
+    process.env.PLANNOTATOR_PORT = String(await reservePort());
+
+    const server = await startPlanReviewServer({
+      plan: "# Plan\n\nShip it.",
+      htmlContent: "<!doctype html><html><body>plan</body></html>",
+      origin: "pi",
+      permissionMode: "acceptEdits",
+    });
+
+    try {
+      const statusResponse = await fetch(`${server.url}/api/settings-status`);
+      await expect(statusResponse.json()).resolves.toEqual({
+        settingEnabled: false,
+        consentGiven: false,
+      });
+
+      const enableResponse = await fetch(`${server.url}/api/enable-clear-context`, {
+        method: "POST",
+      });
+      await expect(enableResponse.json()).resolves.toEqual({
+        ok: false,
+        reason: "not-supported-in-pi-extension",
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
   test("serves review diff parity endpoints including drafts, uploads, and editor annotations", async () => {
     const homeDir = makeTempDir("plannotator-pi-home-");
     const repoDir = initRepo();

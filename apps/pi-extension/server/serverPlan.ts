@@ -444,6 +444,16 @@ export async function startPlanReviewServer(options: {
 				clearContextNudge,
 			});
 			json(res, { ok: true, savedPath });
+		} else if (
+			url.pathname === "/api/settings-status" &&
+			req.method === "GET"
+		) {
+			json(res, { settingEnabled: false, consentGiven: false });
+		} else if (
+			url.pathname === "/api/enable-clear-context" &&
+			req.method === "POST"
+		) {
+			json(res, { ok: false, reason: "not-supported-in-pi-extension" });
 		} else if (url.pathname === "/api/deny" && req.method === "POST") {
 			if (decisionSettled) {
 				json(res, { ok: true, duplicate: true });

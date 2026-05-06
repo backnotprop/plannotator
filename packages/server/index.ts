@@ -13,7 +13,10 @@
  */
 
 import type { Origin } from "@plannotator/shared/agents";
-import { resolve } from "path";
+import { randomBytes } from "crypto";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
+import { homedir } from "os";
+import { dirname, join, resolve } from "path";
 import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
 import { openEditorDiff } from "./ide";
 import {
@@ -71,6 +74,8 @@ export interface ServerOptions {
   htmlContent: string;
   /** Current permission mode to preserve (Claude Code only) */
   permissionMode?: string;
+  /** Tool name from the permission request, e.g. ExitPlanMode */
+  toolName?: string;
   /** Whether URL sharing is enabled (default: true) */
   sharingEnabled?: boolean;
   /** Custom base URL for share links (default: https://share.plannotator.ai) */
@@ -102,6 +107,7 @@ export interface ServerResult {
     agentSwitch?: string;
     permissionMode?: string;
     clearContextNudge?: boolean;
+    deferToNativeForClear?: boolean;
   }>;
   /** Wait for user to close (archive mode only) */
   waitForDone?: () => Promise<void>;
@@ -113,6 +119,64 @@ export interface ServerResult {
 
 const MAX_RETRIES = 5;
 const RETRY_DELAY_MS = 500;
+const CLEAR_CONTEXT_SETTING_KEY = "showClearContextOnPlanAccept";
+
+function clearContextConsentPath(): string {
+  return join(homedir(), ".plannotator", "consent", "clear-context-setting.json");
+}
+
+function clearContextSettingsPath(): string {
+  return join(homedir(), ".claude", "settings.json");
+}
+
+function readClearContextSettings(): Record<string, unknown> | null {
+  if (!existsSync(clearContextSettingsPath())) return {};
+  try {
+    const parsed = JSON.parse(readFileSync(clearContextSettingsPath(), "utf8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch {
+    return null;
+  }
+}
+
+function hasClearContextConsent(): boolean {
+  try {
+    if (!existsSync(clearContextConsentPath())) return false;
+    const parsed = JSON.parse(readFileSync(clearContextConsentPath(), "utf8"));
+    return parsed?.consented === true;
+  } catch {
+    return false;
+  }
+}
+
+function writeJsonAtomic(path: string, data: Record<string, unknown>): void {
+  const tmp = join(
+    dirname(path),
+    `plannotator-settings-${randomBytes(4).toString("hex")}.json`,
+  );
+  writeFileSync(tmp, JSON.stringify(data, null, 2) + "\n", "utf8");
+  renameSync(tmp, path);
+}
+
+function recordClearContextConsent(): void {
+  mkdirSync(join(homedir(), ".plannotator", "consent"), { recursive: true });
+  writeJsonAtomic(clearContextConsentPath(), {
+    consented: true,
+    recordedAt: new Date().toISOString(),
+  });
+}
+
+function enableClearContextSetting(): "ok" | "malformed" {
+  const settings = readClearContextSettings();
+  if (settings === null) return "malformed";
+  settings[CLEAR_CONTEXT_SETTING_KEY] = true;
+  mkdirSync(join(homedir(), ".claude"), { recursive: true });
+  recordClearContextConsent();
+  writeJsonAtomic(clearContextSettingsPath(), settings);
+  return "ok";
+}
 
 /**
  * Start the Plannotator server
@@ -126,7 +190,7 @@ const RETRY_DELAY_MS = 500;
 export async function startPlannotatorServer(
   options: ServerOptions
 ): Promise<ServerResult> {
-  const { plan, origin, htmlContent, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, onReady, mode, customPlanPath } = options;
+  const { plan, origin, htmlContent, permissionMode, toolName, sharingEnabled = true, shareBaseUrl, pasteApiUrl, onReady, mode, customPlanPath } = options;
 
   const isRemote = isRemoteSession();
   const configuredPort = getServerPort();
@@ -174,6 +238,7 @@ export async function startPlannotatorServer(
     agentSwitch?: string;
     permissionMode?: string;
     clearContextNudge?: boolean;
+    deferToNativeForClear?: boolean;
   }) => void;
   let decisionPromise: Promise<{
     approved: boolean;
@@ -182,6 +247,7 @@ export async function startPlannotatorServer(
     agentSwitch?: string;
     permissionMode?: string;
     clearContextNudge?: boolean;
+    deferToNativeForClear?: boolean;
   }>;
 
   if (mode !== "archive") {
@@ -287,7 +353,7 @@ export async function startPlannotatorServer(
                 serverConfig: getServerConfig(gitUser),
               });
             }
-            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, projectRoot: process.cwd(), isWSL: wslFlag, serverConfig: getServerConfig(gitUser) });
+            return Response.json({ plan, origin, permissionMode, toolName, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, projectRoot: process.cwd(), isWSL: wslFlag, serverConfig: getServerConfig(gitUser) });
           }
 
           // API: Serve a linked markdown document
@@ -459,6 +525,7 @@ export async function startPlannotatorServer(
             let agentSwitch: string | undefined;
             let requestedPermissionMode: string | undefined;
             let clearContextNudge: boolean | undefined;
+            let deferToNativeForClear: boolean | undefined;
             let planSaveEnabled = true; // default to enabled for backwards compat
             let planSaveCustomPath: string | undefined;
             try {
@@ -471,6 +538,7 @@ export async function startPlannotatorServer(
                 planSave?: { enabled: boolean; customPath?: string };
                 permissionMode?: string;
                 clearContextNudge?: boolean;
+                deferToNativeForClear?: boolean;
               };
 
               // Capture feedback if provided (for "approve with notes")
@@ -491,6 +559,9 @@ export async function startPlannotatorServer(
               // Capture optional /clear reminder request for Claude Code approval flow
               if (body.clearContextNudge === true) {
                 clearContextNudge = true;
+              }
+              if (body.deferToNativeForClear === true) {
+                deferToNativeForClear = true;
               }
 
               // Capture plan save settings
@@ -538,8 +609,33 @@ export async function startPlannotatorServer(
 
             // Use permission mode from client request if provided, otherwise fall back to hook input
             const effectivePermissionMode = requestedPermissionMode || permissionMode;
-            resolveDecision({ approved: true, feedback, savedPath, agentSwitch, permissionMode: effectivePermissionMode, clearContextNudge });
+            resolveDecision({ approved: true, feedback, savedPath, agentSwitch, permissionMode: effectivePermissionMode, clearContextNudge, deferToNativeForClear });
             return Response.json({ ok: true, savedPath });
+          }
+
+          if (url.pathname === "/api/settings-status" && req.method === "GET") {
+            if (origin !== "claude-code" || toolName !== "ExitPlanMode") {
+              return Response.json({ error: "Unsupported clear-context flow" }, { status: 404 });
+            }
+            const settings = readClearContextSettings();
+            return Response.json({
+              settingEnabled: settings?.[CLEAR_CONTEXT_SETTING_KEY] === true,
+              consentGiven: hasClearContextConsent(),
+            });
+          }
+
+          if (url.pathname === "/api/enable-clear-context" && req.method === "POST") {
+            if (origin !== "claude-code" || toolName !== "ExitPlanMode") {
+              return Response.json({ error: "Unsupported clear-context flow" }, { status: 404 });
+            }
+            const result = enableClearContextSetting();
+            if (result === "malformed") {
+              return Response.json(
+                { ok: false, error: "Malformed Claude Code settings JSON" },
+                { status: 400 },
+              );
+            }
+            return Response.json({ ok: true });
           }
 
           // API: Deny with feedback

@@ -76,6 +76,7 @@ import { DEMO_PLAN_CONTENT as DEFAULT_DEMO_PLAN_CONTENT } from './demoPlan';
 import { DIFF_DEMO_PLAN_CONTENT } from './demoPlanDiffDemo';
 import { canUseAnnotateWideMode, resolveWideModeExitLayout, type WideModeLayoutSnapshot, type WideModeType } from './wideMode';
 import { buildApprovalRequestBody, type ApprovalOverride } from './approvalBody';
+import type { ApproveExtraEntry } from '@plannotator/ui/components/ApproveDropdown';
 const USE_DIFF_DEMO =
   import.meta.env.VITE_DIFF_DEMO === '1' ||
   import.meta.env.VITE_DIFF_DEMO === 'true';
@@ -149,6 +150,9 @@ const App: React.FC = () => {
   }, []);
   const [isApiMode, setIsApiMode] = useState(false);
   const [origin, setOrigin] = useState<Origin | null>(null);
+  const [pendingToolName, setPendingToolName] = useState<string | undefined>();
+  const [showClearContextBanner, setShowClearContextBanner] = useState(false);
+  const [pendingApprovalOverride, setPendingApprovalOverride] = useState<ApprovalOverride>({});
   const [gitUser, setGitUser] = useState<string | undefined>();
   const [isWSL, setIsWSL] = useState(false);
   const [globalAttachments, setGlobalAttachments] = useState<ImageAttachment[]>([]);
@@ -778,6 +782,9 @@ const App: React.FC = () => {
         if (data.versionInfo) {
           setVersionInfo(data.versionInfo);
         }
+        if (data.toolName) {
+          setPendingToolName(data.toolName);
+        }
         if (data.origin) {
           setOrigin(data.origin);
           // For Claude Code, check if user needs to configure permission mode
@@ -785,7 +792,8 @@ const App: React.FC = () => {
             setShowPermissionModeSetup(true);
           }
           // Load saved permission mode preference
-          setPermissionMode(getPermissionModeSettings().mode);
+          const savedPermissionMode = getPermissionModeSettings().mode;
+          setPermissionMode(savedPermissionMode);
         }
         if (data.isWSL) {
           setIsWSL(true);
@@ -942,7 +950,7 @@ const App: React.FC = () => {
   };
 
   // API mode handlers
-  const handleApprove = async () => {
+  const handleApprove = async (override: ApprovalOverride = {}) => {
     setIsSubmitting(true);
     try {
       const obsidianSettings = getObsidianSettings();
@@ -953,6 +961,19 @@ const App: React.FC = () => {
         ? await autoSavePromiseRef.current
         : autoSaveResultsRef.current;
 
+      const shouldUseNativeClear =
+        origin === 'claude-code' &&
+        pendingToolName === 'ExitPlanMode' &&
+        (override.deferToNativeForClear || (override.permissionMode ?? permissionMode) === 'bypassPermissionsClearReminder');
+      if (shouldUseNativeClear) {
+        try {
+          const response = await fetch('/api/enable-clear-context', { method: 'POST' });
+          if (response.ok) setShowClearContextBanner(false);
+        } catch {
+          setShowClearContextBanner(true);
+        }
+      }
+
       const effectiveAgent = getEffectiveAgentName(getAgentSwitchSettings());
       const body = buildApprovalRequestBody({
         origin,
@@ -960,14 +981,7 @@ const App: React.FC = () => {
         override,
         effectiveAgent,
         planSaveSettings,
-      });
-      const effectiveAgent = getEffectiveAgentName(getAgentSwitchSettings());
-      const body = buildApprovalRequestBody({
-        origin,
-        permissionMode,
-        override,
-        effectiveAgent,
-        planSaveSettings,
+        toolName: pendingToolName,
       });
 
       const effectiveVaultPath = getEffectiveVaultPath(obsidianSettings);
@@ -1038,6 +1052,39 @@ const App: React.FC = () => {
       setIsSubmitting(false);
     }
   };
+
+  const approveWithClaudeCodeWarning = useCallback((override: ApprovalOverride = {}) => {
+    setPendingApprovalOverride(override);
+    if (origin === 'claude-code' && (allAnnotations.length > 0 || codeAnnotations.length > 0)) {
+      setShowClaudeCodeWarning(true);
+      return;
+    }
+    handleApprove(override);
+  }, [allAnnotations.length, codeAnnotations.length, origin, handleApprove]);
+
+  const claudeCodeExtraEntries = useMemo<ApproveExtraEntry[]>(() => {
+    if (origin !== 'claude-code') return [];
+    if (pendingToolName === 'ExitPlanMode') {
+      return [{
+        id: 'approve-bypass-native-clear',
+        label: 'Approve + Bypass + Clear Context (native)',
+        description: "Defers to Claude Code's native plan-accept dialog so it can clear context and set bypass permissions.",
+        onSelect: () => approveWithClaudeCodeWarning({
+          permissionMode: 'bypassPermissions',
+          deferToNativeForClear: true,
+        }),
+      }];
+    }
+    return [{
+      id: 'approve-bypass-clear-reminder',
+      label: 'Approve + Bypass + /clear Reminder',
+      description: 'Requests bypass mode and reminds you to run /clear. Hooks cannot clear context directly outside plan acceptance.',
+      onSelect: () => approveWithClaudeCodeWarning({
+        permissionMode: 'bypassPermissions',
+        clearContextNudge: true,
+      }),
+    }];
+  }, [approveWithClaudeCodeWarning, origin, pendingToolName]);
 
   // Annotate mode handler — sends feedback via /api/feedback
   const handleAnnotateFeedback = async () => {
@@ -1635,6 +1682,7 @@ const App: React.FC = () => {
           canShareCurrentSession={canShareCurrentSession}
           agentName={agentName}
           availableAgents={availableAgents}
+          approveExtraEntries={claudeCodeExtraEntries}
           showAnnotationsWarning={allAnnotations.length > 0 || codeAnnotations.length > 0}
           callbackConfig={callbackConfig}
           taterMode={taterMode}
@@ -1670,7 +1718,6 @@ const App: React.FC = () => {
           bearConfigured={getBearSettings().enabled}
           octarineConfigured={isOctarineConfigured()}
         />
-
         {/* Linked document error banner */}
         {linkedDocHook.error && (
           <div className="bg-destructive/10 border-b border-destructive/20 px-4 py-2 flex items-center gap-2 flex-shrink-0">
@@ -2015,7 +2062,9 @@ const App: React.FC = () => {
           onClose={() => setShowClaudeCodeWarning(false)}
           onConfirm={() => {
             setShowClaudeCodeWarning(false);
-            handleApprove();
+            const override = pendingApprovalOverride;
+            setPendingApprovalOverride({});
+            handleApprove(override);
           }}
           title="Annotations Won't Be Sent"
           message={<>{agentName} doesn't yet support feedback on approval. Your {allAnnotations.length + codeAnnotations.length} annotation{(allAnnotations.length + codeAnnotations.length) !== 1 ? 's' : ''} will be lost.</>}
@@ -2132,6 +2181,66 @@ const App: React.FC = () => {
 
         {/* Update notification */}
         <UpdateBanner origin={origin} isWSL={isWSL} />
+
+        {showClearContextBanner && (
+          <div
+            role="dialog"
+            aria-label="Enable native clear-on-accept"
+            style={{
+              position: 'fixed',
+              bottom: 16,
+              right: 16,
+              maxWidth: 380,
+              padding: '12px 14px',
+              background: 'var(--color-surface, #1a1a1a)',
+              border: '1px solid var(--color-border, #333)',
+              borderRadius: 8,
+              boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+              zIndex: 1000,
+              fontSize: 13,
+              lineHeight: 1.4,
+            }}
+          >
+            <div style={{ marginBottom: 8 }}>
+              <strong>Enable native clear-on-accept?</strong>
+            </div>
+            <div style={{ marginBottom: 10, opacity: 0.85 }}>
+              Plannotator will write{' '}
+              <code>showClearContextOnPlanAccept: true</code> to your Claude
+              Code settings so Claude Code can clear planning context through
+              its native approval flow.
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => setShowClearContextBanner(false)}
+                style={{ padding: '4px 10px', cursor: 'pointer' }}
+              >
+                Skip
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const response = await fetch('/api/enable-clear-context', { method: 'POST' });
+                    if (response.ok) {
+                      setShowClearContextBanner(false);
+                    }
+                  } catch {
+                    setShowClearContextBanner(false);
+                  }
+                }}
+                style={{
+                  padding: '4px 10px',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                }}
+              >
+                Enable
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Image Annotator for pasted images */}
         <ImageAnnotator
