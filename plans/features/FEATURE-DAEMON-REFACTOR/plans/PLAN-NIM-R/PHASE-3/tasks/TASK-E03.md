@@ -24,10 +24,10 @@ dependsOn:
 - '[[TASK-D2]]'
 - '[[TASK-E00]]'
 ---
-
 ## Description
 
-Parent phase: Phase 3 (Cross-slice E2E specs). Alias: [[TASK-E03]].
+Parent phase: Phase 3 (Cross-slice E2E specs).
+Alias: [[TASK-E03]].
 
 ## 3.1 Legal transitions
 
@@ -43,7 +43,7 @@ Per [[TASK-D2]] state contract:
 ## 3.2 Illegal transitions (P0 if not implemented)
 
 | # | Test | Pass condition |
-|---|------|----------------|
+| --- | --- | --- |
 | 3.2.1 | Submit while `active`; second submit from different terminal | returns non-success; exit non-zero; error names in-flight doc, states daemon URL, explains recovery |
 | 3.2.2 | Submit while `verdict_ready` | same blocking behavior; references unfetched verdict |
 | 3.2.3 | Raw `POST /api/submit` while active | HTTP 409; JSON body with current state, mode, doc title, hint string |
@@ -52,15 +52,17 @@ Per [[TASK-D2]] state contract:
 ## 3.3 Verdict-consumption semantics
 
 | # | Test | Pass condition |
-|---|------|----------------|
+| --- | --- | --- |
 | 3.3.1 | Submit + approve (UI), then `plannotator wait` | wait exits 0; stdout contains verdict; state → `idle` |
 | 3.3.2 | Submit + deny with feedback, then `plannotator wait` | wait exits with deny code; feedback in output; state → `idle` |
 | 3.3.3 | Submit + UI Cancel, then `plannotator wait` | wait exits with cancel code; state → `idle` |
-| 3.3.4 | Submit; while `in_review(R)`, run `plannotator wait --request-id R` from a second CLI | both waiters block; on UI approve, both receive the same verdict (broadcast per [[TASK-D2]]); neither receives stale verdicts; both exit with the same approve code |
-| 3.3.5 | After 3.3.4 completes and daemon returns to `idle`, run `plannotator wait --request-id R` from a third CLI | exits with `410 verdict_consumed_or_unknown` per [[TASK-D2]]; does not block |
+| 3.3.4a | While `in_review(R)`, a second CLI tries to submit a new plan | rejected immediately with `active_request_collision` (exit 2); second CLI is NOT permitted to wait; only one submitter allowed at a time per [[TASK-D2]] |
+| 3.3.4b | Recovery: Submit → agent dies → fresh terminal runs `plannotator wait --request-id R` | becomes the sole waiter; on UI approve, exits 0 with verdict; state → `idle` |
+| 3.3.5 | After verdict consumed and daemon returns to `idle`, run `plannotator wait --request-id R` from any CLI | exits with `410 verdict_consumed_or_unknown` per [[TASK-D2]]; does not block |
 
 ## Activity Log
 
 - 2026-05-02T04:03:57.645Z: created
 - 2026-05-05T00:00:00.000Z: status_changed (status) -> needs-review
-- 2026-05-05T01:00:00.000Z: rewrote §3.1, §3.2.4, §3.3.4 against decided D1/D2/D6 contracts; added §3.3.5 for stale-verdict isolation per D2
+- 2026-05-05T01:00:00.000Z: rewrote §3.1, §3.2.4, §3.3.4 against decided D1/D2/D6
+  contracts; added §3.3.5 for stale-verdict isolation per D2

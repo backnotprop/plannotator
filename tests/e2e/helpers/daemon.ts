@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn } from 'node:child_process';
 import {
   cpSync,
   existsSync,
@@ -7,34 +7,67 @@ import {
   readFileSync,
   statSync,
   symlinkSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { connect } from "node:net";
-import { join, relative, resolve, sep } from "node:path";
-import process from "node:process";
-import { fileURLToPath } from "node:url";
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { connect } from 'node:net';
+import { join, relative, resolve, sep } from 'node:path';
+import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
-const repoRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
-const bunExecutable = Bun.which("bun") ?? "bun";
+const repoRoot = resolve(fileURLToPath(new URL('../../../', import.meta.url)));
+const bunExecutable = Bun.which('bun') ?? 'bun';
 
-const HOOK_ENTRY_REL = "apps/hook/server/index.ts";
+const HOOK_ENTRY_REL = 'apps/hook/server/index.ts';
 
 let cachedBinaryPromise: Promise<string> | undefined;
 
 function isPlannotatorDependencyRoot(candidate: string): boolean {
-  if (!existsSync(join(candidate, "node_modules"))) {
+  if (!existsSync(join(candidate, 'node_modules'))) {
     return false;
   }
-  const packageJsonPath = join(candidate, "package.json");
+  const packageJsonPath = join(candidate, 'package.json');
   if (!existsSync(packageJsonPath)) {
     return false;
   }
   try {
-    const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { name?: string };
-    return pkg.name === "plannotator";
+    const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as { name?: string };
+    return pkg.name === 'plannotator';
   } catch {
     return false;
   }
+}
+
+function tryResolveFromGitFile(): string | null {
+  // In git worktrees, .git is a file (not a directory) containing:
+  //   gitdir: /path/to/repo/.git/worktrees/<branch>
+  // From that we can derive the actual repo root.
+  const dotGitPath = join(repoRoot, '.git');
+  if (!existsSync(dotGitPath)) {
+    return null;
+  }
+  const stat = statSync(dotGitPath);
+  if (stat.isDirectory()) {
+    return null; // Not a worktree
+  }
+  try {
+    const content = readFileSync(dotGitPath, 'utf8').trim();
+    const match = content.match(/^gitdir:\s*(.+)$/m);
+    if (!match) {
+      return null;
+    }
+    const gitdir = match[1].trim();
+    // gitdir like /path/to/repo/.git/worktrees/<branch> → repo root is /path/to/repo
+    const worktreesIdx = gitdir.indexOf(`${sep}.git${sep}worktrees${sep}`);
+    if (worktreesIdx !== -1) {
+      const repoRootCandidate = gitdir.substring(0, worktreesIdx);
+      if (isPlannotatorDependencyRoot(repoRootCandidate)) {
+        return repoRootCandidate;
+      }
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return null;
 }
 
 function resolveDependencyRoot(): string {
@@ -42,14 +75,20 @@ function resolveDependencyRoot(): string {
     return repoRoot;
   }
 
+  // Try resolving from .git worktree file (handles opencode worktree paths)
+  const fromGitFile = tryResolveFromGitFile();
+  if (fromGitFile) {
+    return fromGitFile;
+  }
+
   // Convention: /<parent>/<repo>_worktrees/<branch>/ — peel off the worktree
   // suffix to find the original checkout, which holds the installed deps.
-  const trimmed = repoRoot.replace(new RegExp(`${sep === "\\" ? "\\\\" : sep}$`), "");
+  const trimmed = repoRoot.replace(new RegExp(`${sep === '\\' ? '\\\\' : sep}$`), '');
   const segments = trimmed.split(sep);
   if (segments.length >= 2) {
     const parent = segments[segments.length - 2];
-    if (parent.endsWith("_worktrees")) {
-      const projectName = parent.slice(0, -"_worktrees".length);
+    if (parent.endsWith('_worktrees')) {
+      const projectName = parent.slice(0, -'_worktrees'.length);
       const projectPath = `${segments.slice(0, -2).join(sep)}${sep}${projectName}`;
       if (isPlannotatorDependencyRoot(projectPath)) {
         return projectPath;
@@ -59,7 +98,7 @@ function resolveDependencyRoot(): string {
 
   let current = repoRoot;
   for (let depth = 0; depth < 5; depth += 1) {
-    const parent = resolve(current, "..");
+    const parent = resolve(current, '..');
     if (parent === current) {
       break;
     }
@@ -80,7 +119,7 @@ function symlinkWorkspaceNodeModules(
   workspaceDirs: string[],
 ): void {
   for (const dir of workspaceDirs) {
-    const source = join(dependencyRoot, dir, "node_modules");
+    const source = join(dependencyRoot, dir, 'node_modules');
     if (!existsSync(source)) {
       continue;
     }
@@ -88,18 +127,18 @@ function symlinkWorkspaceNodeModules(
     if (!existsSync(destinationParent)) {
       continue;
     }
-    const destination = join(destinationParent, "node_modules");
+    const destination = join(destinationParent, 'node_modules');
     if (existsSync(destination)) {
       continue;
     }
-    symlinkSync(source, destination, "dir");
+    symlinkSync(source, destination, 'dir');
   }
 }
 
 function createBuildWorkspace(): string {
   const dependencyRoot = resolveDependencyRoot();
-  const baseDir = mkdtempSync(join(tmpdir(), "plannotator-e2e-build-"));
-  const workspaceRoot = join(baseDir, "workspace");
+  const baseDir = mkdtempSync(join(tmpdir(), 'plannotator-e2e-build-'));
+  const workspaceRoot = join(baseDir, 'workspace');
 
   cpSync(repoRoot, workspaceRoot, {
     recursive: true,
@@ -108,30 +147,34 @@ function createBuildWorkspace(): string {
       if (!rel) {
         return true;
       }
-      if (rel === ".git" || rel.startsWith(`.git${sep}`)) {
+      if (rel === '.git' || rel.startsWith(`.git${sep}`)) {
         return false;
       }
       const segments = rel.split(/[\\/]/);
-      return !segments.includes("node_modules");
+      return !segments.includes('node_modules');
     },
   });
 
-  symlinkSync(join(dependencyRoot, "node_modules"), join(workspaceRoot, "node_modules"), "dir");
+  symlinkSync(
+    join(dependencyRoot, 'node_modules'),
+    join(workspaceRoot, 'node_modules'),
+    'dir',
+  );
 
   const workspaceAppsDirs = [
-    "apps/hook",
-    "apps/review",
-    "apps/opencode-plugin",
-    "apps/vscode-extension",
+    'apps/hook',
+    'apps/review',
+    'apps/opencode-plugin',
+    'apps/vscode-extension',
   ];
   symlinkWorkspaceNodeModules(dependencyRoot, workspaceRoot, workspaceAppsDirs);
 
   const packagesDirs = [
-    "packages/server",
-    "packages/ui",
-    "packages/editor",
-    "packages/review-editor",
-    "packages/shared",
+    'packages/server',
+    'packages/ui',
+    'packages/editor',
+    'packages/review-editor',
+    'packages/shared',
   ];
   symlinkWorkspaceNodeModules(dependencyRoot, workspaceRoot, packagesDirs);
 
@@ -142,28 +185,33 @@ type RunResult = { exitCode: number; stdout: string; stderr: string };
 
 function runShell(
   command: string[],
-  opts: { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs?: number; description: string },
+  opts: {
+    cwd: string;
+    env?: NodeJS.ProcessEnv;
+    timeoutMs?: number;
+    description: string;
+  },
 ): Promise<RunResult> {
   return new Promise((resolveRun, reject) => {
     const child = spawn(command[0], command.slice(1), {
       cwd: opts.cwd,
       env: opts.env ?? process.env,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
       stdout += chunk;
     });
-    child.stderr.on("data", (chunk: string) => {
+    child.stderr.on('data', (chunk: string) => {
       stderr += chunk;
     });
     const timeout = opts.timeoutMs ?? 240_000;
     const timer = setTimeout(() => {
       try {
-        child.kill("SIGKILL");
+        child.kill('SIGKILL');
       } catch {}
       reject(
         new Error(
@@ -171,11 +219,11 @@ function runShell(
         ),
       );
     }, timeout);
-    child.once("error", (err) => {
+    child.once('error', (err) => {
       clearTimeout(timer);
       reject(err);
     });
-    child.once("close", (code) => {
+    child.once('close', (code) => {
       clearTimeout(timer);
       resolveRun({ exitCode: code ?? 1, stdout, stderr });
     });
@@ -187,9 +235,9 @@ export async function buildBinary(): Promise<string> {
     cachedBinaryPromise = (async () => {
       const workspaceRoot = createBuildWorkspace();
 
-      const buildHook = await runShell([bunExecutable, "run", "build:hook"], {
+      const buildHook = await runShell([bunExecutable, 'run', 'build:hook'], {
         cwd: workspaceRoot,
-        description: "bun run build:hook (e2e sandbox)",
+        description: 'bun run build:hook (e2e sandbox)',
         timeoutMs: 240_000,
       });
       if (buildHook.exitCode !== 0) {
@@ -198,16 +246,9 @@ export async function buildBinary(): Promise<string> {
         );
       }
 
-      const binaryPath = join(workspaceRoot, "plannotator");
+      const binaryPath = join(workspaceRoot, 'plannotator');
       const compile = await runShell(
-        [
-          bunExecutable,
-          "build",
-          HOOK_ENTRY_REL,
-          "--compile",
-          "--outfile",
-          binaryPath,
-        ],
+        [bunExecutable, 'build', HOOK_ENTRY_REL, '--compile', '--outfile', binaryPath],
         {
           cwd: workspaceRoot,
           description: `bun build --compile ${HOOK_ENTRY_REL}`,
@@ -220,7 +261,9 @@ export async function buildBinary(): Promise<string> {
         );
       }
       if (!existsSync(binaryPath)) {
-        throw new Error(`bun build --compile reported success but ${binaryPath} is missing.`);
+        throw new Error(
+          `bun build --compile reported success but ${binaryPath} is missing.`,
+        );
       }
       const stat = statSync(binaryPath);
       if (!stat.isFile() || stat.size < 1_000_000) {
@@ -243,12 +286,12 @@ export async function waitForPort(port: number, timeoutMs = 10_000): Promise<voi
   while (Date.now() < deadline) {
     try {
       await new Promise<void>((resolveOk, rejectErr) => {
-        const socket = connect({ host: "127.0.0.1", port });
-        socket.once("connect", () => {
+        const socket = connect({ host: '127.0.0.1', port });
+        socket.once('connect', () => {
           socket.end();
           resolveOk();
         });
-        socket.once("error", (err) => {
+        socket.once('error', (err) => {
           socket.destroy();
           rejectErr(err);
         });
@@ -260,18 +303,20 @@ export async function waitForPort(port: number, timeoutMs = 10_000): Promise<voi
     }
   }
   throw new Error(
-    `Port ${port} not connectable within ${timeoutMs}ms${lastError ? `: ${lastError.message}` : ""}.`,
+    `Port ${port} not connectable within ${timeoutMs}ms${lastError ? `: ${lastError.message}` : ''}.`,
   );
 }
 
-export async function getDaemonStatus(port: number): Promise<{ status: string } | null> {
+export async function getDaemonStatus(
+  port: number,
+): Promise<{ status: string } | null> {
   try {
     const response = await fetch(`http://127.0.0.1:${port}/api/state`);
     if (!response.ok) {
       return null;
     }
     const body = (await response.json()) as { status?: string };
-    if (typeof body.status !== "string") {
+    if (typeof body.status !== 'string') {
       return null;
     }
     return { status: body.status };
@@ -298,31 +343,32 @@ export async function startDaemon(opts: {
     mkdirSync(home, { recursive: true });
   }
 
-  const child = spawn(binary, ["daemon", "start", "--foreground"], {
+  const child = spawn(binary, ['daemon', 'start', '--foreground'], {
     cwd: home,
     env: {
       ...process.env,
       HOME: home,
       PLANNOTATOR_PORT: String(port),
-      PLANNOTATOR_BROWSER: process.env.PLANNOTATOR_BROWSER ?? (Bun.which("true") ?? "/usr/bin/true"),
+      PLANNOTATOR_BROWSER:
+        process.env.PLANNOTATOR_BROWSER ?? Bun.which('true') ?? '/usr/bin/true',
     },
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
   });
 
-  child.stdout?.setEncoding("utf8");
-  child.stderr?.setEncoding("utf8");
-  let stdoutBuf = "";
-  let stderrBuf = "";
-  child.stdout?.on("data", (chunk: string) => {
+  child.stdout?.setEncoding('utf8');
+  child.stderr?.setEncoding('utf8');
+  let stdoutBuf = '';
+  let stderrBuf = '';
+  child.stdout?.on('data', (chunk: string) => {
     stdoutBuf += chunk;
   });
-  child.stderr?.on("data", (chunk: string) => {
+  child.stderr?.on('data', (chunk: string) => {
     stderrBuf += chunk;
   });
 
   let earlyExit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
-  child.once("close", (code, signal) => {
+  child.once('close', (code, signal) => {
     earlyExit = { code, signal };
   });
 
@@ -343,16 +389,16 @@ export async function startDaemon(opts: {
             return;
           }
           try {
-            child.kill("SIGTERM");
+            child.kill('SIGTERM');
           } catch {}
           await new Promise<void>((resolveStop) => {
             const t = setTimeout(() => {
               try {
-                child.kill("SIGKILL");
+                child.kill('SIGKILL');
               } catch {}
               resolveStop();
             }, 5_000);
-            child.once("close", () => {
+            child.once('close', () => {
               clearTimeout(t);
               resolveStop();
             });
@@ -364,7 +410,7 @@ export async function startDaemon(opts: {
   }
 
   try {
-    child.kill("SIGKILL");
+    child.kill('SIGKILL');
   } catch {}
   throw new Error(
     `daemon did not become ready on port ${port} within 15s.\n--- stdout ---\n${stdoutBuf}\n--- stderr ---\n${stderrBuf}`,
