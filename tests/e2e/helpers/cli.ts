@@ -15,6 +15,18 @@ export type RunCliResult = {
   stderr: string;
 };
 
+// Module-level registry so sandbox.cleanup() can kill any orphaned processes.
+const _activeCliProcesses = new Set<ChildProcess>();
+
+export function killAllBackgroundClis(): void {
+  for (const child of _activeCliProcesses) {
+    try {
+      child.kill("SIGKILL");
+    } catch {}
+  }
+  _activeCliProcesses.clear();
+}
+
 function buildEnv(env?: Record<string, string>): NodeJS.ProcessEnv {
   return { ...process.env, ...(env ?? {}) };
 }
@@ -73,9 +85,11 @@ export async function runCli(
 
 export type CliBackgroundHandle = {
   kill(signal?: NodeJS.Signals): void;
-  waitForExit(): Promise<RunCliResult>;
+  waitForExit(timeoutMs?: number): Promise<RunCliResult>;
   pid: number;
 };
+
+const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
 
 export function runCliBackground(
   args: string[],
@@ -94,6 +108,7 @@ export function runCliBackground(
           env: buildEnv(opts.env),
           stdio: ["ignore", "pipe", "pipe"],
         });
+        _activeCliProcesses.add(child);
         child.stdout?.setEncoding("utf8");
         child.stderr?.setEncoding("utf8");
         child.stdout?.on("data", (chunk: string) => {
@@ -102,8 +117,12 @@ export function runCliBackground(
         child.stderr?.on("data", (chunk: string) => {
           stderr += chunk;
         });
-        child.once("error", (err) => rejectExit(err));
+        child.once("error", (err) => {
+          if (child) _activeCliProcesses.delete(child);
+          rejectExit(err);
+        });
         child.once("close", (code) => {
+          if (child) _activeCliProcesses.delete(child);
           resolveExit({ exitCode: code ?? 1, stdout, stderr });
         });
       })
@@ -122,8 +141,31 @@ export function runCliBackground(
         child.kill(signal);
       } catch {}
     },
-    waitForExit() {
-      return exitPromise;
+    waitForExit(timeoutMs = DEFAULT_WAIT_TIMEOUT_MS): Promise<RunCliResult> {
+      return new Promise<RunCliResult>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          if (child) {
+            try {
+              child.kill("SIGKILL");
+            } catch {}
+          }
+          reject(
+            new Error(
+              `waitForExit timed out after ${timeoutMs}ms: plannotator ${args.join(" ")}\n--- stdout ---\n${stdout}\n--- stderr ---\n${stderr}`,
+            ),
+          );
+        }, timeoutMs);
+        exitPromise.then(
+          (result) => {
+            clearTimeout(timer);
+            resolve(result);
+          },
+          (err) => {
+            clearTimeout(timer);
+            reject(err);
+          },
+        );
+      });
     },
   };
 }

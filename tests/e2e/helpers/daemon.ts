@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import {
   cpSync,
   existsSync,
@@ -330,6 +330,18 @@ export type DaemonHandle = {
   stop(): Promise<void>;
 };
 
+// Module-level registry so sandbox.cleanup() can kill any orphaned daemon processes.
+const _activeDaemonProcesses = new Set<ChildProcess>();
+
+export function killAllDaemons(): void {
+  for (const child of _activeDaemonProcesses) {
+    try {
+      child.kill('SIGKILL');
+    } catch {}
+  }
+  _activeDaemonProcesses.clear();
+}
+
 export async function startDaemon(opts: {
   port: number;
   home: string;
@@ -356,6 +368,8 @@ export async function startDaemon(opts: {
     detached: false,
   });
 
+  _activeDaemonProcesses.add(child);
+
   child.stdout?.setEncoding('utf8');
   child.stderr?.setEncoding('utf8');
   let stdoutBuf = '';
@@ -369,6 +383,7 @@ export async function startDaemon(opts: {
 
   let earlyExit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
   child.once('close', (code, signal) => {
+    _activeDaemonProcesses.delete(child);
     earlyExit = { code, signal };
   });
 
@@ -386,6 +401,7 @@ export async function startDaemon(opts: {
         pid,
         async stop() {
           if (child.exitCode !== null || child.signalCode !== null) {
+            _activeDaemonProcesses.delete(child);
             return;
           }
           try {
@@ -396,10 +412,12 @@ export async function startDaemon(opts: {
               try {
                 child.kill('SIGKILL');
               } catch {}
+              _activeDaemonProcesses.delete(child);
               resolveStop();
             }, 5_000);
             child.once('close', () => {
               clearTimeout(t);
+              _activeDaemonProcesses.delete(child);
               resolveStop();
             });
           });
@@ -412,6 +430,7 @@ export async function startDaemon(opts: {
   try {
     child.kill('SIGKILL');
   } catch {}
+  _activeDaemonProcesses.delete(child);
   throw new Error(
     `daemon did not become ready on port ${port} within 15s.\n--- stdout ---\n${stdoutBuf}\n--- stderr ---\n${stderrBuf}`,
   );

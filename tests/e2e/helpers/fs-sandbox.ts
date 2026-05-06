@@ -2,6 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { join } from "node:path";
+import { killAllBackgroundClis } from "./cli";
+import { killAllDaemons } from "./daemon";
 
 export type Sandbox = {
   home: string;
@@ -13,6 +15,8 @@ export function createSandbox(): Sandbox {
   return {
     home,
     cleanup() {
+      killAllBackgroundClis();
+      killAllDaemons();
       try {
         rmSync(home, { recursive: true, force: true });
       } catch {}
