@@ -57,21 +57,15 @@ class CliTimeoutError extends Error {
   }
 }
 
+/** Resolves the plannotator CLI entrypoint. Supports PLANNOTATOR_CLI_ENTRYPOINT env override for testing. */
 function resolveRepoLocalCliEntrypoint(directory: string): string | null {
-  // Allow tests and external callers to override the entrypoint path.
-  // When set, PLANNOTATOR_CLI_ENTRYPOINT is used directly without existence checks,
-  // which is useful for mocking in tests.
   const envOverride: string | undefined = process.env.PLANNOTATOR_CLI_ENTRYPOINT;
-  if (envOverride != null) {
+  if (envOverride !== undefined) {
     return envOverride;
   }
 
   const entrypoint = join(directory, "apps", "hook", "server", "index.ts");
-  if (existsSync(entrypoint)) {
-    return entrypoint;
-  }
-
-  return null;
+  return existsSync(entrypoint) ? entrypoint : null;
 }
 
 function resolvePlannotatorCommand(directory: string): CliCommand {
