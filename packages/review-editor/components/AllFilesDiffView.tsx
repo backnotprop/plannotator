@@ -154,6 +154,24 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
     });
   }, [activeFilePath]);
 
+  const collapseFile = useCallback((filePath: string) => {
+    if (!collapsedFiles.has(filePath)) {
+      collapseHistory.current.push(filePath);
+      setCollapsedFiles(prev => {
+        const next = new Set(prev);
+        next.add(filePath);
+        return next;
+      });
+    }
+    if (activeFilePath === filePath) setActiveFilePath(null);
+  }, [activeFilePath, collapsedFiles]);
+
+  const toggleViewedAndCollapse = useCallback((filePath: string) => {
+    const isCurrentlyViewed = viewedFiles.has(filePath);
+    onToggleViewed?.(filePath);
+    if (!isCurrentlyViewed) collapseFile(filePath);
+  }, [collapseFile, onToggleViewed, viewedFiles]);
+
   const setHeaderRef = useCallback((path: string, el: HTMLDivElement | null) => {
     if (el) headerRefs.current.set(path, el);
     else headerRefs.current.delete(path);
@@ -243,17 +261,7 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
 
       if (e.key === 'v' && currentPath) {
         e.preventDefault();
-        const isCurrentlyViewed = viewedFiles.has(currentPath);
-        onToggleViewed?.(currentPath);
-        if (!isCurrentlyViewed) {
-          collapseHistory.current.push(currentPath);
-          setCollapsedFiles(prev => {
-            const next = new Set(prev);
-            next.add(currentPath);
-            return next;
-          });
-          setActiveFilePath(null);
-        }
+        toggleViewedAndCollapse(currentPath);
         return;
       }
 
@@ -287,7 +295,7 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isActive, sortedFiles, collapsedFiles, activeFilePath, toggleCollapse, viewedFiles, onToggleViewed, canStageFiles, onStage, onAddFileComment]);
+  }, [isActive, sortedFiles, collapsedFiles, activeFilePath, toggleCollapse, toggleViewedAndCollapse, canStageFiles, onStage, onAddFileComment]);
 
   // Click-and-drag line selection in diff content
   useEffect(() => {
@@ -391,7 +399,7 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
                 filePath={file.path}
                 patch={file.patch}
                 isViewed={viewedFiles.has(file.path)}
-                onToggleViewed={onToggleViewed ? () => onToggleViewed(file.path) : undefined}
+                onToggleViewed={onToggleViewed ? () => toggleViewedAndCollapse(file.path) : undefined}
                 isStaged={stagedFiles?.has(file.path)}
                 isStaging={stagingFile === file.path}
                 onStage={onStage ? () => onStage(file.path) : undefined}
