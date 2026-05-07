@@ -35,7 +35,6 @@ export interface PlanReviewDecision {
 	savedPath?: string;
 	agentSwitch?: string;
 	permissionMode?: string;
-	clearContextNudge?: boolean;
 }
 
 export interface BrowserDecisionSession<T> {

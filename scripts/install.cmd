@@ -414,14 +414,6 @@ if exist "%USERPROFILE%\.cache\opencode\node_modules\@plannotator" rmdir /s /q "
 if exist "%USERPROFILE%\.cache\opencode\packages\@plannotator" rmdir /s /q "%USERPROFILE%\.cache\opencode\packages\@plannotator" >nul 2>&1
 if exist "%USERPROFILE%\.bun\install\cache\@plannotator" rmdir /s /q "%USERPROFILE%\.bun\install\cache\@plannotator" >nul 2>&1
 
-REM Update Pi extension if pi is installed
-where pi >nul 2>&1
-if !ERRORLEVEL! equ 0 (
-    echo Updating Pi extension...
-    pi install npm:@plannotator/pi-extension
-    echo Pi extension updated.
-)
-
 REM Install /review slash command
 if defined CLAUDE_CONFIG_DIR (
     set "CLAUDE_COMMANDS_DIR=%CLAUDE_CONFIG_DIR%\commands"
@@ -546,6 +538,40 @@ if !ERRORLEVEL! equ 0 (
     rmdir /s /q "!SKILLS_TMP!" >nul 2>&1
 ) else (
     echo Skipping skills install ^(git not found^)
+)
+
+REM Update Pi extension if pi is installed. When global shared skills are
+REM available, keep the extension commands but disable its bundled skill copy to
+REM avoid duplicate Pi skill warnings.
+where pi >nul 2>&1
+if !ERRORLEVEL! equ 0 (
+    echo Updating Pi extension...
+    pi install npm:@plannotator/pi-extension
+    if !ERRORLEVEL! equ 0 (
+        set "PI_SHARED_SKILLS_DIR=%USERPROFILE%\.agents\skills"
+        set "PI_SHARED_SKILLS_AVAILABLE=0"
+        if exist "!PI_SHARED_SKILLS_DIR!\plannotator-compound\SKILL.md" if exist "!PI_SHARED_SKILLS_DIR!\plannotator-setup-goal\SKILL.md" set "PI_SHARED_SKILLS_AVAILABLE=1"
+        if "!PI_SHARED_SKILLS_AVAILABLE!"=="1" (
+            if defined PI_CODING_AGENT_DIR (
+                set "PI_SETTINGS_PATH=!PI_CODING_AGENT_DIR!\settings.json"
+            ) else (
+                set "PI_SETTINGS_PATH=%USERPROFILE%\.pi\agent\settings.json"
+            )
+            if exist "!PI_SETTINGS_PATH!" (
+                where powershell >nul 2>&1
+                if !ERRORLEVEL! equ 0 (
+                    powershell -NoProfile -ExecutionPolicy Bypass -Command "$p=$env:PI_SETTINGS_PATH; if ((Test-Path $p) -eq $false) { exit 0 }; try { $s=Get-Content -Path $p -Raw -ErrorAction Stop | ConvertFrom-Json } catch { Write-Host 'Skipping Pi settings update (could not parse settings.json)'; exit 0 }; if (($null -eq $s) -or ($null -eq $s.packages)) { exit 0 }; $pattern='^(?:npm:)?@plannotator/pi-extension(?:@.+)?$'; $changed=$false; $packages=@(); foreach ($entry in @($s.packages)) { if (($entry -is [string]) -and ($entry -match $pattern)) { $packages += [pscustomobject]@{ source=$entry; skills=@() }; $changed=$true; continue }; $sourceProperty=$null; if (($null -ne $entry) -and ($null -ne $entry.PSObject)) { $sourceProperty=$entry.PSObject.Properties['source'] }; if (($null -ne $sourceProperty) -and ($sourceProperty.Value -is [string]) -and ($sourceProperty.Value -match $pattern)) { $skillsProperty=$entry.PSObject.Properties['skills']; if (($null -eq $skillsProperty) -or (@($skillsProperty.Value).Count -ne 0)) { if ($null -ne $skillsProperty) { $entry.skills=@() } else { $entry | Add-Member -NotePropertyName 'skills' -NotePropertyValue @() }; $changed=$true } }; $packages += $entry }; if ($changed) { $s.packages=@($packages); $tmp=[System.IO.Path]::GetTempFileName(); try { $json=($s | ConvertTo-Json -Depth 20)+[Environment]::NewLine; $utf8NoBom=New-Object System.Text.UTF8Encoding -ArgumentList $false; [System.IO.File]::WriteAllText($tmp,$json,$utf8NoBom); Move-Item -Force $tmp $p; Write-Host 'Configured Pi to use global Plannotator skills and skip bundled package skills.' } catch { Write-Host 'Skipping Pi settings update (could not rewrite settings.json)'; Remove-Item -Force $tmp -ErrorAction SilentlyContinue } }"
+                ) else (
+                    echo Skipping Pi settings update ^(PowerShell not found^)
+                )
+            )
+        ) else (
+            echo Leaving Pi bundled skills enabled ^(global Plannotator agent skills not found^).
+        )
+        echo Pi extension updated.
+    ) else (
+        echo Skipping Pi settings update ^(pi install failed^)
+    )
 )
 
 REM --- Gemini CLI support (only if Gemini is installed) ---

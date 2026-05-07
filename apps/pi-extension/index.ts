@@ -212,6 +212,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 	let checklistItems: ChecklistItem[] = [];
 	let savedState: SavedPhaseState | null = null;
 	let plannotatorConfig = {};
+	let justApprovedPlan = false;
 
 	pi.on("session_start", (_event, ctx) => {
 		currentPiSession.update(ctx);
@@ -349,7 +350,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 		await applyPhaseConfig(ctx, { restoreSavedState: false });
 		persistState();
 		ctx.ui.notify(
-			"Plannotator: planning mode enabled. Write a markdown plan, then submit it for review.",
+			"Plannotator: planning mode enabled.",
 		);
 		const warning = getPlanReviewAvailabilityWarning({ hasUI: ctx.hasUI, hasPlanHtml: hasPlanBrowserHtml() });
 		if (warning) {
@@ -853,6 +854,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				await applyPhaseConfig(ctx, { restoreSavedState: true });
 				pi.appendEntry("plannotator-execute", { lastSubmittedPath });
 				persistState();
+				justApprovedPlan = true;
 				return {
 					content: [
 						{
@@ -861,6 +863,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 						},
 					],
 					details: { approved: true },
+					terminate: true,
 				};
 			}
 
@@ -881,6 +884,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				await applyPhaseConfig(ctx, { restoreSavedState: true });
 				pi.appendEntry("plannotator-execute", { lastSubmittedPath });
 				persistState();
+				justApprovedPlan = true;
 
 				const doneMsg =
 					checklistItems.length > 0
@@ -900,6 +904,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 							},
 						],
 						details: { approved: true, feedback: result.feedback },
+						terminate: true,
 					};
 				}
 
@@ -914,6 +919,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 						},
 					],
 					details: { approved: true },
+					terminate: true,
 				};
 			}
 
@@ -1131,6 +1137,14 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 
 	// Detect execution completion
 	pi.on("agent_end", async (_event, ctx) => {
+		if (phase === "executing" && justApprovedPlan) {
+			justApprovedPlan = false;
+			setTimeout(() => {
+				pi.sendUserMessage("Continue with the approved plan.");
+			}, 0);
+			return;
+		}
+
 		if (phase !== "executing" || checklistItems.length === 0) return;
 
 		if (checklistItems.every((t) => t.completed)) {

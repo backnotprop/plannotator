@@ -15,7 +15,7 @@ import { TaterSpriteRunning } from '@plannotator/ui/components/TaterSpriteRunnin
 import { TaterSpritePullup } from '@plannotator/ui/components/TaterSpritePullup';
 import { Settings } from '@plannotator/ui/components/Settings';
 import { FeedbackButton, ApproveButton, ExitButton } from '@plannotator/ui/components/ToolbarButtons';
-import { ApproveDropdown, type ApproveExtraEntry } from '@plannotator/ui/components/ApproveDropdown';
+import { ApproveDropdown } from '@plannotator/ui/components/ApproveDropdown';
 import { useSharing } from '@plannotator/ui/hooks/useSharing';
 import { getCallbackConfig, CallbackAction, executeCallback, type ToastPayload } from '@plannotator/ui/utils/callback';
 import { useAgents } from '@plannotator/ui/hooks/useAgents';
@@ -77,7 +77,6 @@ import type { PlanDiffMode } from '@plannotator/ui/components/plan-diff/PlanDiff
 import { DEMO_PLAN_CONTENT as DEFAULT_DEMO_PLAN_CONTENT } from './demoPlan';
 import { DIFF_DEMO_PLAN_CONTENT } from './demoPlanDiffDemo';
 import { canUseAnnotateWideMode, resolveWideModeExitLayout, type WideModeLayoutSnapshot, type WideModeType } from './wideMode';
-import { buildApprovalRequestBody, type ApprovalOverride } from './approvalBody';
 const USE_DIFF_DEMO =
   import.meta.env.VITE_DIFF_DEMO === '1' ||
   import.meta.env.VITE_DIFF_DEMO === 'true';
@@ -104,7 +103,6 @@ const App: React.FC = () => {
   const [showImport, setShowImport] = useState(false);
   const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
   const [showClaudeCodeWarning, setShowClaudeCodeWarning] = useState(false);
-  const [pendingApprovalOverride, setPendingApprovalOverride] = useState<ApprovalOverride | null>(null);
   const [showExitWarning, setShowExitWarning] = useState(false);
   // When the warning dialog confirms, route to the handler matching the button that opened it.
   const [exitWarningAction, setExitWarningAction] = useState<'close' | 'approve'>('close');
@@ -943,8 +941,7 @@ const App: React.FC = () => {
   };
 
   // API mode handlers
-  const handleApprove = async (override: ApprovalOverride = {}) => {
-    setPendingApprovalOverride(null);
+  const handleApprove = async () => {
     setIsSubmitting(true);
     try {
       const obsidianSettings = getObsidianSettings();
@@ -955,14 +952,24 @@ const App: React.FC = () => {
         ? await autoSavePromiseRef.current
         : autoSaveResultsRef.current;
 
+      // Build request body - include integrations if enabled
+      const body: { obsidian?: object; bear?: object; octarine?: object; feedback?: string; agentSwitch?: string; planSave?: { enabled: boolean; customPath?: string }; permissionMode?: string } = {};
+
+      // Include permission mode for Claude Code
+      if (origin === 'claude-code') {
+        body.permissionMode = permissionMode;
+      }
+
       const effectiveAgent = getEffectiveAgentName(getAgentSwitchSettings());
-      const body = buildApprovalRequestBody({
-        origin,
-        permissionMode,
-        override,
-        effectiveAgent,
-        planSaveSettings,
-      });
+      if (effectiveAgent) {
+        body.agentSwitch = effectiveAgent;
+      }
+
+      // Include plan save settings
+      body.planSave = {
+        enabled: planSaveSettings.enabled,
+        ...(planSaveSettings.customPath && { customPath: planSaveSettings.customPath }),
+      };
 
       const effectiveVaultPath = getEffectiveVaultPath(obsidianSettings);
       if (obsidianSettings.enabled && effectiveVaultPath) {
@@ -1032,25 +1039,6 @@ const App: React.FC = () => {
       setIsSubmitting(false);
     }
   };
-
-  const approveWithClaudeCodeWarning = useCallback((override: ApprovalOverride = {}) => {
-    setPendingApprovalOverride(override);
-    if (origin === 'claude-code' && (allAnnotations.length > 0 || codeAnnotations.length > 0)) {
-      setShowClaudeCodeWarning(true);
-      return;
-    }
-    handleApprove(override);
-  }, [allAnnotations.length, codeAnnotations.length, origin, handleApprove]);
-
-  const claudeCodeExtraEntries = useMemo<ApproveExtraEntry[]>(() => (origin === 'claude-code' ? [{
-    id: 'approve-bypass-clear-reminder',
-    label: 'Approve + Bypass + /clear Reminder',
-    description: 'Requests bypass mode and reminds you to run /clear. Hooks cannot clear context directly.',
-    onSelect: () => approveWithClaudeCodeWarning({
-      permissionMode: 'bypassPermissions',
-      clearContextNudge: true,
-    }),
-  }] : []), [approveWithClaudeCodeWarning, origin]);
 
   // Annotate mode handler — sends feedback via /api/feedback
   const handleAnnotateFeedback = async () => {
@@ -1646,24 +1634,18 @@ const App: React.FC = () => {
                 )}
 
                 {(!annotateMode || gate) && (
-                  !annotateMode && (
-                    (origin === 'opencode' && availableAgents.length > 0) ||
-                    (origin === 'claude-code' && claudeCodeExtraEntries.length > 0)
-                  ) ? (
+                  origin === 'opencode' && !annotateMode && availableAgents.length > 0 ? (
                     <ApproveDropdown
                       onApprove={() => {
-                        if (origin === 'opencode') {
-                          const warning = getAgentWarning();
-                          if (warning) {
-                            setAgentWarningMessage(warning);
-                            setShowAgentWarning(true);
-                            return;
-                          }
+                        const warning = getAgentWarning();
+                        if (warning) {
+                          setAgentWarningMessage(warning);
+                          setShowAgentWarning(true);
+                          return;
                         }
-                        approveWithClaudeCodeWarning();
+                        handleApprove();
                       }}
-                      agents={origin === 'opencode' ? availableAgents : []}
-                      extraEntries={claudeCodeExtraEntries}
+                      agents={availableAgents}
                       disabled={isSubmitting}
                       isLoading={isSubmitting}
                     />
@@ -1681,7 +1663,6 @@ const App: React.FC = () => {
                             return;
                           }
                           if (origin === 'claude-code' && (allAnnotations.length > 0 || codeAnnotations.length > 0)) {
-                            setPendingApprovalOverride({});
                             setShowClaudeCodeWarning(true);
                             return;
                           }
@@ -1738,7 +1719,6 @@ const App: React.FC = () => {
                 onIdentityChange={handleIdentityChange}
                 origin={origin}
                 onUIPreferencesChange={setUiPrefs}
-                onPermissionModeChange={setPermissionMode}
                 externalOpen={mobileSettingsOpen}
                 onExternalClose={() => setMobileSettingsOpen(false)}
                 gitUser={gitUser}
@@ -2094,15 +2074,10 @@ const App: React.FC = () => {
         {/* Claude Code annotation warning dialog */}
         <ConfirmDialog
           isOpen={showClaudeCodeWarning}
-          onClose={() => {
-            setShowClaudeCodeWarning(false);
-            setPendingApprovalOverride(null);
-          }}
+          onClose={() => setShowClaudeCodeWarning(false)}
           onConfirm={() => {
-            const override = pendingApprovalOverride ?? {};
             setShowClaudeCodeWarning(false);
-            setPendingApprovalOverride(null);
-            handleApprove(override);
+            handleApprove();
           }}
           title="Annotations Won't Be Sent"
           message={<>{agentName} doesn't yet support feedback on approval. Your {allAnnotations.length + codeAnnotations.length} annotation{(allAnnotations.length + codeAnnotations.length) !== 1 ? 's' : ''} will be lost.</>}

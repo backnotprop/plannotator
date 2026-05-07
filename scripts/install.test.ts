@@ -121,6 +121,22 @@ describe("install.sh", () => {
     expect(script).toContain("Existing custom Codex Plannotator hook found");
     expect(script).not.toContain('hook.command.includes("plannotator")) {\n      hook.command = command;');
   });
+
+  test("configures Pi to skip bundled skills only after shared skills exist", () => {
+    expect(script).toContain("configure_pi_plannotator_package_filter");
+    expect(script).toContain("plannotator_shared_agent_skills_available");
+    expect(script).toContain("PI_CODING_AGENT_DIR");
+    expect(script).toContain("npm:@plannotator/pi-extension");
+    expect(script).toContain("return { source: entry, skills: [] };");
+    expect(script).toContain("Leaving Pi bundled skills enabled (global Plannotator agent skills not found).");
+    expect(script).toContain("Configured Pi to use global Plannotator skills and skip bundled package skills.");
+    expect(script).toContain("if plannotator_shared_agent_skills_available; then\n            configure_pi_plannotator_package_filter");
+
+    const skillsInstallIndex = script.indexOf("# Install skills (requires git)");
+    const piUpdateCallIndex = script.lastIndexOf("update_pi_extension_if_present");
+    expect(skillsInstallIndex).toBeGreaterThan(0);
+    expect(piUpdateCallIndex).toBeGreaterThan(skillsInstallIndex);
+  });
 });
 
 describe("install.ps1", () => {
@@ -218,6 +234,25 @@ describe("install.ps1", () => {
     expect(script).toContain("plannotator-review.md");
     expect(script).toContain("plannotator-annotate.md");
     expect(script).toContain("plannotator-last.md");
+  });
+
+  test("configures Pi to skip bundled skills only after shared skills exist", () => {
+    expect(script).toContain("Configure-PiPlannotatorPackageFilter");
+    expect(script).toContain("Test-PlannotatorSharedAgentSkillsAvailable");
+    expect(script).toContain("PI_CODING_AGENT_DIR");
+    expect(script).toContain("npm:@plannotator/pi-extension");
+    expect(script).toContain("skills = @()");
+    expect(script).toContain("New-Object System.Text.UTF8Encoding -ArgumentList $false");
+    expect(script).toContain("[System.IO.File]::WriteAllText($tmpPath, $json, $utf8NoBom)");
+    expect(script).not.toContain("$settings | ConvertTo-Json -Depth 20 | Set-Content -Path $tmpPath -Encoding UTF8");
+    expect(script).toContain("Leaving Pi bundled skills enabled (global Plannotator agent skills not found).");
+    expect(script).toContain("Configured Pi to use global Plannotator skills and skip bundled package skills.");
+    expect(script).toContain("if (Test-PlannotatorSharedAgentSkillsAvailable) {\n            Configure-PiPlannotatorPackageFilter");
+
+    const skillsInstallIndex = script.indexOf("# Install skills (requires git)");
+    const piUpdateCallIndex = script.lastIndexOf("Update-PiExtensionIfPresent");
+    expect(skillsInstallIndex).toBeGreaterThan(0);
+    expect(piUpdateCallIndex).toBeGreaterThan(skillsInstallIndex);
   });
 });
 
@@ -318,6 +353,27 @@ describe("install.cmd", () => {
     expect(script).toContain("s.hooks.BeforeTool=s.hooks.BeforeTool||[]");
     expect(script).not.toContain("if(!s.hooks)");
     expect(script).not.toContain("if(!s.hooks.BeforeTool)");
+  });
+
+  test("configures Pi to skip bundled skills only after shared skills exist", () => {
+    expect(script).toContain("PI_CODING_AGENT_DIR");
+    expect(script).toContain("PI_SETTINGS_PATH");
+    expect(script).toContain("$env:PI_SETTINGS_PATH");
+    expect(script).toContain("npm:@plannotator/pi-extension");
+    expect(script).toContain("skills=@()");
+    expect(script).toContain("New-Object System.Text.UTF8Encoding -ArgumentList $false");
+    expect(script).toContain("[System.IO.File]::WriteAllText($tmp,$json,$utf8NoBom)");
+    expect(script).not.toContain("Set-Content -Path $tmp -Encoding UTF8");
+    expect(script).toContain("Leaving Pi bundled skills enabled ^(global Plannotator agent skills not found^).");
+    expect(script).toContain("Configured Pi to use global Plannotator skills and skip bundled package skills.");
+    expect(script).toContain('set "PI_SHARED_SKILLS_AVAILABLE=0"');
+    expect(script).toContain('if exist "!PI_SHARED_SKILLS_DIR!\\plannotator-compound\\SKILL.md" if exist "!PI_SHARED_SKILLS_DIR!\\plannotator-setup-goal\\SKILL.md" set "PI_SHARED_SKILLS_AVAILABLE=1"');
+    expect(script).toContain('if "!PI_SHARED_SKILLS_AVAILABLE!"=="1"');
+
+    const skillsInstallIndex = script.indexOf("REM Install skills (requires git)");
+    const piUpdateIndex = script.lastIndexOf("REM Update Pi extension if pi is installed.");
+    expect(skillsInstallIndex).toBeGreaterThan(0);
+    expect(piUpdateIndex).toBeGreaterThan(skillsInstallIndex);
   });
 
   test("attestation verification is off by default with three-layer opt-in", () => {

@@ -302,11 +302,101 @@ Remove-Item -Recurse -Force "$env:USERPROFILE\.bun\install\cache\@plannotator" -
 # Clear Pi jiti cache to force fresh download on next run
 Remove-Item -Recurse -Force "$env:TEMP\jiti" -ErrorAction SilentlyContinue
 
-# Update Pi extension if pi is installed
-if (Get-Command pi -ErrorAction SilentlyContinue) {
+function Test-PlannotatorSharedAgentSkillsAvailable {
+    $agentsSkillsDir = "$env:USERPROFILE\.agents\skills"
+    return (Test-Path (Join-Path $agentsSkillsDir "plannotator-compound\SKILL.md")) -and
+        (Test-Path (Join-Path $agentsSkillsDir "plannotator-setup-goal\SKILL.md"))
+}
+
+function Configure-PiPlannotatorPackageFilter {
+    $piAgentDir = if ($env:PI_CODING_AGENT_DIR) { $env:PI_CODING_AGENT_DIR } else { "$env:USERPROFILE\.pi\agent" }
+    $piSettings = Join-Path $piAgentDir "settings.json"
+
+    if (-not (Test-Path $piSettings)) {
+        return
+    }
+
+    try {
+        $settings = Get-Content -Path $piSettings -Raw -ErrorAction Stop | ConvertFrom-Json
+    } catch {
+        Write-Host "Skipping Pi settings update (could not parse settings.json)"
+        return
+    }
+
+    if ($null -eq $settings -or $null -eq $settings.packages) {
+        return
+    }
+
+    $packagePattern = "^(?:npm:)?@plannotator/pi-extension(?:@.+)?$"
+    $changed = $false
+    $packages = @()
+
+    foreach ($entry in @($settings.packages)) {
+        if ($entry -is [string] -and $entry -match $packagePattern) {
+            $packages += [pscustomobject]@{
+                source = $entry
+                skills = @()
+            }
+            $changed = $true
+            continue
+        }
+
+        $sourceProperty = $null
+        if ($entry -and $entry.PSObject) {
+            $sourceProperty = $entry.PSObject.Properties["source"]
+        }
+
+        if ($sourceProperty -and $sourceProperty.Value -is [string] -and $sourceProperty.Value -match $packagePattern) {
+            $skillsProperty = $entry.PSObject.Properties["skills"]
+            if (-not $skillsProperty -or @($skillsProperty.Value).Count -ne 0) {
+                if ($skillsProperty) {
+                    $entry.skills = @()
+                } else {
+                    $entry | Add-Member -NotePropertyName "skills" -NotePropertyValue @()
+                }
+                $changed = $true
+            }
+        }
+
+        $packages += $entry
+    }
+
+    if (-not $changed) {
+        return
+    }
+
+    $settings.packages = @($packages)
+    $tmpPath = [System.IO.Path]::GetTempFileName()
+
+    try {
+        $json = ($settings | ConvertTo-Json -Depth 20) + "`n"
+        $utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
+        [System.IO.File]::WriteAllText($tmpPath, $json, $utf8NoBom)
+        Move-Item -Force $tmpPath $piSettings
+        Write-Host "Configured Pi to use global Plannotator skills and skip bundled package skills."
+    } catch {
+        Write-Host "Skipping Pi settings update (could not rewrite settings.json)"
+        Remove-Item -Force $tmpPath -ErrorAction SilentlyContinue
+    }
+}
+
+function Update-PiExtensionIfPresent {
+    if (-not (Get-Command pi -ErrorAction SilentlyContinue)) {
+        return
+    }
+
     Write-Host "Updating Pi extension..."
     pi install npm:@plannotator/pi-extension
-    Write-Host "Pi extension updated."
+    if ($LASTEXITCODE -eq 0) {
+        if (Test-PlannotatorSharedAgentSkillsAvailable) {
+            Configure-PiPlannotatorPackageFilter
+        } else {
+            Write-Host "Leaving Pi bundled skills enabled (global Plannotator agent skills not found)."
+        }
+        Write-Host "Pi extension updated."
+    } else {
+        Write-Host "Skipping Pi settings update (pi install failed)"
+    }
 }
 
 # Install Claude Code slash command
@@ -496,6 +586,11 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
 } else {
     Write-Host "Skipping skills install (git not found)"
 }
+
+# Update Pi extension if pi is installed. When global shared skills are
+# available, keep the extension commands but disable its bundled skill copy to
+# avoid duplicate Pi skill warnings.
+Update-PiExtensionIfPresent
 
 # --- Gemini CLI support (only if Gemini is installed) ---
 $geminiDir = "$env:USERPROFILE\.gemini"

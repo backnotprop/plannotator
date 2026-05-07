@@ -54,7 +54,6 @@ export interface PlanReviewDecision {
 	savedPath?: string;
 	agentSwitch?: string;
 	permissionMode?: string;
-	clearContextNudge?: boolean;
 }
 
 export interface PlanServerResult {
@@ -352,7 +351,6 @@ export async function startPlanReviewServer(options: {
 			let feedback: string | undefined;
 			let agentSwitch: string | undefined;
 			let requestedPermissionMode: string | undefined;
-			let clearContextNudge: boolean | undefined;
 			let planSaveEnabled = true;
 			let planSaveCustomPath: string | undefined;
 			try {
@@ -361,7 +359,6 @@ export async function startPlanReviewServer(options: {
 				if (body.agentSwitch) agentSwitch = body.agentSwitch as string;
 				if (body.permissionMode)
 					requestedPermissionMode = body.permissionMode as string;
-				if (body.clearContextNudge === true) clearContextNudge = true;
 				if (body.planSave !== undefined) {
 					const ps = body.planSave as { enabled: boolean; customPath?: string };
 					planSaveEnabled = ps.enabled;
@@ -423,7 +420,6 @@ export async function startPlanReviewServer(options: {
 				savedPath,
 				agentSwitch,
 				permissionMode: effectivePermissionMode,
-				clearContextNudge,
 			});
 			json(res, { ok: true, savedPath });
 		} else if (url.pathname === "/api/deny" && req.method === "POST") {
