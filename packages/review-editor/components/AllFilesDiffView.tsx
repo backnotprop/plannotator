@@ -445,7 +445,15 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
                   disableBackground,
                   hunkSeparators: 'line-info',
                   enableLineSelection: true,
-                  enableHoverUtility: true,
+                  enableGutterUtility: true,
+                  onGutterUtilityClick: (range: SelectedLineRange) => {
+                    if (activeFilePath === file.path) {
+                      toolbarHostRef.current?.handleLineSelectionEnd(range);
+                    } else {
+                      pendingToolbarRange.current = range;
+                      setActiveFilePath(file.path);
+                    }
+                  },
                   onLineSelectionEnd: (range: SelectedLineRange | null) => {
                     if (range) {
                       if (activeFilePath === file.path) {
@@ -472,25 +480,6 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
                     />
                   );
                 }}
-                renderHoverUtility={(getHoveredLine: () => { lineNumber: number; side: 'deletions' | 'additions' } | undefined) => (
-                  <button
-                    className="hover-add-comment"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const line = getHoveredLine();
-                      if (!line) return;
-                      const range = { start: line.lineNumber, end: line.lineNumber, side: line.side };
-                      if (activeFilePath === file.path) {
-                        toolbarHostRef.current?.handleLineSelectionEnd(range);
-                      } else {
-                        pendingToolbarRange.current = range;
-                        setActiveFilePath(file.path);
-                      }
-                    }}
-                  >
-                    +
-                  </button>
-                )}
               />
             )}
           </div>

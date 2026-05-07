@@ -37,8 +37,8 @@ interface PierreDiffContentProps {
   mergedAnnotations: DiffLineAnnotation<DiffAnnotationMetadata>[];
   pendingSelection: SelectedLineRange | null;
   onLineSelectionEnd: (range: SelectedLineRange | null) => void;
+  onGutterUtilityClick: (range: SelectedLineRange) => void;
   renderAnnotation: (annotation: { side: string; lineNumber: number; metadata?: DiffAnnotationMetadata }) => React.ReactNode;
-  renderHoverUtility: (getHoveredLine: () => { lineNumber: number; side: 'deletions' | 'additions' } | undefined) => React.ReactNode;
   onTokenClick?: (props: DiffTokenEventBaseProps, event: MouseEvent) => void;
   onTokenEnter?: (props: DiffTokenEventBaseProps, event: PointerEvent) => void;
   onTokenLeave?: (props: DiffTokenEventBaseProps, event: PointerEvent) => void;
@@ -57,8 +57,8 @@ const PierreDiffContent = React.memo(({
   mergedAnnotations,
   pendingSelection,
   onLineSelectionEnd,
+  onGutterUtilityClick,
   renderAnnotation,
-  renderHoverUtility,
   onTokenClick,
   onTokenEnter,
   onTokenLeave,
@@ -79,7 +79,8 @@ const PierreDiffContent = React.memo(({
         disableBackground,
         hunkSeparators: 'line-info',
         enableLineSelection: true,
-        enableHoverUtility: true,
+        enableGutterUtility: true,
+        onGutterUtilityClick,
         onLineSelectionEnd,
         onTokenClick,
         onTokenEnter,
@@ -88,7 +89,6 @@ const PierreDiffContent = React.memo(({
       lineAnnotations={mergedAnnotations}
       selectedLines={pendingSelection || undefined}
       renderAnnotation={renderAnnotation}
-      renderHoverUtility={renderHoverUtility}
     />
   );
 }, (prev, next) => (
@@ -107,8 +107,8 @@ const PierreDiffContent = React.memo(({
   prev.mergedAnnotations === next.mergedAnnotations &&
   prev.pendingSelection === next.pendingSelection &&
   prev.onLineSelectionEnd === next.onLineSelectionEnd &&
+  prev.onGutterUtilityClick === next.onGutterUtilityClick &&
   prev.renderAnnotation === next.renderAnnotation &&
-  prev.renderHoverUtility === next.renderHoverUtility &&
   prev.onTokenClick === next.onTokenClick &&
   prev.onTokenEnter === next.onTokenEnter &&
   prev.onTokenLeave === next.onTokenLeave
@@ -494,29 +494,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     );
   }, [filePath, onSelectAnnotation, handleEdit, onDeleteAnnotation, onClickAIMarker]);
 
-  // Render hover utility (+ button).
-  // Pierre manages visibility imperatively — it inserts/removes the slot
-  // container on line hover. We must always return a button; calling
-  // getHoveredLine() to gate rendering would return stale data because
-  // Pierre's hover state changes don't trigger React re-renders.
-  const renderHoverUtility = useCallback((getHoveredLine: () => { lineNumber: number; side: 'deletions' | 'additions' } | undefined) => {
-    return (
-      <button
-        className="hover-add-comment"
-        onClick={(e) => {
-          e.stopPropagation();
-          const line = getHoveredLine();
-          if (!line) return;
-          toolbarHostRef.current?.handleLineSelectionEnd({
-            start: line.lineNumber,
-            end: line.lineNumber,
-            side: line.side,
-          });
-        }}
-      >
-        +
-      </button>
-    );
+  const handleGutterUtilityClick = useCallback((range: SelectedLineRange) => {
+    toolbarHostRef.current?.handleLineSelectionEnd(range);
   }, []);
 
   useEffect(() => {
@@ -613,8 +592,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
               mergedAnnotations={mergedAnnotations}
               pendingSelection={pendingSelection}
               onLineSelectionEnd={handlePierreLineSelectionEnd}
+              onGutterUtilityClick={handleGutterUtilityClick}
               renderAnnotation={renderAnnotation}
-              renderHoverUtility={renderHoverUtility}
               onTokenClick={handleTokenClick}
               onTokenEnter={handleTokenEnter}
               onTokenLeave={handleTokenLeave}

@@ -241,32 +241,6 @@ diffs-container {
   background: oklch(from var(--primary) l c h / 0.3) !important;
 }
 
-/* Hover utility button — matches Pierre's [data-utility-button] sizing */
-.hover-add-comment {
-  appearance: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 1lh;
-  height: 1lh;
-  font-size: var(--diffs-font-size, 13px);
-  line-height: var(--diffs-line-height, 20px);
-  border: none;
-  border-radius: 4px;
-  background-color: var(--diffs-modified-base);
-  color: var(--diffs-bg);
-  fill: currentColor;
-  cursor: pointer;
-  position: relative;
-  z-index: 4;
-  padding: 0;
-  margin-right: calc(1ch - 1lh);
-}
-
-.hover-add-comment:hover {
-  filter: brightness(1.2);
-}
-
 /* File tree styling */
 .file-tree-item {
   display: flex;

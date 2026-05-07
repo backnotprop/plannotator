@@ -16,7 +16,6 @@ interface LazyFileDiffProps {
   annotations: DiffLineAnnotation<DiffAnnotationMetadata>[];
   selectedLines: SelectedLineRange | undefined;
   renderAnnotation: (annotation: DiffLineAnnotation<DiffAnnotationMetadata>) => React.ReactNode;
-  renderHoverUtility: (getHoveredLine: () => { lineNumber: number; side: 'deletions' | 'additions' } | undefined) => React.ReactNode;
 }
 
 function estimateHeight(fileDiff: FileDiffMetadata, diffStyle: 'split' | 'unified'): number {
@@ -35,7 +34,6 @@ export const LazyFileDiff: React.FC<LazyFileDiffProps> = ({
   annotations,
   selectedLines,
   renderAnnotation,
-  renderHoverUtility,
 }) => {
   const [mounted, setMounted] = useState(forceMount);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -114,7 +112,6 @@ export const LazyFileDiff: React.FC<LazyFileDiffProps> = ({
         lineAnnotations={annotations}
         selectedLines={selectedLines}
         renderAnnotation={renderAnnotation}
-        renderHoverUtility={renderHoverUtility}
       />
     </div>
   );
