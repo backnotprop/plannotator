@@ -18,7 +18,7 @@ import {
   startAnnotateServer,
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
-import { getVcsContext, runVcsDiff, resolveInitialDiffType } from "@plannotator/server/vcs";
+import { type DiffType, getVcsContext, runVcsDiff, resolveInitialDiffType } from "@plannotator/server/vcs";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
 import {
@@ -58,7 +58,7 @@ export async function handleReviewCommand(
   let rawPatch: string;
   let gitRef: string;
   let diffError: string | undefined;
-  let userDiffType: import("@plannotator/shared/config").DefaultDiffType | undefined;
+  let userDiffType: DiffType | undefined;
   let gitContext: Awaited<ReturnType<typeof getVcsContext>> | undefined;
   let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
 

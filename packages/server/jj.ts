@@ -3,9 +3,12 @@ import {
   type DiffType,
   type GitCommandResult,
   type GitContext,
+  type GitDiffOptions,
   validateFilePath,
 } from "@plannotator/shared/review-core";
 import { basename } from "node:path";
+
+const JJ_TRUNK_REVSET = "trunk()";
 
 async function runJj(
   args: string[],
@@ -54,7 +57,7 @@ export async function getJjContext(cwd?: string): Promise<GitContext> {
     availableBranches: targets,
     compareTarget: {
       diffTypes: ["jj-line"],
-      fallback: "@-",
+      fallback: defaultTarget,
       picker: {
         rowLabel: "from revision",
         triggerLabel: "revision",
@@ -75,9 +78,10 @@ export async function runJjDiff(
   diffType: DiffType,
   defaultBranch: string,
   cwd?: string,
+  options?: GitDiffOptions,
 ): Promise<DiffResult> {
-  const compareTarget = defaultBranch.length > 0 ? defaultBranch : "@-";
-  const args = getDiffArgs(diffType, compareTarget);
+  const compareTarget = defaultBranch.length > 0 ? defaultBranch : JJ_TRUNK_REVSET;
+  const args = getJjDiffArgs(diffType, compareTarget, options);
   if (!args) return { patch: "", label: "Unknown diff type" };
 
   const result = await runJj(args.args, { cwd });
@@ -116,7 +120,7 @@ export async function getJjFileContentsForDiff(
       };
     }
     case "jj-line":
-      const compareTarget = defaultBranch.length > 0 ? defaultBranch : "@-";
+      const compareTarget = defaultBranch.length > 0 ? defaultBranch : JJ_TRUNK_REVSET;
       return {
         oldContent: await jjFileContent(jjLineBaseRevset(compareTarget), oldFilePath, fileCwd),
         newContent: await jjFileContent("@", filePath, fileCwd),
@@ -131,41 +135,34 @@ export async function getJjFileContentsForDiff(
   }
 }
 
-function getDiffArgs(
+export function getJjDiffArgs(
   diffType: DiffType,
   compareTarget: string,
+  options?: GitDiffOptions,
 ): { args: string[]; label: string } | null {
+  const whitespaceArgs = options?.hideWhitespace ? ["-w"] : [];
+
   switch (diffType) {
     case "jj-current":
-      return { args: ["diff", "--git", "-r", "@"], label: "Current change" };
+      return { args: ["diff", "--git", ...whitespaceArgs, "-r", "@"], label: "Current change" };
     case "jj-last":
-      return { args: ["diff", "--git", "-r", "@-"], label: "Last change" };
+      return { args: ["diff", "--git", ...whitespaceArgs, "-r", "@-"], label: "Last change" };
     case "jj-line":
       return {
-        args: ["diff", "--git", "--from", jjLineBaseRevset(compareTarget), "--to", "@"],
+        args: ["diff", "--git", ...whitespaceArgs, "--from", jjLineBaseRevset(compareTarget), "--to", "@"],
         label: `Line of work vs ${compareTarget}`,
       };
     case "jj-all":
-      return { args: ["diff", "--git", "--from", "root()", "--to", "@"], label: "All files" };
+      return { args: ["diff", "--git", ...whitespaceArgs, "--from", "root()", "--to", "@"], label: "All files" };
     default:
       return null;
   }
 }
 
-export function selectDefaultJjCompareTarget(targets: { local: string[]; remote: string[] }): string {
-  const preferredRemote = preferredJjBranchNames()
-    .flatMap((name) => [
-      `${name}@origin`,
-      `${name}@upstream`,
-      ...targets.remote.filter((target) => target.startsWith(`${name}@`)).sort(),
-    ])
-    .find((target) => targets.remote.includes(target));
-  if (preferredRemote) return preferredRemote;
-
-  const preferredLocal = preferredJjBranchNames().find((name) => targets.local.includes(name));
-  if (preferredLocal) return preferredLocal;
-
-  return "@-";
+export function selectDefaultJjCompareTarget(_targets: { local: string[]; remote: string[] }): string {
+  // `trunk()` honors JJ's repository default bookmark/remote and user aliases;
+  // bookmarks are still listed so users can explicitly pick a different base.
+  return JJ_TRUNK_REVSET;
 }
 
 export function jjCompareTargetRevset(target: string): string {
@@ -281,10 +278,6 @@ function parseSerializedJjString(value: string): string | null {
   } catch {
     return null;
   }
-}
-
-function preferredJjBranchNames(): string[] {
-  return ["develop", "main", "master", "trunk"];
 }
 
 async function jjFileContent(rev: string, filePath: string, cwd?: string): Promise<string | null> {

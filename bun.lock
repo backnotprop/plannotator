@@ -64,7 +64,7 @@
     },
     "apps/opencode-plugin": {
       "name": "@plannotator/opencode",
-      "version": "0.19.7",
+      "version": "0.19.8",
       "dependencies": {
         "@opencode-ai/plugin": "^1.1.10",
       },
@@ -86,7 +86,7 @@
     },
     "apps/pi-extension": {
       "name": "@plannotator/pi-extension",
-      "version": "0.19.7",
+      "version": "0.19.8",
       "dependencies": {
         "@joplin/turndown-plugin-gfm": "^1.0.64",
         "@pierre/diffs": "^1.1.12",
@@ -191,7 +191,7 @@
     },
     "packages/server": {
       "name": "@plannotator/server",
-      "version": "0.19.7",
+      "version": "0.19.8",
       "dependencies": {
         "@pierre/diffs": "^1.1.12",
         "@plannotator/ai": "workspace:*",

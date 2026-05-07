@@ -152,8 +152,8 @@ const jjProvider: VcsProvider = {
 
   getContext: getJjContext,
 
-  runDiff(diffType: DiffType, defaultBranch: string, cwd?: string) {
-    return runJjDiff(diffType, defaultBranch, cwd);
+  runDiff(diffType: DiffType, defaultBranch: string, cwd?: string, options?: GitDiffOptions) {
+    return runJjDiff(diffType, defaultBranch, cwd, options);
   },
 
   getFileContents(diffType, defaultBranch, filePath, oldPath?, cwd?) {
@@ -261,6 +261,9 @@ export function resolveInitialDiffType(
 ): DiffType {
   if (gitContext.vcsType === "p4") {
     return "p4-default";
+  }
+  if (gitContext.vcsType === "jj") {
+    return "jj-current";
   }
   if (gitContext.diffOptions.some((option) => option.id === configuredDiffType)) {
     return configuredDiffType;
