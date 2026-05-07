@@ -121,9 +121,10 @@ export function getLocalDiffInstruction(
       };
     case "jj-line": {
       const base = defaultBranch || JJ_TRUNK_REVSET;
+      const baseRevset = jjLineBaseRevset(base);
       return {
-        target: `the JJ line of work against '${base}'`,
-        inspect: `Run \`jj diff --git --from '${jjLineBaseRevset(base)}' --to @\` to inspect the changes.`,
+        target: `the JJ line of work against \`${base}\``,
+        inspect: `Run \`jj diff --git --from ${shellQuote(baseRevset)} --to @\` to inspect the changes.`,
       };
     }
     case "jj-all":
@@ -139,4 +140,8 @@ export function getLocalDiffInstruction(
 function normalizeLocalDiffType(diffType: DiffType): string {
   const worktree = parseWorktreeDiffType(diffType);
   return worktree?.subType ?? diffType;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }

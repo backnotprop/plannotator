@@ -42,8 +42,15 @@ describe("buildAgentReviewUserMessage", () => {
   test("uses selected JJ compare target for line-of-work instructions", () => {
     const message = buildAgentReviewUserMessage(patch, "jj-line", { defaultBranch: "feature-base@origin" });
 
-    expect(message).toContain("the JJ line of work against 'feature-base@origin'");
+    expect(message).toContain("the JJ line of work against `feature-base@origin`");
     expect(message).toContain('remote_bookmarks(exact:"feature-base", exact:"origin")');
+  });
+
+  test("shell-quotes JJ line-of-work revsets with single quotes", () => {
+    const message = buildAgentReviewUserMessage(patch, "jj-line", { defaultBranch: "feature'base" });
+
+    expect(message).toContain("'heads(::@ & ::(bookmarks(exact:\"feature'\\''base\")))'");
+    expect(message).not.toContain(patch);
   });
 
   test("normalizes worktree diff types using the encoded subtype", () => {
