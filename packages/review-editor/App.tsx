@@ -1712,30 +1712,25 @@ const ReviewApp: React.FC = () => {
         <header className="py-1 flex items-center justify-between px-2 md:px-4 border-b border-border/50 bg-card/50 backdrop-blur-xl z-50">
           <div className="min-w-0 flex items-center gap-2 md:gap-3 -ml-1.5 md:-ml-3">
             {shouldShowFileTree && (
-              <button
-                onClick={() => setIsFileTreeOpen(prev => !prev)}
-                className={`p-1 rounded-md transition-all focus-visible:outline-none ${
-                  isFileTreeOpen
-                    ? 'text-primary'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                }`}
-                title={isFileTreeOpen ? 'Hide file tree' : 'Show file tree'}
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                </svg>
-              </button>
+              <>
+                <button
+                  onClick={() => setIsFileTreeOpen(prev => !prev)}
+                  className={`p-1 rounded-md transition-all focus-visible:outline-none ${
+                    isFileTreeOpen
+                      ? 'text-primary'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                  }`}
+                  title={isFileTreeOpen ? 'Hide file tree' : 'Show file tree'}
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  </svg>
+                </button>
+                <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
+              </>
             )}
             {prMetadata ? (
               <div className="min-w-0 flex items-center gap-2 md:gap-3">
-                {(gitContext || agentCwd) && (
-                  <button
-                    onClick={() => setShowWorktreeDialog(true)}
-                    className="text-[10px] font-medium text-primary/80 bg-primary/10 hover:bg-primary/20 px-1.5 py-0.5 rounded transition-colors cursor-pointer"
-                  >
-                    worktree
-                  </button>
-                )}
                 <span
                   className="text-xs text-muted-foreground/60 inline-flex items-center gap-1 whitespace-nowrap"
                 >
@@ -1983,6 +1978,18 @@ const ReviewApp: React.FC = () => {
 
             <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
 
+            <ReviewHeaderMenu
+              onOpenSettings={() => setOpenSettingsMenu(true)}
+              onOpenExport={() => setShowExportModal(true)}
+              onToggleFileTree={() => setIsFileTreeOpen(prev => !prev)}
+              onToggleSidebar={() => reviewSidebar.isOpen ? reviewSidebar.close() : reviewSidebar.open()}
+              isFileTreeOpen={isFileTreeOpen}
+              isSidebarOpen={reviewSidebar.isOpen}
+              appVersion={appVersion}
+            />
+
+            <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
+
             {/* Sidebar tab toggles */}
             <button
               onClick={() => reviewSidebar.toggleTab('annotations')}
@@ -2034,18 +2041,6 @@ const ReviewApp: React.FC = () => {
                 )}
               </button>
             )}
-
-            <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
-
-            <ReviewHeaderMenu
-              onOpenSettings={() => setOpenSettingsMenu(true)}
-              onOpenExport={() => setShowExportModal(true)}
-              onToggleFileTree={() => setIsFileTreeOpen(prev => !prev)}
-              onToggleSidebar={() => reviewSidebar.isOpen ? reviewSidebar.close() : reviewSidebar.open()}
-              isFileTreeOpen={isFileTreeOpen}
-              isSidebarOpen={reviewSidebar.isOpen}
-              appVersion={appVersion}
-            />
           </div>
         </header>
 
