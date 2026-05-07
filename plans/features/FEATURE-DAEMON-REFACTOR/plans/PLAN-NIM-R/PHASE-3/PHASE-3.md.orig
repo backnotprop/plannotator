@@ -57,7 +57,5 @@ Claude hook identity belongs to [[TASK-E13]], and stale verdict isolation belong
 ## Activity Log
 
 - 2026-05-04T08:00:04.000Z: created (unified phase for all 16 E2E specs)
-- 2026-05-07T18:00:00.000Z: status_changed (status) -> needs-review (all 15 E-tasks
-  reached needs-review)
-- 2026-05-07T18:00:00.000Z: updated (spec file refs) -> fixed 07/08/15 filenames to
-  match actual specs
+- 2026-05-07T18:00:00.000Z: status_changed (status) -> needs-review (all 15 E-tasks reached needs-review)
+- 2026-05-07T18:00:00.000Z: updated (spec file refs) -> fixed 07/08/15 filenames to match actual specs
