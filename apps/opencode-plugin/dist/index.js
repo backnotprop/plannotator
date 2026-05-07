@@ -4,6 +4,8 @@ import { tool } from "@opencode-ai/plugin";
 
 // tool-helpers.ts
 import { spawn } from "child_process";
+import { existsSync } from "fs";
+import { join } from "path";
 var REVIEW_TOOL_DIFF_TYPES = [
   "uncommitted",
   "staged",
@@ -18,16 +20,26 @@ class CliTimeoutError extends Error {
     this.name = "CliTimeoutError";
   }
 }
-function requirePlannotatorExecutable() {
-  const executable = Bun.which("plannotator");
-  if (!executable) {
-    throw new Error("Missing `plannotator` executable in PATH. Install the Plannotator CLI before using the OpenCode wrapper.");
+function resolveRepoLocalCliEntrypoint(directory) {
+  const envOverride = process.env.PLANNOTATOR_CLI_ENTRYPOINT;
+  if (envOverride) {
+    return envOverride;
   }
-  return executable;
+  const entrypoint = join(directory, "apps", "hook", "server", "index.ts");
+  if (!existsSync(entrypoint)) {
+    throw new Error(`Expected workspace-local plannotator CLI entrypoint at ${entrypoint}, but it does not exist. Set PLANNOTATOR_CLI_ENTRYPOINT to override.`);
+  }
+  return entrypoint;
+}
+function resolvePlannotatorCommand(directory) {
+  const entrypoint = resolveRepoLocalCliEntrypoint(directory);
+  return {
+    argv: [process.execPath, "run", entrypoint]
+  };
 }
 async function runPlannotatorCli(args, directory, options = {}) {
-  const command = [requirePlannotatorExecutable(), ...args];
-  const child = spawn(command[0], command.slice(1), {
+  const command = resolvePlannotatorCommand(directory);
+  const child = spawn(command.argv[0], [...command.argv.slice(1), ...args], {
     cwd: directory,
     env: {
       ...process.env,

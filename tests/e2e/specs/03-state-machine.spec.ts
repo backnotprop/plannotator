@@ -256,7 +256,7 @@ describe("03-state-machine", () => {
         ["submit", join(FIXTURES_DIR, "multi-section.md"), "--no-browser"],
         { env: env(), timeoutMs: 10_000 },
       );
-      expect(secondResult.exitCode).toBe(1);
+      expect(secondResult.exitCode).toBe(2);
 
       // Verify the error message mentions recovery options
       const combined = `${secondResult.stdout}\n${secondResult.stderr}`;
@@ -270,7 +270,7 @@ describe("03-state-machine", () => {
     }
   });
 
-  test("3.2.2 submitting while verdict_ready: CLI exits 1, references unfetched verdict", async () => {
+  test("3.2.2 submitting while verdict_ready: CLI exits 2, references unfetched verdict", async () => {
     const daemon = await startDaemon({ port, home: sandbox.home, binary });
     try {
       // Submit and then approve to reach verdict_ready (resolved) state
@@ -290,6 +290,9 @@ describe("03-state-machine", () => {
         await new Promise((r) => setTimeout(r, 100));
       }
 
+      firstSubmit.kill("SIGKILL");
+      await firstSubmit.waitForExit(5_000);
+
       await fetch(daemonUrl("/api/approve"), {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -303,13 +306,12 @@ describe("03-state-machine", () => {
         ["submit", join(FIXTURES_DIR, "multi-section.md"), "--no-browser"],
         { env: env(), timeoutMs: 10_000 },
       );
-      expect(secondResult.exitCode).toBe(1);
+      expect(secondResult.exitCode).toBe(2);
 
       const combined = `${secondResult.stdout}\n${secondResult.stderr}`;
       expect(combined.toLowerCase()).toMatch(/verdict|wait|resolved|clear/);
 
       // Consume the verdict to clean up (D2: must use --request-id in resolved state)
-      await firstSubmit.waitForExit();
       await runCli(["wait", "--request-id", firstDocumentId], { env: env(), timeoutMs: 10_000 });
     } finally {
       await daemon.stop();
@@ -524,12 +526,17 @@ describe("03-state-machine", () => {
 
       // Wait until active
       const deadline = Date.now() + 10_000;
+      let requestId = "";
       while (Date.now() < deadline) {
         const resp = await fetch(daemonUrl("/api/state"));
-        const body = (await resp.json()) as { status: string };
-        if (body.status === "awaiting-response") break;
+        const body = (await resp.json()) as { status: string; document?: { id?: string } };
+        if (body.status === "awaiting-response") {
+          requestId = body.document?.id ?? "";
+          break;
+        }
         await new Promise((r) => setTimeout(r, 100));
       }
+      expect(requestId.length).toBeGreaterThan(0);
 
       // Original agent process dies — daemon still holds the request
       firstSubmit.kill("SIGKILL");
@@ -540,9 +547,8 @@ describe("03-state-machine", () => {
       const state = (await stateResp.json()) as { status: string };
       expect(state.status).toBe("awaiting-response");
 
-      // Fresh CLI becomes the sole recovery waiter while still in_review
-      // (D2: wait without requestId is allowed while state is in_review)
-      const recoveryWait = runCliBackground(["wait"], { env: env() });
+      // Fresh CLI becomes the sole recovery waiter while still in_review.
+      const recoveryWait = runCliBackground(["wait", "--request-id", requestId], { env: env() });
 
       // UI approves
       await fetch(daemonUrl("/api/approve"), {

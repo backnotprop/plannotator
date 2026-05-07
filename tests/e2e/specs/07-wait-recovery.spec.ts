@@ -83,12 +83,17 @@ describe("07-wait-recovery", () => {
       );
 
       const deadline = Date.now() + 10_000;
+      let requestId = "";
       while (Date.now() < deadline) {
         const resp = await fetch(daemonUrl("/api/state"));
-        const body = (await resp.json()) as { status: string };
-        if (body.status === "awaiting-response") break;
+        const body = (await resp.json()) as { status: string; document?: { id?: string } };
+        if (body.status === "awaiting-response") {
+          requestId = body.document?.id ?? "";
+          break;
+        }
         await new Promise((r) => setTimeout(r, 100));
       }
+      expect(requestId.length).toBeGreaterThan(0);
 
       // Simulates agent process death — daemon still holds in_review
       submitHandle.kill("SIGKILL");
@@ -98,8 +103,8 @@ describe("07-wait-recovery", () => {
       const state1 = (await (await fetch(daemonUrl("/api/state"))).json()) as { status: string };
       expect(state1.status).toBe("awaiting-response");
 
-      // Fresh recovery waiter binds to the active request (plain wait allowed in in_review per D2)
-      const recoveryWait = runCliBackground(["wait"], { env: env() });
+      // Fresh recovery waiter binds to the active request with an exact request id.
+      const recoveryWait = runCliBackground(["wait", "--request-id", requestId], { env: env() });
 
       // UI still open; user approves
       await fetch(daemonUrl("/api/approve"), {
@@ -129,17 +134,22 @@ describe("07-wait-recovery", () => {
       );
 
       const deadline = Date.now() + 10_000;
+      let requestId = "";
       while (Date.now() < deadline) {
         const resp = await fetch(daemonUrl("/api/state"));
-        const body = (await resp.json()) as { status: string };
-        if (body.status === "awaiting-response") break;
+        const body = (await resp.json()) as { status: string; document?: { id?: string } };
+        if (body.status === "awaiting-response") {
+          requestId = body.document?.id ?? "";
+          break;
+        }
         await new Promise((r) => setTimeout(r, 100));
       }
+      expect(requestId.length).toBeGreaterThan(0);
 
       submitHandle.kill("SIGKILL");
       await submitHandle.waitForExit(5_000);
 
-      const recoveryWait = runCliBackground(["wait"], { env: env() });
+      const recoveryWait = runCliBackground(["wait", "--request-id", requestId], { env: env() });
 
       await fetch(daemonUrl("/api/deny"), {
         method: "POST",
@@ -309,14 +319,19 @@ describe("07-wait-recovery", () => {
     );
 
     const deadline = Date.now() + 10_000;
+    let requestId = "";
     while (Date.now() < deadline) {
       try {
         const resp = await fetch(daemonUrl("/api/state"));
-        const body = (await resp.json()) as { status: string };
-        if (body.status === "awaiting-response") break;
+        const body = (await resp.json()) as { status: string; document?: { id?: string } };
+        if (body.status === "awaiting-response") {
+          requestId = body.document?.id ?? "";
+          break;
+        }
       } catch {}
       await new Promise((r) => setTimeout(r, 100));
     }
+    expect(requestId.length).toBeGreaterThan(0);
 
     // SIGKILL the daemon hard — no chance for graceful shutdown
     try {
@@ -339,7 +354,7 @@ describe("07-wait-recovery", () => {
 
       if (state.status === "awaiting-response") {
         // Recovery waiter connects and blocks until UI acts
-        const recoveryWait = runCliBackground(["wait"], { env: env() });
+        const recoveryWait = runCliBackground(["wait", "--request-id", requestId], { env: env() });
 
         await fetch(daemonUrl("/api/approve"), {
           method: "POST",

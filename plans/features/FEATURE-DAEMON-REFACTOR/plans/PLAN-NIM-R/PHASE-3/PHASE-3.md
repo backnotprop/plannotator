@@ -16,7 +16,7 @@ successCriteria:
 tags:
 - FEATURE-DAEMON-REFACTOR
 - PLAN-NIM-R
-status: needs-review
+status: complete
 parents:
 - PLAN-NIM-R
 ---

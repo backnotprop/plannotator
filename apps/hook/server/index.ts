@@ -89,6 +89,7 @@ type ActivePlanContext = {
 
 type ActiveReviewContext = {
   diffType: DiffType;
+  cwd?: string;
   gitContext: Awaited<ReturnType<typeof getGitContext>>;
   repoInfo: Awaited<ReturnType<typeof getRepoInfo>>;
   error?: string;
@@ -125,8 +126,8 @@ function usageText(): string {
     "",
     "Exit codes:",
     "  0   approved or command completed successfully",
-    "  1   denied, collision, not running (daemon status), or daemon-delivered cancellation",
-    "  2   illegal-state rejection",
+    "  1   denied, stopped daemon status, or daemon-delivered cancellation",
+    "  2   collision or other illegal-state rejection",
     "  3   daemon failure or lost daemon connection after retry",
     "  130 local CLI cancellation via signal",
   ].join("\n");
@@ -444,6 +445,36 @@ async function printCollision(commandLabel: string): Promise<never> {
   );
 }
 
+function renderHookDeny(message: string): never {
+  console.log(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PermissionRequest",
+        decision: {
+          behavior: "deny",
+          message,
+        },
+      },
+    }),
+  );
+  process.exit(EXIT_OK);
+}
+
+async function printHookCollision(commandLabel: string): Promise<never> {
+  const state = await readDaemonStateFromHttp().catch(() => null);
+  const label = commandLabel === "submit" ? "plan submission" : commandLabel;
+  const requestId = state?.document?.id;
+  const details = [
+    `Plannotator could not accept this ${label} because another review is already active.`,
+    requestId ? `Active request ID: ${requestId}` : null,
+    "Reopen with: plannotator open",
+    "To fetch the active verdict: plannotator wait",
+    "To discard it: plannotator clear --force",
+  ].filter((line): line is string => Boolean(line));
+
+  renderHookDeny(details.join("\n"));
+}
+
 async function openSessionUrl(url: string): Promise<void> {
   const opened = await openBrowser(url);
   if (!opened) {
@@ -604,11 +635,7 @@ function renderPlainVerdict(payload: VerdictPayload): never {
   }
 
   if (feedback.cancelled) {
-    if (feedback.feedback) {
-      console.log(`Cancelled: ${feedback.feedback}`);
-    } else {
-      console.log("Cancelled.");
-    }
+    console.log(feedback.feedback || "Cancelled.");
   } else if (feedback.feedback) {
     console.log(feedback.feedback);
   }
@@ -708,6 +735,7 @@ async function submitDocument(
     noBrowser?: boolean;
     permissionMode?: string;
     commitMessage?: string;
+    submitPayload?: Record<string, unknown>;
     verdictFormat?: "plain" | "json";
   } = {},
 ): Promise<never> {
@@ -720,6 +748,7 @@ async function submitDocument(
         noBrowser: options.noBrowser === true,
         permissionMode: options.permissionMode,
         commitMessage: options.commitMessage,
+        ...options.submitPayload,
       }),
     });
 
@@ -791,7 +820,7 @@ async function submitPlanFromHook(): Promise<never> {
     });
 
     if (response.status === 409) {
-      await printCollision("submit");
+      await printHookCollision("submit");
     }
     if (!response.ok) {
       fail(text || `Daemon submit failed with ${response.status}.`, EXIT_DAEMON_FAILURE);
@@ -988,9 +1017,10 @@ async function runClear(args: string[]): Promise<never> {
 async function runReview(args: string[]): Promise<never> {
   const json = takeFlag(args, "--json");
   const diffType = (takeOption(args, "--diff-type") as DiffType | undefined) ?? "uncommitted";
-  const gitContext = await getGitContext();
-  const defaultBranch = gitContext.defaultBranch || (await getDefaultBranch());
-  const { patch, label } = await runGitDiff(diffType, defaultBranch);
+  const reviewCwd = process.env.PLANNOTATOR_CWD || process.cwd();
+  const gitContext = await getGitContext(reviewCwd);
+  const defaultBranch = gitContext.defaultBranch || (await getDefaultBranch(reviewCwd));
+  const { patch, label } = await runGitDiff(diffType, defaultBranch, reviewCwd);
   const document: DocumentSnapshot = {
     id: `review-${crypto.randomUUID()}`,
     mode: "review",
@@ -999,7 +1029,13 @@ async function runReview(args: string[]): Promise<never> {
     gitRef: label,
   };
 
-  await submitDocument(document, { verdictFormat: json ? "json" : "plain" });
+  await submitDocument(document, {
+    verdictFormat: json ? "json" : "plain",
+    submitPayload: {
+      diffType,
+      cwd: reviewCwd,
+    },
+  });
   fail("runReview returned unexpectedly.", EXIT_DAEMON_FAILURE);
 }
 
@@ -1190,12 +1226,15 @@ async function startForegroundDaemon(): Promise<void> {
             repoInfo,
           };
         } else if (nextState.document.mode === "review") {
+          const reviewCwd =
+            typeof body.cwd === "string" && body.cwd.length > 0 ? body.cwd : undefined;
           const diffType =
             typeof body.diffType === "string" ? (body.diffType as DiffType) : "uncommitted";
           activeReviewContext = {
             diffType,
-            gitContext: await getGitContext(),
-            repoInfo,
+            cwd: reviewCwd,
+            gitContext: await getGitContext(reviewCwd),
+            repoInfo: (await getRepoInfo(reviewCwd)) ?? repoInfo,
           };
         } else {
           activeAnnotateContext = { repoInfo };
@@ -1274,8 +1313,11 @@ async function startForegroundDaemon(): Promise<void> {
               return Response.json({ error: "Missing diffType" }, { status: 400 });
             }
 
-            const defaultBranch = await getDefaultBranch();
-            const result = await runGitDiff(body.diffType, defaultBranch);
+            const reviewCwd = activeReviewContext?.cwd;
+            const defaultBranch =
+              activeReviewContext?.gitContext.defaultBranch ??
+              (await getDefaultBranch(reviewCwd));
+            const result = await runGitDiff(body.diffType, defaultBranch, reviewCwd);
             if (currentState.document?.mode === "review" && currentState.document) {
               currentState = {
                 ...currentState,
@@ -1288,8 +1330,9 @@ async function startForegroundDaemon(): Promise<void> {
               saveState(currentState);
               activeReviewContext = {
                 diffType: body.diffType,
-                gitContext: await getGitContext(),
-                repoInfo,
+                cwd: reviewCwd,
+                gitContext: await getGitContext(reviewCwd),
+                repoInfo: (await getRepoInfo(reviewCwd)) ?? repoInfo,
                 error: result.error,
               };
             }
@@ -1307,7 +1350,7 @@ async function startForegroundDaemon(): Promise<void> {
         }
 
         if (url.pathname === "/api/file-content" && req.method === "GET") {
-          const filePath = url.searchParams.get("path");
+          const filePath = url.searchParams.get("path") ?? url.searchParams.get("file");
           if (!filePath) {
             return Response.json({ error: "Missing path" }, { status: 400 });
           }
@@ -1328,11 +1371,18 @@ async function startForegroundDaemon(): Promise<void> {
           }
 
           try {
+            const reviewCwd = activeReviewContext?.cwd;
+            const diffType = activeReviewContext?.diffType ?? "uncommitted";
+            const defaultBranch =
+              activeReviewContext?.gitContext.defaultBranch ??
+              (await getDefaultBranch(reviewCwd));
             return Response.json(
               await getFileContentsForDiff(
+                diffType,
+                defaultBranch,
                 filePath,
                 oldPath,
-                currentState.document?.gitRef || "HEAD",
+                reviewCwd,
               ),
             );
           } catch (error) {
@@ -1350,10 +1400,11 @@ async function startForegroundDaemon(): Promise<void> {
             }
 
             validateFilePath(body.filePath);
+            const targetCwd = activeReviewContext?.cwd;
             if (body.undo) {
-              await gitResetFile(body.filePath);
+              await gitResetFile(body.filePath, targetCwd);
             } else {
-              await gitAddFile(body.filePath);
+              await gitAddFile(body.filePath, targetCwd);
             }
 
             return Response.json({ ok: true });

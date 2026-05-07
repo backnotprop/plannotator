@@ -16,7 +16,7 @@ successCriteria:
 - Final verification passes twice from empty state and leaves no daemon process or contaminated state.
 tags:
 - FEATURE-DAEMON-REFACTOR
-status: in-progress
+status: complete
 dependsOn: []
 phases:
 - '[[PHASE-0]]'

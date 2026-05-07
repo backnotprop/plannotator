@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   statSync,
   symlinkSync,
@@ -16,10 +17,55 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(fileURLToPath(new URL('../../../', import.meta.url)));
 const bunExecutable = Bun.which('bun') ?? 'bun';
+const e2eCacheDir = join(tmpdir(), 'plannotator-e2e');
+const e2eBinaryMarkerPath = join(e2eCacheDir, 'binary.path');
+const BINARY_INPUTS = [
+  'apps/hook',
+  'packages/server',
+  'packages/ui',
+  'packages/editor',
+  'packages/review-editor',
+  'packages/shared',
+  'package.json',
+  'bunfig.toml',
+];
 
 const HOOK_ENTRY_REL = 'apps/hook/server/index.ts';
 
 let cachedBinaryPromise: Promise<string> | undefined;
+
+function newestInputMtimeMs(): number {
+  let newest = 0;
+  const skipNames = new Set(['.git', 'dist', 'node_modules']);
+  const stack = BINARY_INPUTS.map((relativePath) => join(repoRoot, relativePath)).filter(existsSync);
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+    const stat = statSync(current);
+    newest = Math.max(newest, stat.mtimeMs);
+    if (!stat.isDirectory()) {
+      continue;
+    }
+
+    for (const entry of readdirSync(current)) {
+      if (skipNames.has(entry)) {
+        continue;
+      }
+      stack.push(join(current, entry));
+    }
+  }
+
+  return newest;
+}
+
+function isFreshBinary(binaryPath: string): boolean {
+  if (!existsSync(binaryPath)) {
+    return false;
+  }
+
+  return statSync(binaryPath).mtimeMs >= newestInputMtimeMs();
+}
 
 function isPlannotatorDependencyRoot(candidate: string): boolean {
   if (!existsSync(join(candidate, 'node_modules'))) {
@@ -231,16 +277,23 @@ function runShell(
 }
 
 export async function buildBinary(): Promise<string> {
+  if (cachedBinaryPromise) {
+    const cached = await cachedBinaryPromise;
+    if (isFreshBinary(cached)) {
+      return cached;
+    }
+    cachedBinaryPromise = undefined;
+  }
+
   // Fast path: parent process (global-setup or prior worker) already built it.
   const prebuilt = process.env.PLANNOTATOR_E2E_BINARY;
-  if (prebuilt && existsSync(prebuilt)) {
+  if (prebuilt && isFreshBinary(prebuilt)) {
     return prebuilt;
   }
   // Fallback: check the shared marker file written by global-setup.
-  const markerPath = join(tmpdir(), "plannotator-e2e-binary.path");
-  if (!prebuilt && existsSync(markerPath)) {
-    const cached = readFileSync(markerPath, "utf8").trim();
-    if (existsSync(cached)) {
+  if (existsSync(e2eBinaryMarkerPath)) {
+    const cached = readFileSync(e2eBinaryMarkerPath, "utf8").trim();
+    if (isFreshBinary(cached)) {
       process.env.PLANNOTATOR_E2E_BINARY = cached;
       return cached;
     }
@@ -292,7 +345,9 @@ export async function buildBinary(): Promise<string> {
       throw err;
     });
   }
-  return cachedBinaryPromise;
+  const binaryPath = await cachedBinaryPromise;
+  process.env.PLANNOTATOR_E2E_BINARY = binaryPath;
+  return binaryPath;
 }
 
 export async function waitForPort(port: number, timeoutMs = 10_000): Promise<void> {

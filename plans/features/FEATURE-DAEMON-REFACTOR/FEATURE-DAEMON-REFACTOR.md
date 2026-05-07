@@ -7,7 +7,7 @@ dependsOn: []
 plans:
 - '[[PLAN-NIM-R]]'
 title: Local daemon refactor with E2E certification
-status: in-progress
+status: done
 priority: critical
 owner: dzack
 description: Replace Plannotator's per-invocation server model with a persistent local

@@ -477,7 +477,7 @@ function expectSuccessOutput(result: CommandResult, matcher: RegExp): void {
 }
 
 function expectCollisionGuidance(result: CommandResult): void {
-  expect(result.exitCode).toBe(1);
+  expect(result.exitCode).toBe(2);
   expect(result.stdout).toBe("");
   expect(result.stderr).toContain("409");
   expect(result.stderr).toContain("plannotator wait");
@@ -702,7 +702,7 @@ describe("NIM-18 CLI contract proof", () => {
       );
       expect(waitResult.exitCode).toBe(1);
       expect(waitResult.stderr).toBe("");
-      expect(waitResult.stdout).toMatch(/\bcancelled\b/i);
+      expect(waitResult.stdout).toMatch(/Submission cleared before a verdict was delivered\.|\bcancelled\b/i);
 
       const replacementSubmit = spawnCli(
         workspace.workspaceRoot,

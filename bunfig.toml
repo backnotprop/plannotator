@@ -1,2 +1,5 @@
 [install]
 linker = "isolated"
+
+[test]
+preload = ["./tests/e2e/global-setup.ts"]

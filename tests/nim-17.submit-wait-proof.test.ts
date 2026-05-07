@@ -99,13 +99,13 @@ const reviewDocument: DocumentSnapshot = {
 const approvedPlanFeedback: FeedbackPayload = {
   approved: true,
   feedback: "The daemon delivered the plan verdict.",
-  annotations: [
-    {
-      blockId: "proof-1",
-      type: "COMMENT",
-      text: "Verdict should stay buffered until clear.",
-    },
-  ],
+      annotations: [
+        {
+          blockId: "proof-1",
+          type: "COMMENT",
+          text: "Verdict should be consumed once the eligible waiter receives it.",
+        },
+      ],
   permissionMode: "acceptEdits",
 };
 
@@ -305,9 +305,10 @@ function parseSseEvent(rawEvent: string): SseEvent | null {
   }
 }
 
-async function connectSseClient(url: string): Promise<SseClient> {
+async function connectSseClient(url: string, requestId?: string): Promise<SseClient> {
   const controller = new AbortController();
-  const response = await fetch(`${url}/api/wait`, {
+  const waitUrl = requestId ? `${url}/api/wait?requestId=${encodeURIComponent(requestId)}` : `${url}/api/wait`;
+  const response = await fetch(waitUrl, {
     headers: {
       accept: "text/event-stream",
     },
@@ -556,7 +557,7 @@ describe("NIM-17 submit/wait proof", () => {
     }
   }, ROUTER_CASE_TIMEOUT_MS);
 
-  test("delivers a live verdict to a connected waiter and keeps the same verdict buffered until clear", async () => {
+  test("delivers a live verdict to a connected waiter and clears the request once that waiter consumes it", async () => {
     const server = await startDaemonServer(idleState);
 
     try {
@@ -579,20 +580,9 @@ describe("NIM-17 submit/wait proof", () => {
         await waiter.close();
       }
 
-      const lateWaiter = await connectSseClient(server.url);
-      try {
-        const replayedVerdict = await lateWaiter.waitForEvent(eventCarriesApprovedVerdict);
-        expect(extractFeedbackFromEvent(replayedVerdict)).toMatchObject({
-          approved: true,
-          feedback: approvedPlanFeedback.feedback,
-        });
-        expect(extractDocumentIdFromEvent(replayedVerdict)).toBe(planDocument.id);
-      } finally {
-        await lateWaiter.close();
-      }
-
-      const cleared = await postClear(server.url);
-      expect(cleared.response.status).toBe(200);
+      const lateWait = await fetch(`${server.url}/api/wait?requestId=${planDocument.id}`);
+      expect(lateWait.status).toBe(409);
+      expect(await lateWait.text()).toContain("verdict_consumed_or_unknown");
 
       const resubmitted = await postSubmit(server.url, reviewDocument);
       expect([200, 202]).toContain(resubmitted.response.status);
@@ -614,7 +604,8 @@ describe("NIM-17 submit/wait proof", () => {
       const approve = await postApprove(server.url, approvedPlanFeedback);
       expect(approve.response.status).toBe(200);
 
-      const reconnectedWaiter = await connectSseClient(server.url);
+      // State is now resolved — must pass requestId per D2 enforcement
+      const reconnectedWaiter = await connectSseClient(server.url, planDocument.id);
       try {
         const replayedVerdict = await reconnectedWaiter.waitForEvent(eventCarriesApprovedVerdict);
         expect(extractFeedbackFromEvent(replayedVerdict)).toMatchObject({

@@ -6,7 +6,7 @@ parents:
 - '[[FEATURE-DAEMON-REFACTOR]]'
 dependsOn: []
 title: Daemon refactor E2E certification spec
-status: in-progress
+status: done
 priority: critical
 requirement: The daemon refactor must be accepted only after a built Plannotator artifact
   satisfies the daemon lifecycle, singleton state, submit/wait/clear, crash recovery,

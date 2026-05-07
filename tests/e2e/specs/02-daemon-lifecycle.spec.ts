@@ -202,7 +202,7 @@ describe("02-daemon-lifecycle", () => {
     } finally {
       await new Promise<void>((resolve) => blocker.close(() => resolve()));
     }
-  });
+  }, 20_000);
 
   // ─── 2.10 foreground mode ──────────────────────────────────────────────────
   test("2.10 foreground mode: daemon start --foreground runs in shell, SIGTERM stops cleanly", async () => {

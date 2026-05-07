@@ -3,21 +3,21 @@
 graph LR
   subgraph group_feature["Features"]
     direction TB
-    FEATURE_DAEMON_REFACTOR["FEATURE-DAEMON-REFACTOR [in-progress]"]
+    FEATURE_DAEMON_REFACTOR["FEATURE-DAEMON-REFACTOR [done]"]
     class FEATURE_DAEMON_REFACTOR internal-link
-    class FEATURE_DAEMON_REFACTOR status_in_progress
+    class FEATURE_DAEMON_REFACTOR status_done
   end
   subgraph group_spec["Specs"]
     direction TB
-    SPEC_DAEMON_E2E_CERTIFICATION["SPEC-DAEMON-E2E-CERTIFICATION [in-progress]"]
+    SPEC_DAEMON_E2E_CERTIFICATION["SPEC-DAEMON-E2E-CERTIFICATION [done]"]
     class SPEC_DAEMON_E2E_CERTIFICATION internal-link
-    class SPEC_DAEMON_E2E_CERTIFICATION status_in_progress
+    class SPEC_DAEMON_E2E_CERTIFICATION status_done
   end
   subgraph group_plan["Plans"]
     direction TB
-    PLAN_NIM_R["PLAN-NIM-R [in-progress]"]
+    PLAN_NIM_R["PLAN-NIM-R [complete]"]
     class PLAN_NIM_R internal-link
-    class PLAN_NIM_R status_in_progress
+    class PLAN_NIM_R status_complete
   end
   subgraph group_phase["Phases"]
     direction TB
@@ -27,15 +27,15 @@ graph LR
     PHASE_1["PHASE-1 [complete]"]
     class PHASE_1 internal-link
     class PHASE_1 status_complete
-    PHASE_4["PHASE-4 [needs-review]"]
+    PHASE_4["PHASE-4 [complete]"]
     class PHASE_4 internal-link
-    class PHASE_4 status_needs_review
+    class PHASE_4 status_complete
     PHASE_2["PHASE-2 [complete]"]
     class PHASE_2 internal-link
     class PHASE_2 status_complete
-    PHASE_3["PHASE-3 [needs-review]"]
+    PHASE_3["PHASE-3 [complete]"]
     class PHASE_3 internal-link
-    class PHASE_3 status_needs_review
+    class PHASE_3 status_complete
     PHASE_2_TDD["PHASE-2-TDD [complete]"]
     class PHASE_2_TDD internal-link
     class PHASE_2_TDD status_complete
@@ -72,51 +72,51 @@ graph LR
     TASK_TDD_S_5["TASK-TDD-S-5 [complete]"]
     class TASK_TDD_S_5 internal-link
     class TASK_TDD_S_5 status_complete
-    TASK_E01["TASK-E01 [needs-review]"]
+    TASK_E01["TASK-E01 [complete]"]
     class TASK_E01 internal-link
-    class TASK_E01 status_needs_review
-    TASK_E06["TASK-E06 [needs-review]"]
+    class TASK_E01 status_complete
+    TASK_E06["TASK-E06 [complete]"]
     class TASK_E06 internal-link
-    class TASK_E06 status_needs_review
-    TASK_E04["TASK-E04 [needs-review]"]
+    class TASK_E06 status_complete
+    TASK_E04["TASK-E04 [complete]"]
     class TASK_E04 internal-link
-    class TASK_E04 status_needs_review
-    TASK_E10["TASK-E10 [needs-review]"]
+    class TASK_E04 status_complete
+    TASK_E10["TASK-E10 [complete]"]
     class TASK_E10 internal-link
-    class TASK_E10 status_needs_review
-    TASK_E07["TASK-E07 [needs-review]"]
+    class TASK_E10 status_complete
+    TASK_E07["TASK-E07 [complete]"]
     class TASK_E07 internal-link
-    class TASK_E07 status_needs_review
-    TASK_E02["TASK-E02 [needs-review]"]
+    class TASK_E07 status_complete
+    TASK_E02["TASK-E02 [complete]"]
     class TASK_E02 internal-link
-    class TASK_E02 status_needs_review
-    TASK_E11["TASK-E11 [needs-review]"]
+    class TASK_E02 status_complete
+    TASK_E11["TASK-E11 [complete]"]
     class TASK_E11 internal-link
-    class TASK_E11 status_needs_review
-    TASK_E08["TASK-E08 [needs-review]"]
+    class TASK_E11 status_complete
+    TASK_E08["TASK-E08 [complete]"]
     class TASK_E08 internal-link
-    class TASK_E08 status_needs_review
-    TASK_E12["TASK-E12 [needs-review]"]
+    class TASK_E08 status_complete
+    TASK_E12["TASK-E12 [complete]"]
     class TASK_E12 internal-link
-    class TASK_E12 status_needs_review
-    TASK_E14["TASK-E14 [needs-review]"]
+    class TASK_E12 status_complete
+    TASK_E14["TASK-E14 [complete]"]
     class TASK_E14 internal-link
-    class TASK_E14 status_needs_review
-    TASK_E05["TASK-E05 [needs-review]"]
+    class TASK_E14 status_complete
+    TASK_E05["TASK-E05 [complete]"]
     class TASK_E05 internal-link
-    class TASK_E05 status_needs_review
-    TASK_E15["TASK-E15 [needs-review]"]
+    class TASK_E05 status_complete
+    TASK_E15["TASK-E15 [complete]"]
     class TASK_E15 internal-link
-    class TASK_E15 status_needs_review
-    TASK_E03["TASK-E03 [needs-review]"]
+    class TASK_E15 status_complete
+    TASK_E03["TASK-E03 [complete]"]
     class TASK_E03 internal-link
-    class TASK_E03 status_needs_review
-    TASK_E09["TASK-E09 [needs-review]"]
+    class TASK_E03 status_complete
+    TASK_E09["TASK-E09 [complete]"]
     class TASK_E09 internal-link
-    class TASK_E09 status_needs_review
-    TASK_E13["TASK-E13 [needs-review]"]
+    class TASK_E09 status_complete
+    TASK_E13["TASK-E13 [complete]"]
     class TASK_E13 internal-link
-    class TASK_E13 status_needs_review
+    class TASK_E13 status_complete
     TASK_S_1["TASK-S-1 [complete]"]
     class TASK_S_1 internal-link
     class TASK_S_1 status_complete
@@ -144,9 +144,9 @@ graph LR
     TASK_S_7["TASK-S-7 [complete]"]
     class TASK_S_7 internal-link
     class TASK_S_7 status_complete
-    TASK_S_10["TASK-S-10 [needs-review]"]
+    TASK_S_10["TASK-S-10 [complete]"]
     class TASK_S_10 internal-link
-    class TASK_S_10 status_needs_review
+    class TASK_S_10 status_complete
     TASK_E00["TASK-E00 [complete]"]
     class TASK_E00 internal-link
     class TASK_E00 status_complete
@@ -325,8 +325,7 @@ graph LR
   DECISION_D4 --> TASK_D4
   classDef status_complete fill:#d8f5e7,stroke:#16a34a,color:#14532d
   classDef status_decided fill:#d8f5e7,stroke:#16a34a,color:#14532d
-  classDef status_in_progress fill:#d7f3ff,stroke:#0284c7,color:#0f172a
-  classDef status_needs_review fill:#fff1c2,stroke:#d97706,color:#7c2d12
+  classDef status_done fill:#d8f5e7,stroke:#16a34a,color:#14532d
 ```
 
 # Containment DAG
@@ -334,21 +333,21 @@ graph LR
 graph LR
   subgraph group_feature["Features"]
     direction TB
-    FEATURE_DAEMON_REFACTOR["FEATURE-DAEMON-REFACTOR [in-progress]"]
+    FEATURE_DAEMON_REFACTOR["FEATURE-DAEMON-REFACTOR [done]"]
     class FEATURE_DAEMON_REFACTOR internal-link
-    class FEATURE_DAEMON_REFACTOR status_in_progress
+    class FEATURE_DAEMON_REFACTOR status_done
   end
   subgraph group_spec["Specs"]
     direction TB
-    SPEC_DAEMON_E2E_CERTIFICATION["SPEC-DAEMON-E2E-CERTIFICATION [in-progress]"]
+    SPEC_DAEMON_E2E_CERTIFICATION["SPEC-DAEMON-E2E-CERTIFICATION [done]"]
     class SPEC_DAEMON_E2E_CERTIFICATION internal-link
-    class SPEC_DAEMON_E2E_CERTIFICATION status_in_progress
+    class SPEC_DAEMON_E2E_CERTIFICATION status_done
   end
   subgraph group_plan["Plans"]
     direction TB
-    PLAN_NIM_R["PLAN-NIM-R [in-progress]"]
+    PLAN_NIM_R["PLAN-NIM-R [complete]"]
     class PLAN_NIM_R internal-link
-    class PLAN_NIM_R status_in_progress
+    class PLAN_NIM_R status_complete
   end
   subgraph group_phase["Phases"]
     direction TB
@@ -358,15 +357,15 @@ graph LR
     PHASE_1["PHASE-1 [complete]"]
     class PHASE_1 internal-link
     class PHASE_1 status_complete
-    PHASE_4["PHASE-4 [needs-review]"]
+    PHASE_4["PHASE-4 [complete]"]
     class PHASE_4 internal-link
-    class PHASE_4 status_needs_review
+    class PHASE_4 status_complete
     PHASE_2["PHASE-2 [complete]"]
     class PHASE_2 internal-link
     class PHASE_2 status_complete
-    PHASE_3["PHASE-3 [needs-review]"]
+    PHASE_3["PHASE-3 [complete]"]
     class PHASE_3 internal-link
-    class PHASE_3 status_needs_review
+    class PHASE_3 status_complete
     PHASE_2_TDD["PHASE-2-TDD [complete]"]
     class PHASE_2_TDD internal-link
     class PHASE_2_TDD status_complete
@@ -403,51 +402,51 @@ graph LR
     TASK_TDD_S_5["TASK-TDD-S-5 [complete]"]
     class TASK_TDD_S_5 internal-link
     class TASK_TDD_S_5 status_complete
-    TASK_E01["TASK-E01 [needs-review]"]
+    TASK_E01["TASK-E01 [complete]"]
     class TASK_E01 internal-link
-    class TASK_E01 status_needs_review
-    TASK_E06["TASK-E06 [needs-review]"]
+    class TASK_E01 status_complete
+    TASK_E06["TASK-E06 [complete]"]
     class TASK_E06 internal-link
-    class TASK_E06 status_needs_review
-    TASK_E04["TASK-E04 [needs-review]"]
+    class TASK_E06 status_complete
+    TASK_E04["TASK-E04 [complete]"]
     class TASK_E04 internal-link
-    class TASK_E04 status_needs_review
-    TASK_E10["TASK-E10 [needs-review]"]
+    class TASK_E04 status_complete
+    TASK_E10["TASK-E10 [complete]"]
     class TASK_E10 internal-link
-    class TASK_E10 status_needs_review
-    TASK_E07["TASK-E07 [needs-review]"]
+    class TASK_E10 status_complete
+    TASK_E07["TASK-E07 [complete]"]
     class TASK_E07 internal-link
-    class TASK_E07 status_needs_review
-    TASK_E02["TASK-E02 [needs-review]"]
+    class TASK_E07 status_complete
+    TASK_E02["TASK-E02 [complete]"]
     class TASK_E02 internal-link
-    class TASK_E02 status_needs_review
-    TASK_E11["TASK-E11 [needs-review]"]
+    class TASK_E02 status_complete
+    TASK_E11["TASK-E11 [complete]"]
     class TASK_E11 internal-link
-    class TASK_E11 status_needs_review
-    TASK_E08["TASK-E08 [needs-review]"]
+    class TASK_E11 status_complete
+    TASK_E08["TASK-E08 [complete]"]
     class TASK_E08 internal-link
-    class TASK_E08 status_needs_review
-    TASK_E12["TASK-E12 [needs-review]"]
+    class TASK_E08 status_complete
+    TASK_E12["TASK-E12 [complete]"]
     class TASK_E12 internal-link
-    class TASK_E12 status_needs_review
-    TASK_E14["TASK-E14 [needs-review]"]
+    class TASK_E12 status_complete
+    TASK_E14["TASK-E14 [complete]"]
     class TASK_E14 internal-link
-    class TASK_E14 status_needs_review
-    TASK_E05["TASK-E05 [needs-review]"]
+    class TASK_E14 status_complete
+    TASK_E05["TASK-E05 [complete]"]
     class TASK_E05 internal-link
-    class TASK_E05 status_needs_review
-    TASK_E15["TASK-E15 [needs-review]"]
+    class TASK_E05 status_complete
+    TASK_E15["TASK-E15 [complete]"]
     class TASK_E15 internal-link
-    class TASK_E15 status_needs_review
-    TASK_E03["TASK-E03 [needs-review]"]
+    class TASK_E15 status_complete
+    TASK_E03["TASK-E03 [complete]"]
     class TASK_E03 internal-link
-    class TASK_E03 status_needs_review
-    TASK_E09["TASK-E09 [needs-review]"]
+    class TASK_E03 status_complete
+    TASK_E09["TASK-E09 [complete]"]
     class TASK_E09 internal-link
-    class TASK_E09 status_needs_review
-    TASK_E13["TASK-E13 [needs-review]"]
+    class TASK_E09 status_complete
+    TASK_E13["TASK-E13 [complete]"]
     class TASK_E13 internal-link
-    class TASK_E13 status_needs_review
+    class TASK_E13 status_complete
     TASK_S_1["TASK-S-1 [complete]"]
     class TASK_S_1 internal-link
     class TASK_S_1 status_complete
@@ -475,9 +474,9 @@ graph LR
     TASK_S_7["TASK-S-7 [complete]"]
     class TASK_S_7 internal-link
     class TASK_S_7 status_complete
-    TASK_S_10["TASK-S-10 [needs-review]"]
+    TASK_S_10["TASK-S-10 [complete]"]
     class TASK_S_10 internal-link
-    class TASK_S_10 status_needs_review
+    class TASK_S_10 status_complete
     TASK_E00["TASK-E00 [complete]"]
     class TASK_E00 internal-link
     class TASK_E00 status_complete
@@ -579,6 +578,5 @@ graph LR
   PHASE_0 --> TASK_D4
   classDef status_complete fill:#d8f5e7,stroke:#16a34a,color:#14532d
   classDef status_decided fill:#d8f5e7,stroke:#16a34a,color:#14532d
-  classDef status_in_progress fill:#d7f3ff,stroke:#0284c7,color:#0f172a
-  classDef status_needs_review fill:#fff1c2,stroke:#d97706,color:#7c2d12
+  classDef status_done fill:#d8f5e7,stroke:#16a34a,color:#14532d
 ```

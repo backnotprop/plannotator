@@ -356,16 +356,31 @@ function maybeConsumeDeliveredVerdict(
     return;
   }
 
-  if (currentState.feedback.cancelled !== true) {
-    return;
-  }
-
   const nextState = resolveClearTransition(currentState);
   if (nextState instanceof Response) {
-    throw new Error("Cancelled verdict could not be consumed.");
+    throw new Error("Delivered verdict could not be consumed.");
   }
 
   writeDaemonState(stateAdapter, nextState);
+}
+
+function buildCancelFeedback(
+  currentState: DaemonState,
+): FeedbackPayload {
+  const document = currentState.document;
+  const feedback =
+    document?.mode === "annotate" && document.filePath
+      ? `Annotation of ${document.filePath} cancelled by user.`
+      : document?.mode === "review"
+        ? "Code review cancelled by user."
+        : "Plan review cancelled by user.";
+
+  return {
+    approved: false,
+    feedback,
+    annotations: [],
+    cancelled: true,
+  };
 }
 
 function serveActiveBundle(
@@ -728,12 +743,7 @@ export function createDaemonRouter(
           return modeMismatch;
         }
 
-        const feedback: FeedbackPayload = {
-          approved: false,
-          feedback: "Review cancelled by user.",
-          annotations: [],
-          cancelled: true,
-        };
+        const feedback = buildCancelFeedback(currentState);
 
         return applyResolution(
           stateAdapter,

@@ -221,8 +221,8 @@ describe("04-submit-plan", () => {
     }
   }, 30_000);
 
-  // ─── 4.9 Short timeout fires ──────────────────────────────────────────────
-  test("4.9 PLANNOTATOR_PLAN_TIMEOUT_SECONDS=2 fires, CLI exits non-0, state → idle", async () => {
+  // ─── 4.9 Raw CLI ignores wrapper timeout env ──────────────────────────────
+  test("4.9 PLANNOTATOR_PLAN_TIMEOUT_SECONDS=2 does not affect raw CLI submit, which remains blocked until verdict", async () => {
     const daemon = await startDaemon({ port, home: sandbox.home, binary });
     try {
       const submitHandle = runCliBackground(
@@ -235,14 +235,20 @@ describe("04-submit-plan", () => {
         },
       );
 
-      // Wait for timeout (2s + some buffer)
-      const result = await submitHandle.waitForExit();
-      expect(result.exitCode).not.toBe(0);
-      const combined = `${result.stdout}\n${result.stderr}`;
-      expect(combined.toLowerCase()).toMatch(/timeout|timed out/);
+      await new Promise((r) => setTimeout(r, 3_000));
+      const midState = (await (await fetch(daemonUrl("/api/state"))).json()) as {
+        status: string;
+      };
+      expect(midState.status).toBe("awaiting-response");
 
-      // State must be idle after timeout
-      await new Promise((r) => setTimeout(r, 300));
+      await fetch(daemonUrl("/api/approve"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ feedback: "", annotations: [] }),
+      });
+
+      const result = await submitHandle.waitForExit();
+      expect(result.exitCode).toBe(0);
       await expectIdle(port);
     } finally {
       await daemon.stop();

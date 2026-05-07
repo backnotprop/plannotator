@@ -185,8 +185,8 @@ describe("12-json-output", () => {
     }
   }, 40_000);
 
-  // ─── submit --json: timeout case ──────────────────────────────────────────
-  test("12.4 submit --json timeout: JSON has approved=false, cancelled=false", async () => {
+  // ─── submit --json: raw CLI ignores wrapper timeout env ───────────────────
+  test("12.4 submit --json ignores wrapper timeout env and stays blocked until verdict", async () => {
     const daemon = await startDaemon({ port, home: sandbox.home, binary });
     try {
       const submitHandle = runCliBackground(
@@ -199,22 +199,29 @@ describe("12-json-output", () => {
         },
       );
 
-      // Wait for timeout to fire (~2s)
-      const result = await submitHandle.waitForExit();
+      await new Promise((r) => setTimeout(r, 3_000));
+      const midState = (await (await fetch(daemonUrl("/api/state"))).json()) as {
+        status: string;
+      };
+      expect(midState.status).toBe("awaiting-response");
 
-      // Timed out submissions may exit with a specific code; accept 1 or 3
-      expect([1, 3]).toContain(result.exitCode);
+      await fetch(daemonUrl("/api/approve"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ feedback: "", annotations: [] }),
+      });
+
+      const result = await submitHandle.waitForExit();
+      expect(result.exitCode).toBe(0);
       const lines = result.stdout.trim().split("\n").filter((l) => l.trim());
-      // May or may not produce JSON on timeout (depends on implementation)
-      // At minimum it must not produce multiple JSON objects
-      if (lines.length > 0) {
-        expect(lines.length).toBe(1);
-        JSON.parse(lines[0]); // must be valid JSON
-      }
+      expect(lines.length).toBe(1);
+      const parsed = JSON.parse(lines[0]) as Record<string, unknown>;
+      expect(parsed.approved).toBe(true);
+      expect(parsed.cancelled).toBe(false);
     } finally {
       await daemon.stop();
     }
-  }, 30_000);
+  }, 40_000);
 
   // ─── stdout purity: no extra log lines on stdout when --json ───────────────
   test("12.5 submit --json: daemon URL and diagnostics go to stderr, not stdout", async () => {
@@ -404,7 +411,7 @@ describe("12-json-output", () => {
   }, 40_000);
 
   // ─── wait --json ───────────────────────────────────────────────────────────
-  test("12.6 wait --json: produces single JSON line conforming to schema", async () => {
+  test("12.6 wait --json: recovery waiter with exact request id produces single JSON line conforming to schema", async () => {
     const daemon = await startDaemon({ port, home: sandbox.home, binary });
     try {
       const submitHandle = runCliBackground(
@@ -413,22 +420,34 @@ describe("12-json-output", () => {
       );
 
       const deadline = Date.now() + 10_000;
+      let requestId = "";
       while (Date.now() < deadline) {
         const resp = await fetch(daemonUrl("/api/state"));
-        const body = (await resp.json()) as { status: string };
-        if (body.status === "awaiting-response") break;
+        const body = (await resp.json()) as {
+          status: string;
+          document?: { id?: string };
+        };
+        if (body.status === "awaiting-response") {
+          requestId = body.document?.id ?? "";
+          break;
+        }
         await new Promise((r) => setTimeout(r, 100));
       }
+      expect(requestId.length).toBeGreaterThan(0);
 
-      await fetch(daemonUrl("/api/approve"), {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ feedback: "LGTM", annotations: [] }),
-      });
+      submitHandle.kill("SIGKILL");
+      await submitHandle.waitForExit(5_000);
 
-      const [, waitResult] = await Promise.all([
-        submitHandle.waitForExit(),
-        runCli(["wait", "--json"], { env: env(), timeoutMs: 15_000 }),
+      const [waitResult] = await Promise.all([
+        runCli(["wait", "--request-id", requestId, "--json"], {
+          env: env(),
+          timeoutMs: 15_000,
+        }),
+        fetch(daemonUrl("/api/approve"), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ feedback: "LGTM", annotations: [] }),
+        }),
       ]);
 
       const lines = waitResult.stdout.trim().split("\n").filter((l) => l.trim());

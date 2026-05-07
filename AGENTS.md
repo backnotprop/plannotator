@@ -1,6 +1,11 @@
 # Plannotator
 
-A plan review UI for Claude Code that intercepts `ExitPlanMode` via hooks, letting users approve or request changes with annotated feedback. Also provides code review for git diffs and annotation of arbitrary markdown files.
+A daemon-backed plan review UI for Claude Code that intercepts `ExitPlanMode` via hooks, letting users approve or request changes with annotated feedback. Also provides code review for git diffs and annotation of arbitrary markdown files.
+
+The public runtime surface is the local daemon:
+
+- `plannotator daemon start|stop|status` owns the long-lived review server lifecycle.
+- `plannotator submit|review|annotate|wait|clear|open` shell out through that daemon instead of spinning up per-invocation servers.
 
 ## Task Complexity And Model Routing
 
@@ -362,7 +367,7 @@ plannotator/
 │       └── package.json           # Extension manifest (publisher: backnotprop)
 ├── packages/
 │   ├── server/                   # Shared server implementation
-│   │   ├── index.ts              # startPlannotatorServer(), handleServerReady()
+│   │   ├── index.ts              # standalone server entrypoint, ready-hook orchestration
 │   │   ├── review.ts             # startReviewServer(), handleReviewServerReady()
 │   │   ├── annotate.ts           # startAnnotateServer(), handleAnnotateServerReady()
 │   │   ├── storage.ts            # Plan saving to disk (getPlanDir, savePlan, etc.)

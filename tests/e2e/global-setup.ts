@@ -4,13 +4,65 @@
  *
  * This prevents N spec files from each spawning their own full build.
  */
-import { writeFileSync, existsSync, readFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 const DIR = join(tmpdir(), "plannotator-e2e");
 const LOCK = join(DIR, "build.lock");
 const MARKER = join(DIR, "binary.path");
+const repoRoot = resolve(fileURLToPath(new URL("../../", import.meta.url)));
+const BINARY_INPUTS = [
+  "apps/hook",
+  "packages/server",
+  "packages/ui",
+  "packages/editor",
+  "packages/review-editor",
+  "packages/shared",
+  "package.json",
+  "bunfig.toml",
+];
+
+function newestInputMtimeMs(): number {
+  let newest = 0;
+  const skipNames = new Set([".git", "dist", "node_modules"]);
+  const stack = BINARY_INPUTS.map((relativePath) => join(repoRoot, relativePath)).filter(existsSync);
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+    const stat = statSync(current);
+    newest = Math.max(newest, stat.mtimeMs);
+    if (!stat.isDirectory()) {
+      continue;
+    }
+
+    for (const entry of readdirSync(current)) {
+      if (skipNames.has(entry)) {
+        continue;
+      }
+      stack.push(join(current, entry));
+    }
+  }
+
+  return newest;
+}
+
+function isFreshBinary(binaryPath: string): boolean {
+  if (!existsSync(binaryPath)) {
+    return false;
+  }
+
+  return statSync(binaryPath).mtimeMs >= newestInputMtimeMs();
+}
 
 async function waitForMarker(timeoutMs = 300_000): Promise<string> {
   const deadline = Date.now() + timeoutMs;
@@ -36,11 +88,11 @@ try {
 // Fast path: already built.
 if (existsSync(MARKER)) {
   const cached = readFileSync(MARKER, "utf8").trim();
-  if (existsSync(cached)) {
+  if (isFreshBinary(cached)) {
     process.env.PLANNOTATOR_E2E_BINARY = cached;
     // Done — workers proceed immediately.
   } else {
-    // Stale marker, rebuild below.
+    // Missing or stale marker target, rebuild below.
     process.env.PLANNOTATOR_E2E_BINARY = await buildBinary();
     writeFileSync(MARKER, process.env.PLANNOTATOR_E2E_BINARY, "utf8");
   }
