@@ -6,13 +6,13 @@ import { createWorktreePool, type WorktreePool } from "./generated/worktree-pool
 import { fileURLToPath } from "node:url";
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import {
-	getGitContext,
+	prepareLocalReviewDiff,
 	reviewRuntime,
-	runGitDiff,
 	startAnnotateServer,
 	startPlanReviewServer,
 	startReviewServer,
 	type DiffType,
+	type VcsSelection,
 } from "./server.js";
 import { openBrowser, isRemoteSession } from "./server/network.js";
 import { parsePRUrl, checkPRAuth, fetchPR } from "./server/pr.js";
@@ -192,7 +192,7 @@ export async function openPlanReviewBrowser(
 
 export async function openCodeReview(
 	ctx: ExtensionContext,
-	options: { cwd?: string; defaultBranch?: string; diffType?: DiffType; prUrl?: string } = {},
+	options: { cwd?: string; defaultBranch?: string; diffType?: DiffType; prUrl?: string; vcsType?: VcsSelection } = {},
 ): Promise<{ approved: boolean; feedback?: string; annotations?: unknown[]; agentSwitch?: string; exit?: boolean }> {
 	const session = await startCodeReviewBrowserSession(ctx, options);
 	return session.waitForDecision();
@@ -200,7 +200,7 @@ export async function openCodeReview(
 
 export async function startCodeReviewBrowserSession(
 	ctx: ExtensionContext,
-	options: { cwd?: string; defaultBranch?: string; diffType?: DiffType; prUrl?: string } = {},
+	options: { cwd?: string; defaultBranch?: string; diffType?: DiffType; prUrl?: string; vcsType?: VcsSelection } = {},
 ): Promise<
 	BrowserDecisionSession<{
 		approved: boolean;
@@ -220,7 +220,7 @@ export async function startCodeReviewBrowserSession(
 	let rawPatch: string;
 	let gitRef: string;
 	let diffError: string | undefined;
-	let gitCtx: Awaited<ReturnType<typeof getGitContext>> | undefined;
+	let gitCtx: Awaited<ReturnType<typeof prepareLocalReviewDiff>>["gitContext"] | undefined;
 	let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
 	let diffType: DiffType | undefined;
 	let agentCwd: string | undefined;
@@ -392,20 +392,24 @@ export async function startCodeReviewBrowserSession(
 	} else {
 		// --- Local Review Mode ---
 		const cwd = options.cwd ?? ctx.cwd;
-		gitCtx = await getGitContext(cwd);
-		const defaultBranch = options.defaultBranch ?? gitCtx.defaultBranch;
 		const config = loadConfig();
-		diffType = options.diffType ?? resolveDefaultDiffType(config);
-		const result = await runGitDiff(diffType, defaultBranch, cwd, {
+		const result = await prepareLocalReviewDiff({
+			cwd,
+			vcsType: options.vcsType,
+			requestedDiffType: options.diffType,
+			requestedBase: options.defaultBranch,
+			configuredDiffType: resolveDefaultDiffType(config),
 			hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
 		});
-		rawPatch = result.patch;
-		gitRef = result.label;
+		gitCtx = result.gitContext;
+		diffType = result.diffType;
+		rawPatch = result.rawPatch;
+		gitRef = result.gitRef;
 		diffError = result.error;
 		// Remember which base the initial diff was computed against so it can
 		// be forwarded to the server below. Only matters when the caller
 		// overrode the detected default; otherwise it matches gitCtx already.
-		initialBase = defaultBranch;
+		initialBase = result.base;
 	}
 
 	const server = await startReviewServer({

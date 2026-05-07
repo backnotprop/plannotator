@@ -1,4 +1,4 @@
-import { execSync, spawn } from "node:child_process";
+import { execSync } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { createServer } from "node:http";
 import os from "node:os";
@@ -25,18 +25,10 @@ import {
 } from "../generated/pr-provider.js";
 import {
 	type DiffType,
-	type GitCommandResult,
 	type GitContext,
-	type GitDiffOptions,
-	detectRemoteDefaultBranch,
 	getFileContentsForDiff as getFileContentsForDiffCore,
-	getGitContext as getGitContextCore,
-	gitAddFile as gitAddFileCore,
-	gitResetFile as gitResetFileCore,
 	parseWorktreeDiffType,
 	resolveBaseBranch,
-	type ReviewGitRuntime,
-	runGitDiff as runGitDiffCore,
 	validateFilePath,
 } from "../generated/review-core.js";
 import {
@@ -92,6 +84,17 @@ import {
 	transformClaudeFindings,
 } from "../generated/claude-review.js";
 import { createTourSession, TOUR_EMPTY_OUTPUT_ERROR } from "../generated/tour-review.js";
+import {
+	canStageFiles,
+	detectRemoteDefaultCompareTarget,
+	getVcsContext,
+	getVcsFileContentsForDiff,
+	resolveVcsCwd,
+	reviewRuntime,
+	runVcsDiff,
+	stageFile,
+	unstageFile,
+} from "./vcs.js";
 
 /** Detect if running inside WSL (Windows Subsystem for Linux) */
 function detectWSL(): boolean {
@@ -119,65 +122,6 @@ export interface ReviewServerResult {
 		exit?: boolean;
 	}>;
 	stop: () => void;
-}
-
-export const reviewRuntime: ReviewGitRuntime = {
-	runGit(
-		args: string[],
-		options?: { cwd?: string; timeoutMs?: number },
-	): Promise<GitCommandResult> {
-		return new Promise((resolve) => {
-			const proc = spawn("git", ["-c", "core.quotePath=false", ...args], {
-				cwd: options?.cwd,
-				stdio: ["ignore", "pipe", "pipe"],
-			});
-
-			let timer: ReturnType<typeof setTimeout> | undefined;
-			if (options?.timeoutMs) {
-				timer = setTimeout(() => proc.kill(), options.timeoutMs);
-			}
-
-			const stdoutChunks: Buffer[] = [];
-			const stderrChunks: Buffer[] = [];
-			proc.stdout!.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
-			proc.stderr!.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
-
-			proc.on("close", (code) => {
-				if (timer) clearTimeout(timer);
-				resolve({
-					stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
-					stderr: Buffer.concat(stderrChunks).toString("utf-8"),
-					exitCode: code ?? 1,
-				});
-			});
-
-			proc.on("error", () => {
-				if (timer) clearTimeout(timer);
-				resolve({ stdout: "", stderr: "git not found", exitCode: 1 });
-			});
-		});
-	},
-
-	async readTextFile(path: string): Promise<string | null> {
-		try {
-			return readFileSync(path, "utf-8");
-		} catch {
-			return null;
-		}
-	},
-};
-
-export function getGitContext(cwd?: string): Promise<GitContext> {
-	return getGitContextCore(reviewRuntime, cwd);
-}
-
-export function runGitDiff(
-	diffType: DiffType,
-	defaultBranch = "main",
-	cwd?: string,
-	options?: GitDiffOptions,
-): Promise<{ patch: string; label: string; error?: string }> {
-	return runGitDiffCore(reviewRuntime, diffType, defaultBranch, cwd, options);
 }
 
 export async function startReviewServer(options: {
@@ -214,6 +158,7 @@ export async function startReviewServer(options: {
 	let prMeta = options.prMetadata;
 	const isPRMode = !!prMeta;
 	const hasLocalAccess = !!options.gitContext;
+	const sessionVcsType = options.gitContext?.vcsType;
 	const isRemote = isRemoteSession();
 	const wslFlag = detectWSL();
 	let prRef = prMeta ? prRefFromMetadata(prMeta) : null;
@@ -285,7 +230,7 @@ export async function startReviewServer(options: {
 
 	// Fire-and-forget: query the remote for its actual default branch.
 	if (options.gitContext && !options.initialBase && !isPRMode) {
-		detectRemoteDefaultBranch(reviewRuntime, options.gitContext.cwd).then((remote) => {
+		detectRemoteDefaultCompareTarget(options.gitContext.cwd, sessionVcsType).then((remote) => {
 			if (remote && !baseEverSwitched) currentBase = remote;
 		});
 	}
@@ -298,11 +243,7 @@ export async function startReviewServer(options: {
 			if (poolPath) return poolPath;
 		}
 		if (options.agentCwd) return options.agentCwd;
-		if (currentDiffType.startsWith("worktree:")) {
-			const parsed = parseWorktreeDiffType(currentDiffType);
-			if (parsed) return parsed.path;
-		}
-		return options.gitContext?.cwd ?? process.cwd();
+		return resolveVcsCwd(currentDiffType, options.gitContext?.cwd) ?? process.cwd();
 	}
 	const tour = createTourSession();
 
@@ -650,7 +591,7 @@ export async function startReviewServer(options: {
 					detectedBase,
 				);
 				const defaultCwd = options.gitContext?.cwd;
-				const result = await runGitDiff(newType, base, defaultCwd, {
+				const result = await runVcsDiff(newType, base, defaultCwd, {
 					hideWhitespace: currentHideWhitespace,
 				});
 				currentPatch = result.patch;
@@ -666,9 +607,8 @@ export async function startReviewServer(options: {
 				let updatedContext: GitContext | undefined;
 				if (options.gitContext) {
 					try {
-						const worktreeParsed = parseWorktreeDiffType(newType);
-						const effectiveCwd = worktreeParsed?.path ?? options.gitContext.cwd;
-						updatedContext = await getGitContextCore(reviewRuntime, effectiveCwd);
+						const effectiveCwd = resolveVcsCwd(newType, options.gitContext.cwd);
+						updatedContext = await getVcsContext(effectiveCwd, sessionVcsType);
 					} catch {
 						/* best-effort */
 					}
@@ -987,8 +927,7 @@ export async function startReviewServer(options: {
 					detectedBase,
 				);
 				const defaultCwd = options.gitContext?.cwd;
-				const result = await getFileContentsForDiffCore(
-					reviewRuntime,
+				const result = await getVcsFileContentsForDiff(
 					currentDiffType,
 					base,
 					filePath,
@@ -1043,13 +982,8 @@ export async function startReviewServer(options: {
 		} else if (url.pathname === "/api/agents" && req.method === "GET") {
 			json(res, { agents: [] });
 		} else if (url.pathname === "/api/git-add" && req.method === "POST") {
-			// Staging only available for local diff types that support it (not PR mode, not branch diffs).
-			// Worktree diff types use composite format "worktree:/path:uncommitted" — extract the base type.
-			const baseDiffType = currentDiffType.startsWith("worktree:")
-				? (parseWorktreeDiffType(currentDiffType)?.subType ?? currentDiffType)
-				: currentDiffType;
-			const canStage = baseDiffType === "uncommitted" || baseDiffType === "unstaged";
-			if (isPRMode || !canStage) {
+			const stageCwd = resolveVcsCwd(currentDiffType, options.gitContext?.cwd);
+			if (isPRMode || !(await canStageFiles(currentDiffType, stageCwd))) {
 				json(res, { error: "Staging not available" }, 400);
 				return;
 			}
@@ -1060,18 +994,10 @@ export async function startReviewServer(options: {
 					json(res, { error: "Missing filePath" }, 400);
 					return;
 				}
-				let cwd: string | undefined;
-				if (currentDiffType.startsWith("worktree:")) {
-					const parsed = parseWorktreeDiffType(currentDiffType);
-					if (parsed) cwd = parsed.path;
-				}
-				if (!cwd) {
-					cwd = options.gitContext?.cwd;
-				}
 				if (body.undo) {
-					await gitResetFileCore(reviewRuntime, filePath, cwd);
+					await unstageFile(currentDiffType, filePath, stageCwd);
 				} else {
-					await gitAddFileCore(reviewRuntime, filePath, cwd);
+					await stageFile(currentDiffType, filePath, stageCwd);
 				}
 				json(res, { ok: true });
 			} catch (err) {

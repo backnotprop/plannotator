@@ -139,6 +139,7 @@ export async function startReviewServer(
   let prMetadata = options.prMetadata;
   const isPRMode = !!prMetadata;
   const hasLocalAccess = !!gitContext;
+  const sessionVcsType = gitContext?.vcsType;
   let draftKey = contentHash(options.rawPatch);
   const editorAnnotations = createEditorAnnotationHandler();
   const externalAnnotations = createExternalAnnotationHandler("review");
@@ -177,7 +178,7 @@ export async function startReviewServer(
   // local fallback (e.g. "main") to the upstream ref (e.g. "origin/main").
   // Non-blocking — the server is already listening by the time this resolves.
   if (gitContext && !options.initialBase && !isPRMode) {
-    detectRemoteDefaultCompareTarget(gitContext.cwd).then((remote) => {
+    detectRemoteDefaultCompareTarget(gitContext.cwd, sessionVcsType).then((remote) => {
       if (remote && !baseEverSwitched) currentBase = remote;
     });
   }
@@ -597,7 +598,7 @@ export async function startReviewServer(
               if (gitContext) {
                 try {
                   const effectiveCwd = resolveVcsCwd(newDiffType, gitContext.cwd);
-                  updatedContext = await getVcsContext(effectiveCwd);
+                  updatedContext = await getVcsContext(effectiveCwd, sessionVcsType);
                 } catch {
                   /* best-effort */
                 }

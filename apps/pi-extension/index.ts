@@ -49,6 +49,7 @@ import {
 	getAnnotateMessageFeedbackPrompt,
 } from "./generated/prompts.js";
 import { parseAnnotateArgs } from "./generated/annotate-args.js";
+import { parseReviewArgs } from "./generated/review-args.js";
 import { resolveAtReference } from "./generated/at-reference.js";
 import {
 	hasPlanBrowserHtml,
@@ -404,7 +405,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("plannotator-review", {
-		description: "Open interactive code review for current changes or a PR URL",
+		description: "Open interactive code review for current changes or a PR URL; pass --git to force Git in JJ workspaces",
 		handler: async (args, ctx) => {
 			if (!hasReviewBrowserHtml()) {
 				ctx.ui.notify(
@@ -418,9 +419,12 @@ export default function plannotator(pi: ExtensionAPI): void {
 			const origin = getPiSessionIdentity(ctx);
 
 			try {
-				const prUrl = args?.trim() || undefined;
-				const isPRReview = prUrl?.startsWith("http://") || prUrl?.startsWith("https://");
-				const session = await startCodeReviewBrowserSession(ctx, { prUrl });
+				const reviewArgs = parseReviewArgs(args ?? "");
+				const isPRReview = reviewArgs.prUrl !== undefined;
+				const session = await startCodeReviewBrowserSession(ctx, {
+					prUrl: reviewArgs.prUrl,
+					vcsType: reviewArgs.vcsType,
+				});
 				ctx.ui.notify("Code review opened. You can keep chatting while it runs.", "info");
 				void session
 					.waitForDecision()

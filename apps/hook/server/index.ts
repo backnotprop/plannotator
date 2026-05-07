@@ -8,7 +8,7 @@
  *    - Reads hook event from stdin, extracts plan content
  *    - Serves UI, returns approve/deny decision to stdout
  *
- * 2. Code Review (`plannotator review`):
+ * 2. Code Review (`plannotator review`, `plannotator review --git`):
  *    - Triggered by /review slash command
  *    - Runs git diff, opens review UI
  *    - Outputs feedback to stdout (captured by slash command)
@@ -63,8 +63,9 @@ import {
   startAnnotateServer,
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
-import { type DiffType, getVcsContext, runVcsDiff, resolveInitialDiffType, gitRuntime } from "@plannotator/server/vcs";
+import { type DiffType, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
 import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
+import { parseReviewArgs } from "@plannotator/shared/review-args";
 import { stripAtPrefix, resolveAtReference } from "@plannotator/shared/at-reference";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { urlToMarkdown, isConvertedSource } from "@plannotator/shared/url-to-markdown";
@@ -289,22 +290,15 @@ if (args[0] === "sessions") {
   // CODE REVIEW MODE
   // ============================================
 
-  // Parse local flags (strip before URL detection)
-  // --local is now the default for PR/MR reviews; --no-local opts out.
-  // --local kept for backwards compat (no-op).
-  const localIdx = args.indexOf("--local");
-  if (localIdx !== -1) args.splice(localIdx, 1);
-  const noLocalIdx = args.indexOf("--no-local");
-  if (noLocalIdx !== -1) args.splice(noLocalIdx, 1);
-
-  const urlArg = args[1];
-  const isPRMode = urlArg?.startsWith("http://") || urlArg?.startsWith("https://");
-  const useLocal = isPRMode && noLocalIdx === -1;
+  const reviewArgs = parseReviewArgs(args.slice(1));
+  const urlArg = reviewArgs.prUrl;
+  const isPRMode = urlArg !== undefined;
+  const useLocal = isPRMode && reviewArgs.useLocal;
 
   let rawPatch: string;
   let gitRef: string;
   let diffError: string | undefined;
-  let gitContext: Awaited<ReturnType<typeof getVcsContext>> | undefined;
+  let gitContext: Awaited<ReturnType<typeof prepareLocalReviewDiff>>["gitContext"] | undefined;
   let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
   let initialDiffType: DiffType | undefined;
   let agentCwd: string | undefined;
@@ -499,14 +493,16 @@ if (args[0] === "sessions") {
     }
   } else {
     // --- Local Review Mode ---
-    gitContext = await getVcsContext();
     const config = loadConfig();
-    initialDiffType = resolveInitialDiffType(gitContext, resolveDefaultDiffType(config));
-    const diffResult = await runVcsDiff(initialDiffType, gitContext.defaultBranch, gitContext.cwd, {
+    const diffResult = await prepareLocalReviewDiff({
+      vcsType: reviewArgs.vcsType,
+      configuredDiffType: resolveDefaultDiffType(config),
       hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
     });
-    rawPatch = diffResult.patch;
-    gitRef = diffResult.label;
+    gitContext = diffResult.gitContext;
+    initialDiffType = diffResult.diffType;
+    rawPatch = diffResult.rawPatch;
+    gitRef = diffResult.gitRef;
     diffError = diffResult.error;
   }
 
