@@ -16,7 +16,6 @@ import {
   runPlannotatorReviewTool,
   runPlannotatorSubmitCli,
   type PlannotatorCliVerdict,
-  type PlannotatorToolEnvironment,
 } from "./tool-helpers";
 
 // ---------------------------------------------------------------------------

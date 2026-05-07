@@ -2,3 +2,4 @@
 exclude_paths:
   - ".obsidian/**"
   - "plugins/**"
+  - "plans/**"
