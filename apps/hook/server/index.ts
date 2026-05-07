@@ -957,8 +957,14 @@ async function resolveWaitRequestId(requestId?: string): Promise<string | undefi
   }
 
   const currentState = await readDaemonStateFromHttp().catch(() => null);
-  if (currentState?.status === "awaiting-response" && currentState.document?.id) {
-    return currentState.document.id;
+  if (currentState?.document?.id) {
+    // Auto-bind when the daemon has an active or buffered request.
+    // This covers both awaiting-response (in_review) and resolved (verdict_ready)
+    // states, so `plannotator wait` recovers a buffered verdict without
+    // requiring the user to discover and pass --request-id manually.
+    if (currentState.status === "awaiting-response" || currentState.status === "resolved") {
+      return currentState.document.id;
+    }
   }
 
   return undefined;

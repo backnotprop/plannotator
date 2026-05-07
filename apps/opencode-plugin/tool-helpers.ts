@@ -57,7 +57,7 @@ class CliTimeoutError extends Error {
   }
 }
 
-function resolveRepoLocalCliEntrypoint(directory: string): string {
+function resolveRepoLocalCliEntrypoint(directory: string): string | null {
   // Allow tests and external callers to override the entrypoint path.
   // When set, PLANNOTATOR_CLI_ENTRYPOINT is used directly without existence checks,
   // which is useful for mocking in tests.
@@ -67,20 +67,25 @@ function resolveRepoLocalCliEntrypoint(directory: string): string {
   }
 
   const entrypoint = join(directory, "apps", "hook", "server", "index.ts");
-
-  if (!existsSync(entrypoint)) {
-    throw new Error(
-      `Expected workspace-local plannotator CLI entrypoint at ${entrypoint}, but it does not exist. Set PLANNOTATOR_CLI_ENTRYPOINT to override.`,
-    );
+  if (existsSync(entrypoint)) {
+    return entrypoint;
   }
 
-  return entrypoint;
+  return null;
 }
 
 function resolvePlannotatorCommand(directory: string): CliCommand {
   const entrypoint = resolveRepoLocalCliEntrypoint(directory);
+  if (entrypoint) {
+    return {
+      argv: [process.execPath, "run", entrypoint],
+    };
+  }
+
+  // Fallback: use PATH-resolved plannotator binary for published plugin installs
+  // where the monorepo entrypoint is not available.
   return {
-    argv: [process.execPath, "run", entrypoint],
+    argv: ["plannotator"],
   };
 }
 
