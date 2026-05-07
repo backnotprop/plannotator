@@ -38,7 +38,7 @@ import { handleDraftDelete, handleDraftLoad, handleDraftSave, handleImage, handl
 import { handleDoc } from "../../../packages/server/reference-handlers";
 import { contentHash } from "../../../packages/server/draft";
 import { getRepoInfo } from "../../../packages/server/repo";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -113,8 +113,10 @@ function usageText(): string {
     "plannotator — daemon-backed plan & code review CLI",
     "",
     "Usage:",
-    "  plannotator daemon",
-    "  plannotator plan [--json]",
+    "  plannotator daemon start [--foreground]",
+    "  plannotator daemon stop",
+    "  plannotator daemon status",
+    "  plannotator submit <file> [--mode plan|review|annotate] [--no-browser] [--commit-message <msg>] [--json]",
     "  plannotator review [--diff-type <uncommitted|staged|unstaged|last-commit|branch|worktree:...>] [--json]",
     "  plannotator annotate <file> [--json]",
     "  plannotator wait [--request-id <id>] [--json]",
@@ -438,7 +440,7 @@ async function printCollision(commandLabel: string): Promise<never> {
       "Reopen with: plannotator open",
       "To discard it: plannotator clear --force",
     ].join("\n"),
-    EXIT_DENIED,
+    EXIT_ILLEGAL_STATE,
   );
 }
 
@@ -511,6 +513,45 @@ function extractVerdictEvents(buffer: string): { events: VerdictPayload[]; rest:
   return { events, rest: remaining };
 }
 
+async function collectEventStreamEvents(
+  stream: ReadableStream<Uint8Array>,
+): Promise<VerdictPayload[]> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  buffer += decoder.decode();
+  return extractVerdictEvents(buffer).events;
+}
+
+function validateStreamEvents(events: VerdictPayload[]): void {
+  if (events.length === 0) {
+    throw new Error("Daemon /api/wait closed without emitting a verdict event.");
+  }
+}
+
+function parseStreamEvents(events: VerdictPayload[]): VerdictPayload {
+  const verdict = events.at(-1);
+  if (!verdict) {
+    throw new Error("No verdict event was available to parse.");
+  }
+
+  return verdict;
+}
+
 async function waitForVerdict(requestId?: string): Promise<VerdictPayload> {
   let lastError: Error | null = null;
 
@@ -545,7 +586,7 @@ async function waitForVerdict(requestId?: string): Promise<VerdictPayload> {
       lastError = error instanceof Error ? error : new Error(String(error));
 
       if (attempt < WAIT_STREAM_RETRIES) {
-        await sleep(WAIT_STREAM_RETRY_INTERVAL_MS);
+        await Bun.sleep(LIVENESS_POLL_MS);
       }
     }
   }
@@ -694,7 +735,7 @@ async function submitDocument(
       await openSessionUrl(url);
     }
 
-    const verdict = await waitForVerdict().catch((error) => {
+    const verdict = await waitForVerdict(document.id).catch((error) => {
       const message = error instanceof Error ? error.message : String(error);
       fail(`${message}\nUse plannotator wait to reconnect or plannotator open to reopen the session.`, EXIT_DAEMON_FAILURE);
     });
@@ -757,7 +798,7 @@ async function submitPlanFromHook(): Promise<never> {
     }
 
     await openSessionUrl(getDaemonUrl());
-    const verdict = await waitForVerdict().catch((error) => {
+    const verdict = await waitForVerdict(source.document.id).catch((error) => {
       const message = error instanceof Error ? error.message : String(error);
       fail(`${message}\nUse plannotator wait to reconnect or plannotator open to reopen the session.`, EXIT_DAEMON_FAILURE);
     });
@@ -829,10 +870,33 @@ async function runStatus(strictDaemonStatus: boolean): Promise<never> {
   process.exit(EXIT_OK);
 }
 
+async function verifyDaemonStarted(port: number, timeoutMs: number): Promise<boolean> {
+  const lockfilePath = getDaemonLockfilePath();
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!existsSync(lockfilePath)) {
+      return false;
+    }
+    try {
+      const resp = await fetch(`http://127.0.0.1:${port}/api/state`, {
+        signal: AbortSignal.timeout(500),
+      });
+      if (resp.ok) return true;
+    } catch {}
+    await new Promise<void>((r) => setTimeout(r, 100));
+  }
+  return false;
+}
+
 async function runStart(): Promise<never> {
   const port = await ensureDaemonPort();
   const result = await startDaemonDetached(daemonLaunchOptions(port));
-  await waitForDaemonLiveness();
+  if (result.verdict === "started") {
+    const alive = await verifyDaemonStarted(port, 10_000);
+    if (!alive) {
+      fail("Daemon failed to start (port may be in use).", EXIT_DAEMON_FAILURE);
+    }
+  }
   const statusWord = result.verdict === "running" ? "running" : "started";
   console.log(`${statusWord} ${getDaemonUrl(port)} port=${port}`);
   process.exit(EXIT_OK);
@@ -858,12 +922,26 @@ async function runOpen(): Promise<never> {
   fail("runOpen returned unexpectedly.", EXIT_DAEMON_FAILURE);
 }
 
+async function resolveWaitRequestId(requestId?: string): Promise<string | undefined> {
+  if (requestId) {
+    return requestId;
+  }
+
+  const currentState = await readDaemonStateFromHttp().catch(() => null);
+  if (currentState?.status === "awaiting-response" && currentState.document?.id) {
+    return currentState.document.id;
+  }
+
+  return undefined;
+}
+
 async function runWait(args: string[]): Promise<never> {
   const json = takeFlag(args, "--json");
   const requestId = takeOption(args, "--request-id");
 
   await withDaemon(async () => {
-    const verdict = await waitForVerdict(requestId).catch((error) => {
+    const boundRequestId = await resolveWaitRequestId(requestId);
+    const verdict = await waitForVerdict(boundRequestId).catch((error) => {
       const message = error instanceof Error ? error.message : String(error);
       fail(message, EXIT_DAEMON_FAILURE);
     });
@@ -882,22 +960,15 @@ async function runClear(args: string[]): Promise<never> {
 
   await withDaemon(async () => {
     const currentState = await readDaemonStateFromHttp();
-    if (!force) {
-      if (currentState.status === "idle") {
-        console.log("Nothing to clear.");
-        process.exit(EXIT_OK);
-      }
-
-      console.log(
-        `Would clear ${currentState.status} ${summarizeDocument(currentState.document)} at ${getDaemonUrl()}. Re-run with --force to reset daemon state.`,
-      );
+    if (currentState.status === "idle") {
+      console.log("Nothing to clear.");
       process.exit(EXIT_OK);
     }
 
     const { response, text } = await requestJson("/api/clear", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ force: true }),
+      body: JSON.stringify(force ? { force: true } : {}),
     });
 
     if (response.status === 409) {
@@ -907,7 +978,7 @@ async function runClear(args: string[]): Promise<never> {
       fail(text || `Daemon clear failed with ${response.status}.`, EXIT_DAEMON_FAILURE);
     }
 
-    console.log(`cleared ${getDaemonUrl()}`);
+    console.log(`${force ? "cleared" : "discarded"} ${getDaemonUrl()}`);
     process.exit(EXIT_OK);
   });
 
@@ -970,6 +1041,22 @@ async function runAnnotate(args: string[]): Promise<never> {
 }
 
 async function runSubmit(args: string[]): Promise<never> {
+  if (takeFlag(args, "--help") || takeFlag(args, "-h")) {
+    console.log(
+      [
+        "plannotator submit <file> [options]",
+        "",
+        "Options:",
+        "  --mode <plan|annotate>     Submission mode (default: plan)",
+        "  --no-browser               Do not open a browser window",
+        "  --commit-message <msg>     Attach a commit message to the submission",
+        "  --json                     Output verdict as JSON on stdout",
+        "  --request-id <id>          Request ID to associate with this submission",
+        "  --help, -h                 Show this help",
+      ].join("\n"),
+    );
+    process.exit(EXIT_OK);
+  }
   const json = takeFlag(args, "--json");
   const mode = takeOption(args, "--mode") ?? "plan";
   const noBrowser = takeFlag(args, "--no-browser");
@@ -1287,8 +1374,24 @@ async function startForegroundDaemon(): Promise<void> {
     fetch: router.fetch,
   });
 
+  // Write discovery files only after the server has successfully bound its port.
+  writeDaemonMetadata(getDaemonPort());
+  writeFileSync(
+    getDaemonLockfilePath(),
+    JSON.stringify({
+      pid: process.pid,
+      childPid: process.pid,
+      createdAt: new Date().toISOString(),
+      command: process.argv,
+      cwd: process.cwd(),
+    }),
+    "utf8",
+  );
+
   const cleanup = () => {
     unregisterSession(process.pid);
+    try { unlinkSync(getDaemonMetadataPath()); } catch {}
+    try { unlinkSync(getDaemonLockfilePath()); } catch {}
     server.stop();
   };
 
@@ -1339,7 +1442,7 @@ async function main(): Promise<void> {
       await runStop();
       return;
     case "status":
-      await runStatus(false);
+      await runStatus(true);
       return;
     case "submit":
       await runSubmit(args.slice(1));

@@ -343,14 +343,10 @@ function buildVerdictPayload(
   };
 }
 
-function maybeConsumeCancelledVerdict(
+function maybeConsumeDeliveredVerdict(
   stateAdapter: DaemonRouterState,
   resolvedState: Extract<DaemonState, { status: "resolved" }>,
 ): void {
-  if (resolvedState.feedback.cancelled !== true) {
-    return;
-  }
-
   const currentState = readDaemonState(stateAdapter);
   if (!isResolvedState(currentState)) {
     return;
@@ -606,7 +602,7 @@ export function createDaemonRouter(
                 return;
               }
 
-              maybeConsumeCancelledVerdict(stateAdapter, resolvedState);
+              maybeConsumeDeliveredVerdict(stateAdapter, resolvedState);
               finish();
             };
 

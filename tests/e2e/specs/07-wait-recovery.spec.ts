@@ -369,12 +369,16 @@ describe("07-wait-recovery", () => {
       { env: env() },
     );
 
+    let documentId = "";
     const deadline = Date.now() + 10_000;
     while (Date.now() < deadline) {
       try {
         const resp = await fetch(daemonUrl("/api/state"));
-        const body = (await resp.json()) as { status: string };
-        if (body.status === "awaiting-response") break;
+        const body = (await resp.json()) as { status: string; document?: { id: string } };
+        if (body.status === "awaiting-response") {
+          documentId = body.document?.id ?? "";
+          break;
+        }
       } catch {}
       await new Promise((r) => setTimeout(r, 100));
     }
@@ -405,8 +409,8 @@ describe("07-wait-recovery", () => {
       expect(["resolved", "idle"]).toContain(state.status);
 
       if (state.status === "resolved") {
-        // Recovery: fresh wait delivers the persisted verdict
-        const waitResult = await runCli(["wait"], { env: env(), timeoutMs: 10_000 });
+        // Recovery: fresh wait with --request-id delivers the persisted verdict (D2)
+        const waitResult = await runCli(["wait", "--request-id", documentId], { env: env(), timeoutMs: 10_000 });
         expect([0, 1]).toContain(waitResult.exitCode); // 0=approved, 1=denied
         const combined = `${waitResult.stdout}\n${waitResult.stderr}`;
         expect(combined).toContain("approved before crash");

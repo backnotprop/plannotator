@@ -172,6 +172,11 @@ describe("03-state-machine", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ document: sampleDocument() }),
       });
+      // Capture document.id before approve so we can use --request-id
+      const stateResp2 = await fetch(daemonUrl("/api/state"));
+      const stateBody2 = (await stateResp2.json()) as { status: string; document?: { id: string } };
+      const documentId = stateBody2.document?.id ?? "";
+
       await fetch(daemonUrl("/api/approve"), {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -179,8 +184,8 @@ describe("03-state-machine", () => {
       });
       await expectVerdictReady(port);
 
-      // Consume verdict via CLI wait
-      const waitResult = await runCli(["wait"], {
+      // Consume verdict via CLI wait with --request-id (D2: plain wait rejected in resolved state)
+      const waitResult = await runCli(["wait", "--request-id", documentId], {
         env: env(),
         timeoutMs: 15_000,
       });
@@ -273,11 +278,15 @@ describe("03-state-machine", () => {
         env: env(),
       });
 
+      let firstDocumentId = "";
       const deadline = Date.now() + 10_000;
       while (Date.now() < deadline) {
         const resp = await fetch(daemonUrl("/api/state"));
-        const body = (await resp.json()) as { status: string };
-        if (body.status === "awaiting-response") break;
+        const body = (await resp.json()) as { status: string; document?: { id: string } };
+        if (body.status === "awaiting-response") {
+          firstDocumentId = body.document?.id ?? "";
+          break;
+        }
         await new Promise((r) => setTimeout(r, 100));
       }
 
@@ -299,9 +308,9 @@ describe("03-state-machine", () => {
       const combined = `${secondResult.stdout}\n${secondResult.stderr}`;
       expect(combined.toLowerCase()).toMatch(/verdict|wait|resolved|clear/);
 
-      // Consume the verdict to clean up
+      // Consume the verdict to clean up (D2: must use --request-id in resolved state)
       await firstSubmit.waitForExit();
-      await runCli(["wait"], { env: env(), timeoutMs: 10_000 });
+      await runCli(["wait", "--request-id", firstDocumentId], { env: env(), timeoutMs: 10_000 });
     } finally {
       await daemon.stop();
     }

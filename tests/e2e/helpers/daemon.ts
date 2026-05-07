@@ -231,6 +231,21 @@ function runShell(
 }
 
 export async function buildBinary(): Promise<string> {
+  // Fast path: parent process (global-setup or prior worker) already built it.
+  const prebuilt = process.env.PLANNOTATOR_E2E_BINARY;
+  if (prebuilt && existsSync(prebuilt)) {
+    return prebuilt;
+  }
+  // Fallback: check the shared marker file written by global-setup.
+  const markerPath = join(tmpdir(), "plannotator-e2e-binary.path");
+  if (!prebuilt && existsSync(markerPath)) {
+    const cached = readFileSync(markerPath, "utf8").trim();
+    if (existsSync(cached)) {
+      process.env.PLANNOTATOR_E2E_BINARY = cached;
+      return cached;
+    }
+  }
+
   if (!cachedBinaryPromise) {
     cachedBinaryPromise = (async () => {
       const workspaceRoot = createBuildWorkspace();
@@ -336,7 +351,12 @@ const _activeDaemonProcesses = new Set<ChildProcess>();
 export function killAllDaemons(): void {
   for (const child of _activeDaemonProcesses) {
     try {
-      child.kill('SIGKILL');
+      // Kill the entire process group to catch any children the daemon spawned.
+      if (child.pid) {
+        process.kill(-child.pid, 'SIGKILL');
+      } else {
+        child.kill('SIGKILL');
+      }
     } catch {}
   }
   _activeDaemonProcesses.clear();
@@ -365,8 +385,12 @@ export async function startDaemon(opts: {
         process.env.PLANNOTATOR_BROWSER ?? Bun.which('true') ?? '/usr/bin/true',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
-    detached: false,
+    // detached=true puts the daemon in its own process group so killAllDaemons()
+    // can kill(-pid) the entire group. unref() prevents the child from keeping
+    // the test worker alive if cleanup is skipped.
+    detached: true,
   });
+  child.unref();
 
   _activeDaemonProcesses.add(child);
 
@@ -405,12 +429,14 @@ export async function startDaemon(opts: {
             return;
           }
           try {
-            child.kill('SIGTERM');
+            if (child.pid) process.kill(-child.pid, 'SIGTERM');
+            else child.kill('SIGTERM');
           } catch {}
           await new Promise<void>((resolveStop) => {
             const t = setTimeout(() => {
               try {
-                child.kill('SIGKILL');
+                if (child.pid) process.kill(-child.pid, 'SIGKILL');
+                else child.kill('SIGKILL');
               } catch {}
               _activeDaemonProcesses.delete(child);
               resolveStop();
