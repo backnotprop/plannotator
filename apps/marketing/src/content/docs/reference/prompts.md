@@ -32,15 +32,15 @@ The user message Plannotator sends is always:
 
 **Review prompt** is a long, static review instruction that lives in the repo as a TypeScript constant. It's distinct per provider.
 
-**User prompt** is a short, dynamic line built per call from the diff type (`uncommitted`, `staged`, `last-commit`, `branch`, PR URL, and so on). The same builder is used for all providers.
+**User prompt** is a short, dynamic line built per call from the diff type (`uncommitted`, `staged`, `last-commit`, `branch`, `jj-current`, PR URL, and so on). Review agents share one builder; Code Tour uses a tour-specific builder with the same diff instructions.
 
 ## Matrix
 
 | | Claude review | Codex review | Code Tour (Claude or Codex) |
 |---|---|---|---|
 | **System prompt** | Owned by `claude` CLI. We don't touch it. | Owned by `codex` CLI. We don't touch it. | Same as whichever engine runs. |
-| **Review prompt (static, ours)** | `CLAUDE_REVIEW_PROMPT` in `packages/server/claude-review.ts` | `CODEX_REVIEW_SYSTEM_PROMPT` in `packages/server/codex-review.ts` (misnamed; it's user content) | `TOUR_REVIEW_PROMPT` in `packages/server/tour-review.ts` |
-| **User prompt (dynamic, ours)** | `buildCodexReviewUserMessage(patch, diffType, …)` | same function | same function |
+| **Review prompt (static, ours)** | `CLAUDE_REVIEW_PROMPT` in `packages/server/claude-review.ts` | `CODEX_REVIEW_SYSTEM_PROMPT` in `packages/server/codex-review.ts` (misnamed; it's user content) | `TOUR_REVIEW_PROMPT` in `packages/server/tour/tour-review.ts` |
+| **User prompt (dynamic, ours)** | `buildAgentReviewUserMessage(patch, diffType, …)` | same function | `buildTourUserMessage(patch, diffType, …)` |
 | **Full user message** | `review prompt + "\n\n---\n\n" + user prompt` | same | same |
 | **Delivered via** | stdin | last positional argv | stdin (Claude engine) or positional argv (Codex engine) |
 | **Output schema flag** | `--json-schema <inline JSON>` | `--output-schema <file path>` | same as engine |

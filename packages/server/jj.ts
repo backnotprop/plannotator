@@ -4,11 +4,18 @@ import {
   type GitCommandResult,
   type GitContext,
   type GitDiffOptions,
+  JJ_TRUNK_REVSET,
+  jjLineBaseRevset,
   validateFilePath,
 } from "@plannotator/shared/review-core";
 import { basename } from "node:path";
 
-const JJ_TRUNK_REVSET = "trunk()";
+export {
+  JJ_TRUNK_REVSET,
+  jjCompareTargetRevset,
+  jjLineBaseRevset,
+  parseRemoteBookmark,
+} from "@plannotator/shared/review-core";
 
 async function runJj(
   args: string[],
@@ -163,35 +170,6 @@ export function selectDefaultJjCompareTarget(_targets: { local: string[]; remote
   // `trunk()` honors JJ's repository default bookmark/remote and user aliases;
   // bookmarks are still listed so users can explicitly pick a different base.
   return JJ_TRUNK_REVSET;
-}
-
-export function jjCompareTargetRevset(target: string): string {
-  const remoteBookmark = parseRemoteBookmark(target);
-  if (remoteBookmark) {
-    return `remote_bookmarks(exact:${quoteJjString(remoteBookmark.name)}, exact:${quoteJjString(remoteBookmark.remote)})`;
-  }
-  const localBookmark = parseBookmarkName(target);
-  return localBookmark ? `bookmarks(exact:${quoteJjString(localBookmark)})` : target;
-}
-
-export function jjLineBaseRevset(target: string): string {
-  const compareTarget = jjCompareTargetRevset(target);
-  return `heads(::@ & ::(${compareTarget}))`;
-}
-
-export function parseRemoteBookmark(target: string): { name: string; remote: string } | null {
-  const at = target.lastIndexOf("@");
-  if (at <= 0 || at === target.length - 1) return null;
-  return { name: target.slice(0, at), remote: target.slice(at + 1) };
-}
-
-function parseBookmarkName(target: string): string | null {
-  if (!target || target.startsWith("@") || /[()\s]/.test(target)) return null;
-  return target;
-}
-
-function quoteJjString(value: string): string {
-  return JSON.stringify(value);
 }
 
 async function listJjCompareTargets(cwd?: string): Promise<{ local: string[]; remote: string[] }> {

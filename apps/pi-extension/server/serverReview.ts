@@ -79,12 +79,12 @@ import {
 import { getRepoInfo } from "./project.js";
 import {
 	CODEX_REVIEW_SYSTEM_PROMPT,
-	buildCodexReviewUserMessage,
 	buildCodexCommand,
 	generateOutputPath,
 	parseCodexOutput,
 	transformReviewFindings,
 } from "../generated/codex-review.js";
+import { buildAgentReviewUserMessage } from "../generated/agent-review-message.js";
 import {
 	CLAUDE_REVIEW_PROMPT,
 	buildClaudeCommand,
@@ -344,7 +344,7 @@ export async function startReviewServer(options: {
 				return built ? { ...built, prUrl: launchPrUrl, diffScope: launchDiffScope, diffContext } : built;
 			}
 
-			const userMessage = buildCodexReviewUserMessage(currentPatch, currentDiffType, userMessageOptions, prMeta);
+			const userMessage = buildAgentReviewUserMessage(currentPatch, currentDiffType, userMessageOptions, prMeta);
 
 			if (provider === "codex") {
 				const model = typeof config?.model === "string" && config.model ? config.model : undefined;

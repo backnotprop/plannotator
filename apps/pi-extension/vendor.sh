@@ -12,7 +12,7 @@ for f in feedback-templates prompts review-core storage draft project pr-provide
 done
 
 # Vendor review agent modules from packages/server/ — rewrite imports for generated/ layout
-for f in codex-review claude-review path-utils; do
+for f in agent-review-message codex-review claude-review path-utils; do
   src="../../packages/server/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/server/%s.ts\n' "$f" | cat - "$src" \
     | sed 's|from "./vcs"|from "./review-core.js"|' \
@@ -28,6 +28,7 @@ for f in tour-review; do
   printf '// @generated — DO NOT EDIT. Source: packages/server/tour/%s.ts\n' "$f" | cat - "$src" \
     | sed 's|from "\.\./vcs"|from "./review-core.js"|' \
     | sed 's|from "\.\./pr"|from "./pr-provider.js"|' \
+    | sed 's|from "\.\./agent-review-message"|from "./agent-review-message.js"|' \
     | sed 's|from "@plannotator/shared/tour"|from "./tour.js"|' \
     > "generated/$f.ts"
 done

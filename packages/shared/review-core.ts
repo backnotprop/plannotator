@@ -7,6 +7,8 @@
 
 import { resolve as resolvePath } from "node:path";
 
+export const JJ_TRUNK_REVSET = "trunk()";
+
 export type DiffType =
   | "uncommitted"
   | "staged"
@@ -93,6 +95,36 @@ export interface ReviewGitRuntime {
 
 export interface GitDiffOptions {
   hideWhitespace?: boolean;
+}
+
+export function parseRemoteBookmark(target: string): { name: string; remote: string } | null {
+  const at = target.lastIndexOf("@");
+  if (at <= 0 || at === target.length - 1) return null;
+  return { name: target.slice(0, at), remote: target.slice(at + 1) };
+}
+
+export function jjCompareTargetRevset(target: string): string {
+  const remoteBookmark = parseRemoteBookmark(target);
+  if (remoteBookmark) {
+    return `remote_bookmarks(exact:${quoteJjString(remoteBookmark.name)}, exact:${quoteJjString(remoteBookmark.remote)})`;
+  }
+
+  const localBookmark = parseJjBookmarkName(target);
+  return localBookmark ? `bookmarks(exact:${quoteJjString(localBookmark)})` : target;
+}
+
+export function jjLineBaseRevset(target: string): string {
+  const compareTarget = jjCompareTargetRevset(target);
+  return `heads(::@ & ::(${compareTarget}))`;
+}
+
+function parseJjBookmarkName(target: string): string | null {
+  if (!target || target.startsWith("@") || /[()\s]/.test(target)) return null;
+  return target;
+}
+
+function quoteJjString(value: string): string {
+  return JSON.stringify(value);
 }
 
 export async function getCurrentBranch(

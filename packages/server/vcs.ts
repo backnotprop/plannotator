@@ -201,6 +201,12 @@ export type {
 } from "./git";
 
 export { parseWorktreeDiffType, validateFilePath, runtime as gitRuntime } from "./git";
+export {
+  JJ_TRUNK_REVSET,
+  jjCompareTargetRevset,
+  jjLineBaseRevset,
+  parseRemoteBookmark,
+} from "@plannotator/shared/review-core";
 
 // --- Detection cache ---
 

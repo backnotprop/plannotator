@@ -31,12 +31,12 @@ import { createExternalAnnotationHandler } from "./external-annotations";
 import { createAgentJobHandler } from "./agent-jobs";
 import {
   CODEX_REVIEW_SYSTEM_PROMPT,
-  buildCodexReviewUserMessage,
   buildCodexCommand,
   generateOutputPath,
   parseCodexOutput,
   transformReviewFindings,
 } from "./codex-review";
+import { buildAgentReviewUserMessage } from "./agent-review-message";
 import {
   CLAUDE_REVIEW_PROMPT,
   buildClaudeCommand,
@@ -230,7 +230,7 @@ export async function startReviewServer(
         return built ? { ...built, prUrl: launchPrUrl, diffScope: launchDiffScope, diffContext } : built;
       }
 
-      const userMessage = buildCodexReviewUserMessage(currentPatch, currentDiffType, userMessageOptions, prMetadata);
+      const userMessage = buildAgentReviewUserMessage(currentPatch, currentDiffType, userMessageOptions, prMetadata);
 
       if (provider === "codex") {
         const model = typeof config?.model === "string" && config.model ? config.model : undefined;

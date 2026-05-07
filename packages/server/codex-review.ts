@@ -9,8 +9,6 @@ import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { appendFile, mkdir, unlink, writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import type { DiffType } from "./vcs";
-import type { PRMetadata } from "./pr";
 import { toRelativePath } from "./path-utils";
 
 // ---------------------------------------------------------------------------
@@ -157,86 +155,6 @@ Ignore non-blocking issues such as style, formatting, typos, documentation, and 
 
 FORMATTING GUIDELINES:
 The finding description should be one paragraph.`;
-
-// ---------------------------------------------------------------------------
-// User message builder
-// ---------------------------------------------------------------------------
-
-/** Build the dynamic user message based on review context. */
-export function buildCodexReviewUserMessage(
-  patch: string,
-  diffType: DiffType,
-  options?: { defaultBranch?: string; hasLocalAccess?: boolean; prDiffScope?: string },
-  prMetadata?: PRMetadata,
-): string {
-  // PR/MR mode — pass the link, with local context if --local
-  if (prMetadata) {
-    if (options?.prDiffScope === "full-stack") {
-      return [
-        `Full-stack review of ${prMetadata.url}`,
-        "",
-        "This is a stacked PR. The diff below shows ALL accumulated changes from the repository default branch through this PR's head (not just this PR's own layer).",
-        "Review the complete diff for issues that span the stack.",
-        "",
-        "```diff",
-        patch,
-        "```",
-      ].join("\n");
-    }
-    if (options?.hasLocalAccess) {
-      return [
-        prMetadata.url,
-        "",
-        "You are in a local worktree checked out at the PR head. The code is available locally.",
-        `To see the PR changes, diff against the remote base branch: git diff origin/${prMetadata.baseBranch}...HEAD`,
-        "Do NOT diff against the local `main` branch — it may be stale. Always use origin/.",
-      ].join("\n");
-    }
-    return prMetadata.url;
-  }
-
-  // Local mode — Codex has full file/git access
-  const effectiveDiffType = diffType.startsWith("worktree:")
-    ? diffType.split(":").pop() || "uncommitted"
-    : diffType;
-
-  switch (effectiveDiffType) {
-    case "uncommitted":
-      return "Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.";
-
-    case "staged":
-      return "Review the currently staged code changes (`git diff --staged`) and provide prioritized findings.";
-
-    case "unstaged":
-      return "Review the unstaged code changes (tracked modifications and untracked files) and provide prioritized findings.";
-
-    case "last-commit":
-      return "Review the code changes introduced in the last commit (`git diff HEAD~1..HEAD`) and provide prioritized findings.";
-
-    case "branch": {
-      const base = options?.defaultBranch || "main";
-      return `Review the code changes against the base branch '${base}'. Run \`git diff ${base}..HEAD\` to inspect the changes. Provide prioritized, actionable findings.`;
-    }
-
-    case "merge-base": {
-      const base = options?.defaultBranch || "main";
-      return `Review the PR-style diff against base '${base}'. First find the common ancestor with \`git merge-base ${base} HEAD\`, then run \`git diff <merge-base>..HEAD\` using that commit to inspect only the changes introduced on this branch (matches GitHub's PR view). Provide prioritized, actionable findings.`;
-    }
-
-    case "all":
-      return "Review every file in the repository (all files shown as additions, diffed against an empty tree). Provide prioritized, actionable findings.";
-
-    default:
-      // p4 or unknown — fall back to generic with inlined diff
-      return [
-        "Review the following code changes and provide prioritized findings.",
-        "",
-        "```diff",
-        patch,
-        "```",
-      ].join("\n");
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Command builder
