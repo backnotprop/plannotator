@@ -68,6 +68,9 @@ export function usePierreTheme(options?: { fontFamily?: string; fontSize?: strin
         --diffs-dark-bg: ${bg}; --diffs-light-bg: ${bg}; --diffs-dark: ${fg}; --diffs-light: ${fg};
       }
       pre, code { background-color: ${bg} !important; }
+      :host { --diffs-bg-separator-override: color-mix(in srgb, ${fg} 8%, ${bg}); }
+      [data-separator='line-info'], [data-separator='line-info-basic'] { height: 24px !important; }
+      [data-separator='line-info'] { margin-block: 4px !important; }
     `};
   });
 
@@ -77,6 +80,8 @@ export function usePierreTheme(options?: { fontFamily?: string; fontSize?: strin
       const bg = styles.getPropertyValue('--background').trim();
       const fg = styles.getPropertyValue('--foreground').trim();
       const muted = styles.getPropertyValue('--muted').trim();
+      const mutedFg = styles.getPropertyValue('--muted-foreground').trim();
+      const border = styles.getPropertyValue('--border').trim();
       const primary = styles.getPropertyValue('--primary').trim();
       if (!bg || !fg) return;
 
@@ -120,6 +125,50 @@ export function usePierreTheme(options?: { fontFamily?: string; fontSize?: strin
             text-underline-offset: 2px;
             cursor: pointer;
           }
+
+          /* Separator bars — slimmer, semi-transparent, integrated with theme */
+          :host {
+            --diffs-bg-separator-override: color-mix(in srgb, ${border || fg} 25%, ${bg});
+          }
+          [data-separator='line-info'],
+          [data-separator='line-info-basic'] {
+            height: 24px !important;
+          }
+          [data-separator='line-info'] {
+            margin-block: 4px !important;
+          }
+          [data-separator-content] {
+            font-size: 11px !important;
+            color: ${mutedFg || fg} !important;
+            opacity: 0.7;
+          }
+          [data-separator-content]:hover {
+            opacity: 1;
+          }
+          [data-expand-button] {
+            min-width: 24px !important;
+            color: ${mutedFg || fg} !important;
+            opacity: 0.5;
+          }
+          [data-expand-button]:hover {
+            color: ${fg} !important;
+            opacity: 1;
+          }
+          [data-expand-index] [data-separator-wrapper] {
+            grid-template-columns: 24px auto !important;
+          }
+          [data-expand-index] [data-separator-wrapper][data-separator-multi-button] {
+            grid-template-columns: 24px 24px auto !important;
+          }
+          @media (pointer: fine) {
+            [data-separator='line-info'] [data-separator-wrapper] {
+              grid-template-columns: 26px auto !important;
+            }
+            [data-separator='line-info'] [data-separator-wrapper][data-separator-multi-button] {
+              grid-template-columns: 26px 26px auto !important;
+            }
+          }
+
           ${fontCSS}
         `,
       });
