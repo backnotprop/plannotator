@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import type { ToolContext } from "@opencode-ai/plugin";
 import {
   runPlannotatorAnnotateTool,
