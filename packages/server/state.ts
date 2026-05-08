@@ -46,9 +46,9 @@ type AwaitingResponseDaemonState = {
   feedback: null;
 };
 
-type ResolvedDaemonState = {
+type AwaitingRevisionDaemonState = {
   schemaVersion: 1;
-  status: "resolved";
+  status: "awaiting-revision";
   document: DocumentSnapshot;
   feedback: FeedbackPayload;
 };
@@ -56,7 +56,7 @@ type ResolvedDaemonState = {
 export type DaemonState =
   | IdleDaemonState
   | AwaitingResponseDaemonState
-  | ResolvedDaemonState;
+  | AwaitingRevisionDaemonState;
 
 export type StateEvent =
   | { type: "submit"; document: DocumentSnapshot }
@@ -197,7 +197,7 @@ function validateDaemonState(value: unknown, label = "daemon state"): DaemonStat
   }
 
   const status = value.status;
-  if (status !== "idle" && status !== "awaiting-response" && status !== "resolved") {
+  if (status !== "idle" && status !== "awaiting-response" && status !== "awaiting-revision") {
     throw new Error(`${label} has invalid status ${String(status)}`);
   }
 
@@ -289,19 +289,25 @@ export function transition(current: DaemonState, event: StateEvent): DaemonState
     validatedCurrent.status === "awaiting-response" &&
     validatedEvent.type === "resolve"
   ) {
+    // If approved, go to idle (workflow complete)
+    // If needs revision, go to awaiting-revision
+    if (validatedEvent.feedback.approved) {
+      return createIdleState();
+    }
+
     return {
       schemaVersion: SCHEMA_VERSION,
-      status: "resolved",
+      status: "awaiting-revision",
       document: validatedCurrent.document,
       feedback: validatedEvent.feedback,
     };
   }
 
-  if (validatedCurrent.status === "resolved" && validatedEvent.type === "clear") {
+  if (validatedCurrent.status === "awaiting-revision" && validatedEvent.type === "clear") {
     return createIdleState();
   }
 
-  if (validatedCurrent.status === "resolved" && validatedEvent.type === "submit") {
+  if (validatedCurrent.status === "awaiting-revision" && validatedEvent.type === "submit") {
     // Allow revision submission: must match the document being revised
     const currentDoc = validatedCurrent.document;
     const newDoc = validatedEvent.document;

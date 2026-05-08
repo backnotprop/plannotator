@@ -35,7 +35,7 @@ type ResetHookArgs = {
 };
 
 export type DaemonRouterEvent = {
-  type: "resolved";
+  type: "awaiting-revision";
   feedback: FeedbackPayload;
   state: DaemonState;
 };
@@ -222,10 +222,10 @@ function isRecord(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isResolvedState(
+function isAwaitingRevisionState(
   state: DaemonState,
-): state is Extract<DaemonState, { status: "resolved" }> {
-  return state.status === "resolved";
+): state is Extract<DaemonState, { status: "awaiting-revision" }> {
+  return state.status === "awaiting-revision";
 }
 
 function buildCancelledFeedback(message: string): FeedbackPayload {
@@ -281,7 +281,7 @@ async function applyResolution(
 
   writeDaemonState(stateAdapter, nextState);
   publishDaemonEvent(eventBus, {
-    type: "resolved",
+    type: "awaiting-revision",
     feedback,
     state: nextState,
   });
@@ -334,7 +334,7 @@ function toSseChunk(event: string, payload: JsonObject): Uint8Array {
 }
 
 function buildVerdictPayload(
-  resolvedState: Extract<DaemonState, { status: "resolved" }>,
+  resolvedState: Extract<DaemonState, { status: "awaiting-revision" }>,
 ): JsonObject {
   return {
     feedback: resolvedState.feedback,
@@ -345,10 +345,10 @@ function buildVerdictPayload(
 
 function maybeConsumeDeliveredVerdict(
   stateAdapter: DaemonRouterState,
-  resolvedState: Extract<DaemonState, { status: "resolved" }>,
+  resolvedState: Extract<DaemonState, { status: "awaiting-revision" }>,
 ): void {
   const currentState = readDaemonState(stateAdapter);
-  if (!isResolvedState(currentState)) {
+  if (!isAwaitingRevisionState(currentState)) {
     return;
   }
 
@@ -426,7 +426,7 @@ export function createDaemonRouter(
       }
 
       if (url.pathname === "/api/submit" && req.method === "POST") {
-        if (currentState.status !== "idle" && currentState.status !== "resolved") {
+        if (currentState.status !== "idle" && currentState.status !== "awaiting-revision") {
           return Response.json(
             {
               error: `Daemon cannot accept a new submission while state is ${currentState.status}.`,
@@ -518,7 +518,7 @@ export function createDaemonRouter(
         // D2: in resolved (verdict_ready), plain wait without requestId is a stale-verdict
         // risk — a later unrelated command could inadvertently consume an old verdict.
         // Only an exact-ID waiter may recover the buffered verdict.
-        if (currentState.status === "resolved") {
+        if (currentState.status === "awaiting-revision") {
           if (!requestId) {
             return Response.json(
               {
@@ -602,7 +602,7 @@ export function createDaemonRouter(
             };
 
             const deliver = (
-              resolvedState: Extract<DaemonState, { status: "resolved" }>,
+              resolvedState: Extract<DaemonState, { status: "awaiting-revision" }>,
             ) => {
               if (closed) {
                 return;
@@ -623,7 +623,7 @@ export function createDaemonRouter(
               finish();
             };
 
-            if (isResolvedState(currentState)) {
+            if (isAwaitingRevisionState(currentState)) {
               deliver(currentState);
               return;
             }
@@ -631,7 +631,7 @@ export function createDaemonRouter(
             controller.enqueue(new TextEncoder().encode(": connected\n\n"));
 
             unsubscribe = subscribe((event) => {
-              if (event.type !== "resolved") {
+              if (event.type !== "awaiting-revision") {
                 return;
               }
 
@@ -786,7 +786,7 @@ export function createDaemonRouter(
 
           writeDaemonState(stateAdapter, nextState);
           publishDaemonEvent(eventBus, {
-            type: "resolved",
+            type: "awaiting-revision",
             feedback: nextState.feedback,
             state: nextState,
           });

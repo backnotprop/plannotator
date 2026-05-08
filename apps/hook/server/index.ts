@@ -964,7 +964,7 @@ async function resolveWaitRequestId(requestId?: string): Promise<string | undefi
     // This covers both awaiting-response (in_review) and resolved (verdict_ready)
     // states, so `plannotator wait` recovers a buffered verdict without
     // requiring the user to discover and pass --request-id manually.
-    if (currentState.status === "awaiting-response" || currentState.status === "resolved") {
+    if (currentState.status === "awaiting-response" || currentState.status === "awaiting-revision") {
       return currentState.document.id;
     }
   }
