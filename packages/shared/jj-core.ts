@@ -87,7 +87,26 @@ export async function runJjDiff(
     return { patch: "", label: args.label, error: firstErrorLine(result.stderr) };
   }
 
-  return { patch: result.stdout, label: args.label };
+  const patch = options?.hideWhitespace ? dropHunklessGitDiffChunks(result.stdout) : result.stdout;
+  return { patch, label: args.label };
+}
+
+function dropHunklessGitDiffChunks(patch: string): string {
+  if (!patch.includes("diff --git ")) return patch;
+
+  const chunks = patch.split(/^diff --git /m);
+  const prefix = chunks.shift() ?? "";
+  const filtered = chunks
+    .filter(hasReviewableGitDiffChunk)
+    .map((chunk) => `diff --git ${chunk}`)
+    .join("");
+
+  return `${prefix}${filtered}`;
+}
+
+function hasReviewableGitDiffChunk(chunk: string): boolean {
+  if (/^@@@? /m.test(chunk)) return true;
+  return /^(new file mode|deleted file mode|old mode|new mode|rename from|rename to|copy from|copy to|GIT binary patch|Binary files |similarity index|dissimilarity index)/m.test(chunk);
 }
 
 export async function getJjFileContentsForDiff(

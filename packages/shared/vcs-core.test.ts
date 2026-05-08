@@ -94,6 +94,20 @@ describe("createVcsApi", () => {
     await expect(api.getVcsContext("/repo/packages/tool")).resolves.toMatchObject({ vcsType: "jj" });
   });
 
+  test("continues probing providers when root detection throws", async () => {
+    const brokenGit = {
+      ...provider("git", true, ["uncommitted"]),
+      async getRoot() {
+        throw new Error("git failed");
+      },
+    };
+    const p4 = provider("p4", true, ["p4-default"], {}, "/repo");
+    const api = createVcsApi([brokenGit, p4]);
+
+    await expect(api.detectVcs("/repo")).resolves.toBe(p4);
+    await expect(api.getVcsContext("/repo")).resolves.toMatchObject({ vcsType: "p4" });
+  });
+
   test("routes operations by diff type before falling back to detection", async () => {
     const jj = provider("jj", false, ["jj-current"]);
     const git = provider("git", true, ["uncommitted"]);

@@ -152,7 +152,7 @@ User runs /plannotator-review command
 Claude Code: plannotator review subcommand runs
 OpenCode: event handler intercepts command
         ↓
-git diff captures unstaged changes
+VCS diff captures local changes (git diff or jj diff)
         ↓
 Review server starts, opens browser with diff viewer
         ↓

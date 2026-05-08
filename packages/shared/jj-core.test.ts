@@ -4,6 +4,8 @@ import {
   jjLineBaseRevset,
   parseJjBookmarkList,
   parseJjRemoteBookmarkList,
+  type ReviewJjRuntime,
+  runJjDiff,
   selectDefaultJjCompareTarget,
 } from "./jj-core";
 
@@ -39,6 +41,45 @@ describe("jj diff args", () => {
       .toEqual(["diff", "--git", "-w", "--from", "heads(::@ & ::(trunk()))", "--to", "@"]);
     expect(getJjDiffArgs("jj-all", "trunk()", { hideWhitespace: true })?.args)
       .toEqual(["diff", "--git", "-w", "--from", "root()", "--to", "@"]);
+  });
+
+  test("drops hunk-less file chunks after hide-whitespace filtering", async () => {
+    const runtimeForPatch = (stdout: string): ReviewJjRuntime => ({
+      async runJj() {
+        return {
+          stdout,
+          stderr: "",
+          exitCode: 0,
+        };
+      },
+    });
+
+    const hunklessChunk = [
+      "diff --git a/spacey.ts b/spacey.ts",
+      "index 1111111..2222222 100644",
+      "--- a/spacey.ts",
+      "+++ b/spacey.ts",
+      "",
+    ].join("\n");
+    const realChunk = [
+      "diff --git a/real.ts b/real.ts",
+      "index 3333333..4444444 100644",
+      "--- a/real.ts",
+      "+++ b/real.ts",
+      "@@ -1 +1 @@",
+      "-old",
+      "+new",
+      "",
+    ].join("\n");
+
+    const result = await runJjDiff(runtimeForPatch(hunklessChunk + realChunk), "jj-current", "trunk()", undefined, { hideWhitespace: true });
+
+    expect(result.patch).not.toContain("spacey.ts");
+    expect(result.patch).toContain("real.ts");
+    expect(result.patch).toContain("@@ -1 +1 @@");
+
+    const emptyResult = await runJjDiff(runtimeForPatch(hunklessChunk), "jj-current", "trunk()", undefined, { hideWhitespace: true });
+    expect(emptyResult.patch).toBe("");
   });
 });
 

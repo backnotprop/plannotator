@@ -242,8 +242,19 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
 
     const candidates: Array<{ provider: VcsProvider; root: string | null; order: number }> = [];
     for (const provider of providerList) {
-      const root = provider.getRoot ? await provider.getRoot(cwd) : null;
-      if (root || (!provider.getRoot && await provider.detect(cwd))) {
+      let root: string | null = null;
+      let detected = false;
+      try {
+        if (provider.getRoot) {
+          root = await provider.getRoot(cwd);
+          detected = root !== null;
+        } else {
+          detected = await provider.detect(cwd);
+        }
+      } catch {
+        continue;
+      }
+      if (detected) {
         candidates.push({ provider, root, order: candidates.length });
       }
     }
