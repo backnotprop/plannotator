@@ -6,6 +6,11 @@
  * by pointing PLANNOTATOR_CLI_ENTRYPOINT at a mock script that returns
  * controlled verdicts.
  */
+/* eslint-disable @typescript-eslint/no-sync-functions -- test setup uses sync fs intentionally */
+/* eslint-disable @typescript-eslint/no-unsafe-call -- Bun expect() returns error-typed values */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access -- Bun expect() returns error-typed values */
+/* eslint-disable @typescript-eslint/require-await -- async test bodies with Bun expect() */
+/* eslint-disable @typescript-eslint/no-floating-promises -- withEnv returns Promise<void> */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -44,6 +49,7 @@ function createPromptCollector() {
     prompts,
     client: {
       session: {
+        // stub returns synchronously
         async prompt(request: typeof prompts[number]) {
           prompts.push(request);
           return {};
@@ -91,11 +97,13 @@ function withEnv(
   vars: Record<string, string | undefined>,
   fn: () => Promise<void>,
 ): Promise<void> {
+  const keys = Object.keys(vars);
   const saved: Record<string, string | undefined> = {};
-  for (const key of Object.keys(vars)) {
+  for (const key of keys) {
     saved[key] = process.env[key];
   }
-  for (const [key, value] of Object.entries(vars)) {
+  for (const key of keys) {
+    const value = vars[key];
     if (value === undefined) {
       delete process.env[key];
     } else {
@@ -103,7 +111,8 @@ function withEnv(
     }
   }
   return fn().finally(() => {
-    for (const [key, value] of Object.entries(saved)) {
+    for (const key of keys) {
+      const value = saved[key];
       if (value === undefined) {
         delete process.env[key];
       } else {

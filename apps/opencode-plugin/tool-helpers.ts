@@ -57,30 +57,21 @@ class CliTimeoutError extends Error {
   }
 }
 
-/** Resolves the plannotator CLI entrypoint. Supports PLANNOTATOR_CLI_ENTRYPOINT env override for testing. */
-function resolveRepoLocalCliEntrypoint(directory: string): string | null {
+/** Resolves the plannotator CLI command. Supports PLANNOTATOR_CLI_ENTRYPOINT env override for testing. */
+function resolvePlannotatorCommand(directory: string): CliCommand {
   const envOverride: string | undefined = process.env.PLANNOTATOR_CLI_ENTRYPOINT;
   if (envOverride !== undefined) {
-    return envOverride;
+    return { argv: [process.execPath, "run", envOverride] };
   }
 
   const entrypoint = join(directory, "apps", "hook", "server", "index.ts");
-  return existsSync(entrypoint) ? entrypoint : null;
-}
-
-function resolvePlannotatorCommand(directory: string): CliCommand {
-  const entrypoint = resolveRepoLocalCliEntrypoint(directory);
-  if (entrypoint) {
-    return {
-      argv: [process.execPath, "run", entrypoint],
-    };
+  if (existsSync(entrypoint)) {
+    return { argv: [process.execPath, "run", entrypoint] };
   }
 
   // Fallback: use PATH-resolved plannotator binary for published plugin installs
   // where the monorepo entrypoint is not available.
-  return {
-    argv: ["plannotator"],
-  };
+  return { argv: ["plannotator"] };
 }
 
 async function runPlannotatorCli(
