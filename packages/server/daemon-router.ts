@@ -37,6 +37,7 @@ type ResetHookArgs = {
 export type DaemonRouterEvent = {
   type: "awaiting-revision";
   feedback: FeedbackPayload;
+  document?: DocumentSnapshot;
   state: DaemonState;
 };
 
@@ -279,10 +280,15 @@ async function applyResolution(
       request,
     })) ?? {};
 
+  // Preserve document from currentState for verdict delivery
+  // When approved, nextState is idle with null document/feedback
+  const documentForVerdict = currentState.document;
+
   writeDaemonState(stateAdapter, nextState);
   publishDaemonEvent(eventBus, {
     type: "awaiting-revision",
     feedback,
+    document: documentForVerdict,
     state: nextState,
   });
 
@@ -334,12 +340,14 @@ function toSseChunk(event: string, payload: JsonObject): Uint8Array {
 }
 
 function buildVerdictPayload(
-  resolvedState: Extract<DaemonState, { status: "awaiting-revision" }>,
+  feedback: FeedbackPayload,
+  document: DocumentSnapshot | null | undefined,
+  state: DaemonState,
 ): JsonObject {
   return {
-    feedback: resolvedState.feedback,
-    document: resolvedState.document,
-    state: resolvedState,
+    feedback,
+    document,
+    state,
   };
 }
 
@@ -601,16 +609,21 @@ export function createDaemonRouter(
               req.signal.removeEventListener("abort", handleAbort);
             };
 
-            const deliver = (
-              resolvedState: Extract<DaemonState, { status: "awaiting-revision" }>,
-            ) => {
+            const deliver = (event: DaemonRouterEvent) => {
               if (closed) {
                 return;
               }
 
               try {
                 controller.enqueue(
-                  toSseChunk("verdict", buildVerdictPayload(resolvedState)),
+                  toSseChunk(
+                    "verdict",
+                    buildVerdictPayload(
+                      event.feedback,
+                      event.document ?? event.state.document,
+                      event.state,
+                    ),
+                  ),
                 );
               } catch {
                 cleanup();
@@ -619,12 +632,19 @@ export function createDaemonRouter(
 
               // Don't auto-clear after delivering verdict - state should stay resolved
               // until user submits revision or explicitly clears
-              // maybeConsumeDeliveredVerdict(stateAdapter, resolvedState);
+              if (isAwaitingRevisionState(event.state)) {
+                // maybeConsumeDeliveredVerdict(stateAdapter, event.state);
+              }
               finish();
             };
 
             if (isAwaitingRevisionState(currentState)) {
-              deliver(currentState);
+              deliver({
+                type: "awaiting-revision",
+                feedback: currentState.feedback,
+                document: currentState.document,
+                state: currentState,
+              });
               return;
             }
 
@@ -635,7 +655,7 @@ export function createDaemonRouter(
                 return;
               }
 
-              deliver(event.state);
+              deliver(event);
             });
           },
           cancel() {
