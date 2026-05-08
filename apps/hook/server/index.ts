@@ -747,7 +747,7 @@ async function submitDocument(
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         document,
-        noBrowser: options.noBrowser === true,
+        noBrowser: true, // CLI handles browser opening, not daemon
         permissionMode: options.permissionMode,
         commitMessage: options.commitMessage,
         ...options.submitPayload,
