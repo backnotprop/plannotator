@@ -650,6 +650,11 @@ function renderPlainVerdict(payload: VerdictPayload): never {
     process.exit(EXIT_OK);
   }
 
+  // For plans that need revision, instruct the agent to revise and resubmit
+  if (!feedback.approved && document.mode === "plan") {
+    console.log("\nPlease revise the plan to address this feedback and resubmit.");
+  }
+
   process.exit(feedback.approved ? EXIT_OK : EXIT_DENIED);
 }
 
