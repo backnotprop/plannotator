@@ -4,4 +4,3 @@ exclude_paths:
   - "plugins/**"
   - "plans/**"
   - "tests/**"
-  - "**/*.test.ts"
