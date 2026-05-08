@@ -1,10 +1,11 @@
 /**
  * Local-only server port configuration.
  *
- * NIM-2 removes the remote/share runtime surface. The surviving server path
- * still allows an explicit fixed port through PLANNOTATOR_PORT, otherwise it
- * binds an ephemeral local port.
+ * Uses fixed default port (43000) unless overridden via PLANNOTATOR_PORT.
+ * Fixed port enables firewall rules, SSH forwarding, and stable bookmarks.
  */
+
+const DEFAULT_PORT = 43000;
 
 export function isRemoteSession(): boolean {
   return false;
@@ -19,9 +20,9 @@ export function getServerPort(): number {
     }
 
     console.error(
-      `[Plannotator] Warning: Invalid PLANNOTATOR_PORT "${envPort}", using default`,
+      `[Plannotator] Warning: Invalid PLANNOTATOR_PORT "${envPort}", using default ${DEFAULT_PORT}`,
     );
   }
 
-  return 0;
+  return DEFAULT_PORT;
 }

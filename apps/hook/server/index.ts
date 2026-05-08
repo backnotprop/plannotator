@@ -15,7 +15,7 @@
  * but it now routes through the daemon-backed submit/wait flow.
  */
 
-import { daemonStatus, openBrowser, startDaemonDetached, stopDaemon } from "@plannotator/server";
+import { daemonStatus, getServerPort, openBrowser, startDaemonDetached, stopDaemon } from "@plannotator/server";
 import { notifyDocumentEnteredReview } from "@plannotator/server/notify";
 import { resolveMarkdownFile } from "@plannotator/server/resolve-file";
 import { listSessions, registerSession, unregisterSession } from "@plannotator/server/sessions";
@@ -192,11 +192,13 @@ function writeDaemonMetadata(port: number): void {
 }
 
 async function allocateDaemonPort(): Promise<number> {
+  const desiredPort = getServerPort();
+
   return await new Promise<number>((resolve, reject) => {
     const server = createServer();
     server.unref();
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
+    server.listen(desiredPort, "127.0.0.1", () => {
       const address = server.address();
       if (!address || typeof address === "string") {
         server.close();

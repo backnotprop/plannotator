@@ -57,20 +57,19 @@ class CliTimeoutError extends Error {
 }
 
 /** Resolves the plannotator CLI command. Supports PLANNOTATOR_CLI_ENTRYPOINT env override for testing. */
-async function resolvePlannotatorCommand(directory: string): Promise<CliCommand> {
+function resolvePlannotatorCommand(directory: string): CliCommand {
   const envOverride: string | undefined = process.env.PLANNOTATOR_CLI_ENTRYPOINT;
   if (envOverride !== undefined) {
     return { argv: [process.execPath, "run", envOverride] };
   }
 
-  const entrypoint = join(directory, "apps", "hook", "server", "index.ts");
-  if (await Bun.file(entrypoint).exists()) {
-    return { argv: [process.execPath, "run", entrypoint] };
+  const installedBinary = Bun.which("plannotator");
+  if (installedBinary !== null) {
+    return { argv: [installedBinary] };
   }
 
-  // Fallback: use PATH-resolved plannotator binary for published plugin installs
-  // where the monorepo entrypoint is not available.
-  return { argv: ["plannotator"] };
+  const entrypoint = join(directory, "apps", "hook", "server", "index.ts");
+  return { argv: [process.execPath, "run", entrypoint] };
 }
 
 async function runPlannotatorCli(
@@ -81,7 +80,7 @@ async function runPlannotatorCli(
     timeoutMs?: number | null;
   } = {},
 ): Promise<CliResult> {
-  const command = await resolvePlannotatorCommand(directory);
+  const command = resolvePlannotatorCommand(directory);
   const child = spawn(command.argv[0], [...command.argv.slice(1), ...args], {
     cwd: directory,
     env: {

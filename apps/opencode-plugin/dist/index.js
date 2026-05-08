@@ -19,19 +19,20 @@ class CliTimeoutError extends Error {
     this.name = "CliTimeoutError";
   }
 }
-async function resolvePlannotatorCommand(directory) {
+function resolvePlannotatorCommand(directory) {
   const envOverride = process.env.PLANNOTATOR_CLI_ENTRYPOINT;
   if (envOverride !== undefined) {
     return { argv: [process.execPath, "run", envOverride] };
   }
-  const entrypoint = join(directory, "apps", "hook", "server", "index.ts");
-  if (await Bun.file(entrypoint).exists()) {
-    return { argv: [process.execPath, "run", entrypoint] };
+  const installedBinary = Bun.which("plannotator");
+  if (installedBinary !== null) {
+    return { argv: [installedBinary] };
   }
-  return { argv: ["plannotator"] };
+  const entrypoint = join(directory, "apps", "hook", "server", "index.ts");
+  return { argv: [process.execPath, "run", entrypoint] };
 }
 async function runPlannotatorCli(args, directory, options = {}) {
-  const command = await resolvePlannotatorCommand(directory);
+  const command = resolvePlannotatorCommand(directory);
   const child = spawn(command.argv[0], [...command.argv.slice(1), ...args], {
     cwd: directory,
     env: {

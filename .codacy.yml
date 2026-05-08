@@ -2,6 +2,7 @@ exclude_paths:
 - .obsidian/**
 - plugins/**
 - plans/**
+- tests/**
 engines:
   eslint-8:
     exclude_paths:
