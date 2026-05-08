@@ -83,6 +83,8 @@ describe("buildClaudeCommand", () => {
     expect(allowedTools).toContain("Bash(jj diff:*)");
     expect(allowedTools).toContain("Bash(jj log:*)");
     expect(allowedTools).toContain("Bash(jj show:*)");
+    expect(allowedTools).toContain("Bash(jj file show:*)");
+    expect(allowedTools).toContain("Bash(jj cat:*)");
     expect(allowedTools).toContain("Bash(jj bookmark list:*)");
   });
 });

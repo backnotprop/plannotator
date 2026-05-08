@@ -12,6 +12,7 @@ import {
   parseWorktreeDiffType,
   runGitDiff,
 } from "./review-core";
+import { isAbsolute, relative, resolve } from "node:path";
 import {
   type ReviewJjRuntime,
   detectJjWorkspace,
@@ -41,6 +42,7 @@ export {
 export interface VcsProvider {
   readonly id: string;
   detect(cwd?: string): Promise<boolean>;
+  getRoot?(cwd?: string): Promise<string | null>;
   ownsDiffType(diffType: string): boolean;
   canStageFiles?(diffType: string): boolean;
   getContext(cwd?: string): Promise<GitContext>;
@@ -105,6 +107,37 @@ export interface PreparedLocalReviewDiff {
 const GIT_DIFF_TYPES = new Set(["uncommitted", "staged", "unstaged", "last-commit", "branch", "merge-base", "all"]);
 const JJ_DIFF_TYPES = new Set(["jj-current", "jj-last", "jj-line", "jj-all"]);
 
+function selectNearestProvider(
+  candidates: Array<{ provider: VcsProvider; root: string | null; order: number }>,
+  cwd?: string,
+): VcsProvider | null {
+  if (candidates.length === 0) return null;
+
+  const effectiveCwd = resolve(cwd ?? process.cwd());
+  const ranked = candidates
+    .map((candidate) => ({
+      ...candidate,
+      rootDepth: candidate.root ? vcsRootDepth(candidate.root) : -1,
+      containsCwd: candidate.root ? isSameOrAncestor(candidate.root, effectiveCwd) : false,
+    }))
+    .sort((a, b) => {
+      if (a.containsCwd !== b.containsCwd) return a.containsCwd ? -1 : 1;
+      if (a.rootDepth !== b.rootDepth) return b.rootDepth - a.rootDepth;
+      return a.order - b.order;
+    });
+
+  return ranked[0]?.provider ?? null;
+}
+
+function isSameOrAncestor(root: string, child: string): boolean {
+  const relativePath = relative(resolve(root), child);
+  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
+}
+
+function vcsRootDepth(root: string): number {
+  return resolve(root).split(/[\\/]+/).filter(Boolean).length;
+}
+
 export function createGitProvider(runtime: ReviewGitRuntime): VcsProvider {
   return {
     id: "git",
@@ -116,6 +149,11 @@ export function createGitProvider(runtime: ReviewGitRuntime): VcsProvider {
       } catch {
         return false;
       }
+    },
+
+    async getRoot(cwd?: string): Promise<string | null> {
+      const result = await runtime.runGit(["rev-parse", "--show-toplevel"], { cwd });
+      return result.exitCode === 0 ? result.stdout.trim() || null : null;
     },
 
     ownsDiffType(diffType: string): boolean {
@@ -166,6 +204,10 @@ export function createJjProvider(runtime: ReviewJjRuntime): VcsProvider {
       return (await detectJjWorkspace(runtime, cwd)) !== null;
     },
 
+    getRoot(cwd?: string): Promise<string | null> {
+      return detectJjWorkspace(runtime, cwd);
+    },
+
     ownsDiffType(diffType: string): boolean {
       return JJ_DIFF_TYPES.has(diffType);
     },
@@ -198,15 +240,17 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
     const cached = vcsCache.get(key);
     if (cached) return cached;
 
+    const candidates: Array<{ provider: VcsProvider; root: string | null; order: number }> = [];
     for (const provider of providerList) {
-      if (await provider.detect(cwd)) {
-        vcsCache.set(key, provider);
-        return provider;
+      const root = provider.getRoot ? await provider.getRoot(cwd) : null;
+      if (root || (!provider.getRoot && await provider.detect(cwd))) {
+        candidates.push({ provider, root, order: candidates.length });
       }
     }
 
-    vcsCache.set(key, defaultProvider);
-    return defaultProvider;
+    const detected = selectNearestProvider(candidates, cwd) ?? defaultProvider;
+    vcsCache.set(key, detected);
+    return detected;
   }
 
   function getProviderForDiffType(diffType: string): VcsProvider | null {

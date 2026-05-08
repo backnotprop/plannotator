@@ -225,7 +225,9 @@ export async function startReviewServer(options: {
 	// read this (not gitContext.defaultBranch) so they analyze the same diff
 	// the reviewer is currently looking at. Honors an explicit initialBase from
 	// the caller — e.g. programmatic Pi callers can request a non-detected base.
-	let currentBase = options.initialBase || options.gitContext?.defaultBranch || "main";
+	const detectedCompareTarget = (): string =>
+		options.gitContext?.defaultBranch || options.gitContext?.compareTarget?.fallback || "main";
+	let currentBase = options.initialBase || detectedCompareTarget();
 	let baseEverSwitched = false;
 
 	// Fire-and-forget: query the remote for its actual default branch.
@@ -585,7 +587,7 @@ export async function startReviewServer(options: {
 				if (typeof body.hideWhitespace === "boolean") {
 					currentHideWhitespace = body.hideWhitespace;
 				}
-				const detectedBase = options.gitContext?.defaultBranch || "main";
+				const detectedBase = detectedCompareTarget();
 				const base = resolveBaseBranch(
 					typeof body.base === "string" ? body.base : undefined,
 					detectedBase,
@@ -921,7 +923,7 @@ export async function startReviewServer(options: {
 
 			// Local mode first (matches Bun server priority)
 			if (hasLocalAccess && !isPRMode) {
-				const detectedBase = options.gitContext?.defaultBranch || "main";
+				const detectedBase = detectedCompareTarget();
 				const base = resolveBaseBranch(
 					url.searchParams.get("base") ?? undefined,
 					detectedBase,

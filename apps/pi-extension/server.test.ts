@@ -519,7 +519,7 @@ describe("pi review server", () => {
     });
     expect(prepared.gitContext.vcsType).toBe("jj");
     expect(prepared.diffType).toBe("jj-current");
-    expect(prepared.base).toBe("trunk()");
+    expect(prepared.base).toBe("main@git");
 
     const forcedGit = await prepareLocalReviewDiff({
       cwd: repoDir,
@@ -578,7 +578,7 @@ describe("pi review server", () => {
         gitContext?: { vcsType?: string; diffOptions: Array<{ id: string }> };
       };
       expect(initial.diffType).toBe("jj-current");
-      expect(initial.base).toBe("trunk()");
+      expect(initial.base).toBe("main@git");
       expect(initial.gitContext?.vcsType).toBe("jj");
       expect(initial.gitContext?.diffOptions.map((option) => option.id)).toEqual([
         "jj-current",

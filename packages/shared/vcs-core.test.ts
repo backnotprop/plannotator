@@ -32,11 +32,15 @@ function provider(
   detected: boolean,
   ownedTypes: string[],
   contextOverrides: Partial<GitContext> = {},
+  root?: string,
 ): VcsProvider {
   return {
     id,
     async detect() {
       return detected;
+    },
+    async getRoot() {
+      return detected ? root ?? "/repo" : null;
     },
     ownsDiffType(diffType: string) {
       return ownedTypes.includes(diffType);
@@ -64,12 +68,30 @@ const gitRuntime: ReviewGitRuntime = {
 
 describe("createVcsApi", () => {
   test("detects the first matching provider so jj wins colocated workspaces", async () => {
-    const jj = provider("jj", true, ["jj-current"]);
-    const git = provider("git", true, ["uncommitted"]);
+    const jj = provider("jj", true, ["jj-current"], {}, "/repo");
+    const git = provider("git", true, ["uncommitted"], {}, "/repo");
     const api = createVcsApi([jj, git]);
 
     await expect(api.detectVcs("/repo")).resolves.toBe(jj);
     await expect(api.getVcsContext("/repo")).resolves.toMatchObject({ vcsType: "jj" });
+  });
+
+  test("detects the nearest VCS root so nested Git repos beat outer JJ workspaces", async () => {
+    const jj = provider("jj", true, ["jj-current"], { cwd: "/repo" }, "/repo");
+    const git = provider("git", true, ["uncommitted"], { cwd: "/repo/packages/tool" }, "/repo/packages/tool");
+    const api = createVcsApi([jj, git]);
+
+    await expect(api.detectVcs("/repo/packages/tool")).resolves.toBe(git);
+    await expect(api.getVcsContext("/repo/packages/tool")).resolves.toMatchObject({ vcsType: "git" });
+  });
+
+  test("detects the nearest VCS root so nested JJ workspaces beat outer Git repos", async () => {
+    const jj = provider("jj", true, ["jj-current"], { cwd: "/repo/packages/tool" }, "/repo/packages/tool");
+    const git = provider("git", true, ["uncommitted"], { cwd: "/repo" }, "/repo");
+    const api = createVcsApi([jj, git]);
+
+    await expect(api.detectVcs("/repo/packages/tool")).resolves.toBe(jj);
+    await expect(api.getVcsContext("/repo/packages/tool")).resolves.toMatchObject({ vcsType: "jj" });
   });
 
   test("routes operations by diff type before falling back to detection", async () => {

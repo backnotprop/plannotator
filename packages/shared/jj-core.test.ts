@@ -43,18 +43,22 @@ describe("jj diff args", () => {
 });
 
 describe("jj compare targets", () => {
-  test("defaults to jj trunk revset instead of guessing from bookmark names", () => {
+  test("prefers available default bookmarks before falling back to trunk", () => {
     expect(selectDefaultJjCompareTarget({
       local: ["main"],
       remote: ["main@origin"],
-    })).toBe("trunk()");
+    })).toBe("main@origin");
     expect(selectDefaultJjCompareTarget({
-      local: ["develop", "feature"],
-      remote: ["release@origin"],
-    })).toBe("trunk()");
+      local: ["main"],
+      remote: ["main@git"],
+    })).toBe("main@git");
+    expect(selectDefaultJjCompareTarget({
+      local: ["main"],
+      remote: [],
+    })).toBe("main");
     expect(selectDefaultJjCompareTarget({
       local: ["release"],
-      remote: ["production@origin"],
+      remote: ["production@git"],
     })).toBe("trunk()");
   });
 

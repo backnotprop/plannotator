@@ -159,9 +159,22 @@ export function getJjDiffArgs(
   }
 }
 
-export function selectDefaultJjCompareTarget(_targets: { local: string[]; remote: string[] }): string {
-  // `trunk()` honors JJ's repository default bookmark/remote and user aliases;
-  // bookmarks are still listed so users can explicitly pick a different base.
+export function selectDefaultJjCompareTarget(targets: { local: string[]; remote: string[] }): string {
+  const preferredNames = ["main", "develop", "master", "trunk"];
+  for (const name of preferredNames) {
+    const preferredRemote = [
+      `${name}@origin`,
+      `${name}@upstream`,
+      `${name}@git`,
+      ...targets.remote.filter((target) => target.startsWith(`${name}@`)).sort(),
+    ].find((target) => targets.remote.includes(target));
+    if (preferredRemote) return preferredRemote;
+
+    if (targets.local.includes(name)) return name;
+  }
+
+  // `trunk()` honors JJ's repository default bookmark/remote and user aliases
+  // when the repository has no obvious default bookmark to compare against.
   return JJ_TRUNK_REVSET;
 }
 

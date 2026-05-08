@@ -422,7 +422,10 @@ export async function startReviewServer(
     ? { display: getDisplayRepo(prMetadata), branch: `${getMRLabel(prMetadata)} ${getMRNumberLabel(prMetadata)}` }
     : await getRepoInfo();
   if (gitContext?.repository?.displayFallback) {
-    repoInfo = { display: repoInfo?.display || gitContext.repository.displayFallback };
+    repoInfo = {
+      ...repoInfo,
+      display: repoInfo?.display || gitContext.repository.displayFallback,
+    };
   }
 
   // Fetch current platform user (for own-PR/MR detection)

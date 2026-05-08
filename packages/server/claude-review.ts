@@ -208,7 +208,8 @@ export function buildClaudeCommand(prompt: string, model: string = "claude-opus-
     "Bash(git show-ref:*)",
     // JJ (read-only)
     "Bash(jj status:*)", "Bash(jj diff:*)", "Bash(jj log:*)",
-    "Bash(jj show:*)", "Bash(jj bookmark list:*)",
+    "Bash(jj show:*)", "Bash(jj file show:*)", "Bash(jj cat:*)",
+    "Bash(jj bookmark list:*)",
     "Bash(wc:*)",
   ].join(",");
 
