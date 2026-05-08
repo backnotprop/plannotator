@@ -2,3 +2,7 @@ exclude_paths:
 - .obsidian/**
 - plugins/**
 - plans/**
+engines:
+  eslint-8:
+    exclude_paths:
+    - apps/opencode-plugin/index.test.ts
