@@ -84,23 +84,38 @@ describe("jj diff args", () => {
 });
 
 describe("jj compare targets", () => {
-  test("prefers available default bookmarks before falling back to trunk", () => {
-    expect(selectDefaultJjCompareTarget({
-      local: ["main"],
-      remote: ["main@origin"],
-    })).toBe("main@origin");
-    expect(selectDefaultJjCompareTarget({
-      local: ["main"],
-      remote: ["main@git"],
-    })).toBe("main@git");
-    expect(selectDefaultJjCompareTarget({
-      local: ["main"],
-      remote: [],
-    })).toBe("main");
-    expect(selectDefaultJjCompareTarget({
-      local: ["release"],
-      remote: ["production@git"],
-    })).toBe("trunk()");
+  test("resolves default target from jj trunk remote bookmarks", async () => {
+    const calls: string[][] = [];
+    const runtime: ReviewJjRuntime = {
+      async runJj(args) {
+        calls.push(args);
+        return { stdout: '[{"name":"main"},{"name":"main","remote":"origin"}]\n', stderr: "", exitCode: 0 };
+      },
+    };
+
+    await expect(selectDefaultJjCompareTarget(runtime, "/repo"))
+      .resolves.toBe("main@origin");
+    expect(calls).toEqual([[
+      "log",
+      "--no-graph",
+      "-r",
+      "trunk()",
+      "-T",
+      "json(bookmarks)",
+    ]]);
+  });
+
+  test("falls back to local bookmark then trunk revset", async () => {
+    const runtimeFor = (stdout: string): ReviewJjRuntime => ({
+      async runJj() {
+        return { stdout, stderr: "", exitCode: 0 };
+      },
+    });
+
+    await expect(selectDefaultJjCompareTarget(runtimeFor('[{"name":"develop"}]\n')))
+      .resolves.toBe("develop");
+    await expect(selectDefaultJjCompareTarget(runtimeFor('[]\n')))
+      .resolves.toBe("trunk()");
   });
 
   test("treats bookmarks and revsets correctly in line-of-work revsets", () => {

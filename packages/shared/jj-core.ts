@@ -38,7 +38,7 @@ export async function getJjContext(
 ): Promise<GitContext> {
   const root = await detectJjWorkspace(runtime, cwd);
   const targets = await listJjCompareTargets(runtime, root ?? cwd);
-  const defaultTarget = selectDefaultJjCompareTarget(targets);
+  const defaultTarget = await selectDefaultJjCompareTarget(runtime, root ?? cwd);
   const contextCwd = root ?? cwd;
 
   return {
@@ -178,23 +178,55 @@ export function getJjDiffArgs(
   }
 }
 
-export function selectDefaultJjCompareTarget(targets: { local: string[]; remote: string[] }): string {
-  const preferredNames = ["main", "develop", "master", "trunk"];
-  for (const name of preferredNames) {
-    const preferredRemote = [
-      `${name}@origin`,
-      `${name}@upstream`,
-      `${name}@git`,
-      ...targets.remote.filter((target) => target.startsWith(`${name}@`)).sort(),
-    ].find((target) => targets.remote.includes(target));
-    if (preferredRemote) return preferredRemote;
+export async function selectDefaultJjCompareTarget(
+  runtime: ReviewJjRuntime,
+  cwd?: string,
+): Promise<string> {
+  const result = await runtime.runJj([
+    "log",
+    "--no-graph",
+    "-r",
+    JJ_TRUNK_REVSET,
+    "-T",
+    "json(bookmarks)",
+  ], { cwd });
+  if (result.exitCode !== 0) return JJ_TRUNK_REVSET;
 
-    if (targets.local.includes(name)) return name;
+  return parseJjResolvedBookmarks(result.stdout)[0] ?? JJ_TRUNK_REVSET;
+}
+
+function parseJjResolvedBookmarks(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+
+    const local: string[] = [];
+    const remote: string[] = [];
+
+    for (const bookmark of parsed) {
+      if (typeof bookmark === "string") {
+        local.push(bookmark);
+        continue;
+      }
+
+      if (!bookmark || typeof bookmark !== "object") continue;
+
+      const name = typeof bookmark.name === "string" ? bookmark.name : null;
+      if (!name) continue;
+
+      const remoteName = typeof bookmark.remote === "string" ? bookmark.remote : null;
+      if (remoteName) {
+        remote.push(`${name}@${remoteName}`);
+        continue;
+      }
+
+      local.push(name);
+    }
+
+    return [...remote, ...local];
+  } catch {
+    return [];
   }
-
-  // `trunk()` honors JJ's repository default bookmark/remote and user aliases
-  // when the repository has no obvious default bookmark to compare against.
-  return JJ_TRUNK_REVSET;
 }
 
 async function listJjCompareTargets(

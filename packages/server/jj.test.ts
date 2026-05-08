@@ -41,23 +41,24 @@ describe("jj diff args", () => {
 });
 
 describe("jj compare targets", () => {
-  test("prefers available default bookmarks before falling back to trunk", () => {
-    expect(selectDefaultJjCompareTarget({
-      local: ["main"],
-      remote: ["main@origin"],
-    })).toBe("main@origin");
-    expect(selectDefaultJjCompareTarget({
-      local: ["main"],
-      remote: ["main@git"],
-    })).toBe("main@git");
-    expect(selectDefaultJjCompareTarget({
-      local: ["main"],
-      remote: [],
-    })).toBe("main");
-    expect(selectDefaultJjCompareTarget({
-      local: ["release"],
-      remote: ["production@git"],
-    })).toBe("trunk()");
+  test("resolves default target from jj trunk bookmarks", async () => {
+    await expect(selectDefaultJjCompareTarget({
+      async runJj() {
+        return { stdout: '[{"name":"main"},{"name":"main","remote":"origin"}]\n', stderr: "", exitCode: 0 };
+      },
+    })).resolves.toBe("main@origin");
+
+    await expect(selectDefaultJjCompareTarget({
+      async runJj() {
+        return { stdout: '[{"name":"main"}]\n', stderr: "", exitCode: 0 };
+      },
+    })).resolves.toBe("main");
+
+    await expect(selectDefaultJjCompareTarget({
+      async runJj() {
+        return { stdout: "[]\n", stderr: "", exitCode: 0 };
+      },
+    })).resolves.toBe("trunk()");
   });
 
   test("treats bookmarks and revsets correctly in line-of-work revsets", () => {
