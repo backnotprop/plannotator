@@ -6,3 +6,4 @@ engines:
   eslint-8:
     exclude_paths:
     - apps/opencode-plugin/index.test.ts
+    - apps/opencode-plugin/test-helpers.ts
