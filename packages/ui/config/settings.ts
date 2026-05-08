@@ -180,6 +180,21 @@ export const SETTINGS = {
     },
     toServer: (v: string) => ({ diffOptions: { fontSize: v } }),
   },
+  diffTabSize: {
+    defaultValue: 2 as number,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-tab-size');
+      const n = v ? parseInt(v, 10) : NaN;
+      return Number.isFinite(n) && n >= 1 && n <= 8 ? n : undefined;
+    },
+    toCookie: (v: number) => storage.setItem('plannotator-diff-tab-size', String(v)),
+    serverKey: 'diffOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = (sc.diffOptions as Record<string, unknown> | undefined)?.tabSize;
+      return typeof v === 'number' && v >= 1 && v <= 8 ? v : undefined;
+    },
+    toServer: (v: number) => ({ diffOptions: { tabSize: v } }),
+  },
   conventionalComments: {
     defaultValue: false as boolean,
     fromCookie: () => {

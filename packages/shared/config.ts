@@ -21,6 +21,7 @@ export interface DiffOptions {
   showDiffBackground?: boolean;
   fontFamily?: string;
   fontSize?: string;
+  tabSize?: number;
   hideWhitespace?: boolean;
   defaultDiffType?: DefaultDiffType;
 }
