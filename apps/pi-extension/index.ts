@@ -424,6 +424,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				const session = await startCodeReviewBrowserSession(ctx, {
 					prUrl: reviewArgs.prUrl,
 					vcsType: reviewArgs.vcsType,
+					useLocal: reviewArgs.useLocal,
 				});
 				ctx.ui.notify("Code review opened. You can keep chatting while it runs.", "info");
 				void session

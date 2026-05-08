@@ -96,6 +96,26 @@ describe("createVcsApi", () => {
     await expect(git.canStageFiles("merge-base", "/repo")).resolves.toBe(false);
   });
 
+  test("requires providers to explicitly opt into staging", async () => {
+    const stageFile = async () => {};
+    const unstageFile = async () => {};
+    const api = createVcsApi([
+      {
+        ...provider("custom", true, ["custom-diff"]),
+        stageFile,
+        unstageFile,
+      },
+    ]);
+
+    await expect(api.canStageFiles("custom-diff", "/repo")).resolves.toBe(false);
+    await expect(api.stageFile("custom-diff", "tracked.txt", "/repo")).rejects.toThrow(
+      "Staging not available for custom",
+    );
+    await expect(api.unstageFile("custom-diff", "tracked.txt", "/repo")).rejects.toThrow(
+      "Unstaging not available for custom",
+    );
+  });
+
   test("prepares JJ local reviews by ignoring Git-shaped requested options", async () => {
     const jj = provider("jj", true, ["jj-current", "jj-line"], {
       defaultBranch: "trunk()",

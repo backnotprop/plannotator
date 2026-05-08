@@ -118,12 +118,13 @@ export async function getJjFileContentsForDiff(
         newContent: await jjFileContent(runtime, "@-", filePath, fileCwd),
       };
     }
-    case "jj-line":
+    case "jj-line": {
       const compareTarget = defaultBranch.length > 0 ? defaultBranch : JJ_TRUNK_REVSET;
       return {
         oldContent: await jjFileContent(runtime, jjLineBaseRevset(compareTarget), oldFilePath, fileCwd),
         newContent: await jjFileContent(runtime, "@", filePath, fileCwd),
       };
+    }
     case "jj-all":
       return {
         oldContent: null,
@@ -205,8 +206,8 @@ export function parseJjBookmarkList(stdout: string): string[] {
   const seen = new Set<string>();
   const bookmarks: string[] = [];
 
-  for (const rawLine of stdout.split("\n")) {
-    const line = rawLine.replace(/\\n$/, "").trim();
+  for (const rawLine of splitJjTemplateRecords(stdout)) {
+    const line = rawLine.trim();
     if (!line) continue;
 
     const bookmark = parseSerializedJjString(line);
@@ -223,16 +224,17 @@ export function parseJjRemoteBookmarkList(stdout: string): string[] {
   const seen = new Set<string>();
   const bookmarks: string[] = [];
 
-  for (const rawLine of stdout.split("\n")) {
-    const line = rawLine.replace(/\\n$/, "").trim();
+  for (const rawLine of splitJjTemplateRecords(stdout)) {
+    const line = rawLine.trim();
     if (!line) continue;
 
-    const separator = line.indexOf("\t");
-    if (separator === -1) continue;
+    const fields = splitJjTemplateFields(line);
+    if (!fields) continue;
 
-    const name = parseSerializedJjString(line.slice(0, separator));
-    const remote = parseSerializedJjString(line.slice(separator + 1));
-    if (!name || !remote || remote === "git") continue;
+    const [nameField, remoteField] = fields;
+    const name = parseSerializedJjString(nameField);
+    const remote = parseSerializedJjString(remoteField);
+    if (!name || !remote) continue;
 
     const bookmark = `${name}@${remote}`;
     if (seen.has(bookmark)) continue;
@@ -242,6 +244,20 @@ export function parseJjRemoteBookmarkList(stdout: string): string[] {
   }
 
   return bookmarks;
+}
+
+function splitJjTemplateRecords(stdout: string): string[] {
+  return stdout.split(/\n|\\n/g);
+}
+
+function splitJjTemplateFields(line: string): [string, string] | null {
+  const literalTab = line.indexOf("\t");
+  if (literalTab !== -1) return [line.slice(0, literalTab), line.slice(literalTab + 1)];
+
+  const escapedTab = line.indexOf("\\t");
+  if (escapedTab !== -1) return [line.slice(0, escapedTab), line.slice(escapedTab + 2)];
+
+  return null;
 }
 
 function parseSerializedJjString(value: string): string | null {

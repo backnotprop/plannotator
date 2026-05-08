@@ -351,12 +351,12 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
 
     async canStageFiles(diffType: string, cwd?: string): Promise<boolean> {
       const provider = await getProviderForOperation(diffType, cwd);
-      return provider.stageFile !== undefined && provider.canStageFiles?.(diffType) !== false;
+      return provider.stageFile !== undefined && (provider.canStageFiles?.(diffType) ?? false);
     },
 
     async stageFile(diffType: string, filePath: string, cwd?: string): Promise<void> {
       const provider = await getProviderForOperation(diffType, cwd);
-      if (!provider.stageFile || provider.canStageFiles?.(diffType) === false) {
+      if (!provider.stageFile || !(provider.canStageFiles?.(diffType) ?? false)) {
         throw new Error(`Staging not available for ${provider.id}`);
       }
       return provider.stageFile(filePath, cwd);
@@ -364,7 +364,7 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
 
     async unstageFile(diffType: string, filePath: string, cwd?: string): Promise<void> {
       const provider = await getProviderForOperation(diffType, cwd);
-      if (!provider.unstageFile || provider.canStageFiles?.(diffType) === false) {
+      if (!provider.unstageFile || !(provider.canStageFiles?.(diffType) ?? false)) {
         throw new Error(`Unstaging not available for ${provider.id}`);
       }
       return provider.unstageFile(filePath, cwd);

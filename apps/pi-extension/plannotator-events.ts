@@ -88,6 +88,7 @@ export interface PlannotatorCodeReviewPayload {
 	diffType?: DiffType;
 	defaultBranch?: string;
 	vcsType?: VcsSelection;
+	useLocal?: boolean;
 	cwd?: string;
 	prUrl?: string;
 }
@@ -266,6 +267,7 @@ export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
 						defaultBranch: request.payload?.defaultBranch,
 						diffType: request.payload?.diffType,
 						vcsType: request.payload?.vcsType,
+						useLocal: request.payload?.useLocal,
 						prUrl: request.payload?.prUrl,
 					});
 					request.respond({ status: "handled", result });

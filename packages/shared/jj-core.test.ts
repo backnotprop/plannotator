@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   getJjDiffArgs,
   jjLineBaseRevset,
+  parseJjBookmarkList,
+  parseJjRemoteBookmarkList,
   selectDefaultJjCompareTarget,
 } from "./jj-core";
 
@@ -60,5 +62,25 @@ describe("jj compare targets", () => {
     expect(jjLineBaseRevset("main")).toBe('heads(::@ & ::(bookmarks(exact:"main")))');
     expect(jjLineBaseRevset("main@origin")).toBe('heads(::@ & ::(remote_bookmarks(exact:"main", exact:"origin")))');
     expect(jjLineBaseRevset("trunk()")).toBe("heads(::@ & ::(trunk()))");
+  });
+});
+
+describe("jj bookmark parsing", () => {
+  test("parses escaped newline separators from jj bookmark templates", () => {
+    expect(parseJjBookmarkList('"dev"\\n"main"\\n')).toEqual(["dev", "main"]);
+  });
+
+  test("parses escaped tab and newline separators from jj remote bookmark templates", () => {
+    expect(parseJjRemoteBookmarkList('"main"\\t"git"\\n"release"\\t"origin"\\n')).toEqual([
+      "main@git",
+      "release@origin",
+    ]);
+  });
+
+  test("preserves git remote bookmarks from colocated jj repositories", () => {
+    expect(parseJjRemoteBookmarkList('"main"\t"git"\n"release"\t"origin"\n')).toEqual([
+      "main@git",
+      "release@origin",
+    ]);
   });
 });
