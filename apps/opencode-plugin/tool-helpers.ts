@@ -1,6 +1,5 @@
 import type { ToolContext } from "@opencode-ai/plugin";
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 export const REVIEW_TOOL_DIFF_TYPES = [
@@ -58,14 +57,14 @@ class CliTimeoutError extends Error {
 }
 
 /** Resolves the plannotator CLI command. Supports PLANNOTATOR_CLI_ENTRYPOINT env override for testing. */
-function resolvePlannotatorCommand(directory: string): CliCommand {
+async function resolvePlannotatorCommand(directory: string): Promise<CliCommand> {
   const envOverride: string | undefined = process.env.PLANNOTATOR_CLI_ENTRYPOINT;
   if (envOverride !== undefined) {
     return { argv: [process.execPath, "run", envOverride] };
   }
 
   const entrypoint = join(directory, "apps", "hook", "server", "index.ts");
-  if (existsSync(entrypoint)) {
+  if (await Bun.file(entrypoint).exists()) {
     return { argv: [process.execPath, "run", entrypoint] };
   }
 
@@ -82,7 +81,7 @@ async function runPlannotatorCli(
     timeoutMs?: number | null;
   } = {},
 ): Promise<CliResult> {
-  const command = resolvePlannotatorCommand(directory);
+  const command = await resolvePlannotatorCommand(directory);
   const child = spawn(command.argv[0], [...command.argv.slice(1), ...args], {
     cwd: directory,
     env: {
