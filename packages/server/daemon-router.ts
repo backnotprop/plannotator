@@ -426,7 +426,7 @@ export function createDaemonRouter(
       }
 
       if (url.pathname === "/api/submit" && req.method === "POST") {
-        if (currentState.status !== "idle") {
+        if (currentState.status !== "idle" && currentState.status !== "resolved") {
           return Response.json(
             {
               error: `Daemon cannot accept a new submission while state is ${currentState.status}.`,
@@ -617,7 +617,9 @@ export function createDaemonRouter(
                 return;
               }
 
-              maybeConsumeDeliveredVerdict(stateAdapter, resolvedState);
+              // Don't auto-clear after delivering verdict - state should stay resolved
+              // until user submits revision or explicitly clears
+              // maybeConsumeDeliveredVerdict(stateAdapter, resolvedState);
               finish();
             };
 

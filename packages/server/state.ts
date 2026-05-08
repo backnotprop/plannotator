@@ -301,6 +301,26 @@ export function transition(current: DaemonState, event: StateEvent): DaemonState
     return createIdleState();
   }
 
+  if (validatedCurrent.status === "resolved" && validatedEvent.type === "submit") {
+    // Allow revision submission: must match the document being revised
+    const currentDoc = validatedCurrent.document;
+    const newDoc = validatedEvent.document;
+
+    if (currentDoc.id !== newDoc.id) {
+      throw new Error(
+        `Cannot submit unrelated plan. Currently revising "${currentDoc.id}". ` +
+        `Run 'plannotator clear' to abandon current work.`
+      );
+    }
+
+    return {
+      schemaVersion: SCHEMA_VERSION,
+      status: "awaiting-response",
+      document: validatedEvent.document,
+      feedback: null,
+    };
+  }
+
   throw new Error(
     `Illegal state transition from ${validatedCurrent.status} via ${validatedEvent.type}`,
   );
