@@ -15,6 +15,9 @@ export type {
   WorktreeInfo,
   GitContext,
   AvailableBranches,
+  CompareTargetConfig,
+  CompareTargetPickerCopy,
+  RepositoryContext,
 } from "./review-core";
 
 export type {

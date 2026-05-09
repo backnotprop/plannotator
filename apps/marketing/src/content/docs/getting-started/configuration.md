@@ -6,7 +6,7 @@ sidebar:
 section: "Getting Started"
 ---
 
-Plannotator is configured through environment variables and hook/plugin configuration files. No config file of its own is required.
+Plannotator is configured through environment variables, hook/plugin configuration files, and an optional `~/.plannotator/config.json` file for persistent settings and feature-specific overrides.
 
 ## Environment variables
 
@@ -73,6 +73,22 @@ To configure the workflow explicitly:
 }
 ```
 
+When Plannotator is used with other OpenCode plugins, the options object must stay attached to the Plannotator plugin entry:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    ["@plannotator/opencode@latest", {
+      "workflow": "plan-agent",
+      "planningAgents": ["plan", "sisyphus"]
+    }],
+    "oh-my-opencode-slim",
+    "openviking-opencode"
+  ]
+}
+```
+
 Use `workflow: "manual"` for commands-only mode, or `workflow: "all-agents"` to restore the legacy behavior where primary agents can call `submit_plan`. In `plan-agent` mode, any names listed in `planningAgents` are added alongside OpenCode's built-in `plan` agent. Slash commands (`/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`) require the CLI to be installed separately via the install script.
 
 If you are upgrading from an older OpenCode install, see the [OpenCode 0.19.1 migration guide](/docs/guides/opencode-migration-0-19-1/).
@@ -80,6 +96,12 @@ If you are upgrading from an older OpenCode install, see the [OpenCode 0.19.1 mi
 ## Plan saving
 
 Approved and denied plans are saved to `~/.plannotator/plans/` by default. You can change the save directory or disable saving in the Plannotator UI settings (gear icon).
+
+## Config file
+
+Plannotator reads `~/.plannotator/config.json` for persistent settings. This includes display name, diff options, conventional comment labels, and feedback message customization.
+
+You can customize the messages Plannotator sends to the agent when you approve, deny, or annotate plans and documents. See the [custom feedback guide](/docs/guides/custom-feedback/) for the full config shape, template variables, and runtime-specific overrides.
 
 ## Remote mode
 

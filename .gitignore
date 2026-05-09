@@ -42,6 +42,7 @@ apps/pi-extension/review-core.ts
 # Claude Code session-local runtime state (lock files, scheduled-task state).
 # Machine-specific; never belongs in the repo.
 .claude/
+.playwright-cli/
 .serena/
 *.ntvs*
 *.njsproj

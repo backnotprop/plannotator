@@ -2,6 +2,93 @@
  * Demo diff data for development mode
  */
 
+/**
+ * Full old/new file contents for demo files that need file-content serving
+ * (e.g. for hideWhitespace to work in demo mode). Keyed by file path.
+ */
+export const DEMO_FILE_CONTENTS: Record<string, { oldContent: string; newContent: string }> = {
+  'src/config/settings.ts': {
+    oldContent: `import { z } from 'zod';
+
+const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'staging', 'production']),
+  PORT: z.coerce.number().default(3000),
+  DATABASE_URL: z.string().url(),
+  REDIS_URL: z.string().url().optional(),
+  JWT_SECRET: z.string().min(32),
+  LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+});
+
+export const config = envSchema.parse(process.env);
+
+export function getLogConfig() {
+  return {
+    level: config.LOG_LEVEL,
+    pretty: config.NODE_ENV === 'development',
+    timestamp: true,
+  };
+}
+
+export function getDatabaseConfig() {
+  return {
+    connectionString: config.DATABASE_URL,
+    pool: {
+      min: 2,
+      max: config.NODE_ENV === 'production' ? 20 : 5,
+    },
+    ssl: config.NODE_ENV === 'production',
+  };
+}
+
+export function getCacheConfig() {
+  return {
+    url: config.REDIS_URL,
+    ttl: config.NODE_ENV === 'production' ? 3600 : 60,
+    prefix: 'app:',
+  };
+}`,
+    newContent: `import { z } from  'zod';
+
+const envSchema = z.object({
+  NODE_ENV:     z.enum(['development', 'staging', 'production']),
+  PORT:         z.coerce.number().default(3000),
+  DATABASE_URL: z.string().url(),
+  REDIS_URL:    z.string().url().optional(),
+  JWT_SECRET:   z.string().min(32),
+  LOG_LEVEL:    z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+});
+
+export const config = envSchema.parse(process.env);
+
+export function getLogConfig() {
+    return {
+        level: config.LOG_LEVEL,
+        pretty: config.NODE_ENV === 'development',
+        timestamp: true,
+    };
+}
+
+export function getDatabaseConfig() {
+    return {
+        connectionString: config.DATABASE_URL,
+        pool: {
+            min: 2,
+            max: config.NODE_ENV === 'production' ? 20 : 10,
+        },
+        ssl: config.NODE_ENV === 'production',
+    };
+}
+
+export function getCacheConfig() {
+    return {
+        url: config.REDIS_URL,
+        ttl: config.NODE_ENV === 'production' ? 3600 : 60,
+        prefix: 'app:',
+    };
+}`,
+  },
+};
+
 export const DEMO_DIFF = `diff --git a/src/components/Button.tsx b/src/components/Button.tsx
 index 1234567..abcdefg 100644
 --- a/src/components/Button.tsx
@@ -197,6 +284,75 @@ index 4567890..defghij 100644
 +    delete: (id: string) => request(\`/users/\${id}\`, { method: 'DELETE' }),
    },
  };
+diff --git a/src/config/settings.ts b/src/config/settings.ts
+index 5678901..efghijk 100644
+--- a/src/config/settings.ts
++++ b/src/config/settings.ts
+@@ -1,38 +1,38 @@
+-import { z } from 'zod';
++import { z } from  'zod';
+
+ const envSchema = z.object({
+-  NODE_ENV: z.enum(['development', 'staging', 'production']),
+-  PORT: z.coerce.number().default(3000),
+-  DATABASE_URL: z.string().url(),
+-  REDIS_URL: z.string().url().optional(),
+-  JWT_SECRET: z.string().min(32),
+-  LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
++  NODE_ENV:     z.enum(['development', 'staging', 'production']),
++  PORT:         z.coerce.number().default(3000),
++  DATABASE_URL: z.string().url(),
++  REDIS_URL:    z.string().url().optional(),
++  JWT_SECRET:   z.string().min(32),
++  LOG_LEVEL:    z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+ });
+
+ export const config = envSchema.parse(process.env);
+
+ export function getLogConfig() {
+-  return {
+-    level: config.LOG_LEVEL,
+-    pretty: config.NODE_ENV === 'development',
+-    timestamp: true,
+-  };
++    return {
++        level: config.LOG_LEVEL,
++        pretty: config.NODE_ENV === 'development',
++        timestamp: true,
++    };
+ }
+
+ export function getDatabaseConfig() {
+-  return {
+-    connectionString: config.DATABASE_URL,
+-    pool: {
+-      min: 2,
+-      max: config.NODE_ENV === 'production' ? 20 : 5,
+-    },
+-    ssl: config.NODE_ENV === 'production',
+-  };
++    return {
++        connectionString: config.DATABASE_URL,
++        pool: {
++            min: 2,
++            max: config.NODE_ENV === 'production' ? 20 : 10,
++        },
++        ssl: config.NODE_ENV === 'production',
++    };
+ }
+
+ export function getCacheConfig() {
+-  return {
+-    url: config.REDIS_URL,
+-    ttl: config.NODE_ENV === 'production' ? 3600 : 60,
+-    prefix: 'app:',
+-  };
++    return {
++        url: config.REDIS_URL,
++        ttl: config.NODE_ENV === 'production' ? 3600 : 60,
++        prefix: 'app:',
++    };
+ }
 diff --git a/src/components/Modal.tsx b/src/components/Modal.tsx
 new file mode 100644
 index 0000000..1234567

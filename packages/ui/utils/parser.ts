@@ -1,4 +1,4 @@
-import { Block, type Annotation, type EditorAnnotation, type ImageAttachment } from '../types';
+import { Block, type Annotation, type CodeAnnotation, type EditorAnnotation, type ImageAttachment } from '../types';
 import { planDenyFeedback } from '@plannotator/shared/feedback-templates';
 
 /**
@@ -10,23 +10,34 @@ export interface Frontmatter {
 
 /**
  * Extract YAML frontmatter from markdown if present.
- * Returns both the parsed frontmatter and the remaining markdown.
+ * Returns the parsed frontmatter, the remaining markdown, and the 1-based
+ * line number where content begins in the original file (so downstream
+ * line references stay accurate).
  */
-export function extractFrontmatter(markdown: string): { frontmatter: Frontmatter | null; content: string } {
+export function extractFrontmatter(markdown: string): { frontmatter: Frontmatter | null; content: string; contentStartLine: number } {
   const trimmed = markdown.trimStart();
   if (!trimmed.startsWith('---')) {
-    return { frontmatter: null, content: markdown };
+    return { frontmatter: null, content: markdown, contentStartLine: 1 };
   }
 
   // Find the closing ---
   const endIndex = trimmed.indexOf('\n---', 3);
   if (endIndex === -1) {
-    return { frontmatter: null, content: markdown };
+    return { frontmatter: null, content: markdown, contentStartLine: 1 };
   }
 
   // Extract frontmatter content (between the --- delimiters)
   const frontmatterRaw = trimmed.slice(4, endIndex).trim();
-  const afterFrontmatter = trimmed.slice(endIndex + 4).trimStart();
+  const rawAfterFrontmatter = trimmed.slice(endIndex + 4);
+  const afterFrontmatter = rawAfterFrontmatter.trimStart();
+
+  // Compute the 1-based line where content begins in the original file.
+  // Account for: leading whitespace trimmed from original, the frontmatter
+  // block itself, and any blank lines between closing --- and first content.
+  const leadingChars = markdown.length - trimmed.length;
+  const consumedInTrimmed = endIndex + 4 + (rawAfterFrontmatter.length - afterFrontmatter.length);
+  const consumedTotal = leadingChars + consumedInTrimmed;
+  const contentStartLine = (markdown.slice(0, consumedTotal).match(/\n/g) || []).length + 1;
 
   // Parse simple YAML (key: value pairs)
   const frontmatter: Frontmatter = {};
@@ -60,7 +71,7 @@ export function extractFrontmatter(markdown: string): { frontmatter: Frontmatter
     }
   }
 
-  return { frontmatter, content: afterFrontmatter };
+  return { frontmatter, content: afterFrontmatter, contentStartLine };
 }
 
 /**
@@ -88,7 +99,7 @@ const HTML_BLOCK_OPEN_RE = /^<\/?([a-zA-Z][a-zA-Z0-9]*)(?:\s|>|\/|$)/;
  * but for this demo, we want predictable text-anchoring.
  */
 export const parseMarkdownToBlocks = (markdown: string): Block[] => {
-  const { content: cleanMarkdown } = extractFrontmatter(markdown);
+  const { content: cleanMarkdown, contentStartLine } = extractFrontmatter(markdown);
   const lines = cleanMarkdown.split('\n');
   const blocks: Block[] = [];
   let currentId = 0;
@@ -96,7 +107,7 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
   let buffer: string[] = [];
   let currentType: Block['type'] = 'paragraph';
   let currentLevel = 0;
-  let bufferStartLine = 1; // Track the start line of the current buffer
+  let bufferStartLine = contentStartLine;
   let lastLineWasBlank = false;
 
   const flush = () => {
@@ -117,7 +128,7 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
-    const currentLineNum = i + 1; // 1-based index
+    const currentLineNum = i + contentStartLine;
     const prevLineWasBlank = lastLineWasBlank;
     lastLineWasBlank = false;
 
@@ -447,7 +458,40 @@ export const computeListIndices = (blocks: Block[]): (number | null)[] => {
 export const wrapFeedbackForAgent = (feedback: string): string =>
   planDenyFeedback(feedback);
 
-export const exportAnnotations = (blocks: Block[], annotations: any[], globalAttachments: ImageAttachment[] = [], title: string = 'Plan Feedback', subject: string = 'plan'): string => {
+export interface ExportAnnotationsOptions {
+  sourceConverted?: boolean;
+}
+
+/** Compute the end line of a block from its content and type. */
+const blockEndLine = (block: Block): number => {
+  if (!block.content) return block.startLine;
+  const contentLines = block.content.split('\n').length;
+  if (block.type === 'code') return block.startLine + contentLines + 1;
+  if (block.type === 'directive') return block.startLine + contentLines + 1;
+  if (block.alertKind) return block.startLine + contentLines;
+  return block.startLine + contentLines - 1;
+};
+
+/** Resolve the source-line label for a single annotation.
+ *  Returns null for global comments, diff-view annotations, or missing blocks. */
+const lineLabelForAnnotation = (blocks: Block[], ann: any): string | null => {
+  if (!ann.blockId || ann.type === 'GLOBAL_COMMENT') return null;
+  if (typeof ann.blockId === 'string' && ann.blockId.startsWith('diff-block-')) return null;
+  const block = blocks.find(b => b.id === ann.blockId);
+  if (!block || typeof block.startLine !== 'number') return null;
+  const end = blockEndLine(block);
+  if (end <= block.startLine) return `line ${block.startLine}`;
+  return `lines ${block.startLine}–${end}`;
+};
+
+export const exportAnnotations = (
+  blocks: Block[],
+  annotations: any[],
+  globalAttachments: ImageAttachment[] = [],
+  title: string = 'Plan Feedback',
+  subject: string = 'plan',
+  opts: ExportAnnotationsOptions = {},
+): string => {
   if (annotations.length === 0 && globalAttachments.length === 0) {
     return 'No changes detected.';
   }
@@ -461,6 +505,10 @@ export const exportAnnotations = (blocks: Block[], annotations: any[], globalAtt
   });
 
   let output = `# ${title}\n\n`;
+
+  if (opts.sourceConverted) {
+    output += `> Note: Line numbers below refer to the converted markdown, not the original HTML/URL source.\n\n`;
+  }
 
   // Add global reference images section if any
   if (globalAttachments.length > 0) {
@@ -477,13 +525,14 @@ export const exportAnnotations = (blocks: Block[], annotations: any[], globalAtt
   }
 
   sortedAnns.forEach((ann, index) => {
-    const block = blocks.find(b => b.id === ann.blockId);
-
     output += `## ${index + 1}. `;
 
     // Add diff context label if annotation was created in diff view
     if (ann.diffContext) {
       output += `[In diff content] `;
+    } else {
+      const lineLabel = lineLabelForAnnotation(blocks, ann);
+      if (lineLabel) output += `(${lineLabel}) `;
     }
 
     switch (ann.type) {
@@ -542,15 +591,23 @@ export const exportAnnotations = (blocks: Block[], annotations: any[], globalAtt
   return output;
 };
 
+export interface LinkedDocAnnotationEntry {
+  annotations: Annotation[];
+  globalAttachments: ImageAttachment[];
+  markdown?: string;
+  blocks?: Block[];
+  isConverted?: boolean;
+}
+
 export const exportLinkedDocAnnotations = (
-  docAnnotations: Map<string, { annotations: Annotation[]; globalAttachments: ImageAttachment[] }>
+  docAnnotations: Map<string, LinkedDocAnnotationEntry>
 ): string => {
   let output = `\n# Linked Document Feedback\n\nThe following feedback is on documents referenced in the plan.\n\n`;
 
-  for (const [filepath, { annotations, globalAttachments }] of docAnnotations) {
+  for (const [filepath, { annotations, globalAttachments, blocks: docBlocks, isConverted }] of docAnnotations) {
     if (annotations.length === 0 && globalAttachments.length === 0) continue;
 
-    output += `## ${filepath}\n\n`;
+    output += `## ${filepath}${isConverted ? ' (converted from HTML — line numbers refer to converted markdown)' : ''}\n\n`;
 
     if (globalAttachments.length > 0) {
       output += `### Reference Images\n`;
@@ -571,6 +628,9 @@ export const exportLinkedDocAnnotations = (
 
     sortedAnns.forEach((ann, index) => {
       output += `### ${index + 1}. `;
+
+      const lineLabel = docBlocks ? lineLabelForAnnotation(docBlocks, ann) : null;
+      if (lineLabel) output += `(${lineLabel}) `;
 
       switch (ann.type) {
         case 'DELETION':
@@ -629,3 +689,37 @@ export const exportEditorAnnotations = (editorAnnotations: EditorAnnotation[]): 
   return output;
 };
 
+export const exportCodeFileAnnotations = (annotations: CodeAnnotation[]): string => {
+  if (annotations.length === 0) return '';
+
+  let output = `\n# Code File Feedback\n\nThe following feedback is on code files referenced from the reviewed document.\n\n`;
+  const sorted = [...annotations].sort((a, b) => {
+    if (a.filePath !== b.filePath) return a.filePath.localeCompare(b.filePath);
+    if (a.lineStart !== b.lineStart) return a.lineStart - b.lineStart;
+    return a.createdAt - b.createdAt;
+  });
+
+  sorted.forEach((ann, index) => {
+    const lineRange = ann.lineStart === ann.lineEnd
+      ? `line ${ann.lineStart}`
+      : `lines ${ann.lineStart}-${ann.lineEnd}`;
+
+    output += `## ${index + 1}. ${ann.filePath} (${lineRange})\n`;
+    if (ann.originalCode) {
+      output += `\`\`\`\n${ann.originalCode}\n\`\`\`\n`;
+    }
+    if (ann.text) {
+      output += `> ${ann.text}\n`;
+    }
+    if (ann.images && ann.images.length > 0) {
+      output += `**Attached images:**\n`;
+      ann.images.forEach((img) => {
+        output += `- [${img.name}] \`${img.path}\`\n`;
+      });
+    }
+    output += '\n';
+  });
+
+  output += `---\n`;
+  return output;
+};

@@ -6,22 +6,25 @@ import {
   ActionMenuSectionLabel,
 } from '@plannotator/ui/components/ActionMenu';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
+import { modKey } from '@plannotator/ui/utils/platform';
 
 interface ReviewHeaderMenuProps {
-  isPanelOpen: boolean;
-  annotationCount: number;
-  onTogglePanel: () => void;
   onOpenSettings: () => void;
   onOpenExport: () => void;
+  onToggleFileTree: () => void;
+  onToggleSidebar: () => void;
+  isFileTreeOpen: boolean;
+  isSidebarOpen: boolean;
   appVersion: string;
 }
 
 export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
-  isPanelOpen,
-  annotationCount,
-  onTogglePanel,
   onOpenSettings,
   onOpenExport,
+  onToggleFileTree,
+  onToggleSidebar,
+  isFileTreeOpen,
+  isSidebarOpen,
   appVersion,
 }) => {
   const { theme, resolvedMode, setTheme } = useTheme();
@@ -50,22 +53,6 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
     >
       {({ closeMenu }) => (
         <>
-          <ActionMenuItem
-            onClick={() => {
-              closeMenu();
-              onTogglePanel();
-            }}
-            icon={<AnnotationsIcon />}
-            label={isPanelOpen ? 'Hide Annotations' : 'Show Annotations'}
-            badge={annotationCount > 0 ? (
-              <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-                {annotationCount}
-              </span>
-            ) : undefined}
-          />
-
-          <ActionMenuDivider />
-
           <div className="px-3 py-2 space-y-1.5">
             <ActionMenuSectionLabel>Theme</ActionMenuSectionLabel>
             <div className="flex items-center gap-1 rounded-lg bg-muted/50 p-0.5">
@@ -106,6 +93,27 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
             }}
             icon={<ExportIcon />}
             label="Export"
+          />
+
+          <ActionMenuDivider />
+
+          <ActionMenuItem
+            onClick={() => {
+              closeMenu();
+              onToggleFileTree();
+            }}
+            icon={<FileTreeMenuIcon />}
+            label={isFileTreeOpen ? 'Hide File Tree' : 'Show File Tree'}
+            badge={<KbdHint keys={[modKey, 'B']} />}
+          />
+          <ActionMenuItem
+            onClick={() => {
+              closeMenu();
+              onToggleSidebar();
+            }}
+            icon={<SidebarIcon />}
+            label={isSidebarOpen ? 'Hide Sidebar' : 'Show Sidebar'}
+            badge={<KbdHint keys={[modKey, '.']} />}
           />
 
           <ActionMenuDivider />
@@ -163,11 +171,6 @@ const SettingsIcon = () => (
   </svg>
 );
 
-const AnnotationsIcon = () => (
-  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-  </svg>
-);
 
 const ExportIcon = () => (
   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -185,5 +188,27 @@ const SunIcon = () => (
 const MoonIcon = () => (
   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3c-.18.57-.21 1.19-.21 1.82A8 8 0 0019.18 13c.63 0 1.25-.03 1.82-.21z" />
+  </svg>
+);
+
+const FileTreeMenuIcon = () => (
+  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+  </svg>
+);
+
+const KbdHint: React.FC<{ keys: string[] }> = ({ keys }) => (
+  <span className="inline-flex items-center gap-0.5 ml-auto">
+    {keys.map((k, i) => (
+      <kbd key={i} className="inline-flex items-center justify-center h-[18px] min-w-[18px] px-1 rounded bg-muted border border-border/60 text-[10px] font-mono leading-none text-muted-foreground">
+        {k}
+      </kbd>
+    ))}
+  </span>
+);
+
+const SidebarIcon = () => (
+  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M9 4h10a2 2 0 012 2v12a2 2 0 01-2 2H9M9 4H5a2 2 0 00-2 2v12a2 2 0 002 2h4M9 4v16" />
   </svg>
 );

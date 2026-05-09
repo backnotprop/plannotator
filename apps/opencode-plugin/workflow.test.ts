@@ -5,6 +5,7 @@ import {
   shouldApplyToolDefinitionRewrites,
   shouldInjectFullPlanningPrompt,
   shouldInjectGenericPlanReminder,
+  shouldModifyPrompts,
   shouldRegisterSubmitPlan,
   shouldRejectSubmitPlanForAgent,
 } from "./workflow";
@@ -53,6 +54,16 @@ describe("workflow gates", () => {
     expect(shouldRejectSubmitPlanForAgent("build", options)).toBe(false);
   });
 
+  test("user-managed mode registers tool but skips prompt/config modifications", () => {
+    const options = normalizeWorkflowOptions({ workflow: "user-managed" });
+
+    expect(shouldRegisterSubmitPlan(options)).toBe(true);
+    expect(shouldModifyPrompts(options)).toBe(false);
+    expect(shouldApplyToolDefinitionRewrites(options)).toBe(false);
+    expect(shouldInjectFullPlanningPrompt("plan", options)).toBe(false);
+    expect(shouldRejectSubmitPlanForAgent("build", options)).toBe(false);
+  });
+
   test("plan-agent mode injects only for configured planning agents", () => {
     const options = normalizeWorkflowOptions({
       workflow: "plan-agent",
@@ -92,6 +103,14 @@ describe("applyWorkflowConfig", () => {
     const config: any = {};
 
     applyWorkflowConfig(config, normalizeWorkflowOptions({ workflow: "manual" }), false);
+
+    expect(config).toEqual({});
+  });
+
+  test("user-managed mode leaves OpenCode config untouched", () => {
+    const config: any = {};
+
+    applyWorkflowConfig(config, normalizeWorkflowOptions({ workflow: "user-managed" }), false);
 
     expect(config).toEqual({});
   });

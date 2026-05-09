@@ -24,7 +24,6 @@ interface PlanHeaderMenuProps {
   sharingEnabled: boolean;
   isApiMode: boolean;
   agentInstructionsEnabled: boolean;
-  hasNewSettingsHints: boolean;
   obsidianConfigured: boolean;
   bearConfigured: boolean;
   octarineConfigured: boolean;
@@ -45,7 +44,6 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
   sharingEnabled,
   isApiMode,
   agentInstructionsEnabled,
-  hasNewSettingsHints,
   obsidianConfigured,
   bearConfigured,
   octarineConfigured,
@@ -71,12 +69,6 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
         >
           {isOpen ? <CloseIcon /> : <MenuIcon />}
           <span className="hidden md:inline">Options</span>
-          {hasNewSettingsHints && !isOpen && (
-            <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
-              <span className="absolute inset-0 rounded-full bg-primary opacity-75 animate-ping" />
-              <span className="relative rounded-full h-2 w-2 bg-primary" />
-            </span>
-          )}
         </button>
       )}
     >

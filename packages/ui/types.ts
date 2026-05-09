@@ -107,6 +107,7 @@ export interface CodeAnnotation {
   lineEnd: number;
   side: 'old' | 'new'; // Maps to 'deletions' | 'additions' in @pierre/diffs
   text?: string;
+  images?: ImageAttachment[];
   suggestedCode?: string;
   originalCode?: string; // Original selected lines for suggestion diff
   charStart?: number; // Character offset within lineStart (token-level selection)
@@ -119,6 +120,11 @@ export interface CodeAnnotation {
   reasoning?: string; // Validation chain — how the issue was confirmed (Claude)
   conventionalLabel?: ConventionalLabel;
   decorations?: ConventionalDecoration[];
+  prUrl?: string;
+  prNumber?: number;
+  prTitle?: string;
+  prRepo?: string;
+  diffScope?: 'layer' | 'full-stack';
 }
 
 /** Token-level metadata passed from selection to annotation creation. */

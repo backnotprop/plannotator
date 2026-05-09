@@ -7,13 +7,20 @@
 
 import { resolve as resolvePath } from "node:path";
 
+export const JJ_TRUNK_REVSET = "trunk()";
+
 export type DiffType =
   | "uncommitted"
   | "staged"
   | "unstaged"
   | "last-commit"
+  | "jj-current"
+  | "jj-last"
+  | "jj-line"
+  | "jj-all"
   | "branch"
   | "merge-base"
+  | "all"
   | `worktree:${string}`
   | "p4-default"
   | `p4-changelist:${string}`;
@@ -34,14 +41,36 @@ export interface AvailableBranches {
   remote: string[];
 }
 
+export interface CompareTargetPickerCopy {
+  rowLabel: string;
+  triggerLabel: string;
+  triggerTitlePrefix: string;
+  searchPlaceholder: string;
+  emptyText: string;
+  localGroupLabel: string;
+  remoteGroupLabel: string;
+}
+
+export interface CompareTargetConfig {
+  diffTypes: string[];
+  fallback: string;
+  picker: CompareTargetPickerCopy;
+}
+
+export interface RepositoryContext {
+  displayFallback?: string;
+}
+
 export interface GitContext {
   currentBranch: string;
   defaultBranch: string;
   diffOptions: DiffOption[];
   worktrees: WorktreeInfo[];
   availableBranches: AvailableBranches;
+  compareTarget?: CompareTargetConfig;
+  repository?: RepositoryContext;
   cwd?: string;
-  vcsType?: "git" | "p4";
+  vcsType?: "git" | "jj" | "p4";
 }
 
 export interface DiffResult {
@@ -62,6 +91,40 @@ export interface ReviewGitRuntime {
     options?: { cwd?: string; timeoutMs?: number },
   ) => Promise<GitCommandResult>;
   readTextFile: (path: string) => Promise<string | null>;
+}
+
+export interface GitDiffOptions {
+  hideWhitespace?: boolean;
+}
+
+export function parseRemoteBookmark(target: string): { name: string; remote: string } | null {
+  const at = target.lastIndexOf("@");
+  if (at <= 0 || at === target.length - 1) return null;
+  return { name: target.slice(0, at), remote: target.slice(at + 1) };
+}
+
+export function jjCompareTargetRevset(target: string): string {
+  const remoteBookmark = parseRemoteBookmark(target);
+  if (remoteBookmark) {
+    return `remote_bookmarks(exact:${quoteJjString(remoteBookmark.name)}, exact:${quoteJjString(remoteBookmark.remote)})`;
+  }
+
+  const localBookmark = parseJjBookmarkName(target);
+  return localBookmark ? `bookmarks(exact:${quoteJjString(localBookmark)})` : target;
+}
+
+export function jjLineBaseRevset(target: string): string {
+  const compareTarget = jjCompareTargetRevset(target);
+  return `heads(::@ & ::(${compareTarget}))`;
+}
+
+function parseJjBookmarkName(target: string): string | null {
+  if (!target || target.startsWith("@") || /[()\s]/.test(target)) return null;
+  return target;
+}
+
+function quoteJjString(value: string): string {
+  return JSON.stringify(value);
 }
 
 export async function getCurrentBranch(
@@ -272,9 +335,10 @@ export async function getGitContext(
   // old guard hid the active mode's option, trapping them. Unconditional
   // emission keeps the active option reachable in every flow.
   if (defaultBranch) {
-    diffOptions.push({ id: "branch", label: `vs ${defaultBranch}` });
-    diffOptions.push({ id: "merge-base", label: `Current PR Diff` });
+    diffOptions.push({ id: "merge-base", label: "Committed changes" });
   }
+
+  diffOptions.push({ id: "all", label: "All files (HEAD)" });
 
   const [worktrees, currentTreePathResult] = await Promise.all([
     getWorktrees(runtime, cwd),
@@ -292,7 +356,21 @@ export async function getGitContext(
     diffOptions,
     worktrees: worktrees.filter((wt) => wt.path !== currentTreePath),
     availableBranches,
+    compareTarget: {
+      diffTypes: ["branch", "merge-base"],
+      fallback: "main",
+      picker: {
+        rowLabel: "compare against",
+        triggerLabel: "base",
+        triggerTitlePrefix: "Review base",
+        searchPlaceholder: "Search branches…",
+        emptyText: "No branches match.",
+        localGroupLabel: "Local",
+        remoteGroupLabel: "Remote",
+      },
+    },
     cwd,
+    vcsType: "git",
   };
 }
 
@@ -301,6 +379,7 @@ async function getUntrackedFileDiffs(
   srcPrefix = "a/",
   dstPrefix = "b/",
   cwd?: string,
+  options?: GitDiffOptions,
 ): Promise<string> {
   // git ls-files scopes to the CWD subtree and returns CWD-relative paths,
   // unlike git diff HEAD which always covers the full repo with root-relative
@@ -332,6 +411,7 @@ async function getUntrackedFileDiffs(
         [
           "diff",
           "--no-ext-diff",
+          ...(options?.hideWhitespace ? ["-w"] : []),
           "--no-index",
           `--src-prefix=${srcPrefix}`,
           `--dst-prefix=${dstPrefix}`,
@@ -369,6 +449,7 @@ const WORKTREE_SUB_TYPES = new Set([
   "last-commit",
   "branch",
   "merge-base",
+  "all",
 ]);
 
 export function parseWorktreeDiffType(
@@ -393,6 +474,7 @@ export async function runGitDiff(
   diffType: DiffType,
   defaultBranch: string = "main",
   externalCwd?: string,
+  options?: GitDiffOptions,
 ): Promise<DiffResult> {
   let patch = "";
   let label = "";
@@ -412,12 +494,15 @@ export async function runGitDiff(
     effectiveDiffType = parsed.subType;
   }
 
+  const wFlag = options?.hideWhitespace ? ["-w"] : [];
+
   try {
     switch (effectiveDiffType) {
       case "uncommitted": {
         const trackedDiffArgs = [
           "diff",
           "--no-ext-diff",
+          ...wFlag,
           "HEAD",
           "--src-prefix=a/",
           "--dst-prefix=b/",
@@ -436,6 +521,7 @@ export async function runGitDiff(
           "a/",
           "b/",
           cwd,
+          options,
         );
         patch = trackedPatch + untrackedDiff;
         label = "Uncommitted changes";
@@ -446,6 +532,7 @@ export async function runGitDiff(
         const stagedDiffArgs = [
           "diff",
           "--no-ext-diff",
+          ...wFlag,
           "--staged",
           "--src-prefix=a/",
           "--dst-prefix=b/",
@@ -460,7 +547,13 @@ export async function runGitDiff(
       }
 
       case "unstaged": {
-        const trackedDiffArgs = ["diff", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/"];
+        const trackedDiffArgs = [
+          "diff",
+          "--no-ext-diff",
+          ...wFlag,
+          "--src-prefix=a/",
+          "--dst-prefix=b/",
+        ];
         const trackedDiff = assertGitSuccess(
           await runtime.runGit(trackedDiffArgs, { cwd }),
           trackedDiffArgs,
@@ -470,6 +563,7 @@ export async function runGitDiff(
           "a/",
           "b/",
           cwd,
+          options,
         );
         patch = trackedDiff.stdout + untrackedDiff;
         label = "Unstaged changes";
@@ -483,8 +577,8 @@ export async function runGitDiff(
         );
         const args =
           hasParent.exitCode === 0
-            ? ["diff", "--no-ext-diff", "HEAD~1..HEAD", "--src-prefix=a/", "--dst-prefix=b/"]
-            : ["diff", "--no-ext-diff", "--root", "HEAD", "--src-prefix=a/", "--dst-prefix=b/"];
+            ? ["diff", "--no-ext-diff", ...wFlag, "HEAD~1..HEAD", "--src-prefix=a/", "--dst-prefix=b/"]
+            : ["diff", "--no-ext-diff", ...wFlag, "--root", "HEAD", "--src-prefix=a/", "--dst-prefix=b/"];
         const lastCommitDiff = assertGitSuccess(
           await runtime.runGit(args, { cwd }),
           args,
@@ -502,6 +596,7 @@ export async function runGitDiff(
         const branchDiffArgs = [
           "diff",
           "--no-ext-diff",
+          ...wFlag,
           "--src-prefix=a/",
           "--dst-prefix=b/",
           "--end-of-options",
@@ -526,6 +621,7 @@ export async function runGitDiff(
         const mergeBaseDiffArgs = [
           "diff",
           "--no-ext-diff",
+          ...wFlag,
           "--src-prefix=a/",
           "--dst-prefix=b/",
           "--end-of-options",
@@ -537,6 +633,30 @@ export async function runGitDiff(
         );
         patch = mergeBaseDiff.stdout;
         label = `PR diff vs ${defaultBranch}`;
+        break;
+      }
+
+      case "all": {
+        // Diff from the empty tree to HEAD — shows every tracked file as an addition.
+        const emptyTreeResult = await runtime.runGit(["hash-object", "-t", "tree", "/dev/null"], { cwd });
+        const emptyTree = emptyTreeResult.exitCode === 0
+          ? emptyTreeResult.stdout.trim()
+          : "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+        const allDiffArgs = [
+          "diff",
+          "--no-ext-diff",
+          ...wFlag,
+          "--src-prefix=a/",
+          "--dst-prefix=b/",
+          "--end-of-options",
+          `${emptyTree}..HEAD`,
+        ];
+        const allDiff = assertGitSuccess(
+          await runtime.runGit(allDiffArgs, { cwd }),
+          allDiffArgs,
+        );
+        patch = allDiff.stdout;
+        label = "All files";
         break;
       }
 
@@ -571,8 +691,9 @@ export async function runGitDiffWithContext(
   runtime: ReviewGitRuntime,
   diffType: DiffType,
   gitContext: GitContext,
+  options?: GitDiffOptions,
 ): Promise<DiffResult> {
-  return runGitDiff(runtime, diffType, gitContext.defaultBranch, gitContext.cwd);
+  return runGitDiff(runtime, diffType, gitContext.defaultBranch, gitContext.cwd, options);
 }
 
 export async function getFileContentsForDiff(
@@ -638,6 +759,11 @@ export async function getFileContentsForDiff(
         newContent: await gitShow("HEAD", filePath),
       };
     }
+    case "all":
+      return {
+        oldContent: null,
+        newContent: await gitShow("HEAD", filePath),
+      };
     default:
       return { oldContent: null, newContent: null };
   }

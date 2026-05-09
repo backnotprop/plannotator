@@ -1,0 +1,66 @@
+/* Poimandres — by drcmda */
+.theme-poimandres {
+  --background: #1b1e28;
+  --foreground: #a6accd;
+  --card: #303340;
+  --card-foreground: #a6accd;
+  --popover: #303340;
+  --popover-foreground: #a6accd;
+  --primary: #add7ff;
+  --primary-foreground: #1b1e28;
+  --secondary: #252934;
+  --secondary-foreground: #767c9d;
+  --muted: #252934;
+  --muted-foreground: #767c9d;
+  --accent: #5de4c7;
+  --accent-foreground: #1b1e28;
+  --destructive: #d0679d;
+  --destructive-foreground: #1b1e28;
+  --border: #3b3f4f;
+  --input: #252934;
+  --ring: #add7ff;
+  --success: #5de4c7;
+  --success-foreground: #1b1e28;
+  --warning: #fffac2;
+  --warning-foreground: #1b1e28;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #252934;
+  --focus-highlight: #add7ff;
+}
+
+.theme-poimandres.light {
+  --background: #1b1e28;
+  --foreground: #a6accd;
+  --card: #303340;
+  --card-foreground: #a6accd;
+  --popover: #303340;
+  --popover-foreground: #a6accd;
+  --primary: #add7ff;
+  --primary-foreground: #1b1e28;
+  --secondary: #252934;
+  --secondary-foreground: #767c9d;
+  --muted: #252934;
+  --muted-foreground: #767c9d;
+  --accent: #5de4c7;
+  --accent-foreground: #1b1e28;
+  --destructive: #d0679d;
+  --destructive-foreground: #1b1e28;
+  --border: #3b3f4f;
+  --input: #252934;
+  --ring: #add7ff;
+  --success: #5de4c7;
+  --success-foreground: #1b1e28;
+  --warning: #fffac2;
+  --warning-foreground: #1b1e28;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #252934;
+  --focus-highlight: #add7ff;
+}

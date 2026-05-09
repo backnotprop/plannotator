@@ -3,6 +3,13 @@
  *
  * The plan deny template was tuned in #224 / commit 3dca977 to use strong
  * directive framing — Claude was ignoring softer phrasing.
+ *
+ * IMPORTANT: This module is imported by packages/ui/utils/parser.ts which is
+ * bundled into the browser SPA. It must NOT import from ./prompts or ./config
+ * (which depend on node:fs, node:os, node:child_process). Keep it self-contained.
+ *
+ * Server-side call sites use getPlanDeniedPrompt() from ./prompts directly.
+ * This module is only kept for the browser's wrapFeedbackForAgent clipboard feature.
  */
 
 export interface PlanDenyFeedbackOptions {

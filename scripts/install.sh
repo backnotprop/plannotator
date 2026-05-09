@@ -313,6 +313,197 @@ if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
     echo "  source ${shell_config}"
 fi
 
+# --- Codex CLI / Desktop app support (only if Codex is installed or configured) ---
+codex_home_has_user_config() {
+    [ -d "$HOME/.codex" ] || return 1
+    [ -n "$(find "$HOME/.codex" -mindepth 1 -maxdepth 1 ! -name skills ! -name .DS_Store -print -quit 2>/dev/null)" ]
+}
+
+codex_available=0
+if command -v codex >/dev/null 2>&1 || codex_home_has_user_config; then
+    codex_available=1
+fi
+
+if [ "$codex_available" -eq 1 ]; then
+    CODEX_DIR="$HOME/.codex"
+    CODEX_CONFIG="$CODEX_DIR/config.toml"
+    CODEX_HOOKS="$CODEX_DIR/hooks.json"
+    PLANNOTATOR_BIN="${INSTALL_DIR}/plannotator"
+    codex_hook_configured=0
+
+    mkdir -p "$CODEX_DIR"
+
+    enable_codex_hooks_config() {
+        if [ ! -f "$CODEX_CONFIG" ]; then
+            cat > "$CODEX_CONFIG" << 'CODEX_CONFIG_EOF'
+[features]
+codex_hooks = true
+CODEX_CONFIG_EOF
+            echo "Created Codex config at ${CODEX_CONFIG}"
+            return 0
+        fi
+
+        if grep -Eq '^[[:space:]]*features[[:space:]]*=' "$CODEX_CONFIG"; then
+            echo ""
+            echo "Codex config uses inline features in ${CODEX_CONFIG}; leaving it unchanged."
+            echo "Add this manually to enable Plannotator plan review:"
+            echo ""
+            echo "  [features]"
+            echo "  codex_hooks = true"
+            return 1
+        fi
+
+        tmp_config="$(mktemp)"
+        if awk '
+            function is_table(line) {
+                return line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*$/
+            }
+            BEGIN {
+                in_features = 0
+                saw_features = 0
+                saw_hook = 0
+            }
+            {
+                if (is_table($0)) {
+                    if (in_features && !saw_hook) {
+                        print "codex_hooks = true"
+                        saw_hook = 1
+                    }
+                    in_features = ($0 ~ /^[[:space:]]*\[features\][[:space:]]*$/)
+                    if (in_features) saw_features = 1
+                }
+
+                if (in_features && $0 ~ /^[[:space:]]*codex_hooks[[:space:]]*=/) {
+                    print "codex_hooks = true"
+                    saw_hook = 1
+                    next
+                }
+
+                print
+            }
+            END {
+                if (saw_features && in_features && !saw_hook) {
+                    print "codex_hooks = true"
+                } else if (!saw_features) {
+                    print ""
+                    print "[features]"
+                    print "codex_hooks = true"
+                }
+            }
+        ' "$CODEX_CONFIG" > "$tmp_config"; then
+            mv "$tmp_config" "$CODEX_CONFIG"
+            echo "Enabled codex_hooks in ${CODEX_CONFIG}"
+            return 0
+        fi
+
+        rm -f "$tmp_config"
+        echo "Could not update ${CODEX_CONFIG}; add codex_hooks manually." >&2
+        return 1
+    }
+
+    if [ ! -f "$CODEX_HOOKS" ]; then
+        cat > "$CODEX_HOOKS" << CODEX_HOOKS_EOF
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PLANNOTATOR_BIN}",
+            "timeout": 345600
+          }
+        ]
+      }
+    ]
+  }
+}
+CODEX_HOOKS_EOF
+        echo "Created Codex hooks at ${CODEX_HOOKS}"
+        codex_hook_configured=1
+    elif command -v node >/dev/null 2>&1; then
+        if codex_merge_result=$(node - "$CODEX_HOOKS" "$PLANNOTATOR_BIN" <<'NODE'
+const fs = require("fs");
+const path = require("path");
+const [hooksPath, command] = process.argv.slice(2);
+const config = JSON.parse(fs.readFileSync(hooksPath, "utf8"));
+config.hooks ||= {};
+const stopHooks = Array.isArray(config.hooks.Stop) ? config.hooks.Stop : [];
+let updated = false;
+let foundCustomPlannotatorHook = false;
+
+function isManagedPlannotatorCommand(value) {
+  const current = value.trim();
+  if (current === "plannotator" || current === command) return true;
+  return current.startsWith("/") && path.posix.basename(current) === "plannotator";
+}
+
+for (const entry of stopHooks) {
+  const hooks = Array.isArray(entry?.hooks) ? entry.hooks : [];
+  for (const hook of hooks) {
+    if (hook?.type !== "command" || typeof hook.command !== "string") continue;
+
+    if (isManagedPlannotatorCommand(hook.command)) {
+      hook.command = command;
+      hook.timeout = 345600;
+      updated = true;
+    } else if (hook.command.includes("plannotator")) {
+      foundCustomPlannotatorHook = true;
+    }
+  }
+}
+if (!updated && !foundCustomPlannotatorHook) {
+  stopHooks.push({
+    hooks: [
+      {
+        type: "command",
+        command,
+        timeout: 345600,
+      },
+    ],
+  });
+}
+config.hooks.Stop = stopHooks;
+if (updated || !foundCustomPlannotatorHook) {
+  fs.writeFileSync(hooksPath, JSON.stringify(config, null, 2) + "\n");
+}
+process.stdout.write(updated ? "updated" : foundCustomPlannotatorHook ? "custom" : "added");
+NODE
+        ); then
+            case "$codex_merge_result" in
+                custom)
+                    echo "Existing custom Codex Plannotator hook found at ${CODEX_HOOKS}; left it unchanged."
+                    ;;
+                added)
+                    echo "Added Codex hooks at ${CODEX_HOOKS}"
+                    ;;
+                *)
+                    echo "Updated Codex hooks at ${CODEX_HOOKS}"
+                    ;;
+            esac
+            codex_hook_configured=1
+        else
+            echo ""
+            echo "Codex hooks file already exists at ${CODEX_HOOKS}, but it could not be merged automatically."
+            echo "Leaving Codex hook support unchanged. Add or update this Stop hook manually:"
+            echo ""
+            echo "  command: ${PLANNOTATOR_BIN}"
+            echo "  timeout: 345600"
+        fi
+    else
+        echo ""
+        echo "Codex hooks file already exists at ${CODEX_HOOKS}, but node was not found to merge it safely."
+        echo "Leaving Codex hook support unchanged. Add or update this Stop hook manually:"
+        echo ""
+        echo "  command: ${PLANNOTATOR_BIN}"
+        echo "  timeout: 345600"
+    fi
+
+    if [ "$codex_hook_configured" -eq 1 ]; then
+        enable_codex_hooks_config || true
+    fi
+fi
+
 # Validate plugin hooks.json if plugin is already installed
 PLUGIN_HOOKS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/marketplaces/plannotator/apps/hook/hooks/hooks.json"
 if [ -f "$PLUGIN_HOOKS" ]; then
@@ -343,12 +534,94 @@ rm -rf "$HOME/.cache/opencode/node_modules/@plannotator" "$HOME/.cache/opencode/
 # Clear Pi jiti cache to force fresh download on next run
 rm -rf /tmp/jiti 2>/dev/null || true
 
-# Update Pi extension if pi is installed
-if command -v pi &>/dev/null; then
+plannotator_shared_agent_skills_available() {
+    local agents_skills_dir="$HOME/.agents/skills"
+
+    [ -f "$agents_skills_dir/plannotator-compound/SKILL.md" ] &&
+        [ -f "$agents_skills_dir/plannotator-setup-goal/SKILL.md" ]
+}
+
+configure_pi_plannotator_package_filter() {
+    local pi_agent_dir="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+    local pi_settings="$pi_agent_dir/settings.json"
+
+    if [ ! -f "$pi_settings" ]; then
+        return 0
+    fi
+
+    if ! command -v node &>/dev/null; then
+        echo "Skipping Pi settings update (node not found)"
+        return 0
+    fi
+
+    node - "$pi_settings" <<'NODE' || echo "Skipping Pi settings update (could not rewrite settings.json)"
+const fs = require("fs");
+
+const settingsPath = process.argv[2];
+const packagePattern = /^(?:npm:)?@plannotator\/pi-extension(?:@.+)?$/;
+
+let settings;
+try {
+  settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+} catch {
+  console.log("Skipping Pi settings update (could not parse settings.json)");
+  process.exit(0);
+}
+
+if (!settings || !Array.isArray(settings.packages)) {
+  process.exit(0);
+}
+
+let changed = false;
+settings.packages = settings.packages.map((entry) => {
+  if (typeof entry === "string" && packagePattern.test(entry)) {
+    changed = true;
+    return { source: entry, skills: [] };
+  }
+
+  if (
+    entry &&
+    typeof entry === "object" &&
+    typeof entry.source === "string" &&
+    packagePattern.test(entry.source)
+  ) {
+    if (!Array.isArray(entry.skills) || entry.skills.length !== 0) {
+      changed = true;
+      return { ...entry, skills: [] };
+    }
+  }
+
+  return entry;
+});
+
+if (!changed) {
+  process.exit(0);
+}
+
+const tmpPath = `${settingsPath}.${process.pid}.tmp`;
+fs.writeFileSync(tmpPath, `${JSON.stringify(settings, null, 2)}\n`);
+fs.renameSync(tmpPath, settingsPath);
+console.log("Configured Pi to use global Plannotator skills and skip bundled package skills.");
+NODE
+}
+
+update_pi_extension_if_present() {
+    if ! command -v pi &>/dev/null; then
+        return 0
+    fi
+
     echo "Updating Pi extension..."
-    pi install npm:@plannotator/pi-extension
-    echo "Pi extension updated."
-fi
+    if pi install npm:@plannotator/pi-extension; then
+        if plannotator_shared_agent_skills_available; then
+            configure_pi_plannotator_package_filter
+        else
+            echo "Leaving Pi bundled skills enabled (global Plannotator agent skills not found)."
+        fi
+        echo "Pi extension updated."
+    else
+        echo "Skipping Pi settings update (pi install failed)"
+    fi
+}
 
 # Install /review slash command
 CLAUDE_COMMANDS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/commands"
@@ -443,11 +716,51 @@ COMMAND_EOF
 
 echo "Installed /plannotator-last command to ${OPENCODE_COMMANDS_DIR}/plannotator-last.md"
 
+# Remove legacy Codex-oriented skills from the older shared agent scope.
+LEGACY_AGENTS_SKILLS_DIR="$HOME/.agents/skills"
+legacy_skills_removed=0
+if [ -d "$LEGACY_AGENTS_SKILLS_DIR" ]; then
+    for skill in plannotator-review plannotator-annotate plannotator-last; do
+        if [ -d "$LEGACY_AGENTS_SKILLS_DIR/$skill" ]; then
+            rm -rf "$LEGACY_AGENTS_SKILLS_DIR/$skill"
+            legacy_skills_removed=1
+        fi
+    done
+fi
+if [ "$legacy_skills_removed" -eq 1 ]; then
+    echo "Removed legacy Plannotator skills from ${LEGACY_AGENTS_SKILLS_DIR}"
+fi
+
+# Remove Plannotator skills that belong in the shared agent scope from Codex.
+STALE_CODEX_SKILLS_DIR="$HOME/.codex/skills"
+stale_codex_skills_removed=0
+if [ -d "$STALE_CODEX_SKILLS_DIR" ]; then
+    for skill in plannotator-compound plannotator-setup-goal; do
+        if [ -d "$STALE_CODEX_SKILLS_DIR/$skill" ]; then
+            rm -rf "$STALE_CODEX_SKILLS_DIR/$skill"
+            stale_codex_skills_removed=1
+        fi
+    done
+fi
+if [ "$stale_codex_skills_removed" -eq 1 ]; then
+    echo "Removed shared-agent Plannotator skills from ${STALE_CODEX_SKILLS_DIR}"
+fi
+
 # Install skills (requires git)
 if command -v git &>/dev/null; then
     CLAUDE_SKILLS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills"
+    CODEX_SKILLS_DIR="$HOME/.codex/skills"
     AGENTS_SKILLS_DIR="$HOME/.agents/skills"
     skills_tmp=$(mktemp -d)
+
+    copy_skill_if_present() {
+        local source_dir="$1"
+        local target_dir="$2"
+
+        if [ -d "$source_dir" ]; then
+            cp -r "$source_dir" "$target_dir/"
+        fi
+    }
 
     # Wrap the cd-bearing block in a subshell so any `cd` is scoped to
     # the subshell and can't leave the parent script with a dangling CWD.
@@ -461,18 +774,30 @@ if command -v git &>/dev/null; then
     # equivalent — the parent shell's CWD is inherited in, and any
     # cd inside the subshell disappears when the subshell exits.
     if (
-        cd "$skills_tmp" &&
+        set -e
+        cd "$skills_tmp"
         git clone --depth 1 --filter=blob:none --sparse \
-            "https://github.com/${REPO}.git" --branch "$latest_tag" repo 2>/dev/null &&
-        cd repo &&
-        git sparse-checkout set apps/skills 2>/dev/null &&
-        [ -d "apps/skills" ] &&
-        [ "$(ls -A apps/skills 2>/dev/null)" ] &&
-        mkdir -p "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR" &&
-        cp -r apps/skills/* "$CLAUDE_SKILLS_DIR/" &&
-        cp -r apps/skills/* "$AGENTS_SKILLS_DIR/"
+            "https://github.com/${REPO}.git" --branch "$latest_tag" repo 2>/dev/null
+        cd repo
+        git sparse-checkout set apps/skills 2>/dev/null
+        [ -d "apps/skills" ]
+        [ "$(ls -A apps/skills 2>/dev/null)" ]
+        mkdir -p "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR"
+        cp -r apps/skills/* "$CLAUDE_SKILLS_DIR/"
+        copy_skill_if_present apps/skills/plannotator-compound "$AGENTS_SKILLS_DIR"
+        copy_skill_if_present apps/skills/plannotator-setup-goal "$AGENTS_SKILLS_DIR"
+        if [ "$codex_available" -eq 1 ]; then
+            mkdir -p "$CODEX_SKILLS_DIR"
+            copy_skill_if_present apps/skills/plannotator-review "$CODEX_SKILLS_DIR"
+            copy_skill_if_present apps/skills/plannotator-annotate "$CODEX_SKILLS_DIR"
+            copy_skill_if_present apps/skills/plannotator-last "$CODEX_SKILLS_DIR"
+        fi
     ); then
-        echo "Installed skills to ${CLAUDE_SKILLS_DIR}/ and ${AGENTS_SKILLS_DIR}/"
+        if [ "$codex_available" -eq 1 ]; then
+            echo "Installed skills to ${CLAUDE_SKILLS_DIR}/, Codex command skills to ${CODEX_SKILLS_DIR}/, and shared agent skills to ${AGENTS_SKILLS_DIR}/"
+        else
+            echo "Installed skills to ${CLAUDE_SKILLS_DIR}/ and shared agent skills to ${AGENTS_SKILLS_DIR}/"
+        fi
     else
         echo "Skipping skills install (git sparse-checkout failed or apps/skills empty)"
     fi
@@ -481,6 +806,11 @@ if command -v git &>/dev/null; then
 else
     echo "Skipping skills install (git not found)"
 fi
+
+# Update Pi extension if pi is installed. When global shared skills are
+# available, keep the extension commands but disable its bundled skill copy to
+# avoid duplicate Pi skill warnings.
+update_pi_extension_if_present
 
 # --- Gemini CLI support (only if Gemini is installed) ---
 if [ -d "$HOME/.gemini" ]; then

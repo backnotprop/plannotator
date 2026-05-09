@@ -1,0 +1,66 @@
+/* GitHub — by GitHub */
+.theme-github {
+  --background: #24292e;
+  --foreground: #e1e4e8;
+  --card: #1f2428;
+  --card-foreground: #e1e4e8;
+  --popover: #1f2428;
+  --popover-foreground: #e1e4e8;
+  --primary: #58a6ff;
+  --primary-foreground: #24292e;
+  --secondary: #2f363d;
+  --secondary-foreground: #d1d5da;
+  --muted: #2f363d;
+  --muted-foreground: #6a737d;
+  --accent: #79b8ff;
+  --accent-foreground: #24292e;
+  --destructive: #f97583;
+  --destructive-foreground: #24292e;
+  --border: #1b1f23;
+  --input: #2f363d;
+  --ring: #58a6ff;
+  --success: #28a745;
+  --success-foreground: #24292e;
+  --warning: #ffea7f;
+  --warning-foreground: #24292e;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #2f363d;
+  --focus-highlight: #58a6ff;
+}
+
+.theme-github.light {
+  --background: #ffffff;
+  --foreground: #24292e;
+  --card: #f6f8fa;
+  --card-foreground: #24292e;
+  --popover: #f6f8fa;
+  --popover-foreground: #24292e;
+  --primary: #0366d6;
+  --primary-foreground: #ffffff;
+  --secondary: #f6f8fa;
+  --secondary-foreground: #586069;
+  --muted: #fafbfc;
+  --muted-foreground: #6a737d;
+  --accent: #0366d6;
+  --accent-foreground: #ffffff;
+  --destructive: #cb2431;
+  --destructive-foreground: #ffffff;
+  --border: #e1e4e8;
+  --input: #fafbfc;
+  --ring: #2188ff;
+  --success: #28a745;
+  --success-foreground: #ffffff;
+  --warning: #f9c513;
+  --warning-foreground: #24292e;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #f6f8fa;
+  --focus-highlight: #2188ff;
+}

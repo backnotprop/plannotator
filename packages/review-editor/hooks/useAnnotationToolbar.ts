@@ -133,8 +133,10 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
     setDecorations([]);
   }, []);
 
-  // Track mouse position continuously for toolbar placement
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+  // Track mouse position continuously for toolbar placement.
+  // Structural type so the same handler accepts both React synthetic events
+  // (parent JSX onMouseMove) and native MouseEvents (ToolbarHost window listener).
+  const handleMouseMove = useCallback((e: { clientX: number; clientY: number }) => {
     lastMousePosition.current = { x: e.clientX, y: e.clientY };
   }, []);
 

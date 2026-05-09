@@ -116,44 +116,6 @@ jobs:
           bun build apps/paste-service/targets/bun.ts --compile --target=bun-windows-arm64 --outfile plannotator-paste-win32-arm64.exe
           sha256sum plannotator-paste-win32-arm64.exe > plannotator-paste-win32-arm64.exe.sha256
 
-      - name: Smoke-test linux-x64 binary
-        run: |
-          chmod +x plannotator-linux-x64
-
-          # 1. --help: proves binary loads and arg parsing works
-          ./plannotator-linux-x64 --help
-
-          # Helper: start server, poll endpoint for 200, kill
-          smoke_test_server() {
-            local LABEL="$1" PORT="$2" ENDPOINT="$3"
-            shift 3
-            # Start the binary in background
-            PLANNOTATOR_PORT=$PORT "$@" &
-            local PID=$!
-            # Poll until the API responds (up to 10s)
-            local OK=0
-            for i in $(seq 1 20); do
-              if curl -sf "http://localhost:${PORT}${ENDPOINT}" -o /dev/null 2>/dev/null; then
-                OK=1; break
-              fi
-              sleep 0.5
-            done
-            kill $PID 2>/dev/null; wait $PID 2>/dev/null || true
-            if [ "$OK" = "0" ]; then
-              echo "FAIL: $LABEL did not respond on :${PORT}${ENDPOINT}"
-              exit 1
-            fi
-            echo "OK: $LABEL — :${PORT}${ENDPOINT} responded"
-          }
-
-          # 2. review: exercises full server startup (imports, bundled HTML, git diff, HTTP)
-          smoke_test_server "plannotator review" 19500 "/api/diff" \
-            ./plannotator-linux-x64 review
-
-          # 3. annotate: exercises annotate server path with a real file
-          smoke_test_server "plannotator annotate" 19501 "/api/plan" \
-            ./plannotator-linux-x64 annotate README.md
-
       - name: Upload artifacts
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
@@ -161,6 +123,290 @@ jobs:
           path: |
             plannotator-*
             !*.ts
+
+  smoke-binaries:
+    needs: build
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            binary: plannotator-linux-x64
+          - os: windows-latest
+            binary: plannotator-win32-x64.exe
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Download binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: binaries
+          path: artifacts
+
+      - name: Smoke-test binary
+        if: runner.os != 'Windows'
+        env:
+          BINARY: artifacts/${{ matrix.binary }}
+          BROWSER: true
+        run: |
+          set -euo pipefail
+          chmod +x "$BINARY"
+
+          # 1. --help: proves binary loads and arg parsing works.
+          "$BINARY" --help
+
+          smoke_test_server() {
+            local label="$1" port="$2" endpoint="$3"
+            shift 3
+
+            PLANNOTATOR_PORT="$port" "$@" &
+            local pid=$!
+            local ok=0
+
+            for _ in $(seq 1 60); do
+              if curl -sf "http://127.0.0.1:${port}${endpoint}" -o /dev/null 2>/dev/null; then
+                ok=1
+                break
+              fi
+              sleep 0.5
+            done
+
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+
+            if [ "$ok" = "0" ]; then
+              echo "FAIL: ${label} did not respond on :${port}${endpoint}"
+              exit 1
+            fi
+
+            echo "OK: ${label} responded on :${port}${endpoint}"
+          }
+
+          # 2. review: exercises server startup, bundled HTML, git diff, and HTTP.
+          smoke_test_server "plannotator review" 19500 "/api/diff" \
+            "$BINARY" review
+
+          # 3. annotate: exercises annotate server startup with a real file.
+          smoke_test_server "plannotator annotate" 19501 "/api/plan" \
+            "$BINARY" annotate README.md
+
+      - name: Smoke-test binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          BINARY: artifacts/${{ matrix.binary }}
+          BROWSER: true
+        run: |
+          $ErrorActionPreference = "Stop"
+          $binary = (Resolve-Path $env:BINARY).Path
+
+          # 1. --help: proves binary loads and arg parsing works.
+          & $binary --help
+
+          function Test-PlannotatorServer {
+            param(
+              [string] $Label,
+              [string] $Port,
+              [string] $Endpoint,
+              [string[]] $Arguments
+            )
+
+            $env:PLANNOTATOR_PORT = $Port
+            $stdout = New-TemporaryFile
+            $stderr = New-TemporaryFile
+            $process = Start-Process `
+              -FilePath $binary `
+              -ArgumentList $Arguments `
+              -PassThru `
+              -NoNewWindow `
+              -RedirectStandardOutput $stdout `
+              -RedirectStandardError $stderr
+            $ok = $false
+
+            try {
+              for ($i = 0; $i -lt 60; $i++) {
+                try {
+                  Invoke-WebRequest -Uri "http://127.0.0.1:$Port$Endpoint" -UseBasicParsing -TimeoutSec 1 | Out-Null
+                  $ok = $true
+                  break
+                } catch {
+                  if ($process.HasExited) {
+                    break
+                  }
+                  Start-Sleep -Milliseconds 500
+                }
+              }
+            } finally {
+              if (-not $process.HasExited) {
+                Stop-Process -Id $process.Id -Force
+                Wait-Process -Id $process.Id -ErrorAction SilentlyContinue
+              }
+              Remove-Item Env:\PLANNOTATOR_PORT -ErrorAction SilentlyContinue
+            }
+
+            if (-not $ok) {
+              Write-Host "stdout:"
+              Get-Content $stdout -ErrorAction SilentlyContinue
+              Write-Host "stderr:"
+              Get-Content $stderr -ErrorAction SilentlyContinue
+              throw "FAIL: $Label did not respond on :$Port$Endpoint"
+            }
+
+            Write-Host "OK: $Label responded on :$Port$Endpoint"
+          }
+
+          # 2. review: exercises server startup, bundled HTML, git diff, and HTTP.
+          Test-PlannotatorServer "plannotator review" "19500" "/api/diff" @("review")
+
+          # 3. annotate: exercises annotate server startup with a real file.
+          Test-PlannotatorServer "plannotator annotate" "19501" "/api/plan" @("annotate", "README.md")
+
+  install-script-smoke:
+    needs: build
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: plannotator-linux-x64
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Download binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: binaries
+          path: artifacts
+
+      - name: Verify installer writes Codex hook config
+        env:
+          ARTIFACT_NAME: ${{ matrix.artifact }}
+        run: |
+          set -euo pipefail
+
+          tmp_home="$(mktemp -d)"
+          fake_bin="$(mktemp -d)"
+          artifact="$PWD/artifacts/$ARTIFACT_NAME"
+
+          cat > "$fake_bin/codex" <<'SH'
+          #!/usr/bin/env bash
+          echo "codex stub"
+          SH
+          chmod +x "$fake_bin/codex"
+
+          cat > "$fake_bin/curl" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          out=""
+          url=""
+
+          while [ "$#" -gt 0 ]; do
+            case "$1" in
+              -o|--output)
+                out="$2"
+                shift 2
+                ;;
+              -*)
+                shift
+                ;;
+              *)
+                url="$1"
+                shift
+                ;;
+            esac
+          done
+
+          if [[ "$url" == *.sha256 ]]; then
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$ARTIFACT"
+            else
+              shasum -a 256 "$ARTIFACT"
+            fi
+            exit 0
+          fi
+
+          if [ -n "$out" ]; then
+            cp "$ARTIFACT" "$out"
+          else
+            cat "$ARTIFACT"
+          fi
+          SH
+          chmod +x "$fake_bin/curl"
+
+          run_installer() {
+            HOME="$tmp_home" \
+              PATH="$fake_bin:$PATH" \
+              SHELL=/bin/bash \
+              ARTIFACT="$artifact" \
+              bash scripts/install.sh --version v9.9.9 --skip-attestation
+          }
+
+          run_installer
+
+          test -x "$tmp_home/.local/bin/plannotator"
+          grep -q 'codex_hooks = true' "$tmp_home/.codex/config.toml"
+
+          HOME="$tmp_home" node <<'NODE'
+          const fs = require("fs");
+          const path = require("path");
+          const home = process.env.HOME;
+          const hooksPath = path.join(home, ".codex", "hooks.json");
+          const hooks = JSON.parse(fs.readFileSync(hooksPath, "utf8"));
+          const command = hooks?.hooks?.Stop?.[0]?.hooks?.[0]?.command;
+          const timeout = hooks?.hooks?.Stop?.[0]?.hooks?.[0]?.timeout;
+          const expected = path.join(home, ".local", "bin", "plannotator");
+
+          if (command !== expected) {
+            throw new Error(`Expected Stop hook command ${expected}, got ${command}`);
+          }
+          if (timeout !== 345600) {
+            throw new Error(`Expected Stop hook timeout 345600, got ${timeout}`);
+          }
+          NODE
+
+          cat > "$tmp_home/.codex/hooks.json" <<'JSON'
+          {
+            "hooks": {
+              "Stop": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "PLANNOTATOR_BROWSER=/usr/bin/true plannotator",
+                      "timeout": 123
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+          JSON
+
+          run_installer
+
+          HOME="$tmp_home" node <<'NODE'
+          const fs = require("fs");
+          const path = require("path");
+          const hooksPath = path.join(process.env.HOME, ".codex", "hooks.json");
+          const stop = JSON.parse(fs.readFileSync(hooksPath, "utf8"))?.hooks?.Stop;
+          const hooks = stop?.flatMap((entry) => entry?.hooks ?? []) ?? [];
+
+          if (hooks.length !== 1) {
+            throw new Error(`Expected one preserved custom Stop hook, got ${hooks.length}`);
+          }
+          if (hooks[0].command !== "PLANNOTATOR_BROWSER=/usr/bin/true plannotator") {
+            throw new Error(`Custom Stop hook command was changed to ${hooks[0].command}`);
+          }
+          NODE
 
   attest:
     # Isolated attestation job — runs on tag pushes only and holds the
@@ -172,7 +418,10 @@ jobs:
     # same binaries the build job uploaded; attest-build-provenance
     # publishes the signed bundle to GitHub's attestation store, so the
     # release job downstream doesn't need any new artifact handling.
-    needs: build
+    needs:
+      - build
+      - smoke-binaries
+      - install-script-smoke
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
@@ -235,7 +484,10 @@ jobs:
           prerelease: ${{ contains(github.ref, '-') }}
 
   npm-publish:
-    needs: build
+    needs:
+      - build
+      - smoke-binaries
+      - install-script-smoke
     runs-on: ubuntu-latest
     permissions:
       contents: read

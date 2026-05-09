@@ -36,16 +36,18 @@ export const SETTINGS = {
   // --- Diff display options (namespaced under diffOptions in config.json) ---
 
   defaultDiffType: {
-    defaultValue: 'unstaged' as 'uncommitted' | 'unstaged' | 'staged',
+    defaultValue: 'unstaged' as 'uncommitted' | 'unstaged' | 'staged' | 'merge-base' | 'all',
     fromCookie: () => {
       const v = storage.getItem('plannotator-default-diff-type');
-      return v === 'uncommitted' || v === 'unstaged' || v === 'staged' ? v : undefined;
+      if (v === 'branch') return 'merge-base' as const;
+      return v === 'uncommitted' || v === 'unstaged' || v === 'staged' || v === 'merge-base' || v === 'all' ? v : undefined;
     },
     toCookie: (v: string) => storage.setItem('plannotator-default-diff-type', v),
     serverKey: 'diffOptions',
     fromServer: (sc: Record<string, unknown>) => {
       const v = (sc.diffOptions as Record<string, unknown> | undefined)?.defaultDiffType;
-      return v === 'uncommitted' || v === 'unstaged' || v === 'staged' ? v : undefined;
+      if (v === 'branch') return 'merge-base' as const;
+      return v === 'uncommitted' || v === 'unstaged' || v === 'staged' || v === 'merge-base' || v === 'all' ? v : undefined;
     },
     toServer: (v: string) => ({ diffOptions: { defaultDiffType: v } }),
   },
@@ -152,6 +154,21 @@ export const SETTINGS = {
     toServer: (v: string) => ({ diffOptions: { fontFamily: v } }),
   },
 
+  diffHideWhitespace: {
+    defaultValue: false as boolean,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-hide-whitespace');
+      return v === 'true' ? true : v === 'false' ? false : undefined;
+    },
+    toCookie: (v: boolean) => storage.setItem('plannotator-diff-hide-whitespace', String(v)),
+    serverKey: 'diffOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = (sc.diffOptions as Record<string, unknown> | undefined)?.hideWhitespace;
+      return typeof v === 'boolean' ? v : undefined;
+    },
+    toServer: (v: boolean) => ({ diffOptions: { hideWhitespace: v } }),
+  },
+
   diffFontSize: {
     defaultValue: '' as string, // empty = theme default
     fromCookie: () => storage.getItem('plannotator-diff-font-size') || undefined,
@@ -162,6 +179,21 @@ export const SETTINGS = {
       return typeof v === 'string' ? v : undefined;
     },
     toServer: (v: string) => ({ diffOptions: { fontSize: v } }),
+  },
+  diffTabSize: {
+    defaultValue: 2 as number,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-tab-size');
+      const n = v ? parseInt(v, 10) : NaN;
+      return Number.isFinite(n) && n >= 1 && n <= 8 ? n : undefined;
+    },
+    toCookie: (v: number) => storage.setItem('plannotator-diff-tab-size', String(v)),
+    serverKey: 'diffOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = (sc.diffOptions as Record<string, unknown> | undefined)?.tabSize;
+      return typeof v === 'number' && v >= 1 && v <= 8 ? v : undefined;
+    },
+    toServer: (v: number) => ({ diffOptions: { tabSize: v } }),
   },
   conventionalComments: {
     defaultValue: false as boolean,

@@ -11,6 +11,7 @@ export interface ThemeInfo {
   name: string;
   builtIn: boolean;
   modeSupport: 'both' | 'dark-only' | 'light-only';
+  syntaxHighlighting?: boolean;
   colors: {
     dark: ThemeColors;
     light: ThemeColors;
@@ -49,6 +50,39 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     },
   },
   {
+    id: 'andromeeda',
+    name: 'Andromeeda',
+    builtIn: true,
+    modeSupport: 'dark-only',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#00e8c6', secondary: '#373941', accent: '#c74ded', background: '#23262e', foreground: '#d5ced9' },
+      light: { primary: '#00e8c6', secondary: '#373941', accent: '#c74ded', background: '#23262e', foreground: '#d5ced9' },
+    },
+  },
+  {
+    id: 'aurora-x',
+    name: 'Aurora X',
+    builtIn: true,
+    modeSupport: 'dark-only',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#86a5ff', secondary: '#262e47', accent: '#c792ea', background: '#07090f', foreground: '#a8beff' },
+      light: { primary: '#86a5ff', secondary: '#262e47', accent: '#c792ea', background: '#07090f', foreground: '#a8beff' },
+    },
+  },
+  {
+    id: 'ayu-dark',
+    name: 'Ayu Dark',
+    builtIn: true,
+    modeSupport: 'dark-only',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#e6b450', secondary: '#0b0e14', accent: '#73b8ff', background: '#10141c', foreground: '#bfbdb6' },
+      light: { primary: '#e6b450', secondary: '#0b0e14', accent: '#73b8ff', background: '#10141c', foreground: '#bfbdb6' },
+    },
+  },
+  {
     id: 'caffeine',
     name: 'Caffeine',
     builtIn: true,
@@ -63,6 +97,7 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     name: 'Catppuccin',
     builtIn: true,
     modeSupport: 'both',
+    syntaxHighlighting: true,
     colors: {
       dark: { primary: '#89b4fa', secondary: '#45475a', accent: '#f5c2e7', background: '#1e1e2e', foreground: '#cdd6f4' },
       light: { primary: '#1e66f5', secondary: '#ccd0da', accent: '#ea76cb', background: '#eff1f5', foreground: '#4c4f69' },
@@ -89,6 +124,17 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     },
   },
   {
+    id: 'dark-plus',
+    name: 'Dark+',
+    builtIn: true,
+    modeSupport: 'both',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#007acc', secondary: '#383b3d', accent: '#4ec9b0', background: '#1e1e1e', foreground: '#d4d4d4' },
+      light: { primary: '#007acc', secondary: '#e8e8e8', accent: '#267f99', background: '#ffffff', foreground: '#000000' },
+    },
+  },
+  {
     id: 'doom-64',
     name: 'Doom 64',
     builtIn: true,
@@ -103,9 +149,54 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     name: 'Dracula',
     builtIn: true,
     modeSupport: 'dark-only',
+    syntaxHighlighting: true,
     colors: {
       dark: { primary: 'rgb(189, 147, 249)', secondary: 'rgb(68, 71, 90)', accent: 'rgb(139, 233, 253)', background: 'rgb(40, 42, 54)', foreground: 'rgb(248, 248, 242)' },
       light: { primary: 'rgb(189, 147, 249)', secondary: 'rgb(68, 71, 90)', accent: 'rgb(139, 233, 253)', background: 'rgb(40, 42, 54)', foreground: 'rgb(248, 248, 242)' },
+    },
+  },
+  {
+    id: 'everforest',
+    name: 'Everforest',
+    builtIn: true,
+    modeSupport: 'both',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#A7C080', secondary: '#475258', accent: '#83C092', background: '#2D353B', foreground: '#D3C6AA' },
+      light: { primary: '#8DA101', secondary: '#E6E2CC', accent: '#35A77C', background: '#FDF6E3', foreground: '#5C6A72' },
+    },
+  },
+  {
+    id: 'everforest-hard',
+    name: 'Everforest Hard',
+    builtIn: true,
+    modeSupport: 'both',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#A7C080', secondary: '#414B50', accent: '#83C092', background: '#272E33', foreground: '#D3C6AA' },
+      light: { primary: '#8DA101', secondary: '#EDEADA', accent: '#35A77C', background: '#FFFBEF', foreground: '#5C6A72' },
+    },
+  },
+  {
+    id: 'everforest-soft',
+    name: 'Everforest Soft',
+    builtIn: true,
+    modeSupport: 'both',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#A7C080', secondary: '#4D5960', accent: '#83C092', background: '#333C43', foreground: '#D3C6AA' },
+      light: { primary: '#8DA101', secondary: '#DDD8BE', accent: '#35A77C', background: '#F3EAD3', foreground: '#5C6A72' },
+    },
+  },
+  {
+    id: 'github',
+    name: 'GitHub',
+    builtIn: true,
+    modeSupport: 'both',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#58a6ff', secondary: '#2f363d', accent: '#79b8ff', background: '#24292e', foreground: '#e1e4e8' },
+      light: { primary: '#0366d6', secondary: '#f6f8fa', accent: '#0366d6', background: '#ffffff', foreground: '#24292e' },
     },
   },
   {
@@ -113,9 +204,21 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     name: 'Gruvbox',
     builtIn: true,
     modeSupport: 'both',
+    syntaxHighlighting: true,
     colors: {
       dark: { primary: '#458588', secondary: '#504945', accent: '#b8bb26', background: '#282828', foreground: '#ebdbb2' },
       light: { primary: '#076678', secondary: '#d5c4a1', accent: '#79740e', background: '#fbf1c7', foreground: '#3c3836' },
+    },
+  },
+  {
+    id: 'houston',
+    name: 'Houston',
+    builtIn: true,
+    modeSupport: 'dark-only',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#4bf3c8', secondary: '#343841', accent: '#54b9ff', background: '#17191e', foreground: '#eef0f9' },
+      light: { primary: '#4bf3c8', secondary: '#343841', accent: '#54b9ff', background: '#17191e', foreground: '#eef0f9' },
     },
   },
   {
@@ -123,6 +226,7 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     name: 'Kanagawa Dragon',
     builtIn: true,
     modeSupport: 'dark-only',
+    syntaxHighlighting: true,
     colors: {
       dark: { primary: '#7fb4ca', secondary: '#2a2625', accent: '#7aa89f', background: '#181616', foreground: '#c8c093' },
       light: { primary: '#7fb4ca', secondary: '#2a2625', accent: '#7aa89f', background: '#181616', foreground: '#c8c093' },
@@ -133,6 +237,7 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     name: 'Kanagawa Lotus',
     builtIn: true,
     modeSupport: 'light-only',
+    syntaxHighlighting: true,
     colors: {
       dark: { primary: '#4d699b', secondary: '#dcd5ac', accent: '#624c83', background: '#f2ecbc', foreground: '#545464' },
       light: { primary: '#4d699b', secondary: '#dcd5ac', accent: '#624c83', background: '#f2ecbc', foreground: '#545464' },
@@ -143,19 +248,32 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     name: 'Kanagawa Wave',
     builtIn: true,
     modeSupport: 'dark-only',
+    syntaxHighlighting: true,
     colors: {
       dark: { primary: '#7e9cd8', secondary: '#363646', accent: '#957fb8', background: '#1f1f28', foreground: '#dcd7ba' },
       light: { primary: '#7e9cd8', secondary: '#363646', accent: '#957fb8', background: '#1f1f28', foreground: '#dcd7ba' },
     },
   },
   {
-    id: 'monokai-pro',
-    name: 'Monokai Pro',
+    id: 'laserwave',
+    name: 'Laserwave',
     builtIn: true,
     modeSupport: 'dark-only',
+    syntaxHighlighting: true,
     colors: {
-      dark: { primary: '#ffd866', secondary: '#5b595c', accent: '#78dce8', background: '#2d2a2e', foreground: '#fcfcfa' },
-      light: { primary: '#ffd866', secondary: '#5b595c', accent: '#78dce8', background: '#2d2a2e', foreground: '#fcfcfa' },
+      dark: { primary: '#eb64b9', secondary: '#3e3549', accent: '#40b4c4', background: '#27212e', foreground: '#ffffff' },
+      light: { primary: '#eb64b9', secondary: '#3e3549', accent: '#40b4c4', background: '#27212e', foreground: '#ffffff' },
+    },
+  },
+  {
+    id: 'material',
+    name: 'Material',
+    builtIn: true,
+    modeSupport: 'both',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#80CBC4', secondary: '#1e272c', accent: '#C3E88D', background: '#263238', foreground: '#EEFFFF' },
+      light: { primary: '#80CBC4', secondary: '#FAFAFA', accent: '#39ADB5', background: '#FAFAFA', foreground: '#90A4AE' },
     },
   },
   {
@@ -169,6 +287,72 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     },
   },
   {
+    id: 'min',
+    name: 'Min',
+    builtIn: true,
+    modeSupport: 'both',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#b392f0', secondary: '#2a2a2a', accent: '#79b8ff', background: '#1f1f1f', foreground: '#b392f0' },
+      light: { primary: '#6f42c1', secondary: '#eeeeee', accent: '#1976d2', background: '#ffffff', foreground: '#24292e' },
+    },
+  },
+  {
+    id: 'monokai-pro',
+    name: 'Monokai Pro',
+    builtIn: true,
+    modeSupport: 'dark-only',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#ffd866', secondary: '#5b595c', accent: '#78dce8', background: '#2d2a2e', foreground: '#fcfcfa' },
+      light: { primary: '#ffd866', secondary: '#5b595c', accent: '#78dce8', background: '#2d2a2e', foreground: '#fcfcfa' },
+    },
+  },
+  {
+    id: 'night-owl',
+    name: 'Night Owl',
+    builtIn: true,
+    modeSupport: 'dark-only',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#7e57c2', secondary: '#0b253a', accent: '#82aaff', background: '#011627', foreground: '#d6deeb' },
+      light: { primary: '#7e57c2', secondary: '#0b253a', accent: '#82aaff', background: '#011627', foreground: '#d6deeb' },
+    },
+  },
+  {
+    id: 'nord',
+    name: 'Nord',
+    builtIn: true,
+    modeSupport: 'dark-only',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#88c0d0', secondary: '#434c5e', accent: '#81a1c1', background: '#2e3440', foreground: '#d8dee9' },
+      light: { primary: '#88c0d0', secondary: '#434c5e', accent: '#81a1c1', background: '#2e3440', foreground: '#d8dee9' },
+    },
+  },
+  {
+    id: 'one-dark-pro',
+    name: 'One Dark Pro',
+    builtIn: true,
+    modeSupport: 'dark-only',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#61afef', secondary: '#21252b', accent: '#c678dd', background: '#282c34', foreground: '#abb2bf' },
+      light: { primary: '#61afef', secondary: '#21252b', accent: '#c678dd', background: '#282c34', foreground: '#abb2bf' },
+    },
+  },
+  {
+    id: 'one-light',
+    name: 'One Light',
+    builtIn: true,
+    modeSupport: 'light-only',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#526fff', secondary: '#e5e5e6', accent: '#4078f2', background: '#fafafa', foreground: '#383a42' },
+      light: { primary: '#526fff', secondary: '#e5e5e6', accent: '#4078f2', background: '#fafafa', foreground: '#383a42' },
+    },
+  },
+  {
     id: 'paulmillr',
     name: 'PaulMillr',
     builtIn: true,
@@ -176,6 +360,28 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     colors: {
       dark: { primary: '#396bd7', secondary: '#414141', accent: '#66ccff', background: '#000000', foreground: '#f2f2f2' },
       light: { primary: '#396bd7', secondary: '#414141', accent: '#66ccff', background: '#000000', foreground: '#f2f2f2' },
+    },
+  },
+  {
+    id: 'plastic',
+    name: 'Plastic',
+    builtIn: true,
+    modeSupport: 'dark-only',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#1085ff', secondary: '#0d1117', accent: '#61afef', background: '#21252b', foreground: '#a9b2c3' },
+      light: { primary: '#1085ff', secondary: '#0d1117', accent: '#61afef', background: '#21252b', foreground: '#a9b2c3' },
+    },
+  },
+  {
+    id: 'poimandres',
+    name: 'Poimandres',
+    builtIn: true,
+    modeSupport: 'dark-only',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#add7ff', secondary: '#252934', accent: '#5de4c7', background: '#1b1e28', foreground: '#a6accd' },
+      light: { primary: '#add7ff', secondary: '#252934', accent: '#5de4c7', background: '#1b1e28', foreground: '#a6accd' },
     },
   },
   {
@@ -189,13 +395,47 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     },
   },
   {
+    id: 'red',
+    name: 'Red',
+    builtIn: true,
+    modeSupport: 'dark-only',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#cc3333', secondary: '#580000', accent: '#ffd0aa', background: '#390000', foreground: '#f8f8f8' },
+      light: { primary: '#cc3333', secondary: '#580000', accent: '#ffd0aa', background: '#390000', foreground: '#f8f8f8' },
+    },
+  },
+  {
     id: 'rose-pine',
     name: 'Rosé Pine',
     builtIn: true,
     modeSupport: 'both',
+    syntaxHighlighting: true,
     colors: {
       dark: { primary: '#c4a7e7', secondary: '#403d52', accent: '#f6c177', background: '#191724', foreground: '#e0def4' },
       light: { primary: '#907aa9', secondary: '#dfdad9', accent: '#ea9d34', background: '#faf4ed', foreground: '#575279' },
+    },
+  },
+  {
+    id: 'slack',
+    name: 'Slack',
+    builtIn: true,
+    modeSupport: 'both',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#0077b5', secondary: '#141414', accent: '#1d978d', background: '#222222', foreground: '#e6e6e6' },
+      light: { primary: '#5899c5', secondary: '#eeeeee', accent: '#5899c5', background: '#ffffff', foreground: '#000000' },
+    },
+  },
+  {
+    id: 'snazzy-light',
+    name: 'Snazzy Light',
+    builtIn: true,
+    modeSupport: 'light-only',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#09a1ed', secondary: '#e9eaeb', accent: '#2dae58', background: '#fafbfc', foreground: '#565869' },
+      light: { primary: '#09a1ed', secondary: '#e9eaeb', accent: '#2dae58', background: '#fafbfc', foreground: '#565869' },
     },
   },
   {
@@ -219,10 +459,22 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     },
   },
   {
+    id: 'solarized',
+    name: 'Solarized',
+    builtIn: true,
+    modeSupport: 'both',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#268bd2', secondary: '#073642', accent: '#2aa198', background: '#002b36', foreground: '#839496' },
+      light: { primary: '#268bd2', secondary: '#eee8d5', accent: '#2aa198', background: '#fdf6e3', foreground: '#657b83' },
+    },
+  },
+  {
     id: 'synthwave-84',
-    name: 'Synthwave \'84',
+    name: "Synthwave '84",
     builtIn: true,
     modeSupport: 'dark-only',
+    syntaxHighlighting: true,
     colors: {
       dark: { primary: '#ff7edb', secondary: '#34294f', accent: '#72f1b8', background: '#262335', foreground: '#ffffff' },
       light: { primary: '#ff7edb', secondary: '#34294f', accent: '#72f1b8', background: '#262335', foreground: '#ffffff' },
@@ -253,9 +505,43 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     name: 'Tokyo Night',
     builtIn: true,
     modeSupport: 'both',
+    syntaxHighlighting: true,
     colors: {
       dark: { primary: '#7aa2f7', secondary: '#414868', accent: '#7dcfff', background: '#24283b', foreground: '#c0caf5' },
       light: { primary: '#2e7de9', secondary: '#a1a6c5', accent: '#007197', background: '#e1e2e7', foreground: '#3760bf' },
+    },
+  },
+  {
+    id: 'vesper',
+    name: 'Vesper',
+    builtIn: true,
+    modeSupport: 'dark-only',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#FFC799', secondary: '#1C1C1C', accent: '#99FFE4', background: '#101010', foreground: '#FFFFFF' },
+      light: { primary: '#FFC799', secondary: '#1C1C1C', accent: '#99FFE4', background: '#101010', foreground: '#FFFFFF' },
+    },
+  },
+  {
+    id: 'vitesse',
+    name: 'Vitesse',
+    builtIn: true,
+    modeSupport: 'both',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#4d9375', secondary: '#181818', accent: '#e6cc77', background: '#121212', foreground: '#dbd7ca' },
+      light: { primary: '#1c6b48', secondary: '#f1f1f1', accent: '#bda437', background: '#ffffff', foreground: '#393a34' },
+    },
+  },
+  {
+    id: 'vitesse-black',
+    name: 'Vitesse Black',
+    builtIn: true,
+    modeSupport: 'dark-only',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#4d9375', secondary: '#191919', accent: '#6394bf', background: '#000000', foreground: '#dbd7ca' },
+      light: { primary: '#4d9375', secondary: '#191919', accent: '#6394bf', background: '#000000', foreground: '#dbd7ca' },
     },
   },
 ];

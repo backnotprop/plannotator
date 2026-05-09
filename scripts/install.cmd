@@ -382,18 +382,37 @@ echo }
     echo Updated plugin hooks at !PLUGIN_HOOKS!
 )
 
+REM Codex hooks on Windows are still experimental upstream. Do not mutate
+REM %%USERPROFILE%%\.codex automatically from the cmd installer until that path
+REM is verified end-to-end.
+set "CODEX_AVAILABLE=0"
+where codex >nul 2>&1
+if !ERRORLEVEL! equ 0 set "CODEX_AVAILABLE=1"
+if exist "%USERPROFILE%\.codex" (
+    for /f "delims=" %%C in ('dir /b /a "%USERPROFILE%\.codex" 2^>nul') do (
+        if /i not "%%C"=="skills" if /i not "%%C"==".DS_Store" set "CODEX_AVAILABLE=1"
+    )
+)
+if "!CODEX_AVAILABLE!"=="1" (
+    echo.
+    echo Codex detected.
+    echo Codex plan review hooks are experimental on Windows. To try them manually:
+    echo.
+    echo   1. Add this to %%USERPROFILE%%\.codex\config.toml:
+    echo.
+    echo      [features]
+    echo      codex_hooks = true
+    echo.
+    echo   2. Add a Stop hook in %%USERPROFILE%%\.codex\hooks.json that runs:
+    echo.
+    echo      !INSTALL_PATH!
+    echo.
+)
+
 REM Clear any cached OpenCode plugin to force fresh download on next run
 if exist "%USERPROFILE%\.cache\opencode\node_modules\@plannotator" rmdir /s /q "%USERPROFILE%\.cache\opencode\node_modules\@plannotator" >nul 2>&1
 if exist "%USERPROFILE%\.cache\opencode\packages\@plannotator" rmdir /s /q "%USERPROFILE%\.cache\opencode\packages\@plannotator" >nul 2>&1
 if exist "%USERPROFILE%\.bun\install\cache\@plannotator" rmdir /s /q "%USERPROFILE%\.bun\install\cache\@plannotator" >nul 2>&1
-
-REM Update Pi extension if pi is installed
-where pi >nul 2>&1
-if !ERRORLEVEL! equ 0 (
-    echo Updating Pi extension...
-    pi install npm:@plannotator/pi-extension
-    echo Pi extension updated.
-)
 
 REM Install /review slash command
 if defined CLAUDE_CONFIG_DIR (
@@ -455,6 +474,28 @@ echo Address the annotation feedback above. The user has reviewed your last mess
 echo Installed /plannotator-last command to !CLAUDE_COMMANDS_DIR!\plannotator-last.md
 
 REM Install skills (requires git)
+REM Remove legacy Codex-oriented skills from the older shared agent scope.
+set "LEGACY_AGENTS_SKILLS_DIR=%USERPROFILE%\.agents\skills"
+set "LEGACY_SKILLS_REMOVED=0"
+for %%S in (plannotator-review plannotator-annotate plannotator-last) do (
+    if exist "!LEGACY_AGENTS_SKILLS_DIR!\%%S" (
+        rmdir /s /q "!LEGACY_AGENTS_SKILLS_DIR!\%%S" >nul 2>&1
+        set "LEGACY_SKILLS_REMOVED=1"
+    )
+)
+if "!LEGACY_SKILLS_REMOVED!"=="1" echo Removed legacy Plannotator skills from !LEGACY_AGENTS_SKILLS_DIR!
+
+REM Remove Plannotator skills that belong in the shared agent scope from Codex.
+set "STALE_CODEX_SKILLS_DIR=%USERPROFILE%\.codex\skills"
+set "STALE_CODEX_SKILLS_REMOVED=0"
+for %%S in (plannotator-compound plannotator-setup-goal) do (
+    if exist "!STALE_CODEX_SKILLS_DIR!\%%S" (
+        rmdir /s /q "!STALE_CODEX_SKILLS_DIR!\%%S" >nul 2>&1
+        set "STALE_CODEX_SKILLS_REMOVED=1"
+    )
+)
+if "!STALE_CODEX_SKILLS_REMOVED!"=="1" echo Removed shared-agent Plannotator skills from !STALE_CODEX_SKILLS_DIR!
+
 where git >nul 2>&1
 if !ERRORLEVEL! equ 0 (
     if defined CLAUDE_CONFIG_DIR (
@@ -462,6 +503,7 @@ if !ERRORLEVEL! equ 0 (
     ) else (
         set "CLAUDE_SKILLS_DIR=%USERPROFILE%\.claude\skills"
     )
+    set "CODEX_SKILLS_DIR=%USERPROFILE%\.codex\skills"
     set "AGENTS_SKILLS_DIR=%USERPROFILE%\.agents\skills"
     set "SKILLS_TMP=%TEMP%\plannotator-skills-%RANDOM%"
     mkdir "!SKILLS_TMP!" >nul 2>&1
@@ -475,8 +517,17 @@ if !ERRORLEVEL! equ 0 (
             if not exist "!CLAUDE_SKILLS_DIR!" mkdir "!CLAUDE_SKILLS_DIR!"
             if not exist "!AGENTS_SKILLS_DIR!" mkdir "!AGENTS_SKILLS_DIR!"
             xcopy /s /y /q "apps\skills\*" "!CLAUDE_SKILLS_DIR!\" >nul 2>&1
-            xcopy /s /y /q "apps\skills\*" "!AGENTS_SKILLS_DIR!\" >nul 2>&1
-            echo Installed skills to !CLAUDE_SKILLS_DIR!\ and !AGENTS_SKILLS_DIR!\
+            if exist "apps\skills\plannotator-compound" xcopy /s /i /y /q "apps\skills\plannotator-compound" "!AGENTS_SKILLS_DIR!\plannotator-compound\" >nul 2>&1
+            if exist "apps\skills\plannotator-setup-goal" xcopy /s /i /y /q "apps\skills\plannotator-setup-goal" "!AGENTS_SKILLS_DIR!\plannotator-setup-goal\" >nul 2>&1
+            if "!CODEX_AVAILABLE!"=="1" (
+                if not exist "!CODEX_SKILLS_DIR!" mkdir "!CODEX_SKILLS_DIR!"
+                if exist "apps\skills\plannotator-review" xcopy /s /i /y /q "apps\skills\plannotator-review" "!CODEX_SKILLS_DIR!\plannotator-review\" >nul 2>&1
+                if exist "apps\skills\plannotator-annotate" xcopy /s /i /y /q "apps\skills\plannotator-annotate" "!CODEX_SKILLS_DIR!\plannotator-annotate\" >nul 2>&1
+                if exist "apps\skills\plannotator-last" xcopy /s /i /y /q "apps\skills\plannotator-last" "!CODEX_SKILLS_DIR!\plannotator-last\" >nul 2>&1
+                echo Installed skills to !CLAUDE_SKILLS_DIR!\, Codex command skills to !CODEX_SKILLS_DIR!\, and shared agent skills to !AGENTS_SKILLS_DIR!\
+            ) else (
+                echo Installed skills to !CLAUDE_SKILLS_DIR!\ and shared agent skills to !AGENTS_SKILLS_DIR!\
+            )
         )
 
         popd
@@ -487,6 +538,40 @@ if !ERRORLEVEL! equ 0 (
     rmdir /s /q "!SKILLS_TMP!" >nul 2>&1
 ) else (
     echo Skipping skills install ^(git not found^)
+)
+
+REM Update Pi extension if pi is installed. When global shared skills are
+REM available, keep the extension commands but disable its bundled skill copy to
+REM avoid duplicate Pi skill warnings.
+where pi >nul 2>&1
+if !ERRORLEVEL! equ 0 (
+    echo Updating Pi extension...
+    pi install npm:@plannotator/pi-extension
+    if !ERRORLEVEL! equ 0 (
+        set "PI_SHARED_SKILLS_DIR=%USERPROFILE%\.agents\skills"
+        set "PI_SHARED_SKILLS_AVAILABLE=0"
+        if exist "!PI_SHARED_SKILLS_DIR!\plannotator-compound\SKILL.md" if exist "!PI_SHARED_SKILLS_DIR!\plannotator-setup-goal\SKILL.md" set "PI_SHARED_SKILLS_AVAILABLE=1"
+        if "!PI_SHARED_SKILLS_AVAILABLE!"=="1" (
+            if defined PI_CODING_AGENT_DIR (
+                set "PI_SETTINGS_PATH=!PI_CODING_AGENT_DIR!\settings.json"
+            ) else (
+                set "PI_SETTINGS_PATH=%USERPROFILE%\.pi\agent\settings.json"
+            )
+            if exist "!PI_SETTINGS_PATH!" (
+                where powershell >nul 2>&1
+                if !ERRORLEVEL! equ 0 (
+                    powershell -NoProfile -ExecutionPolicy Bypass -Command "$p=$env:PI_SETTINGS_PATH; if ((Test-Path $p) -eq $false) { exit 0 }; try { $s=Get-Content -Path $p -Raw -ErrorAction Stop | ConvertFrom-Json } catch { Write-Host 'Skipping Pi settings update (could not parse settings.json)'; exit 0 }; if (($null -eq $s) -or ($null -eq $s.packages)) { exit 0 }; $pattern='^(?:npm:)?@plannotator/pi-extension(?:@.+)?$'; $changed=$false; $packages=@(); foreach ($entry in @($s.packages)) { if (($entry -is [string]) -and ($entry -match $pattern)) { $packages += [pscustomobject]@{ source=$entry; skills=@() }; $changed=$true; continue }; $sourceProperty=$null; if (($null -ne $entry) -and ($null -ne $entry.PSObject)) { $sourceProperty=$entry.PSObject.Properties['source'] }; if (($null -ne $sourceProperty) -and ($sourceProperty.Value -is [string]) -and ($sourceProperty.Value -match $pattern)) { $skillsProperty=$entry.PSObject.Properties['skills']; if (($null -eq $skillsProperty) -or (@($skillsProperty.Value).Count -ne 0)) { if ($null -ne $skillsProperty) { $entry.skills=@() } else { $entry | Add-Member -NotePropertyName 'skills' -NotePropertyValue @() }; $changed=$true } }; $packages += $entry }; if ($changed) { $s.packages=@($packages); $tmp=[System.IO.Path]::GetTempFileName(); try { $json=($s | ConvertTo-Json -Depth 20)+[Environment]::NewLine; $utf8NoBom=New-Object System.Text.UTF8Encoding -ArgumentList $false; [System.IO.File]::WriteAllText($tmp,$json,$utf8NoBom); Move-Item -Force $tmp $p; Write-Host 'Configured Pi to use global Plannotator skills and skip bundled package skills.' } catch { Write-Host 'Skipping Pi settings update (could not rewrite settings.json)'; Remove-Item -Force $tmp -ErrorAction SilentlyContinue } }"
+                ) else (
+                    echo Skipping Pi settings update ^(PowerShell not found^)
+                )
+            )
+        ) else (
+            echo Leaving Pi bundled skills enabled ^(global Plannotator agent skills not found^).
+        )
+        echo Pi extension updated.
+    ) else (
+        echo Skipping Pi settings update ^(pi install failed^)
+    )
 )
 
 REM --- Gemini CLI support (only if Gemini is installed) ---

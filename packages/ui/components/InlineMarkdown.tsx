@@ -1,12 +1,113 @@
 import React from "react";
+import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX } from "@plannotator/shared/code-file";
 import { transformPlainText } from "../utils/inlineTransforms";
 import { getImageSrc } from "./ImageThumbnail";
+import { useCodePathValidation, type CodePathValidationContextValue } from "./CodePathValidationContext";
+import type { ValidationEntry } from "../hooks/useValidatedCodePaths";
+import { CodeFilePicker } from "./CodeFilePicker";
+
+/**
+ * Decide how a candidate code-file path should render based on validation state:
+ *   - 'link'           → clickable, opens directly via onOpenCodeFile(resolvedOrInput)
+ *   - 'ambiguous-link' → clickable, opens a picker over `matches`
+ *   - 'plain'          → not a link (file does not exist anywhere in the repo)
+ *
+ * No provider or `ready: false` falls back to optimistic 'link' behavior.
+ */
+function gateCodePath(
+  candidate: string,
+  validation: CodePathValidationContextValue | null,
+): { render: 'link'; resolved?: string } | { render: 'ambiguous-link'; matches: string[] } | { render: 'plain' } {
+  if (!validation || !validation.ready) return { render: 'link' };
+  const entry = validation.validated.get(candidate);
+  // If the validator is ready but has no entry for this candidate, the
+  // extractor intentionally excluded it (e.g., inside an HTML comment or
+  // fenced code block). Demote rather than optimistically linking.
+  if (!entry) return { render: 'plain' };
+  switch ((entry as ValidationEntry).status) {
+    case 'found':       return { render: 'link', resolved: (entry as Extract<ValidationEntry, { status: 'found' }>).resolved };
+    case 'ambiguous':   return { render: 'ambiguous-link', matches: (entry as Extract<ValidationEntry, { status: 'ambiguous' }>).matches };
+    case 'unavailable': return { render: 'link' };
+    case 'missing':     return { render: 'plain' };
+    default:            return { render: 'link' }; // unknown status — degrade to optimistic
+  }
+}
+
+const CodeFileLink: React.FC<{
+  candidate: string;
+  display: string;
+  onOpenCodeFile: (path: string) => void;
+}> = ({ candidate, display, onOpenCodeFile }) => {
+  const validation = useCodePathValidation();
+  const gate = gateCodePath(candidate, validation);
+  const [pickerOpen, setPickerOpen] = React.useState(false);
+  const anchorRef = React.useRef<HTMLElement | null>(null);
+
+  if (gate.render === 'plain') {
+    return (
+      <code className="px-1.5 py-0.5 rounded bg-muted text-sm font-mono">
+        {display}
+      </code>
+    );
+  }
+
+  const isAmbiguous = gate.render === 'ambiguous-link';
+  const handleClick = () => {
+    if (isAmbiguous) {
+      setPickerOpen(true);
+      return;
+    }
+    onOpenCodeFile(gate.render === 'link' && gate.resolved ? gate.resolved : candidate);
+  };
+
+  return (
+    <>
+      <code
+        ref={(el) => { anchorRef.current = el; }}
+        role="button"
+        tabIndex={0}
+        data-ambiguous={isAmbiguous ? "true" : undefined}
+        onClick={handleClick}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleClick(); } }}
+        className="code-file-link px-1.5 py-0.5 rounded bg-muted text-sm font-mono cursor-pointer hover:text-primary inline-flex items-center gap-1 transition-colors"
+        title={isAmbiguous ? `${display} — multiple matches` : `View: ${display}`}
+      >
+        {display}
+        <CodeFileIcon />
+        {isAmbiguous && (
+          <sup className="text-[0.6rem] opacity-70 -ml-0.5">{(gate as { matches: string[] }).matches.length}</sup>
+        )}
+      </code>
+      {pickerOpen && isAmbiguous && (
+        <CodeFilePicker
+          anchorEl={anchorRef.current}
+          matches={(gate as { matches: string[] }).matches}
+          onPick={(path) => { setPickerOpen(false); onOpenCodeFile(path); }}
+          onDismiss={() => setPickerOpen(false)}
+        />
+      )}
+    </>
+  );
+};
 
 const DANGEROUS_PROTOCOL = /^\s*(javascript|data|vbscript|file)\s*:/i;
 function sanitizeLinkUrl(url: string): string | null {
   if (DANGEROUS_PROTOCOL.test(url)) return null;
   return url;
 }
+
+const CodeFileIcon = () => (
+  <svg
+    className="w-3 h-3 opacity-50 flex-shrink-0"
+    fill="none"
+    viewBox="0 0 24 24"
+    stroke="currentColor"
+    strokeWidth={2}
+    aria-hidden="true"
+  >
+    <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+  </svg>
+);
 
 // Trim trailing sentence punctuation from a bare URL, but keep closing
 // brackets when they balance an opener inside the URL (Wikipedia-style
@@ -31,43 +132,92 @@ export function trimUrlTail(url: string): string {
   return url;
 }
 
-// Scan a plain-text chunk for bare https?:// URLs at word boundaries and
-// emit them as anchor nodes, passing surrounding text through
-// transformPlainText so emoji shortcodes and smart punctuation still apply
-// to the non-URL slices.
+// Scan a plain-text chunk for bare https?:// URLs and bare code file paths
+// at word boundaries, emitting them as interactive nodes. Surrounding text
+// passes through transformPlainText for emoji shortcodes + smart punctuation.
 function emitPlainTextWithBareUrls(
   text: string,
   previousChar: string,
   parts: React.ReactNode[],
   nextKey: () => number,
+  onOpenCodeFile?: (path: string) => void,
+  validation?: CodePathValidationContextValue | null,
 ): void {
   if (text.length === 0) return;
-  const re = /https?:\/\/[^\s<>"']+/g;
-  let last = 0;
+
+  type Span = { start: number; end: number; kind: 'url'; value: string }
+    | { start: number; end: number; kind: 'path'; value: string };
+  const spans: Span[] = [];
+
+  // Collect bare URLs
+  const urlRe = /https?:\/\/[^\s<>"']+/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
+  while ((m = urlRe.exec(text)) !== null) {
     const before = m.index === 0 ? previousChar : text[m.index - 1];
     if (/\w/.test(before)) continue;
-    const raw = m[0];
-    const url = trimUrlTail(raw);
+    const url = trimUrlTail(m[0]);
     const safe = url.length > 0 ? sanitizeLinkUrl(url) : null;
     if (!safe) continue;
-    if (m.index > last) {
-      parts.push(transformPlainText(text.slice(last, m.index)));
+    spans.push({ start: m.index, end: m.index + url.length, kind: 'url', value: url });
+    urlRe.lastIndex = m.index + url.length;
+  }
+
+  // Collect bare code file paths (require /)
+  if (onOpenCodeFile) {
+    const pathRe = new RegExp(CODE_PATH_BARE_REGEX.source, 'g');
+    while ((m = pathRe.exec(text)) !== null) {
+      const before = m.index === 0 ? previousChar : text[m.index - 1];
+      if (/\w/.test(before)) continue;
+      const candidate = m[0];
+      if (!isCodeFilePathStrict(candidate)) continue;
+      const overlaps = spans.some(s => m!.index < s.end && m!.index + candidate.length > s.start);
+      if (overlaps) continue;
+      spans.push({ start: m.index, end: m.index + candidate.length, kind: 'path', value: candidate });
     }
-    parts.push(
-      <a
-        key={nextKey()}
-        href={safe}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-primary underline underline-offset-2 hover:text-primary/80"
-      >
-        {url}
-      </a>,
-    );
-    last = m.index + url.length;
-    re.lastIndex = last;
+  }
+
+  if (spans.length === 0) {
+    parts.push(transformPlainText(text));
+    return;
+  }
+
+  spans.sort((a, b) => a.start - b.start);
+
+  let last = 0;
+  for (const span of spans) {
+    if (span.start > last) {
+      parts.push(transformPlainText(text.slice(last, span.start)));
+    }
+    if (span.kind === 'url') {
+      parts.push(
+        <a
+          key={nextKey()}
+          href={span.value}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-primary underline underline-offset-2 hover:text-primary/80"
+        >
+          {span.value}
+        </a>,
+      );
+    } else {
+      const cleanPath = span.value.replace(/#.*$/, '');
+      const gate = gateCodePath(cleanPath, validation ?? null);
+      if (gate.render === 'plain') {
+        // Bare prose, file doesn't exist — emit as plain text, no link styling.
+        parts.push(transformPlainText(span.value));
+      } else {
+        parts.push(
+          <CodeFileLink
+            key={nextKey()}
+            candidate={cleanPath}
+            display={span.value}
+            onOpenCodeFile={onOpenCodeFile!}
+          />,
+        );
+      }
+    }
+    last = span.end;
   }
   if (last < text.length) {
     parts.push(transformPlainText(text.slice(last)));
@@ -85,19 +235,32 @@ function emitPlainTextWithBareUrls(
 export const InlineMarkdown: React.FC<{
   text: string;
   onOpenLinkedDoc?: (path: string) => void;
+  onOpenCodeFile?: (path: string) => void;
   onNavigateAnchor?: (hash: string) => void;
   imageBaseDir?: string;
   onImageClick?: (src: string, alt: string) => void;
   githubRepo?: string;
-}> = ({ text, onOpenLinkedDoc, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo }) => {
+}> = ({ text, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo }) => {
+  const validation = useCodePathValidation();
   const parts: React.ReactNode[] = [];
   let remaining = text;
   let key = 0;
   let previousChar = "";
 
   while (remaining.length > 0) {
+    // HTML comments: skip entirely — they should be invisible per CommonMark.
+    // The parser doesn't recognize <!-- --> as a block-level construct, so
+    // comments inside paragraphs land here. Without this, path detection
+    // would linkify paths inside comments.
+    let match = remaining.match(/^<!--[\s\S]*?-->/);
+    if (match) {
+      remaining = remaining.slice(match[0].length);
+      previousChar = ">";
+      continue;
+    }
+
     // Backslash escaping: \. \* \_ \` \[ \~ etc. — emit literal char, hide backslash
-    let match = remaining.match(/^\\([\\*_`\[\]~!.()\-#>+|{}&])/);
+    match = remaining.match(/^\\([\\*_`\[\]~!.()\-#>+|{}&])/);
     if (match) {
       parts.push(match[1]);
       remaining = remaining.slice(2);
@@ -180,6 +343,7 @@ export const InlineMarkdown: React.FC<{
             onImageClick={onImageClick}
             text={match[1]}
             onOpenLinkedDoc={onOpenLinkedDoc}
+            onOpenCodeFile={onOpenCodeFile}
             onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
           />
@@ -201,6 +365,7 @@ export const InlineMarkdown: React.FC<{
               onImageClick={onImageClick}
               text={match[1]}
               onOpenLinkedDoc={onOpenLinkedDoc}
+              onOpenCodeFile={onOpenCodeFile}
               onNavigateAnchor={onNavigateAnchor}
               githubRepo={githubRepo}
             />
@@ -222,6 +387,7 @@ export const InlineMarkdown: React.FC<{
             onImageClick={onImageClick}
             text={match[1]}
             onOpenLinkedDoc={onOpenLinkedDoc}
+            onOpenCodeFile={onOpenCodeFile}
             onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
           />
@@ -242,6 +408,7 @@ export const InlineMarkdown: React.FC<{
             onImageClick={onImageClick}
             text={match[1]}
             onOpenLinkedDoc={onOpenLinkedDoc}
+            onOpenCodeFile={onOpenCodeFile}
             onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
           />
@@ -263,6 +430,7 @@ export const InlineMarkdown: React.FC<{
             onImageClick={onImageClick}
             text={match[1]}
             onOpenLinkedDoc={onOpenLinkedDoc}
+            onOpenCodeFile={onOpenCodeFile}
             onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
           />
@@ -273,17 +441,30 @@ export const InlineMarkdown: React.FC<{
       continue;
     }
 
-    // Inline code: `code`
+    // Inline code: `code` — when the content is a code file path, render as clickable
     match = remaining.match(/^`([^`]+)`/);
     if (match) {
-      parts.push(
-        <code
-          key={key++}
-          className="px-1.5 py-0.5 rounded bg-muted text-sm font-mono"
-        >
-          {match[1]}
-        </code>,
-      );
+      const codeContent = match[1];
+      if (isCodeFilePath(codeContent) && onOpenCodeFile) {
+        const cleanPath = codeContent.replace(/#.*$/, '');
+        parts.push(
+          <CodeFileLink
+            key={key++}
+            candidate={cleanPath}
+            display={codeContent}
+            onOpenCodeFile={onOpenCodeFile}
+          />,
+        );
+      } else {
+        parts.push(
+          <code
+            key={key++}
+            className="px-1.5 py-0.5 rounded bg-muted text-sm font-mono"
+          >
+            {codeContent}
+          </code>,
+        );
+      }
       remaining = remaining.slice(match[0].length);
       previousChar = match[0][match[0].length - 1] || previousChar;
       continue;
@@ -505,7 +686,9 @@ export const InlineMarkdown: React.FC<{
         /\.(mdx?|html?)(#.*)?$/i.test(linkUrl) &&
         !linkUrl.startsWith("http://") &&
         !linkUrl.startsWith("https://");
+      const isCodeFile = !isLocalDoc && isCodeFilePath(linkUrl);
       const linkedDocPath = isLocalDoc ? linkUrl.replace(/#.*$/, '') : linkUrl;
+      const codeFilePath = isCodeFile ? linkUrl.replace(/#.*$/, '') : linkUrl;
       const isInPageAnchor = safeLinkUrl.startsWith('#');
 
       if (isInPageAnchor) {
@@ -551,6 +734,22 @@ export const InlineMarkdown: React.FC<{
             </svg>
           </a>,
         );
+      } else if (isCodeFile && onOpenCodeFile) {
+        parts.push(
+          <a
+            key={key++}
+            href={safeLinkUrl}
+            onClick={(e) => {
+              e.preventDefault();
+              onOpenCodeFile(codeFilePath);
+            }}
+            className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1 cursor-pointer"
+            title={`View: ${linkUrl}`}
+          >
+            {linkText}
+            <CodeFileIcon />
+          </a>,
+        );
       } else if (isLocalDoc) {
         // No handler — render as plain link (e.g., in shared/portal views)
         parts.push(
@@ -590,6 +789,7 @@ export const InlineMarkdown: React.FC<{
             key={key++}
             text={before}
             onOpenLinkedDoc={onOpenLinkedDoc}
+            onOpenCodeFile={onOpenCodeFile}
             onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
             imageBaseDir={imageBaseDir}
@@ -610,7 +810,7 @@ export const InlineMarkdown: React.FC<{
     // detected inline via emitPlainTextWithBareUrls() below.
     const nextSpecial = remaining.slice(1).search(/[\*_`\[!~\\<#@]/);
     const plainText = nextSpecial === -1 ? remaining : remaining.slice(0, nextSpecial + 1);
-    emitPlainTextWithBareUrls(plainText, previousChar, parts, () => key++);
+    emitPlainTextWithBareUrls(plainText, previousChar, parts, () => key++, onOpenCodeFile, validation);
     previousChar = plainText[plainText.length - 1] || previousChar;
     if (nextSpecial === -1) {
       break;

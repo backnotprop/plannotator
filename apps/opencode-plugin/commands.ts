@@ -18,18 +18,22 @@ import {
   startAnnotateServer,
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
-import { getGitContext, runGitDiffWithContext } from "@plannotator/server/git";
-import { detectManagedVcs } from "@plannotator/server/vcs";
+import { type DiffType, prepareLocalReviewDiff } from "@plannotator/server/vcs";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
+import {
+  getReviewApprovedPrompt,
+  getReviewDeniedSuffix,
+  getAnnotateFileFeedbackPrompt,
+} from "@plannotator/shared/prompts";
 import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles } from "@plannotator/shared/resolve-file";
 import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { parseAnnotateArgs } from "@plannotator/shared/annotate-args";
-import { urlToMarkdown } from "@plannotator/shared/url-to-markdown";
+import { parseReviewArgs } from "@plannotator/shared/review-args";
+import { urlToMarkdown, isConvertedSource } from "@plannotator/shared/url-to-markdown";
 import { statSync } from "fs";
 import path from "path";
-import { buildWorkspaceLocalRepos, buildWorkspacePRRepos } from "@plannotator/server/review-workspace";
 
 /** Shared dependencies injected by the plugin */
 export interface CommandDeps {
@@ -49,27 +53,21 @@ export async function handleReviewCommand(
   const { client, reviewHtmlContent, getSharingEnabled, getShareBaseUrl, directory } = deps;
 
   // @ts-ignore - Event properties contain arguments
-  const urlArg: string = event.properties?.arguments || "";
-  const urlArgs = urlArg.split(/\s+/).filter((arg: string) => arg.startsWith("http://") || arg.startsWith("https://"));
-  const isPRMode = urlArgs.length > 0;
-  const isMultiPRMode = urlArgs.length > 1;
+  const reviewArgs = parseReviewArgs(event.properties?.arguments || "");
+  const urlArg = reviewArgs.prUrl;
+  const isPRMode = urlArg !== undefined;
 
   let rawPatch: string;
   let gitRef: string;
   let diffError: string | undefined;
-  let userDiffType: import("@plannotator/shared/config").DefaultDiffType | undefined;
-  let gitContext: Awaited<ReturnType<typeof getGitContext>> | undefined;
+  let userDiffType: DiffType | undefined;
+  let gitContext: Awaited<ReturnType<typeof prepareLocalReviewDiff>>["gitContext"] | undefined;
   let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
-  let workspaceRepos: Awaited<ReturnType<typeof buildWorkspaceLocalRepos>> | undefined;
 
-  if (isMultiPRMode) {
-    workspaceRepos = await buildWorkspacePRRepos(urlArgs);
-    rawPatch = "";
-    gitRef = "Workspace review";
-  } else if (isPRMode) {
-    const prRef = parsePRUrl(urlArgs[0]);
+  if (isPRMode) {
+    const prRef = parsePRUrl(urlArg);
     if (!prRef) {
-      client.app.log({ level: "error", message: `Invalid PR/MR URL: ${urlArgs[0]}` });
+      client.app.log({ level: "error", message: `Invalid PR/MR URL: ${urlArg}` });
       return;
     }
 
@@ -95,27 +93,18 @@ export async function handleReviewCommand(
   } else {
     client.app.log({ level: "info", message: "Opening code review UI..." });
 
-    const managedVcs = await detectManagedVcs(directory);
-    if (managedVcs) {
-      gitContext = await getGitContext(directory);
-      userDiffType = resolveDefaultDiffType(loadConfig());
-      const diffResult = await runGitDiffWithContext(userDiffType, gitContext);
-      rawPatch = diffResult.patch;
-      gitRef = diffResult.label;
-      diffError = diffResult.error;
-    } else {
-      workspaceRepos = await buildWorkspaceLocalRepos(directory || process.cwd());
-      if (workspaceRepos.length === 0) {
-        client.app.log({ level: "error", message: "Not in a git repo and no nested repositories were found." });
-        return;
-      }
-      client.app.log({
-        level: "info",
-        message: `Workspace mode: found ${workspaceRepos.length} repos (${workspaceRepos.filter((repo) => repo.selected).length} selected with changes).`,
-      });
-      rawPatch = "";
-      gitRef = "Workspace review";
-    }
+    const config = loadConfig();
+    const diffResult = await prepareLocalReviewDiff({
+      cwd: directory,
+      vcsType: reviewArgs.vcsType,
+      configuredDiffType: resolveDefaultDiffType(config),
+      hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
+    });
+    gitContext = diffResult.gitContext;
+    userDiffType = diffResult.diffType;
+    rawPatch = diffResult.rawPatch;
+    gitRef = diffResult.gitRef;
+    diffError = diffResult.error;
   }
 
   const server = await startReviewServer({
@@ -126,12 +115,16 @@ export async function handleReviewCommand(
     diffType: isPRMode ? undefined : userDiffType,
     gitContext,
     prMetadata,
-    workspaceRepos,
     sharingEnabled: await getSharingEnabled(),
     shareBaseUrl: getShareBaseUrl(),
     htmlContent: reviewHtmlContent,
     opencodeClient: client,
-    onReady: handleReviewServerReady,
+    onReady: (url, isRemote, port) => {
+      handleReviewServerReady(url, isRemote, port);
+      if (isRemote) {
+        client.app.log({ level: "info", message: `[Plannotator] Open in browser: ${url}` });
+      }
+    },
   });
 
   const result = await server.waitForDecision();
@@ -151,10 +144,10 @@ export async function handleReviewCommand(
       const targetAgent = result.agentSwitch || "build";
 
       const message = result.approved
-        ? "# Code Review\n\nCode review completed — no changes requested."
+        ? getReviewApprovedPrompt("opencode")
         : isPRMode
           ? result.feedback
-          : `${result.feedback}\n\nPlease address this feedback.`;
+          : `${result.feedback}${getReviewDeniedSuffix("opencode")}`;
 
       try {
         await client.session.prompt({
@@ -194,7 +187,9 @@ export async function handleAnnotateCommand(
   let absolutePath: string;
   let folderPath: string | undefined;
   let annotateMode: "annotate" | "annotate-folder" = "annotate";
+  let isFolder = false;
   let sourceInfo: string | undefined;
+  let sourceConverted = false;
 
   // --- URL annotation ---
   const isUrl = /^https?:\/\//i.test(filePath);
@@ -205,6 +200,7 @@ export async function handleAnnotateCommand(
     try {
       const result = await urlToMarkdown(filePath, { useJina });
       markdown = result.markdown;
+      sourceConverted = isConvertedSource(result.source);
     } catch (err) {
       client.app.log({ level: "error", message: `Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}` });
       return;
@@ -215,7 +211,6 @@ export async function handleAnnotateCommand(
     const projectRoot = directory || process.cwd();
     const resolvedArg = resolveUserPath(filePath, projectRoot);
 
-    let isFolder = false;
     try {
       isFolder = statSync(resolvedArg).isDirectory();
     } catch {
@@ -248,6 +243,7 @@ export async function handleAnnotateCommand(
       markdown = htmlToMarkdown(html);
       absolutePath = resolvedArg;
       sourceInfo = path.basename(resolvedArg);
+      sourceConverted = true;
       client.app.log({ level: "info", message: `Converted: ${absolutePath}` });
     } else {
       // Markdown file annotation
@@ -283,12 +279,18 @@ export async function handleAnnotateCommand(
     mode: annotateMode,
     folderPath,
     sourceInfo,
+    sourceConverted,
     sharingEnabled: await getSharingEnabled(),
     shareBaseUrl: getShareBaseUrl(),
     pasteApiUrl: getPasteApiUrl(),
     gate,
     htmlContent,
-    onReady: handleAnnotateServerReady,
+    onReady: (url, isRemote, port) => {
+      handleAnnotateServerReady(url, isRemote, port);
+      if (isRemote) {
+        client.app.log({ level: "info", message: `[Plannotator] Open in browser: ${url}` });
+      }
+    },
   });
 
   const result = await server.waitForDecision();
@@ -311,7 +313,11 @@ export async function handleAnnotateCommand(
           body: {
             parts: [{
               type: "text",
-              text: `# Markdown Annotations\n\nFile: ${absolutePath}\n\n${result.feedback}\n\nPlease address the annotation feedback above.`,
+              text: getAnnotateFileFeedbackPrompt("opencode", undefined, {
+                fileHeader: isFolder ? "Folder" : "File",
+                filePath: absolutePath,
+                feedback: result.feedback,
+              }),
             }],
           },
         });
@@ -385,7 +391,12 @@ export async function handleAnnotateLastCommand(
     pasteApiUrl: getPasteApiUrl(),
     gate,
     htmlContent,
-    onReady: handleAnnotateServerReady,
+    onReady: (url, isRemote, port) => {
+      handleAnnotateServerReady(url, isRemote, port);
+      if (isRemote) {
+        client.app.log({ level: "info", message: `[Plannotator] Open in browser: ${url}` });
+      }
+    },
   });
 
   const result = await server.waitForDecision();
@@ -416,7 +427,12 @@ export async function handleArchiveCommand(
     shareBaseUrl: getShareBaseUrl(),
     pasteApiUrl: getPasteApiUrl(),
     htmlContent,
-    onReady: handleServerReady,
+    onReady: (url, isRemote, port) => {
+      handleServerReady(url, isRemote, port);
+      if (isRemote) {
+        client.app.log({ level: "info", message: `[Plannotator] Open in browser: ${url}` });
+      }
+    },
   });
 
   if (server.waitForDone) {

@@ -14,7 +14,7 @@ Plannotator is a plan review UI for Claude Code that intercepts `ExitPlanMode` v
 
 ## What is Plannotator?
 
-When Claude Code generates a plan, Plannotator opens an interactive review UI in your browser. You can read through the plan, select text to annotate, and provide structured feedback — deletions, replacements, comments, and insertions — before approving or requesting changes.
+When Claude Code generates a plan, Plannotator opens an interactive review UI in your browser. You can read through the plan, select text to annotate, and provide structured feedback — deletions, comments, global comments, quick labels, and "looks good" approvals — before approving or requesting changes.
 
 ## Key Features
 

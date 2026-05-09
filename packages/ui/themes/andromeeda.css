@@ -1,0 +1,66 @@
+/* Andromeeda — by EliverLara */
+.theme-andromeeda {
+  --background: #23262e;
+  --foreground: #d5ced9;
+  --card: #2b303b;
+  --card-foreground: #d5ced9;
+  --popover: #2b303b;
+  --popover-foreground: #d5ced9;
+  --primary: #00e8c6;
+  --primary-foreground: #23262e;
+  --secondary: #373941;
+  --secondary-foreground: #d5ced9;
+  --muted: #333844;
+  --muted-foreground: #746f77;
+  --accent: #c74ded;
+  --accent-foreground: #23262e;
+  --destructive: #fc644d;
+  --destructive-foreground: #23262e;
+  --border: #363c49;
+  --input: #363c49;
+  --ring: #00e8c6;
+  --success: #96e072;
+  --success-foreground: #23262e;
+  --warning: #ffe66d;
+  --warning-foreground: #23262e;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #2e323d;
+  --focus-highlight: #00e8c6;
+}
+
+.theme-andromeeda.light {
+  --background: #23262e;
+  --foreground: #d5ced9;
+  --card: #2b303b;
+  --card-foreground: #d5ced9;
+  --popover: #2b303b;
+  --popover-foreground: #d5ced9;
+  --primary: #00e8c6;
+  --primary-foreground: #23262e;
+  --secondary: #373941;
+  --secondary-foreground: #d5ced9;
+  --muted: #333844;
+  --muted-foreground: #746f77;
+  --accent: #c74ded;
+  --accent-foreground: #23262e;
+  --destructive: #fc644d;
+  --destructive-foreground: #23262e;
+  --border: #363c49;
+  --input: #363c49;
+  --ring: #00e8c6;
+  --success: #96e072;
+  --success-foreground: #23262e;
+  --warning: #ffe66d;
+  --warning-foreground: #23262e;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #2e323d;
+  --focus-highlight: #00e8c6;
+}

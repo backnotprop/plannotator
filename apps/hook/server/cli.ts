@@ -14,7 +14,7 @@ export function formatTopLevelHelp(): string {
     "Usage:",
     "  plannotator --help",
     "  plannotator [--browser <name>]",
-    "  plannotator review [PR_URL]",
+    "  plannotator review [--git] [PR_URL]",
     "  plannotator annotate <file.md | file.html | https://... | folder/>  [--no-jina] [--gate] [--json] [--hook]",
     "  plannotator last",
     "  plannotator archive",

@@ -266,6 +266,34 @@ if (Test-Path $pluginHooks) {
     Write-Host "Updated plugin hooks at $pluginHooks"
 }
 
+# Codex hooks on Windows are still experimental upstream. Do not mutate
+# $env:USERPROFILE\.codex automatically from the Windows installer until that
+# path is verified end-to-end.
+$codexDir = "$env:USERPROFILE\.codex"
+$codexHomeHasUserConfig = $false
+if (Test-Path $codexDir) {
+    $codexHomeHasUserConfig = [bool](Get-ChildItem -Force $codexDir -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -ne "skills" -and $_.Name -ne ".DS_Store" } |
+        Select-Object -First 1)
+}
+$codexAvailable = [bool](Get-Command codex -ErrorAction SilentlyContinue) -or $codexHomeHasUserConfig
+
+if ($codexAvailable) {
+    $codexExePath = "$installDir\plannotator.exe"
+    Write-Host ""
+    Write-Host "Codex detected."
+    Write-Host "Codex plan review hooks are experimental on Windows. To try them manually:"
+    Write-Host ""
+    Write-Host "  1. Add this to $env:USERPROFILE\.codex\config.toml:"
+    Write-Host ""
+    Write-Host "     [features]"
+    Write-Host "     codex_hooks = true"
+    Write-Host ""
+    Write-Host "  2. Add a Stop hook in $env:USERPROFILE\.codex\hooks.json that runs:"
+    Write-Host ""
+    Write-Host "     $codexExePath"
+}
+
 # Clear OpenCode plugin cache
 Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\opencode\node_modules\@plannotator" -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\opencode\packages\@plannotator" -ErrorAction SilentlyContinue
@@ -274,11 +302,101 @@ Remove-Item -Recurse -Force "$env:USERPROFILE\.bun\install\cache\@plannotator" -
 # Clear Pi jiti cache to force fresh download on next run
 Remove-Item -Recurse -Force "$env:TEMP\jiti" -ErrorAction SilentlyContinue
 
-# Update Pi extension if pi is installed
-if (Get-Command pi -ErrorAction SilentlyContinue) {
+function Test-PlannotatorSharedAgentSkillsAvailable {
+    $agentsSkillsDir = "$env:USERPROFILE\.agents\skills"
+    return (Test-Path (Join-Path $agentsSkillsDir "plannotator-compound\SKILL.md")) -and
+        (Test-Path (Join-Path $agentsSkillsDir "plannotator-setup-goal\SKILL.md"))
+}
+
+function Configure-PiPlannotatorPackageFilter {
+    $piAgentDir = if ($env:PI_CODING_AGENT_DIR) { $env:PI_CODING_AGENT_DIR } else { "$env:USERPROFILE\.pi\agent" }
+    $piSettings = Join-Path $piAgentDir "settings.json"
+
+    if (-not (Test-Path $piSettings)) {
+        return
+    }
+
+    try {
+        $settings = Get-Content -Path $piSettings -Raw -ErrorAction Stop | ConvertFrom-Json
+    } catch {
+        Write-Host "Skipping Pi settings update (could not parse settings.json)"
+        return
+    }
+
+    if ($null -eq $settings -or $null -eq $settings.packages) {
+        return
+    }
+
+    $packagePattern = "^(?:npm:)?@plannotator/pi-extension(?:@.+)?$"
+    $changed = $false
+    $packages = @()
+
+    foreach ($entry in @($settings.packages)) {
+        if ($entry -is [string] -and $entry -match $packagePattern) {
+            $packages += [pscustomobject]@{
+                source = $entry
+                skills = @()
+            }
+            $changed = $true
+            continue
+        }
+
+        $sourceProperty = $null
+        if ($entry -and $entry.PSObject) {
+            $sourceProperty = $entry.PSObject.Properties["source"]
+        }
+
+        if ($sourceProperty -and $sourceProperty.Value -is [string] -and $sourceProperty.Value -match $packagePattern) {
+            $skillsProperty = $entry.PSObject.Properties["skills"]
+            if (-not $skillsProperty -or @($skillsProperty.Value).Count -ne 0) {
+                if ($skillsProperty) {
+                    $entry.skills = @()
+                } else {
+                    $entry | Add-Member -NotePropertyName "skills" -NotePropertyValue @()
+                }
+                $changed = $true
+            }
+        }
+
+        $packages += $entry
+    }
+
+    if (-not $changed) {
+        return
+    }
+
+    $settings.packages = @($packages)
+    $tmpPath = [System.IO.Path]::GetTempFileName()
+
+    try {
+        $json = ($settings | ConvertTo-Json -Depth 20) + "`n"
+        $utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
+        [System.IO.File]::WriteAllText($tmpPath, $json, $utf8NoBom)
+        Move-Item -Force $tmpPath $piSettings
+        Write-Host "Configured Pi to use global Plannotator skills and skip bundled package skills."
+    } catch {
+        Write-Host "Skipping Pi settings update (could not rewrite settings.json)"
+        Remove-Item -Force $tmpPath -ErrorAction SilentlyContinue
+    }
+}
+
+function Update-PiExtensionIfPresent {
+    if (-not (Get-Command pi -ErrorAction SilentlyContinue)) {
+        return
+    }
+
     Write-Host "Updating Pi extension..."
     pi install npm:@plannotator/pi-extension
-    Write-Host "Pi extension updated."
+    if ($LASTEXITCODE -eq 0) {
+        if (Test-PlannotatorSharedAgentSkillsAvailable) {
+            Configure-PiPlannotatorPackageFilter
+        } else {
+            Write-Host "Leaving Pi bundled skills enabled (global Plannotator agent skills not found)."
+        }
+        Write-Host "Pi extension updated."
+    } else {
+        Write-Host "Skipping Pi settings update (pi install failed)"
+    }
 }
 
 # Install Claude Code slash command
@@ -374,12 +492,52 @@ description: Annotate the last assistant message
 
 Write-Host "Installed /plannotator-last command to $opencodeCommandsDir\plannotator-last.md"
 
+# Remove legacy Codex-oriented skills from the older shared agent scope.
+$legacyAgentsSkillsDir = "$env:USERPROFILE\.agents\skills"
+$legacySkillsRemoved = $false
+foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last")) {
+    $legacySkillPath = Join-Path $legacyAgentsSkillsDir $skill
+    if (Test-Path $legacySkillPath) {
+        Remove-Item -Recurse -Force $legacySkillPath -ErrorAction SilentlyContinue
+        $legacySkillsRemoved = $true
+    }
+}
+if ($legacySkillsRemoved) {
+    Write-Host "Removed legacy Plannotator skills from $legacyAgentsSkillsDir"
+}
+
+# Remove Plannotator skills that belong in the shared agent scope from Codex.
+$staleCodexSkillsDir = "$env:USERPROFILE\.codex\skills"
+$staleCodexSkillsRemoved = $false
+foreach ($skill in @("plannotator-compound", "plannotator-setup-goal")) {
+    $staleSkillPath = Join-Path $staleCodexSkillsDir $skill
+    if (Test-Path $staleSkillPath) {
+        Remove-Item -Recurse -Force $staleSkillPath -ErrorAction SilentlyContinue
+        $staleCodexSkillsRemoved = $true
+    }
+}
+if ($staleCodexSkillsRemoved) {
+    Write-Host "Removed shared-agent Plannotator skills from $staleCodexSkillsDir"
+}
+
 # Install skills (requires git)
 if (Get-Command git -ErrorAction SilentlyContinue) {
     $claudeSkillsDir = if ($env:CLAUDE_CONFIG_DIR) { "$env:CLAUDE_CONFIG_DIR\skills" } else { "$env:USERPROFILE\.claude\skills" }
+    $codexSkillsDir = "$env:USERPROFILE\.codex\skills"
     $agentsSkillsDir = "$env:USERPROFILE\.agents\skills"
     $skillsTmp = Join-Path ([System.IO.Path]::GetTempPath()) "plannotator-skills-$(Get-Random)"
     New-Item -ItemType Directory -Force -Path $skillsTmp | Out-Null
+
+    function Copy-SkillIfPresent {
+        param(
+            [string]$SourceDir,
+            [string]$TargetDir
+        )
+
+        if (Test-Path $SourceDir) {
+            Copy-Item -Recurse -Force $SourceDir $TargetDir
+        }
+    }
 
     try {
         git clone --depth 1 --filter=blob:none --sparse "https://github.com/$repo.git" --branch $latestTag "$skillsTmp\repo" 2>$null
@@ -403,8 +561,17 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
                         New-Item -ItemType Directory -Force -Path $claudeSkillsDir | Out-Null
                         New-Item -ItemType Directory -Force -Path $agentsSkillsDir | Out-Null
                         Copy-Item -Recurse -Force "apps\skills\*" $claudeSkillsDir
-                        Copy-Item -Recurse -Force "apps\skills\*" $agentsSkillsDir
-                        Write-Host "Installed skills to $claudeSkillsDir\ and $agentsSkillsDir\"
+                        Copy-SkillIfPresent "apps\skills\plannotator-compound" $agentsSkillsDir
+                        Copy-SkillIfPresent "apps\skills\plannotator-setup-goal" $agentsSkillsDir
+                        if ($codexAvailable) {
+                            New-Item -ItemType Directory -Force -Path $codexSkillsDir | Out-Null
+                            Copy-SkillIfPresent "apps\skills\plannotator-review" $codexSkillsDir
+                            Copy-SkillIfPresent "apps\skills\plannotator-annotate" $codexSkillsDir
+                            Copy-SkillIfPresent "apps\skills\plannotator-last" $codexSkillsDir
+                            Write-Host "Installed skills to $claudeSkillsDir\, Codex command skills to $codexSkillsDir\, and shared agent skills to $agentsSkillsDir\"
+                        } else {
+                            Write-Host "Installed skills to $claudeSkillsDir\ and shared agent skills to $agentsSkillsDir\"
+                        }
                     }
                 }
             } finally {
@@ -419,6 +586,11 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
 } else {
     Write-Host "Skipping skills install (git not found)"
 }
+
+# Update Pi extension if pi is installed. When global shared skills are
+# available, keep the extension commands but disable its bundled skill copy to
+# avoid duplicate Pi skill warnings.
+Update-PiExtensionIfPresent
 
 # --- Gemini CLI support (only if Gemini is installed) ---
 $geminiDir = "$env:USERPROFILE\.gemini"

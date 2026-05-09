@@ -9,11 +9,13 @@
     "./components/plan-diff/*": "./components/plan-diff/*.tsx",
     "./utils/*": "./utils/*.ts",
     "./hooks/*": "./hooks/*.ts",
+    "./shortcuts": "./shortcuts/index.ts",
     "./config": "./config/index.ts",
     "./types": "./types.ts",
     "./theme": "./theme.css"
   },
   "dependencies": {
+    "@pierre/diffs": "^1.1.12",
     "@plannotator/shared": "workspace:*",
     "@plannotator/web-highlighter": "^0.8.1",
     "@radix-ui/react-dialog": "^1.1.15",

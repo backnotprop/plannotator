@@ -157,6 +157,7 @@ UI test scripts simulate plugin behavior locally:
 # Plan review UI tests
 ./tests/manual/local/test-hook.sh          # Claude Code simulation
 ./tests/manual/local/test-hook-2.sh        # OpenCode origin badge test
+./tests/manual/local/test-codex-plan-review-e2e.sh  # Real Codex Stop-hook E2E
 
 # Code review UI test
 ./tests/manual/local/test-opencode-review.sh  # Code review UI test
@@ -186,6 +187,19 @@ UI test scripts simulate plugin behavior locally:
 3. Opens browser with code review UI
 4. Verifies "OpenCode" badge + "Send Feedback" button (not "Copy Feedback")
 5. Tests feedback submission flow
+
+**`test-codex-plan-review-e2e.sh`**
+
+1. Builds the hook + review apps (unless `--skip-build`)
+2. Creates a disposable `HOME` and sample git repo
+3. Copies your Codex auth into the disposable config
+4. Enables `codex_hooks` and registers a `Stop` hook pointing at the local Plannotator entrypoint
+5. Runs a real `codex exec` prompt that returns only a `<proposed_plan>` block
+6. Leaves behind rollout logs, Plannotator history, plan files, and session URLs in an artifact directory
+
+This is the best harness when you want to verify the full Codex deny/revise/approve loop instead of simulating hook
+payloads. For browser automation, set `PLANNOTATOR_BROWSER=/usr/bin/true`, keep the script running in one terminal,
+and drive the printed session URL with Playwright from another terminal.
 
 See [tests/README.md](../tests/README.md) for additional integration and utility test scripts.
 

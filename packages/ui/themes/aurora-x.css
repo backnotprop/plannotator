@@ -1,0 +1,66 @@
+/* Aurora X — by marqu3s10 */
+.theme-aurora-x {
+  --background: #07090f;
+  --foreground: #a8beff;
+  --card: #15182b;
+  --card-foreground: #c7d5ff;
+  --popover: #15182b;
+  --popover-foreground: #c7d5ff;
+  --primary: #86a5ff;
+  --primary-foreground: #07090f;
+  --secondary: #262e47;
+  --secondary-foreground: #c7d5ff;
+  --muted: #15182b;
+  --muted-foreground: #546e7a;
+  --accent: #c792ea;
+  --accent-foreground: #07090f;
+  --destructive: #dd5073;
+  --destructive-foreground: #07090f;
+  --border: #262e47;
+  --input: #262e47;
+  --ring: #86a5ff;
+  --success: #63eb90;
+  --success-foreground: #07090f;
+  --warning: #ffcb6b;
+  --warning-foreground: #07090f;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #0c0e19;
+  --focus-highlight: #86a5ff;
+}
+
+.theme-aurora-x.light {
+  --background: #07090f;
+  --foreground: #a8beff;
+  --card: #15182b;
+  --card-foreground: #c7d5ff;
+  --popover: #15182b;
+  --popover-foreground: #c7d5ff;
+  --primary: #86a5ff;
+  --primary-foreground: #07090f;
+  --secondary: #262e47;
+  --secondary-foreground: #c7d5ff;
+  --muted: #15182b;
+  --muted-foreground: #546e7a;
+  --accent: #c792ea;
+  --accent-foreground: #07090f;
+  --destructive: #dd5073;
+  --destructive-foreground: #07090f;
+  --border: #262e47;
+  --input: #262e47;
+  --ring: #86a5ff;
+  --success: #63eb90;
+  --success-foreground: #07090f;
+  --warning: #ffcb6b;
+  --warning-foreground: #07090f;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #0c0e19;
+  --focus-highlight: #86a5ff;
+}

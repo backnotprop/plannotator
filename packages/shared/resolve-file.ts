@@ -14,6 +14,10 @@ import { isAbsolute, join, resolve, win32 } from "path";
 import { existsSync, readdirSync, type Dirent } from "fs";
 
 const MARKDOWN_PATH_REGEX = /\.mdx?$/i;
+
+import { CODE_FILE_REGEX as CODE_FILE_BASENAME_REGEX } from "./code-file";
+export { CODE_FILE_REGEX, isCodeFilePath } from "./code-file";
+
 const WINDOWS_DRIVE_PATH_PATTERNS = [
 	/^\/cygdrive\/([a-zA-Z])\/(.+)$/,
 	/^\/([a-zA-Z])\/(.+)$/,
@@ -30,10 +34,22 @@ const IGNORED_DIRS = [
 	".trash/",
 ];
 
+const CODE_IGNORED_DIRS = [
+	...IGNORED_DIRS,
+	".turbo/",
+	".cache/",
+	"target/",
+	"vendor/",
+	"coverage/",
+	".venv/",
+	".pytest_cache/",
+];
+
 export type ResolveResult =
 	| { kind: "found"; path: string }
 	| { kind: "not_found"; input: string }
-	| { kind: "ambiguous"; input: string; matches: string[] };
+	| { kind: "ambiguous"; input: string; matches: string[] }
+	| { kind: "unavailable"; input: string };
 
 function normalizeSeparators(input: string): string {
 	return input.replace(/\\/g, "/");
@@ -178,25 +194,177 @@ function fileExists(filePath: string): boolean {
 	}
 }
 
-/** Recursively walk a directory collecting markdown files, skipping ignored dirs. */
-function walkMarkdownFiles(dir: string, root: string, results: string[], ignoredDirs: string[]): void {
-	let entries: Dirent[];
-	try {
-		entries = readdirSync(dir, { withFileTypes: true }) as Dirent[];
-	} catch {
-		return;
-	}
+/** Recursively walk a directory collecting files matching `fileMatcher`, skipping ignored dirs. */
+function walkFiles(
+	dir: string,
+	root: string,
+	results: string[],
+	ignoredDirs: string[],
+	fileMatcher: (name: string) => boolean,
+): void {
+	const entries = readdirSync(dir, { withFileTypes: true }) as Dirent[];
 	for (const entry of entries) {
 		if (entry.isDirectory()) {
 			if (ignoredDirs.some((d) => d === entry.name + "/")) continue;
-			walkMarkdownFiles(join(dir, entry.name), root, results, ignoredDirs);
-		} else if (entry.isFile() && /\.mdx?$/i.test(entry.name)) {
+			try {
+				walkFiles(join(dir, entry.name), root, results, ignoredDirs, fileMatcher);
+			} catch {
+				/* skip dirs we can't read */
+			}
+		} else if (entry.isFile() && fileMatcher(entry.name)) {
 			const relative = join(dir, entry.name)
 				.slice(root.length + 1)
 				.replace(/\\/g, "/");
 			results.push(relative);
 		}
 	}
+}
+
+function walkMarkdownFiles(dir: string, root: string, results: string[], ignoredDirs: string[]): void {
+	try {
+		walkFiles(dir, root, results, ignoredDirs, (name) => /\.mdx?$/i.test(name));
+	} catch {
+		/* fail soft for markdown — preserves existing behavior */
+	}
+}
+
+// --- Code-file resolution (async, cached) ---
+
+const FILE_LIST_CACHE_TTL_MS = 30_000;
+const fileListCache = new Map<
+	string,
+	{ promise: Promise<string[] | null>; startedAt: number }
+>();
+
+function fileListCacheKey(projectRoot: string, kind: string): string {
+	return `${projectRoot}|${kind}`;
+}
+
+function startCodeWalk(projectRoot: string): Promise<string[] | null> {
+	return Promise.resolve().then(() => {
+		try {
+			const results: string[] = [];
+			walkFiles(projectRoot, projectRoot, results, CODE_IGNORED_DIRS, (name) =>
+				CODE_FILE_BASENAME_REGEX.test(name),
+			);
+			return results;
+		} catch {
+			return null;
+		}
+	});
+}
+
+/**
+ * Trigger (or return the in-flight) walk of `projectRoot` for code files.
+ * Cached for `FILE_LIST_CACHE_TTL_MS`. Storing a Promise (not a value) makes
+ * concurrent callers piggyback on the same walk — first arrival wins.
+ *
+ * Returns `null` (wrapped in Promise) when the walk fails (perms, etc).
+ */
+export function warmFileListCache(
+	projectRoot: string,
+	kind: "code",
+): Promise<string[] | null> {
+	const key = fileListCacheKey(projectRoot, kind);
+	const entry = fileListCache.get(key);
+	if (entry && Date.now() - entry.startedAt < FILE_LIST_CACHE_TTL_MS) {
+		return entry.promise;
+	}
+	const promise = startCodeWalk(projectRoot);
+	fileListCache.set(key, { promise, startedAt: Date.now() });
+	return promise;
+}
+
+/**
+ * Resolve a code-file path within a project root.
+ *
+ * Strategies:
+ *   1. Absolute path → use as-is.
+ *   2. Exact relative from project root.
+ *   3. If `baseDir` provided, literal `<baseDir>/<input>` existence check —
+ *      lets out-of-tree linked docs resolve their own relative references
+ *      (e.g. `../script.ts` in `~/notes/foo.md` finds `~/script.ts`).
+ *   4. Case-insensitive suffix match against the cached file list:
+ *      - bare basename input → match any file with that basename;
+ *      - input with `/` → match files whose path equals or ends with `/<input>`
+ *        on a segment boundary (so `editor/App.tsx` matches `packages/editor/App.tsx`
+ *        but not `myeditor/App.tsx`).
+ *
+ * `..` segments in the input are honored: only `./` is stripped before suffix
+ * matching. `../foo.ts` without a `baseDir` correctly falls through to
+ * not_found rather than fabricating a match against `foo.ts` somewhere in cwd.
+ */
+export async function resolveCodeFile(
+	input: string,
+	projectRoot: string,
+	baseDir?: string,
+): Promise<ResolveResult> {
+	const originalInput = input.trim();
+	const unquotedInput = stripWrappingQuotes(originalInput);
+	const normalizedInput = normalizeUserPathInput(unquotedInput);
+	const searchInput = normalizeSeparators(normalizedInput);
+
+	if (!searchInput) {
+		return { kind: "not_found", input: originalInput };
+	}
+
+	if (isAbsoluteNormalizedUserPath(normalizedInput)) {
+		const absolutePath = resolveAbsolutePath(normalizedInput);
+		if (fileExists(absolutePath)) {
+			return { kind: "found", path: absolutePath };
+		}
+		return { kind: "not_found", input: originalInput };
+	}
+
+	const fromRoot = resolve(projectRoot, searchInput);
+	if (isWithinProjectRoot(fromRoot, projectRoot) && fileExists(fromRoot)) {
+		return { kind: "found", path: fromRoot };
+	}
+
+	if (baseDir) {
+		const fromBase = resolve(baseDir, searchInput);
+		if (fileExists(fromBase)) {
+			return { kind: "found", path: fromBase };
+		}
+	}
+
+	const fileList = await warmFileListCache(projectRoot, "code");
+	if (fileList === null) {
+		return { kind: "unavailable", input: originalInput };
+	}
+
+	// Strip leading `./` so suffix matching works on inputs like
+	// `./editor/App.tsx` — file list entries never carry that segment.
+	// `../` is intentionally NOT stripped: `..` is meaningful (escape parent),
+	// not noise. If we can't honor it via baseDir, the input has no
+	// suffix-match equivalent in the in-tree file list.
+	const cleanedInput = searchInput.replace(/^(?:\.\/)+/, "");
+	if (!cleanedInput || cleanedInput.startsWith("../")) {
+		return { kind: "not_found", input: originalInput };
+	}
+	const target = cleanedInput.toLowerCase();
+	const isBareFilename = !cleanedInput.includes("/");
+	const matches: string[] = [];
+
+	for (const f of fileList) {
+		const fl = f.toLowerCase();
+		if (isBareFilename) {
+			const base = fl.split("/").pop();
+			if (base === target) matches.push(resolve(projectRoot, f));
+		} else {
+			if (fl === target || fl.endsWith("/" + target)) {
+				matches.push(resolve(projectRoot, f));
+			}
+		}
+	}
+
+	if (matches.length === 1) {
+		return { kind: "found", path: matches[0] };
+	}
+	if (matches.length > 1) {
+		return { kind: "ambiguous", input: originalInput, matches };
+	}
+	return { kind: "not_found", input: originalInput };
 }
 
 /**

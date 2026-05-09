@@ -6,10 +6,16 @@ import {
   getMRLabel,
   getMRNumberLabel,
   getPlatformLabel,
+  isSameProject,
   parsePRUrl,
   prRefFromMetadata,
   type PRMetadata,
+  type PRRef,
 } from "./pr-provider";
+import {
+  getPRDiffScopeOptions,
+  getPRStackInfo,
+} from "./pr-stack";
 
 describe("pr-provider platform helpers", () => {
   test("parses GitHub PR URLs including nested suffixes", () => {
@@ -167,5 +173,94 @@ describe("pr-provider platform helpers", () => {
     expect(getCliInstallUrl(githubRef)).toBe("https://cli.github.com");
     expect(getCliName(gitlabRef)).toBe("glab");
     expect(getCliInstallUrl(gitlabRef)).toBe("https://gitlab.com/gitlab-org/cli");
+  });
+});
+
+describe("PR stack helpers", () => {
+  const stackedMeta: PRMetadata = {
+    platform: "github",
+    host: "github.com",
+    owner: "backnotprop",
+    repo: "plannotator-stack-fixture",
+    number: 3,
+    title: "Validate user id",
+    author: "backnotprop",
+    baseBranch: "stack/auth-refactor",
+    headBranch: "stack/validation",
+    defaultBranch: "main",
+    baseSha: "base",
+    headSha: "head",
+    url: "https://github.com/backnotprop/plannotator-stack-fixture/pull/3",
+  };
+
+  test("infers a stacked PR when the base branch differs from the default branch", () => {
+    expect(getPRStackInfo(stackedMeta)).toEqual({
+      isStacked: true,
+      baseBranch: "stack/auth-refactor",
+      defaultBranch: "main",
+      label: "stack/validation stacked on stack/auth-refactor",
+      source: "branch-inferred",
+    });
+  });
+
+  test("does not infer a stack for the bottom PR targeting the default branch", () => {
+    expect(getPRStackInfo({
+      ...stackedMeta,
+      number: 1,
+      baseBranch: "main",
+      headBranch: "stack/base-cleanup",
+    })).toBeNull();
+  });
+
+  test("only enables full-stack scope when stacked metadata has a local checkout", () => {
+    expect(getPRDiffScopeOptions(stackedMeta, true)).toEqual([
+      {
+        id: "layer",
+        label: "Layer",
+        description: "Only changes relative to stack/auth-refactor.",
+        enabled: true,
+      },
+      {
+        id: "full-stack",
+        label: "Full stack",
+        description: "All changes from main to HEAD in the local checkout.",
+        enabled: true,
+      },
+    ]);
+
+    expect(getPRDiffScopeOptions(stackedMeta, false)[1].enabled).toBe(false);
+  });
+});
+
+describe("isSameProject", () => {
+  const ghRef: PRRef = { platform: "github", host: "github.com", owner: "acme", repo: "widgets", number: 1 };
+  const glRef: PRRef = { platform: "gitlab", host: "gitlab.com", projectPath: "acme/widgets", iid: 1 };
+
+  test("same GitHub project", () => {
+    expect(isSameProject(ghRef, { ...ghRef, number: 99 })).toBe(true);
+  });
+
+  test("different GitHub owner", () => {
+    expect(isSameProject(ghRef, { ...ghRef, owner: "other" })).toBe(false);
+  });
+
+  test("different GitHub repo", () => {
+    expect(isSameProject(ghRef, { ...ghRef, repo: "gadgets" })).toBe(false);
+  });
+
+  test("different GitHub host", () => {
+    expect(isSameProject(ghRef, { ...ghRef, host: "ghe.corp.com" })).toBe(false);
+  });
+
+  test("same GitLab project", () => {
+    expect(isSameProject(glRef, { ...glRef, iid: 99 })).toBe(true);
+  });
+
+  test("different GitLab projectPath", () => {
+    expect(isSameProject(glRef, { ...glRef, projectPath: "other/repo" })).toBe(false);
+  });
+
+  test("GitHub vs GitLab", () => {
+    expect(isSameProject(ghRef, glRef)).toBe(false);
   });
 });

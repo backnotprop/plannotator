@@ -3,6 +3,7 @@ import { FileDiff } from '@pierre/diffs/react';
 import { getSingularPatch } from '@pierre/diffs';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { useReviewState } from '../dock/ReviewStateContext';
+import { resolveSyntaxTheme } from '../hooks/usePierreTheme';
 
 interface DiffHunkPreviewProps {
   /** Raw diff hunk string (unified diff format). */
@@ -59,7 +60,7 @@ export const DiffHunkPreview: React.FC<DiffHunkPreviewProps> = ({
   maxHeight = 128,
   className,
 }) => {
-  const { resolvedMode } = useTheme();
+  const { resolvedMode, colorTheme } = useTheme();
   const state = useReviewState();
   const [expanded, setExpanded] = useState(false);
 
@@ -97,7 +98,9 @@ export const DiffHunkPreview: React.FC<DiffHunkPreviewProps> = ({
       });
     });
     return () => cancelAnimationFrame(rafId);
-  }, [resolvedMode, state.fontFamily, state.fontSize]);
+  }, [resolvedMode, colorTheme, state.fontFamily, state.fontSize]);
+
+  const syntaxTheme = resolveSyntaxTheme(colorTheme, resolvedMode ?? 'dark');
 
   if (!fileDiff) {
     return (
@@ -118,6 +121,7 @@ export const DiffHunkPreview: React.FC<DiffHunkPreviewProps> = ({
           options={{
             themeType: pierreTheme.type,
             unsafeCSS: pierreTheme.css,
+            ...(syntaxTheme && { theme: syntaxTheme }),
             diffStyle: 'unified',
             disableLineNumbers: true,
             overflow: 'wrap',

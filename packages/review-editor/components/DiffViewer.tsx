@@ -3,21 +3,18 @@ import { FileDiff, type DiffLineAnnotation } from '@pierre/diffs/react';
 import { getSingularPatch, processFile } from '@pierre/diffs';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/types';
 import type { DiffTokenEventBaseProps } from '@pierre/diffs';
-import { useTheme } from '@plannotator/ui/components/ThemeProvider';
+import { usePierreTheme } from '../hooks/usePierreTheme';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { storage } from '@plannotator/ui/utils/storage';
 import { detectLanguage } from '../utils/detectLanguage';
-import { useAnnotationToolbar } from '../hooks/useAnnotationToolbar';
-import { useConfigValue } from '@plannotator/ui/config';
+import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { useOverlayViewport } from '@plannotator/ui/hooks/useOverlayViewport';
-import { getEnabledLabels } from './ConventionalLabelPicker';
 import { FileHeader } from './FileHeader';
+import { getLineNumberFromNode, getSideFromNode, getDiffSelection } from '../utils/diffSelection';
 import { InlineAnnotation } from './InlineAnnotation';
 import { InlineAIMarker } from './InlineAIMarker';
-import { AnnotationToolbar } from './AnnotationToolbar';
 import type { AIChatEntry } from '../hooks/useAIChat';
-import { SuggestionModal } from './SuggestionModal';
 import { type ReviewSearchMatch } from '../utils/reviewSearch';
 import {
   applySearchHighlights,
@@ -30,7 +27,7 @@ import {
 interface PierreDiffContentProps {
   filePath: string;
   fileDiff: ReturnType<typeof getSingularPatch>;
-  pierreTheme: { type: 'dark' | 'light'; css: string };
+  pierreTheme: { type: 'dark' | 'light'; css: string; syntaxTheme?: { dark: string; light: string } };
   diffStyle: 'split' | 'unified';
   diffOverflow?: 'scroll' | 'wrap';
   diffIndicators?: 'bars' | 'classic' | 'none';
@@ -40,8 +37,8 @@ interface PierreDiffContentProps {
   mergedAnnotations: DiffLineAnnotation<DiffAnnotationMetadata>[];
   pendingSelection: SelectedLineRange | null;
   onLineSelectionEnd: (range: SelectedLineRange | null) => void;
+  onGutterUtilityClick: (range: SelectedLineRange) => void;
   renderAnnotation: (annotation: { side: string; lineNumber: number; metadata?: DiffAnnotationMetadata }) => React.ReactNode;
-  renderHoverUtility: (getHoveredLine: () => { lineNumber: number; side: 'deletions' | 'additions' } | undefined) => React.ReactNode;
   onTokenClick?: (props: DiffTokenEventBaseProps, event: MouseEvent) => void;
   onTokenEnter?: (props: DiffTokenEventBaseProps, event: PointerEvent) => void;
   onTokenLeave?: (props: DiffTokenEventBaseProps, event: PointerEvent) => void;
@@ -60,8 +57,8 @@ const PierreDiffContent = React.memo(({
   mergedAnnotations,
   pendingSelection,
   onLineSelectionEnd,
+  onGutterUtilityClick,
   renderAnnotation,
-  renderHoverUtility,
   onTokenClick,
   onTokenEnter,
   onTokenLeave,
@@ -73,6 +70,7 @@ const PierreDiffContent = React.memo(({
       options={{
         themeType: pierreTheme.type,
         unsafeCSS: pierreTheme.css,
+        ...(pierreTheme.syntaxTheme && { theme: pierreTheme.syntaxTheme }),
         diffStyle,
         overflow: diffOverflow,
         diffIndicators,
@@ -81,7 +79,8 @@ const PierreDiffContent = React.memo(({
         disableBackground,
         hunkSeparators: 'line-info',
         enableLineSelection: true,
-        enableHoverUtility: true,
+        enableGutterUtility: true,
+        onGutterUtilityClick,
         onLineSelectionEnd,
         onTokenClick,
         onTokenEnter,
@@ -90,7 +89,6 @@ const PierreDiffContent = React.memo(({
       lineAnnotations={mergedAnnotations}
       selectedLines={pendingSelection || undefined}
       renderAnnotation={renderAnnotation}
-      renderHoverUtility={renderHoverUtility}
     />
   );
 }, (prev, next) => (
@@ -98,6 +96,8 @@ const PierreDiffContent = React.memo(({
   prev.fileDiff === next.fileDiff &&
   prev.pierreTheme.type === next.pierreTheme.type &&
   prev.pierreTheme.css === next.pierreTheme.css &&
+  prev.pierreTheme.syntaxTheme?.dark === next.pierreTheme.syntaxTheme?.dark &&
+  prev.pierreTheme.syntaxTheme?.light === next.pierreTheme.syntaxTheme?.light &&
   prev.diffStyle === next.diffStyle &&
   prev.diffOverflow === next.diffOverflow &&
   prev.diffIndicators === next.diffIndicators &&
@@ -107,8 +107,8 @@ const PierreDiffContent = React.memo(({
   prev.mergedAnnotations === next.mergedAnnotations &&
   prev.pendingSelection === next.pendingSelection &&
   prev.onLineSelectionEnd === next.onLineSelectionEnd &&
+  prev.onGutterUtilityClick === next.onGutterUtilityClick &&
   prev.renderAnnotation === next.renderAnnotation &&
-  prev.renderHoverUtility === next.renderHoverUtility &&
   prev.onTokenClick === next.onTokenClick &&
   prev.onTokenEnter === next.onTokenEnter &&
   prev.onTokenLeave === next.onTokenLeave
@@ -202,13 +202,14 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   onClickAIMarker,
   aiHistoryMessages = [],
 }) => {
-  const { theme, colorTheme, resolvedMode } = useTheme();
+  const pierreTheme = usePierreTheme({ fontFamily, fontSize });
   // containerRef must point at the actual scrolling element (the
   // OverlayScrollbars viewport), not the OverlayScrollArea host. `viewport`
   // is state so effects re-run once the library has mounted the viewport.
   const { ref: containerRef, viewport, onViewportReady } =
     useOverlayViewport<HTMLDivElement>();
   const splitSurfaceRef = useRef<HTMLDivElement>(null);
+  const diffContentRef = useRef<HTMLDivElement>(null);
   const [fileCommentAnchor, setFileCommentAnchor] = useState<HTMLElement | null>(null);
 
   // Resizable split pane — only applies when Pierre renders a two-column grid
@@ -262,10 +263,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     storage.setItem('review-split-ratio', '0.5');
   }, []);
 
-  const toolbar = useAnnotationToolbar({ patch, filePath, isFocused, onLineSelection, onAddAnnotation, onEditAnnotation });
-  const conventionalCommentsEnabled = useConfigValue('conventionalComments');
-  const conventionalLabelsJson = useConfigValue('conventionalLabels');
-  const enabledLabels = useMemo(() => getEnabledLabels(conventionalLabelsJson), [conventionalLabelsJson]);
+  const toolbarHostRef = useRef<ToolbarHostHandle>(null);
 
   // Parse patch into FileDiffMetadata for @pierre/diffs FileDiff component
   const fileDiff = useMemo(() => getSingularPatch(patch), [patch]);
@@ -301,7 +299,6 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       });
       return result || fileDiff;
     } catch {
-      // Fall back to partial diff if file contents don't match hunks
       return fileDiff;
     }
   }, [patch, filePath, oldPath, fileContents, fileDiff]);
@@ -467,8 +464,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   // Handle edit: find annotation and start editing in toolbar
   const handleEdit = useCallback((id: string) => {
     const ann = annotations.find(a => a.id === id);
-    if (ann) toolbar.startEdit(ann);
-  }, [annotations, toolbar.startEdit]);
+    if (ann) toolbarHostRef.current?.startEdit(ann);
+  }, [annotations]);
 
   // Render annotation or AI marker in diff
   const renderAnnotation = useCallback((annotation: { side: string; lineNumber: number; metadata?: DiffAnnotationMetadata }) => {
@@ -497,32 +494,42 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     );
   }, [filePath, onSelectAnnotation, handleEdit, onDeleteAnnotation, onClickAIMarker]);
 
-  // Render hover utility (+ button)
-  const renderHoverUtility = useCallback((getHoveredLine: () => { lineNumber: number; side: 'deletions' | 'additions' } | undefined) => {
-    const line = getHoveredLine();
-    if (!line) return null;
+  const handleGutterUtilityClick = useCallback((range: SelectedLineRange) => {
+    toolbarHostRef.current?.handleLineSelectionEnd(range);
+  }, []);
 
-    return (
-      <button
-        className="hover-add-comment"
-        onClick={(e) => {
-          e.stopPropagation();
-          toolbar.handleLineSelectionEnd({
-            start: line.lineNumber,
-            end: line.lineNumber,
-            side: line.side,
-          });
-        }}
-      >
-        +
-      </button>
-    );
-  }, [toolbar.handleLineSelectionEnd]);
+  useEffect(() => {
+    const root = diffContentRef.current;
+    if (!root) return;
+    const handler = () => {
+      requestAnimationFrame(() => {
+        const selection = getDiffSelection(root);
+        if (!selection || selection.isCollapsed || !selection.toString().trim()) return;
+        const anchorLine = getLineNumberFromNode(selection.anchorNode);
+        const focusLine = getLineNumberFromNode(selection.focusNode);
+        if (anchorLine == null || focusLine == null) return;
+        if (anchorLine === focusLine) return;
+        const side = getSideFromNode(selection.anchorNode);
+        toolbarHostRef.current?.handleLineSelectionEnd({
+          start: Math.min(anchorLine, focusLine),
+          end: Math.max(anchorLine, focusLine),
+          side,
+        });
+        selection.removeAllRanges();
+      });
+    };
+    root.addEventListener('mouseup', handler, true);
+    return () => root.removeEventListener('mouseup', handler, true);
+  }, []);
+
+  const handlePierreLineSelectionEnd = useCallback((range: SelectedLineRange | null) => {
+    toolbarHostRef.current?.handleLineSelectionEnd(range);
+  }, []);
 
   // Token interaction handlers (code area clicks)
   const handleTokenClick = useCallback((props: DiffTokenEventBaseProps, event: MouseEvent) => {
-    toolbar.handleTokenClick(props, event);
-  }, [toolbar.handleTokenClick]);
+    toolbarHostRef.current?.handleTokenClick(props, event);
+  }, []);
 
   const handleTokenEnter = useCallback((props: DiffTokenEventBaseProps) => {
     props.tokenElement.classList.add('pn-token-hover');
@@ -531,78 +538,6 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   const handleTokenLeave = useCallback((props: DiffTokenEventBaseProps) => {
     props.tokenElement.classList.remove('pn-token-hover');
   }, []);
-
-  // Inject resolved colors into @pierre/diffs shadow DOM.
-  // CSS custom properties don't cross the shadow boundary, so we read computed
-  // values and pass them via unsafeCSS. Single state object avoids split renders.
-  const [pierreTheme, setPierreTheme] = useState<{ type: 'dark' | 'light'; css: string }>(() => {
-    // Compute initial theme synchronously to avoid a flash of unstyled dark content
-    const styles = getComputedStyle(document.documentElement);
-    const bg = styles.getPropertyValue('--background').trim();
-    const fg = styles.getPropertyValue('--foreground').trim();
-    if (!bg || !fg) return { type: resolvedMode ?? 'dark', css: '' };
-    return { type: resolvedMode ?? 'dark', css: `
-      :host, [data-diff], [data-file], [data-diffs-header], [data-error-wrapper], [data-virtualizer-buffer] {
-        --diffs-bg: ${bg} !important; --diffs-fg: ${fg} !important;
-        --diffs-dark-bg: ${bg}; --diffs-light-bg: ${bg}; --diffs-dark: ${fg}; --diffs-light: ${fg};
-      }
-      pre, code { background-color: ${bg} !important; }
-    `};
-  });
-
-  useEffect(() => {
-    requestAnimationFrame(() => {
-      const styles = getComputedStyle(document.documentElement);
-      const bg = styles.getPropertyValue('--background').trim();
-      const fg = styles.getPropertyValue('--foreground').trim();
-      const muted = styles.getPropertyValue('--muted').trim();
-      const primary = styles.getPropertyValue('--primary').trim();
-      if (!bg || !fg) return;
-
-      const fontCSS = fontFamily || fontSize ? `
-          pre, code, [data-line-content], [data-column-number] {
-            ${fontFamily ? `font-family: '${fontFamily}', monospace !important;` : ''}
-            ${fontSize ? `font-size: ${fontSize} !important; line-height: 1.5 !important;` : ''}
-          }` : '';
-
-      setPierreTheme({
-        type: resolvedMode,
-        css: `
-          :host, [data-diff], [data-file], [data-diffs-header], [data-error-wrapper], [data-virtualizer-buffer] {
-            --diffs-bg: ${bg} !important;
-            --diffs-fg: ${fg} !important;
-            --diffs-dark-bg: ${bg};
-            --diffs-light-bg: ${bg};
-            --diffs-dark: ${fg};
-            --diffs-light: ${fg};
-          }
-          pre, code { background-color: ${bg} !important; }
-          [data-file-info] { background-color: ${muted} !important; }
-          [data-column-number] { background-color: ${bg} !important; }
-          [data-diffs-header] [data-title] { display: none !important; }
-          [data-diff-type='split'][data-overflow='scroll'] {
-            grid-template-columns:
-              minmax(0, var(--split-left, 1fr))
-              minmax(0, var(--split-right, 1fr)) !important;
-          }
-          [data-diff-type='split'][data-overflow='scroll'] > [data-code][data-deletions],
-          [data-diff-type='split'][data-overflow='scroll'] > [data-code][data-additions],
-          [data-diff-type='split'][data-overflow='scroll'] > [data-code][data-deletions] [data-content],
-          [data-diff-type='split'][data-overflow='scroll'] > [data-code][data-additions] [data-content] {
-            min-width: 0 !important;
-          }
-          .pn-token-hover {
-            text-decoration: underline;
-            text-decoration-color: ${primary || 'oklch(0.70 0.20 280)'};
-            text-decoration-thickness: 1.5px;
-            text-underline-offset: 2px;
-            cursor: pointer;
-          }
-          ${fontCSS}
-        `,
-      });
-    });
-  }, [resolvedMode, colorTheme, fontFamily, fontSize]);
 
   const splitGridStyle = useMemo(() => {
     if (!isSplitLayout || diffOverflow === 'wrap') return undefined;
@@ -631,9 +566,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         className={`flex-1 min-h-0 relative ${isDraggingSplit ? 'select-none' : ''}`}
         overflowX="scroll"
         onViewportReady={onViewportReady}
-        onMouseMove={toolbar.handleMouseMove}
       >
-        <div className="p-4">
+        <div className="p-4" ref={diffContentRef}>
           <div ref={splitSurfaceRef} className="relative min-w-0" style={splitGridStyle}>
             {isSplitLayout && diffOverflow !== 'wrap' && (
               <div
@@ -657,9 +591,9 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
               disableBackground={disableBackground}
               mergedAnnotations={mergedAnnotations}
               pendingSelection={pendingSelection}
-              onLineSelectionEnd={toolbar.handleLineSelectionEnd}
+              onLineSelectionEnd={handlePierreLineSelectionEnd}
+              onGutterUtilityClick={handleGutterUtilityClick}
               renderAnnotation={renderAnnotation}
-              renderHoverUtility={renderHoverUtility}
               onTokenClick={handleTokenClick}
               onTokenEnter={handleTokenEnter}
               onTokenLeave={handleTokenLeave}
@@ -667,48 +601,20 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           </div>
         </div>
 
-      {toolbar.toolbarState && !toolbar.showCodeModal && (
-        <AnnotationToolbar
-          toolbarState={toolbar.toolbarState}
-          toolbarRef={toolbar.toolbarRef}
-          commentText={toolbar.commentText}
-          setCommentText={toolbar.setCommentText}
-          suggestedCode={toolbar.suggestedCode}
-          setSuggestedCode={toolbar.setSuggestedCode}
-          showSuggestedCode={toolbar.showSuggestedCode}
-          setShowSuggestedCode={toolbar.setShowSuggestedCode}
-          selectedOriginalCode={toolbar.selectedOriginalCode}
-          setShowCodeModal={toolbar.setShowCodeModal}
-          isEditing={!!toolbar.editingAnnotationId}
-          onSubmit={toolbar.handleSubmitAnnotation}
-          onDismiss={toolbar.handleDismiss}
-          onCancel={toolbar.handleCancel}
-          conventionalCommentsEnabled={conventionalCommentsEnabled}
-          conventionalLabel={toolbar.conventionalLabel}
-          onConventionalLabelChange={toolbar.setConventionalLabel}
-          decorations={toolbar.decorations}
-          onDecorationsChange={toolbar.setDecorations}
-          enabledLabels={enabledLabels}
-          aiAvailable={aiAvailable}
-          onAskAI={onAskAI}
-          isAILoading={isAILoading}
-          onViewAIResponse={onViewAIResponse}
-          aiHistoryMessages={aiHistoryMessages}
-        />
-      )}
-
-      {toolbar.showCodeModal && (
-        <SuggestionModal
-          filePath={filePath}
-          toolbarState={toolbar.toolbarState}
-          selectedOriginalCode={toolbar.selectedOriginalCode}
-          suggestedCode={toolbar.suggestedCode}
-          setSuggestedCode={toolbar.setSuggestedCode}
-          modalLayout={toolbar.modalLayout}
-          setModalLayout={toolbar.setModalLayout}
-          onClose={() => toolbar.setShowCodeModal(false)}
-        />
-      )}
+      <ToolbarHost
+        ref={toolbarHostRef}
+        patch={patch}
+        filePath={filePath}
+        isFocused={isFocused}
+        onLineSelection={onLineSelection}
+        onAddAnnotation={onAddAnnotation}
+        onEditAnnotation={onEditAnnotation}
+        aiAvailable={aiAvailable}
+        onAskAI={onAskAI}
+        isAILoading={isAILoading}
+        onViewAIResponse={onViewAIResponse}
+        aiHistoryMessages={aiHistoryMessages}
+      />
 
       {fileCommentAnchor && (
         <CommentPopover

@@ -141,6 +141,18 @@ export function getAncestorPaths(filePath: string): string[] {
   return paths;
 }
 
+export function getVisualFileOrder(nodes: FileTreeNode[]): number[] {
+  const order: number[] = [];
+  for (const node of nodes) {
+    if (node.type === 'file' && node.fileIndex != null) {
+      order.push(node.fileIndex);
+    } else if (node.children) {
+      order.push(...getVisualFileOrder(node.children));
+    }
+  }
+  return order;
+}
+
 export function getAllFolderPaths(nodes: FileTreeNode[]): string[] {
   const paths: string[] = [];
   for (const node of nodes) {

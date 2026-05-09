@@ -3,6 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { mkdir, writeFile, readFile, unlink } from "node:fs/promises";
 import type { DiffType } from "../vcs";
 import type { PRMetadata } from "../pr";
+import { getLocalDiffInstruction } from "../agent-review-message";
 import type {
   CodeTourOutput,
   TourDiffAnchor,
@@ -243,7 +244,7 @@ should reference at least one stop.
 
 ## Pipeline
 
-1. Read the full diff (git diff or inlined patch).
+1. Read the full diff (git diff, jj diff, or inlined patch).
 2. Read CLAUDE.md and README.md for project context.
 3. Read commit messages (git log --oneline) and PR title/body if available.
 4. Identify logical groupings of change (cross-file when appropriate). These
@@ -284,13 +285,25 @@ problems. Most clean changesets should have zero warnings and zero [!WARNING]
 callouts. The primary question is "what does this change do and why?" not
 "what's wrong with this code?"`;
 
-function buildTourUserMessage(
+export function buildTourUserMessage(
   patch: string,
   diffType: DiffType,
-  options?: { defaultBranch?: string; hasLocalAccess?: boolean },
+  options?: { defaultBranch?: string; hasLocalAccess?: boolean; prDiffScope?: string },
   prMetadata?: PRMetadata,
 ): string {
   if (prMetadata) {
+    if (options?.prDiffScope === "full-stack") {
+      return [
+        `Full-stack tour of ${prMetadata.url}`,
+        "",
+        "This is a stacked PR. The diff below shows ALL accumulated changes from the repository default branch through this PR's head (not just this PR's own layer).",
+        "Walk the reviewer through the complete changeset as a guided tour.",
+        "",
+        "```diff",
+        patch,
+        "```",
+      ].join("\n");
+    }
     if (options?.hasLocalAccess) {
       return [
         prMetadata.url,
@@ -305,36 +318,18 @@ function buildTourUserMessage(
     return [prMetadata.url, "", "Walk the reviewer through this PR as a guided tour."].join("\n");
   }
 
-  const effectiveDiffType = diffType.startsWith("worktree:")
-    ? diffType.split(":").pop() || "uncommitted"
-    : diffType;
-
-  switch (effectiveDiffType) {
-    case "uncommitted":
-      return "Walk the reviewer through the current code changes (staged, unstaged, and untracked files) as a guided tour.";
-    case "staged":
-      return "Walk the reviewer through the currently staged code changes (`git diff --staged`) as a guided tour.";
-    case "unstaged":
-      return "Walk the reviewer through the unstaged code changes (tracked modifications and untracked files) as a guided tour.";
-    case "last-commit":
-      return "Walk the reviewer through the code changes introduced in the last commit (`git diff HEAD~1..HEAD`) as a guided tour.";
-    case "branch": {
-      const base = options?.defaultBranch || "main";
-      return `Walk the reviewer through the code changes against the base branch '${base}' as a guided tour. Run \`git diff ${base}..HEAD\` to inspect the changes.`;
-    }
-    case "merge-base": {
-      const base = options?.defaultBranch || "main";
-      return `Walk the reviewer through the PR-style diff against base '${base}' as a guided tour. First find the common ancestor with \`git merge-base ${base} HEAD\`, then run \`git diff <merge-base>..HEAD\` using that commit to inspect only the changes introduced on this branch (matches GitHub's PR view).`;
-    }
-    default:
-      return [
-        "Walk the reviewer through the following code changes as a guided tour.",
-        "",
-        "```diff",
-        patch,
-        "```",
-      ].join("\n");
+  const instruction = getLocalDiffInstruction(diffType, options?.defaultBranch);
+  if (instruction) {
+    return `Walk the reviewer through ${instruction.target} as a guided tour. ${instruction.inspect}`;
   }
+
+  return [
+    "Walk the reviewer through the following code changes as a guided tour.",
+    "",
+    "```diff",
+    patch,
+    "```",
+  ].join("\n");
 }
 
 export interface TourClaudeCommandResult {
@@ -350,6 +345,9 @@ export function buildTourClaudeCommand(prompt: string, model: string = "sonnet",
     "Bash(git grep:*)", "Bash(git ls-remote:*)", "Bash(git ls-tree:*)",
     "Bash(git merge-base:*)", "Bash(git remote:*)", "Bash(git rev-parse:*)",
     "Bash(git show-ref:*)",
+    "Bash(jj status:*)", "Bash(jj diff:*)", "Bash(jj log:*)",
+    "Bash(jj show:*)", "Bash(jj file show:*)", "Bash(jj cat:*)",
+    "Bash(jj bookmark list:*)",
     "Bash(gh pr view:*)", "Bash(gh pr diff:*)", "Bash(gh pr list:*)",
     "Bash(gh api repos/*/*/pulls/*)", "Bash(gh api repos/*/*/pulls/*/files*)",
     // The tour prompt follows linked issues (`Fixes #123`, `Closes owner/repo#456`),

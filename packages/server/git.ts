@@ -11,6 +11,7 @@ import {
   type DiffType,
   type GitCommandResult,
   type GitContext,
+  type GitDiffOptions,
   type ReviewGitRuntime,
   type WorktreeInfo,
   getCurrentBranch as getCurrentBranchCore,
@@ -31,6 +32,7 @@ export type {
   DiffType,
   DiffResult,
   GitContext,
+  GitDiffOptions,
   WorktreeInfo,
 } from "@plannotator/shared/review-core";
 
@@ -38,7 +40,7 @@ async function runGit(
   args: string[],
   options?: { cwd?: string; timeoutMs?: number },
 ): Promise<GitCommandResult> {
-  const proc = Bun.spawn(["git", ...args], {
+  const proc = Bun.spawn(["git", "-c", "core.quotePath=false", ...args], {
     cwd: options?.cwd,
     stdout: "pipe",
     stderr: "pipe",
@@ -92,15 +94,17 @@ export function runGitDiff(
   diffType: DiffType,
   defaultBranch: string = "main",
   cwd?: string,
+  options?: GitDiffOptions,
 ): Promise<DiffResult> {
-  return runGitDiffCore(runtime, diffType, defaultBranch, cwd);
+  return runGitDiffCore(runtime, diffType, defaultBranch, cwd, options);
 }
 
 export function runGitDiffWithContext(
   diffType: DiffType,
   gitContext: GitContext,
+  options?: GitDiffOptions,
 ): Promise<DiffResult> {
-  return runGitDiffWithContextCore(runtime, diffType, gitContext);
+  return runGitDiffWithContextCore(runtime, diffType, gitContext, options);
 }
 
 export function getFileContentsForDiff(

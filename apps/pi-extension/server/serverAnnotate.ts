@@ -17,11 +17,13 @@ import { listenOnPort } from "./network.js";
 import { getRepoInfo } from "./project.js";
 import {
 	handleDocRequest,
+	handleDocExistsRequest,
 	handleFileBrowserRequest,
 	handleObsidianVaultsRequest,
 	handleObsidianFilesRequest,
 	handleObsidianDocRequest,
 } from "./reference.js";
+import { warmFileListCache } from "../generated/resolve-file.js";
 import { createExternalAnnotationHandler } from "./external-annotations.js";
 
 export interface AnnotateServerResult {
@@ -43,8 +45,11 @@ export async function startAnnotateServer(options: {
 	shareBaseUrl?: string;
 	pasteApiUrl?: string;
 	sourceInfo?: string;
+	sourceConverted?: boolean;
 	gate?: boolean;
 }): Promise<AnnotateServerResult> {
+	// Side-channel pre-warm so /api/doc/exists POSTs land on warm cache.
+	void warmFileListCache(process.cwd(), "code");
 	const gitUser = detectGitUser();
 	const sharingEnabled =
 		options.sharingEnabled ?? process.env.PLANNOTATOR_SHARE !== "disabled";
@@ -92,6 +97,7 @@ export async function startAnnotateServer(options: {
 				mode: options.mode || "annotate",
 				filePath: options.filePath,
 				sourceInfo: options.sourceInfo,
+				sourceConverted: options.sourceConverted ?? false,
 				gate: options.gate ?? false,
 				sharingEnabled,
 				shareBaseUrl,
@@ -124,7 +130,9 @@ export async function startAnnotateServer(options: {
 			if (!url.searchParams.has("base") && options.filePath && !/^https?:\/\//i.test(options.filePath)) {
 				url.searchParams.set("base", dirname(resolvePath(options.filePath)));
 			}
-			handleDocRequest(res, url);
+			await handleDocRequest(res, url);
+		} else if (url.pathname === "/api/doc/exists" && req.method === "POST") {
+			await handleDocExistsRequest(res, req);
 		} else if (url.pathname === "/api/obsidian/vaults") {
 			handleObsidianVaultsRequest(res);
 		} else if (url.pathname === "/api/reference/obsidian/files" && req.method === "GET") {

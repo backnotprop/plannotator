@@ -217,13 +217,24 @@ See [apps/pi-extension/README.md](apps/pi-extension/README.md) for full usage de
 curl -fsSL https://plannotator.ai/install.sh | bash
 ```
 
+The installer also enables Codex Stop hooks when Codex is installed or `~/.codex` already exists. Restart Codex Desktop
+after installing or changing hooks.
+
 **Windows PowerShell:**
 
 ```powershell
 irm https://plannotator.ai/install.ps1 | iex
 ```
 
+Codex plan review is automatic on macOS, Linux, and WSL. Codex hooks are currently disabled on Windows in the official Codex docs, so the Windows installer does not enable them automatically; the direct `!plannotator` commands still work.
+
 **Then in Codex — feedback flows back into the agent loop automatically:**
+
+```
+$plannotator-review          # Code review skill for current changes
+$plannotator-annotate        # Annotate a markdown file, URL, or folder
+$plannotator-last            # Annotate the last agent message
+```
 
 ```
 !plannotator review           # Code review for current changes
@@ -232,7 +243,7 @@ irm https://plannotator.ai/install.ps1 | iex
 !plannotator last             # Annotate the last agent message
 ```
 
-Plan mode is not yet supported.
+Plan review uses Codex's experimental `Stop` hook on macOS, Linux, and WSL.
 
 See [apps/codex/README.md](apps/codex/README.md) for details.
 
@@ -267,3 +278,18 @@ at your option.
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in this project by you, as defined in the Apache-2.0 license,
 shall be dual licensed as above, without any additional terms or conditions.
+
+## Development
+
+To make the global `plannotator` command run from this checkout:
+
+```bash
+bun install
+bun link
+```
+
+After linking, commands like `plannotator review` use `apps/hook/server/index.ts` from your local repo. Rebuild the bundled HTML when changing UI code:
+
+```bash
+bun run --cwd apps/review build && bun run build:hook
+```

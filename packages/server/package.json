@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/server",
-  "version": "0.19.1",
+  "version": "0.19.11",
   "private": true,
   "description": "Shared server implementation for Plannotator plugins",
   "main": "index.ts",
@@ -26,6 +26,7 @@
     "*.ts"
   ],
   "dependencies": {
+    "@pierre/diffs": "^1.1.12",
     "@plannotator/shared": "workspace:*",
     "@plannotator/ai": "workspace:*"
   },

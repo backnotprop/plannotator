@@ -1,0 +1,66 @@
+/* One Dark Pro — by Binaryify */
+.theme-one-dark-pro {
+  --background: #282c34;
+  --foreground: #abb2bf;
+  --card: #21252b;
+  --card-foreground: #abb2bf;
+  --popover: #21252b;
+  --popover-foreground: #abb2bf;
+  --primary: #61afef;
+  --primary-foreground: #282c34;
+  --secondary: #21252b;
+  --secondary-foreground: #abb2bf;
+  --muted: #1d1f23;
+  --muted-foreground: #5c6370;
+  --accent: #c678dd;
+  --accent-foreground: #282c34;
+  --destructive: #e06c75;
+  --destructive-foreground: #282c34;
+  --border: #3e4452;
+  --input: #1d1f23;
+  --ring: #528bff;
+  --success: #98c379;
+  --success-foreground: #282c34;
+  --warning: #e5c07b;
+  --warning-foreground: #282c34;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #2c313a;
+  --focus-highlight: #528bff;
+}
+
+.theme-one-dark-pro.light {
+  --background: #282c34;
+  --foreground: #abb2bf;
+  --card: #21252b;
+  --card-foreground: #abb2bf;
+  --popover: #21252b;
+  --popover-foreground: #abb2bf;
+  --primary: #61afef;
+  --primary-foreground: #282c34;
+  --secondary: #21252b;
+  --secondary-foreground: #abb2bf;
+  --muted: #1d1f23;
+  --muted-foreground: #5c6370;
+  --accent: #c678dd;
+  --accent-foreground: #282c34;
+  --destructive: #e06c75;
+  --destructive-foreground: #282c34;
+  --border: #3e4452;
+  --input: #1d1f23;
+  --ring: #528bff;
+  --success: #98c379;
+  --success-foreground: #282c34;
+  --warning: #e5c07b;
+  --warning-foreground: #282c34;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #2c313a;
+  --focus-highlight: #528bff;
+}

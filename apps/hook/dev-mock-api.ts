@@ -27,6 +27,10 @@
  * a more structural diff (outline → full spec) within whichever mode is on.
  */
 import type { Plugin } from 'vite';
+import { existsSync, readFileSync, statSync } from 'fs';
+import { resolve } from 'path';
+import { isCodeFilePath } from '../../packages/shared/code-file';
+import { preloadFile } from '@pierre/diffs/ssr';
 
 // ─── Default plans (Real-time Collaboration) ─────────────────────────────
 // What every dev sees when running `bun run dev:hook` without any flag.
@@ -569,7 +573,7 @@ export function devMockApi(): Plugin {
   return {
     name: 'plannotator-dev-mock-api',
     configureServer(server) {
-      server.middlewares.use((req, res, next) => {
+      server.middlewares.use(async (req, res, next) => {
         if (req.url === '/api/plan') {
           res.setHeader('Content-Type', 'application/json');
           res.end(JSON.stringify({
@@ -602,6 +606,41 @@ export function devMockApi(): Plugin {
           } else {
             res.statusCode = 404;
             res.end(JSON.stringify({ error: 'Version not found' }));
+          }
+          return;
+        }
+
+        if (req.url?.startsWith('/api/doc?')) {
+          const url = new URL(req.url, 'http://localhost');
+          const reqPath = url.searchParams.get('path');
+          if (!reqPath) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'Missing path parameter' }));
+            return;
+          }
+          const base = url.searchParams.get('base');
+          const repoRoot = resolve(import.meta.dirname, '../..');
+          const resolved = resolve(base || repoRoot, reqPath);
+          if (!existsSync(resolved) || statSync(resolved).isDirectory()) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: `File not found: ${reqPath}` }));
+            return;
+          }
+          const contents = readFileSync(resolved, 'utf-8');
+          res.setHeader('Content-Type', 'application/json');
+          if (isCodeFilePath(reqPath)) {
+            const displayName = resolved.split('/').pop() || resolved;
+            let prerenderedHTML: string | undefined;
+            try {
+              const result = await preloadFile({
+                file: { name: displayName, contents },
+                options: { disableFileHeader: true },
+              });
+              prerenderedHTML = result.prerenderedHTML;
+            } catch { /* fall back to client-side rendering */ }
+            res.end(JSON.stringify({ codeFile: true, contents, filepath: resolved, prerenderedHTML }));
+          } else {
+            res.end(JSON.stringify({ markdown: contents, filepath: resolved }));
           }
           return;
         }

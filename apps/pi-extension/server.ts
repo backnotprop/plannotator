@@ -11,6 +11,7 @@ export type {
 	DiffType,
 	GitContext,
 } from "./generated/review-core.js";
+export type { VcsSelection } from "./server/vcs.js";
 export {
 	type AnnotateServerResult,
 	startAnnotateServer,
@@ -20,9 +21,22 @@ export {
 	startPlanReviewServer,
 } from "./server/serverPlan.js";
 export {
-	getGitContext,
-	reviewRuntime,
 	type ReviewServerResult,
-	runGitDiff,
 	startReviewServer,
 } from "./server/serverReview.js";
+export {
+	canStageFiles,
+	detectRemoteDefaultCompareTarget,
+	detectVcs,
+	getGitContext,
+	getVcsContext,
+	getVcsFileContentsForDiff,
+	prepareLocalReviewDiff,
+	resolveInitialDiffType,
+	resolveVcsCwd,
+	reviewRuntime,
+	runGitDiff,
+	runVcsDiff,
+	stageFile,
+	unstageFile,
+} from "./server/vcs.js";

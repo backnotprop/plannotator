@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { DiffOptionsPopover } from './DiffOptionsPopover';
 
 interface FileHeaderProps {
   filePath: string;
@@ -11,6 +12,8 @@ interface FileHeaderProps {
   canStage?: boolean;
   stageError?: string | null;
   onFileComment?: (anchorEl: HTMLElement) => void;
+  collapseToggle?: React.ReactNode;
+  onCollapseToggle?: () => void;
 }
 
 function splitFilePath(filePath: string): { directory: string; name: string } {
@@ -42,6 +45,8 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   canStage = false,
   stageError,
   onFileComment,
+  collapseToggle,
+  onCollapseToggle,
 }) => {
   const [copied, setCopied] = useState(false);
   const [headerWidth, setHeaderWidth] = useState<number>(0);
@@ -82,7 +87,8 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
       className="flex-shrink-0 px-3 border-b border-border/50 flex items-center justify-between gap-2"
       style={{ height: 'var(--panel-header-h)' }}
     >
-      <div className="min-w-0 flex flex-1 items-center">
+      <div className="min-w-0 flex flex-1 items-center" onClick={onCollapseToggle} style={onCollapseToggle ? { cursor: 'pointer' } : undefined}>
+        {collapseToggle}
         <span className="min-w-0 flex items-center text-xs font-semibold leading-none whitespace-nowrap" title={filePath}>
           {!showFilenameOnly && directory && (
             <span className="min-w-0 overflow-hidden text-ellipsis text-muted-foreground/70">
@@ -105,7 +111,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
                 ? 'bg-success/15 text-success'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             }`}
-            title={isViewed ? "Mark as not viewed" : "Mark as viewed"}
+            title={isViewed ? "Mark as not viewed (V)" : "Mark as viewed (V)"}
           >
             {isViewed ? (
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -130,7 +136,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
                   ? 'bg-primary/15 text-primary'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             }`}
-            title={isStaged ? "Unstage this file (git reset)" : "Stage this file (git add)"}
+            title={isStaged ? "Unstage this file (A)" : "Stage this file (A)"}
           >
             {isStaging ? (
               <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -196,6 +202,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             </>
           )}
         </button>
+        <DiffOptionsPopover />
       </div>
     </div>
   );

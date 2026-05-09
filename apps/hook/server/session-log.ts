@@ -16,7 +16,7 @@
 
 import { readdirSync, statSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { join, dirname } from "node:path";
+import { join, dirname, basename } from "node:path";
 import { homedir } from "node:os";
 
 const DEFAULT_SESSIONS_DIR = join(homedir(), ".claude", "sessions");
@@ -293,9 +293,42 @@ export function getAncestorPids(
 }
 
 /**
+ * Check if a sessionId is referenced by any metadata file in the sessions dir.
+ * Used to distinguish "ghost" sessions (created by /clear but never registered
+ * in metadata) from legitimate concurrent sessions (which have their own PID's
+ * metadata file).
+ */
+export function isSessionRegistered(
+  sessionId: string,
+  sessionsDir: string
+): boolean {
+  try {
+    const files = readdirSync(sessionsDir).filter((f) => f.endsWith(".json"));
+    for (const f of files) {
+      try {
+        const meta: SessionMetadata = JSON.parse(
+          readFileSync(join(sessionsDir, f), "utf-8")
+        );
+        if (meta?.sessionId === sessionId) return true;
+      } catch {
+        // Malformed file — skip
+      }
+    }
+  } catch {
+    // sessionsDir unreadable
+  }
+  return false;
+}
+
+/**
  * Resolve a session log path by walking up the PID chain, checking
  * `~/.claude/sessions/<pid>.json` at each hop for a session metadata match.
- * Deterministic — no mtime guessing, no cwd matching.
+ *
+ * When the matched log is not the most recently modified file in the project
+ * directory, checks whether the newer file is a "ghost" session — one created
+ * by /clear that was never registered in any metadata file. If so, prefers the
+ * ghost (it's the current session). If the newer file belongs to a registered
+ * concurrent session, keeps the PID-based result.
  */
 export function resolveSessionLogByAncestorPids(
   opts: {
@@ -321,7 +354,17 @@ export function resolveSessionLogByAncestorPids(
 
     const candidates = findSessionLogsForCwd(meta.cwd, opts.projectsDir);
     const match = candidates.find((p) => p.includes(meta.sessionId));
-    if (match) return match;
+    if (match) {
+      // Check for stale metadata: if a newer log exists that has no
+      // registered metadata, it's a ghost session from /clear — prefer it.
+      if (candidates[0] !== match) {
+        const newestSessionId = basename(candidates[0], ".jsonl");
+        if (!isSessionRegistered(newestSessionId, sessionsDir)) {
+          return candidates[0];
+        }
+      }
+      return match;
+    }
   }
   return null;
 }

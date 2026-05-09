@@ -25,6 +25,9 @@ export interface UseLinkedDocOptions {
   /** Absolute path of the primary document — enables getDocAnnotations() to include
    *  stashed original-file annotations when viewing a linked doc. */
   sourceFilePath?: string;
+  /** Whether the primary document was converted from HTML/URL — propagated to the
+   *  stashed entry so feedback caveats survive cross-doc navigation. */
+  sourceConverted?: boolean;
 }
 
 interface SavedPlanState {
@@ -37,6 +40,8 @@ interface SavedPlanState {
 export interface CachedDocState {
   annotations: Annotation[];
   globalAttachments: ImageAttachment[];
+  markdown?: string;
+  isConverted?: boolean;
 }
 
 export interface UseLinkedDocReturn {
@@ -75,9 +80,10 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     viewerRef,
     sidebar,
     sourceFilePath,
+    sourceConverted,
   } = options;
 
-  const [linkedDoc, setLinkedDoc] = useState<{ filepath: string } | null>(null);
+  const [linkedDoc, setLinkedDoc] = useState<{ filepath: string; isConverted?: boolean; markdown?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [docAnnotationCount, setDocAnnotationCount] = useState(0);
@@ -104,6 +110,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
         const data = (await res.json()) as {
           markdown?: string;
           filepath?: string;
+          isConverted?: boolean;
           error?: string;
           matches?: string[];
         };
@@ -147,6 +154,8 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
           docCache.current.set(linkedDoc.filepath, {
             annotations: [...annotations],
             globalAttachments: [...globalAttachments],
+            markdown: linkedDoc.markdown,
+            isConverted: linkedDoc.isConverted,
           });
           let total = 0;
           for (const [fp, cached] of docCache.current.entries()) {
@@ -167,7 +176,11 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
         setAnnotations(cached?.annotations ?? []);
         setGlobalAttachments(cached?.globalAttachments ?? []);
         setSelectedAnnotationId(null);
-        setLinkedDoc({ filepath: data.filepath! });
+        setLinkedDoc({
+          filepath: data.filepath!,
+          isConverted: !!data.isConverted,
+          markdown: data.markdown,
+        });
         sidebar.open(targetTab ?? "toc");
 
         // Re-apply cached annotations after DOM settles
@@ -209,6 +222,8 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
       docCache.current.set(linkedDoc.filepath, {
         annotations: [...annotations],
         globalAttachments: [...globalAttachments],
+        markdown: linkedDoc.markdown,
+        isConverted: linkedDoc.isConverted,
       });
       // Update reactive count so button labels can respond
       let total = 0;
@@ -255,16 +270,20 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
       result.set(sourceFilePath, {
         annotations: [...savedPlanState.current.annotations],
         globalAttachments: [...savedPlanState.current.globalAttachments],
+        markdown: savedPlanState.current.markdown,
+        isConverted: !!sourceConverted,
       });
     }
     if (linkedDoc) {
       result.set(linkedDoc.filepath, {
         annotations: [...annotations],
         globalAttachments: [...globalAttachments],
+        markdown: linkedDoc.markdown,
+        isConverted: linkedDoc.isConverted,
       });
     }
     return result;
-  }, [linkedDoc, annotations, globalAttachments, sourceFilePath]);
+  }, [linkedDoc, annotations, globalAttachments, sourceFilePath, sourceConverted]);
 
   return {
     isActive: linkedDoc !== null,

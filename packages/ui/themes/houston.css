@@ -1,0 +1,66 @@
+/* Houston — by Astro */
+.theme-houston {
+  --background: #17191e;
+  --foreground: #eef0f9;
+  --card: #23262d;
+  --card-foreground: #eef0f9;
+  --popover: #23262d;
+  --popover-foreground: #eef0f9;
+  --primary: #4bf3c8;
+  --primary-foreground: #17191e;
+  --secondary: #343841;
+  --secondary-foreground: #eef0f9;
+  --muted: #2a2d34;
+  --muted-foreground: #545864;
+  --accent: #54b9ff;
+  --accent-foreground: #17191e;
+  --destructive: #f4587e;
+  --destructive-foreground: #17191e;
+  --border: #343841;
+  --input: #343841;
+  --ring: #4bf3c8;
+  --success: #4bf3c8;
+  --success-foreground: #17191e;
+  --warning: #ffd493;
+  --warning-foreground: #17191e;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #23262d;
+  --focus-highlight: #4bf3c8;
+}
+
+.theme-houston.light {
+  --background: #17191e;
+  --foreground: #eef0f9;
+  --card: #23262d;
+  --card-foreground: #eef0f9;
+  --popover: #23262d;
+  --popover-foreground: #eef0f9;
+  --primary: #4bf3c8;
+  --primary-foreground: #17191e;
+  --secondary: #343841;
+  --secondary-foreground: #eef0f9;
+  --muted: #2a2d34;
+  --muted-foreground: #545864;
+  --accent: #54b9ff;
+  --accent-foreground: #17191e;
+  --destructive: #f4587e;
+  --destructive-foreground: #17191e;
+  --border: #343841;
+  --input: #343841;
+  --ring: #4bf3c8;
+  --success: #4bf3c8;
+  --success-foreground: #17191e;
+  --warning: #ffd493;
+  --warning-foreground: #17191e;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #23262d;
+  --focus-highlight: #4bf3c8;
+}

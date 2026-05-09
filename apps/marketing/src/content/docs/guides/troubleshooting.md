@@ -64,6 +64,20 @@ If `ExitPlanMode` doesn't trigger Plannotator:
 3. Verify `plannotator` is on your PATH: `which plannotator`
 4. Check that plan mode is enabled in your Claude Code session
 
+## Codex plan review doesn't open
+
+Codex plan review uses the experimental `Stop` hook, which the macOS, Linux, and WSL installer configures automatically when Codex is installed or `~/.codex` already exists.
+
+If a Codex plan turn completes without opening Plannotator:
+
+1. Rerun the installer: `curl -fsSL https://plannotator.ai/install.sh | bash`
+2. Restart Codex Desktop or CLI so hooks are reloaded
+3. Check `~/.codex/config.toml` contains `codex_hooks = true` under `[features]`
+4. Check `~/.codex/hooks.json` has a `Stop` hook whose command points to `plannotator`
+5. Run `plannotator sessions` in case the browser failed to open but the session is running
+
+Codex hooks are currently disabled on Windows in the official Codex docs, so the Windows installer prints manual guidance instead of changing Codex config automatically.
+
 ## OpenCode build agent cannot call `submit_plan`
 
 This is expected with the default OpenCode workflow. Plannotator now defaults to `plan-agent`, which keeps `submit_plan` available to OpenCode's `plan` agent and hides or denies it for `build` and other non-planning primary agents.

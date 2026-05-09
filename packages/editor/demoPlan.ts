@@ -2,7 +2,7 @@ export const DEMO_PLAN_CONTENT = `# Implementation Plan: Real-time Collaboration
 
 ## Context
 
-This proposal introduces real-time collaborative editing to the Plannotator editor, letting reviewers annotate the same plan simultaneously with sub-second visibility of each other's cursors and edits. We are targeting **production-grade concurrency** for up to 50 active collaborators per document, with end-to-end edit-to-visible latency under 150ms at the 95th percentile. The implementation uses operational transforms running on a dedicated Node.js gateway that speaks \`WebSocket\` to clients and \`gRPC\` to the storage tier. See [the technical design doc](https://docs.example.com/realtime-v2) for the full rationale and rollout plan.
+This proposal introduces real-time collaborative editing to the Plannotator editor, letting reviewers annotate the same plan simultaneously with sub-second visibility of each other's cursors and edits. We are targeting **production-grade concurrency** for up to 50 active collaborators per document, with end-to-end edit-to-visible latency under 150ms at the 95th percentile. The implementation uses operational transforms running on a dedicated Node.js gateway that speaks \`WebSocket\` to clients and \`gRPC\` to the storage tier. See [the technical design doc](https://docs.example.com/realtime-v2) for the full rationale and rollout plan. The editor entry point is [App.tsx](packages/editor/App.tsx) and the server config lives in [server/index.ts](packages/server/index.ts).
 
 Runtime parameters for phase one:
 
@@ -14,6 +14,24 @@ export const COLLAB_CONFIG = {
   gateway: "wss://collab.plannotator.ai",
 } as const;
 \`\`\`
+
+### Configuration reference
+
+| Parameter | Value | Description |
+| --- | --- | --- |
+| \`maxCollaborators\` | 50 | Hard ceiling per document before the gateway rejects new joins |
+| \`heartbeatIntervalMs\` | 5 000 ms | Ping cadence; three missed heartbeats trigger a reconnect |
+| \`operationBatchSize\` | 32 | Max ops coalesced into a single WebSocket frame |
+| \`gateway\` | \`wss://collab.plannotator.ai\` | Regional edge endpoint; clients are routed by latency |
+
+### Key files
+
+| File | Role |
+| --- | --- |
+| \`packages/editor/App.tsx\` | Editor entry point |
+| \`packages/shared/resolve-file.ts\` | Path resolution |
+| \`packages/fake/nope.ts\` | Should fail silently |
+| \`package.json\` | Root config |
 
 ## Overview
 Add real-time collaboration features to the editor using _**[WebSocket API](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API)**_ and *[operational transforms](https://en.wikipedia.org/wiki/Operational_transformation)*.
@@ -348,6 +366,21 @@ digraph CollaborationStack {
 \`\`\`
 
 ---
+
+## Phase 4: File Changes
+
+### Modified files
+
+The core connection logic lives in \`packages/ui/components/InlineMarkdown.tsx\` which handles rendering inline tokens. The detection utility is in \`packages/shared/code-file.ts\` and the popout viewer is wired through \`packages/ui/hooks/useCodeFilePopout.ts\`.
+
+On the server side, update packages/server/index.ts to register the new WebSocket routes and packages/server/reference-handlers.ts for the file resolution endpoint. The editor entry point \`packages/editor/App.tsx\` needs the collaboration provider wrapper.
+
+### Build and deploy
+
+- Update the \`Dockerfile\` to expose the new WebSocket port
+- Run \`package.json\` scripts for the build pipeline
+- Config files like \`.env\` and \`README.md\` do not need changes
+- Commands like \`npm install\` and \`bun run build\` remain unchanged
 
 **Target:** Ship MVP in next sprint
 `;

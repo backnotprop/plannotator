@@ -1,6 +1,6 @@
 ---
 title: "Installation"
-description: "How to install Plannotator for Claude Code, OpenCode, Pi, and other agent hosts."
+description: "How to install Plannotator for Claude Code, Codex, OpenCode, Pi, and other agent hosts."
 sidebar:
   order: 1
 section: "Getting Started"
@@ -122,13 +122,58 @@ Coming soon.
 
 ## Codex
 
-Plan mode is not yet supported.
+Codex plan review is supported through the experimental `Stop` hook.
 
-Install the binary, then use it directly:
+This is a post-render review flow: when a Codex turn stops, Plannotator reads the current transcript, extracts the latest plan, and opens the same plan review UI used by the other integrations. If you deny the plan, Plannotator returns a `Stop` continuation reason so Codex can revise the plan in the same turn.
 
+On macOS, Linux, and WSL, the installer enables Codex hooks automatically when Codex is installed or `~/.codex` already exists:
+
+```bash
+curl -fsSL https://plannotator.ai/install.sh | bash
 ```
-!plannotator review           # Code review for current changes
-!plannotator annotate file.md # Annotate a markdown file
+
+Restart Codex Desktop after installing or changing hooks.
+
+For manual setup, enable hooks in `~/.codex/config.toml` or `<repo>/.codex/config.toml`:
+
+```toml
+[features]
+codex_hooks = true
+```
+
+Then add `hooks.json` next to that config layer:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "plannotator",
+            "timeout": 345600
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Notes:
+
+- Codex discovers hooks from `~/.codex/hooks.json` and `<repo>/.codex/hooks.json`, and loads all matching files.
+- Prefer an absolute `plannotator` command path in `hooks.json` for Codex Desktop, because app-launched processes may not inherit your shell `PATH`.
+- Codex hooks are currently experimental.
+- The current official Codex hooks docs say hooks are disabled on Windows, so this flow is currently macOS/Linux/WSL only.
+
+You can still use the direct commands at any time:
+
+```bash
+!plannotator review
+!plannotator annotate file.md
+!plannotator last
 ```
 
 ## Pi

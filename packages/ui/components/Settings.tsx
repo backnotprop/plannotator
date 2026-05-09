@@ -58,7 +58,6 @@ import {
 import { useAgents } from '../hooks/useAgents';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
 import { type QuickLabel, getQuickLabels, saveQuickLabels, resetQuickLabels, DEFAULT_QUICK_LABELS, getLabelColors, LABEL_COLOR_MAP } from '../utils/quickLabels';
-import { hasNewSettings, markNewSettingsSeen } from '../utils/newSettingsHint';
 import { ThemeTab } from './ThemeTab';
 import { isMac, modKey, altKey } from '../utils/platform';
 import { getAIProviderSettings } from '../utils/aiProvider';
@@ -70,7 +69,7 @@ import {
   type FileBrowserSettings,
 } from '../utils/fileBrowser';
 
-type SettingsTab = 'general' | 'theme' | 'display' | 'saving' | 'labels' | 'shortcuts' | 'ai' | 'files' | 'obsidian' | 'bear' | 'octarine' | 'comments';
+type SettingsTab = 'general' | 'theme' | 'git' | 'display' | 'saving' | 'labels' | 'shortcuts' | 'ai' | 'files' | 'obsidian' | 'bear' | 'octarine' | 'comments';
 
 interface SettingsProps {
   taterMode: boolean;
@@ -103,29 +102,31 @@ const DIFF_FONT_OPTIONS = [
   { value: 'Atkinson Hyperlegible Mono', label: 'Atkinson Hyperlegible' },
 ];
 
-const DIFF_STYLE_OPTIONS = [
+export const DIFF_STYLE_OPTIONS = [
   { value: 'split' as const, label: 'Split' },
   { value: 'unified' as const, label: 'Unified' },
 ];
-const OVERFLOW_OPTIONS = [
+export const OVERFLOW_OPTIONS = [
   { value: 'scroll' as const, label: 'Scroll' },
   { value: 'wrap' as const, label: 'Wrap' },
 ];
-const INDICATOR_OPTIONS = [
+export const INDICATOR_OPTIONS = [
   { value: 'bars' as const, label: 'Bars' },
   { value: 'classic' as const, label: 'Classic' },
   { value: 'none' as const, label: 'None' },
 ];
-const LINE_DIFF_OPTIONS = [
+export const LINE_DIFF_OPTIONS = [
   { value: 'word-alt' as const, label: 'Word-Alt' },
   { value: 'word' as const, label: 'Word' },
   { value: 'char' as const, label: 'Char' },
   { value: 'none' as const, label: 'None' },
 ];
 const DEFAULT_DIFF_TYPE_OPTIONS = [
-  { value: 'uncommitted' as const, label: 'All Changes' },
-  { value: 'unstaged' as const, label: 'Unstaged' },
-  { value: 'staged' as const, label: 'Staged' },
+  { value: 'uncommitted' as const, label: 'All Changes', description: "Everything you've changed since your last commit" },
+  { value: 'unstaged' as const, label: 'Unstaged', description: "Only changes you haven't staged yet" },
+  { value: 'staged' as const, label: 'Staged', description: "Only changes you've staged for commit" },
+  { value: 'merge-base' as const, label: 'Committed', description: "Everything you've committed on this branch" },
+  { value: 'all' as const, label: 'All Files (HEAD)', description: "Every tracked file at HEAD, shown as additions" },
 ];
 
 function SegmentedControl<T extends string>({ options, value, onChange }: {
@@ -182,14 +183,52 @@ function ToggleSwitch({ checked, onChange, label, description }: {
   );
 }
 
-const ReviewDisplayTab: React.FC = () => {
+const GitTab: React.FC = () => {
   const defaultDiffType = useConfigValue('defaultDiffType');
+  return (
+    <div className="space-y-2">
+      <div>
+        <div className="text-sm font-medium">Default Diff View</div>
+        <div className="text-xs text-muted-foreground">Which changes to show when you open a code review</div>
+      </div>
+      <div className="space-y-2">
+        {DEFAULT_DIFF_TYPE_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => configStore.set('defaultDiffType', opt.value)}
+            className={`w-full flex items-start gap-3 p-3 rounded-lg border transition-colors text-left ${
+              defaultDiffType === opt.value
+                ? 'border-primary bg-primary/5'
+                : 'border-border hover:border-muted-foreground/30 hover:bg-muted/50'
+            }`}
+          >
+            <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${
+              defaultDiffType === opt.value ? 'border-primary' : 'border-muted-foreground/40'
+            }`}>
+              {defaultDiffType === opt.value && (
+                <div className="w-2 h-2 rounded-full bg-primary" />
+              )}
+            </div>
+            <div>
+              <div className="text-sm font-medium">{opt.label}</div>
+              <div className="text-xs text-muted-foreground">{opt.description}</div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const ReviewDisplayTab: React.FC = () => {
   const diffStyle = useConfigValue('diffStyle');
   const diffOverflow = useConfigValue('diffOverflow');
   const diffIndicators = useConfigValue('diffIndicators');
   const diffLineDiffType = useConfigValue('diffLineDiffType');
   const diffShowLineNumbers = useConfigValue('diffShowLineNumbers');
   const diffShowBackground = useConfigValue('diffShowBackground');
+  const diffHideWhitespace = useConfigValue('diffHideWhitespace');
   const diffFontFamily = useConfigValue('diffFontFamily');
   const diffFontSize = useConfigValue('diffFontSize');
 
@@ -200,17 +239,6 @@ const ReviewDisplayTab: React.FC = () => {
 
   return (
     <>
-      {/* Default Diff View */}
-      <div className="space-y-2">
-        <div>
-          <div className="text-sm font-medium">Default Diff View</div>
-          <div className="text-xs text-muted-foreground">Which changes to show when opening a review</div>
-        </div>
-        <SegmentedControl options={DEFAULT_DIFF_TYPE_OPTIONS} value={defaultDiffType} onChange={(v) => configStore.set('defaultDiffType', v)} />
-      </div>
-
-      <div className="border-t border-border" />
-
       {/* Font Family */}
       <div className="space-y-2">
         <div>
@@ -332,6 +360,16 @@ const ReviewDisplayTab: React.FC = () => {
         onChange={(v) => configStore.set('diffShowBackground', v)}
         label="Show Diff Background"
         description="Colored backgrounds on added/deleted lines"
+      />
+
+      <div className="border-t border-border" />
+
+      {/* Hide Whitespace */}
+      <ToggleSwitch
+        checked={diffHideWhitespace}
+        onChange={(v) => configStore.set('diffHideWhitespace', v)}
+        label="Hide Whitespace"
+        description="Ignore whitespace-only changes in diffs"
       />
 
     </>
@@ -544,6 +582,16 @@ const CommentsTab: React.FC = () => {
 
 export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', onUIPreferencesChange, externalOpen, onExternalClose, aiProviders = [], gitUser }) => {
   const [showDialog, setShowDialog] = useState(false);
+  const [themePreview, setThemePreview] = useState(false);
+
+  useEffect(() => {
+    if (!themePreview) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setThemePreview(false); setShowDialog(true); }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [themePreview]);
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [identity, setIdentity] = useState('');
   const [obsidian, setObsidian] = useState<ObsidianSettings>({
@@ -568,11 +616,6 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const [quickLabelsState, setQuickLabelsState] = useState<QuickLabel[]>([]);
   const [editingTipIndex, setEditingTipIndex] = useState<number | null>(null);
   const [editingTipValue, setEditingTipValue] = useState('');
-  // Captured at mount so future hint markers (e.g. `{showNewHints && <Badge>}`)
-  // stay visible for the duration of the dialog session even after
-  // markNewSettingsSeen() runs on open. Bump CURRENT_HINT_VERSION in
-  // newSettingsHint.ts when adding new highlighted settings.
-  const [showNewHints] = useState(() => hasNewSettings());
   const [aiProvider, setAiProvider] = useState<string | null>(null);
   const [fileBrowserSettings, setFileBrowserSettings] = useState<FileBrowserSettings>({ enabled: false, directories: [] });
   const [newDirPath, setNewDirPath] = useState('');
@@ -589,6 +632,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       t.push({ id: 'labels', label: 'Labels' });
     }
     if (mode === 'review') {
+      t.push({ id: 'git', label: 'Git' });
       t.push({ id: 'display', label: 'Display' });
       t.push({ id: 'comments', label: 'Comments' });
       if (aiProviders.length > 0) {
@@ -619,7 +663,6 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
 
   useEffect(() => {
     if (showDialog) {
-      if (showNewHints) markNewSettingsSeen();
       setIdentity(getIdentity())
       setObsidian(getObsidianSettings());
       setBear(getBearSettings());
@@ -781,7 +824,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
         </svg>
       </button>
 
-      {showDialog && createPortal(
+      {showDialog && !themePreview && createPortal(
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm p-4"
           onClick={() => setShowDialog(false)}
@@ -1057,7 +1100,12 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                 )}
 
                 {/* === THEME TAB === */}
-                {activeTab === 'theme' && <ThemeTab />}
+                {activeTab === 'theme' && <ThemeTab onPreview={() => { setShowDialog(false); setThemePreview(true); }} />}
+
+                {/* === GIT TAB === */}
+                {activeTab === 'git' && mode === 'review' && (
+                  <GitTab />
+                )}
 
                 {/* === DISPLAY TAB === */}
                 {activeTab === 'display' && mode === 'review' && (
@@ -2028,6 +2076,30 @@ tags: [plan, ...]
 
               </div>
               </OverlayScrollArea>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {themePreview && createPortal(
+        <div className="fixed inset-0 z-[100] flex flex-col pointer-events-none">
+          <div className="flex-1" />
+          <div
+            className="pointer-events-auto w-full bg-card border-t-2 border-primary/30 shadow-[0_-4px_20px_rgba(0,0,0,0.4)] flex flex-col max-h-[35vh] overflow-hidden"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-border flex-shrink-0">
+              <span className="text-xs font-medium text-muted-foreground">Theme Preview</span>
+              <button
+                onClick={() => { setThemePreview(false); setShowDialog(true); }}
+                className="px-2.5 py-1 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+              >
+                Done
+              </button>
+            </div>
+            <div className="p-3 overflow-y-auto flex-1 min-h-0">
+              <ThemeTab compact />
             </div>
           </div>
         </div>,

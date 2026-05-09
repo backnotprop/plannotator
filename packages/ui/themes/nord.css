@@ -1,0 +1,66 @@
+/* Nord — by Arctic Ice Studio */
+.theme-nord {
+  --background: #2e3440;
+  --foreground: #d8dee9;
+  --card: #3b4252;
+  --card-foreground: #d8dee9;
+  --popover: #3b4252;
+  --popover-foreground: #d8dee9;
+  --primary: #88c0d0;
+  --primary-foreground: #2e3440;
+  --secondary: #434c5e;
+  --secondary-foreground: #d8dee9;
+  --muted: #3b4252;
+  --muted-foreground: #616e88;
+  --accent: #81a1c1;
+  --accent-foreground: #2e3440;
+  --destructive: #bf616a;
+  --destructive-foreground: #2e3440;
+  --border: #434c5e;
+  --input: #3b4252;
+  --ring: #88c0d0;
+  --success: #a3be8c;
+  --success-foreground: #2e3440;
+  --warning: #ebcb8b;
+  --warning-foreground: #2e3440;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #4c566a;
+  --focus-highlight: #88c0d0;
+}
+
+.theme-nord.light {
+  --background: #2e3440;
+  --foreground: #d8dee9;
+  --card: #3b4252;
+  --card-foreground: #d8dee9;
+  --popover: #3b4252;
+  --popover-foreground: #d8dee9;
+  --primary: #88c0d0;
+  --primary-foreground: #2e3440;
+  --secondary: #434c5e;
+  --secondary-foreground: #d8dee9;
+  --muted: #3b4252;
+  --muted-foreground: #616e88;
+  --accent: #81a1c1;
+  --accent-foreground: #2e3440;
+  --destructive: #bf616a;
+  --destructive-foreground: #2e3440;
+  --border: #434c5e;
+  --input: #3b4252;
+  --ring: #88c0d0;
+  --success: #a3be8c;
+  --success-foreground: #2e3440;
+  --warning: #ebcb8b;
+  --warning-foreground: #2e3440;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #4c566a;
+  --focus-highlight: #88c0d0;
+}

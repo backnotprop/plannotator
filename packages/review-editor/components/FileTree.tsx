@@ -1,7 +1,7 @@
 import React, { useEffect, useCallback, useState, useMemo } from 'react';
 import { CodeAnnotation } from '@plannotator/ui/types';
-import type { AvailableBranches, DiffOption, WorktreeInfo } from '@plannotator/shared/types';
-import { buildFileTree, getAncestorPaths, getAllFolderPaths } from '../utils/buildFileTree';
+import type { AvailableBranches, CompareTargetConfig, DiffOption, WorktreeInfo } from '@plannotator/shared/types';
+import { buildFileTree, getAncestorPaths, getAllFolderPaths, getVisualFileOrder } from '../utils/buildFileTree';
 import { FileTreeNodeItem } from './FileTreeNode';
 import { BaseBranchPicker } from './BaseBranchPicker';
 import { DiffTypePicker } from './DiffTypePicker';
@@ -30,11 +30,12 @@ interface FileTreeProps {
   activeWorktreePath?: string | null;
   onSelectWorktree?: (path: string | null) => void;
   currentBranch?: string;
-  /** Base-branch picker — only meaningful when activeDiffType is "branch" or "merge-base". */
+  /** Compare target picker — base branch for Git, bookmark/revision for jj. */
   availableBranches?: AvailableBranches;
   selectedBase?: string;
   detectedBase?: string;
   onSelectBase?: (branch: string) => void;
+  compareTarget?: CompareTargetConfig;
   stagedFiles?: Set<string>;
   onCopyRawDiff?: () => void;
   canCopyRawDiff?: boolean;
@@ -52,6 +53,11 @@ interface FileTreeProps {
   activeSearchMatchId?: string | null;
   onSelectSearchMatch?: (matchId: string) => void;
   onStepSearchMatch?: (direction: 1 | -1) => void;
+  onSelectAllFiles?: () => void;
+  isAllFilesActive?: boolean;
+  scrollHighlightIndex?: number;
+  /** Absolute repo root for the "Copy full path" context menu item. Null/undefined hides the option (e.g. PR review mode). */
+  repoRoot?: string | null;
 }
 
 export const FileTree: React.FC<FileTreeProps> = ({
@@ -78,6 +84,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   selectedBase,
   detectedBase,
   onSelectBase,
+  compareTarget,
   stagedFiles,
   onCopyRawDiff,
   canCopyRawDiff = false,
@@ -95,8 +102,16 @@ export const FileTree: React.FC<FileTreeProps> = ({
   activeSearchMatchId,
   onSelectSearchMatch,
   onStepSearchMatch,
+  onSelectAllFiles,
+  isAllFilesActive = false,
+  scrollHighlightIndex,
+  repoRoot,
 }) => {
   const isSearchVisible = !!onSearchChange && (isSearchOpen || !!searchQuery.trim());
+
+  const tree = useMemo(() => buildFileTree(files), [files]);
+  const allFolderPaths = useMemo(() => getAllFolderPaths(tree), [tree]);
+  const visualOrder = useMemo(() => getVisualFileOrder(tree), [tree]);
 
   // Keyboard navigation: j/k or arrow keys
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -121,22 +136,26 @@ export const FileTree: React.FC<FileTreeProps> = ({
       return;
     }
 
+    const visualPos = visualOrder.indexOf(activeFileIndex);
+
     if (e.key === 'j' || e.key === 'ArrowDown') {
       e.preventDefault();
-      const nextIndex = Math.min(activeFileIndex + 1, files.length - 1);
-      onSelectFile(nextIndex);
+      if (visualPos < visualOrder.length - 1) {
+        onSelectFile(visualOrder[visualPos + 1]);
+      }
     } else if (e.key === 'k' || e.key === 'ArrowUp') {
       e.preventDefault();
-      const prevIndex = Math.max(activeFileIndex - 1, 0);
-      onSelectFile(prevIndex);
+      if (visualPos > 0) {
+        onSelectFile(visualOrder[visualPos - 1]);
+      }
     } else if (e.key === 'Home') {
       e.preventDefault();
-      onSelectFile(0);
+      onSelectFile(visualOrder[0]);
     } else if (e.key === 'End') {
       e.preventDefault();
-      onSelectFile(files.length - 1);
+      onSelectFile(visualOrder[visualOrder.length - 1]);
     }
-  }, [enableKeyboardNav, activeFileIndex, files.length, onSelectFile]);
+  }, [enableKeyboardNav, activeFileIndex, visualOrder, onSelectFile]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
@@ -155,15 +174,13 @@ export const FileTree: React.FC<FileTreeProps> = ({
     return annotationCountMap.get(filePath) ?? 0;
   }, [annotationCountMap]);
 
-  const tree = useMemo(() => buildFileTree(files), [files]);
-
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set(getAllFolderPaths(tree)));
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set(allFolderPaths));
   const [prevTree, setPrevTree] = useState(tree);
 
   // Expand all folders when tree changes (initial render + diff switch)
   if (tree !== prevTree) {
     setPrevTree(tree);
-    setExpandedFolders(new Set(getAllFolderPaths(tree)));
+    setExpandedFolders(new Set(allFolderPaths));
   }
 
   // Auto-expand ancestors of the active file so j/k nav always reveals the target
@@ -191,6 +208,12 @@ export const FileTree: React.FC<FileTreeProps> = ({
       return next;
     });
   }, []);
+
+  const areAllFoldersExpanded = allFolderPaths.length > 0 && allFolderPaths.every(path => expandedFolders.has(path));
+
+  const handleToggleAllFolders = useCallback(() => {
+    setExpandedFolders(areAllFoldersExpanded ? new Set() : new Set(allFolderPaths));
+  }, [allFolderPaths, areAllFoldersExpanded]);
 
   return (
     <aside className="border-r border-border/50 bg-card/30 flex flex-col flex-shrink-0 overflow-hidden" style={{ width: width ?? 256 }}>
@@ -224,24 +247,22 @@ export const FileTree: React.FC<FileTreeProps> = ({
               </button>
             )}
             <button
-              onClick={() => setExpandedFolders(new Set(getAllFolderPaths(tree)))}
-              className="p-1 rounded transition-colors hover:bg-muted text-muted-foreground"
-              title="Expand all folders"
+              onClick={handleToggleAllFolders}
+              disabled={allFolderPaths.length === 0}
+              className="p-1 rounded transition-colors hover:bg-muted text-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+              title={areAllFoldersExpanded ? 'Collapse all folders' : 'Expand all folders'}
             >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 8l7-6 7 6" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 16l7 6 7-6" />
-              </svg>
-            </button>
-            <button
-              onClick={() => setExpandedFolders(new Set())}
-              className="p-1 rounded transition-colors hover:bg-muted text-muted-foreground"
-              title="Collapse all folders"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 2l7 6 7-6" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 22l7-6 7 6" />
-              </svg>
+              {areAllFoldersExpanded ? (
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 2l7 6 7-6" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 22l7-6 7 6" />
+                </svg>
+              ) : (
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 8l7-6 7 6" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 16l7 6 7-6" />
+                </svg>
+              )}
             </button>
             {onToggleHideViewed && (
               <button
@@ -347,15 +368,16 @@ export const FileTree: React.FC<FileTreeProps> = ({
         </div>
       )}
 
-      {/* Base-branch picker — only relevant for branch / merge-base diff types */}
+      {/* Compare target picker — only relevant for base-dependent diff types */}
       {onSelectBase &&
         selectedBase &&
         detectedBase &&
         availableBranches &&
-        (activeDiffType === 'branch' || activeDiffType === 'merge-base') && (
+        activeDiffType &&
+        compareTarget?.diffTypes.includes(activeDiffType) && (
           <div className="px-2 py-1.5 border-b border-border/30 flex items-center gap-2">
             <span className="text-[10px] uppercase tracking-wide text-muted-foreground flex-shrink-0">
-              compare against
+              {compareTarget.picker.rowLabel}
             </span>
             <div className="flex-1 min-w-0">
               <BaseBranchPicker
@@ -364,6 +386,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
                 detectedBase={detectedBase}
                 onSelectBase={onSelectBase}
                 disabled={isLoadingDiff}
+                copy={compareTarget.picker}
               />
             </div>
           </div>
@@ -393,13 +416,35 @@ export const FileTree: React.FC<FileTreeProps> = ({
             </div>
           )
         ) : (
-          tree.map(node => (
+          <>
+          {onSelectAllFiles && (
+            <button
+              onClick={onSelectAllFiles}
+              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors mb-0.5 ${
+                isAllFilesActive
+                  ? 'bg-primary/15 text-primary font-medium'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              }`}
+            >
+              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 6.878V6a2.25 2.25 0 012.25-2.25h7.5A2.25 2.25 0 0118 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 004.5 9v.878m13.5-3A2.25 2.25 0 0119.5 9v.878m-13.5 0A2.25 2.25 0 003 12v3a2.25 2.25 0 002.25 2.25h13.5A2.25 2.25 0 0021 15v-3a2.25 2.25 0 00-2.25-2.25m-13.5 0h13.5" />
+              </svg>
+              <span>All files</span>
+              <span className="ml-auto text-[10px] tabular-nums opacity-60">
+                <span className="text-green-500">+{files.reduce((s, f) => s + f.additions, 0)}</span>
+                {' '}
+                <span className="text-red-500">-{files.reduce((s, f) => s + f.deletions, 0)}</span>
+              </span>
+            </button>
+          )}
+          {tree.map(node => (
             <FileTreeNodeItem
               key={node.type === 'file' ? node.path : `folder:${node.path}`}
               node={node}
               expandedFolders={expandedFolders}
               onToggleFolder={handleToggleFolder}
-              activeFileIndex={activeFileIndex}
+              activeFileIndex={isAllFilesActive ? -1 : activeFileIndex}
+              scrollHighlightIndex={isAllFilesActive ? scrollHighlightIndex : undefined}
               onSelectFile={onSelectFile}
               onDoubleClickFile={onDoubleClickFile}
               viewedFiles={viewedFiles}
@@ -407,8 +452,10 @@ export const FileTree: React.FC<FileTreeProps> = ({
               hideViewedFiles={hideViewedFiles}
               getAnnotationCount={getAnnotationCount}
               stagedFiles={stagedFiles}
+              repoRoot={repoRoot}
             />
-          ))
+          ))}
+          </>
         )}
       </div>
       </OverlayScrollArea>

@@ -1,0 +1,66 @@
+/* Snazzy Light — by Aleksandr Hovhannisyan */
+.theme-snazzy-light {
+  --background: #fafbfc;
+  --foreground: #565869;
+  --card: #f3f4f5;
+  --card-foreground: #565869;
+  --popover: #f3f4f5;
+  --popover-foreground: #565869;
+  --primary: #09a1ed;
+  --primary-foreground: #ffffff;
+  --secondary: #e9eaeb;
+  --secondary-foreground: #565869;
+  --muted: #e9eaeb;
+  --muted-foreground: #9194a2;
+  --accent: #2dae58;
+  --accent-foreground: #ffffff;
+  --destructive: #ff5c56;
+  --destructive-foreground: #ffffff;
+  --border: #dedfe0;
+  --input: #e9eaeb;
+  --ring: #09a1ed;
+  --success: #2dae58;
+  --success-foreground: #ffffff;
+  --warning: #cf9c00;
+  --warning-foreground: #ffffff;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #e9eaeb;
+  --focus-highlight: #09a1ed;
+}
+
+.theme-snazzy-light.light {
+  --background: #fafbfc;
+  --foreground: #565869;
+  --card: #f3f4f5;
+  --card-foreground: #565869;
+  --popover: #f3f4f5;
+  --popover-foreground: #565869;
+  --primary: #09a1ed;
+  --primary-foreground: #ffffff;
+  --secondary: #e9eaeb;
+  --secondary-foreground: #565869;
+  --muted: #e9eaeb;
+  --muted-foreground: #9194a2;
+  --accent: #2dae58;
+  --accent-foreground: #ffffff;
+  --destructive: #ff5c56;
+  --destructive-foreground: #ffffff;
+  --border: #dedfe0;
+  --input: #e9eaeb;
+  --ring: #09a1ed;
+  --success: #2dae58;
+  --success-foreground: #ffffff;
+  --warning: #cf9c00;
+  --warning-foreground: #ffffff;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #e9eaeb;
+  --focus-highlight: #09a1ed;
+}

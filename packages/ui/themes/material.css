@@ -1,0 +1,62 @@
+/* Material Theme — by Mattia Astorino (equinusocio) */
+.theme-material {
+  --background: #263238;
+  --foreground: #EEFFFF;
+  --card: #2E3C43;
+  --card-foreground: #EEFFFF;
+  --popover: #263238;
+  --popover-foreground: #EEFFFF;
+  --primary: #80CBC4;
+  --primary-foreground: #263238;
+  --secondary: #37474F;
+  --secondary-foreground: #6c8692;
+  --muted: #303C41;
+  --muted-foreground: #546E7A;
+  --accent: #C3E88D;
+  --accent-foreground: #263238;
+  --destructive: #f07178;
+  --destructive-foreground: #263238;
+  --border: #37474F;
+  --input: #303C41;
+  --ring: #80CBC4;
+  --success: #C3E88D;
+  --success-foreground: #263238;
+  --warning: #FFCB6B;
+  --warning-foreground: #263238;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #2D3B41;
+  --focus-highlight: #80CBC4;
+}
+
+.theme-material.light {
+  --background: #FAFAFA;
+  --foreground: #546E7A;
+  --card: #F0F4F5;
+  --card-foreground: #546E7A;
+  --popover: #FAFAFA;
+  --popover-foreground: #546E7A;
+  --primary: #80CBC4;
+  --primary-foreground: #263238;
+  --secondary: #E8EDEF;
+  --secondary-foreground: #758a95;
+  --muted: #EEEEEE;
+  --muted-foreground: #B0BEC5;
+  --accent: #39ADB5;
+  --accent-foreground: #FAFAFA;
+  --destructive: #E53935;
+  --destructive-foreground: #FAFAFA;
+  --border: #B0BEC5;
+  --input: #EEEEEE;
+  --ring: #80CBC4;
+  --success: #91B859;
+  --success-foreground: #FAFAFA;
+  --warning: #E2931D;
+  --warning-foreground: #FAFAFA;
+
+  --code-bg: #EEEEEE;
+  --focus-highlight: #80CBC4;
+}

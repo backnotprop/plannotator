@@ -10,7 +10,7 @@ import { join } from "path";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { execSync } from "child_process";
 
-export type DefaultDiffType = 'uncommitted' | 'unstaged' | 'staged';
+export type DefaultDiffType = 'uncommitted' | 'unstaged' | 'staged' | 'merge-base' | 'all';
 
 export interface DiffOptions {
   diffStyle?: 'split' | 'unified';
@@ -21,6 +21,8 @@ export interface DiffOptions {
   showDiffBackground?: boolean;
   fontFamily?: string;
   fontSize?: string;
+  tabSize?: number;
+  hideWhitespace?: boolean;
   defaultDiffType?: DefaultDiffType;
 }
 
@@ -31,9 +33,70 @@ export interface CCLabelConfig {
   blocking: boolean;
 }
 
+export type PromptSectionOverrides = Record<string, string | undefined>;
+
+export type PromptRuntime =
+  | "claude-code"
+  | "opencode"
+  | "copilot-cli"
+  | "pi"
+  | "codex"
+  | "gemini-cli";
+
+interface PromptSectionConfig {
+  [key: string]: string | Partial<Record<PromptRuntime, PromptSectionOverrides>> | undefined;
+  runtimes?: Partial<Record<PromptRuntime, PromptSectionOverrides>>;
+}
+
+export interface PromptConfig {
+  review?: PromptSectionConfig & {
+    approved?: string;
+    denied?: string;
+  };
+  plan?: PromptSectionConfig & {
+    approved?: string;
+    approvedWithNotes?: string;
+    autoApproved?: string;
+    denied?: string;
+  };
+  annotate?: PromptSectionConfig & {
+    fileFeedback?: string;
+    messageFeedback?: string;
+    approved?: string;
+  };
+}
+
+const PROMPT_SECTIONS = ["review", "plan", "annotate"] as const;
+
+export function mergePromptConfig(
+  current?: PromptConfig,
+  partial?: PromptConfig,
+): PromptConfig | undefined {
+  if (!current && !partial) return undefined;
+
+  const result: Record<string, any> = { ...current, ...partial };
+
+  for (const section of PROMPT_SECTIONS) {
+    const cur = current?.[section];
+    const par = partial?.[section];
+    if (cur || par) {
+      result[section] = {
+        ...cur,
+        ...par,
+        runtimes: (cur?.runtimes || par?.runtimes)
+          ? { ...cur?.runtimes, ...par?.runtimes }
+          : undefined,
+      };
+    }
+  }
+
+  return result as PromptConfig;
+}
+
 export interface PlannotatorConfig {
   displayName?: string;
   diffOptions?: DiffOptions;
+  prompts?: PromptConfig;
   conventionalComments?: boolean;
   /** null = explicitly cleared (use defaults), undefined = not set */
   conventionalLabels?: CCLabelConfig[] | null;
@@ -83,7 +146,13 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): void {
     const mergedDiffOptions = (current.diffOptions || partial.diffOptions)
       ? { ...current.diffOptions, ...partial.diffOptions }
       : undefined;
-    const merged = { ...current, ...partial, diffOptions: mergedDiffOptions };
+    const mergedPrompts = mergePromptConfig(current.prompts, partial.prompts);
+    const merged = {
+      ...current,
+      ...partial,
+      diffOptions: mergedDiffOptions,
+      prompts: mergedPrompts,
+    };
     mkdirSync(CONFIG_DIR, { recursive: true });
     writeFileSync(CONFIG_PATH, JSON.stringify(merged, null, 2) + "\n", "utf-8");
   } catch (e) {
@@ -129,8 +198,9 @@ export function getServerConfig(gitUser: string | null): {
  * Read the user's preferred default diff type from config, falling back to 'unstaged'.
  */
 export function resolveDefaultDiffType(cfg?: PlannotatorConfig): DefaultDiffType {
-  const v = cfg?.diffOptions?.defaultDiffType;
-  return v === 'uncommitted' || v === 'unstaged' || v === 'staged' ? v : 'unstaged';
+  const v = cfg?.diffOptions?.defaultDiffType as string | undefined;
+  if (v === 'branch') return 'merge-base';
+  return v === 'uncommitted' || v === 'unstaged' || v === 'staged' || v === 'merge-base' || v === 'all' ? v : 'unstaged';
 }
 
 /**

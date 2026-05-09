@@ -56,7 +56,14 @@ import {
   handleArchiveCommand,
   type CommandDeps,
 } from "./commands";
-import { planDenyFeedback } from "@plannotator/shared/feedback-templates";
+import {
+  getPlanDeniedPrompt,
+  getPlanApprovedPrompt,
+  getPlanApprovedWithNotesPrompt,
+  getPlanToolName,
+  buildPlanFileRule,
+  getAnnotateMessageFeedbackPrompt,
+} from "@plannotator/shared/prompts";
 import {
   stripConflictingPlanModeRules,
 } from "./plan-mode";
@@ -67,6 +74,7 @@ import {
   shouldApplyToolDefinitionRewrites,
   shouldInjectFullPlanningPrompt,
   shouldInjectGenericPlanReminder,
+  shouldModifyPrompts,
   shouldRegisterSubmitPlan,
   shouldRejectSubmitPlanForAgent,
   type PlannotatorOpenCodeOptions,
@@ -252,7 +260,7 @@ export const PlannotatorPlugin: Plugin = async (ctx, rawOptions?: PlannotatorOpe
     // that allows markdown file writing. OpenCode's original blocks ALL file edits,
     // but we need the agent to write plans, specs, docs, etc.
     "experimental.chat.messages.transform": async (input, output) => {
-      if (workflowOptions.workflow === "manual") return;
+      if (!shouldModifyPrompts(workflowOptions)) return;
 
       const lastUserAgent = getLastUserAgentFromMessages(output.messages);
       if (
@@ -306,7 +314,7 @@ tools (except writing markdown files), or otherwise make changes to the system.
 
     // Inject planning instructions into system prompt
     "experimental.chat.system.transform": async (input, output) => {
-      if (workflowOptions.workflow === "manual") return;
+      if (!shouldModifyPrompts(workflowOptions)) return;
 
       const systemText = output.system.join("\n");
       if (systemText.toLowerCase().includes("title generator") || systemText.toLowerCase().includes("generate a title")) {
@@ -389,7 +397,7 @@ Do NOT proceed with implementation until your plan is approved.`);
             body: {
               parts: [{
                 type: "text",
-                text: `# Message Annotations\n\n${feedback}\n\nPlease address the annotation feedback above.`,
+                text: getAnnotateMessageFeedbackPrompt("opencode", undefined, { feedback }),
               }],
             },
           });
@@ -474,6 +482,9 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
             opencodeClient: ctx.client,
             onReady: async (url, isRemote, port) => {
               handleServerReady(url, isRemote, port);
+              if (isRemote) {
+                ctx.client.app.log({ level: "info", message: `[Plannotator] Open in browser: ${url}` });
+              }
             },
           });
 
@@ -520,22 +531,25 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
             }
 
             if (result.feedback) {
-              return `Plan approved with notes!
-${result.savedPath ? `Saved to: ${result.savedPath}` : ""}
-
-## Implementation Notes
-
-The user approved your plan but added the following notes to consider during implementation:
-
-${result.feedback}
-
-Proceed with implementation, incorporating these notes where applicable.`;
+              return getPlanApprovedWithNotesPrompt("opencode", undefined, {
+                planFilePath: sourceFilePath,
+                doneMsg: result.savedPath ? `Saved to: ${result.savedPath}` : "",
+                feedback: result.feedback,
+                proceedSuffix: shouldSwitchAgent
+                  ? "\n\nProceed with implementation, incorporating these notes where applicable."
+                  : "",
+              });
             }
 
-            return `Plan approved!${result.savedPath ? ` Saved to: ${result.savedPath}` : ""}`;
-          } else {
-            return planDenyFeedback(result.feedback || "", "submit_plan", {
+            return getPlanApprovedPrompt("opencode", undefined, {
               planFilePath: sourceFilePath,
+              doneMsg: result.savedPath ? ` Saved to: ${result.savedPath}` : "",
+            });
+          } else {
+            return getPlanDeniedPrompt("opencode", undefined, {
+              toolName: getPlanToolName("opencode"),
+              planFileRule: buildPlanFileRule(getPlanToolName("opencode"), sourceFilePath),
+              feedback: result.feedback || "Plan changes requested",
             }) + "\n\nAfter making your revisions, call `submit_plan` again to resubmit for review.";
           }
         },

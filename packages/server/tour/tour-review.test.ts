@@ -3,7 +3,12 @@ import { writeFile, mkdtemp } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseTourStreamOutput, parseTourFileOutput } from "./tour-review";
+import {
+  buildTourClaudeCommand,
+  buildTourUserMessage,
+  parseTourStreamOutput,
+  parseTourFileOutput,
+} from "./tour-review";
 
 const stop = {
   title: "Add retry",
@@ -94,5 +99,47 @@ describe("parseTourFileOutput", () => {
     const file = join(dir, "out.json");
     await writeFile(file, JSON.stringify({ other: 1 }));
     expect(await parseTourFileOutput(file)).toBeNull();
+  });
+});
+
+describe("buildTourUserMessage", () => {
+  const patch = "diff --git a/src/large.ts b/src/large.ts\n+const value = 1;\n";
+
+  test("builds JJ tour instructions without inlining the patch", () => {
+    const cases = [
+      ["jj-current", "jj diff --git -r @"],
+      ["jj-last", "jj diff --git -r @-"],
+      ["jj-line", "jj diff --git --from 'heads(::@ & ::(trunk()))' --to @"],
+      ["jj-all", "jj diff --git --from 'root()' --to @"],
+    ] as const;
+
+    for (const [diffType, command] of cases) {
+      const message = buildTourUserMessage(patch, diffType, { defaultBranch: "trunk()" });
+      expect(message).toContain("Walk the reviewer through");
+      expect(message).toContain(command);
+      expect(message).not.toContain(patch);
+    }
+  });
+
+  test("falls back to the inline patch for unknown local diff types", () => {
+    const message = buildTourUserMessage(patch, "p4-default");
+
+    expect(message).toContain("Walk the reviewer through the following code changes");
+    expect(message).toContain(patch);
+  });
+});
+
+describe("buildTourClaudeCommand", () => {
+  test("allows read-only JJ commands", () => {
+    const command = buildTourClaudeCommand("tour").command;
+    const allowedTools = command[command.indexOf("--allowedTools") + 1];
+
+    expect(allowedTools).toContain("Bash(jj status:*)");
+    expect(allowedTools).toContain("Bash(jj diff:*)");
+    expect(allowedTools).toContain("Bash(jj log:*)");
+    expect(allowedTools).toContain("Bash(jj show:*)");
+    expect(allowedTools).toContain("Bash(jj file show:*)");
+    expect(allowedTools).toContain("Bash(jj cat:*)");
+    expect(allowedTools).toContain("Bash(jj bookmark list:*)");
   });
 });

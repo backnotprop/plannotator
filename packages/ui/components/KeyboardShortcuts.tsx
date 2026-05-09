@@ -116,7 +116,8 @@ const reviewShortcuts: ShortcutSection[] = [
     shortcuts: [
       { keys: [modKey, enter], desc: 'Approve / Send feedback' },
       { keys: [altKey, altKey], desc: 'Toggle destination', hint: 'Double-tap to switch between GitHub and Agent in PR review mode' },
-      { keys: [modKey, '⇧', 'C'], desc: 'Toggle comment mode' },
+      { keys: [modKey, 'B'], desc: 'Toggle file tree' },
+      { keys: [modKey, '.'], desc: 'Toggle sidebar' },
       { keys: ['Esc'], desc: 'Collapse sidebar' },
     ],
   },
@@ -125,8 +126,20 @@ const reviewShortcuts: ShortcutSection[] = [
     shortcuts: [
       { keys: ['J'], desc: 'Next file' },
       { keys: ['K'], desc: 'Previous file' },
+      { keys: ['['], desc: 'Scroll to previous file', hint: 'In all-files view, scrolls the viewport to the previous file' },
+      { keys: [']'], desc: 'Scroll to next file', hint: 'In all-files view, scrolls the viewport to the next file' },
       { keys: ['Home'], desc: 'First file' },
       { keys: ['End'], desc: 'Last file' },
+    ],
+  },
+  {
+    title: 'File Actions',
+    shortcuts: [
+      { keys: ['V'], desc: 'Toggle viewed', hint: 'In all-files view, also collapses the file' },
+      { keys: ['A'], desc: 'Toggle git add / stage' },
+      { keys: ['C'], desc: 'File comment', hint: 'In all-files view, opens the comment popover for the focused file' },
+      { keys: ['X'], desc: 'Collapse / expand file', hint: 'In all-files view, toggles the focused file' },
+      { keys: ['Z'], desc: 'Undo collapse', hint: 'Reopens the last collapsed file and scrolls to it' },
     ],
   },
   {

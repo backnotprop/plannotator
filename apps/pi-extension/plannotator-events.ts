@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import type { DiffType } from "./server.js";
+import type { DiffType, VcsSelection } from "./server.js";
 import {
 	getLastAssistantMessageText,
 	getStartupErrorMessage,
@@ -10,6 +10,9 @@ import {
 	openCodeReview,
 	openLastMessageAnnotation,
 	openMarkdownAnnotation,
+	startCodeReviewBrowserSession,
+	startLastMessageAnnotationSession,
+	startMarkdownAnnotationSession,
 	startPlanReviewBrowserSession,
 } from "./plannotator-browser.js";
 
@@ -84,6 +87,8 @@ export type PlannotatorReviewStatusResult =
 export interface PlannotatorCodeReviewPayload {
 	diffType?: DiffType;
 	defaultBranch?: string;
+	vcsType?: VcsSelection;
+	useLocal?: boolean;
 	cwd?: string;
 	prUrl?: string;
 }
@@ -261,6 +266,8 @@ export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
 						cwd: request.payload?.cwd,
 						defaultBranch: request.payload?.defaultBranch,
 						diffType: request.payload?.diffType,
+						vcsType: request.payload?.vcsType,
+						useLocal: request.payload?.useLocal,
 						prUrl: request.payload?.prUrl,
 					});
 					request.respond({ status: "handled", result });
@@ -272,6 +279,7 @@ export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
 						request.respond({ status: "error", error: "Missing filePath for annotate request." });
 						return;
 					}
+					const sourceConverted = /\.html?$/i.test(payload.filePath) || /^https?:\/\//i.test(payload.filePath);
 					const result = await openMarkdownAnnotation(
 						ctx,
 						payload.filePath,
@@ -279,6 +287,7 @@ export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
 						payload.mode ?? "annotate",
 						payload.folderPath,
 						undefined,
+						sourceConverted,
 						payload.gate,
 					);
 					request.respond({ status: "handled", result });
@@ -286,7 +295,7 @@ export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
 				}
 				case "annotate-last": {
 					const payload = request.payload;
-					const lastText = payload?.markdown?.trim() ? payload.markdown : await getLastAssistantMessageText(ctx);
+					const lastText = payload?.markdown?.trim() ? payload.markdown : getLastAssistantMessageText(ctx);
 					if (!lastText) {
 						request.respond({ status: "unavailable", error: "No assistant message found in session." });
 						return;
@@ -316,6 +325,9 @@ export {
 	getLastAssistantMessageText,
 	hasPlanBrowserHtml,
 	hasReviewBrowserHtml,
+	startCodeReviewBrowserSession,
+	startLastMessageAnnotationSession,
+	startMarkdownAnnotationSession,
 	getStartupErrorMessage,
 	openArchiveBrowserAction,
 	openCodeReview,

@@ -24,6 +24,13 @@ Both integrations are derived from official tooling. Claude's review model is ba
 
 For PR reviews, a temporary local checkout is created by default so the agent has file access beyond the diff. Pass `--no-local` to skip this.
 
+For stacked PRs and MRs, the review header lets you choose what the agent sees:
+
+- **Layer** reviews only the current PR or MR relative to its parent branch.
+- **Full stack** reviews the cumulative diff from the repository default branch through the current head.
+
+Layer review is best for avoiding duplicate feedback on parent PRs. Full stack review is useful for integration issues that only appear when the whole chain is considered together. Posting inline comments back to GitHub or GitLab stays limited to Layer because platform comments must anchor to the platform diff.
+
 ## Findings
 
 Each finding includes a file path, line range, description, and severity or priority. Claude findings also include a reasoning trace that explains how the issue was verified.
@@ -182,7 +189,7 @@ claude -p \
   --no-session-persistence \
   --model sonnet \
   --tools Agent,Bash,Read,Glob,Grep \
-  --allowedTools Agent,Read,Glob,Grep,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh api repos/*/*/pulls/*),Bash(gh api repos/*/*/pulls/*/files*),Bash(gh api repos/*/*/pulls/*/comments*),Bash(gh api repos/*/*/issues/*/comments*),Bash(glab mr view:*),Bash(glab mr diff:*),Bash(glab mr list:*),Bash(glab api:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git blame:*),Bash(git branch:*),Bash(git grep:*),Bash(git ls-remote:*),Bash(git ls-tree:*),Bash(git merge-base:*),Bash(git remote:*),Bash(git rev-parse:*),Bash(git show-ref:*),Bash(wc:*) \
+  --allowedTools Agent,Read,Glob,Grep,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh api repos/*/*/pulls/*),Bash(gh api repos/*/*/pulls/*/files*),Bash(gh api repos/*/*/pulls/*/comments*),Bash(gh api repos/*/*/issues/*/comments*),Bash(glab mr view:*),Bash(glab mr diff:*),Bash(glab mr list:*),Bash(glab api:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git blame:*),Bash(git branch:*),Bash(git grep:*),Bash(git ls-remote:*),Bash(git ls-tree:*),Bash(git merge-base:*),Bash(git remote:*),Bash(git rev-parse:*),Bash(git show-ref:*),Bash(jj status:*),Bash(jj diff:*),Bash(jj log:*),Bash(jj show:*),Bash(jj file show:*),Bash(jj cat:*),Bash(jj bookmark list:*),Bash(wc:*) \
   --disallowedTools Edit,Write,NotebookEdit,WebFetch,WebSearch,Bash(python:*),Bash(python3:*),Bash(node:*),Bash(npx:*),Bash(bun:*),Bash(bunx:*),Bash(sh:*),Bash(bash:*),Bash(zsh:*),Bash(curl:*),Bash(wget:*)
 ```
 

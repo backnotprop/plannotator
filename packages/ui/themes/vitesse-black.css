@@ -1,0 +1,66 @@
+/* Vitesse Black — by Anthony Fu */
+.theme-vitesse-black {
+  --background: #000000;
+  --foreground: #dbd7ca;
+  --card: #121212;
+  --card-foreground: #dbd7ca;
+  --popover: #121212;
+  --popover-foreground: #dbd7ca;
+  --primary: #4d9375;
+  --primary-foreground: #000000;
+  --secondary: #191919;
+  --secondary-foreground: #bfbaaa;
+  --muted: #121212;
+  --muted-foreground: #758575;
+  --accent: #6394bf;
+  --accent-foreground: #000000;
+  --destructive: #cb7676;
+  --destructive-foreground: #000000;
+  --border: #191919;
+  --input: #191919;
+  --ring: #4d9375;
+  --success: #4d9375;
+  --success-foreground: #000000;
+  --warning: #e6cc77;
+  --warning-foreground: #000000;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #121212;
+  --focus-highlight: #4d9375;
+}
+
+.theme-vitesse-black.light {
+  --background: #000000;
+  --foreground: #dbd7ca;
+  --card: #121212;
+  --card-foreground: #dbd7ca;
+  --popover: #121212;
+  --popover-foreground: #dbd7ca;
+  --primary: #4d9375;
+  --primary-foreground: #000000;
+  --secondary: #191919;
+  --secondary-foreground: #bfbaaa;
+  --muted: #121212;
+  --muted-foreground: #758575;
+  --accent: #6394bf;
+  --accent-foreground: #000000;
+  --destructive: #cb7676;
+  --destructive-foreground: #000000;
+  --border: #191919;
+  --input: #191919;
+  --ring: #4d9375;
+  --success: #4d9375;
+  --success-foreground: #000000;
+  --warning: #e6cc77;
+  --warning-foreground: #000000;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #121212;
+  --focus-highlight: #4d9375;
+}

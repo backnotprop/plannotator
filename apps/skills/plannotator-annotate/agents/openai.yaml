@@ -1,0 +1,5 @@
+interface:
+  display_name: "Plannotator Annotate"
+  short_description: "Annotate a markdown file, URL, or folder in Plannotator."
+policy:
+  allow_implicit_invocation: false

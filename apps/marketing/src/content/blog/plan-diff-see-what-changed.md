@@ -1,6 +1,6 @@
 ---
 title: "Plan Diff: See What Changed Between Iterations"
-description: "When your coding agent revises a plan, Plannotator now shows exactly what changed. Visual diffs, raw markdown diffs, and version history — across Claude Code, OpenCode, and Pi."
+description: "When your coding agent revises a plan, Plannotator now shows exactly what changed. Visual diffs, raw markdown diffs, and version history — across Claude Code, Codex, OpenCode, and Pi."
 date: 2026-02-22
 author: "backnotprop"
 tags: ["plan-diff", "plan-mode", "version-history"]
@@ -40,7 +40,7 @@ Right now, diffs are scoped to versions of the same plan. A future release will 
 
 ## Works everywhere
 
-Plan Diff is available across all three supported agents: Claude Code, OpenCode, and Pi. The diff UI is the same regardless of which agent you're using. If your agent submits a revised plan, you'll see the badge.
+Plan Diff is available across the supported plan-review agents: Claude Code, Codex, OpenCode, and Pi. The diff UI is the same regardless of which agent you're using. If your agent submits a revised plan, you'll see the badge.
 
 ## This is v1
 
@@ -58,4 +58,4 @@ Start a planning session, deny a plan with some annotations, and let the agent r
 
 ## Plannotator: plan review for coding agents
 
-Plannotator is a free, open-source plan review UI for AI coding agents. Annotate plans visually, review code diffs, share with your team, and now see exactly what changed between iterations with Plan Diff. Coding agents like Claude Code don't show you how a plan changed after revision — Plannotator does. Works with Claude Code, OpenCode, and Pi. Install it in under a minute and start reviewing plans in your browser instead of the terminal.
+Plannotator is a free, open-source plan review UI for AI coding agents. Annotate plans visually, review code diffs, share with your team, and now see exactly what changed between iterations with Plan Diff. Coding agents like Claude Code and Codex don't show you how a plan changed after revision — Plannotator does. Works with Claude Code, Codex, OpenCode, and Pi. Install it in under a minute and start reviewing plans in your browser instead of the terminal.

@@ -99,7 +99,7 @@ The annotation UI in annotate mode works the same as plan review, with a few cha
 - `Cmd/Ctrl+Enter` sends annotations instead of approving
 - The completion screen says "Annotations Sent" instead of "Plan Approved"
 
-All annotation types work identically: deletions, replacements, comments, insertions, global comments, and image attachments.
+All annotation types work identically: deletions, comments, global comments, quick labels, "looks good" approvals, and image attachments.
 
 ## Flags
 

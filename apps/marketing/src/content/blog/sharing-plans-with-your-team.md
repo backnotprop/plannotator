@@ -37,9 +37,9 @@ You paste this in Slack and send it to your senior teammate.
 Your senior clicks the link. The share portal — a static page with no backend — decompresses the URL hash and renders the plan with your annotations. They can now add their own feedback:
 
 - **Comment** on the migration script section: "Add a rollback step"
-- **Replace** the session handling approach: swap JWT for HTTP-only cookies
+- **Comment** on the session handling approach: "Swap JWT for HTTP-only cookies"
 - **Delete** the unnecessary logging middleware
-- **Insert** a note about rate limiting on the new auth endpoints
+- **Quick label** the auth endpoints with "Needs tests" and add a comment: "Document rate limiting here"
 
 Each annotation is tied to the specific text it references.
 
@@ -49,7 +49,7 @@ Your senior clicks **Export → Copy Link** to share their annotated version bac
 
 ### 5. You send combined feedback to Claude
 
-With the merged annotations in front of you, you click **Request Changes**. Plannotator formats the combined feedback — deletions, replacements, comments, insertions — into structured markdown and sends it back to Claude Code through the hook system. Claude receives specific, actionable feedback and revises the plan.
+With the merged annotations in front of you, you click **Request Changes**. Plannotator formats the combined feedback — deletions, comments, global comments, quick labels, and "looks good" approvals — into structured markdown and sends it back to Claude Code through the hook system. Claude receives specific, actionable feedback and revises the plan.
 
 ## How the hook integration works
 

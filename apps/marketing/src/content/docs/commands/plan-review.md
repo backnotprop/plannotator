@@ -1,12 +1,12 @@
 ---
 title: "Plan Review"
-description: "The core plan review flow — how Plannotator intercepts ExitPlanMode and presents the annotation UI."
+description: "The core plan review flow across Claude Code, Codex, and other supported agent hosts."
 sidebar:
   order: 10
 section: "Commands"
 ---
 
-Plan review is the core Plannotator workflow. It's not a slash command — it fires automatically when your agent calls `ExitPlanMode`.
+Plan review is the core Plannotator workflow. It's not a slash command. Plannotator opens automatically when the host agent reaches its plan handoff point.
 
 ## How it works
 
@@ -29,6 +29,34 @@ Agent resubmits → Plan Diff shows what changed
 
 The hook configuration lives at `apps/hook/hooks/hooks.json` and matches the `ExitPlanMode` tool name.
 
+## Codex flow
+
+Codex does not expose a dedicated `ExitPlanMode` interception point. Instead, Plannotator integrates through Codex's experimental `Stop` hook.
+
+```
+Codex turn stops
+        ↓
+Stop hook fires
+        ↓
+Plannotator reads transcript_path rollout
+        ↓
+Latest completed plan item is extracted
+fallback: raw <proposed_plan> block from assistant response
+        ↓
+Browser opens with the normal review UI
+        ↓
+Approve → turn stays completed
+Deny    → Stop hook returns continuation feedback
+        ↓
+Codex revises the plan in the same turn
+        ↓
+Plannotator reopens only if the revised plan actually changed
+```
+
+This means Codex plan review is post-render rather than pre-submit, but you still get the same annotations, plan history, diff view, and revision loop.
+
+The macOS, Linux, and WSL installer enables this hook automatically when Codex is installed or `~/.codex` already exists. Restart Codex Desktop or CLI after installing so the hook configuration is loaded.
+
 ## Annotation types
 
 When you select text in the plan, the annotation toolbar appears with these options:
@@ -36,10 +64,12 @@ When you select text in the plan, the annotation toolbar appears with these opti
 | Type | What it does | Example |
 |------|-------------|---------|
 | **Deletion** | Marks text for removal | "Remove this section" |
-| **Replacement** | Suggests alternative text | "Change `WebSocket` to `SSE`" |
 | **Comment** | Adds feedback on a section | "This needs error handling" |
-| **Insertion** | Adds content after the selection | "Add a retry mechanism here" |
+| **Quick label** | Applies a preset label (⚡) | "Clarify this", "Needs tests", "Out of scope" |
+| **Looks good** | Marks a section as approved (👍) | — |
 | **Global comment** | General feedback (not tied to text) | "The plan looks good overall but needs tests" |
+
+If you want a replacement or an insertion, ask for it in a comment ("Change `WebSocket` to `SSE`" or "Add a retry mechanism here") — the agent will incorporate it during the revision.
 
 ## Image attachments
 
@@ -58,7 +88,7 @@ Images are stored as temporary files and referenced by name in the feedback sent
 **Approve** (no annotations):
 - Click "Approve" or press `Cmd/Ctrl+Enter`
 - Optionally saves plan to disk or Obsidian/Bear
-- Agent proceeds with implementation
+- Agent proceeds through its normal post-plan workflow
 
 **Approve with annotations** (Claude Code):
 - Claude Code doesn't yet support feedback on approval

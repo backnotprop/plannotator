@@ -1,0 +1,66 @@
+/* Dark Plus — by Microsoft */
+.theme-dark-plus {
+  --background: #1e1e1e;
+  --foreground: #d4d4d4;
+  --card: #252526;
+  --card-foreground: #d4d4d4;
+  --popover: #252526;
+  --popover-foreground: #d4d4d4;
+  --primary: #007acc;
+  --primary-foreground: #ffffff;
+  --secondary: #383b3d;
+  --secondary-foreground: #d4d4d4;
+  --muted: #303031;
+  --muted-foreground: #858585;
+  --accent: #4ec9b0;
+  --accent-foreground: #1e1e1e;
+  --destructive: #f44747;
+  --destructive-foreground: #ffffff;
+  --border: #454545;
+  --input: #454545;
+  --ring: #007acc;
+  --success: #369432;
+  --success-foreground: #ffffff;
+  --warning: #cca700;
+  --warning-foreground: #1e1e1e;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #2d2d2d;
+  --focus-highlight: #007acc;
+}
+
+.theme-dark-plus.light {
+  --background: #ffffff;
+  --foreground: #000000;
+  --card: #f3f3f3;
+  --card-foreground: #000000;
+  --popover: #f3f3f3;
+  --popover-foreground: #000000;
+  --primary: #007acc;
+  --primary-foreground: #ffffff;
+  --secondary: #e8e8e8;
+  --secondary-foreground: #000000;
+  --muted: #e5ebf1;
+  --muted-foreground: #6e7781;
+  --accent: #267f99;
+  --accent-foreground: #ffffff;
+  --destructive: #cd3131;
+  --destructive-foreground: #ffffff;
+  --border: #d4d4d4;
+  --input: #d4d4d4;
+  --ring: #007acc;
+  --success: #369432;
+  --success-foreground: #ffffff;
+  --warning: #bf8803;
+  --warning-foreground: #ffffff;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #f3f3f3;
+  --focus-highlight: #007acc;
+}

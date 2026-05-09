@@ -1,0 +1,5 @@
+interface:
+  display_name: "Plannotator Last"
+  short_description: "Annotate the latest assistant message in Plannotator."
+policy:
+  allow_implicit_invocation: false

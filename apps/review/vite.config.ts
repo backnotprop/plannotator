@@ -1,9 +1,26 @@
 import path from 'path';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 import tailwindcss from '@tailwindcss/vite';
 import pkg from '../../package.json';
+import { DEMO_FILE_CONTENTS } from '../../packages/review-editor/demoData';
+
+function demoFileContentPlugin(): Plugin {
+  return {
+    name: 'demo-file-content',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (!req.url?.startsWith('/api/file-content')) return next();
+        const filePath = new URL(req.url, 'http://localhost').searchParams.get('path');
+        const entry = filePath ? DEMO_FILE_CONTENTS[filePath] : undefined;
+        if (!entry) return next();
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ oldContent: entry.oldContent, newContent: entry.newContent }));
+      });
+    },
+  };
+}
 
 export default defineConfig({
   server: {
@@ -13,7 +30,7 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
-  plugins: [react(), tailwindcss(), viteSingleFile()],
+  plugins: [demoFileContentPlugin(), react(), tailwindcss(), viteSingleFile()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, '.'),

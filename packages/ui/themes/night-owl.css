@@ -1,0 +1,66 @@
+/* Night Owl — by Sarah Drasner */
+.theme-night-owl {
+  --background: #011627;
+  --foreground: #d6deeb;
+  --card: #0b2942;
+  --card-foreground: #d6deeb;
+  --popover: #0b2942;
+  --popover-foreground: #d6deeb;
+  --primary: #7e57c2;
+  --primary-foreground: #ffffff;
+  --secondary: #0b253a;
+  --secondary-foreground: #89a4bb;
+  --muted: #0b253a;
+  --muted-foreground: #4b6479;
+  --accent: #82aaff;
+  --accent-foreground: #011627;
+  --destructive: #ef5350;
+  --destructive-foreground: #011627;
+  --border: #5f7e97;
+  --input: #0b253a;
+  --ring: #7e57c2;
+  --success: #addb67;
+  --success-foreground: #011627;
+  --warning: #ffcb6b;
+  --warning-foreground: #011627;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #0b2942;
+  --focus-highlight: #7e57c2;
+}
+
+.theme-night-owl.light {
+  --background: #011627;
+  --foreground: #d6deeb;
+  --card: #0b2942;
+  --card-foreground: #d6deeb;
+  --popover: #0b2942;
+  --popover-foreground: #d6deeb;
+  --primary: #7e57c2;
+  --primary-foreground: #ffffff;
+  --secondary: #0b253a;
+  --secondary-foreground: #89a4bb;
+  --muted: #0b253a;
+  --muted-foreground: #4b6479;
+  --accent: #82aaff;
+  --accent-foreground: #011627;
+  --destructive: #ef5350;
+  --destructive-foreground: #011627;
+  --border: #5f7e97;
+  --input: #0b253a;
+  --ring: #7e57c2;
+  --success: #addb67;
+  --success-foreground: #011627;
+  --warning: #ffcb6b;
+  --warning-foreground: #011627;
+
+  --font-sans: system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #0b2942;
+  --focus-highlight: #7e57c2;
+}
