@@ -63,7 +63,7 @@ import {
   startAnnotateServer,
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
-import { type DiffType, getVcsContext, runVcsDiff, gitRuntime, detectManagedVcs, prepareLocalReviewDiff } from "@plannotator/server/vcs";
+import { type DiffType, gitRuntime, prepareLocalReviewDiff } from "@plannotator/server/vcs";
 import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
 import { parseReviewArgs } from "@plannotator/shared/review-args";
 import { stripAtPrefix, resolveAtReference } from "@plannotator/shared/at-reference";
@@ -504,24 +504,6 @@ if (args[0] === "sessions") {
     }
   } else {
     // --- Local Review Mode ---
-<<<<<<< HEAD
-    const managedVcs = await detectManagedVcs(process.cwd());
-    if (managedVcs) {
-      gitContext = await getVcsContext();
-      initialDiffType = gitContext.vcsType === "p4" ? "p4-default" : resolveDefaultDiffType(loadConfig());
-      const diffResult = await runVcsDiff(initialDiffType, gitContext.defaultBranch);
-      rawPatch = diffResult.patch;
-      gitRef = diffResult.label;
-      diffError = diffResult.error;
-    } else {
-      workspaceRepos = await buildWorkspaceLocalRepos(process.cwd());
-      if (workspaceRepos.length === 0) {
-        throw new Error("Not in a git repo and no nested repositories were found.");
-      }
-      rawPatch = "";
-      gitRef = "Workspace review";
-    }
-=======
     const config = loadConfig();
     const diffResult = await prepareLocalReviewDiff({
       vcsType: reviewArgs.vcsType,
@@ -533,7 +515,16 @@ if (args[0] === "sessions") {
     rawPatch = diffResult.rawPatch;
     gitRef = diffResult.gitRef;
     diffError = diffResult.error;
->>>>>>> origin/main
+
+    // Fallback: if no VCS detected, try workspace review (multi-repo / poly-repo setups)
+    if (!gitContext) {
+      workspaceRepos = await buildWorkspaceLocalRepos(process.cwd());
+      if (workspaceRepos.length === 0) {
+        throw new Error("Not in a git repo and no nested repositories were found.");
+      }
+      rawPatch = "";
+      gitRef = "Workspace review";
+    }
   }
 
   const reviewProject = (await detectProjectName()) ?? "_unknown";
