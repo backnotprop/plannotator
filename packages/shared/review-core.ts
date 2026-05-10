@@ -18,6 +18,7 @@ export type DiffType =
   | "jj-last"
   | "jj-line"
   | "jj-all"
+  | "jj-evolog"
   | "branch"
   | "merge-base"
   | "all"
@@ -61,6 +62,15 @@ export interface RepositoryContext {
   displayFallback?: string;
 }
 
+export interface JjEvoLogEntry {
+  /** Short commit ID (12 hex chars) */
+  commitId: string;
+  /** First line of the commit message */
+  description: string;
+  /** Human-readable age string, e.g. "2 hours ago" */
+  age?: string;
+}
+
 export interface GitContext {
   currentBranch: string;
   defaultBranch: string;
@@ -71,6 +81,8 @@ export interface GitContext {
   repository?: RepositoryContext;
   cwd?: string;
   vcsType?: "git" | "jj" | "p4";
+  /** Evolution log entries for the current jj change (jj only). */
+  jjEvologs?: JjEvoLogEntry[];
 }
 
 export interface DiffResult {

@@ -14,6 +14,7 @@ export type {
   DiffOption,
   WorktreeInfo,
   GitContext,
+  JjEvoLogEntry,
   AvailableBranches,
   CompareTargetConfig,
   CompareTargetPickerCopy,
