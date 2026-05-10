@@ -510,6 +510,18 @@ if [ -f "$PLUGIN_HOOKS" ]; then
     cat > "$PLUGIN_HOOKS" << 'HOOKS_EOF'
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "EnterPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "plannotator improve-context",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "PermissionRequest": [
       {
         "matcher": "ExitPlanMode",

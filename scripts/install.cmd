@@ -364,6 +364,18 @@ if exist "!PLUGIN_HOOKS!" (
     (
 echo {
 echo   "hooks": {
+echo     "PreToolUse": [
+echo       {
+echo         "matcher": "EnterPlanMode",
+echo         "hooks": [
+echo           {
+echo             "type": "command",
+echo             "command": "!EXE_PATH! improve-context",
+echo             "timeout": 5
+echo           }
+echo         ]
+echo       }
+echo     ],
 echo     "PermissionRequest": [
 echo       {
 echo         "matcher": "ExitPlanMode",

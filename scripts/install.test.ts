@@ -26,6 +26,13 @@ describe("install.sh", () => {
     expect(json.hooks.PermissionRequest[0].hooks[0].type).toBe("command");
     expect(json.hooks.PermissionRequest[0].hooks[0].command).toBe("plannotator");
     expect(json.hooks.PermissionRequest[0].hooks[0].timeout).toBe(345600);
+    // EnterPlanMode hook drives the compound-skill improvement-hook injection.
+    // It must be re-emitted on every install — see apps/hook/hooks/hooks.json.
+    expect(json.hooks.PreToolUse).toBeArray();
+    expect(json.hooks.PreToolUse[0].matcher).toBe("EnterPlanMode");
+    expect(json.hooks.PreToolUse[0].hooks[0].type).toBe("command");
+    expect(json.hooks.PreToolUse[0].hooks[0].command).toBe("plannotator improve-context");
+    expect(json.hooks.PreToolUse[0].hooks[0].timeout).toBe(5);
   });
 
   test("installs to ~/.local/bin", () => {
@@ -150,6 +157,11 @@ describe("install.ps1", () => {
     expect(script).toContain('"type": "command"');
     expect(script).toContain('"timeout": 345600');
     expect(script).toContain('"command":');
+    // EnterPlanMode hook drives the compound-skill improvement-hook injection.
+    expect(script).toContain('"PreToolUse"');
+    expect(script).toContain('"matcher": "EnterPlanMode"');
+    expect(script).toContain('"command": "$exePathJson improve-context"');
+    expect(script).toContain('"timeout": 5');
   });
 
   test("uses full exe path in hooks.json", () => {
@@ -267,6 +279,11 @@ describe("install.cmd", () => {
     expect(script).toContain('echo             "type": "command",');
     expect(script).toContain('echo             "command":');
     expect(script).toContain('echo             "timeout": 345600');
+    // EnterPlanMode hook drives the compound-skill improvement-hook injection.
+    expect(script).toContain('echo     "PreToolUse": [');
+    expect(script).toContain('echo         "matcher": "EnterPlanMode",');
+    expect(script).toContain('echo             "command": "!EXE_PATH! improve-context",');
+    expect(script).toContain('echo             "timeout": 5');
   });
 
   test("uses full exe path in hooks.json", () => {

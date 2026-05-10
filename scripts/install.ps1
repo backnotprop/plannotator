@@ -248,6 +248,18 @@ if (Test-Path $pluginHooks) {
     @"
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "EnterPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$exePathJson improve-context",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "PermissionRequest": [
       {
         "matcher": "ExitPlanMode",
