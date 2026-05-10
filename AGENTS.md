@@ -119,6 +119,10 @@ claude --plugin-dir ./apps/hook
 | `JINA_API_KEY` | Optional Jina Reader API key for higher rate limits (500 RPM vs 20 RPM unauthenticated). Free keys include 10M tokens. |
 | `PLANNOTATOR_VERIFY_ATTESTATION` | **Read by the install scripts only**, not by the runtime binary. Set to `1` / `true` to have `scripts/install.sh` / `install.ps1` / `install.cmd` run `gh attestation verify` on every install. Off by default. Can also be set persistently via `~/.plannotator/config.json` (`{ "verifyAttestation": true }`) or per-invocation via `--verify-attestation`. Requires `gh` installed and authenticated. |
 
+**Config-only settings (`~/.plannotator/config.json`)**: Some settings have no env-var equivalent and are toggled by editing the config file directly:
+
+- `pfmReminder` (`true` / `false`, default `false`) — when enabled, the Claude Code `EnterPlanMode` PreToolUse hook injects a Plannotator Flavored Markdown reminder describing the renderer's extensions (code-file links, callouts, tables, diagrams, task lists, hex swatches, wiki-links). Lets the planning agent enrich plans with PFM features without having to discover them. Composes cleanly with the compound-skill improvement hook — both fire from the same `improve-context` handler in `apps/hook/server/index.ts`.
+
 **Legacy:** `SSH_TTY` and `SSH_CONNECTION` are still detected when `PLANNOTATOR_REMOTE` is unset. Set `PLANNOTATOR_REMOTE=1` / `true` to force remote mode or `0` / `false` to force local mode.
 
 **Devcontainer/SSH usage:**

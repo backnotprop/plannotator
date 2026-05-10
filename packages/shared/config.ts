@@ -115,6 +115,13 @@ export interface PlannotatorConfig {
    * Set to false to always use plain fetch + Turndown.
    */
   jina?: boolean;
+  /**
+   * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
+   * call so the agent is aware it can enrich plans with code-file links,
+   * callouts, tables, diagrams, task lists, and the other PFM extensions.
+   * Read by the `improve-context` PreToolUse handler. Default: false.
+   */
+  pfmReminder?: boolean;
 }
 
 const CONFIG_DIR = join(homedir(), ".plannotator");

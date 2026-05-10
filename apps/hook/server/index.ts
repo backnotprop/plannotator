@@ -89,6 +89,7 @@ import { openBrowser } from "@plannotator/server/browser";
 import { detectProjectName } from "@plannotator/server/project";
 import { hostnameOrFallback } from "@plannotator/shared/project";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
+import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import { AGENT_CONFIG, type Origin } from "@plannotator/shared/agents";
 import {
   findSessionLogsByAncestorWalk,
@@ -1048,21 +1049,22 @@ if (args[0] === "sessions") {
   // ============================================
   //
   // Called by PreToolUse hook on EnterPlanMode.
-  // Reads the improvement hook file and returns additionalContext.
-  // No file = exit 0 silently (passthrough).
+  // Composes any enabled context sources (compound improvement hook,
+  // PFM reminder) into a single additionalContext payload.
+  // Nothing enabled = exit 0 silently (passthrough).
 
   // Must consume stdin (Claude Code hooks deliver event JSON on stdin)
   await Bun.stdin.text();
 
   const hook = readImprovementHook("enterplanmode-improve");
-  if (!hook) process.exit(0);
+  const pfmEnabled = loadConfig().pfmReminder === true;
 
-  const context = [
-    "[Plannotator Improvement Hook]",
-    "The following corrective instructions were generated from analysis of previous plan denial patterns.",
-    "Apply these guidelines when writing your plan:\n",
-    hook.content,
-  ].join("\n");
+  const context = composeImproveContext({
+    pfmEnabled,
+    improvementHookContent: hook?.content ?? null,
+  });
+
+  if (context === null) process.exit(0);
 
   console.log(JSON.stringify({
     hookSpecificOutput: {
