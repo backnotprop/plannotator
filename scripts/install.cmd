@@ -370,7 +370,19 @@ echo         "matcher": "EnterPlanMode",
 echo         "hooks": [
 echo           {
 echo             "type": "command",
-echo             "command": "!EXE_PATH! improve-context",
+echo             "command": "!EXE_PATH! improve-context pre-tool",
+echo             "timeout": 5
+echo           }
+echo         ]
+echo       }
+echo     ],
+echo     "UserPromptSubmit": [
+echo       {
+echo         "matcher": "*",
+echo         "hooks": [
+echo           {
+echo             "type": "command",
+echo             "command": "!EXE_PATH! improve-context prompt",
 echo             "timeout": 5
 echo           }
 echo         ]

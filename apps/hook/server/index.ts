@@ -75,7 +75,7 @@ import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getCliInstallUrl, getMRLa
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
 import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles } from "@plannotator/shared/resolve-file";
 import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
-import { statSync, rmSync, realpathSync, existsSync } from "fs";
+import { statSync, rmSync, realpathSync, existsSync, appendFileSync } from "fs";
 import { parseRemoteUrl } from "@plannotator/shared/repo";
 import {
   getReviewApprovedPrompt,
@@ -108,7 +108,7 @@ import {
   isTopLevelHelpInvocation,
 } from "./cli";
 import path from "path";
-import { tmpdir } from "os";
+import { tmpdir, homedir } from "os";
 
 // Embed the built HTML at compile time
 // @ts-ignore - Bun import attribute for text
@@ -1048,13 +1048,27 @@ if (args[0] === "sessions") {
   // IMPROVEMENT HOOK CONTEXT INJECTION MODE
   // ============================================
   //
-  // Called by PreToolUse hook on EnterPlanMode.
+  // Called by two hooks:
+  //   1. PreToolUse/EnterPlanMode — fires when the model auto-enters plan mode
+  //   2. UserPromptSubmit — fires on every user prompt; only injects when
+  //      permission_mode is "plan" (covers manual plan mode entry)
+  //
   // Composes any enabled context sources (compound improvement hook,
   // PFM reminder) into a single additionalContext payload.
   // Nothing enabled = exit 0 silently (passthrough).
 
-  // Must consume stdin (Claude Code hooks deliver event JSON on stdin)
-  await Bun.stdin.text();
+  const stdinText = await Bun.stdin.text();
+
+  // For UserPromptSubmit, only inject when in plan mode
+  const hookEvent = args[1]; // "pre-tool" or "prompt"
+  if (hookEvent === "prompt") {
+    try {
+      const input = JSON.parse(stdinText);
+      if (input.permission_mode !== "plan") process.exit(0);
+    } catch {
+      process.exit(0);
+    }
+  }
 
   const hook = readImprovementHook("enterplanmode-improve");
   const pfmEnabled = loadConfig().pfmReminder === true;
@@ -1068,7 +1082,7 @@ if (args[0] === "sessions") {
 
   console.log(JSON.stringify({
     hookSpecificOutput: {
-      hookEventName: "PreToolUse",
+      hookEventName: hookEvent === "prompt" ? "UserPromptSubmit" : "PreToolUse",
       additionalContext: context,
     },
   }));
