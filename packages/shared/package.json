@@ -30,6 +30,7 @@
     "./config": "./config.ts",
     "./prompts": "./prompts.ts",
     "./improvement-hooks": "./improvement-hooks.ts",
+    "./pfm-reminder": "./pfm-reminder.ts",
     "./worktree": "./worktree.ts",
     "./worktree-pool": "./worktree-pool.ts",
     "./html-to-markdown": "./html-to-markdown.ts",
