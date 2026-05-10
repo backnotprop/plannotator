@@ -354,7 +354,9 @@ tools (except writing markdown files), or otherwise make changes to the system.
       }
 
       if (shouldInjectFullPlanningPrompt(lastUserAgent, workflowOptions)) {
-        output.system = stripConflictingPlanModeRules(output.system);
+        const stripped = stripConflictingPlanModeRules(output.system);
+        output.system.length = 0;
+        output.system.push(...stripped);
         output.system.push(getPlanningPrompt());
 
         const hook = readImprovementHook("enterplanmode-improve");
