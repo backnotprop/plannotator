@@ -112,23 +112,6 @@ diffs-container {
   --diffs-light: var(--foreground);
 }
 
-/* Diff line backgrounds - synchronized with plannotator colors */
-.diff-line-addition {
-  background: oklch(from var(--success) l c h / 0.12);
-}
-
-.diff-line-deletion {
-  background: oklch(from var(--destructive) l c h / 0.12);
-}
-
-.light .diff-line-addition {
-  background: oklch(from var(--success) l c h / 0.15);
-}
-
-.light .diff-line-deletion {
-  background: oklch(from var(--destructive) l c h / 0.15);
-}
-
 /* Review comment thread styling */
 .review-comment {
   position: relative;

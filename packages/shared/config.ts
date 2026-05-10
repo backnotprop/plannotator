@@ -11,6 +11,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { execSync } from "child_process";
 
 export type DefaultDiffType = 'uncommitted' | 'unstaged' | 'staged' | 'merge-base' | 'all';
+export type DiffLineBgIntensity = 'subtle' | 'normal' | 'strong';
 
 export interface DiffOptions {
   diffStyle?: 'split' | 'unified';
@@ -24,6 +25,7 @@ export interface DiffOptions {
   tabSize?: number;
   hideWhitespace?: boolean;
   defaultDiffType?: DefaultDiffType;
+  lineBgIntensity?: DiffLineBgIntensity;
 }
 
 /** Single conventional comment label entry stored in config.json */
