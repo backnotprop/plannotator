@@ -574,6 +574,56 @@ export function devMockApi(): Plugin {
     name: 'plannotator-dev-mock-api',
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
+        if (req.url === '/api/hooks/status') {
+          res.setHeader('Content-Type', 'application/json');
+          try {
+            const { readImprovementHook } = await import('@plannotator/shared/improvement-hooks');
+            const { loadConfig } = await import('@plannotator/shared/config');
+            const { composeImproveContext } = await import('@plannotator/shared/pfm-reminder');
+            const config = loadConfig();
+            const hook = readImprovementHook('enterplanmode-improve');
+            const pfmEnabled = config.pfmReminder === true;
+            const composed = composeImproveContext({ pfmEnabled, improvementHookContent: hook?.content ?? null });
+            res.end(JSON.stringify({
+              pfmReminder: { enabled: pfmEnabled },
+              improvementHook: {
+                present: !!hook,
+                filePath: hook?.filePath ?? null,
+                fileSize: hook?.content?.length ?? null,
+                content: hook?.content ?? null,
+              },
+              composedLength: composed?.length ?? null,
+            }));
+          } catch {
+            res.end(JSON.stringify({
+              pfmReminder: { enabled: false },
+              improvementHook: { present: false, filePath: null, fileSize: null, content: null },
+              composedLength: null,
+            }));
+          }
+          return;
+        }
+
+        if (req.url === '/api/config' && req.method === 'POST') {
+          let body = '';
+          req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+          req.on('end', async () => {
+            try {
+              const { saveConfig } = await import('@plannotator/shared/config');
+              const parsed = JSON.parse(body);
+              const toSave: Record<string, unknown> = {};
+              if (parsed.pfmReminder !== undefined) toSave.pfmReminder = parsed.pfmReminder;
+              if (Object.keys(toSave).length > 0) saveConfig(toSave as any);
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ ok: true }));
+            } catch {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: 'Invalid request' }));
+            }
+          });
+          return;
+        }
+
         if (req.url === '/api/plan') {
           res.setHeader('Content-Type', 'application/json');
           res.end(JSON.stringify({
