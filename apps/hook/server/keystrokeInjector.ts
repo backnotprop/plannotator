@@ -1,5 +1,9 @@
-// Injects "1\n" into CC terminal to auto-select the plan-accept "clear + bypass" option.
+// Opt-in helper that injects "1\n" into CC terminal to auto-select native clear + bypass.
 const MACOS_PROCESS_TERMINALS = ["iTerm2", "Terminal"];
+
+export function shouldAutoSelectNativeClear(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env["PLANNOTATOR_AUTO_SELECT_NATIVE_CLEAR"] === "1";
+}
 
 export function spawnKeystrokeInjector(delayMs = 600): void {
   const delaySec = (delayMs / 1000).toFixed(2);

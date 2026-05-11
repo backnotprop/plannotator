@@ -7,7 +7,26 @@ import {
   beforeEach,
   afterEach,
 } from "bun:test";
-import { spawnKeystrokeInjector } from "./keystrokeInjector";
+import { shouldAutoSelectNativeClear, spawnKeystrokeInjector } from "./keystrokeInjector";
+
+describe("shouldAutoSelectNativeClear", () => {
+  it("defaults to false", () => {
+    expect(shouldAutoSelectNativeClear({} as NodeJS.ProcessEnv)).toBe(false);
+  });
+
+  it("is true only for PLANNOTATOR_AUTO_SELECT_NATIVE_CLEAR=1", () => {
+    expect(
+      shouldAutoSelectNativeClear({
+        PLANNOTATOR_AUTO_SELECT_NATIVE_CLEAR: "1",
+      } as NodeJS.ProcessEnv),
+    ).toBe(true);
+    expect(
+      shouldAutoSelectNativeClear({
+        PLANNOTATOR_AUTO_SELECT_NATIVE_CLEAR: "true",
+      } as NodeJS.ProcessEnv),
+    ).toBe(false);
+  });
+});
 
 describe("spawnKeystrokeInjector", () => {
   let spawnCalls: { cmd: string[]; opts: Record<string, unknown> }[] = [];

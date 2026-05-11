@@ -1,8 +1,30 @@
 import { describe, expect, test } from 'bun:test';
-import { buildApprovalRequestBody } from './approvalBody';
+import { buildApprovalRequestBody, shouldEnableNativeClearBeforeApprove } from './approvalBody';
+
+describe('shouldEnableNativeClearBeforeApprove', () => {
+  test('enables native clear only for explicit Claude Code ExitPlanMode overrides', () => {
+    expect(shouldEnableNativeClearBeforeApprove({
+      origin: 'claude-code',
+      toolName: 'ExitPlanMode',
+      override: { deferToNativeForClear: true },
+    })).toBe(true);
+
+    expect(shouldEnableNativeClearBeforeApprove({
+      origin: 'claude-code',
+      toolName: 'ExitPlanMode',
+      override: { permissionMode: 'bypassPermissionsClearReminder' },
+    })).toBe(false);
+
+    expect(shouldEnableNativeClearBeforeApprove({
+      origin: 'claude-code',
+      toolName: 'OtherTool',
+      override: { deferToNativeForClear: true },
+    })).toBe(false);
+  });
+});
 
 describe('buildApprovalRequestBody', () => {
-  test('maps bypass clear reminder mode to native Claude Code clear on ExitPlanMode', () => {
+  test('maps bypass clear reminder mode to reminder fallback on ExitPlanMode', () => {
     expect(buildApprovalRequestBody({
       origin: 'claude-code',
       permissionMode: 'bypassPermissionsClearReminder',
@@ -10,7 +32,7 @@ describe('buildApprovalRequestBody', () => {
       planSaveSettings: { enabled: true },
     })).toEqual({
       permissionMode: 'bypassPermissions',
-      deferToNativeForClear: true,
+      clearContextNudge: true,
       planSave: { enabled: true },
     });
   });
@@ -60,7 +82,7 @@ describe('buildApprovalRequestBody', () => {
     });
   });
 
-  test('uses native clear for bypass clear reminder override when ExitPlanMode is known', () => {
+  test('keeps bypass clear reminder override as reminder fallback when ExitPlanMode is known', () => {
     expect(buildApprovalRequestBody({
       origin: 'claude-code',
       permissionMode: 'acceptEdits',
@@ -71,7 +93,7 @@ describe('buildApprovalRequestBody', () => {
       planSaveSettings: { enabled: true },
     })).toEqual({
       permissionMode: 'bypassPermissions',
-      deferToNativeForClear: true,
+      clearContextNudge: true,
       planSave: { enabled: true },
     });
   });
@@ -100,10 +122,11 @@ describe('buildApprovalRequestBody', () => {
     });
   });
 
-  test('forwards deferToNativeForClear for Claude Code bypass approvals', () => {
+  test('forwards deferToNativeForClear only for explicit Claude Code ExitPlanMode bypass approvals', () => {
     expect(buildApprovalRequestBody({
       origin: 'claude-code',
       permissionMode: 'acceptEdits',
+      toolName: 'ExitPlanMode',
       override: {
         permissionMode: 'bypassPermissions',
         deferToNativeForClear: true,
@@ -112,6 +135,22 @@ describe('buildApprovalRequestBody', () => {
     })).toEqual({
       permissionMode: 'bypassPermissions',
       deferToNativeForClear: true,
+      planSave: { enabled: true },
+    });
+  });
+
+  test('does not forward deferToNativeForClear without ExitPlanMode', () => {
+    expect(buildApprovalRequestBody({
+      origin: 'claude-code',
+      permissionMode: 'acceptEdits',
+      toolName: 'OtherTool',
+      override: {
+        permissionMode: 'bypassPermissions',
+        deferToNativeForClear: true,
+      },
+      planSaveSettings: { enabled: true },
+    })).toEqual({
+      permissionMode: 'bypassPermissions',
       planSave: { enabled: true },
     });
   });
