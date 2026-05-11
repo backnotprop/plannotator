@@ -19,6 +19,18 @@ export interface ApprovalRequestBody {
   deferToNativeForClear?: boolean;
 }
 
+export function shouldEnableNativeClearBeforeApprove(options: {
+  origin: Origin | null;
+  toolName?: string;
+  override?: ApprovalOverride;
+}): boolean {
+  return (
+    options.origin === 'claude-code' &&
+    options.toolName === 'ExitPlanMode' &&
+    options.override?.deferToNativeForClear === true
+  );
+}
+
 export function buildApprovalRequestBody(options: {
   origin: Origin | null;
   permissionMode: PermissionMode;

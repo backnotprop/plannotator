@@ -78,7 +78,7 @@ import type { PlanDiffMode } from '@plannotator/ui/components/plan-diff/PlanDiff
 import { DEMO_PLAN_CONTENT as DEFAULT_DEMO_PLAN_CONTENT } from './demoPlan';
 import { DIFF_DEMO_PLAN_CONTENT } from './demoPlanDiffDemo';
 import { canUseAnnotateWideMode, resolveWideModeExitLayout, type WideModeLayoutSnapshot, type WideModeType } from './wideMode';
-import { buildApprovalRequestBody, type ApprovalOverride } from './approvalBody';
+import { buildApprovalRequestBody, shouldEnableNativeClearBeforeApprove, type ApprovalOverride } from './approvalBody';
 const USE_DIFF_DEMO =
   import.meta.env.VITE_DIFF_DEMO === '1' ||
   import.meta.env.VITE_DIFF_DEMO === 'true';
@@ -965,11 +965,7 @@ const App: React.FC = () => {
         ? await autoSavePromiseRef.current
         : autoSaveResultsRef.current;
 
-      const shouldUseNativeClear =
-        origin === 'claude-code' &&
-        pendingToolName === 'ExitPlanMode' &&
-        (override.deferToNativeForClear || (override.permissionMode ?? permissionMode) === 'bypassPermissionsClearReminder');
-      if (shouldUseNativeClear) {
+      if (shouldEnableNativeClearBeforeApprove({ origin, toolName: pendingToolName, override })) {
         try {
           const response = await fetch('/api/enable-clear-context', { method: 'POST' });
           if (response.ok) setShowClearContextBanner(false);
@@ -1071,8 +1067,8 @@ const App: React.FC = () => {
     if (pendingToolName === 'ExitPlanMode') {
       return [{
         id: 'approve-bypass-native-clear',
-        label: 'Approve + Bypass + Clear Context (native)',
-        description: "Defers to Claude Code's native plan-accept dialog so it can clear context and set bypass permissions.",
+        label: 'Approve + Bypass + Fresh Thread / Native Clear',
+        description: "Defers to the native plan-accept dialog. This may restart or open a fresh thread while setting bypass permissions.",
         onSelect: () => approveWithClaudeCodeWarning({
           permissionMode: 'bypassPermissions',
           deferToNativeForClear: true,
