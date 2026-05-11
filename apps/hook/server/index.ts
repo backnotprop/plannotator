@@ -1048,27 +1048,12 @@ if (args[0] === "sessions") {
   // IMPROVEMENT HOOK CONTEXT INJECTION MODE
   // ============================================
   //
-  // Called by two hooks:
-  //   1. PreToolUse/EnterPlanMode — fires when the model auto-enters plan mode
-  //   2. UserPromptSubmit — fires on every user prompt; only injects when
-  //      permission_mode is "plan" (covers manual plan mode entry)
-  //
+  // Called by PreToolUse hook on EnterPlanMode.
   // Composes any enabled context sources (compound improvement hook,
   // PFM reminder) into a single additionalContext payload.
   // Nothing enabled = exit 0 silently (passthrough).
 
-  const stdinText = await Bun.stdin.text();
-
-  // For UserPromptSubmit, only inject when in plan mode
-  const hookEvent = args[1]; // "pre-tool" or "prompt"
-  if (hookEvent === "prompt") {
-    try {
-      const input = JSON.parse(stdinText);
-      if (input.permission_mode !== "plan") process.exit(0);
-    } catch {
-      process.exit(0);
-    }
-  }
+  await Bun.stdin.text();
 
   const hook = readImprovementHook("enterplanmode-improve");
   const pfmEnabled = loadConfig().pfmReminder === true;

@@ -254,19 +254,7 @@ if (Test-Path $pluginHooks) {
         "hooks": [
           {
             "type": "command",
-            "command": "$exePathJson improve-context pre-tool",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$exePathJson improve-context prompt",
+            "command": "$exePathJson improve-context",
             "timeout": 5
           }
         ]

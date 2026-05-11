@@ -516,19 +516,7 @@ if [ -f "$PLUGIN_HOOKS" ]; then
         "hooks": [
           {
             "type": "command",
-            "command": "plannotator improve-context pre-tool",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "plannotator improve-context prompt",
+            "command": "plannotator improve-context",
             "timeout": 5
           }
         ]
