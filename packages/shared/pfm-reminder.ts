@@ -1,10 +1,9 @@
 /**
- * Plannotator Flavored Markdown reminder.
+ * Plannotator planning reminders.
  *
  * Static prose injected into the EnterPlanMode PreToolUse hook when the user
- * has opted in via `pfmReminder: true` in ~/.plannotator/config.json. It tells
- * the planning agent which markdown extensions Plannotator's viewer renders so
- * plans can be enriched with code-file links, callouts, tables, diagrams, etc.
+ * has opted in through ~/.plannotator/config.json. These reminders tell the
+ * planning agent how to shape plans for Plannotator review.
  *
  * Keep this short. The agent reads it on every EnterPlanMode call.
  */
@@ -13,17 +12,23 @@
  * Compose the additionalContext string for the improve-context PreToolUse handler.
  * Returns null when no sources are enabled (handler should exit silently).
  *
- * Order: PFM reminder first (capabilities) then improvement hook (corrective
- * rules). Both appear separated by a horizontal rule.
+ * Order: PFM reminder first (capabilities), ASCII flow reminder second
+ * (structure), then improvement hook (corrective rules). Sections appear
+ * separated by a horizontal rule.
  */
 export function composeImproveContext(input: {
   pfmEnabled: boolean;
+  asciiFlowEnabled: boolean;
   improvementHookContent: string | null;
 }): string | null {
   const sections: string[] = [];
 
   if (input.pfmEnabled) {
     sections.push(PFM_REMINDER);
+  }
+
+  if (input.asciiFlowEnabled) {
+    sections.push(ASCII_FLOW_REMINDER);
   }
 
   if (input.improvementHookContent) {
@@ -78,3 +83,21 @@ Other extras
   - A small set of emoji shortcodes is supported (:rocket:, :warning:, :white_check_mark:, ...)
 
 Plain prose is always fine. The point is: prefer code-file links over copy-pasted snippets, and reach for callouts or tables when structure makes the plan easier to scan.`;
+
+export const ASCII_FLOW_REMINDER = `[ASCII Plan Flow]
+This plan will be reviewed by a human before implementation. Add a compact \`## Plan Flow\` section after Summary/Context and before implementation details so the reviewer can quickly judge whether the order, branches, and review gates make sense.
+
+Use a fenced \`text\` code block with pure ASCII only:
+\`\`\`text
+[Explore] -> [Draft plan] -> [Review]
+                   |             |
+                   v             v
+              [Revise] <---- [Feedback]
+\`\`\`
+
+Rules:
+- Use pure ASCII characters only. Do not use Unicode box drawing.
+- Do not use Mermaid, Graphviz, or SVG for this section.
+- Show the main execution order, important branches, review gates, rollback/feedback loops, and parallel work where relevant.
+- Keep it compact: roughly 5-12 nodes, short concrete labels, and no decorative art.
+- For very small plans, keep the flow to the minimum useful shape.`;

@@ -583,9 +583,11 @@ export function devMockApi(): Plugin {
             const config = loadConfig();
             const hook = readImprovementHook('enterplanmode-improve');
             const pfmEnabled = config.pfmReminder === true;
-            const composed = composeImproveContext({ pfmEnabled, improvementHookContent: hook?.content ?? null });
+            const asciiFlowEnabled = config.asciiFlowReminder === true;
+            const composed = composeImproveContext({ pfmEnabled, asciiFlowEnabled, improvementHookContent: hook?.content ?? null });
             res.end(JSON.stringify({
               pfmReminder: { enabled: pfmEnabled },
+              asciiFlowReminder: { enabled: asciiFlowEnabled },
               improvementHook: {
                 present: !!hook,
                 filePath: hook?.filePath ?? getImprovementHookExpectedPath('enterplanmode-improve'),
@@ -597,6 +599,7 @@ export function devMockApi(): Plugin {
           } catch {
             res.end(JSON.stringify({
               pfmReminder: { enabled: false },
+              asciiFlowReminder: { enabled: false },
               improvementHook: { present: false, filePath: '~/.plannotator/hooks/compound/enterplanmode-improve-hook.txt', fileSize: null, content: null },
               composedLength: null,
             }));
@@ -613,6 +616,7 @@ export function devMockApi(): Plugin {
               const parsed = JSON.parse(body);
               const toSave: Record<string, unknown> = {};
               if (parsed.pfmReminder !== undefined) toSave.pfmReminder = parsed.pfmReminder;
+              if (parsed.asciiFlowReminder !== undefined) toSave.asciiFlowReminder = parsed.asciiFlowReminder;
               if (Object.keys(toSave).length > 0) saveConfig(toSave as any);
               res.setHeader('Content-Type', 'application/json');
               res.end(JSON.stringify({ ok: true }));

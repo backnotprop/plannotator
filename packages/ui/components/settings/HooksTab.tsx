@@ -3,6 +3,7 @@ import { FAVICON_SVG } from '@plannotator/shared/favicon';
 
 interface HooksStatus {
   pfmReminder: { enabled: boolean };
+  asciiFlowReminder: { enabled: boolean };
   improvementHook: {
     present: boolean;
     filePath: string | null;
@@ -51,6 +52,7 @@ const CopyPathButton: React.FC<{ filePath: string }> = ({ filePath }) => {
 export const HooksTab: React.FC = () => {
   const [status, setStatus] = useState<HooksStatus | null>(null);
   const [pfmEnabled, setPfmEnabled] = useState(false);
+  const [asciiFlowEnabled, setAsciiFlowEnabled] = useState(false);
   const [hookExpanded, setHookExpanded] = useState(false);
 
   useEffect(() => {
@@ -59,6 +61,7 @@ export const HooksTab: React.FC = () => {
       .then((data: HooksStatus) => {
         setStatus(data);
         setPfmEnabled(data.pfmReminder.enabled);
+        setAsciiFlowEnabled(data.asciiFlowReminder.enabled);
       })
       .catch(() => {});
   }, []);
@@ -71,6 +74,16 @@ export const HooksTab: React.FC = () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pfmReminder: next }),
     }).catch(() => setPfmEnabled(!next));
+  };
+
+  const toggleAsciiFlow = async () => {
+    const next = !asciiFlowEnabled;
+    setAsciiFlowEnabled(next);
+    await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ asciiFlowReminder: next }),
+    }).catch(() => setAsciiFlowEnabled(!next));
   };
 
   if (!status) {
@@ -121,6 +134,48 @@ export const HooksTab: React.FC = () => {
               }`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${pfmEnabled ? 'bg-primary' : 'bg-muted-foreground/50'}`} />
                 {pfmEnabled ? 'Enabled' : 'Disabled'}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ASCII Flow Reminder Card */}
+      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+        <div className="flex items-start gap-3">
+          <div
+            className="w-8 h-8 flex-shrink-0 rounded-md overflow-hidden"
+            dangerouslySetInnerHTML={{ __html: FAVICON_SVG }}
+          />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-foreground">ASCII Plan Flow</h3>
+              <button
+                onClick={toggleAsciiFlow}
+                className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                  asciiFlowEnabled ? 'bg-primary' : 'bg-muted'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-transform ${
+                    asciiFlowEnabled ? 'translate-x-4' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+              Asks the planning agent to include a compact <code className="text-[10px] bg-muted px-1 py-0.5 rounded">## Plan Flow</code>{' '}
+              section with a fenced <code className="text-[10px] bg-muted px-1 py-0.5 rounded">text</code> ASCII flowchart.
+              This helps reviewers scan execution order, branches, review gates, rollback paths, and feedback loops before approving.
+            </p>
+            <div className="mt-2">
+              <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
+                asciiFlowEnabled
+                  ? 'bg-primary/15 text-primary'
+                  : 'bg-muted text-muted-foreground'
+              }`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${asciiFlowEnabled ? 'bg-primary' : 'bg-muted-foreground/50'}`} />
+                {asciiFlowEnabled ? 'Enabled' : 'Disabled'}
               </span>
             </div>
           </div>

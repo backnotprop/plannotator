@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { PFM_REMINDER, composeImproveContext } from "./pfm-reminder";
+import { ASCII_FLOW_REMINDER, PFM_REMINDER, composeImproveContext } from "./pfm-reminder";
 
 describe("PFM_REMINDER", () => {
   test("identifies itself with a recognizable header", () => {
@@ -34,32 +34,67 @@ describe("PFM_REMINDER", () => {
   });
 });
 
+describe("ASCII_FLOW_REMINDER", () => {
+  test("identifies itself with a recognizable header", () => {
+    expect(ASCII_FLOW_REMINDER).toContain("[ASCII Plan Flow]");
+  });
+
+  test("describes the required plan flow contract", () => {
+    expect(ASCII_FLOW_REMINDER).toContain("## Plan Flow");
+    expect(ASCII_FLOW_REMINDER).toContain("```text");
+    expect(ASCII_FLOW_REMINDER).toContain("pure ASCII");
+    expect(ASCII_FLOW_REMINDER).toContain("Mermaid");
+    expect(ASCII_FLOW_REMINDER).toContain("Graphviz");
+    expect(ASCII_FLOW_REMINDER).toContain("5-12 nodes");
+  });
+
+  test("stays small enough to inject on every EnterPlanMode call", () => {
+    expect(ASCII_FLOW_REMINDER.length).toBeLessThan(1500);
+  });
+});
+
 describe("composeImproveContext", () => {
   test("returns null when nothing is enabled", () => {
     expect(
-      composeImproveContext({ pfmEnabled: false, improvementHookContent: null }),
+      composeImproveContext({ pfmEnabled: false, asciiFlowEnabled: false, improvementHookContent: null }),
     ).toBeNull();
   });
 
   test("treats empty improvement-hook content the same as null", () => {
     expect(
-      composeImproveContext({ pfmEnabled: false, improvementHookContent: "" }),
+      composeImproveContext({ pfmEnabled: false, asciiFlowEnabled: false, improvementHookContent: "" }),
     ).toBeNull();
   });
 
   test("returns just the PFM reminder when only PFM is enabled", () => {
     const ctx = composeImproveContext({
       pfmEnabled: true,
+      asciiFlowEnabled: false,
       improvementHookContent: null,
     });
     expect(ctx).not.toBeNull();
     expect(ctx).toContain("[Plannotator Flavored Markdown]");
+    expect(ctx).not.toContain("[ASCII Plan Flow]");
+    expect(ctx).not.toContain("[Plannotator Improvement Hook]");
+  });
+
+  test("returns just the ASCII flow reminder when only ASCII flow is enabled", () => {
+    const ctx = composeImproveContext({
+      pfmEnabled: false,
+      asciiFlowEnabled: true,
+      improvementHookContent: null,
+    });
+    expect(ctx).not.toBeNull();
+    expect(ctx).toContain("[ASCII Plan Flow]");
+    expect(ctx).toContain("## Plan Flow");
+    expect(ctx).not.toContain("[Plannotator Flavored Markdown]");
     expect(ctx).not.toContain("[Plannotator Improvement Hook]");
   });
 
   test("returns just the improvement-hook block when only it is set (legacy behavior)", () => {
     const ctx = composeImproveContext({
       pfmEnabled: false,
+      asciiFlowEnabled: false,
       improvementHookContent: "1. Always include a test plan section.",
     });
     expect(ctx).not.toBeNull();
@@ -67,22 +102,28 @@ describe("composeImproveContext", () => {
     expect(ctx).toContain("The following corrective instructions were generated");
     expect(ctx).toContain("1. Always include a test plan section.");
     expect(ctx).not.toContain("[Plannotator Flavored Markdown]");
+    expect(ctx).not.toContain("[ASCII Plan Flow]");
   });
 
-  test("composes both with PFM reminder first, separated by a divider", () => {
+  test("composes reminders and improvement hook in stable order", () => {
     const ctx = composeImproveContext({
       pfmEnabled: true,
+      asciiFlowEnabled: true,
       improvementHookContent: "1. Always include a test plan section.",
     })!;
 
     const pfmIdx = ctx.indexOf("[Plannotator Flavored Markdown]");
+    const asciiIdx = ctx.indexOf("[ASCII Plan Flow]");
     const improveIdx = ctx.indexOf("[Plannotator Improvement Hook]");
     expect(pfmIdx).toBeGreaterThanOrEqual(0);
-    expect(improveIdx).toBeGreaterThan(pfmIdx);
+    expect(asciiIdx).toBeGreaterThan(pfmIdx);
+    expect(improveIdx).toBeGreaterThan(asciiIdx);
 
     // A horizontal rule separates the two sections so the agent reads them
     // as distinct payloads.
-    const between = ctx.slice(pfmIdx, improveIdx);
-    expect(between).toContain("\n---\n");
+    const pfmToAscii = ctx.slice(pfmIdx, asciiIdx);
+    const asciiToImprove = ctx.slice(asciiIdx, improveIdx);
+    expect(pfmToAscii).toContain("\n---\n");
+    expect(asciiToImprove).toContain("\n---\n");
   });
 });

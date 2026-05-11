@@ -995,9 +995,12 @@ export default function plannotator(pi: ExtensionAPI): void {
 		let improveContext: string | null = null;
 		if (phase === "planning") {
 			const hook = readImprovementHook("enterplanmode-improve");
-			const pfmEnabled = loadConfig().pfmReminder === true;
+			const config = loadConfig();
+			const pfmEnabled = config.pfmReminder === true;
+			const asciiFlowEnabled = config.asciiFlowReminder === true;
 			improveContext = composeImproveContext({
 				pfmEnabled,
+				asciiFlowEnabled,
 				improvementHookContent: hook?.content ?? null,
 			});
 		}

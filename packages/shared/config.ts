@@ -124,6 +124,13 @@ export interface PlannotatorConfig {
    * Read by the `improve-context` PreToolUse handler. Default: false.
    */
   pfmReminder?: boolean;
+  /**
+   * Inject an ASCII flow reminder into every EnterPlanMode call so the agent
+   * adds a compact `## Plan Flow` text diagram when it helps the reviewer
+   * understand plan order, branches, gates, and feedback loops.
+   * Read by the `improve-context` PreToolUse handler. Default: false.
+   */
+  asciiFlowReminder?: boolean;
 }
 
 const CONFIG_DIR = join(homedir(), ".plannotator");

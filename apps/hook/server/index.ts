@@ -1067,10 +1067,13 @@ if (args[0] === "sessions") {
   await Bun.stdin.text();
 
   const hook = readImprovementHook("enterplanmode-improve");
-  const pfmEnabled = loadConfig().pfmReminder === true;
+  const config = loadConfig();
+  const pfmEnabled = config.pfmReminder === true;
+  const asciiFlowEnabled = config.asciiFlowReminder === true;
 
   const context = composeImproveContext({
     pfmEnabled,
+    asciiFlowEnabled,
     improvementHookContent: hook?.content ?? null,
   });
 

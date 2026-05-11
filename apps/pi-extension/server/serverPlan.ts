@@ -233,9 +233,11 @@ export async function startPlanReviewServer(options: {
 			const config = loadConfig();
 			const hook = readImprovementHook("enterplanmode-improve");
 			const pfmEnabled = config.pfmReminder === true;
-			const composed = composeImproveContext({ pfmEnabled, improvementHookContent: hook?.content ?? null });
+			const asciiFlowEnabled = config.asciiFlowReminder === true;
+			const composed = composeImproveContext({ pfmEnabled, asciiFlowEnabled, improvementHookContent: hook?.content ?? null });
 			json(res, {
 				pfmReminder: { enabled: pfmEnabled },
+				asciiFlowReminder: { enabled: asciiFlowEnabled },
 				improvementHook: {
 					present: !!hook,
 					filePath: hook?.filePath ?? getImprovementHookExpectedPath("enterplanmode-improve"),
@@ -246,12 +248,13 @@ export async function startPlanReviewServer(options: {
 			});
 		} else if (url.pathname === "/api/config" && req.method === "POST") {
 			try {
-				const body = (await parseBody(req)) as { displayName?: string; diffOptions?: Record<string, unknown>; conventionalComments?: boolean; pfmReminder?: boolean };
+				const body = (await parseBody(req)) as { displayName?: string; diffOptions?: Record<string, unknown>; conventionalComments?: boolean; pfmReminder?: boolean; asciiFlowReminder?: boolean };
 				const toSave: Record<string, unknown> = {};
 				if (body.displayName !== undefined) toSave.displayName = body.displayName;
 				if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
 				if (body.conventionalComments !== undefined) toSave.conventionalComments = body.conventionalComments;
 				if (body.pfmReminder !== undefined) toSave.pfmReminder = body.pfmReminder;
+				if (body.asciiFlowReminder !== undefined) toSave.asciiFlowReminder = body.asciiFlowReminder;
 				if (Object.keys(toSave).length > 0) saveConfig(toSave as Parameters<typeof saveConfig>[0]);
 				json(res, { ok: true });
 			} catch {

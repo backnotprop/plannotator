@@ -360,9 +360,12 @@ tools (except writing markdown files), or otherwise make changes to the system.
         output.system.push(getPlanningPrompt());
 
         const hook = readImprovementHook("enterplanmode-improve");
-        const pfmEnabled = loadConfig().pfmReminder === true;
+        const config = loadConfig();
+        const pfmEnabled = config.pfmReminder === true;
+        const asciiFlowEnabled = config.asciiFlowReminder === true;
         const improveContext = composeImproveContext({
           pfmEnabled,
+          asciiFlowEnabled,
           improvementHookContent: hook?.content ?? null,
         });
         if (improveContext) {
