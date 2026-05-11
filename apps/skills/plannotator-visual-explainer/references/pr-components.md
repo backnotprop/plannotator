@@ -85,102 +85,42 @@ Component patterns specific to PR explainer documents. For the base design syste
 
 ## Diff rendering
 
-Three-column grid on a dark background: line number | +/- marker | code.
+Use Pierre diffs via CDN for syntax-highlighted, theme-aware diff rendering. Renders into shadow DOM (no style conflicts) with Shiki syntax highlighting.
 
 ```html
-<div class="diff">
-  <div class="diff-row hunk">
-    <span class="ln"></span>
-    <span class="mark"></span>
-    <span class="code">@@ -1,4 +1,6 @@</span>
-  </div>
-  <div class="diff-row ctx">
-    <span class="ln">1</span>
-    <span class="mark"></span>
-    <span class="code">import { Router } from 'express';</span>
-  </div>
-  <div class="diff-row add">
-    <span class="ln">2</span>
-    <span class="mark">+</span>
-    <span class="code">import { NotificationService } from './notifications';</span>
-  </div>
-  <div class="diff-row del">
-    <span class="ln">3</span>
-    <span class="mark">-</span>
-    <span class="code">import { legacyPoll } from './polling';</span>
-  </div>
-</div>
+<script type="module">
+  import { getSingularPatch, registerDiffsComponent } from 'https://cdn.jsdelivr.net/npm/@pierre/diffs@1.1.21/+esm';
+  registerDiffsComponent();
+
+  const patch = `--- a/src/handler.ts
++++ b/src/handler.ts
+@@ -1,4 +1,6 @@
+ import { Router } from 'express';
++import { NotificationService } from './notifications';
+-import { legacyPoll } from './polling';`;
+
+  const container = document.querySelector('diffs-container');
+  container.fileDiff = getSingularPatch(patch);
+  container.options = {
+    themeType: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+    diffStyle: 'unified',
+    diffIndicators: 'bars',
+    lineDiffType: 'word-alt',
+    unsafeCSS: `
+      :host {
+        --diffs-bg: var(--background);
+        --diffs-fg: var(--foreground);
+        border-radius: var(--radius);
+        border: 1.5px solid var(--border);
+        overflow: hidden;
+      }
+    `,
+  };
+</script>
+<diffs-container></diffs-container>
 ```
 
-```css
-.diff {
-  background: var(--code-bg);
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  line-height: 1.7;
-  overflow-x: auto;
-  border-radius: var(--radius);
-  border: 1.5px solid var(--border);
-}
-
-.diff-row {
-  display: grid;
-  grid-template-columns: 48px 18px 1fr;
-  align-items: baseline;
-  padding: 0 14px 0 0;
-  white-space: pre;
-}
-
-.diff-row .ln {
-  text-align: right;
-  padding-right: 14px;
-  color: var(--muted-foreground);
-  user-select: none;
-  opacity: 0.5;
-}
-
-.diff-row .mark {
-  text-align: center;
-  color: var(--muted-foreground);
-}
-
-.diff-row .code {
-  color: var(--foreground);
-}
-
-/* Context lines — dimmed */
-.diff-row.ctx .code {
-  opacity: 0.6;
-}
-
-/* Added lines — success tint */
-.diff-row.add {
-  background: color-mix(in oklab, var(--success) 12%, transparent);
-}
-.diff-row.add .mark {
-  color: var(--success);
-}
-
-/* Deleted lines — destructive tint */
-.diff-row.del {
-  background: color-mix(in oklab, var(--destructive) 12%, transparent);
-}
-.diff-row.del .mark {
-  color: var(--destructive);
-}
-
-/* Hunk headers */
-.diff-row.hunk {
-  background: color-mix(in oklab, var(--muted) 30%, transparent);
-  color: var(--muted-foreground);
-}
-
-/* Syntax tokens inside diff code */
-.diff .kw  { color: var(--primary); }
-.diff .fn  { color: var(--accent); }
-.diff .str { color: var(--success); }
-.diff .cm  { color: var(--muted-foreground); font-style: italic; }
-```
+For multiple diffs, create one `<diffs-container>` per file. Pierre handles syntax highlighting, line numbers, add/del coloring, and word-level diffs automatically.
 
 ## Review comments
 
@@ -706,5 +646,72 @@ Checkbox-style verification checklist.
 .risk-tag.safe {
   background: color-mix(in oklab, var(--success) 12%, transparent);
   color: var(--success);
+}
+```
+
+## Rollout plan
+
+Phased deployment strip showing ramp percentages.
+
+```html
+<div class="rollout">
+  <div class="rollout-step">
+    <div class="rollout-when">Day 0</div>
+    <div class="rollout-pct">internal</div>
+    <div class="rollout-desc">Team only. Watch error rates.</div>
+  </div>
+  <div class="rollout-step">
+    <div class="rollout-when">Day 2</div>
+    <div class="rollout-pct">10%</div>
+    <div class="rollout-desc">Random sample. Alert on anomalies.</div>
+  </div>
+  <div class="rollout-step">
+    <div class="rollout-when">Day 4</div>
+    <div class="rollout-pct">100%</div>
+    <div class="rollout-desc">Full ramp.</div>
+  </div>
+</div>
+```
+
+```css
+.rollout { display: flex; gap: 0; }
+
+.rollout-step {
+  flex: 1;
+  background: var(--card);
+  border: 1.5px solid var(--border);
+  padding: 16px 18px;
+}
+
+.rollout-step:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+.rollout-step:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+.rollout-step + .rollout-step { border-left: none; }
+
+.rollout-when {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted-foreground);
+  margin-bottom: 8px;
+}
+
+.rollout-pct {
+  font-family: var(--font-mono);
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: var(--primary);
+  margin-bottom: 6px;
+}
+
+.rollout-desc {
+  font-size: 0.82rem;
+  color: var(--muted-foreground);
+}
+
+@media (max-width: 720px) {
+  .rollout { flex-direction: column; }
+  .rollout-step { border-radius: var(--radius); }
+  .rollout-step + .rollout-step { border-left: 1.5px solid var(--border); margin-top: 10px; }
 }
 ```

@@ -40,8 +40,6 @@ plannotator annotate <file> --render-html
 
 For implementation plans, design docs, feature specs, migration guides, and proposals.
 
-**Reference:** Study the structure at `https://thariqs.github.io/html-effectiveness/16-implementation-plan.html` — this is the target quality bar.
-
 **Before generating, read:**
 1. `references/design-system.md` — Plannotator theme tokens, typography, component patterns
 2. `references/svg-patterns.md` — inline SVG building blocks for architecture diagrams, flowcharts, data flow
@@ -68,8 +66,6 @@ Not every plan needs every section. Skip what doesn't serve the content. Never i
 ## PR path
 
 For PR walkthroughs, diff reviews, code change explainers, and reviewer guides.
-
-**Reference:** Study the structure at `https://thariqs.github.io/html-effectiveness/17-pr-writeup.html` — this is the target quality bar.
 
 **Before generating, read:**
 1. `references/design-system.md` — Plannotator theme tokens, typography, component patterns

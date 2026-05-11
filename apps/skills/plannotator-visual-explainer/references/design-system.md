@@ -492,3 +492,69 @@ details[open] summary::before { transform: rotate(90deg); }
 
 .details-body { padding: 0 24px 24px; }
 ```
+
+### Milestone timeline
+
+Vertical timeline showing phases without time estimates.
+
+```html
+<div class="milestones">
+  <div class="milestone">
+    <div class="when">Phase 1</div>
+    <div class="dot-col"><span class="dot done"></span><span class="line"></span></div>
+    <div class="body">
+      <h3>Foundation</h3>
+      <p>Set up core infrastructure and initial integrations.</p>
+      <div class="tags"><span class="tag">packages/server</span></div>
+    </div>
+  </div>
+</div>
+```
+
+```css
+.milestones { display: flex; flex-direction: column; gap: 0; }
+
+.milestone {
+  display: grid;
+  grid-template-columns: 120px 28px 1fr;
+  gap: 0 18px;
+}
+
+.milestone .when {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  padding-top: 4px;
+}
+
+.milestone .dot-col { display: flex; flex-direction: column; align-items: center; }
+
+.milestone .dot {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--card);
+  border: 3px solid var(--primary);
+  flex-shrink: 0;
+}
+
+.milestone .dot.done { background: var(--success); border-color: var(--success); }
+
+.milestone .line { width: 2px; flex: 1; background: var(--border); margin: 4px 0; }
+.milestone:last-child .line { display: none; }
+
+.milestone .body { padding-bottom: 36px; }
+
+.milestone .body h3 {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.milestone .body p {
+  font-size: 0.88rem;
+  color: var(--muted-foreground);
+  max-width: 620px;
+  margin-bottom: 10px;
+}
+```
