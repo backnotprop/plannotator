@@ -31,8 +31,13 @@ describe("install.sh", () => {
     expect(json.hooks.PreToolUse).toBeArray();
     expect(json.hooks.PreToolUse[0].matcher).toBe("EnterPlanMode");
     expect(json.hooks.PreToolUse[0].hooks[0].type).toBe("command");
-    expect(json.hooks.PreToolUse[0].hooks[0].command).toBe("plannotator improve-context");
+    expect(json.hooks.PreToolUse[0].hooks[0].command).toBe("plannotator improve-context pre-tool");
     expect(json.hooks.PreToolUse[0].hooks[0].timeout).toBe(5);
+    // UserPromptSubmit hook covers manual plan mode entry.
+    expect(json.hooks.UserPromptSubmit).toBeArray();
+    expect(json.hooks.UserPromptSubmit[0].matcher).toBe("*");
+    expect(json.hooks.UserPromptSubmit[0].hooks[0].command).toBe("plannotator improve-context prompt");
+    expect(json.hooks.UserPromptSubmit[0].hooks[0].timeout).toBe(5);
   });
 
   test("installs to ~/.local/bin", () => {
@@ -160,7 +165,10 @@ describe("install.ps1", () => {
     // EnterPlanMode hook drives the compound-skill improvement-hook injection.
     expect(script).toContain('"PreToolUse"');
     expect(script).toContain('"matcher": "EnterPlanMode"');
-    expect(script).toContain('"command": "$exePathJson improve-context"');
+    expect(script).toContain('"command": "$exePathJson improve-context pre-tool"');
+    // UserPromptSubmit hook covers manual plan mode entry.
+    expect(script).toContain('"UserPromptSubmit"');
+    expect(script).toContain('"command": "$exePathJson improve-context prompt"');
     expect(script).toContain('"timeout": 5');
   });
 
@@ -282,8 +290,11 @@ describe("install.cmd", () => {
     // EnterPlanMode hook drives the compound-skill improvement-hook injection.
     expect(script).toContain('echo     "PreToolUse": [');
     expect(script).toContain('echo         "matcher": "EnterPlanMode",');
-    expect(script).toContain('echo             "command": "!EXE_PATH! improve-context",');
+    expect(script).toContain('echo             "command": "!EXE_PATH! improve-context pre-tool",');
     expect(script).toContain('echo             "timeout": 5');
+    // UserPromptSubmit hook covers manual plan mode entry.
+    expect(script).toContain('echo     "UserPromptSubmit": [');
+    expect(script).toContain('echo             "command": "!EXE_PATH! improve-context prompt",');
   });
 
   test("uses full exe path in hooks.json", () => {
