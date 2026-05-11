@@ -186,6 +186,38 @@ describe("applyWorkflowConfig", () => {
     expect(config.agent.build.permission.submit_plan).toBe("deny");
   });
 
+  test("plan-agent mode resolves planningAgents to existing display-named agents", () => {
+    const prometheusKey = "\u200B\u200B\u200BPrometheus - Plan Builder";
+    const sisyphusKey = "Sisyphus (Ultraworker)";
+    const config: any = {
+      agent: {
+        [prometheusKey]: {
+          mode: "primary",
+          permission: {},
+        },
+        [sisyphusKey]: {
+          mode: "primary",
+          permission: {},
+        },
+      },
+    };
+
+    applyWorkflowConfig(
+      config,
+      normalizeWorkflowOptions({
+        workflow: "plan-agent",
+        planningAgents: ["prometheus", "sisyphus"],
+      }),
+      false,
+    );
+
+    expect(config.agent[prometheusKey].permission.submit_plan).toBe("allow");
+    expect(config.agent[sisyphusKey].permission.submit_plan).toBe("allow");
+    expect(config.agent.prometheus).toBeUndefined();
+    expect(config.agent.sisyphus).toBeUndefined();
+    expect(config.agent.build.permission.submit_plan).toBe("deny");
+  });
+
   test("plan-agent mode denies user-configured non-planning primary agents", () => {
     const config: any = {
       agent: {
