@@ -1067,7 +1067,7 @@ if (args[0] === "sessions") {
 
   console.log(JSON.stringify({
     hookSpecificOutput: {
-      hookEventName: hookEvent === "prompt" ? "UserPromptSubmit" : "PreToolUse",
+      hookEventName: "PreToolUse",
       additionalContext: context,
     },
   }));
