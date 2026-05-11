@@ -76,7 +76,7 @@ import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getCliInstallUrl, getMRLa
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
 import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles } from "@plannotator/shared/resolve-file";
 import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
-import { statSync, rmSync, realpathSync, existsSync } from "fs";
+import { statSync, rmSync, realpathSync, existsSync, appendFileSync } from "fs";
 import { parseRemoteUrl } from "@plannotator/shared/repo";
 import {
   getReviewApprovedPrompt,
@@ -112,7 +112,7 @@ import {
 } from "./cli";
 import { ensureClearContextSettingEnabled } from "./clearContextSetting";
 import path from "path";
-import { tmpdir } from "os";
+import { tmpdir, homedir } from "os";
 
 // Embed the built HTML at compile time
 // @ts-ignore - Bun import attribute for text
