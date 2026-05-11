@@ -62,7 +62,7 @@ describe("spawnKeystrokeInjector", () => {
     expect(spawnCalls).toHaveLength(1);
     const script = spawnCalls[0].cmd[2] as string;
     expect(script).toContain("osascript");
-    expect(script).toContain("warp");
+    expect(script).toContain('application "Warp" is running');
     expect(script).toContain("iTerm2");
     expect(script).toContain("Terminal");
     expect(script).toContain('keystroke "1"');
