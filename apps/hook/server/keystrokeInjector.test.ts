@@ -14,6 +14,10 @@ describe("spawnKeystrokeInjector", () => {
   let originalEnv: NodeJS.ProcessEnv;
   let originalPlatform: string;
 
+  function setPlatform(v: string) {
+    Object.defineProperty(process, "platform", { value: v, writable: true });
+  }
+
   beforeEach(() => {
     spawnCalls = [];
     originalEnv = { ...process.env };
@@ -52,10 +56,7 @@ describe("spawnKeystrokeInjector", () => {
   });
 
   it("uses osascript on macOS when no tmux pane", () => {
-    Object.defineProperty(process, "platform", {
-      value: "darwin",
-      writable: true,
-    });
+    setPlatform("darwin");
     spawnKeystrokeInjector(100);
 
     expect(spawnCalls).toHaveLength(1);
@@ -69,28 +70,19 @@ describe("spawnKeystrokeInjector", () => {
   });
 
   it("no-op on linux without tmux", () => {
-    Object.defineProperty(process, "platform", {
-      value: "linux",
-      writable: true,
-    });
+    setPlatform("linux");
     spawnKeystrokeInjector();
     expect(spawnCalls).toHaveLength(0);
   });
 
   it("no-op on windows without tmux", () => {
-    Object.defineProperty(process, "platform", {
-      value: "win32",
-      writable: true,
-    });
+    setPlatform("win32");
     spawnKeystrokeInjector();
     expect(spawnCalls).toHaveLength(0);
   });
 
   it("spawn is detached and unreffed (does not block caller)", () => {
-    Object.defineProperty(process, "platform", {
-      value: "darwin",
-      writable: true,
-    });
+    setPlatform("darwin");
     spawnKeystrokeInjector();
 
     expect(spawnCalls).toHaveLength(1);
@@ -107,10 +99,7 @@ describe("spawnKeystrokeInjector", () => {
   });
 
   it("embeds delay in osascript via 'delay' statement", () => {
-    Object.defineProperty(process, "platform", {
-      value: "darwin",
-      writable: true,
-    });
+    setPlatform("darwin");
     spawnKeystrokeInjector(800);
     const script = spawnCalls[0].cmd[2] as string;
     expect(script).toContain("delay 0.80");
