@@ -39,7 +39,7 @@ import {
 import { listenOnPort } from "./network.js";
 
 import { loadConfig, saveConfig, detectGitUser, getServerConfig } from "../generated/config.js";
-import { readImprovementHook } from "../generated/improvement-hooks.js";
+import { readImprovementHook, getImprovementHookExpectedPath } from "../generated/improvement-hooks.js";
 import { composeImproveContext } from "../generated/pfm-reminder.js";
 import { detectProjectName, getRepoInfo } from "./project.js";
 import {
