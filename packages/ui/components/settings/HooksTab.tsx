@@ -13,8 +13,8 @@ interface HooksStatus {
 }
 
 function displayPath(filePath: string): string {
-  const home = filePath.match(/^(\/[^/]+\/[^/]+)\//)?.[1];
-  if (home && filePath.startsWith(home)) return '~' + filePath.slice(home.length);
+  const idx = filePath.indexOf('/.plannotator/');
+  if (idx >= 0) return '~' + filePath.slice(idx);
   return filePath;
 }
 
