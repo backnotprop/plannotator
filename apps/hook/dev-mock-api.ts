@@ -577,7 +577,7 @@ export function devMockApi(): Plugin {
         if (req.url === '/api/hooks/status') {
           res.setHeader('Content-Type', 'application/json');
           try {
-            const { readImprovementHook } = await import('@plannotator/shared/improvement-hooks');
+            const { readImprovementHook, getImprovementHookExpectedPath } = await import('@plannotator/shared/improvement-hooks');
             const { loadConfig } = await import('@plannotator/shared/config');
             const { composeImproveContext } = await import('@plannotator/shared/pfm-reminder');
             const config = loadConfig();
@@ -588,7 +588,7 @@ export function devMockApi(): Plugin {
               pfmReminder: { enabled: pfmEnabled },
               improvementHook: {
                 present: !!hook,
-                filePath: hook?.filePath ?? null,
+                filePath: hook?.filePath ?? getImprovementHookExpectedPath('enterplanmode-improve'),
                 fileSize: hook?.content?.length ?? null,
                 content: hook?.content ?? null,
               },
@@ -597,7 +597,7 @@ export function devMockApi(): Plugin {
           } catch {
             res.end(JSON.stringify({
               pfmReminder: { enabled: false },
-              improvementHook: { present: false, filePath: null, fileSize: null, content: null },
+              improvementHook: { present: false, filePath: '~/.plannotator/hooks/compound/enterplanmode-improve-hook.txt', fileSize: null, content: null },
               composedLength: null,
             }));
           }
