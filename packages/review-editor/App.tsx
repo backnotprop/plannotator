@@ -1210,12 +1210,19 @@ const ReviewApp: React.FC = () => {
     if (fullDiffType === diffType) return;
     // For evolog, default to the second entry (previous state of @) so the
     // server doesn't fall back to the jj bookmark/trunk revset.
-    const evoBase =
-      baseDiffType === 'jj-evolog' && gitContext?.jjEvologs && gitContext.jjEvologs.length >= 2
-        ? gitContext.jjEvologs[1].commitId
+    // When leaving evolog, restore the base to the detected compare target
+    // so other base-dependent modes (jj-line) don't inherit a commit ID.
+    const enteringEvolog =
+      baseDiffType === 'jj-evolog' && gitContext?.jjEvologs && gitContext.jjEvologs.length >= 2;
+    const leavingEvolog =
+      !enteringEvolog && activeDiffBase === 'jj-evolog' && gitContext?.defaultBranch;
+    const baseOverride = enteringEvolog
+      ? gitContext!.jjEvologs![1].commitId
+      : leavingEvolog
+        ? gitContext!.defaultBranch
         : undefined;
-    if (evoBase) setSelectedBase(evoBase);
-    await fetchDiffSwitch(fullDiffType, evoBase);
+    if (baseOverride) setSelectedBase(baseOverride);
+    await fetchDiffSwitch(fullDiffType, baseOverride);
   }, [diffType, activeWorktreePath, fetchDiffSwitch, gitContext]);
 
   // Switch worktree context (or back to main repo). Preserves the current
