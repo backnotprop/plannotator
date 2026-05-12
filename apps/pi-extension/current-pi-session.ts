@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 type SendUserMessageContent = Parameters<ExtensionAPI["sendUserMessage"]>[0];
 type SendUserMessageOptions = Parameters<ExtensionAPI["sendUserMessage"]>[1];

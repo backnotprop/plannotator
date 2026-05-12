@@ -226,4 +226,4 @@ State persists across session restarts via Pi's `appendEntry` API.
 
 ## Requirements
 
-- [Pi](https://github.com/mariozechner/pi) >= 0.53.0
+- [Pi](https://github.com/earendil-works/pi) >= 0.74.0
