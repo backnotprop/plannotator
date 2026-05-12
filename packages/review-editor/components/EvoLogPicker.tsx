@@ -48,7 +48,7 @@ export const EvoLogPicker: React.FC<EvoLogPickerProps> = ({
           type="button"
           disabled={disabled}
           title={`Compare against evolog entry: ${selectedCommitId}`}
-          className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed ${
+          className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium overflow-hidden transition-colors focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed ${
             isCustom
               ? 'bg-primary/10 border border-primary/30 text-foreground'
               : 'bg-muted border border-transparent text-foreground'
@@ -61,7 +61,7 @@ export const EvoLogPicker: React.FC<EvoLogPickerProps> = ({
             {(selected?.commitId ?? selectedCommitId).slice(0, 8)}
           </span>
           {selected?.age && (
-            <span className="text-[10px] text-muted-foreground flex-shrink-0 whitespace-nowrap">
+            <span className="text-[10px] text-muted-foreground truncate">
               {selected.age}
             </span>
           )}
@@ -121,9 +121,9 @@ export const EvoLogPicker: React.FC<EvoLogPickerProps> = ({
                       <span className="block truncate mt-0.5">{entry.description}</span>
                     )}
                   </span>
-                  <span className="flex-shrink-0 flex flex-col items-end gap-1">
+                  <span className="flex-shrink-0 flex flex-col items-end gap-1 max-w-[40%]">
                     {entry.age && (
-                      <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                      <span className="text-[10px] text-muted-foreground truncate max-w-full">
                         {entry.age}
                       </span>
                     )}
