@@ -2,6 +2,8 @@ import React, { useMemo, useCallback, useRef, useState, useEffect } from 'react'
 import { type DiffLineAnnotation } from '@pierre/diffs/react';
 import { getSingularPatch } from '@pierre/diffs';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/types';
+import type { DiffTokenEventBaseProps } from '@pierre/diffs';
+import { buildCodeNavRequest } from '../utils/buildCodeNavRequest';
 import { usePierreTheme } from '../hooks/usePierreTheme';
 import { LazyFileDiff } from './LazyFileDiff';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
@@ -51,6 +53,7 @@ interface AllFilesDiffViewProps {
   isAILoading?: boolean;
   onViewAIResponse?: (questionId?: string) => void;
   aiHistoryForSelection?: AIChatEntry[];
+  onCodeNavRequest?: (request: import('@plannotator/shared/code-nav').CodeNavRequest) => void;
 }
 
 export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
@@ -89,6 +92,7 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
   isAILoading = false,
   onViewAIResponse,
   aiHistoryForSelection = [],
+  onCodeNavRequest,
 }) => {
   const pierreTheme = usePierreTheme({ fontFamily, fontSize });
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
@@ -477,6 +481,13 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
                     }
                     onLineSelection(range);
                   },
+                  ...(onCodeNavRequest && {
+                    onTokenClick: (props: DiffTokenEventBaseProps, event: MouseEvent) => {
+                      if (event.metaKey || event.ctrlKey) {
+                        onCodeNavRequest(buildCodeNavRequest(props, file.path));
+                      }
+                    },
+                  }),
                 }}
                 annotations={fileAnnotations}
                 selectedLines={activeFilePath === file.path ? (pendingSelection || undefined) : undefined}

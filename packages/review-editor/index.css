@@ -1283,3 +1283,9 @@ diffs-container {
 .pr-switch-overlay {
   animation: overlay-fade-in 0.15s ease-out both;
 }
+
+/* Code navigation peek panel — force hljs background transparent on target line */
+.code-nav-peek-target code,
+.code-nav-peek-target .hljs {
+  background: transparent !important;
+}

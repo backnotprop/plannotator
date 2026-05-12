@@ -99,6 +99,15 @@ export interface ReviewState {
 
   // Tour
   openTourPanel: (jobId: string) => void;
+
+  // Code navigation
+  onCodeNavRequest?: (request: import('@plannotator/shared/code-nav').CodeNavRequest) => void;
+  codeNavResult: import('@plannotator/shared/code-nav').CodeNavResponse | null;
+  codeNavIsLoading: boolean;
+  codeNavActiveSymbol: string | null;
+  codeNavActiveSide: 'old' | 'new';
+  codeNavChangedFiles: string[];
+  onCodeNavGoToDiff?: (filePath: string, line: number) => void;
 }
 
 const ReviewStateContext = createContext<ReviewState | null>(null);

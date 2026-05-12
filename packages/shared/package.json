@@ -37,7 +37,8 @@
     "./url-to-markdown": "./url-to-markdown.ts",
     "./tour": "./tour.ts",
     "./annotate-args": "./annotate-args.ts",
-    "./at-reference": "./at-reference.ts"
+    "./at-reference": "./at-reference.ts",
+    "./code-nav": "./code-nav.ts"
   },
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.64",

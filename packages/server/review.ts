@@ -48,6 +48,7 @@ import { loadConfig, saveConfig, detectGitUser, getServerConfig } from "./config
 import { type PRMetadata, type PRReviewFileComment, type PRStackTree, type PRListItem, fetchPR, fetchPRFileContent, fetchPRContext, submitPRReview, fetchPRViewedFiles, markPRFilesViewed, fetchPRStack, fetchPRList, getPRUser, parsePRUrl, prRefFromMetadata, isSameProject, getDisplayRepo, getMRLabel, getMRNumberLabel } from "./pr";
 import { createAIEndpoints, ProviderRegistry, SessionManager, createProvider, type AIEndpoints, type PiSDKConfig } from "@plannotator/ai";
 import { isWSL } from "./browser";
+import { handleCodeNavResolve, extractChangedFiles } from "./code-nav";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -900,6 +901,42 @@ export async function startReviewServer(
             }
 
             return Response.json({ error: "No file access available" }, { status: 400 });
+          }
+
+          // API: Code navigation (search-based symbol resolution)
+          if (url.pathname === "/api/code-nav/resolve" && req.method === "POST") {
+            const hasCodeNavAccess = !!gitContext || !!options.agentCwd || !!options.worktreePool;
+            if (!hasCodeNavAccess) {
+              return Response.json(
+                { error: "Code navigation requires local access" },
+                { status: 400 },
+              );
+            }
+            const navCwd = resolveAgentCwd();
+            const changedFiles = extractChangedFiles(currentPatch);
+            return handleCodeNavResolve(req, navCwd, changedFiles);
+          }
+
+          // API: Code navigation file preview (read file from working tree)
+          if (url.pathname === "/api/code-nav/file" && req.method === "GET") {
+            const hasCodeNavAccess = !!gitContext || !!options.agentCwd || !!options.worktreePool;
+            if (!hasCodeNavAccess) {
+              return Response.json({ error: "Code navigation requires local access" }, { status: 400 });
+            }
+            const filePath = url.searchParams.get("path");
+            if (!filePath) {
+              return Response.json({ error: "Missing path" }, { status: 400 });
+            }
+            try { validateFilePath(filePath); } catch {
+              return Response.json({ error: "Invalid path" }, { status: 400 });
+            }
+            try {
+              const navCwd = resolveAgentCwd();
+              const content = await Bun.file(`${navCwd}/${filePath}`).text();
+              return Response.json({ content });
+            } catch {
+              return Response.json({ error: "File not found" }, { status: 404 });
+            }
           }
 
           // API: Stage / unstage a file (disabled when VCS doesn't support it)

@@ -43,6 +43,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       isAILoading={state.isAILoading}
       onViewAIResponse={state.onViewAIResponse}
       aiHistoryForSelection={state.aiHistoryForSelection}
+      onCodeNavRequest={state.onCodeNavRequest}
     />
   );
 };

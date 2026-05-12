@@ -28,6 +28,9 @@ import { useCodeAnnotationDraft } from '@plannotator/ui/hooks/useCodeAnnotationD
 import { useGitAdd } from './hooks/useGitAdd';
 import { generateId } from './utils/generateId';
 import { useAIChat } from './hooks/useAIChat';
+import { useCodeNav, type CodeNavRequest } from './hooks/useCodeNav';
+import { highlightDiffLine } from './utils/highlightDiffLine';
+import { extractChangedFiles } from '@plannotator/shared/code-nav';
 import { extractLinesFromPatch } from './utils/patchParser';
 import { isTypingTarget, useReviewSearch, type ReviewSearchMatch } from './hooks/useReviewSearch';
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
@@ -67,6 +70,7 @@ import {
   REVIEW_PR_COMMENTS_PANEL_ID,
   REVIEW_PR_CHECKS_PANEL_ID,
   REVIEW_ALL_FILES_PANEL_ID,
+  REVIEW_CODE_NAV_PANEL_ID,
 } from './dock/reviewPanelTypes';
 import type { DiffFile } from './types';
 import type { DiffOption, WorktreeInfo, GitContext } from '@plannotator/shared/types';
@@ -421,6 +425,37 @@ const ReviewApp: React.FC = () => {
     model: aiConfig.model,
     reasoningEffort: aiConfig.reasoningEffort,
   });
+
+  const codeNav = useCodeNav();
+  const changedFilePaths = useMemo(() => extractChangedFiles(diffData?.rawPatch ?? null), [diffData?.rawPatch]);
+
+  const handleCodeNavRequest = useCallback((request: CodeNavRequest) => {
+    codeNav.resolve(request);
+    if (!dockApi) return;
+    const existing = dockApi.getPanel(REVIEW_CODE_NAV_PANEL_ID);
+    if (existing) {
+      existing.api.setTitle(`References: ${request.symbol}`);
+      existing.api.setActive();
+    } else {
+      const refPanel = isAllFilesActive
+        ? REVIEW_ALL_FILES_PANEL_ID
+        : REVIEW_DIFF_PANEL_ID;
+      dockApi.addPanel({
+        id: REVIEW_CODE_NAV_PANEL_ID,
+        component: REVIEW_PANEL_TYPES.CODE_NAV,
+        title: `References: ${request.symbol}`,
+        position: { direction: 'below', referencePanel: refPanel },
+        initialHeight: 250,
+      });
+    }
+  }, [codeNav.resolve, dockApi, isAllFilesActive]);
+
+  const handleCodeNavGoToDiff = useCallback((filePath: string, line: number) => {
+    const inDiff = files.some(f => f.path === filePath);
+    if (!inDiff) return;
+    openDiffFile(filePath);
+    highlightDiffLine(line);
+  }, [files, openDiffFile]);
 
   // Check AI capabilities on mount
   useEffect(() => {
@@ -1357,6 +1392,13 @@ const ReviewApp: React.FC = () => {
     onAllFilesVisibleFileChange: setAllFilesVisibleFile,
     isAllFilesActive,
     openTourPanel: handleOpenTour,
+    onCodeNavRequest: handleCodeNavRequest,
+    codeNavResult: codeNav.result,
+    codeNavIsLoading: codeNav.isLoading,
+    codeNavActiveSymbol: codeNav.activeSymbol,
+    codeNavActiveSide: codeNav.activeSide,
+    codeNavChangedFiles: changedFilePaths,
+    onCodeNavGoToDiff: handleCodeNavGoToDiff,
   }), [
     files, activeFileIndex, diffStyle, diffOverflow, diffIndicators,
     diffLineDiffType, diffShowLineNumbers, diffShowBackground,
@@ -1373,6 +1415,8 @@ const ReviewApp: React.FC = () => {
     aiHistoryForSelection, agentJobs.jobs, prMetadata, prContext,
     isPRContextLoading, prContextError, fetchPRContext, platformUser, openDiffFile,
     handleOpenTour, isAllFilesActive, handleAddAnnotationForFile,
+    handleCodeNavRequest, codeNav.result, codeNav.isLoading, codeNav.activeSymbol,
+    codeNav.activeSide, changedFilePaths, handleCodeNavGoToDiff,
   ]);
 
   // Separate context for high-frequency job logs — prevents re-rendering all panels on every SSE event
