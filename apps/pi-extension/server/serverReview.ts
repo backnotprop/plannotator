@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { createServer } from "node:http";
 import os from "node:os";
@@ -118,7 +118,7 @@ const piCodeNavRuntime: CodeNavRuntime = {
 			const stderrChunks: Buffer[] = [];
 			proc.stdout!.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
 			proc.stderr!.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
-			proc.on("close", (code) => {
+			proc.on("close", (code: number | null) => {
 				if (timer) clearTimeout(timer);
 				resolve({
 					stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
@@ -1010,7 +1010,7 @@ export async function startReviewServer(options: {
 				return;
 			}
 			try {
-				const body = (await parseBody(req)) as CodeNavRequest;
+				const body = (await parseBody(req)) as unknown as CodeNavRequest;
 				const error = validateCodeNavRequest(body);
 				if (error) {
 					json(res, { error }, 400);
