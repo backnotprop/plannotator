@@ -1,7 +1,8 @@
 /**
  * SidebarContainer — Shared sidebar shell
  *
- * Houses the Table of Contents, Version Browser, File Browser, and Archive Browser views.
+ * Houses the Table of Contents, Version Browser, Plan Context, File Browser,
+ * and Archive Browser views.
  * Tab bar at top switches between them.
  */
 
@@ -13,8 +14,10 @@ import type { UseFileBrowserReturn } from "../../hooks/useFileBrowser";
 import { TableOfContents } from "../TableOfContents";
 import { VersionBrowser } from "./VersionBrowser";
 import { FileBrowser } from "./FileBrowser";
+import { PlanContextBrowser } from "./PlanContextBrowser";
 import { ArchiveBrowser, type ArchivedPlan } from "./ArchiveBrowser";
 import { OverlayScrollArea } from "../OverlayScrollArea";
+import type { PlanContextFile } from "../../utils/planContext";
 
 interface SidebarContainerProps {
   activeTab: SidebarTab;
@@ -29,6 +32,10 @@ interface SidebarContainerProps {
   linkedDocFilepath?: string | null;
   onLinkedDocBack?: () => void;
   backLabel?: string;
+  // Plan Context props
+  showContextTab?: boolean;
+  planContextFiles?: PlanContextFile[];
+  onContextNavigate?: (blockId: string) => void;
   // File Browser props
   showFilesTab?: boolean;
   fileAnnotationCounts?: Map<string, number>;
@@ -72,6 +79,9 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
   linkedDocFilepath,
   onLinkedDocBack,
   backLabel,
+  showContextTab,
+  planContextFiles,
+  onContextNavigate,
   showFilesTab,
   fileAnnotationCounts,
   highlightedFiles,
@@ -145,6 +155,28 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
               </svg>
             }
             label="Versions"
+          />
+        )}
+        {showContextTab && (
+          <TabButton
+            active={activeTab === "context"}
+            onClick={() => onTabChange("context")}
+            icon={
+              <svg
+                className="w-3 h-3"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M4 7h6m4 0h6M4 12h16M4 17h8m4 0h4"
+                />
+              </svg>
+            }
+            label="Context"
           />
         )}
         {showFilesTab && (
@@ -241,6 +273,12 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
             isSelectingVersion={isSelectingVersion}
             fetchingVersion={fetchingVersion}
             onFetchVersions={onFetchVersions}
+          />
+        )}
+        {activeTab === "context" && showContextTab && (
+          <PlanContextBrowser
+            files={planContextFiles ?? []}
+            onNavigate={onContextNavigate ?? (() => {})}
           />
         )}
         {activeTab === "files" && showFilesTab && fileBrowser && (

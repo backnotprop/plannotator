@@ -24,23 +24,37 @@ const BACKTICK_SPAN = /`([^`\n]+)`/g;
  * Hash anchors (`#L42`) are stripped from results to match the renderer's
  * `cleanPath` transform. Returns deduped candidate strings.
  */
-export function extractCandidateCodePaths(markdown: string): string[] {
+function collectCandidateCodePaths(markdown: string, dedupe: boolean): string[] {
 	const stripped = markdown
 		.replace(FENCED_CODE_BLOCK, "")
 		.replace(HTML_COMMENT, "");
 
-	const candidates = new Set<string>();
+	const seen = new Set<string>();
+	const candidates: string[] = [];
+
+	const addCandidate = (candidate: string) => {
+		const clean = candidate.replace(/#.*$/, "");
+		if (dedupe) {
+			if (seen.has(clean)) return;
+			seen.add(clean);
+		}
+		candidates.push(clean);
+	};
 
 	let m: RegExpExecArray | null;
 	const backtickRe = new RegExp(BACKTICK_SPAN.source, "g");
 	while ((m = backtickRe.exec(stripped)) !== null) {
 		const inner = m[1].trim();
 		if (isCodeFilePath(inner)) {
-			candidates.add(inner.replace(/#.*$/, ""));
+			addCandidate(inner);
 		}
 	}
 
-	for (const line of stripped.split("\n")) {
+	const strippedForBareScan = stripped.replace(BACKTICK_SPAN, (match) =>
+		" ".repeat(match.length),
+	);
+
+	for (const line of strippedForBareScan.split("\n")) {
 		const urlRanges: Array<[number, number]> = [];
 		const urlRe = new RegExp(URL_REGEX.source, "g");
 		while ((m = urlRe.exec(line)) !== null) {
@@ -58,9 +72,22 @@ export function extractCandidateCodePaths(markdown: string): string[] {
 			);
 			if (overlapsUrl) continue;
 			if (!isCodeFilePathStrict(m[0])) continue;
-			candidates.add(m[0].replace(/#.*$/, ""));
+			addCandidate(m[0]);
 		}
 	}
 
-	return Array.from(candidates);
+	return candidates;
+}
+
+export function extractCandidateCodePaths(markdown: string): string[] {
+	return collectCandidateCodePaths(markdown, true);
+}
+
+/**
+ * Extract candidate code-file path mentions without deduplication.
+ * Uses the same stripping and validation rules as `extractCandidateCodePaths`,
+ * but keeps repeated mentions so UI summaries can show frequency.
+ */
+export function extractCandidateCodePathMentions(markdown: string): string[] {
+	return collectCandidateCodePaths(markdown, false);
 }

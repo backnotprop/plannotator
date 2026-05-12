@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { extractCandidateCodePaths } from "./extract-code-paths";
+import { extractCandidateCodePathMentions, extractCandidateCodePaths } from "./extract-code-paths";
 
 describe("extractCandidateCodePaths", () => {
 	test("extracts backtick code-file paths", () => {
@@ -17,6 +17,11 @@ describe("extractCandidateCodePaths", () => {
 	test("dedupes repeated references", () => {
 		const md = "`src/foo.ts` and src/foo.ts again";
 		expect(extractCandidateCodePaths(md)).toEqual(["src/foo.ts"]);
+	});
+
+	test("keeps repeated references for mention summaries", () => {
+		const md = "`src/foo.ts` and src/foo.ts again";
+		expect(extractCandidateCodePathMentions(md)).toEqual(["src/foo.ts", "src/foo.ts"]);
 	});
 
 	test("strips line anchors", () => {
