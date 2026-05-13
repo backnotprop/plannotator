@@ -100,7 +100,7 @@ const DEFINITION_PATTERNS: DefinitionPatternSet[] = [
       String.raw`(?:export\s+)?class\s+SYMBOL\b`,
       String.raw`(?:export\s+)?(?:interface|type)\s+SYMBOL\b`,
       String.raw`(?:export\s+)?enum\s+SYMBOL\b`,
-      String.raw`^\s+(?:(?:async|static|readonly|get|set|private|protected|public)\s+)*SYMBOL\s*[(<:]`,
+      String.raw`^\s+(?:(?:async|static|readonly|get|set|private|protected|public)\s+)+SYMBOL\s*[(<:]`,
     ],
   },
   {

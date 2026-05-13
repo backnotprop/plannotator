@@ -61,6 +61,14 @@ describe("classifyMatch", () => {
       expect(classifyMatch("  const result = startServer(config);", "startServer", lang)).toBe("reference");
     });
 
+    test("bare indented call is not a definition", () => {
+      expect(classifyMatch("  startServer(config);", "startServer", lang)).toBe("reference");
+    });
+
+    test("indented call in if/return is not a definition", () => {
+      expect(classifyMatch("    return startServer(config);", "startServer", lang)).toBe("reference");
+    });
+
     test("plain reference (import)", () => {
       expect(classifyMatch('import { startServer } from "./server";', "startServer", lang)).toBe("reference");
     });
