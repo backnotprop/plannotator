@@ -120,6 +120,9 @@ interface DiffViewerProps {
   oldPath?: string;
   /** Base branch override used for file-content lookups (branch / merge-base modes only). */
   reviewBase?: string;
+  /** Current PR url + diff scope — used to namespace file-comment drafts so they don't leak across in-place PR switches. */
+  prUrl?: string;
+  prDiffScope?: string;
   isFocused?: boolean;
   diffStyle: 'split' | 'unified';
   diffOverflow?: 'scroll' | 'wrap';
@@ -165,6 +168,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   filePath,
   oldPath,
   reviewBase,
+  prUrl,
+  prDiffScope,
   isFocused = false,
   diffStyle,
   diffOverflow,
@@ -621,7 +626,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           anchorEl={fileCommentAnchor}
           contextText={filePath.split('/').pop() || filePath}
           isGlobal={false}
-          draftKey={`file:${filePath}`}
+          draftKey={`file:${prUrl ?? ''}:${prDiffScope ?? ''}:${filePath}`}
           onSubmit={(text) => {
             onAddFileComment(text);
             setFileCommentAnchor(null);
