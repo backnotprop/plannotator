@@ -15,6 +15,7 @@ export type {
   WorktreeInfo,
   GitContext,
   JjEvoLogEntry,
+  RecentCommit,
   AvailableBranches,
   CompareTargetConfig,
   CompareTargetPickerCopy,

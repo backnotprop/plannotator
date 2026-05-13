@@ -71,6 +71,19 @@ export interface JjEvoLogEntry {
   age?: string;
 }
 
+export interface RecentCommit {
+  /** Full SHA — sent back as the diff base. */
+  sha: string;
+  /** Abbreviated SHA for display. */
+  shortSha: string;
+  /** First line of the commit message. */
+  subject: string;
+  /** Human-readable age string, e.g. "2 hours ago". */
+  relativeDate: string;
+  /** Committer-name; shown after the subject in the picker. */
+  author: string;
+}
+
 export interface GitContext {
   currentBranch: string;
   defaultBranch: string;
@@ -83,6 +96,8 @@ export interface GitContext {
   vcsType?: "git" | "jj" | "p4";
   /** Evolution log entries for the current jj change (jj only). */
   jjEvologs?: JjEvoLogEntry[];
+  /** HEAD ancestry, newest first. Powers the commit-based baseline picker (#709). */
+  recentCommits?: RecentCommit[];
 }
 
 export interface DiffResult {
@@ -218,6 +233,45 @@ export async function detectRemoteDefaultBranch(
   }
 }
 
+const RECENT_COMMIT_LIMIT_DEFAULT = 20;
+// US (\x1F) separator avoids collisions with commit subjects, author names, and
+// dates while staying compatible with `git log --pretty=format`.
+const COMMIT_FIELD_SEP = "\x1f";
+
+/**
+ * Walk HEAD's ancestry and return the most-recent commits for the
+ * commit-baseline picker. Single `git log` call — fast (~ms).
+ */
+export async function listRecentCommits(
+  runtime: ReviewGitRuntime,
+  cwd?: string,
+  limit: number = RECENT_COMMIT_LIMIT_DEFAULT,
+): Promise<RecentCommit[]> {
+  const fmt = ["%H", "%h", "%s", "%cr", "%an"].join(COMMIT_FIELD_SEP);
+  const result = await runtime.runGit(
+    ["log", `--max-count=${limit}`, `--pretty=format:${fmt}`, "HEAD"],
+    { cwd },
+  );
+  if (result.exitCode !== 0) return [];
+
+  const commits: RecentCommit[] = [];
+  for (const line of result.stdout.split("\n")) {
+    if (!line) continue;
+    const parts = line.split(COMMIT_FIELD_SEP);
+    if (parts.length < 5) continue;
+    // If a subject contains a literal US byte the split over-divides. sha/
+    // shortSha are fixed-shape at the start and relativeDate/author at the
+    // end, so rejoin everything between back into the subject.
+    const sha = parts[0];
+    const shortSha = parts[1];
+    const author = parts[parts.length - 1];
+    const relativeDate = parts[parts.length - 2];
+    const subject = parts.slice(2, parts.length - 2).join(COMMIT_FIELD_SEP);
+    commits.push({ sha, shortSha, subject, relativeDate, author });
+  }
+  return commits;
+}
+
 export async function listBranches(
   runtime: ReviewGitRuntime,
   cwd?: string,
@@ -324,10 +378,11 @@ export async function getGitContext(
   runtime: ReviewGitRuntime,
   cwd?: string,
 ): Promise<GitContext> {
-  const [currentBranch, defaultBranch, availableBranches] = await Promise.all([
+  const [currentBranch, defaultBranch, availableBranches, recentCommits] = await Promise.all([
     getCurrentBranch(runtime, cwd),
     getDefaultBranch(runtime, cwd),
     listBranches(runtime, cwd),
+    listRecentCommits(runtime, cwd),
   ]);
 
   const diffOptions: DiffOption[] = [
@@ -383,6 +438,7 @@ export async function getGitContext(
     },
     cwd,
     vcsType: "git",
+    recentCommits,
   };
 }
 
@@ -437,6 +493,14 @@ async function getUntrackedFileDiffs(
   );
 
   return diffs.join("");
+}
+
+/**
+ * If `ref` looks like a full or long hex SHA, return its 7-char prefix for
+ * display. Branch names, tags, and `HEAD~N` pass through unchanged.
+ */
+function displayRef(ref: string): string {
+  return /^[0-9a-f]{7,}$/i.test(ref) ? ref.slice(0, 7) : ref;
 }
 
 function assertGitSuccess(
@@ -619,7 +683,7 @@ export async function runGitDiff(
           branchDiffArgs,
         );
         patch = branchDiff.stdout;
-        label = `Changes vs ${defaultBranch}`;
+        label = `Changes vs ${displayRef(defaultBranch)}`;
         break;
       }
 
@@ -644,7 +708,7 @@ export async function runGitDiff(
           mergeBaseDiffArgs,
         );
         patch = mergeBaseDiff.stdout;
-        label = `PR diff vs ${defaultBranch}`;
+        label = `PR diff vs ${displayRef(defaultBranch)}`;
         break;
       }
 

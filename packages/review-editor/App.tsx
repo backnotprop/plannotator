@@ -1167,6 +1167,8 @@ const ReviewApp: React.FC = () => {
               diffOptions: data.gitContext!.diffOptions,
               compareTarget: data.gitContext!.compareTarget,
               jjEvologs: data.gitContext!.jjEvologs,
+              // HEAD differs per worktree, so refresh the commit-baseline picker.
+              recentCommits: data.gitContext!.recentCommits,
             };
           });
         }
@@ -2094,6 +2096,7 @@ const ReviewApp: React.FC = () => {
                 detectedBase={prMetadata ? undefined : gitContext?.defaultBranch || gitContext?.compareTarget?.fallback}
                 onSelectBase={prMetadata ? undefined : handleBaseSelect}
                 compareTarget={gitContext?.compareTarget}
+                recentCommits={prMetadata ? undefined : gitContext?.recentCommits}
                 jjEvologs={prMetadata ? undefined : gitContext?.jjEvologs}
                 detectedEvoBase={prMetadata ? undefined : gitContext?.jjEvologs?.[1]?.commitId}
                 stagedFiles={stagedFiles}

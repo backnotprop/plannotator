@@ -1,6 +1,6 @@
 import React, { useEffect, useCallback, useState, useMemo } from 'react';
 import { CodeAnnotation } from '@plannotator/ui/types';
-import type { AvailableBranches, CompareTargetConfig, DiffOption, JjEvoLogEntry, WorktreeInfo } from '@plannotator/shared/types';
+import type { AvailableBranches, CompareTargetConfig, DiffOption, JjEvoLogEntry, RecentCommit, WorktreeInfo } from '@plannotator/shared/types';
 import { buildFileTree, getAncestorPaths, getAllFolderPaths, getVisualFileOrder } from '../utils/buildFileTree';
 import { FileTreeNodeItem } from './FileTreeNode';
 import { BaseBranchPicker } from './BaseBranchPicker';
@@ -37,6 +37,8 @@ interface FileTreeProps {
   detectedBase?: string;
   onSelectBase?: (branch: string) => void;
   compareTarget?: CompareTargetConfig;
+  /** HEAD ancestry for the commit-baseline picker (git only, #709). */
+  recentCommits?: RecentCommit[];
   /** Evolution log entries for the current jj change (jj-evolog mode only). */
   jjEvologs?: JjEvoLogEntry[];
   /** Default evolog commit ID to compare against (second evolog entry). */
@@ -90,6 +92,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   detectedBase,
   onSelectBase,
   compareTarget,
+  recentCommits,
   jjEvologs,
   detectedEvoBase,
   stagedFiles,
@@ -418,6 +421,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
                 onSelectBase={onSelectBase}
                 disabled={isLoadingDiff}
                 copy={compareTarget.picker}
+                recentCommits={recentCommits}
               />
             </div>
           </div>
