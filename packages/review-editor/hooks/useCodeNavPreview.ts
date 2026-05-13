@@ -25,6 +25,7 @@ export function useCodeNavPreview() {
       const cached = cache.get(filePath);
 
       if (cached) {
+        setIsLoading(false);
         const allLines = cached.split('\n');
         setPreviewData({
           lines: allLines,
