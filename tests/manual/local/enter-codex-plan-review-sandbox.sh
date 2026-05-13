@@ -34,7 +34,7 @@ Sandbox env:
   CODEX_HOME=$CODEX_HOME
 
 Run Desktop Codex from this shell:
-  codex --enable codex_hooks -m gpt-5.4-mini -s workspace-write app
+  codex --enable hooks -m gpt-5.4-mini -s workspace-write app
 
 After a failed hook, inspect:
   cat $ROOT_DIR/artifacts/plannotator-hook-events.log

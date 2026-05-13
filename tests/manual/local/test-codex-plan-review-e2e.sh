@@ -205,7 +205,7 @@ fi
 
 cat > "$TEMP_HOME/.codex/config.toml" <<'EOF'
 [features]
-codex_hooks = true
+hooks = true
 EOF
 
 cat > "$TEMP_HOME/.codex/hooks.json" <<'EOF'
@@ -298,8 +298,8 @@ env HOME="$TEMP_HOME" "${CODEX_CMD[@]}" --version > "$ARTIFACTS_DIR/codex-versio
 env HOME="$TEMP_HOME" "${CODEX_CMD[@]}" features list > "$ARTIFACTS_DIR/codex-features.txt" 2>&1
 env HOME="$TEMP_HOME" "${CODEX_CMD[@]}" login status > "$ARTIFACTS_DIR/codex-login-status.txt" 2>&1 || true
 
-if ! grep -q 'codex_hooks' "$ARTIFACTS_DIR/codex-features.txt"; then
-  echo "Selected Codex CLI does not expose codex_hooks." >&2
+if ! grep -Eq '^hooks[[:space:]]' "$ARTIFACTS_DIR/codex-features.txt"; then
+  echo "Selected Codex CLI does not expose hooks." >&2
   echo "See: $ARTIFACTS_DIR/codex-features.txt" >&2
   exit 1
 fi
@@ -333,7 +333,7 @@ PROMPT_CONTENT="$(cat "$PROMPT_PATH")"
   printf 'PROMPT_CONTENT="$(cat %q)"\n' "$PROMPT_PATH"
   printf 'exec '
   printf '%q ' "${CODEX_CMD[@]}"
-  printf 'exec --enable codex_hooks -m %q -s %q -C %q "$PROMPT_CONTENT"\n' "$MODEL" "$SANDBOX_MODE" "$WORKSPACE_DIR"
+  printf 'exec --enable hooks -m %q -s %q -C %q "$PROMPT_CONTENT"\n' "$MODEL" "$SANDBOX_MODE" "$WORKSPACE_DIR"
 } > "$RUNNER_SCRIPT"
 chmod +x "$RUNNER_SCRIPT"
 

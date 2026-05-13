@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { exportReviewFeedback } from "./exportFeedback";
 import type { CodeAnnotation } from "@plannotator/ui/types";
-import type { PRMetadata } from "@plannotator/shared/pr-provider";
+import type { PRMetadata } from "@plannotator/shared/pr-types";
 
 const ann = (overrides: Partial<CodeAnnotation> = {}): CodeAnnotation => ({
   id: "1",

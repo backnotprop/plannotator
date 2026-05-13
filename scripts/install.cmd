@@ -413,7 +413,7 @@ if "!CODEX_AVAILABLE!"=="1" (
     echo   1. Add this to %%USERPROFILE%%\.codex\config.toml:
     echo.
     echo      [features]
-    echo      codex_hooks = true
+    echo      hooks = true
     echo.
     echo   2. Add a Stop hook in %%USERPROFILE%%\.codex\hooks.json that runs:
     echo.

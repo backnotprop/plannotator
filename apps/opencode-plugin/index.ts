@@ -383,11 +383,26 @@ The user will review your plan in a visual UI where they can annotate, approve, 
 Do NOT proceed with implementation until your plan is approved.`);
     },
 
-    // Intercept plannotator-last before the agent sees the command
+    // Intercept plannotator commands before the agent sees them.
+    // Clearing output.parts in place suppresses the .md body + appended
+    // args so the agent never receives the command — without this, OpenCode
+    // calls resolvePromptParts() on "<body> <arguments>", which auto-attaches
+    // any file path it finds as a FilePart. On a large file that blows the
+    // context before the annotation UI even opens (#713).
+    //
+    // Must mutate in place (length = 0), not reassign (= []). The caller
+    // holds a reference to the parts array directly and ignores any new
+    // array assigned to output.parts.
     "command.execute.before": async (input, output) => {
-      if (input.command !== "plannotator-last") return;
+      const cmd = input.command;
+      if (
+        cmd !== "plannotator-last" &&
+        cmd !== "plannotator-annotate" &&
+        cmd !== "plannotator-review" &&
+        cmd !== "plannotator-archive"
+      ) return;
 
-      output.parts = [];
+      output.parts.length = 0;
 
       const deps: CommandDeps = {
         client: ctx.client,
@@ -398,58 +413,35 @@ Do NOT proceed with implementation until your plan is approved.`);
         getPasteApiUrl,
         directory: ctx.directory,
       };
+      // input.arguments is the raw tail string from OpenCode's command dispatcher —
+      // needed so --gate / --json reach the handlers' parseAnnotateArgs (#570).
+      const event = {
+        properties: { sessionID: input.sessionID, arguments: input.arguments },
+      };
 
-      const feedback = await handleAnnotateLastCommand(
-        // input.arguments is the raw tail string from OpenCode's command dispatcher —
-        // needed so --gate / --json reach handleAnnotateLastCommand's parseAnnotateArgs (#570).
-        { properties: { sessionID: input.sessionID, arguments: input.arguments } },
-        deps
-      );
-
-      if (feedback) {
-        try {
-          await ctx.client.session.prompt({
-            path: { id: input.sessionID },
-            body: {
-              parts: [{
-                type: "text",
-                text: getAnnotateMessageFeedbackPrompt("opencode", undefined, { feedback }),
-              }],
-            },
-          });
-        } catch {
-          // Session may not be available
+      if (cmd === "plannotator-last") {
+        const feedback = await handleAnnotateLastCommand(event, deps);
+        if (feedback) {
+          try {
+            await ctx.client.session.prompt({
+              path: { id: input.sessionID },
+              body: {
+                parts: [{
+                  type: "text",
+                  text: getAnnotateMessageFeedbackPrompt("opencode", undefined, { feedback }),
+                }],
+              },
+            });
+          } catch {
+            // Session may not be available
+          }
         }
+        return;
       }
-    },
 
-    // Listen for slash commands (review + annotate)
-    event: async ({ event }) => {
-      const isCommandEvent =
-        event.type === "command.executed" ||
-        event.type === "tui.command.execute";
-
-      if (!isCommandEvent) return;
-
-      // @ts-ignore - Event structure varies
-      const commandName = event.properties?.name || event.command || event.payload?.name;
-
-      const deps: CommandDeps = {
-        client: ctx.client,
-        htmlContent: getPlanHtml(),
-        reviewHtmlContent: getReviewHtml(),
-        getSharingEnabled,
-        getShareBaseUrl,
-        getPasteApiUrl,
-        directory: ctx.directory,
-      };
-
-      if (commandName === "plannotator-review")
-        return handleReviewCommand(event, deps);
-      if (commandName === "plannotator-annotate")
-        return handleAnnotateCommand(event, deps);
-      if (commandName === "plannotator-archive")
-        return handleArchiveCommand(event, deps);
+      if (cmd === "plannotator-annotate") return handleAnnotateCommand(event, deps);
+      if (cmd === "plannotator-review") return handleReviewCommand(event, deps);
+      if (cmd === "plannotator-archive") return handleArchiveCommand(event, deps);
     },
   };
 

@@ -353,7 +353,7 @@ jobs:
           run_installer
 
           test -x "$tmp_home/.local/bin/plannotator"
-          grep -q 'codex_hooks = true' "$tmp_home/.codex/config.toml"
+          grep -q 'hooks = true' "$tmp_home/.codex/config.toml"
 
           HOME="$tmp_home" node <<'NODE'
           const fs = require("fs");

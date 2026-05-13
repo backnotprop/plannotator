@@ -138,7 +138,7 @@ For manual setup, enable hooks in `~/.codex/config.toml` or `<repo>/.codex/confi
 
 ```toml
 [features]
-codex_hooks = true
+hooks = true
 ```
 
 Then add `hooks.json` next to that config layer:

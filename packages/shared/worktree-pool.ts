@@ -11,7 +11,7 @@
 
 import { join } from "node:path";
 import type { ReviewGitRuntime } from "./review-core";
-import type { PRMetadata } from "./pr-provider";
+import type { PRMetadata } from "./pr-types";
 import { createWorktree, removeWorktree, fetchRef, ensureObjectAvailable } from "./worktree";
 
 export interface PoolEntry {

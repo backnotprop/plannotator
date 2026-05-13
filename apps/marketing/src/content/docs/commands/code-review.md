@@ -82,6 +82,18 @@ By default the review opens showing uncommitted changes, but you can switch what
 
 If you're working on a feature branch and want to see everything you've done before opening a PR, switch to the "vs main" option. It's a good way to do a self-review of your full branch diff.
 
+You can also pick a specific commit as the diff base from the base branch picker. This lets you compare against any of the last 20 commits on your branch rather than just the branch tip.
+
+### Jujutsu (jj) diff modes
+
+In a jj workspace, the diff type picker shows jj-native options instead of git modes:
+
+- **Current** - working-copy changes
+- **Last** - the previous change
+- **Line** - full line of work from the current change back to trunk
+- **All** - all local changes not yet on the remote
+- **Evolution** - amendment history for the current change (requires 2+ evolog entries)
+
 ## The diff viewer
 
 The review UI shows your changes in a familiar diff format:
@@ -158,12 +170,20 @@ Runtime keys use Plannotator's runtime identifiers. For code review, the current
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/api/diff` | GET | Returns `{ rawPatch, gitRef, origin }` |
+| `/api/diff` | GET | Returns diff data including `rawPatch`, `gitRef`, `origin`, `diffType`, `base`, `hideWhitespace`, `gitContext` |
+| `/api/diff/switch` | POST | Switch diff type, base branch/commit, or whitespace mode |
+| `/api/file-content` | GET | Full file content for expandable diff context |
+| `/api/git-add` | POST | Stage or unstage a file |
 | `/api/feedback` | POST | Submit review feedback |
 | `/api/image` | GET | Serve image by path |
 | `/api/upload` | POST | Upload image attachment |
+| `/api/draft` | GET/POST/DELETE | Auto-save annotation drafts |
 | `/api/ai/capabilities` | GET | Check available AI providers |
-| `/api/ai/session` | POST | Create AI chat session |
+| `/api/ai/session` | POST | Create or fork an AI session |
 | `/api/ai/query` | POST | Send prompt, stream SSE response |
 | `/api/ai/abort` | POST | Abort current AI query |
 | `/api/ai/permission` | POST | Respond to tool approval request |
+| `/api/agents/capabilities` | GET | Check available agent providers |
+| `/api/agents/jobs` | GET/POST/DELETE | Manage agent jobs (Code Tour, etc.) |
+| `/api/pr-list` | GET | List PRs for the current repo |
+| `/api/pr-switch` | POST | Switch to a different PR in-place |

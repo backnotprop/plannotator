@@ -8,11 +8,20 @@
  *   - one current working-copy change on top
  *
  * Usage:
- *   bun run tests/manual/test-jj-review.ts [--keep] [--setup-only]
+ *   bun run tests/manual/test-jj-review.ts [--keep] [--setup-only] [--with-evolog]
+ *
+ * Flags:
+ *   --keep          Don't delete the sandbox after the server exits.
+ *   --setup-only    Create the sandbox and print the path, but don't start the server.
+ *   --with-evolog   Amend the current change a few times before launching, so the
+ *                   "Evolution diff" mode appears in the UI with entries to pick from.
+ *                   Without this flag a helper script is written to the sandbox that
+ *                   you can run yourself at any time: `./create-evolog.sh`
  *
  * What to test in the review UI:
  *   1. The View dropdown lists JJ modes only:
  *      Current change, Last change, Line of work, All files.
+ *      (With --with-evolog or after running create-evolog.sh: also Evolution diff.)
  *   2. Initial view is Current change, even if a saved Git default exists.
  *   3. Current change shows only the working-copy commit (@).
  *   4. Last change shows only the previous committed JJ change (@-).
@@ -20,6 +29,10 @@
  *   6. All files shows the whole repository from root() to @.
  *   7. Hide whitespace re-runs JJ diff with -w.
  *   8. Staging controls are unavailable because JJ has no Git-style staging.
+ *   9. (Evolog) Evolution diff shows what changed between amendments of @.
+ *  10. (Evolog) The EvoLogPicker lists 3+ entries with commit IDs and ages.
+ *  11. (Evolog) Selecting an older entry re-diffs against that snapshot.
+ *  12. (Evolog) The "current" entry (index 0) is disabled in the picker.
  */
 
 import { $ } from "bun";
@@ -40,6 +53,7 @@ import {
 import html from "../../apps/review/dist/index.html" with { type: "text" };
 
 const SETUP_ONLY = process.argv.includes("--setup-only");
+const WITH_EVOLOG = process.argv.includes("--with-evolog");
 const KEEP = process.argv.includes("--keep") || SETUP_ONLY;
 
 const sandbox = path.join(tmpdir(), `plannotator-jj-test-${Date.now()}`);
@@ -680,6 +694,412 @@ async function createJjWorkspace(): Promise<void> {
   await $`jj status`.cwd(jjRepo).quiet();
 }
 
+/**
+ * Amend the current working-copy change several times to create a realistic
+ * evolution log. Simulates a typical iteration cycle: first pass, then
+ * fixing issues you spotted, then responding to review feedback, then a
+ * final polish. After this, `jj evolog -r @` will show 5 entries.
+ */
+async function createEvologHistory(): Promise<void> {
+  // Amendment 1: noticed the audit log service is missing a metadata field
+  // that other services expect. Quick fix while the change is still fresh.
+  await write("src/services/audit-log.ts", lines([
+    "export interface AuditEvent {",
+    "  type: string;",
+    "  actor: string;",
+    "  resource?: string;",
+    "  createdAt: string;",
+    "}",
+    "",
+    "export function recordAuditEvent(type: string, actor = 'system', resource?: string): AuditEvent {",
+    "  return {",
+    "    type,",
+    "    actor,",
+    "    resource,",
+    "    createdAt: new Date().toISOString(),",
+    "  };",
+    "}",
+  ]));
+  await $`jj describe -m "feat: add config, audit log, and project API improvements"`.cwd(jjRepo).quiet();
+  await $`jj status`.cwd(jjRepo).quiet();
+
+  // Amendment 2: reviewer pointed out the config should validate env vars
+  // instead of silently accepting garbage values. Also add a debug level
+  // to the logger since we're adding enableRequestTracing.
+  await write("src/config.ts", lines([
+    "export interface Config {",
+    "  port: number;",
+    "  logLevel: 'debug' | 'info' | 'warn' | 'error';",
+    "  enableRequestTracing: boolean;",
+    "  maxRetries: number;",
+    "}",
+    "",
+    "const VALID_LOG_LEVELS = new Set(['debug', 'info', 'warn', 'error']);",
+    "",
+    "export function loadConfig(): Config {",
+    "  const rawLogLevel = process.env.LOG_LEVEL ?? 'info';",
+    "  if (!VALID_LOG_LEVELS.has(rawLogLevel)) {",
+    "    throw new Error(`Invalid LOG_LEVEL: ${rawLogLevel}`);",
+    "  }",
+    "",
+    "  return {",
+    "    port: Number(process.env.PORT ?? 3000),",
+    "    logLevel: rawLogLevel as Config['logLevel'],",
+    "    enableRequestTracing: process.env.REQUEST_TRACING === '1',",
+    "    maxRetries: Number(process.env.MAX_RETRIES ?? 3),",
+    "  };",
+    "}",
+  ]));
+  await write("src/utils/logger.ts", lines([
+    "export type LogLevel = 'debug' | 'info' | 'warn' | 'error';",
+    "",
+    "const LEVEL_PRIORITY: Record<LogLevel, number> = {",
+    "  debug: 0,",
+    "  info: 1,",
+    "  warn: 2,",
+    "  error: 3,",
+    "};",
+    "",
+    "export function createLogger(level: string) {",
+    "  const threshold = LEVEL_PRIORITY[level as LogLevel] ?? 1;",
+    "",
+    "  return {",
+    "    debug(message: string, data?: unknown) {",
+    "      if (threshold <= 0) console.debug(message, data ?? '');",
+    "    },",
+    "    info(message: string, data?: unknown) {",
+    "      if (threshold <= 1) console.log(message, data ?? '');",
+    "    },",
+    "    warn(message: string, data?: unknown) {",
+    "      if (threshold <= 2) console.warn(message, data ?? '');",
+    "    },",
+    "    error(message: string, data?: unknown) {",
+    "      console.error(message, data ?? '');",
+    "    },",
+    "  };",
+    "}",
+  ]));
+  await $`jj describe -m "feat: add config validation, structured logger, audit log, and project API"`.cwd(jjRepo).quiet();
+  await $`jj status`.cwd(jjRepo).quiet();
+
+  // Amendment 3: realized the archive job threshold should be configurable
+  // via config rather than hardcoded. Wire it through.
+  await write("src/config.ts", lines([
+    "export interface Config {",
+    "  port: number;",
+    "  logLevel: 'debug' | 'info' | 'warn' | 'error';",
+    "  enableRequestTracing: boolean;",
+    "  maxRetries: number;",
+    "  staleProjectDays: number;",
+    "}",
+    "",
+    "const VALID_LOG_LEVELS = new Set(['debug', 'info', 'warn', 'error']);",
+    "",
+    "export function loadConfig(): Config {",
+    "  const rawLogLevel = process.env.LOG_LEVEL ?? 'info';",
+    "  if (!VALID_LOG_LEVELS.has(rawLogLevel)) {",
+    "    throw new Error(`Invalid LOG_LEVEL: ${rawLogLevel}`);",
+    "  }",
+    "",
+    "  return {",
+    "    port: Number(process.env.PORT ?? 3000),",
+    "    logLevel: rawLogLevel as Config['logLevel'],",
+    "    enableRequestTracing: process.env.REQUEST_TRACING === '1',",
+    "    maxRetries: Number(process.env.MAX_RETRIES ?? 3),",
+    "    staleProjectDays: Number(process.env.STALE_PROJECT_DAYS ?? 120),",
+    "  };",
+    "}",
+  ]));
+  await write("src/features/projects/jobs/nightly/archive-stale-projects.ts", lines([
+    "import { listProjects, saveProject } from '../../repositories/project-repository';",
+    "",
+    "export async function archiveStaleProjects(",
+    "  staleAfterDays: number,",
+    "  now = new Date(),",
+    "): Promise<number> {",
+    "  const projects = await listProjects();",
+    "  let archived = 0;",
+    "",
+    "  for (const project of projects) {",
+    "    const ageMs = now.getTime() - new Date(project.updatedAt).getTime();",
+    "    const ageDays = ageMs / (1000 * 60 * 60 * 24);",
+    "    if (project.status === 'paused' && ageDays > staleAfterDays) {",
+    "      await saveProject({ ...project, status: 'archived' });",
+    "      archived += 1;",
+    "    }",
+    "  }",
+    "",
+    "  return archived;",
+    "}",
+  ]));
+  await $`jj describe -m "feat: config validation, structured logger, configurable archive threshold"`.cwd(jjRepo).quiet();
+  await $`jj status`.cwd(jjRepo).quiet();
+
+  // Amendment 4: final cleanup — fix the invoice repository to use the
+  // status field properly and tighten the http client types. The kind of
+  // last-minute polish before marking a change as ready.
+  await write("src/features/billing/invoices/repositories/invoice-repository.ts", lines([
+    "import type { Invoice } from '../domain/invoice';",
+    "",
+    "export async function listOpenInvoices(accountId: string): Promise<Invoice[]> {",
+    "  return [",
+    "    {",
+    "      id: 'inv_001',",
+    "      accountId,",
+    "      totalCents: 24000,",
+    "      status: 'open',",
+    "      dueAt: '2026-05-15T00:00:00.000Z',",
+    "    },",
+    "  ];",
+    "}",
+    "",
+    "export async function listOverdueInvoices(accountId: string, now = new Date()): Promise<Invoice[]> {",
+    "  const invoices = await listOpenInvoices(accountId);",
+    "  return invoices.filter((inv) => new Date(inv.dueAt).getTime() < now.getTime());",
+    "}",
+  ]));
+  await write("src/shared/http/client.ts", lines([
+    "export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';",
+    "",
+    "export interface HttpRequestOptions {",
+    "  method?: HttpMethod;",
+    "  headers?: Record<string, string>;",
+    "  body?: unknown;",
+    "  signal?: AbortSignal;",
+    "}",
+    "",
+    "export async function requestJson<T>(url: string, options: HttpRequestOptions = {}): Promise<T> {",
+    "  const response = await fetch(url, {",
+    "    method: options.method ?? 'GET',",
+    "    headers: {",
+    "      'content-type': 'application/json',",
+    "      ...options.headers,",
+    "    },",
+    "    body: options.body === undefined ? undefined : JSON.stringify(options.body),",
+    "    signal: options.signal,",
+    "  });",
+    "",
+    "  if (!response.ok) {",
+    "    throw new Error(`Request failed: ${response.status} ${response.statusText}`);",
+    "  }",
+    "",
+    "  return response.json() as Promise<T>;",
+    "}",
+  ]));
+  await $`jj describe -m "feat: config validation, structured logger, project archive, invoice & http cleanup"`.cwd(jjRepo).quiet();
+  await $`jj status`.cwd(jjRepo).quiet();
+}
+
+/**
+ * Write a standalone shell script into the sandbox that creates evolog
+ * history when run. This lets the user launch the sandbox without evolog,
+ * verify the base modes work, then run the script and refresh to see the
+ * Evolution diff mode appear.
+ */
+async function writeEvologHelperScript(): Promise<void> {
+  const script = `#!/usr/bin/env bash
+set -euo pipefail
+
+# Creates evolution history for the current JJ change (@) by amending it
+# four times, simulating a realistic iteration cycle. After running this,
+# refresh the Plannotator review UI — the "Evolution diff" mode will
+# appear in the diff type picker with 5 entries to compare between.
+
+cd "${jjRepo}"
+
+echo "Amendment 1/4: adding resource field to audit log..."
+cat > src/services/audit-log.ts << 'TSEOF'
+export interface AuditEvent {
+  type: string;
+  actor: string;
+  resource?: string;
+  createdAt: string;
+}
+
+export function recordAuditEvent(type: string, actor = 'system', resource?: string): AuditEvent {
+  return {
+    type,
+    actor,
+    resource,
+    createdAt: new Date().toISOString(),
+  };
+}
+TSEOF
+jj describe -m "feat: add config, audit log, and project API improvements"
+jj status > /dev/null
+
+echo "Amendment 2/4: adding config validation and structured logger..."
+cat > src/config.ts << 'TSEOF'
+export interface Config {
+  port: number;
+  logLevel: 'debug' | 'info' | 'warn' | 'error';
+  enableRequestTracing: boolean;
+  maxRetries: number;
+}
+
+const VALID_LOG_LEVELS = new Set(['debug', 'info', 'warn', 'error']);
+
+export function loadConfig(): Config {
+  const rawLogLevel = process.env.LOG_LEVEL ?? 'info';
+  if (!VALID_LOG_LEVELS.has(rawLogLevel)) {
+    throw new Error(\\\`Invalid LOG_LEVEL: \\\${rawLogLevel}\\\`);
+  }
+
+  return {
+    port: Number(process.env.PORT ?? 3000),
+    logLevel: rawLogLevel as Config['logLevel'],
+    enableRequestTracing: process.env.REQUEST_TRACING === '1',
+    maxRetries: Number(process.env.MAX_RETRIES ?? 3),
+  };
+}
+TSEOF
+cat > src/utils/logger.ts << 'TSEOF'
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+const LEVEL_PRIORITY: Record<LogLevel, number> = {
+  debug: 0,
+  info: 1,
+  warn: 2,
+  error: 3,
+};
+
+export function createLogger(level: string) {
+  const threshold = LEVEL_PRIORITY[level as LogLevel] ?? 1;
+
+  return {
+    debug(message: string, data?: unknown) {
+      if (threshold <= 0) console.debug(message, data ?? '');
+    },
+    info(message: string, data?: unknown) {
+      if (threshold <= 1) console.log(message, data ?? '');
+    },
+    warn(message: string, data?: unknown) {
+      if (threshold <= 2) console.warn(message, data ?? '');
+    },
+    error(message: string, data?: unknown) {
+      console.error(message, data ?? '');
+    },
+  };
+}
+TSEOF
+jj describe -m "feat: config validation, structured logger, audit log, and project API"
+jj status > /dev/null
+
+echo "Amendment 3/4: making archive threshold configurable..."
+cat > src/config.ts << 'TSEOF'
+export interface Config {
+  port: number;
+  logLevel: 'debug' | 'info' | 'warn' | 'error';
+  enableRequestTracing: boolean;
+  maxRetries: number;
+  staleProjectDays: number;
+}
+
+const VALID_LOG_LEVELS = new Set(['debug', 'info', 'warn', 'error']);
+
+export function loadConfig(): Config {
+  const rawLogLevel = process.env.LOG_LEVEL ?? 'info';
+  if (!VALID_LOG_LEVELS.has(rawLogLevel)) {
+    throw new Error(\\\`Invalid LOG_LEVEL: \\\${rawLogLevel}\\\`);
+  }
+
+  return {
+    port: Number(process.env.PORT ?? 3000),
+    logLevel: rawLogLevel as Config['logLevel'],
+    enableRequestTracing: process.env.REQUEST_TRACING === '1',
+    maxRetries: Number(process.env.MAX_RETRIES ?? 3),
+    staleProjectDays: Number(process.env.STALE_PROJECT_DAYS ?? 120),
+  };
+}
+TSEOF
+cat > src/features/projects/jobs/nightly/archive-stale-projects.ts << 'TSEOF'
+import { listProjects, saveProject } from '../../repositories/project-repository';
+
+export async function archiveStaleProjects(
+  staleAfterDays: number,
+  now = new Date(),
+): Promise<number> {
+  const projects = await listProjects();
+  let archived = 0;
+
+  for (const project of projects) {
+    const ageMs = now.getTime() - new Date(project.updatedAt).getTime();
+    const ageDays = ageMs / (1000 * 60 * 60 * 24);
+    if (project.status === 'paused' && ageDays > staleAfterDays) {
+      await saveProject({ ...project, status: 'archived' });
+      archived += 1;
+    }
+  }
+
+  return archived;
+}
+TSEOF
+jj describe -m "feat: config validation, structured logger, configurable archive threshold"
+jj status > /dev/null
+
+echo "Amendment 4/4: polish — overdue invoice query and http client cleanup..."
+cat > src/features/billing/invoices/repositories/invoice-repository.ts << 'TSEOF'
+import type { Invoice } from '../domain/invoice';
+
+export async function listOpenInvoices(accountId: string): Promise<Invoice[]> {
+  return [
+    {
+      id: 'inv_001',
+      accountId,
+      totalCents: 24000,
+      status: 'open',
+      dueAt: '2026-05-15T00:00:00.000Z',
+    },
+  ];
+}
+
+export async function listOverdueInvoices(accountId: string, now = new Date()): Promise<Invoice[]> {
+  const invoices = await listOpenInvoices(accountId);
+  return invoices.filter((inv) => new Date(inv.dueAt).getTime() < now.getTime());
+}
+TSEOF
+cat > src/shared/http/client.ts << 'TSEOF'
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
+
+export interface HttpRequestOptions {
+  method?: HttpMethod;
+  headers?: Record<string, string>;
+  body?: unknown;
+  signal?: AbortSignal;
+}
+
+export async function requestJson<T>(url: string, options: HttpRequestOptions = {}): Promise<T> {
+  const response = await fetch(url, {
+    method: options.method ?? 'GET',
+    headers: {
+      'content-type': 'application/json',
+      ...options.headers,
+    },
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    signal: options.signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(\\\`Request failed: \\\${response.status} \\\${response.statusText}\\\`);
+  }
+
+  return response.json() as Promise<T>;
+}
+TSEOF
+jj describe -m "feat: config validation, structured logger, project archive, invoice & http cleanup"
+jj status > /dev/null
+
+echo ""
+echo "Done! Evolution log now has 5 entries:"
+jj evolog --no-graph -r @ -T 'commit.commit_id().short(8) ++ "  " ++ commit.description().first_line() ++ "  (" ++ commit.author().timestamp().ago() ++ ")\\n"'
+echo ""
+echo "Refresh the Plannotator review UI to see the Evolution diff mode."
+`;
+  const scriptPath = path.join(sandbox, "create-evolog.sh");
+  await Bun.write(scriptPath, script);
+  await $`chmod +x ${scriptPath}`.quiet();
+}
+
 async function printSandboxSummary(): Promise<void> {
   const log = await $`jj log --no-graph -T 'change_id.short() ++ " " ++ commit_id.short() ++ " " ++ bookmarks ++ " " ++ remote_bookmarks ++ " " ++ description.first_line() ++ "\n"'`.cwd(jjRepo).quiet();
   const status = await $`jj status`.cwd(jjRepo).quiet();
@@ -702,7 +1122,12 @@ async function printSandboxSummary(): Promise<void> {
   console.error("  jj diff --git --from 'heads(::@ & ::(trunk()))' --to @");
   console.error("  jj diff --git --from 'root()' --to @");
   console.error("  jj diff --git -w -r @");
+  console.error("  jj evolog -r @");
   console.error("  jj git push --dry-run --bookmark review/jj-demo");
+  console.error("");
+  console.error("Evolog helper script:");
+  console.error(`  ${path.join(sandbox, "create-evolog.sh")}`);
+  console.error("  (Amends @ twice to create evolution history, then refresh the UI)")
   console.error("");
 }
 
@@ -717,6 +1142,17 @@ console.error("");
 await mkdir(sandbox, { recursive: true });
 await createSeedGitRemote();
 await createJjWorkspace();
+await writeEvologHelperScript();
+
+if (WITH_EVOLOG) {
+  console.error("Creating evolution history (--with-evolog)...");
+  await createEvologHistory();
+  const evolog = await $`jj evolog --no-graph -r @ -T 'commit.commit_id().short(8) ++ "  " ++ commit.description().first_line() ++ "\n"'`.cwd(jjRepo).quiet();
+  console.error("Evolog entries:");
+  console.error(evolog.text().trimEnd());
+  console.error("");
+}
+
 await printSandboxSummary();
 
 if (SETUP_ONLY) {
@@ -737,6 +1173,12 @@ console.error("Expected initial state:");
 console.error("  - VCS type: jj");
 console.error("  - Initial View: Current change");
 console.error("  - Base for Line of work: trunk()");
+if (WITH_EVOLOG) {
+  console.error("  - Evolution diff: available (5 evolog entries)");
+  console.error("  - EvoLogPicker: should show entries with commit IDs + ages");
+} else {
+  console.error("  - Evolution diff: not shown (run create-evolog.sh and refresh)");
+}
 console.error("");
 
 const server = await startReviewServer({

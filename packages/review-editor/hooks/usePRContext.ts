@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import type { PRContext } from '@plannotator/shared/pr-provider';
-import type { PRMetadata } from '@plannotator/shared/pr-provider';
+import type { PRContext } from '@plannotator/shared/pr-types';
+import type { PRMetadata } from '@plannotator/shared/pr-types';
 
 export function usePRContext(prMetadata: PRMetadata | null) {
   const [prContext, setPRContext] = useState<PRContext | null>(null);

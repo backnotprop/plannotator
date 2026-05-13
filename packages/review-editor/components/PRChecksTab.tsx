@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import type { PRContext, PRCheck } from '@plannotator/shared/pr-provider';
+import type { PRContext, PRCheck } from '@plannotator/shared/pr-types';
 
 interface PRChecksTabProps {
   context: PRContext;

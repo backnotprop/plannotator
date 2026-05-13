@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ReviewGitRuntime } from "./review-core";
-import type { PRMetadata } from "./pr-provider";
+import type { PRMetadata } from "./pr-types";
 import { createWorktreePool } from "./worktree-pool";
 
 function fakeRuntime(): { runtime: ReviewGitRuntime; commands: string[][] } {

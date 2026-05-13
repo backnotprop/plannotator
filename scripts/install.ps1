@@ -299,7 +299,7 @@ if ($codexAvailable) {
     Write-Host "  1. Add this to $env:USERPROFILE\.codex\config.toml:"
     Write-Host ""
     Write-Host "     [features]"
-    Write-Host "     codex_hooks = true"
+    Write-Host "     hooks = true"
     Write-Host ""
     Write-Host "  2. Add a Stop hook in $env:USERPROFILE\.codex\hooks.json that runs:"
     Write-Host ""

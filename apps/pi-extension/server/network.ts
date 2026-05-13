@@ -57,7 +57,7 @@ export function getServerPort(): {
 	const envPort = process.env.PLANNOTATOR_PORT;
 	if (envPort) {
 		const parsed = parseInt(envPort, 10);
-		if (!Number.isNaN(parsed) && parsed > 0 && parsed < 65536) {
+		if (!Number.isNaN(parsed) && parsed >= 0 && parsed < 65536) {
 			return { port: parsed, portSource: "env" };
 		}
 		// Invalid port - fall back silently, caller can check env var themselves

@@ -105,6 +105,7 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
     setActiveFilePath(null);
     setCollapsedFiles(new Set());
     collapseHistory.current = [];
+    setFileCommentAnchor(null);
   }, [files]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -534,9 +535,11 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
 
       {fileCommentAnchor && onAddFileComment && (
         <CommentPopover
+          key={`file:${prUrl ?? ''}:${prDiffScope ?? ''}:${fileCommentAnchor.filePath}`}
           anchorEl={fileCommentAnchor.el}
           contextText={fileCommentAnchor.filePath.split('/').pop() || fileCommentAnchor.filePath}
           isGlobal={false}
+          draftKey={`file:${prUrl ?? ''}:${prDiffScope ?? ''}:${fileCommentAnchor.filePath}`}
           onSubmit={(text) => {
             onAddFileComment(fileCommentAnchor.filePath, text);
             setFileCommentAnchor(null);

@@ -44,6 +44,14 @@ const KNOWN_HOOKS = {
 
 export type ImprovementHookName = keyof typeof KNOWN_HOOKS;
 
+export function getImprovementHookExpectedPath(
+  hookName: ImprovementHookName,
+): string | null {
+  const entry = KNOWN_HOOKS[hookName];
+  if (!entry) return null;
+  return join(HOOKS_BASE_DIR, entry.path);
+}
+
 export interface ImprovementHookResult {
   content: string;
   hookName: ImprovementHookName;

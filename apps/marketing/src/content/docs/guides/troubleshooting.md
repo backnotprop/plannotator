@@ -72,7 +72,7 @@ If a Codex plan turn completes without opening Plannotator:
 
 1. Rerun the installer: `curl -fsSL https://plannotator.ai/install.sh | bash`
 2. Restart Codex Desktop or CLI so hooks are reloaded
-3. Check `~/.codex/config.toml` contains `codex_hooks = true` under `[features]`
+3. Check `~/.codex/config.toml` contains `hooks = true` under `[features]`
 4. Check `~/.codex/hooks.json` has a `Stop` hook whose command points to `plannotator`
 5. Run `plannotator sessions` in case the browser failed to open but the session is running
 

@@ -53,7 +53,7 @@ export function getServerPort(): number {
   const envPort = process.env.PLANNOTATOR_PORT;
   if (envPort) {
     const parsed = parseInt(envPort, 10);
-    if (!isNaN(parsed) && parsed > 0 && parsed < 65536) {
+    if (!isNaN(parsed) && parsed >= 0 && parsed < 65536) {
       return parsed;
     }
     console.error(
