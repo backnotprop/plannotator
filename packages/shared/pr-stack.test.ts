@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { PRMetadata } from "./pr-provider";
+import type { PRMetadata } from "./pr-types";
 import type { GitCommandResult, ReviewGitRuntime } from "./review-core";
 import { runPRFullStackDiff } from "./pr-stack";
 

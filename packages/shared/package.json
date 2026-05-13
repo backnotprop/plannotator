@@ -13,6 +13,7 @@
     "./vcs-core": "./vcs-core.ts",
     "./checklist": "./checklist.ts",
     "./types": "./types.ts",
+    "./pr-types": "./pr-types.ts",
     "./pr-provider": "./pr-provider.ts",
     "./pr-stack": "./pr-stack.ts",
     "./project": "./project.ts",

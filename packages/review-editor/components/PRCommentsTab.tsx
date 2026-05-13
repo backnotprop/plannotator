@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
-import type { PRContext, PRComment, PRReview, PRReviewThread } from '@plannotator/shared/pr-provider';
+import type { PRContext, PRComment, PRReview, PRReviewThread } from '@plannotator/shared/pr-types';
 import { MarkdownBody } from './PRSummaryTab';
 import { CopyButton } from './CopyButton';
 import { DiffHunkPreview } from './DiffHunkPreview';

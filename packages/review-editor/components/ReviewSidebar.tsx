@@ -10,7 +10,7 @@ import { renderInlineMarkdown } from '../utils/renderInlineMarkdown';
 import { formatRelativeTime } from '../utils/formatRelativeTime';
 import { AITab } from './AITab';
 import { AgentsTab } from '@plannotator/ui/components/AgentsTab';
-import type { PRMetadata } from '@plannotator/shared/pr-provider';
+import type { PRMetadata } from '@plannotator/shared/pr-types';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import type { AgentJobInfo, AgentCapabilities } from '@plannotator/ui/types';

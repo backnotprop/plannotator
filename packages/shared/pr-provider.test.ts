@@ -11,7 +11,7 @@ import {
   prRefFromMetadata,
   type PRMetadata,
   type PRRef,
-} from "./pr-provider";
+} from "./pr-types";
 import {
   getPRDiffScopeOptions,
   getPRStackInfo,

@@ -2,7 +2,7 @@ import React, { useMemo, useRef, useEffect } from 'react';
 import DOMPurify from 'dompurify';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { renderInlineMarkdown } from '../utils/renderInlineMarkdown';
-import type { PRContext, PRMetadata } from '@plannotator/shared/pr-provider';
+import type { PRContext, PRMetadata } from '@plannotator/shared/pr-types';
 
 interface PRSummaryTabProps {
   context: PRContext;

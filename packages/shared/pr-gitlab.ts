@@ -5,8 +5,11 @@
  * Self-hosted instances are supported via the --hostname flag.
  */
 
-import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, CommandResult } from "./pr-provider";
-import { encodeApiFilePath } from "./pr-provider";
+import { homedir } from "os";
+import { join } from "path";
+import { mkdirSync, writeFileSync } from "fs";
+import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, CommandResult } from "./pr-types";
+import { encodeApiFilePath } from "./pr-types";
 
 // GitLab-specific MRRef shape (used internally)
 interface GlMRRef {
@@ -495,13 +498,42 @@ export async function submitGlMRReview(
       }
     }
 
-    if (errors.length > 0 && errors.length === fileComments.length) {
-      // All failed — throw
-      throw new Error(`Failed to post inline comments:\n${errors.join("\n")}`);
-    }
-    // Partial failures: some comments posted, some didn't — log but don't throw
     if (errors.length > 0) {
-      console.error(`Warning: ${errors.length}/${fileComments.length} inline comments failed:\n${errors.join("\n")}`);
+      // Persist unposted bodies to disk so the work survives transient GitLab errors.
+      // We keep the original throw-vs-warn split intentionally:
+      //  - all-fail → throw (nothing was posted, caller retries from clean state)
+      //  - partial-fail → warn only (some discussions + the MR note are already on
+      //    the server; throwing would have the client re-submit the whole review
+      //    and create duplicates).
+      const failed = results
+        .map((r, i) => (r.status === "rejected" ? fileComments[i] : null))
+        .filter((c): c is PRReviewFileComment => c !== null);
+      let savedTo: string | null = null;
+      try {
+        const dir = join(homedir(), ".plannotator", "failed-comments");
+        mkdirSync(dir, { recursive: true });
+        const slug = `${ref.host}-${ref.projectPath.replace(/\//g, "_")}-mr${ref.iid}-${Date.now()}`;
+        savedTo = join(dir, `${slug}.json`);
+        writeFileSync(
+          savedTo,
+          JSON.stringify({ ref, headSha, baseSha, startSha, errors, failedComments: failed }, null, 2),
+        );
+      } catch (writeErr) {
+        console.error(`[plannotator] Failed to persist unposted comments: ${writeErr instanceof Error ? writeErr.message : String(writeErr)}`);
+      }
+      const suffix = savedTo ? ` (unposted bodies saved to ${savedTo})` : "";
+
+      if (errors.length === fileComments.length) {
+        // All failed — safe to throw, nothing was posted.
+        throw new Error(
+          `Failed to post inline comments${suffix}:\n${errors.join("\n")}`,
+        );
+      }
+      // Partial failure — some comments and the MR note are already posted.
+      // Don't throw, or the UI will resubmit the whole review and duplicate them.
+      console.error(
+        `[plannotator] ${errors.length}/${fileComments.length} inline comments failed${suffix}:\n${errors.join("\n")}`,
+      );
     }
   }
 

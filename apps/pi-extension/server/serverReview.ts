@@ -22,7 +22,7 @@ import {
 	type PRMetadata,
 	type PRReviewFileComment,
 	prRefFromMetadata,
-} from "../generated/pr-provider.js";
+} from "../generated/pr-types.js";
 import {
 	type DiffType,
 	type GitContext,
@@ -168,15 +168,15 @@ export async function startReviewServer(options: {
 		? getPRDiffScopeOptions(prMeta, !!(options.worktreePool || options.agentCwd))
 		: [];
 
-	let prListCache: import("../generated/pr-provider.js").PRListItem[] | null = null;
+	let prListCache: import("../generated/pr-types.js").PRListItem[] | null = null;
 	let prListCacheTime = 0;
 	const prSwitchCache = new Map<string, { metadata: PRMetadata; rawPatch: string }>();
 	if (isPRMode && prMeta) prSwitchCache.set(prMeta.url, { metadata: prMeta, rawPatch: options.rawPatch });
-	const prStackTreeCache = new Map<string, import("../generated/pr-provider.js").PRStackTree | null>();
+	const prStackTreeCache = new Map<string, import("../generated/pr-types.js").PRStackTree | null>();
 
 	// Fetch full stack tree (best-effort — always try in PR mode so root PRs
 	// that target the default branch can still discover descendant PRs)
-	let prStackTree: import("../generated/pr-provider.js").PRStackTree | null = null;
+	let prStackTree: import("../generated/pr-types.js").PRStackTree | null = null;
 	if (prRef && prMeta) {
 		try {
 			prStackTree = await fetchPRStack(prRef, prMeta);

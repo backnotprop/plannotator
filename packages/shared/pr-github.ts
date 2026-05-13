@@ -4,8 +4,8 @@
  * All functions use the `gh` CLI via the PRRuntime abstraction.
  */
 
-import type { PRRuntime, PRMetadata, PRContext, PRReviewThread, PRThreadComment, PRReviewFileComment, CommandResult, PRStackTree, PRStackNode, PRListItem } from "./pr-provider";
-import { encodeApiFilePath } from "./pr-provider";
+import type { PRRuntime, PRMetadata, PRContext, PRReviewThread, PRThreadComment, PRReviewFileComment, CommandResult, PRStackTree, PRStackNode, PRListItem } from "./pr-types";
+import { encodeApiFilePath } from "./pr-types";
 
 // GitHub-specific PRRef shape (used internally)
 interface GhPRRef {
