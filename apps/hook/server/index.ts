@@ -44,6 +44,7 @@
  *
  * Global flags:
  *   --help             - Show top-level usage information
+ *   --version, -v      - Print version and exit
  *   --browser <name>   - Override which browser to open (e.g. "Google Chrome")
  *
  * Environment variables:
@@ -104,8 +105,10 @@ import { findCopilotPlanContent, findCopilotSessionForCwd, getLastCopilotMessage
 import {
   formatInteractiveNoArgClarification,
   formatTopLevelHelp,
+  formatVersion,
   isInteractiveNoArgInvocation,
   isTopLevelHelpInvocation,
+  isVersionInvocation,
 } from "./cli";
 import path from "path";
 import { tmpdir } from "os";
@@ -200,6 +203,11 @@ function emitAnnotateOutcome(result: {
     return;
   }
   if (result.feedback) console.log(result.feedback);
+}
+
+if (isVersionInvocation(args)) {
+  console.log(formatVersion());
+  process.exit(0);
 }
 
 if (isTopLevelHelpInvocation(args)) {

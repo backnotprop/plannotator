@@ -73,28 +73,30 @@ jobs:
 
       - name: Compile binaries (cross-compile all targets)
         run: |
+          VERSION=$(jq -r .version package.json)
+
           # macOS ARM64
-          bun build apps/hook/server/index.ts --compile --target=bun-darwin-arm64 --outfile plannotator-darwin-arm64
+          bun build apps/hook/server/index.ts --compile --target=bun-darwin-arm64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-darwin-arm64
           sha256sum plannotator-darwin-arm64 > plannotator-darwin-arm64.sha256
 
           # macOS x64
-          bun build apps/hook/server/index.ts --compile --target=bun-darwin-x64 --outfile plannotator-darwin-x64
+          bun build apps/hook/server/index.ts --compile --target=bun-darwin-x64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-darwin-x64
           sha256sum plannotator-darwin-x64 > plannotator-darwin-x64.sha256
 
           # Linux x64
-          bun build apps/hook/server/index.ts --compile --target=bun-linux-x64 --outfile plannotator-linux-x64
+          bun build apps/hook/server/index.ts --compile --target=bun-linux-x64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-linux-x64
           sha256sum plannotator-linux-x64 > plannotator-linux-x64.sha256
 
           # Linux ARM64
-          bun build apps/hook/server/index.ts --compile --target=bun-linux-arm64 --outfile plannotator-linux-arm64
+          bun build apps/hook/server/index.ts --compile --target=bun-linux-arm64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-linux-arm64
           sha256sum plannotator-linux-arm64 > plannotator-linux-arm64.sha256
 
           # Windows x64
-          bun build apps/hook/server/index.ts --compile --target=bun-windows-x64 --outfile plannotator-win32-x64.exe
+          bun build apps/hook/server/index.ts --compile --target=bun-windows-x64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-win32-x64.exe
           sha256sum plannotator-win32-x64.exe > plannotator-win32-x64.exe.sha256
 
           # Windows ARM64 (native, via bun-windows-arm64 — stable since Bun v1.3.10)
-          bun build apps/hook/server/index.ts --compile --target=bun-windows-arm64 --outfile plannotator-win32-arm64.exe
+          bun build apps/hook/server/index.ts --compile --target=bun-windows-arm64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-win32-arm64.exe
           sha256sum plannotator-win32-arm64.exe > plannotator-win32-arm64.exe.sha256
 
           # Paste service binaries

@@ -2,6 +2,16 @@ export function isTopLevelHelpInvocation(args: string[]): boolean {
   return args[0] === "--help";
 }
 
+export function isVersionInvocation(args: string[]): boolean {
+  return args[0] === "--version" || args[0] === "-v";
+}
+
+declare const __CLI_VERSION__: string;
+
+export function formatVersion(): string {
+  return `plannotator ${typeof __CLI_VERSION__ !== "undefined" ? __CLI_VERSION__ : "dev"}`;
+}
+
 export function isInteractiveNoArgInvocation(
   args: string[],
   stdinIsTTY: boolean | undefined,
@@ -13,6 +23,7 @@ export function formatTopLevelHelp(): string {
   return [
     "Usage:",
     "  plannotator --help",
+    "  plannotator --version, -v",
     "  plannotator [--browser <name>]",
     "  plannotator review [--git] [PR_URL]",
     "  plannotator annotate <file.md | file.html | https://... | folder/>  [--no-jina] [--gate] [--json] [--hook]",
