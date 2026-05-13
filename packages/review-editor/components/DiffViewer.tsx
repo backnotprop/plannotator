@@ -621,6 +621,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           anchorEl={fileCommentAnchor}
           contextText={filePath.split('/').pop() || filePath}
           isGlobal={false}
+          draftKey={`file:${filePath}`}
           onSubmit={(text) => {
             onAddFileComment(text);
             setFileCommentAnchor(null);
