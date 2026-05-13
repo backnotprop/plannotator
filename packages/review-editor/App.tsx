@@ -28,6 +28,7 @@ import { useCodeAnnotationDraft } from '@plannotator/ui/hooks/useCodeAnnotationD
 import { useGitAdd } from './hooks/useGitAdd';
 import { generateId } from './utils/generateId';
 import { useAIChat } from './hooks/useAIChat';
+import { toast, Toaster } from 'sonner';
 import { useCodeNav, type CodeNavRequest } from './hooks/useCodeNav';
 import { extractLinesFromPatch } from './utils/patchParser';
 import { isTypingTarget, useReviewSearch, type ReviewSearchMatch } from './hooks/useReviewSearch';
@@ -427,6 +428,13 @@ const ReviewApp: React.FC = () => {
   const codeNav = useCodeNav();
 
   const handleCodeNavRequest = useCallback((request: CodeNavRequest) => {
+    if (!gitContext && !agentCwd) {
+      toast('Code navigation requires a local checkout', {
+        description: 'Re-run with --local for PR reviews',
+        duration: 4000,
+      });
+      return;
+    }
     codeNav.resolve(request);
     if (!dockApi) return;
     const existing = dockApi.getPanel(REVIEW_CODE_NAV_PANEL_ID);
@@ -445,7 +453,7 @@ const ReviewApp: React.FC = () => {
         initialHeight: 250,
       });
     }
-  }, [codeNav.resolve, dockApi, isAllFilesActive]);
+  }, [codeNav.resolve, dockApi, isAllFilesActive, gitContext, agentCwd]);
 
   // Check AI capabilities on mount
   useEffect(() => {
@@ -2454,6 +2462,16 @@ const ReviewApp: React.FC = () => {
         </button>
       )}
 
+    <Toaster
+      position="bottom-center"
+      toastOptions={{
+        style: {
+          '--normal-bg': 'var(--card)',
+          '--normal-border': 'var(--border)',
+          '--normal-text': 'var(--foreground)',
+        } as React.CSSProperties,
+      }}
+    />
     </JobLogsProvider>
     </ReviewStateProvider>
     </TooltipProvider>
