@@ -1284,8 +1284,8 @@ diffs-container {
   animation: overlay-fade-in 0.15s ease-out both;
 }
 
-/* Code navigation peek panel — force hljs background transparent on target line */
-.code-nav-peek-target code,
-.code-nav-peek-target .hljs {
+/* Code navigation peek panel — strip hljs hardcoded background */
+.code-nav-peek code,
+.code-nav-peek .hljs {
   background: transparent !important;
 }

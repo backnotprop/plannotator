@@ -64,7 +64,7 @@ const CodePreview: React.FC<{
   const language = detectLanguage(preview.filePath);
 
   return (
-    <div className="font-mono text-[12px] leading-[20px]">
+    <div className="code-nav-peek font-mono text-[12px] leading-[20px]">
       <table className="w-full border-collapse">
         <tbody>
           {preview.lines.map((line, i) => {
@@ -80,7 +80,7 @@ const CodePreview: React.FC<{
                   {lineNum}
                 </td>
                 <td
-                  className={`pr-4 whitespace-pre ${isTarget ? 'code-nav-peek-target' : ''}`}
+                  className="pr-4 whitespace-pre"
                   style={targetStyle}
                 >
                   <HighlightedCode code={line || ' '} language={language} />
