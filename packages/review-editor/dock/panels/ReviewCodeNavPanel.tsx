@@ -205,7 +205,6 @@ export const ReviewCodeNavPanel: React.FC<IDockviewPanelProps> = (props) => {
     [preview.selectLocation],
   );
 
-
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;

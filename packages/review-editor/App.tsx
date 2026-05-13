@@ -29,7 +29,6 @@ import { useGitAdd } from './hooks/useGitAdd';
 import { generateId } from './utils/generateId';
 import { useAIChat } from './hooks/useAIChat';
 import { useCodeNav, type CodeNavRequest } from './hooks/useCodeNav';
-import { extractChangedFiles } from '@plannotator/shared/code-nav';
 import { extractLinesFromPatch } from './utils/patchParser';
 import { isTypingTarget, useReviewSearch, type ReviewSearchMatch } from './hooks/useReviewSearch';
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
@@ -426,7 +425,6 @@ const ReviewApp: React.FC = () => {
   });
 
   const codeNav = useCodeNav();
-  const changedFilePaths = useMemo(() => extractChangedFiles(diffData?.rawPatch ?? null), [diffData?.rawPatch]);
 
   const handleCodeNavRequest = useCallback((request: CodeNavRequest) => {
     codeNav.resolve(request);
@@ -1388,8 +1386,6 @@ const ReviewApp: React.FC = () => {
     codeNavResult: codeNav.result,
     codeNavIsLoading: codeNav.isLoading,
     codeNavActiveSymbol: codeNav.activeSymbol,
-    codeNavActiveSide: codeNav.activeSide,
-    codeNavChangedFiles: changedFilePaths,
   }), [
     files, activeFileIndex, diffStyle, diffOverflow, diffIndicators,
     diffLineDiffType, diffShowLineNumbers, diffShowBackground,
@@ -1407,7 +1403,6 @@ const ReviewApp: React.FC = () => {
     isPRContextLoading, prContextError, fetchPRContext, platformUser, openDiffFile,
     handleOpenTour, isAllFilesActive, handleAddAnnotationForFile,
     handleCodeNavRequest, codeNav.result, codeNav.isLoading, codeNav.activeSymbol,
-    codeNav.activeSide, changedFilePaths,
   ]);
 
   // Separate context for high-frequency job logs — prevents re-rendering all panels on every SSE event

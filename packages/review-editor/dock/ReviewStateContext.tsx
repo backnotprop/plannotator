@@ -105,8 +105,6 @@ export interface ReviewState {
   codeNavResult: import('@plannotator/shared/code-nav').CodeNavResponse | null;
   codeNavIsLoading: boolean;
   codeNavActiveSymbol: string | null;
-  codeNavActiveSide: 'old' | 'new';
-  codeNavChangedFiles: string[];
 }
 
 const ReviewStateContext = createContext<ReviewState | null>(null);
