@@ -7,7 +7,6 @@ export function useCodeNav() {
   const [result, setResult] = useState<CodeNavResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [activeSymbol, setActiveSymbol] = useState<string | null>(null);
-  const [activeSide, setActiveSide] = useState<'old' | 'new'>('new');
   const abortRef = useRef<AbortController | null>(null);
 
   const resolve = useCallback(async (request: CodeNavRequest) => {
@@ -16,7 +15,6 @@ export function useCodeNav() {
     abortRef.current = controller;
 
     setActiveSymbol(request.symbol);
-    setActiveSide(request.side);
     setIsLoading(true);
     setResult(null);
 
@@ -47,5 +45,5 @@ export function useCodeNav() {
     setIsLoading(false);
   }, []);
 
-  return { result, isLoading, activeSymbol, activeSide, resolve, clear };
+  return { result, isLoading, activeSymbol, resolve, clear };
 }

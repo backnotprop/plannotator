@@ -277,6 +277,8 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/pr-switch` | POST | Switch to a different PR in-place (body: `{ url }`) |
 | `/api/tour/:jobId` | GET | Fetch Code Tour result (greeting, stops, checklist) for a completed tour job |
 | `/api/tour/:jobId/checklist` | PUT | Persist checklist item state for a Code Tour |
+| `/api/code-nav/resolve` | POST | Search for symbol definitions and references via ripgrep (body: `{ symbol, filePath, line, charStart, side, language? }`) |
+| `/api/code-nav/file` | GET | Read file from working tree for code-nav preview (`?path=`) |
 
 ### Annotate Server (`packages/server/annotate.ts`)
 
