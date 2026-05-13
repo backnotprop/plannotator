@@ -97,10 +97,8 @@ const CodePreview: React.FC<{
 const ReferenceList: React.FC<{
   groups: FileGroup[];
   selectedLocation: CodeNavLocation | null;
-  changedFiles: Set<string>;
   onSelect: (loc: CodeNavLocation) => void;
-  onGoToDiff: (filePath: string, line: number) => void;
-}> = ({ groups, selectedLocation, changedFiles, onSelect, onGoToDiff }) => {
+}> = ({ groups, selectedLocation, onSelect }) => {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   const toggleCollapse = (filePath: string) => {
@@ -115,7 +113,6 @@ const ReferenceList: React.FC<{
   return (
     <div className="text-[11px]">
       {groups.map((group) => {
-        const isInDiff = changedFiles.has(group.filePath);
         const isCollapsed = collapsed.has(group.filePath);
         return (
           <div key={group.filePath}>
@@ -130,7 +127,7 @@ const ReferenceList: React.FC<{
               >
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
               </svg>
-              <span className={`font-medium truncate ${isInDiff ? 'text-foreground' : 'text-muted-foreground'}`}>
+              <span className="font-medium truncate text-foreground">
                 {basename(group.filePath)}
               </span>
               <span className="text-muted-foreground/60 truncate text-[10px]">
@@ -155,7 +152,6 @@ const ReferenceList: React.FC<{
                           : 'hover:bg-muted/40 text-muted-foreground'
                       }`}
                       onClick={() => onSelect(loc)}
-                      onDoubleClick={() => isInDiff && onGoToDiff(loc.filePath, loc.line)}
                     >
                       <span className="font-mono text-[10px] flex-shrink-0 w-8 text-right">
                         :{loc.line}
@@ -179,9 +175,7 @@ export const ReviewCodeNavPanel: React.FC<IDockviewPanelProps> = (props) => {
   const state = useReviewState();
   const preview = useCodeNavPreview();
   const containerRef = useRef<HTMLDivElement>(null);
-  const { codeNavResult, codeNavIsLoading, codeNavActiveSymbol, codeNavChangedFiles } = state;
-
-  const changedSet = useMemo(() => new Set(codeNavChangedFiles), [codeNavChangedFiles]);
+  const { codeNavResult, codeNavIsLoading, codeNavActiveSymbol } = state;
 
   const allLocations = useMemo(() => {
     if (!codeNavResult) return [];
@@ -211,12 +205,6 @@ export const ReviewCodeNavPanel: React.FC<IDockviewPanelProps> = (props) => {
     [preview.selectLocation],
   );
 
-  const handleGoToDiff = useCallback(
-    (filePath: string, line: number) => {
-      state.onCodeNavGoToDiff?.(filePath, line);
-    },
-    [state.onCodeNavGoToDiff],
-  );
 
   useEffect(() => {
     const el = containerRef.current;
@@ -270,9 +258,7 @@ export const ReviewCodeNavPanel: React.FC<IDockviewPanelProps> = (props) => {
           <ReferenceList
             groups={groups}
             selectedLocation={selectedLocation}
-            changedFiles={changedSet}
             onSelect={handleSelect}
-            onGoToDiff={handleGoToDiff}
           />
         </div>
       </div>

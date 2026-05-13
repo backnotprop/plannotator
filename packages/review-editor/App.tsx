@@ -29,7 +29,6 @@ import { useGitAdd } from './hooks/useGitAdd';
 import { generateId } from './utils/generateId';
 import { useAIChat } from './hooks/useAIChat';
 import { useCodeNav, type CodeNavRequest } from './hooks/useCodeNav';
-import { highlightDiffLine } from './utils/highlightDiffLine';
 import { extractChangedFiles } from '@plannotator/shared/code-nav';
 import { extractLinesFromPatch } from './utils/patchParser';
 import { isTypingTarget, useReviewSearch, type ReviewSearchMatch } from './hooks/useReviewSearch';
@@ -449,13 +448,6 @@ const ReviewApp: React.FC = () => {
       });
     }
   }, [codeNav.resolve, dockApi, isAllFilesActive]);
-
-  const handleCodeNavGoToDiff = useCallback((filePath: string, line: number) => {
-    const inDiff = files.some(f => f.path === filePath);
-    if (!inDiff) return;
-    openDiffFile(filePath);
-    highlightDiffLine(line);
-  }, [files, openDiffFile]);
 
   // Check AI capabilities on mount
   useEffect(() => {
@@ -1398,7 +1390,6 @@ const ReviewApp: React.FC = () => {
     codeNavActiveSymbol: codeNav.activeSymbol,
     codeNavActiveSide: codeNav.activeSide,
     codeNavChangedFiles: changedFilePaths,
-    onCodeNavGoToDiff: handleCodeNavGoToDiff,
   }), [
     files, activeFileIndex, diffStyle, diffOverflow, diffIndicators,
     diffLineDiffType, diffShowLineNumbers, diffShowBackground,
@@ -1416,7 +1407,7 @@ const ReviewApp: React.FC = () => {
     isPRContextLoading, prContextError, fetchPRContext, platformUser, openDiffFile,
     handleOpenTour, isAllFilesActive, handleAddAnnotationForFile,
     handleCodeNavRequest, codeNav.result, codeNav.isLoading, codeNav.activeSymbol,
-    codeNav.activeSide, changedFilePaths, handleCodeNavGoToDiff,
+    codeNav.activeSide, changedFilePaths,
   ]);
 
   // Separate context for high-frequency job logs — prevents re-rendering all panels on every SSE event

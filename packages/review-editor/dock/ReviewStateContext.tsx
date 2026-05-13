@@ -107,7 +107,6 @@ export interface ReviewState {
   codeNavActiveSymbol: string | null;
   codeNavActiveSide: 'old' | 'new';
   codeNavChangedFiles: string[];
-  onCodeNavGoToDiff?: (filePath: string, line: number) => void;
 }
 
 const ReviewStateContext = createContext<ReviewState | null>(null);
