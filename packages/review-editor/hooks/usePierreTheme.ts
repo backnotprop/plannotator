@@ -225,6 +225,11 @@ export function usePierreTheme(options?: { fontFamily?: string; fontSize?: strin
             text-underline-offset: 2px;
             cursor: pointer;
           }
+          .pn-token-nav {
+            text-decoration-thickness: 2px;
+            cursor: pointer;
+            opacity: 0.85;
+          }
 
           /* Separator bars — slimmer, semi-transparent, integrated with theme */
           :host {

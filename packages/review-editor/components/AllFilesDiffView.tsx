@@ -487,6 +487,14 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
                         onCodeNavRequest(buildCodeNavRequest(props, file.path));
                       }
                     },
+                    onTokenEnter: (props: DiffTokenEventBaseProps, event: PointerEvent) => {
+                      if (event.metaKey || event.ctrlKey) {
+                        props.tokenElement.classList.add('pn-token-nav');
+                      }
+                    },
+                    onTokenLeave: (props: DiffTokenEventBaseProps) => {
+                      props.tokenElement.classList.remove('pn-token-nav');
+                    },
                   }),
                 }}
                 annotations={fileAnnotations}

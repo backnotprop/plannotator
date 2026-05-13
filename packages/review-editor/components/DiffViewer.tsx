@@ -539,12 +539,16 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     toolbarHostRef.current?.handleTokenClick(props, event);
   }, [filePath, onCodeNavRequest]);
 
-  const handleTokenEnter = useCallback((props: DiffTokenEventBaseProps) => {
+  const handleTokenEnter = useCallback((props: DiffTokenEventBaseProps, event: PointerEvent) => {
     props.tokenElement.classList.add('pn-token-hover');
-  }, []);
+    if ((event.metaKey || event.ctrlKey) && onCodeNavRequest) {
+      props.tokenElement.classList.add('pn-token-nav');
+    }
+  }, [onCodeNavRequest]);
 
   const handleTokenLeave = useCallback((props: DiffTokenEventBaseProps) => {
     props.tokenElement.classList.remove('pn-token-hover');
+    props.tokenElement.classList.remove('pn-token-nav');
   }, []);
 
   const splitGridStyle = useMemo(() => {
