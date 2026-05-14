@@ -111,7 +111,6 @@ import {
   isVersionInvocation,
 } from "./cli";
 import { ensureClearContextSettingEnabled } from "./clearContextSetting";
-import { shouldAutoSelectNativeClear, spawnKeystrokeInjector } from "./keystrokeInjector";
 import path from "path";
 import { tmpdir } from "os";
 
@@ -1281,9 +1280,6 @@ if (args[0] === "sessions") {
     ) {
       const nativeClearEnabled = await ensureClearContextSettingEnabled();
       if (nativeClearEnabled) {
-        if (shouldAutoSelectNativeClear()) {
-          spawnKeystrokeInjector();
-        }
         process.exit(0);
       }
       result.clearContextNudge = true;
