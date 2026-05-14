@@ -79,6 +79,7 @@ import { DEMO_PLAN_CONTENT as DEFAULT_DEMO_PLAN_CONTENT } from './demoPlan';
 import { DIFF_DEMO_PLAN_CONTENT } from './demoPlanDiffDemo';
 import { canUseAnnotateWideMode, resolveWideModeExitLayout, type WideModeLayoutSnapshot, type WideModeType } from './wideMode';
 import { buildApprovalRequestBody, type ApprovalOverride } from './approvalBody';
+import type { ApproveExtraEntry } from '@plannotator/ui/components/ApproveDropdown';
 const USE_DIFF_DEMO =
   import.meta.env.VITE_DIFF_DEMO === '1' ||
   import.meta.env.VITE_DIFF_DEMO === 'true';
@@ -952,7 +953,7 @@ const App: React.FC = () => {
   };
 
   // API mode handlers
-  const handleApprove = async () => {
+  const handleApprove = async (override: ApprovalOverride = {}) => {
     setIsSubmitting(true);
     try {
       const obsidianSettings = getObsidianSettings();
@@ -1055,8 +1056,6 @@ const App: React.FC = () => {
     }
   };
 
-<<<<<<< HEAD
-=======
   const approveWithClaudeCodeWarning = useCallback((override: ApprovalOverride = {}) => {
     setPendingApprovalOverride(override);
     if (origin === 'claude-code' && (allAnnotations.length > 0 || codeAnnotations.length > 0)) {
@@ -1090,7 +1089,6 @@ const App: React.FC = () => {
     }];
   }, [approveWithClaudeCodeWarning, origin, pendingToolName]);
 
->>>>>>> ff79946 (Keep Plannotator approvals actionable for bypass clear context)
   // Annotate mode handler — sends feedback via /api/feedback
   const handleAnnotateFeedback = async () => {
     setIsSubmitting(true);
@@ -2243,7 +2241,9 @@ const App: React.FC = () => {
           onClose={() => setShowClaudeCodeWarning(false)}
           onConfirm={() => {
             setShowClaudeCodeWarning(false);
-            handleApprove();
+            const override = pendingApprovalOverride;
+            setPendingApprovalOverride({});
+            handleApprove(override);
           }}
           title="Annotations Won't Be Sent"
           message={<>{agentName} doesn't yet support feedback on approval. Your {allAnnotations.length + codeAnnotations.length} annotation{(allAnnotations.length + codeAnnotations.length) !== 1 ? 's' : ''} will be lost.</>}
