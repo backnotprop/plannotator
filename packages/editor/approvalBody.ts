@@ -19,6 +19,19 @@ export interface ApprovalRequestBody {
   deferToNativeForClear?: boolean;
 }
 
+export function shouldEnableNativeClearBeforeApprove(options: {
+  origin: Origin | null;
+  permissionMode: PermissionMode;
+  toolName?: string;
+  override?: ApprovalOverride;
+}): boolean {
+  return (
+    options.origin === 'claude-code' &&
+    options.toolName === 'ExitPlanMode' &&
+    options.override?.deferToNativeForClear === true
+  );
+}
+
 export function buildApprovalRequestBody(options: {
   origin: Origin | null;
   permissionMode: PermissionMode;
@@ -33,7 +46,7 @@ export function buildApprovalRequestBody(options: {
   if (origin === 'claude-code') {
     const effectivePermissionMode = override.permissionMode ?? permissionMode;
     const wantsClearContext = effectivePermissionMode === 'bypassPermissionsClearReminder';
-    const useNativeClear = override.deferToNativeForClear || (wantsClearContext && toolName === 'ExitPlanMode');
+    const useNativeClear = shouldEnableNativeClearBeforeApprove({ origin, permissionMode, toolName, override });
 
     body.permissionMode = wantsClearContext ? 'bypassPermissions' : effectivePermissionMode;
 

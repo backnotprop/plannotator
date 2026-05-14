@@ -6,7 +6,7 @@
  *
  * Available modes:
  * - bypassPermissions: Auto-approve all tool calls
- * - bypassPermissionsClearReminder: Persisted UI mode that uses native clear-on-accept for Claude Code plan approvals and a /clear reminder fallback otherwise
+ * - bypassPermissionsClearReminder: Persisted UI mode that requests bypassPermissions and emits a /clear reminder
  * - acceptEdits: Auto-approve file edits only
  * - default: Manually approve each tool call
  */
@@ -37,7 +37,7 @@ export const PERMISSION_MODE_OPTIONS: { value: PermissionMode; label: string; de
   {
     value: 'bypassPermissionsClearReminder',
     label: 'Bypass + Clear Context',
-    description: 'For Claude Code plan approvals, defer to the native clear-context flow and bypass permissions; otherwise emit a /clear reminder.',
+    description: 'Approve with bypass permissions and show a /clear reminder. Use the explicit native option when available for Claude Code’s own clear-context prompt.',
   },
   {
     value: 'default',

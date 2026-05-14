@@ -111,6 +111,7 @@ import {
   isVersionInvocation,
 } from "./cli";
 import { ensureClearContextSettingEnabled } from "./clearContextSetting";
+import { formatClaudePlanHookOutput, normalizeClaudeHookEventName } from "./hookDecision";
 import path from "path";
 import { tmpdir } from "os";
 
@@ -1272,62 +1273,27 @@ if (args[0] === "sessions") {
       );
     }
   } else {
-    // Claude Code: PermissionRequest hook decision
-    if (
+    const hookEventName = normalizeClaudeHookEventName(event.hook_event_name);
+    const nativeClearEnabled =
       result.approved &&
       result.deferToNativeForClear &&
+      hookEventName === "PreToolUse" &&
       toolName === "ExitPlanMode"
-    ) {
-      const nativeClearEnabled = await ensureClearContextSettingEnabled();
-      if (nativeClearEnabled) {
-        process.exit(0);
-      }
-      result.clearContextNudge = true;
-      result.permissionMode ||= "bypassPermissions";
-    }
+        ? await ensureClearContextSettingEnabled()
+        : false;
 
-    if (result.approved) {
-      const updatedPermissions = [];
-      if (result.permissionMode) {
-        updatedPermissions.push({
-          type: "setMode",
-          mode: result.permissionMode,
-          destination: "session",
-        });
-      }
-
-      console.log(
-        JSON.stringify({
-          ...(result.clearContextNudge && {
-            systemMessage:
-              "Plannotator requested bypass mode. Hooks cannot clear context. Run /clear before continuing if you want a fresh implementation session.",
-          }),
-          hookSpecificOutput: {
-            hookEventName: "PermissionRequest",
-            decision: {
-              behavior: "allow",
-              ...(updatedPermissions.length > 0 && { updatedPermissions }),
-            },
-          },
+    console.log(
+      JSON.stringify(
+        formatClaudePlanHookOutput({
+          result,
+          hookEventName,
+          toolName,
+          detectedOrigin,
+          nativeClearEnabled,
+          planFilename,
         })
-      );
-    } else {
-      console.log(
-        JSON.stringify({
-          hookSpecificOutput: {
-            hookEventName: "PermissionRequest",
-            decision: {
-              behavior: "deny",
-              message: getPlanDeniedPrompt(detectedOrigin, undefined, {
-                toolName: getPlanToolName(detectedOrigin),
-                planFileRule: "",
-                feedback: result.feedback || "Plan changes requested",
-              }),
-            },
-          },
-        })
-      );
-    }
+      )
+    );
   }
 
   process.exit(0);

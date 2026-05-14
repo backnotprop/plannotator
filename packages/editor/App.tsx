@@ -78,8 +78,7 @@ import type { PlanDiffMode } from '@plannotator/ui/components/plan-diff/PlanDiff
 import { DEMO_PLAN_CONTENT as DEFAULT_DEMO_PLAN_CONTENT } from './demoPlan';
 import { DIFF_DEMO_PLAN_CONTENT } from './demoPlanDiffDemo';
 import { canUseAnnotateWideMode, resolveWideModeExitLayout, type WideModeLayoutSnapshot, type WideModeType } from './wideMode';
-import { buildApprovalRequestBody, type ApprovalOverride } from './approvalBody';
-import type { ApproveExtraEntry } from '@plannotator/ui/components/ApproveDropdown';
+import { buildApprovalRequestBody, shouldEnableNativeClearBeforeApprove, type ApprovalOverride } from './approvalBody';
 const USE_DIFF_DEMO =
   import.meta.env.VITE_DIFF_DEMO === '1' ||
   import.meta.env.VITE_DIFF_DEMO === 'true';
@@ -154,7 +153,6 @@ const App: React.FC = () => {
   const [isApiMode, setIsApiMode] = useState(false);
   const [origin, setOrigin] = useState<Origin | null>(null);
   const [pendingToolName, setPendingToolName] = useState<string | undefined>();
-  const [showClearContextBanner, setShowClearContextBanner] = useState(false);
   const [pendingApprovalOverride, setPendingApprovalOverride] = useState<ApprovalOverride>({});
   const [gitUser, setGitUser] = useState<string | undefined>();
   const [isWSL, setIsWSL] = useState(false);
@@ -964,16 +962,19 @@ const App: React.FC = () => {
         ? await autoSavePromiseRef.current
         : autoSaveResultsRef.current;
 
-      const shouldUseNativeClear =
-        origin === 'claude-code' &&
-        pendingToolName === 'ExitPlanMode' &&
-        (override.deferToNativeForClear || (override.permissionMode ?? permissionMode) === 'bypassPermissionsClearReminder');
-      if (shouldUseNativeClear) {
+      let approvalOverride = override;
+      if (shouldEnableNativeClearBeforeApprove({ origin, permissionMode, toolName: pendingToolName, override })) {
         try {
           const response = await fetch('/api/enable-clear-context', { method: 'POST' });
-          if (response.ok) setShowClearContextBanner(false);
+          if (!response.ok) {
+            throw new Error(`Unable to enable native clear-context: ${response.status}`);
+          }
         } catch {
-          setShowClearContextBanner(true);
+          approvalOverride = {
+            permissionMode: 'bypassPermissions',
+            clearContextNudge: true,
+          };
+          toast.warning('Native clear-on-accept unavailable; approving with a /clear reminder instead.');
         }
       }
 
@@ -981,7 +982,7 @@ const App: React.FC = () => {
       const body = buildApprovalRequestBody({
         origin,
         permissionMode,
-        override,
+        override: approvalOverride,
         effectiveAgent,
         planSaveSettings,
         toolName: pendingToolName,
@@ -2361,65 +2362,6 @@ const App: React.FC = () => {
         {/* Update notification */}
         <UpdateBanner origin={origin} isWSL={isWSL} />
 
-        {showClearContextBanner && (
-          <div
-            role="dialog"
-            aria-label="Enable native clear-on-accept"
-            style={{
-              position: 'fixed',
-              bottom: 16,
-              right: 16,
-              maxWidth: 380,
-              padding: '12px 14px',
-              background: 'var(--color-surface, #1a1a1a)',
-              border: '1px solid var(--color-border, #333)',
-              borderRadius: 8,
-              boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-              zIndex: 1000,
-              fontSize: 13,
-              lineHeight: 1.4,
-            }}
-          >
-            <div style={{ marginBottom: 8 }}>
-              <strong>Enable native clear-on-accept?</strong>
-            </div>
-            <div style={{ marginBottom: 10, opacity: 0.85 }}>
-              Plannotator will write{' '}
-              <code>showClearContextOnPlanAccept: true</code> to your Claude
-              Code settings so Claude Code can clear planning context through
-              its native approval flow.
-            </div>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button
-                type="button"
-                onClick={() => setShowClearContextBanner(false)}
-                style={{ padding: '4px 10px', cursor: 'pointer' }}
-              >
-                Skip
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    const response = await fetch('/api/enable-clear-context', { method: 'POST' });
-                    if (response.ok) {
-                      setShowClearContextBanner(false);
-                    }
-                  } catch {
-                    setShowClearContextBanner(false);
-                  }
-                }}
-                style={{
-                  padding: '4px 10px',
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                }}
-              >
-                Enable
-              </button>
-            </div>
-          </div>
-        )}
 
         {/* Image Annotator for pasted images */}
         <ImageAnnotator
