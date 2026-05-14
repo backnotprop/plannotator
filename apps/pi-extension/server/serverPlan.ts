@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 import { contentHash, deleteDraft } from "../generated/draft.js";
 import {
@@ -37,7 +39,7 @@ import {
 import { listenOnPort } from "./network.js";
 
 import { loadConfig, saveConfig, detectGitUser, getServerConfig } from "../generated/config.js";
-import { readImprovementHook, getImprovementHookExpectedPath } from "../generated/improvement-hooks.js";
+import { readImprovementHook } from "../generated/improvement-hooks.js";
 import { composeImproveContext } from "../generated/pfm-reminder.js";
 import { detectProjectName, getRepoInfo } from "./project.js";
 import {
@@ -49,6 +51,10 @@ import {
 	handleObsidianVaultsRequest,
 } from "./reference.js";
 import { warmFileListCache } from "../generated/resolve-file.js";
+
+function getEnterPlanModeImproveHookExpectedPath(): string {
+	return join(homedir(), ".plannotator", "hooks", "compound", "enterplanmode-improve-hook.txt");
+}
 
 export interface PlanReviewDecision {
 	approved: boolean;
@@ -239,7 +245,7 @@ export async function startPlanReviewServer(options: {
 				pfmReminder: { enabled: pfmEnabled },
 				improvementHook: {
 					present: !!hook,
-					filePath: hook?.filePath ?? getImprovementHookExpectedPath("enterplanmode-improve"),
+					filePath: hook?.filePath ?? getEnterPlanModeImproveHookExpectedPath(),
 					fileSize: hook?.content?.length ?? null,
 					content: hook?.content ?? null,
 				},

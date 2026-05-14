@@ -45,7 +45,7 @@ import {
 import { getRepoInfo } from "./repo";
 import { detectProjectName } from "./project";
 import { loadConfig, saveConfig, detectGitUser, getServerConfig } from "./config";
-import { readImprovementHook, getImprovementHookExpectedPath } from "@plannotator/shared/improvement-hooks";
+import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft } from "./draft";
@@ -62,6 +62,10 @@ export * from "./integrations";
 export * from "./storage";
 export { handleServerReady } from "./shared-handlers";
 export { type VaultNode, buildFileTree } from "@plannotator/shared/reference-common";
+
+function getEnterPlanModeImproveHookExpectedPath(): string {
+  return join(homedir(), ".plannotator", "hooks", "compound", "enterplanmode-improve-hook.txt");
+}
 
 // --- Types ---
 
@@ -379,7 +383,7 @@ export async function startPlannotatorServer(
               pfmReminder: { enabled: pfmEnabled },
               improvementHook: {
                 present: !!hook,
-                filePath: hook?.filePath ?? getImprovementHookExpectedPath("enterplanmode-improve"),
+                filePath: hook?.filePath ?? getEnterPlanModeImproveHookExpectedPath(),
                 fileSize: hook?.content?.length ?? null,
                 content: hook?.content ?? null,
               },
