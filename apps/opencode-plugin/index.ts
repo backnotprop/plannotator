@@ -59,7 +59,6 @@ import {
   getPlanApprovedPrompt,
   getPlanApprovedWithNotesPrompt,
   getPlanToolName,
-  buildPlanFileRule,
   getAnnotateMessageFeedbackPrompt,
 } from "@plannotator/shared/prompts";
 import { loadConfig } from "@plannotator/shared/config";
