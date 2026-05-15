@@ -2,7 +2,7 @@
  * Command Handlers for OpenCode Plugin
  *
  * Handles /plannotator-review, /plannotator-annotate, /plannotator-last,
- * and /plannotator-archive slash commands. Extracted from the event hook
+ * /plannotator-archive, and /plannotator-setup-goal slash commands. Extracted from the event hook
  * for modularity.
  */
 
@@ -18,6 +18,10 @@ import {
   startAnnotateServer,
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
+import {
+  startGoalSetupServer,
+  handleGoalSetupServerReady,
+} from "@plannotator/server/goal-setup";
 import { type DiffType, prepareLocalReviewDiff } from "@plannotator/server/vcs";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
@@ -31,8 +35,12 @@ import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { parseAnnotateArgs } from "@plannotator/shared/annotate-args";
 import { parseReviewArgs } from "@plannotator/shared/review-args";
+import {
+  normalizeGoalSetupBundle,
+  type GoalSetupStage,
+} from "@plannotator/shared/goal-setup";
 import { urlToMarkdown, isConvertedSource } from "@plannotator/shared/url-to-markdown";
-import { statSync } from "fs";
+import { readFileSync, statSync } from "fs";
 import path from "path";
 
 /** Shared dependencies injected by the plugin */
@@ -448,4 +456,70 @@ export async function handleArchiveCommand(
   }
   await Bun.sleep(1500);
   server.stop();
+}
+
+export async function handleGoalSetupCommand(
+  event: any,
+  deps: CommandDeps
+) {
+  const { client, htmlContent, directory } = deps;
+  const rawArgs = event.properties?.arguments || event.arguments || "";
+  const parts = String(rawArgs)
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((part) => part !== "--json");
+  const stage = parts[0] as GoalSetupStage | undefined;
+  const bundleArg = parts[1];
+
+  if ((stage !== "interview" && stage !== "facts") || !bundleArg) {
+    client.app.log({ level: "error", message: "Usage: /plannotator-setup-goal <interview|facts> <bundle.json> [--json]" });
+    return;
+  }
+
+  const bundlePath = path.resolve(directory || process.cwd(), bundleArg);
+  let bundle: ReturnType<typeof normalizeGoalSetupBundle>;
+  try {
+    bundle = normalizeGoalSetupBundle(JSON.parse(readFileSync(bundlePath, "utf-8")), stage);
+  } catch (err) {
+    client.app.log({ level: "error", message: `Failed to load goal setup bundle: ${err instanceof Error ? err.message : String(err)}` });
+    return;
+  }
+
+  client.app.log({ level: "info", message: `Opening goal setup ${stage} UI...` });
+
+  const server = await startGoalSetupServer({
+    bundle,
+    origin: "opencode",
+    htmlContent,
+    onReady: (url, isRemote, port) => {
+      handleGoalSetupServerReady(url, isRemote, port);
+      if (isRemote) {
+        client.app.log({ level: "info", message: `[Plannotator] Open in browser: ${url}` });
+      }
+    },
+  });
+
+  const result = await server.waitForDecision();
+  await Bun.sleep(800);
+  server.stop();
+
+  if (result.exit || !result.result) return;
+
+  const sessionId = event.properties?.sessionID;
+  if (!sessionId) return;
+
+  try {
+    await client.session.prompt({
+      path: { id: sessionId },
+      body: {
+        parts: [{
+          type: "text",
+          text: `Plannotator goal setup ${result.result.stage} result:\n\n\`\`\`json\n${JSON.stringify(result.result, null, 2)}\n\`\`\``,
+        }],
+      },
+    });
+  } catch {
+    // Session may not be available
+  }
 }

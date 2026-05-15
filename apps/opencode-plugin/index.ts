@@ -54,6 +54,7 @@ import {
   handleAnnotateCommand,
   handleAnnotateLastCommand,
   handleArchiveCommand,
+  handleGoalSetupCommand,
   type CommandDeps,
 } from "./commands";
 import {
@@ -399,7 +400,8 @@ Do NOT proceed with implementation until your plan is approved.`);
         cmd !== "plannotator-last" &&
         cmd !== "plannotator-annotate" &&
         cmd !== "plannotator-review" &&
-        cmd !== "plannotator-archive"
+        cmd !== "plannotator-archive" &&
+        cmd !== "plannotator-setup-goal"
       ) return;
 
       output.parts.length = 0;
@@ -442,6 +444,7 @@ Do NOT proceed with implementation until your plan is approved.`);
       if (cmd === "plannotator-annotate") return handleAnnotateCommand(event, deps);
       if (cmd === "plannotator-review") return handleReviewCommand(event, deps);
       if (cmd === "plannotator-archive") return handleArchiveCommand(event, deps);
+      if (cmd === "plannotator-setup-goal") return handleGoalSetupCommand(event, deps);
     },
   };
 

@@ -328,6 +328,7 @@ export {
 	startCodeReviewBrowserSession,
 	startLastMessageAnnotationSession,
 	startMarkdownAnnotationSession,
+	startGoalSetupSession,
 	getStartupErrorMessage,
 	openArchiveBrowserAction,
 	openCodeReview,

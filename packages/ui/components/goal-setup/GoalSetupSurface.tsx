@@ -1,0 +1,1052 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Check,
+  ChevronDown,
+  Edit3,
+  HelpCircle,
+  MessageSquare,
+  Plus,
+  TestTube2,
+  Trash2,
+  X,
+} from 'lucide-react';
+import type {
+  GoalSetupBundle,
+  GoalSetupFactResult,
+  GoalSetupFactsBundle,
+  GoalSetupInterviewBundle,
+  GoalSetupQuestion,
+  GoalSetupQuestionAnswer,
+} from '@plannotator/shared/goal-setup';
+import { ConfirmDialog } from '../ConfirmDialog';
+import { CommentPopover } from '../CommentPopover';
+import { Button } from '../core/button';
+import { Textarea } from '../core/textarea';
+
+interface GoalSetupSurfaceProps {
+  bundle: GoalSetupBundle;
+  maxWidth?: number | null;
+  onSubmitted?: () => void;
+  onActionStateChange?: (state: GoalSetupActionState) => void;
+}
+
+type SubmitState = 'idle' | 'submitting' | 'submitted' | 'error';
+
+export interface GoalSetupSurfaceHandle {
+  submit: () => void;
+}
+
+export interface GoalSetupActionState {
+  canSubmit: boolean;
+  isSubmitting: boolean;
+  submitted: boolean;
+  submitLabel: string;
+}
+
+function cx(...classes: Array<string | false | null | undefined>): string {
+  return classes.filter(Boolean).join(' ');
+}
+
+async function submitGoalSetup(payload: unknown): Promise<void> {
+  const response = await fetch('/api/goal-setup/submit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    let message = 'Submission failed';
+    try {
+      const body = await response.json();
+      if (typeof body.error === 'string') message = body.error;
+    } catch {
+      // Keep the generic message.
+    }
+    throw new Error(message);
+  }
+}
+
+export const GoalSetupSurface = React.forwardRef<GoalSetupSurfaceHandle, GoalSetupSurfaceProps>(({
+  bundle,
+  maxWidth = 880,
+  onSubmitted,
+  onActionStateChange,
+}, ref) => (
+  <div
+    className="w-full"
+    style={maxWidth == null ? undefined : { maxWidth }}
+  >
+    {bundle.stage === 'interview' ? (
+      <InterviewSurface
+        ref={ref}
+        bundle={bundle}
+        onSubmitted={onSubmitted}
+        onActionStateChange={onActionStateChange}
+      />
+    ) : (
+      <FactsSurface
+        ref={ref}
+        bundle={bundle}
+        onSubmitted={onSubmitted}
+        onActionStateChange={onActionStateChange}
+      />
+    )}
+  </div>
+));
+GoalSetupSurface.displayName = 'GoalSetupSurface';
+
+const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
+  bundle: GoalSetupInterviewBundle;
+  onSubmitted?: () => void;
+  onActionStateChange?: (state: GoalSetupActionState) => void;
+}>(({ bundle, onSubmitted, onActionStateChange }, ref) => {
+  const [answers, setAnswers] = useState<Record<string, GoalSetupQuestionAnswer>>(() =>
+    Object.fromEntries(
+      bundle.questions.map((question) => [
+        question.id,
+        {
+          questionId: question.id,
+          selectedOptionIds: [],
+          customAnswer: '',
+          note: '',
+          answer: '',
+          completed: false,
+        },
+      ])
+    )
+  );
+  const [activeQuestionId, setActiveQuestionId] = useState<string | null>(
+    () => bundle.questions[0]?.id ?? null
+  );
+  const [skippedIds, setSkippedIds] = useState<Set<string>>(new Set());
+  const [noteOpenForId, setNoteOpenForId] = useState<string | null>(null);
+  const [recommendationActionForId, setRecommendationActionForId] = useState<{
+    id: string;
+    action: 'accept' | 'dismiss';
+    nonce: number;
+  } | null>(null);
+  const questionRefs = useRef(new Map<string, HTMLDivElement>());
+  const didAutoFocus = useRef(false);
+  const [submitState, setSubmitState] = useState<SubmitState>('idle');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (didAutoFocus.current || !activeQuestionId) return;
+    didAutoFocus.current = true;
+    const firstQuestion = bundle.questions[0];
+    if (!firstQuestion) return;
+    const isTextQuestion = !firstQuestion.answerMode || firstQuestion.answerMode === 'text' || firstQuestion.answerMode === 'custom';
+    requestAnimationFrame(() => {
+      const row = questionRefs.current.get(activeQuestionId);
+      if (isTextQuestion) {
+        row?.querySelector<HTMLElement>('textarea')?.focus();
+      } else {
+        row?.querySelector<HTMLElement>(':scope > button')?.focus();
+      }
+    });
+  });
+
+  const answerList = useMemo(
+    () =>
+      bundle.questions.map((question) => {
+        const answer = answers[question.id];
+        return {
+          ...answer,
+          answer: buildAnswerText(question, answer),
+          completed: hasAnswer(question, answer),
+        };
+      }),
+    [answers, bundle.questions]
+  );
+
+  const completedCount = answerList.filter((answer) => answer.completed).length;
+  const [showIncompleteWarning, setShowIncompleteWarning] = useState(false);
+
+  const incompleteQuestions = useMemo(
+    () =>
+      bundle.questions.filter(
+        (q) => q.required !== false && !hasAnswer(q, answers[q.id]) && !skippedIds.has(q.id)
+      ),
+    [bundle.questions, answers, skippedIds]
+  );
+  const skippedQuestions = useMemo(
+    () => bundle.questions.filter((q) => skippedIds.has(q.id) && !hasAnswer(q, answers[q.id])),
+    [bundle.questions, answers, skippedIds]
+  );
+
+  const updateAnswer = useCallback(
+    (questionId: string, patch: Partial<GoalSetupQuestionAnswer>) => {
+      setAnswers((current) => ({
+        ...current,
+        [questionId]: {
+          ...current[questionId],
+          ...patch,
+        },
+      }));
+      setSkippedIds((current) => {
+        if (!current.has(questionId)) return current;
+        const next = new Set(current);
+        next.delete(questionId);
+        return next;
+      });
+    },
+    []
+  );
+
+  const doSubmit = async () => {
+    if (submitState === 'submitting') return;
+    setShowIncompleteWarning(false);
+    setSubmitState('submitting');
+    setError('');
+    try {
+      await submitGoalSetup({
+        stage: 'interview',
+        title: bundle.title,
+        goalSlug: bundle.goalSlug,
+        answers: answerList,
+      });
+      setSubmitState('submitted');
+      onSubmitted?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Submission failed');
+      setSubmitState('error');
+    }
+  };
+
+  const handleSubmit = () => {
+    if (submitState === 'submitting') return;
+    if (incompleteQuestions.length > 0 || skippedQuestions.length > 0) {
+      setShowIncompleteWarning(true);
+      return;
+    }
+    doSubmit();
+  };
+
+  React.useImperativeHandle(ref, () => ({ submit: handleSubmit }), [handleSubmit]);
+
+  useEffect(() => {
+    onActionStateChange?.({
+      canSubmit: true,
+      isSubmitting: submitState === 'submitting',
+      submitted: submitState === 'submitted',
+      submitLabel: 'Submit Answers',
+    });
+  }, [onActionStateChange, submitState]);
+
+  const advance = useCallback(
+    (delta: 1 | -1) => {
+      const ids = bundle.questions.map((q) => q.id);
+      if (ids.length === 0) return;
+      const currentIndex = activeQuestionId ? ids.indexOf(activeQuestionId) : -1;
+      const nextIndex =
+        currentIndex === -1
+          ? delta === 1 ? 0 : ids.length - 1
+          : Math.max(0, Math.min(ids.length - 1, currentIndex + delta));
+      const nextId = ids[nextIndex];
+      const nextQuestion = bundle.questions[nextIndex];
+      setActiveQuestionId(nextId);
+      requestAnimationFrame(() => {
+        const row = questionRefs.current.get(nextId);
+        row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        const isTextQuestion = !nextQuestion.answerMode || nextQuestion.answerMode === 'text' || nextQuestion.answerMode === 'custom';
+        if (isTextQuestion) {
+          const textarea = row?.querySelector<HTMLElement>('textarea');
+          if (textarea) requestAnimationFrame(() => textarea.focus());
+        } else {
+          const headerBtn = row?.querySelector<HTMLElement>(':scope > button');
+          if (headerBtn) requestAnimationFrame(() => headerBtn.focus());
+        }
+      });
+    },
+    [bundle.questions, activeQuestionId]
+  );
+
+  const skipQuestion = useCallback(
+    (questionId: string) => {
+      setSkippedIds((current) => {
+        const next = new Set(current);
+        next.add(questionId);
+        return next;
+      });
+      advance(1);
+    },
+    [advance]
+  );
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+
+      // Ctrl+letter shortcuts — work from anywhere, including inside text fields
+      if (event.ctrlKey && !event.metaKey && !event.altKey && activeQuestionId) {
+        const key = event.key.toLowerCase();
+        if (key === 'u') {
+          event.preventDefault();
+          setRecommendationActionForId({ id: activeQuestionId, action: 'accept', nonce: Date.now() });
+          return;
+        }
+        if (key === 'k') {
+          event.preventDefault();
+          skipQuestion(activeQuestionId);
+          return;
+        }
+        if (key === 'j') {
+          event.preventDefault();
+          setNoteOpenForId(activeQuestionId);
+          requestAnimationFrame(() => {
+            const row = questionRefs.current.get(activeQuestionId);
+            const noteInput = row?.querySelector<HTMLElement>('.goal-note-textarea');
+            if (noteInput) requestAnimationFrame(() => noteInput.focus());
+          });
+          return;
+        }
+      }
+
+      // Escape — blur current input so shortcuts work again
+      if (event.key === 'Escape') {
+        const el = event.target;
+        if (el instanceof HTMLElement && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+          event.preventDefault();
+          const row = el.closest('.goal-row');
+          const headerBtn = row?.querySelector<HTMLElement>(':scope > button');
+          if (headerBtn) headerBtn.focus();
+          else (el as HTMLElement).blur();
+        }
+        return;
+      }
+
+      // Tab / Shift+Tab — advance between questions
+      if (event.key === 'Tab') {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        if (!target.closest('.goal-row')) return;
+        event.preventDefault();
+        advance(event.shiftKey ? -1 : 1);
+        return;
+      }
+
+      // Number keys — toggle options on the active question
+      if (!activeQuestionId) return;
+      const el = event.target;
+      if (el instanceof HTMLElement && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+
+      const activeQuestion = bundle.questions.find((q) => q.id === activeQuestionId);
+      if (!activeQuestion?.options?.length) return;
+      const mode = activeQuestion.answerMode || 'text';
+      const isMulti = mode === 'multi' || mode === 'multi-custom';
+
+      // "/" — focus the custom input for the active question
+      if (event.key === '/' && (mode === 'custom' || mode === 'single-custom' || mode === 'multi-custom')) {
+        event.preventDefault();
+        const row = questionRefs.current.get(activeQuestionId);
+        const customInput = row?.querySelector<HTMLElement>('label input');
+        customInput?.focus();
+        return;
+      }
+
+      const digit = parseInt(event.key, 10);
+      if (isNaN(digit) || digit < 1 || digit > activeQuestion.options.length) return;
+      event.preventDefault();
+
+      const option = activeQuestion.options[digit - 1];
+      const current = answers[activeQuestionId];
+      if (isMulti) {
+        updateAnswer(activeQuestionId, {
+          selectedOptionIds: current.selectedOptionIds.includes(option.id)
+            ? current.selectedOptionIds.filter((id) => id !== option.id)
+            : [...current.selectedOptionIds, option.id],
+        });
+      } else {
+        updateAnswer(activeQuestionId, { selectedOptionIds: [option.id], customAnswer: '' });
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [advance, activeQuestionId, bundle.questions, answers, updateAnswer, skipQuestion]);
+
+  return (
+    <section className="w-full">
+      <ConfirmDialog
+        isOpen={showIncompleteWarning}
+        onClose={() => setShowIncompleteWarning(false)}
+        onConfirm={doSubmit}
+        variant="warning"
+        title="Submit with incomplete answers?"
+        message={
+          <>
+            {skippedQuestions.length > 0 && (
+              <span>{skippedQuestions.length} skipped question{skippedQuestions.length !== 1 ? 's' : ''} will be sent without answers. </span>
+            )}
+            {incompleteQuestions.length > 0 && (
+              <span>{incompleteQuestions.length} required question{incompleteQuestions.length !== 1 ? 's' : ''} {incompleteQuestions.length !== 1 ? 'are' : 'is'} still unanswered. </span>
+            )}
+            <span>The agent will work with whatever you've provided.</span>
+          </>
+        }
+        confirmText="Submit anyway"
+        cancelText="Go back"
+        showCancel
+      />
+
+      <div className="goal-shell" data-has-active={activeQuestionId !== null ? 'true' : 'false'}>
+        <header className="mb-3 flex items-baseline justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+              Goal interview
+            </div>
+            <h1 className="mt-0.5 truncate text-lg font-medium leading-tight text-foreground">
+              {bundle.title || 'Answer the setup questions'}
+            </h1>
+          </div>
+          <div className="shrink-0 font-mono text-[11px] text-muted-foreground">
+            {completedCount}/{bundle.questions.length} answered
+          </div>
+        </header>
+
+        {error && (
+          <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            {error}
+          </div>
+        )}
+        {bundle.questions.map((question) => {
+          const answer = answers[question.id];
+          const isActive = activeQuestionId === question.id;
+          const complete = hasAnswer(question, answer);
+          const skipped = skippedIds.has(question.id) && !complete;
+          const summary = skipped
+            ? 'Skipped'
+            : complete
+              ? buildAnswerText(question, answer).replace(/\s*\n+\s*/g, ' · ').trim()
+              : '';
+
+          return (
+            <div
+              key={question.id}
+              ref={(node) => {
+                if (node) questionRefs.current.set(question.id, node);
+                else questionRefs.current.delete(question.id);
+              }}
+              className={cx(
+                'goal-row',
+                isActive && 'active',
+                complete && 'answered',
+                skipped && 'skipped'
+              )}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveQuestionId((current) =>
+                    current === question.id ? null : question.id
+                  );
+                }}
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-left"
+              >
+                <StatusDot complete={complete} skipped={skipped} />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[13.5px] font-medium leading-snug text-foreground">
+                    {question.prompt}
+                  </span>
+                  {!isActive && summary && (
+                    <span className={cx(
+                      'mt-0.5 block truncate text-[12px] leading-snug',
+                      skipped ? 'text-warning' : 'text-muted-foreground'
+                    )}>
+                      {summary}
+                    </span>
+                  )}
+                </span>
+                {question.required === false && !complete && !skipped && (
+                  <span className="shrink-0 text-[9px] font-medium uppercase tracking-wider text-muted-foreground">
+                    opt
+                  </span>
+                )}
+                {skipped && <Check className="h-3.5 w-3.5 shrink-0 text-warning" />}
+                {complete && !skipped && <Check className="h-3.5 w-3.5 shrink-0 text-success/85" />}
+                <ChevronDown
+                  className={cx(
+                    'h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-150',
+                    isActive && 'rotate-180'
+                  )}
+                />
+              </button>
+
+              <div className={cx('goal-question-body', isActive && 'expanded')}>
+                <div className="goal-question-body-inner">
+                  <div className="goal-row-divider" />
+                  <QuestionAnswerControls
+                    question={question}
+                    answer={answer}
+                    onChange={(patch) => updateAnswer(question.id, patch)}
+                    noteOpen={noteOpenForId === question.id}
+                    onNoteOpenChange={(open) =>
+                      setNoteOpenForId(open ? question.id : null)
+                    }
+                    onSkip={() => skipQuestion(question.id)}
+                    recommendationCommand={
+                      recommendationActionForId?.id === question.id
+                        ? recommendationActionForId
+                        : null
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <GoalShortcutPill />
+    </section>
+  );
+});
+InterviewSurface.displayName = 'InterviewSurface';
+
+const QuestionAnswerControls: React.FC<{
+  question: GoalSetupQuestion;
+  answer: GoalSetupQuestionAnswer;
+  onChange: (patch: Partial<GoalSetupQuestionAnswer>) => void;
+  noteOpen: boolean;
+  onNoteOpenChange: (open: boolean) => void;
+  onSkip: () => void;
+  recommendationCommand: { action: 'accept' | 'dismiss'; nonce: number } | null;
+}> = ({ question, answer, onChange, noteOpen, onNoteOpenChange, onSkip, recommendationCommand }) => {
+  const mode = question.answerMode || 'text';
+  const options = question.options || [];
+  const supportsOptions = mode === 'single' || mode === 'multi' || mode === 'single-custom' || mode === 'multi-custom';
+  const supportsCustom = mode === 'custom' || mode === 'single-custom' || mode === 'multi-custom';
+  const supportsText = mode === 'text';
+  const isMulti = mode === 'multi' || mode === 'multi-custom';
+  const textValue = supportsText ? answer.answer : answer.customAnswer;
+  const showTextArea = supportsText || mode === 'custom';
+  const showCustomOption = supportsOptions && supportsCustom;
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const hasAnyAnswer = hasAnswer(question, answer);
+  const canUseRecommendation = showTextArea || supportsCustom || Boolean(question.recommendedOptionIds?.length);
+
+  useEffect(() => {
+    if (answer.note && !noteOpen) {
+      onNoteOpenChange(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [answer.note]);
+
+  const toggleOption = (optionId: string) => {
+    if (isMulti) {
+      onChange({
+        selectedOptionIds: answer.selectedOptionIds.includes(optionId)
+          ? answer.selectedOptionIds.filter((id) => id !== optionId)
+          : [...answer.selectedOptionIds, optionId],
+      });
+      return;
+    }
+    onChange({ selectedOptionIds: [optionId], customAnswer: '' });
+  };
+
+  const updateTextValue = (value: string) => {
+    supportsText
+      ? onChange({ answer: value })
+      : onChange({ customAnswer: value });
+  };
+
+  const updateCustomOption = (value: string) => {
+    onChange({
+      customAnswer: value,
+      ...(mode === 'single-custom' && value.trim() ? { selectedOptionIds: [] } : {}),
+    });
+  };
+
+  const useRecommendation = () => {
+    const patch: Partial<GoalSetupQuestionAnswer> = {};
+    if (question.recommendedOptionIds?.length && supportsOptions) {
+      patch.selectedOptionIds = isMulti
+        ? question.recommendedOptionIds
+        : [question.recommendedOptionIds[0]];
+    }
+    if (question.recommendedAnswer) {
+      if (showTextArea) {
+        patch.answer = supportsText ? question.recommendedAnswer : undefined;
+        patch.customAnswer = !supportsText ? question.recommendedAnswer : undefined;
+      } else if (supportsCustom && !patch.selectedOptionIds?.length) {
+        patch.customAnswer = question.recommendedAnswer;
+      }
+    }
+    if (Object.keys(patch).length === 0) return;
+    onChange(patch);
+    if (showTextArea) requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
+  useEffect(() => {
+    if (!recommendationCommand) return;
+    if (recommendationCommand.action === 'accept') useRecommendation();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recommendationCommand?.nonce]);
+
+  return (
+    <div className="px-3 pb-3 pt-2.5">
+      {question.description && (
+        <p className="mb-2.5 text-[12.5px] leading-snug text-muted-foreground">
+          {question.description}
+        </p>
+      )}
+      {question.recommendedAnswer && !hasAnyAnswer && (
+        <div className="mb-2.5 flex items-start gap-2.5 rounded-md bg-muted/30 px-3 py-2">
+          <div className="min-w-0 flex-1">
+            <RecommendedBadge label="Recommended" />
+            <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+              {question.recommendedAnswer}
+            </p>
+          </div>
+          {canUseRecommendation && (
+            <button
+              type="button"
+              onClick={useRecommendation}
+              className="mt-0.5 shrink-0 rounded-md bg-primary/15 px-2.5 py-1 text-[12px] font-medium text-primary hover:bg-primary/25"
+            >
+              Use
+            </button>
+          )}
+        </div>
+      )}
+
+      {supportsOptions && options.length > 0 && (
+        <div className="mb-2.5 space-y-0.5">
+          {options.map((option, optionIndex) => {
+            const selected = answer.selectedOptionIds.includes(option.id);
+            return (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => toggleOption(option.id)}
+                className={cx(
+                  'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition-colors',
+                  selected
+                    ? 'bg-primary/10 text-foreground'
+                    : 'text-foreground/85 hover:bg-muted/30'
+                )}
+              >
+                <span
+                  className={cx(
+                    'flex h-3.5 w-3.5 flex-none items-center justify-center transition-colors',
+                    isMulti ? 'rounded-sm' : 'rounded-full',
+                    selected
+                      ? 'bg-primary text-primary-foreground'
+                      : 'border-[1.5px] border-muted-foreground/35'
+                  )}
+                >
+                  {selected && <Check className="h-2 w-2" strokeWidth={3} />}
+                </span>
+                <span className="min-w-0 flex-1 text-[13px] leading-snug">
+                  <span className="font-medium">{option.label}</span>
+                  {option.description && (
+                    <span className="text-muted-foreground"> — {option.description}</span>
+                  )}
+                </span>
+                <kbd className="goal-shortcut-pill ml-1 flex h-4 w-4 shrink-0 items-center justify-center rounded border border-border/40 bg-muted/40 font-mono text-[10px] text-muted-foreground">{optionIndex + 1}</kbd>
+              </button>
+            );
+          })}
+          {showCustomOption && (
+            <label
+              className={cx(
+                'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 transition-colors',
+                answer.customAnswer.trim()
+                  ? 'bg-primary/10'
+                  : 'hover:bg-muted/30'
+              )}
+            >
+              <span
+                className={cx(
+                  'flex h-3.5 w-3.5 flex-none items-center justify-center transition-colors',
+                  isMulti ? 'rounded-sm' : 'rounded-full',
+                  answer.customAnswer.trim()
+                    ? 'bg-primary text-primary-foreground'
+                    : 'border-[1.5px] border-muted-foreground/35'
+                )}
+              >
+                {answer.customAnswer.trim() ? <Check className="h-2 w-2" strokeWidth={3} /> : <Plus className="h-2 w-2" strokeWidth={3} />}
+              </span>
+              <input
+                value={answer.customAnswer}
+                onChange={(event) => updateCustomOption(event.target.value)}
+                placeholder="Other…"
+                className="min-w-0 flex-1 bg-transparent text-[13px] leading-snug text-foreground outline-none placeholder:text-muted-foreground/50"
+              />
+              <kbd className="goal-shortcut-pill ml-1 flex h-4 w-4 shrink-0 items-center justify-center rounded border border-border/40 bg-muted/40 font-mono text-[10px] text-muted-foreground">/</kbd>
+            </label>
+          )}
+        </div>
+      )}
+
+      {showTextArea && (
+        <Textarea
+          ref={textareaRef}
+          value={textValue}
+          onChange={(event) => updateTextValue(event.target.value)}
+          placeholder={question.recommendedAnswer || 'Type your answer'}
+        />
+      )}
+
+      <div className="mt-3">
+        {noteOpen ? (
+          <div className="rounded-md bg-muted/25 p-2">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Note</span>
+              <button
+                type="button"
+                onClick={() => {
+                  onChange({ note: '' });
+                  onNoteOpenChange(false);
+                }}
+                className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                title="Remove note"
+                aria-label="Remove note"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <Textarea
+              value={answer.note || ''}
+              onChange={(event) => onChange({ note: event.target.value })}
+              placeholder="Add context or constraints for this answer"
+              className="goal-note-textarea min-h-16 border-0 bg-transparent focus:ring-0"
+            />
+          </div>
+        ) : (
+          <div className="flex items-center gap-1">
+          <Button type="button" variant="ghost" size="sm" onClick={() => onNoteOpenChange(true)}>
+            <Plus className="h-3.5 w-3.5" />
+            Add note
+          </Button>
+          <Button type="button" variant="ghost" size="sm" onClick={onSkip}>
+            Skip
+            <ChevronDown className="h-3 w-3 -rotate-90" />
+          </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const FACTS_HELP_ITEMS = [
+  { icon: Check, label: 'Accept', color: 'text-success', description: 'Mark a fact as accepted. Accepted facts become part of the final fact sheet.' },
+  { icon: Edit3, label: 'Edit', color: 'text-primary', description: 'Edit the fact text before accepting. Click again to finish editing.' },
+  { icon: MessageSquare, label: 'Comment', color: 'text-primary', description: 'Add a note or context to a fact. The agent sees your comments alongside the fact.' },
+  { icon: TestTube2, label: 'Auto-verify', color: 'text-primary', description: 'Flag this fact for automated verification. The agent will write concrete test checks for flagged facts in the plan.' },
+  { icon: Trash2, label: 'Remove', color: 'text-destructive', description: 'Remove a fact entirely. It won\'t appear in the final fact sheet or plan.' },
+];
+
+const FactsSurface = React.forwardRef<GoalSetupSurfaceHandle, {
+  bundle: GoalSetupFactsBundle;
+  onSubmitted?: () => void;
+  onActionStateChange?: (state: GoalSetupActionState) => void;
+}>(({ bundle, onSubmitted, onActionStateChange }, ref) => {
+  const [facts, setFacts] = useState<GoalSetupFactResult[]>(() =>
+    bundle.facts.map((fact) => ({
+      id: fact.id,
+      text: fact.text,
+      accepted: fact.accepted,
+      removed: fact.removed,
+      comment: fact.comment,
+      automatedVerification: fact.automatedVerification,
+      recommendedAutomatedVerification: fact.recommendedAutomatedVerification,
+    }))
+  );
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [commentingId, setCommentingId] = useState<string | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
+  const [submitState, setSubmitState] = useState<SubmitState>('idle');
+  const [error, setError] = useState('');
+  const commentButtons = useRef(new Map<string, HTMLButtonElement>());
+
+  const liveFacts = facts.filter((fact) => !fact.removed);
+  const acceptedCount = liveFacts.filter((fact) => fact.accepted).length;
+  const commentingFact = commentingId
+    ? facts.find((fact) => fact.id === commentingId)
+    : undefined;
+  const commentingAnchor = commentingId
+    ? commentButtons.current.get(commentingId)
+    : undefined;
+
+  const updateFact = useCallback((id: string, patch: Partial<GoalSetupFactResult>) => {
+    setFacts((current) =>
+      current.map((fact) => (fact.id === id ? { ...fact, ...patch } : fact))
+    );
+  }, []);
+
+  const handleSubmit = async () => {
+    if (submitState === 'submitting') return;
+    setSubmitState('submitting');
+    setError('');
+    try {
+      await submitGoalSetup({
+        stage: 'facts',
+        title: bundle.title,
+        goalSlug: bundle.goalSlug,
+        facts,
+      });
+      setSubmitState('submitted');
+      onSubmitted?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Submission failed');
+      setSubmitState('error');
+    }
+  };
+
+  React.useImperativeHandle(ref, () => ({ submit: handleSubmit }), [handleSubmit]);
+
+  useEffect(() => {
+    onActionStateChange?.({
+      canSubmit: true,
+      isSubmitting: submitState === 'submitting',
+      submitted: submitState === 'submitted',
+      submitLabel: 'Submit Facts',
+    });
+  }, [onActionStateChange, submitState]);
+
+  return (
+    <section className="w-full">
+      <div className="goal-shell">
+        <header className="mb-3 flex items-baseline justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+              Fact review
+            </div>
+            <div className="mt-0.5 flex items-baseline gap-2">
+              <h1 className="truncate text-lg font-medium leading-tight text-foreground">
+                {bundle.title || 'Review the facts'}
+              </h1>
+              <button
+                type="button"
+                onClick={() => setShowHelp(true)}
+                className="shrink-0 text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                help
+              </button>
+            </div>
+          </div>
+          <div className="shrink-0 font-mono text-[11px] text-muted-foreground">
+            {acceptedCount}/{liveFacts.length} accepted
+          </div>
+        </header>
+
+        <ConfirmDialog
+          isOpen={showHelp}
+          onClose={() => setShowHelp(false)}
+          title="Fact actions"
+          variant="info"
+          wide
+          confirmText="Got it"
+          message={
+            <div className="space-y-3">
+              {FACTS_HELP_ITEMS.map((item) => (
+                <div key={item.label} className="flex items-start gap-2.5">
+                  <item.icon className={cx('mt-0.5 h-4 w-4 shrink-0', item.color)} />
+                  <div>
+                    <div className="text-sm font-medium text-foreground">{item.label}</div>
+                    <div className="text-xs text-muted-foreground">{item.description}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          }
+        />
+
+        {error && (
+          <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            {error}
+          </div>
+        )}
+
+        {liveFacts.map((fact) => {
+          const editing = editingId === fact.id;
+          return (
+            <div
+              key={fact.id}
+              className={cx(
+                'goal-row flex items-center gap-2.5 px-3 py-2.5',
+                fact.accepted && 'answered'
+              )}
+            >
+              <button
+                type="button"
+                onClick={() => updateFact(fact.id, { accepted: !fact.accepted })}
+                title={fact.accepted ? 'Unaccept' : 'Accept'}
+                className="shrink-0"
+              >
+                <StatusDot complete={fact.accepted} />
+              </button>
+
+              <div className="min-w-0 flex-1">
+                {editing ? (
+                  <Textarea
+                    value={fact.text}
+                    onChange={(event) => updateFact(fact.id, { text: event.target.value })}
+                    className="min-h-12"
+                  />
+                ) : (
+                  <p className="text-[13.5px] leading-snug text-foreground">{fact.text}</p>
+                )}
+                {fact.comment && (
+                  <p className="mt-1.5 text-[12px] leading-snug text-muted-foreground">
+                    {fact.comment}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => updateFact(fact.id, { accepted: !fact.accepted })}
+                  title={fact.accepted ? 'Unaccept' : 'Accept'}
+                  className={cx(
+                    'inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors',
+                    fact.accepted ? 'bg-success/15 text-success' : 'text-muted-foreground hover:bg-success/10 hover:text-success'
+                  )}
+                >
+                  <Check className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingId(editing ? null : fact.id)}
+                  title={editing ? 'Done editing' : 'Edit'}
+                  className={cx(
+                    'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
+                    editing ? 'bg-primary/10 text-primary' : 'hover:bg-muted hover:text-foreground'
+                  )}
+                >
+                  <Edit3 className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  ref={(node) => {
+                    if (node) commentButtons.current.set(fact.id, node);
+                    else commentButtons.current.delete(fact.id);
+                  }}
+                  onClick={() => setCommentingId(fact.id)}
+                  title="Comment"
+                  className={cx(
+                    'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
+                    fact.comment ? 'bg-primary/10 text-primary' : 'hover:bg-muted hover:text-foreground'
+                  )}
+                >
+                  <MessageSquare className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateFact(fact.id, { automatedVerification: !fact.automatedVerification })}
+                  title={fact.automatedVerification ? 'Disable auto-verify' : 'Enable auto-verify'}
+                  className={cx(
+                    'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
+                    fact.automatedVerification ? 'bg-primary/10 text-primary' : 'hover:bg-muted hover:text-foreground'
+                  )}
+                >
+                  <TestTube2 className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateFact(fact.id, { removed: true, accepted: false })}
+                  title="Remove"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+
+        {liveFacts.length === 0 && (
+          <div className="goal-row px-4 py-8 text-center text-sm text-muted-foreground">
+            All facts have been removed.
+          </div>
+        )}
+      </div>
+
+      {commentingFact && (
+        <CommentPopover
+          anchorEl={commentingAnchor}
+          contextText={commentingFact.text}
+          isGlobal={false}
+          initialText={commentingFact.comment || ''}
+          draftKey={`goal-fact-${commentingFact.id}`}
+          onSubmit={(text) => {
+            updateFact(commentingFact.id, { comment: text });
+            setCommentingId(null);
+          }}
+          onClose={() => setCommentingId(null)}
+        />
+      )}
+    </section>
+  );
+});
+FactsSurface.displayName = 'FactsSurface';
+
+const GoalShortcutPill: React.FC = () => (
+  <div
+    role="status"
+    aria-label="Keyboard shortcuts"
+    className="goal-shortcut-pill pointer-events-none fixed bottom-4 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 rounded-lg border border-border/50 bg-popover/85 px-3 py-1.5 text-[10px] text-muted-foreground shadow-xl backdrop-blur-md"
+  >
+    <kbd>tab</kbd>
+    <span>next</span>
+    <span className="text-muted-foreground/40">·</span>
+    <span className="flex"><kbd>ctrl</kbd><kbd>u</kbd></span>
+    <span>use rec</span>
+    <span className="text-muted-foreground/40">·</span>
+    <span className="flex"><kbd>ctrl</kbd><kbd>k</kbd></span>
+    <span>skip</span>
+    <span className="text-muted-foreground/40">·</span>
+    <span className="flex"><kbd>ctrl</kbd><kbd>j</kbd></span>
+    <span>note</span>
+    <span className="text-muted-foreground/40">·</span>
+    <span className="flex"><kbd>cmd</kbd><kbd>enter</kbd></span>
+    <span>submit</span>
+  </div>
+);
+
+
+const RecommendedBadge: React.FC<{ label: string }> = ({ label }) => (
+  <span className="inline-flex self-start items-center rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+    {label}
+  </span>
+);
+
+const StatusDot: React.FC<{ complete: boolean; skipped?: boolean }> = ({ complete, skipped }) => (
+  <span
+    aria-hidden="true"
+    className={cx(
+      'flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full transition-colors',
+      complete
+        ? 'bg-success text-success-foreground'
+        : skipped
+          ? 'bg-warning text-warning-foreground'
+          : 'border-[1.5px] border-muted-foreground/30 bg-transparent'
+    )}
+  >
+    {(complete || skipped) && <Check className="h-2.5 w-2.5" strokeWidth={3} />}
+  </span>
+);
+
+
+function hasAnswer(question: GoalSetupQuestion, answer: GoalSetupQuestionAnswer): boolean {
+  const text = buildAnswerText(question, answer);
+  return text.trim().length > 0;
+}
+
+function isQuestionSubmittable(question: GoalSetupQuestion, answer: GoalSetupQuestionAnswer): boolean {
+  return question.required === false || hasAnswer(question, answer);
+}
+
+function buildAnswerText(question: GoalSetupQuestion, answer: GoalSetupQuestionAnswer): string {
+  const selectedLabels =
+    question.options
+      ?.filter((option) => answer.selectedOptionIds.includes(option.id))
+      .map((option) => option.label) || [];
+  const freeText =
+    (question.answerMode || 'text') === 'text'
+      ? answer.answer.trim()
+      : answer.customAnswer.trim();
+  return [...selectedLabels, freeText].filter(Boolean).join('\n');
+}

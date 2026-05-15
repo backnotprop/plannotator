@@ -1,7 +1,7 @@
 /**
  * Plannotator CLI for Claude Code, Codex, Gemini CLI, and Copilot CLI
  *
- * Supports eight modes:
+ * Supports nine modes:
  *
  * 1. Plan Review (default, no args):
  *    - Spawned by Claude/Gemini/Codex hook entrypoints
@@ -37,7 +37,11 @@
  *    - Annotate the last assistant message from a Copilot CLI session
  *    - Parses events.jsonl from session state
  *
- * 8. Improve Context (`plannotator improve-context`):
+ * 8. Goal Setup (`plannotator setup-goal interview|facts <bundle.json>`):
+ *    - Opens the bundled question or facts acceptance UI
+ *    - Outputs structured JSON for setup-goal workflows
+ *
+ * 9. Improve Context (`plannotator improve-context`):
  *    - Spawned by PreToolUse hook on EnterPlanMode
  *    - Reads improvement hook file from ~/.plannotator/hooks/
  *    - Returns additionalContext or silently passes through
@@ -64,9 +68,17 @@ import {
   startAnnotateServer,
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
+import {
+  startGoalSetupServer,
+  handleGoalSetupServerReady,
+} from "@plannotator/server/goal-setup";
 import { type DiffType, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
 import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
 import { parseReviewArgs } from "@plannotator/shared/review-args";
+import {
+  normalizeGoalSetupBundle,
+  type GoalSetupStage,
+} from "@plannotator/shared/goal-setup";
 import { stripAtPrefix, resolveAtReference } from "@plannotator/shared/at-reference";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { urlToMarkdown, isConvertedSource } from "@plannotator/shared/url-to-markdown";
@@ -205,6 +217,17 @@ function emitAnnotateOutcome(result: {
   if (result.feedback) console.log(result.feedback);
 }
 
+async function loadGoalSetupBundle(
+  stage: GoalSetupStage,
+  bundlePath: string
+) {
+  const raw =
+    bundlePath === "-"
+      ? await Bun.stdin.text()
+      : await Bun.file(path.resolve(bundlePath)).text();
+  return normalizeGoalSetupBundle(JSON.parse(raw), stage);
+}
+
 if (isVersionInvocation(args)) {
   console.log(formatVersion());
   process.exit(0);
@@ -295,6 +318,68 @@ if (args[0] === "sessions") {
     console.error(`  #${i + 1}  ${s.mode.padEnd(9)} ${s.project.padEnd(20)} ${s.url.padEnd(28)} ${ageStr} ago`);
   }
   console.error(`\nReopen with: plannotator sessions --open [N]`);
+  process.exit(0);
+
+} else if (args[0] === "setup-goal") {
+  // ============================================
+  // GOAL SETUP MODE
+  // ============================================
+
+  const stage = args[1] as GoalSetupStage | undefined;
+  const bundlePath = args[2];
+
+  if ((stage !== "interview" && stage !== "facts") || !bundlePath) {
+    console.error(
+      "Usage: plannotator setup-goal <interview|facts> <bundle.json | -> [--json]"
+    );
+    process.exit(1);
+  }
+
+  let bundle: Awaited<ReturnType<typeof loadGoalSetupBundle>>;
+  try {
+    bundle = await loadGoalSetupBundle(stage, bundlePath);
+  } catch (err) {
+    console.error(
+      `Failed to load goal setup bundle: ${err instanceof Error ? err.message : String(err)}`
+    );
+    process.exit(1);
+  }
+
+  const goalProject = (await detectProjectName()) ?? "_unknown";
+
+  const server = await startGoalSetupServer({
+    bundle,
+    origin: detectedOrigin,
+    htmlContent: planHtmlContent,
+    onReady: (url, isRemote, port) => {
+      handleGoalSetupServerReady(url, isRemote, port);
+    },
+  });
+
+  registerSession({
+    pid: process.pid,
+    port: server.port,
+    url: server.url,
+    mode: "goal-setup",
+    project: goalProject,
+    startedAt: new Date().toISOString(),
+    label: `goal-setup-${bundle.stage}-${bundle.goalSlug || goalProject}`,
+  });
+
+  const result = await server.waitForDecision();
+  await Bun.sleep(800);
+  server.stop();
+
+  if (result.exit) {
+    console.log(JSON.stringify({ decision: "dismissed", stage: bundle.stage }));
+  } else if (result.result) {
+    const output = {
+      decision: "submitted",
+      stage: result.result.stage,
+      result: result.result,
+    };
+    console.log(jsonFlag ? JSON.stringify(output) : JSON.stringify(output, null, 2));
+  }
   process.exit(0);
 
 } else if (args[0] === "review") {

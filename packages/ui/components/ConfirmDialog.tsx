@@ -2,7 +2,7 @@
  * Reusable confirmation dialog component
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 
 export interface ConfirmDialogProps {
   isOpen: boolean;
@@ -31,6 +31,23 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   showCancel = false,
   wide = false,
 }) => {
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        if (onConfirm) onConfirm();
+        else onClose();
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [isOpen, onConfirm, onClose]);
+
   if (!isOpen) return null;
 
   const iconColors = {

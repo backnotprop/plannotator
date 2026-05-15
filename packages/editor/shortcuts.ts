@@ -5,6 +5,7 @@ import {
   createShortcutRegistry,
   createShortcutScopeHook,
   defineShortcutScope,
+  goalSetupShortcuts,
   imageAnnotatorShortcuts,
   inputMethodShortcuts,
   viewerShortcuts,
@@ -106,4 +107,30 @@ export const annotateSurface: ShortcutSurface = {
   title: 'Annotate mode',
   description: 'Shortcuts surfaced by the standalone annotation UI.',
   registry: annotateSettingsShortcutRegistry,
+};
+
+const goalSetupEditorSettingsShortcuts = defineShortcutScope({
+  id: 'goal-setup-editor-settings',
+  title: 'Goal Setup',
+  shortcuts: {
+    submitGoalSetup: {
+      description: 'Submit answers / facts',
+      bindings: ['Mod+Enter'],
+      section: 'Actions',
+      hint: 'Submits the bundled interview or facts review.',
+      displayOrder: 10,
+    },
+  },
+});
+
+export const goalSetupSettingsShortcutRegistry = createShortcutRegistry([
+  goalSetupEditorSettingsShortcuts,
+  goalSetupShortcuts,
+] as const);
+
+export const goalSetupSurface: ShortcutSurface = {
+  slug: 'goal-setup',
+  title: 'Goal setup',
+  description: 'Shortcuts surfaced by the bundled goal-setup interview and facts review.',
+  registry: goalSetupSettingsShortcutRegistry,
 };
