@@ -15,7 +15,9 @@ State back what the user wants in your own words. If the conversation already ha
 
 ### 2. Interview Bundle
 
-Build a complete bundle of questions that can derive every "fact" this goal should produce. Package the questions together so the user can answer them quickly in the Plannotator goal setup UI. For each question, include your recommended answer and use options when they make answering faster.
+Build a compact bundle of questions that can derive every "fact" this goal should produce. Package the questions together so the user can answer them quickly in the Plannotator goal setup UI. For each question, include your recommended answer and use options when they make answering faster.
+
+Do not ask obvious confirmation questions. If the answer can be inferred from the user's request, from the conversation, or from shallow codebase exploration, infer it and move on. If an obvious area has meaningful nuance, present the inferred answer as a recommendation with options or a custom "add/correct this" path rather than asking the user to restate the obvious.
 
 Question areas that usually matter:
 
@@ -28,7 +30,7 @@ Question areas that usually matter:
 - What edge cases to consider
 - What constraints or precedent apply
 
-**If a question can be answered by exploring the codebase, explore the codebase instead of asking.** Only include questions where the user's judgment is actually needed.
+**If a question can be answered by exploring the codebase, explore the codebase instead of asking.** Only include questions where the user's judgment is actually needed. Prefer fewer, higher-leverage questions over exhaustive obvious ones.
 
 Pipe the bundle as raw JSON directly to the CLI via stdin — no need to write a file:
 
@@ -40,6 +42,12 @@ Supported `answerMode` values: `text`, `single`, `multi`, `custom`, `single-cust
 
 Run this as a monitored foreground process and wait patiently for the browser session to finish. The command returns JSON on stdout with the submitted answers. Use those answers as the reviewed interview result. If the session is dismissed, stop and tell the user the goal setup was closed.
 
+Before moving to facts, read every answer and note carefully:
+
+- If the user wrote questions, uncertainty, "not sure", "needs context", or similar concerns in an answer or note, stop and address those questions in chat. Do not proceed to facts until the user has enough context or you have rerun a revised interview bundle.
+- If the user skipped a question with a note, treat the note as intentional feedback, not as an empty answer. Answer the note, refine the question, or make a documented assumption before proceeding.
+- If the user skipped a question without a note, proceed only if the missing answer is non-blocking; otherwise ask the smallest possible follow-up in chat.
+
 ### 3. Fact Sheet
 
 A fact is a simple description of each outcome of a goal. It should be easily testable and verifiable. A fact may describe the function of a specific feature or aspect of a system. A fact may determine specific UI and UX. Again, a fact is literally anything that can be tested and verified in automated or manual testing. Keep fact language simple. In a way, a fact sheet is a design spec, but less verbose & using language the human user can easily visualize & rationalize. 
@@ -50,7 +58,7 @@ Create the goal directory, then prepare a facts review bundle from the interview
 mkdir -p goals/<slug>
 ```
 
-Pipe the facts bundle as raw JSON directly via stdin — no file needed. If revising after a prior facts pass, include previously accepted facts with `"accepted": true`; the UI hides them by default while preserving their state.
+Pipe the facts bundle as raw JSON directly via stdin — no file needed. If revising after a prior facts pass, include previously accepted facts with `"accepted": true`; the UI keeps all facts visible and preserves their accepted state.
 
 ```bash
 echo '{"stage":"facts","title":"Short human-readable title","goalSlug":"<slug>","facts":[{"id":"fact-1","text":"The accepted fact text.","accepted":false,"removed":false,"recommendedAutomatedVerification":true,"automatedVerification":true}]}' | plannotator setup-goal facts - --json

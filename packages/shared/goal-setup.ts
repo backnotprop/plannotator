@@ -32,6 +32,7 @@ export interface GoalSetupQuestionAnswer {
   note?: string;
   answer: string;
   completed: boolean;
+  skipped?: boolean;
 }
 
 export interface GoalSetupInterviewBundle {
@@ -266,9 +267,12 @@ export function createInterviewResult(
         answer: asString(answer?.answer),
         completed: asBoolean(answer?.completed, false),
       };
+      const completed = normalized.completed || hasQuestionAnswer(normalized);
+      const skipped = asBoolean(answer?.skipped, false) && !completed;
       return {
         ...normalized,
-        completed: normalized.completed || hasQuestionAnswer(normalized),
+        completed,
+        ...(skipped ? { skipped: true } : {}),
       };
     }),
   };

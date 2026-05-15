@@ -130,33 +130,38 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
   const [submitState, setSubmitState] = useState<SubmitState>('idle');
   const [error, setError] = useState('');
 
+  const focusQuestionControl = useCallback(
+    (questionId: string, options?: { scroll?: boolean }) => {
+      requestAnimationFrame(() => {
+        const row = questionRefs.current.get(questionId);
+        if (!row) return;
+        if (options?.scroll) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        const focusTarget = row.querySelector<HTMLElement>('.goal-answer-focus');
+        if (focusTarget) requestAnimationFrame(() => focusTarget.focus());
+      });
+    },
+    []
+  );
+
   useEffect(() => {
     if (didAutoFocus.current || !activeQuestionId) return;
     didAutoFocus.current = true;
-    const firstQuestion = bundle.questions[0];
-    if (!firstQuestion) return;
-    const isTextQuestion = !firstQuestion.answerMode || firstQuestion.answerMode === 'text' || firstQuestion.answerMode === 'custom';
-    requestAnimationFrame(() => {
-      const row = questionRefs.current.get(activeQuestionId);
-      if (isTextQuestion) {
-        row?.querySelector<HTMLElement>('textarea')?.focus();
-      } else {
-        row?.querySelector<HTMLElement>(':scope > button')?.focus();
-      }
-    });
-  });
+    focusQuestionControl(activeQuestionId);
+  }, [activeQuestionId, focusQuestionControl]);
 
   const answerList = useMemo(
     () =>
       bundle.questions.map((question) => {
         const answer = answers[question.id];
+        const completed = hasAnswer(question, answer);
         return {
           ...answer,
           answer: buildAnswerText(question, answer),
-          completed: hasAnswer(question, answer),
+          completed,
+          skipped: skippedIds.has(question.id) && !completed,
         };
       }),
-    [answers, bundle.questions]
+    [answers, bundle.questions, skippedIds]
   );
 
   const completedCount = answerList.filter((answer) => answer.completed).length;
@@ -176,6 +181,10 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
 
   const updateAnswer = useCallback(
     (questionId: string, patch: Partial<GoalSetupQuestionAnswer>) => {
+      const answerFieldsChanged =
+        Object.prototype.hasOwnProperty.call(patch, 'answer') ||
+        Object.prototype.hasOwnProperty.call(patch, 'customAnswer') ||
+        Object.prototype.hasOwnProperty.call(patch, 'selectedOptionIds');
       setAnswers((current) => ({
         ...current,
         [questionId]: {
@@ -184,7 +193,7 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
         },
       }));
       setSkippedIds((current) => {
-        if (!current.has(questionId)) return current;
+        if (!answerFieldsChanged || !current.has(questionId)) return current;
         const next = new Set(current);
         next.delete(questionId);
         return next;
@@ -243,22 +252,10 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
           ? delta === 1 ? 0 : ids.length - 1
           : Math.max(0, Math.min(ids.length - 1, currentIndex + delta));
       const nextId = ids[nextIndex];
-      const nextQuestion = bundle.questions[nextIndex];
       setActiveQuestionId(nextId);
-      requestAnimationFrame(() => {
-        const row = questionRefs.current.get(nextId);
-        row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-        const isTextQuestion = !nextQuestion.answerMode || nextQuestion.answerMode === 'text' || nextQuestion.answerMode === 'custom';
-        if (isTextQuestion) {
-          const textarea = row?.querySelector<HTMLElement>('textarea');
-          if (textarea) requestAnimationFrame(() => textarea.focus());
-        } else {
-          const headerBtn = row?.querySelector<HTMLElement>(':scope > button');
-          if (headerBtn) requestAnimationFrame(() => headerBtn.focus());
-        }
-      });
+      focusQuestionControl(nextId, { scroll: true });
     },
-    [bundle.questions, activeQuestionId]
+    [bundle.questions, activeQuestionId, focusQuestionControl]
   );
 
   const skipQuestion = useCallback(
@@ -306,10 +303,7 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
         const el = event.target;
         if (el instanceof HTMLElement && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
           event.preventDefault();
-          const row = el.closest('.goal-row');
-          const headerBtn = row?.querySelector<HTMLElement>(':scope > button');
-          if (headerBtn) headerBtn.focus();
-          else (el as HTMLElement).blur();
+          el.blur();
         }
         return;
       }
@@ -338,7 +332,7 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
       if (event.key === '/' && (mode === 'custom' || mode === 'single-custom' || mode === 'multi-custom')) {
         event.preventDefault();
         const row = questionRefs.current.get(activeQuestionId);
-        const customInput = row?.querySelector<HTMLElement>('label input');
+        const customInput = row?.querySelector<HTMLElement>('.goal-custom-input');
         customInput?.focus();
         return;
       }
@@ -375,7 +369,7 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
         message={
           <>
             {skippedQuestions.length > 0 && (
-              <span>{skippedQuestions.length} skipped question{skippedQuestions.length !== 1 ? 's' : ''} will be sent without answers. </span>
+              <span>{skippedQuestions.length} skipped question{skippedQuestions.length !== 1 ? 's' : ''} will be sent as skipped, including any notes. </span>
             )}
             {incompleteQuestions.length > 0 && (
               <span>{incompleteQuestions.length} required question{incompleteQuestions.length !== 1 ? 's' : ''} {incompleteQuestions.length !== 1 ? 'are' : 'is'} still unanswered. </span>
@@ -413,8 +407,9 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
           const isActive = activeQuestionId === question.id;
           const complete = hasAnswer(question, answer);
           const skipped = skippedIds.has(question.id) && !complete;
+          const noteSummary = answer.note?.trim();
           const summary = skipped
-            ? 'Skipped'
+            ? noteSummary ? `Skipped · ${noteSummary}` : 'Skipped'
             : complete
               ? buildAnswerText(question, answer).replace(/\s*\n+\s*/g, ' · ').trim()
               : '';
@@ -440,7 +435,9 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
                     current === question.id ? null : question.id
                   );
                 }}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-left"
+                tabIndex={-1}
+                aria-expanded={isActive}
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-left focus-visible:outline-none"
               >
                 <StatusDot complete={complete} skipped={skipped} />
                 <span className="min-w-0 flex-1">
@@ -619,7 +616,7 @@ const QuestionAnswerControls: React.FC<{
                 type="button"
                 onClick={() => toggleOption(option.id)}
                 className={cx(
-                  'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition-colors',
+                  'goal-answer-focus flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition-colors',
                   selected
                     ? 'bg-primary/10 text-foreground'
                     : 'text-foreground/85 hover:bg-muted/30'
@@ -670,7 +667,7 @@ const QuestionAnswerControls: React.FC<{
                 value={answer.customAnswer}
                 onChange={(event) => updateCustomOption(event.target.value)}
                 placeholder="Other…"
-                className="min-w-0 flex-1 bg-transparent text-[13px] leading-snug text-foreground outline-none placeholder:text-muted-foreground/50"
+                className="goal-answer-focus goal-custom-input min-w-0 flex-1 bg-transparent text-[13px] leading-snug text-foreground outline-none placeholder:text-muted-foreground/50"
               />
               <kbd className="goal-shortcut-pill ml-1 flex h-4 w-4 shrink-0 items-center justify-center rounded border border-border/40 bg-muted/40 font-mono text-[10px] text-muted-foreground">/</kbd>
             </label>
@@ -684,6 +681,7 @@ const QuestionAnswerControls: React.FC<{
           value={textValue}
           onChange={(event) => updateTextValue(event.target.value)}
           placeholder={question.recommendedAnswer || 'Type your answer'}
+          className="goal-answer-focus"
         />
       )}
 
@@ -708,20 +706,26 @@ const QuestionAnswerControls: React.FC<{
             <Textarea
               value={answer.note || ''}
               onChange={(event) => onChange({ note: event.target.value })}
-              placeholder="Add context or constraints for this answer"
+              placeholder="Add context, constraints, or questions for the agent"
               className="goal-note-textarea min-h-16 border-0 bg-transparent focus:ring-0"
             />
+            <div className="mt-2 flex justify-end">
+              <Button type="button" variant="ghost" size="sm" onClick={onSkip}>
+                {answer.note?.trim() ? 'Skip with note' : 'Skip'}
+                <ChevronDown className="h-3 w-3 -rotate-90" />
+              </Button>
+            </div>
           </div>
         ) : (
           <div className="flex items-center gap-1">
-          <Button type="button" variant="ghost" size="sm" onClick={() => onNoteOpenChange(true)}>
-            <Plus className="h-3.5 w-3.5" />
-            Add note
-          </Button>
-          <Button type="button" variant="ghost" size="sm" onClick={onSkip}>
-            Skip
-            <ChevronDown className="h-3 w-3 -rotate-90" />
-          </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={() => onNoteOpenChange(true)}>
+              <Plus className="h-3.5 w-3.5" />
+              Add note
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={onSkip}>
+              Skip
+              <ChevronDown className="h-3 w-3 -rotate-90" />
+            </Button>
           </div>
         )}
       </div>

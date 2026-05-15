@@ -71,6 +71,39 @@ describe("goal setup model", () => {
     ]);
   });
 
+  test("preserves skipped interview answers with notes", () => {
+    const bundle = normalizeGoalSetupBundle(
+      {
+        stage: "interview",
+        questions: [
+          { id: "scope", prompt: "What is out of scope?" },
+        ],
+      },
+      "interview"
+    );
+
+    if (bundle.stage !== "interview") throw new Error("expected interview");
+
+    const result = createInterviewResult(bundle, [
+      {
+        questionId: "scope",
+        selectedOptionIds: [],
+        customAnswer: "",
+        answer: "",
+        note: "I need more context before answering.",
+        completed: false,
+        skipped: true,
+      },
+    ]);
+
+    expect(result.answers[0]).toMatchObject({
+      questionId: "scope",
+      completed: false,
+      skipped: true,
+      note: "I need more context before answering.",
+    });
+  });
+
   test("filters previously accepted facts unless the bundle opts in", () => {
     const bundle = normalizeFactsBundle({
       stage: "facts",

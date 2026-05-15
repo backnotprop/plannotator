@@ -695,7 +695,8 @@ export function devMockApi(): Plugin {
                   },
                   {
                     id: "audience",
-                    prompt: "Who is the primary user of this workflow?",
+                    prompt: "Which inferred audience assumption should change?",
+                    description: "The agent should not need basic confirmation here; only change this if the default is wrong.",
                     answerMode: "single",
                     recommendedAnswer: "Developers using Claude Code with Plannotator installed.",
                     recommendedOptionIds: ["devs-cc"],
@@ -707,8 +708,8 @@ export function devMockApi(): Plugin {
                   },
                   {
                     id: "scope",
-                    prompt: "What should be in scope?",
-                    description: "Select the layers the implementation must cover.",
+                    prompt: "Which inferred scope items should stay or be added?",
+                    description: "Recommended items are based on the code paths the agent can infer. Add only missing nuance.",
                     answerMode: "multi-custom",
                     recommendedAnswer: "Skill text, interactive UI, server endpoints, and tests.",
                     recommendedOptionIds: ["skill", "ui", "server", "tests"],
@@ -721,7 +722,8 @@ export function devMockApi(): Plugin {
                   },
                   {
                     id: "launch",
-                    prompt: "Which runtimes should ship first?",
+                    prompt: "What rollout constraint should override the default?",
+                    description: "Default is the smallest useful launch; choose a broader option only if runtime parity matters immediately.",
                     answerMode: "single",
                     recommendedOptionIds: ["claude-only"],
                     options: [
