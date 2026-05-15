@@ -537,7 +537,10 @@ const QuestionAnswerControls: React.FC<{
       });
       return;
     }
-    onChange({ selectedOptionIds: [optionId], customAnswer: '' });
+    onChange({
+      selectedOptionIds: answer.selectedOptionIds.includes(optionId) ? [] : [optionId],
+      customAnswer: '',
+    });
   };
 
   const updateTextValue = (value: string) => {
@@ -564,7 +567,7 @@ const QuestionAnswerControls: React.FC<{
       if (showTextArea) {
         patch.answer = supportsText ? question.recommendedAnswer : undefined;
         patch.customAnswer = !supportsText ? question.recommendedAnswer : undefined;
-      } else if (supportsCustom && !patch.selectedOptionIds?.length) {
+      } else if (supportsCustom) {
         patch.customAnswer = question.recommendedAnswer;
       }
     }
@@ -586,12 +589,14 @@ const QuestionAnswerControls: React.FC<{
           {question.description}
         </p>
       )}
-      {question.recommendedAnswer && !hasAnyAnswer && (
+      {(question.recommendedAnswer || question.recommendedOptionIds?.length) && !hasAnyAnswer && (
         <div className="mb-2.5 flex items-start gap-2.5 rounded-md bg-muted/30 px-3 py-2">
           <div className="min-w-0 flex-1">
             <RecommendedBadge label="Recommended" />
             <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-              {question.recommendedAnswer}
+              {question.recommendedAnswer || question.recommendedOptionIds!.map((id) =>
+                question.options?.find((o) => o.id === id)?.label ?? id
+              ).join(', ')}
             </p>
           </div>
           {canUseRecommendation && (
