@@ -13,6 +13,14 @@ Turn an idea into a goal package at `goals/<slug>/` through structured discovery
 
 State back what the user wants in your own words. If the conversation already has rich context, summarize it. If the goal is bare or vague, do minimal shallow exploration of the codebase to ground your understanding. Keep it to 2-3 sentences. Wait for the user to confirm or correct before continuing.
 
+Create the goal directory once the slug is clear:
+
+```bash
+mkdir -p goals/<slug>
+```
+
+Use `goals/<slug>/` for both working JSON files and final docs. The JSON files are provenance and iteration state; the markdown files are the human-readable authoritative goal package.
+
 ### 2. Interview Bundle
 
 Build a compact bundle of questions that can derive every "fact" this goal should produce. Package the questions together so the user can answer them quickly in the Plannotator goal setup UI. For each question, include your recommended answer and use options when they make answering faster.
@@ -32,15 +40,48 @@ Question areas that usually matter:
 
 **If a question can be answered by exploring the codebase, explore the codebase instead of asking.** Only include questions where the user's judgment is actually needed. Prefer fewer, higher-leverage questions over exhaustive obvious ones.
 
-Pipe the bundle as raw JSON directly to the CLI via stdin — no need to write a file:
+Write the interview bundle before showing it to the user:
 
-```bash
-echo '{"stage":"interview","title":"Short human-readable title","goalSlug":"<slug>","questions":[{"id":"scope","prompt":"What should be in scope?","description":"Optional clarification.","answerMode":"multi-custom","recommendedAnswer":"Your recommended answer.","recommendedOptionIds":["ui","server"],"options":[{"id":"ui","label":"UI"},{"id":"server","label":"Server"}],"required":true}]}' | plannotator setup-goal interview - --json
+`goals/<slug>/interview.json`
+
+```json
+{
+  "stage": "interview",
+  "title": "Short human-readable title",
+  "goalSlug": "<slug>",
+  "questions": [
+    {
+      "id": "scope",
+      "prompt": "What should be in scope?",
+      "description": "Optional clarification.",
+      "answerMode": "multi-custom",
+      "recommendedAnswer": "Your recommended answer.",
+      "recommendedOptionIds": ["ui", "server"],
+      "options": [
+        { "id": "ui", "label": "UI" },
+        { "id": "server", "label": "Server" }
+      ],
+      "required": true
+    }
+  ]
+}
 ```
 
 Supported `answerMode` values: `text`, `single`, `multi`, `custom`, `single-custom`, `multi-custom`.
 
-Run this as a monitored foreground process and wait patiently for the browser session to finish. The command returns JSON on stdout with the submitted answers. Use those answers as the reviewed interview result. If the session is dismissed, stop and tell the user the goal setup was closed.
+Run this as a monitored foreground process and wait patiently for the browser session to finish:
+
+```bash
+plannotator setup-goal interview goals/<slug>/interview.json --json
+```
+
+The command returns JSON on stdout with the submitted answers. Write that exact result to `goals/<slug>/interview-result.json` before continuing. A convenient pattern is:
+
+```bash
+plannotator setup-goal interview goals/<slug>/interview.json --json | tee goals/<slug>/interview-result.json
+```
+
+If the user revises, update `interview.json` and rerun the command instead of reconstructing the whole bundle from memory. If the session is dismissed, stop and tell the user the goal setup was closed.
 
 Before moving to facts, read every answer and note carefully:
 
@@ -52,19 +93,41 @@ Before moving to facts, read every answer and note carefully:
 
 A fact is a simple description of each outcome of a goal. It should be easily testable and verifiable. A fact may describe the function of a specific feature or aspect of a system. A fact may determine specific UI and UX. Again, a fact is literally anything that can be tested and verified in automated or manual testing. Keep fact language simple. In a way, a fact sheet is a design spec, but less verbose & using language the human user can easily visualize & rationalize. 
 
-Create the goal directory, then prepare a facts review bundle from the interview result. Each fact should include whether automated verification is recommended and preselected.
+Prepare a facts review bundle from `goals/<slug>/interview-result.json`. Each fact should include whether automated verification is recommended and preselected.
 
-```bash
-mkdir -p goals/<slug>
+Write the facts review bundle before showing it to the user. If revising after a prior facts pass, start from `facts-review.json` and `facts-result.json`, include previously accepted facts with `"accepted": true`, and preserve their state.
+
+`goals/<slug>/facts-review.json`
+
+```json
+{
+  "stage": "facts",
+  "title": "Short human-readable title",
+  "goalSlug": "<slug>",
+  "facts": [
+    {
+      "id": "fact-1",
+      "text": "The accepted fact text.",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    }
+  ]
+}
 ```
 
-Pipe the facts bundle as raw JSON directly via stdin — no file needed. If revising after a prior facts pass, include previously accepted facts with `"accepted": true`; the UI keeps all facts visible and preserves their accepted state.
+Run this as a monitored foreground process and wait patiently for the browser session to finish:
 
 ```bash
-echo '{"stage":"facts","title":"Short human-readable title","goalSlug":"<slug>","facts":[{"id":"fact-1","text":"The accepted fact text.","accepted":false,"removed":false,"recommendedAutomatedVerification":true,"automatedVerification":true}]}' | plannotator setup-goal facts - --json
+plannotator setup-goal facts goals/<slug>/facts-review.json --json
 ```
 
-Run this as a monitored foreground process and wait patiently for the browser session to finish. The command returns JSON on stdout with accepted/edited/removed facts plus automated verification selections.
+The command returns JSON on stdout with accepted/edited/removed facts plus automated verification selections. Write that exact result to `goals/<slug>/facts-result.json`. A convenient pattern is:
+
+```bash
+plannotator setup-goal facts goals/<slug>/facts-review.json --json | tee goals/<slug>/facts-result.json
+```
 
 Write `goals/<slug>/facts.md` as a flat readable list of accepted facts. Each fact is one line; add a minimal note only when the fact cannot be stated clearly on its own. Also write `goals/<slug>/facts.meta.json` preserving each accepted fact's `id`, final `text`, `comment`, `recommendedAutomatedVerification`, and `automatedVerification` value.
 
