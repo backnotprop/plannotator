@@ -48,17 +48,12 @@ export interface CodexPlanResult {
   source: CodexPlanSource;
 }
 
-export interface GetLastCodexMessageOptions {
-  beforeActiveTurn?: boolean;
-}
-
 export interface GetLatestCodexPlanOptions {
   turnId?: string;
   stopHookActive?: boolean;
 }
 
 const TURN_START_TYPES = new Set(["task_started", "turn_started"]);
-const TURN_COMPLETE_TYPES = new Set(["task_complete", "turn_completed"]);
 const PROPOSED_PLAN_RE = /<proposed_plan>([\s\S]*?)<\/proposed_plan>/gi;
 
 // --- Rollout File Discovery ---
@@ -205,24 +200,6 @@ function findTurnStartIndex(entries: RolloutEntry[], turnId?: string): number {
   return lastTurnContext === -1 ? 0 : lastTurnContext;
 }
 
-function findActiveTurnStartIndex(entries: RolloutEntry[]): number {
-  const latestTurnStart = findLastIndex(
-    entries,
-    (entry) =>
-      entry.type === "event_msg" &&
-      TURN_START_TYPES.has(entry.payload?.type || "")
-  );
-  if (latestTurnStart === -1) return -1;
-
-  const latestTurnComplete = findLastIndex(
-    entries,
-    (entry) =>
-      entry.type === "event_msg" &&
-      TURN_COMPLETE_TYPES.has(entry.payload?.type || "")
-  );
-  return latestTurnStart > latestTurnComplete ? latestTurnStart : -1;
-}
-
 function isHookPromptMessage(entry: RolloutEntry): boolean {
   if (entry.type !== "response_item") return false;
   if (entry.payload?.type !== "message") return false;
@@ -318,17 +295,12 @@ function pickLatestPreferredPlan(
  * Extracts output_text blocks from payload.content.
  */
 export function getLastCodexMessage(
-  rolloutPath: string,
-  options: GetLastCodexMessageOptions = {}
+  rolloutPath: string
 ): { text: string } | null {
   const entries = parseRolloutEntries(rolloutPath);
-  const activeTurnStart = options.beforeActiveTurn
-    ? findActiveTurnStartIndex(entries)
-    : -1;
-  const endIndex = activeTurnStart === -1 ? entries.length - 1 : activeTurnStart - 1;
 
   // Walk backward
-  for (let i = endIndex; i >= 0; i--) {
+  for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i];
     if (entry.type !== "response_item") continue;
     if (entry.payload?.type !== "message") continue;

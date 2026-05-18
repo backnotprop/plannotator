@@ -30,6 +30,9 @@
     "./agent-jobs": "./agent-jobs.ts",
     "./config": "./config.ts",
     "./prompts": "./prompts.ts",
+    "./plugin-binary": "./plugin-binary.ts",
+    "./plugin-client": "./plugin-client.ts",
+    "./plugin-protocol": "./plugin-protocol.ts",
     "./improvement-hooks": "./improvement-hooks.ts",
     "./pfm-reminder": "./pfm-reminder.ts",
     "./worktree": "./worktree.ts",
@@ -38,9 +41,9 @@
     "./url-to-markdown": "./url-to-markdown.ts",
     "./tour": "./tour.ts",
     "./annotate-args": "./annotate-args.ts",
+    "./goal-setup": "./goal-setup.ts",
     "./at-reference": "./at-reference.ts",
-    "./code-nav": "./code-nav.ts",
-    "./goal-setup": "./goal-setup.ts"
+    "./code-nav": "./code-nav.ts"
   },
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.64",

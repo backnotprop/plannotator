@@ -1,12 +1,12 @@
 /**
- * Route Parity Test
+ * Runtime Route Ownership Test
  *
- * Extracts all API routes from Bun and Pi server files and asserts
- * they are identical per server (plan, review, annotate) plus shared
- * delegated handlers (editor annotations, AI endpoints).
+ * The Bun server is now the only Plannotator UI server runtime. This test
+ * keeps coverage that the canonical server still exposes routes while proving
+ * Pi no longer ships a mirrored node:http route implementation.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
@@ -56,35 +56,29 @@ const pi = {
   review: join(ROOT, "apps/pi-extension/server/serverReview.ts"),
   annotate: join(ROOT, "apps/pi-extension/server/serverAnnotate.ts"),
   editorAnnotations: join(ROOT, "apps/pi-extension/server/annotations.ts"),
+  serverDir: join(ROOT, "apps/pi-extension/server"),
+  serverBarrel: join(ROOT, "apps/pi-extension/server.ts"),
 };
 
 const aiEndpointsFile = join(ROOT, "packages/ai/endpoints.ts");
 
 // --- Tests ---
 
-describe("route parity: Bun ↔ Pi", () => {
-  test("plan server routes match", () => {
-    const bunRoutes = unique(extractInlineRoutes(bun.plan));
-    const piRoutes = unique(extractInlineRoutes(pi.plan));
-    expect(piRoutes).toEqual(bunRoutes);
+describe("route ownership: Bun server only", () => {
+  test("canonical Bun route files still expose API routes", () => {
+    expect(unique(extractInlineRoutes(bun.plan)).length).toBeGreaterThan(0);
+    expect(unique(extractInlineRoutes(bun.review)).length).toBeGreaterThan(0);
+    expect(unique(extractInlineRoutes(bun.annotate)).length).toBeGreaterThan(0);
+    expect(unique(extractInlineRoutes(bun.editorAnnotations)).length).toBeGreaterThan(0);
   });
 
-  test("review server routes match", () => {
-    const bunRoutes = unique(extractInlineRoutes(bun.review));
-    const piRoutes = unique(extractInlineRoutes(pi.review));
-    expect(piRoutes).toEqual(bunRoutes);
-  });
-
-  test("annotate server routes match", () => {
-    const bunRoutes = unique(extractInlineRoutes(bun.annotate));
-    const piRoutes = unique(extractInlineRoutes(pi.annotate));
-    expect(piRoutes).toEqual(bunRoutes);
-  });
-
-  test("editor annotation routes match", () => {
-    const bunRoutes = unique(extractInlineRoutes(bun.editorAnnotations));
-    const piRoutes = unique(extractInlineRoutes(pi.editorAnnotations));
-    expect(piRoutes).toEqual(bunRoutes);
+  test("Pi mirrored route files are absent", () => {
+    expect(existsSync(pi.serverDir)).toBe(false);
+    expect(existsSync(pi.serverBarrel)).toBe(false);
+    expect(existsSync(pi.plan)).toBe(false);
+    expect(existsSync(pi.review)).toBe(false);
+    expect(existsSync(pi.annotate)).toBe(false);
+    expect(existsSync(pi.editorAnnotations)).toBe(false);
   });
 
   test("AI endpoint keys are present (shared file)", () => {
@@ -98,7 +92,7 @@ describe("route parity: Bun ↔ Pi", () => {
     expect(routes).toContain("/api/ai/sessions");
   });
 
-  test("all routes across all servers match", () => {
+  test("canonical Bun routes cover all server surfaces", () => {
     const bunAll = unique([
       ...extractInlineRoutes(bun.plan),
       ...extractInlineRoutes(bun.review),
@@ -107,14 +101,9 @@ describe("route parity: Bun ↔ Pi", () => {
       ...extractAIEndpointKeys(aiEndpointsFile),
     ]);
 
-    const piAll = unique([
-      ...extractInlineRoutes(pi.plan),
-      ...extractInlineRoutes(pi.review),
-      ...extractInlineRoutes(pi.annotate),
-      ...extractInlineRoutes(pi.editorAnnotations),
-      ...extractAIEndpointKeys(aiEndpointsFile),
-    ]);
-
-    expect(piAll).toEqual(bunAll);
+    expect(bunAll).toContain("/api/plan");
+    expect(bunAll).toContain("/api/diff");
+    expect(bunAll).toContain("/api/feedback");
+    expect(bunAll).toContain("/api/ai/query");
   });
 });

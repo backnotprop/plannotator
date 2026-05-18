@@ -1,6 +1,6 @@
 # Plannotator for Pi
 
-Plannotator integration for the [Pi coding agent](https://github.com/earendil-works/pi). Adds file-based plan mode with a visual browser UI for reviewing, annotating, and approving agent plans.
+Plannotator integration for the [Pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent). Adds file-based plan mode with a visual browser UI for reviewing, annotating, and approving agent plans.
 
 ## Install
 
@@ -25,7 +25,7 @@ pi -e npm:@plannotator/pi-extension
 
 ## Build from source
 
-If installing from a local clone, build the HTML assets first:
+If installing from a local clone, build the extension package helpers first:
 
 ```bash
 cd plannotator
@@ -33,7 +33,19 @@ bun install
 bun run build:pi
 ```
 
-This builds the plan review and code review UIs and copies them into `apps/pi-extension/`.
+The Pi extension does not package browser HTML or a server implementation. It delegates Plannotator UI sessions to the installed `plannotator` Bun binary.
+
+## Runtime Model
+
+The Pi extension is a client of the installed `plannotator` binary. Pi keeps phase state, tool gating, slash commands, current-session fallback, checklist progress, and the shared event channel. The binary owns plan review, code review, annotation, archive browser sessions, and the HTTP routes behind those UIs.
+
+Binary discovery order:
+
+1. `PLANNOTATOR_BIN`
+2. `plannotator` on `PATH`
+3. Standard install locations such as `~/.local/bin/plannotator`
+
+If the binary is missing or too old for the plugin protocol, the extension runs the official installer. Set `PLANNOTATOR_DISABLE_AUTO_INSTALL=1` to turn that off in controlled environments.
 
 ## Usage
 
@@ -180,7 +192,7 @@ Run `/plannotator-last` to annotate the agent's most recent response. The messag
 
 ### Archive browser
 
-The Plannotator archive browser is available through the shared event API as `archive`, which opens the saved plan/decision browser for future callers. The orchestrator does not expose a dedicated archive command yet.
+Run `/plannotator-archive` to open the saved plan/decision browser. The same browser is available through the shared event API as `archive`.
 
 ### Progress tracking
 
@@ -195,6 +207,7 @@ During execution, the agent marks completed steps with `[DONE:n]` markers. Progr
 | `/plannotator-review` | Open code review UI for current changes |
 | `/plannotator-annotate <file>` | Open markdown file in annotation UI |
 | `/plannotator-last` | Annotate the last assistant message |
+| `/plannotator-archive` | Browse saved plan decisions |
 
 ## Flags
 
@@ -227,3 +240,16 @@ State persists across session restarts via Pi's `appendEntry` API.
 ## Requirements
 
 - [Pi](https://github.com/earendil-works/pi) >= 0.74.0
+- Installed `plannotator` binary, or permission for the extension to install it automatically
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `PLANNOTATOR_BIN` | Explicit path to the installed `plannotator` binary used by the extension. |
+| `PLANNOTATOR_DISABLE_AUTO_INSTALL` | Set to `1`, `true`, or `yes` to prevent automatic binary installation. |
+| `PLANNOTATOR_REMOTE` | Set to `1` / `true` for remote mode, `0` / `false` for local mode, or leave unset for SSH auto-detection. |
+| `PLANNOTATOR_PORT` | Fixed port to use. Default: random locally, `19432` for remote sessions. |
+| `PLANNOTATOR_BROWSER` | Custom browser to open Plannotator sessions. |
+| `PLANNOTATOR_SHARE_URL` | Custom share portal URL for self-hosting. |
+| `PLANNOTATOR_PASTE_URL` | Custom paste service URL for self-hosting. |

@@ -552,9 +552,6 @@ This change lands in section 3 of the contributor guide alongside the updated re
 const USE_DIFF_DEMO =
   process.env.VITE_DIFF_DEMO === "1" ||
   process.env.VITE_DIFF_DEMO === "true";
-const GOAL_SETUP_DEMO = process.env.VITE_GOAL_SETUP_DEMO;
-const USE_GOAL_SETUP_DEMO =
-  GOAL_SETUP_DEMO === "interview" || GOAL_SETUP_DEMO === "facts";
 
 const PLAN_V1 = USE_DIFF_DEMO ? PLAN_V1_DIFF_TEST : PLAN_V1_DEFAULT;
 const PLAN_V2 = USE_DIFF_DEMO ? PLAN_V2_DIFF_TEST : PLAN_V2_DEFAULT;
@@ -629,153 +626,6 @@ export function devMockApi(): Plugin {
 
         if (req.url === '/api/plan') {
           res.setHeader('Content-Type', 'application/json');
-          if (USE_GOAL_SETUP_DEMO) {
-            res.end(JSON.stringify({
-              plan: '',
-              origin: 'claude-code',
-              mode: 'goal-setup',
-              sharingEnabled: false,
-              goalSetup: GOAL_SETUP_DEMO === "facts" ? {
-                stage: "facts",
-                title: "Interactive goal setup facts",
-                goalSlug: "interactive-goal-setup-ui",
-                facts: [
-                  {
-                    id: "skill-batch",
-                    text: "The setup-goal skill should package all interview questions into one Plannotator UI session.",
-                    accepted: false,
-                    removed: false,
-                    recommendedAutomatedVerification: true,
-                    automatedVerification: true,
-                  },
-                  {
-                    id: "facts-verify",
-                    text: "Each fact can be accepted, edited, removed, commented on, and marked for automated verification.",
-                    accepted: false,
-                    removed: false,
-                    recommendedAutomatedVerification: true,
-                    automatedVerification: true,
-                  },
-                  {
-                    id: "header-submit",
-                    text: "Goal setup submission should use the Plannotator app header action area instead of local form buttons.",
-                    accepted: false,
-                    removed: false,
-                    recommendedAutomatedVerification: false,
-                    automatedVerification: false,
-                  },
-                  {
-                    id: "question-modes",
-                    text: "The interview UI should cover text answers, single-select choices, multi-select choices, and custom option entry.",
-                    accepted: false,
-                    removed: false,
-                    recommendedAutomatedVerification: true,
-                    automatedVerification: true,
-                  },
-                  {
-                    id: "previous",
-                    text: "Previously accepted facts remain visible in the facts review with their accepted state preserved.",
-                    accepted: true,
-                    removed: false,
-                    recommendedAutomatedVerification: false,
-                    automatedVerification: false,
-                  },
-                  {
-                    id: "bulk-accept",
-                    text: "The facts UI provides a single action to accept every visible fact while keeping the review open for final edits.",
-                    accepted: false,
-                    removed: false,
-                    recommendedAutomatedVerification: true,
-                    automatedVerification: true,
-                  },
-                  {
-                    id: "copy-export",
-                    text: "The interview and facts UIs can copy the current state as raw JSON or markdown for provenance and debugging.",
-                    accepted: false,
-                    removed: false,
-                    recommendedAutomatedVerification: false,
-                    automatedVerification: false,
-                  },
-                ],
-              } : {
-                stage: "interview",
-                title: "Interactive goal setup interview",
-                goalSlug: "interactive-goal-setup-ui",
-                questions: [
-                  {
-                    id: "objective",
-                    prompt: "What is the primary outcome of this goal?",
-                    description: "One sentence that captures what 'done' looks like.",
-                    answerMode: "text",
-                    recommendedAnswer: "A bundled goal setup UI where agents launch one browser session for interview Q&A and a second for facts acceptance, replacing multi-turn chat prompting.",
-                  },
-                  {
-                    id: "audience",
-                    prompt: "Which inferred audience assumption should change?",
-                    description: "The agent should not need basic confirmation here; only change this if the default is wrong.",
-                    answerMode: "single",
-                    recommendedAnswer: "Developers using Claude Code with Plannotator installed.",
-                    recommendedOptionIds: ["devs-cc"],
-                    options: [
-                      { id: "devs-cc", label: "Developers on Claude Code" },
-                      { id: "devs-oc", label: "Developers on OpenCode" },
-                      { id: "devs-all", label: "All Plannotator users" },
-                    ],
-                  },
-                  {
-                    id: "scope",
-                    prompt: "Which inferred scope items should stay or be added?",
-                    description: "Recommended items are based on the code paths the agent can infer. Add only missing nuance.",
-                    answerMode: "multi-custom",
-                    recommendedAnswer: "Skill text, interactive UI, server endpoints, and tests.",
-                    recommendedOptionIds: ["skill", "ui", "server", "tests"],
-                    options: [
-                      { id: "skill", label: "Skill text" },
-                      { id: "ui", label: "Interactive UI" },
-                      { id: "server", label: "Server endpoints" },
-                      { id: "tests", label: "Tests and fixtures" },
-                    ],
-                  },
-                  {
-                    id: "launch",
-                    prompt: "What rollout constraint should override the default?",
-                    description: "Default is the smallest useful launch; choose a broader option only if runtime parity matters immediately.",
-                    answerMode: "single",
-                    recommendedOptionIds: ["claude-only"],
-                    options: [
-                      { id: "claude-only", label: "Claude Code only" },
-                      { id: "all-runtimes", label: "All runtimes (Claude Code, OpenCode, Pi)" },
-                      { id: "prototype", label: "Prototype behind a dev flag" },
-                    ],
-                  },
-                  {
-                    id: "risk",
-                    prompt: "Which risks should the plan explicitly address?",
-                    answerMode: "multi",
-                    recommendedOptionIds: ["runtime-parity", "data-loss"],
-                    options: [
-                      { id: "runtime-parity", label: "Runtime parity", description: "Bun and Pi server endpoints stay mirrored." },
-                      { id: "data-loss", label: "Answer data loss", description: "Edited answers survive until submission." },
-                      { id: "header-actions", label: "Header action placement", description: "Submit/close matches existing patterns." },
-                    ],
-                  },
-                  {
-                    id: "facts-ux",
-                    prompt: "How should fact review work?",
-                    answerMode: "text",
-                    recommendedAnswer: "Vertical list with per-fact accept, edit, remove, comment, and automated-verification toggle. Accepted facts hidden by default on re-review.",
-                  },
-                  {
-                    id: "out-of-scope",
-                    prompt: "Anything explicitly out of scope?",
-                    answerMode: "custom",
-                    required: false,
-                  },
-                ],
-              },
-            }));
-            return;
-          }
           res.end(JSON.stringify({
             plan: undefined, // Editor uses its own DIFF_DEMO_PLAN_CONTENT
             origin: 'claude-code',
@@ -783,15 +633,6 @@ export function devMockApi(): Plugin {
             versionInfo: { version: 3, totalVersions: 3, project: 'demo' },
             sharingEnabled: true,
           }));
-          return;
-        }
-
-        if (req.url === '/api/goal-setup/submit' && req.method === 'POST') {
-          req.on('data', () => {});
-          req.on('end', () => {
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({ ok: true }));
-          });
           return;
         }
 

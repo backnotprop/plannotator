@@ -11,14 +11,31 @@ if (!fs.existsSync(sourceEntry)) {
   process.exit(1);
 }
 
-const result = childProcess.spawnSync("bun", [sourceEntry, ...process.argv.slice(2)], {
+const child = childProcess.spawn("bun", [sourceEntry, ...process.argv.slice(2)], {
   cwd: process.cwd(),
   stdio: "inherit",
 });
 
-if (result.error) {
-  console.error(result.error.message);
-  process.exit(1);
-}
+let forwardedSignal = null;
+const forwardSignal = (signal) => {
+  forwardedSignal = signal;
+  if (!child.killed) child.kill(signal);
+};
 
-process.exit(typeof result.status === "number" ? result.status : 0);
+process.once("SIGINT", () => forwardSignal("SIGINT"));
+process.once("SIGTERM", () => forwardSignal("SIGTERM"));
+
+child.on("error", (err) => {
+  console.error(err.message);
+  process.exit(1);
+});
+
+child.on("exit", (code, signal) => {
+  if (code !== null) {
+    process.exit(code);
+  }
+  if (signal || forwardedSignal) {
+    process.exit(signal === "SIGINT" || forwardedSignal === "SIGINT" ? 130 : 143);
+  }
+  process.exit(1);
+});

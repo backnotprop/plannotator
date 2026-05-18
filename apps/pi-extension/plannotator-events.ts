@@ -2,7 +2,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { DiffType, VcsSelection } from "./server.js";
+import type { DiffType } from "./generated/review-core.js";
+import type { VcsSelection } from "./generated/vcs-core.js";
 import {
 	getLastAssistantMessageText,
 	getStartupErrorMessage,
@@ -82,6 +83,7 @@ export interface PlannotatorReviewStatusPayload {
 export type PlannotatorReviewStatusResult =
 	| { status: "pending" }
 	| ({ status: "completed" } & PlannotatorReviewResultEvent)
+	| { status: "error"; error: string }
 	| { status: "missing" };
 
 export interface PlannotatorCodeReviewPayload {
@@ -238,7 +240,7 @@ export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
 						request.respond({ status: "error", error: "Missing planContent for plan-review request." });
 						return;
 					}
-					const session = await startPlanReviewBrowserSession(ctx, planContent);
+					const session = await startPlanReviewBrowserSession(ctx, planContent, { waitForReady: false });
 					setStoredReviewStatus(session.reviewId, { status: "pending" });
 					session.onDecision((result) => {
 						const reviewResult = {
@@ -251,6 +253,12 @@ export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
 						} satisfies PlannotatorReviewResultEvent;
 						setStoredReviewStatus(session.reviewId, { status: "completed", ...reviewResult });
 						pi.events.emit(PLANNOTATOR_REVIEW_RESULT_CHANNEL, reviewResult);
+					});
+					void session.waitForDecision().catch((err) => {
+						setStoredReviewStatus(session.reviewId, {
+							status: "error",
+							error: getStartupErrorMessage(err),
+						});
 					});
 					request.respond({
 						status: "handled",
@@ -283,7 +291,7 @@ export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
 					const result = await openMarkdownAnnotation(
 						ctx,
 						payload.filePath,
-						payload.markdown ?? "",
+						payload.markdown,
 						payload.mode ?? "annotate",
 						payload.folderPath,
 						undefined,
@@ -323,8 +331,6 @@ export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
 
 export {
 	getLastAssistantMessageText,
-	hasPlanBrowserHtml,
-	hasReviewBrowserHtml,
 	startCodeReviewBrowserSession,
 	startLastMessageAnnotationSession,
 	startMarkdownAnnotationSession,

@@ -1,6 +1,6 @@
 {
   "name": "plannotator",
-  "version": "0.19.18",
+  "version": "0.19.17",
   "private": true,
   "description": "Interactive Plan Review for Claude Code - annotate plans visually, share with team, automatically send feedback",
   "author": "backnotprop",
@@ -32,7 +32,7 @@
     "dev:vscode": "bun run --cwd apps/vscode-extension watch",
     "build:vscode": "bun run --cwd apps/vscode-extension build",
     "package:vscode": "bun run --cwd apps/vscode-extension package",
-    "test": "bun test",
+    "test": "bash apps/pi-extension/vendor.sh && bun test",
     "typecheck": "bash apps/pi-extension/vendor.sh && tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/ai/tsconfig.json && tsc --noEmit -p packages/server/tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.json && tsc --noEmit -p apps/pi-extension/tsconfig.json"
   },
   "dependencies": {
@@ -47,8 +47,10 @@
     "sonner": "^2.0.7"
   },
   "devDependencies": {
+    "@types/dompurify": "^3.2.0",
     "@types/node": "^25.5.2",
     "@types/turndown": "^5.0.6",
-    "bun-types": "^1.3.11"
+    "bun-types": "^1.3.11",
+    "typescript": "~5.8.2"
   }
 }

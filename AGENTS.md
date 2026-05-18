@@ -73,7 +73,10 @@ plannotator/
 │   ├── shared/                   # Shared types, utilities, and cross-runtime logic
 │   │   ├── storage.ts            # Plan saving, version history, archive listing (node:fs only)
 │   │   ├── draft.ts              # Annotation draft persistence (node:fs only)
-│   │   └── project.ts            # Pure string helpers (sanitizeTag, extractRepoName, extractDirName)
+│   │   ├── project.ts            # Pure string helpers (sanitizeTag, extractRepoName, extractDirName)
+│   │   ├── plugin-protocol.ts    # JSON protocol for binary-owned plugin commands
+│   │   ├── plugin-client.ts      # Shared OpenCode/Pi subprocess client for plannotator plugin commands
+│   │   └── plugin-binary.ts      # Binary discovery, compatibility checks, and installer bridge
 │   ├── editor/                   # Plan review app
 │   │   ├── App.tsx               # Main plan review app
 │   │   └── shortcuts.ts          # planReviewSurface + annotateSurface — composes plan-review scopes into per-surface registries
@@ -90,12 +93,11 @@ plannotator/
 
 ## Server Runtimes
 
-There are two separate server implementations with the same API surface:
+Plannotator has one server implementation:
 
-- **Bun server** (`packages/server/`) — used by both Claude Code (`apps/hook/`) and OpenCode (`apps/opencode-plugin/`). These plugins import directly from `@plannotator/server`.
-- **Pi server** (`apps/pi-extension/server/`) — a standalone Node.js server for the Pi extension. It mirrors the Bun server's API but uses `node:http` primitives instead of Bun's `Request`/`Response` APIs.
+- **Bun server** (`packages/server/`) — owns plan review, code review, annotate, archive, and shared browser APIs.
 
-When adding or modifying server endpoints, both implementations must be updated. Runtime-agnostic logic (store, validation, types) lives in `packages/shared/` and is imported by both.
+Claude Code runs this server through the released `plannotator` binary entrypoint. OpenCode and Pi do not package their own server implementations; they call the same binary through the plugin protocol in `packages/shared/plugin-protocol.ts`. Runtime-agnostic logic (store, validation, types) lives in `packages/shared/`.
 
 ## Installation
 
@@ -118,6 +120,8 @@ claude --plugin-dir ./apps/hook
 | `PLANNOTATOR_REMOTE` | Set to `1` / `true` for remote mode, `0` / `false` for local mode, or leave unset for SSH auto-detection. Uses a fixed port in remote mode; browser-opening behavior depends on the environment. |
 | `PLANNOTATOR_PORT` | Fixed port to use. Default: random locally, `19432` for remote sessions. |
 | `PLANNOTATOR_BROWSER` | Custom browser to open plans in. macOS: app name or path. Linux/Windows: executable path. |
+| `PLANNOTATOR_BIN` | Explicit `plannotator` binary path for OpenCode/Pi plugin clients. Overrides PATH and standard install locations. |
+| `PLANNOTATOR_DISABLE_AUTO_INSTALL` | Set to `1` / `true` to make OpenCode/Pi fail clearly instead of running the official installer when no compatible binary is found. |
 | `PLANNOTATOR_SHARE` | Set to `disabled` to turn off URL sharing entirely. Default: enabled. |
 | `PLANNOTATOR_SHARE_URL` | Custom base URL for share links (self-hosted portal). Default: `https://share.plannotator.ai`. |
 | `PLANNOTATOR_PASTE_URL` | Base URL of the paste service API for short URL sharing. Default: `https://plannotator-paste.plannotator.workers.dev`. |

@@ -34,7 +34,7 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Generate Pi extension shared copies
+      - name: Generate Pi extension shared helpers
         run: bash apps/pi-extension/vendor.sh
 
       - name: Type check

@@ -310,43 +310,6 @@ describe("getLastCodexMessage", () => {
     expect(result).not.toBeNull();
     expect(result!.text).toBe("Valid message");
   });
-
-  test("can ignore assistant messages from the active Codex turn", () => {
-    const previousTurnId = "turn-previous";
-    const activeTurnId = "turn-active";
-    const path = writeTempRollout(
-      buildRollout(
-        sessionMeta(),
-        turnStarted(previousTurnId),
-        userMessage("Explain the thing"),
-        assistantMessage("Substantive final answer"),
-        turnCompleted(previousTurnId),
-        turnStarted(activeTurnId),
-        userMessage("[$plannotator-last]"),
-        assistantMessage("I’ll open Plannotator on my last response.")
-      )
-    );
-
-    const result = getLastCodexMessage(path, { beforeActiveTurn: true });
-    expect(result).not.toBeNull();
-    expect(result!.text).toBe("Substantive final answer");
-  });
-
-  test("keeps default latest-message behavior inside an active turn", () => {
-    const turnId = "turn-active";
-    const path = writeTempRollout(
-      buildRollout(
-        sessionMeta(),
-        assistantMessage("Previous answer"),
-        turnStarted(turnId),
-        assistantMessage("Current status update")
-      )
-    );
-
-    const result = getLastCodexMessage(path);
-    expect(result).not.toBeNull();
-    expect(result!.text).toBe("Current status update");
-  });
 });
 
 describe("getLatestCodexPlan", () => {

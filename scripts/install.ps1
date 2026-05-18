@@ -470,7 +470,7 @@ Address the annotation feedback above. The user has reviewed your last message a
 Write-Host "Installed /plannotator-last command to $claudeCommandsDir\plannotator-last.md"
 
 # Install OpenCode slash command
-$opencodeCommandsDir = "$env:USERPROFILE\.config\opencode\commands"
+$opencodeCommandsDir = "$env:USERPROFILE\.config\opencode\command"
 New-Item -ItemType Directory -Force -Path $opencodeCommandsDir | Out-Null
 
 @"

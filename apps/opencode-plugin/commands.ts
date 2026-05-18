@@ -7,136 +7,162 @@
  */
 
 import {
-  startPlannotatorServer,
-  handleServerReady,
-} from "@plannotator/server";
-import {
-  startReviewServer,
-  handleReviewServerReady,
-} from "@plannotator/server/review";
-import {
-  startAnnotateServer,
-  handleAnnotateServerReady,
-} from "@plannotator/server/annotate";
-import { type DiffType, prepareLocalReviewDiff } from "@plannotator/server/vcs";
-import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
-import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
-import {
   getReviewApprovedPrompt,
   getReviewDeniedSuffix,
   getAnnotateFileFeedbackPrompt,
 } from "@plannotator/shared/prompts";
-import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles } from "@plannotator/shared/resolve-file";
-import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
-import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { parseAnnotateArgs } from "@plannotator/shared/annotate-args";
 import { parseReviewArgs } from "@plannotator/shared/review-args";
-import { urlToMarkdown, isConvertedSource } from "@plannotator/shared/url-to-markdown";
-import { statSync } from "fs";
-import path from "path";
+import type { PluginAgentInfo, PluginFeature } from "@plannotator/shared/plugin-protocol";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  type CommandRunOptions,
+  type EnsurePlannotatorBinaryResult,
+  ensurePlannotatorBinary,
+  findPlannotatorSourceRoot,
+  runPluginAnnotate,
+  runPluginArchive,
+  runPluginReview,
+} from "./binary-client";
 
 /** Shared dependencies injected by the plugin */
+interface OpenCodeCommandEvent {
+  arguments?: string;
+  properties?: {
+    arguments?: string;
+    sessionID?: string;
+  };
+}
+
+interface OpenCodeMessagePart {
+  type: string;
+  text?: string;
+}
+
+interface OpenCodeMessage {
+  info: {
+    role: string;
+  };
+  parts: OpenCodeMessagePart[];
+}
+
+interface OpenCodeClient {
+  app: {
+    log: (entry: { level: "error" | "info"; message: string }) => void;
+    agents: (options?: { query?: { directory?: string } }) => Promise<{ data?: PluginAgentInfo[] }>;
+  };
+  session: {
+    prompt: (request: {
+      path: { id: string };
+      body: {
+        agent?: string;
+        parts: Array<{ type: "text"; text: string }>;
+      };
+    }) => Promise<unknown>;
+    messages: (request: { path: { id: string } }) => Promise<{ data?: OpenCodeMessage[] }>;
+  };
+}
+
 export interface CommandDeps {
-  client: any;
-  htmlContent: string;
-  reviewHtmlContent: string;
+  client: OpenCodeClient;
   getSharingEnabled: () => Promise<boolean>;
   getShareBaseUrl: () => string | undefined;
   getPasteApiUrl: () => string | undefined;
   directory?: string;
+  binaryClient?: {
+    ensurePlannotatorBinary?: typeof ensurePlannotatorBinary;
+    runPluginAnnotate?: typeof runPluginAnnotate;
+    runPluginArchive?: typeof runPluginArchive;
+    runPluginReview?: typeof runPluginReview;
+  };
+}
+
+function logBinaryError(client: OpenCodeClient, message: string): void {
+  client.app.log({ level: "error", message: `[Plannotator] ${message}` });
+}
+
+function logSessionReady(client: OpenCodeClient, url: string): void {
+  client.app.log({ level: "info", message: `[Plannotator] Open in browser: ${url}` });
+}
+
+function sessionReadyOptions(client: OpenCodeClient): CommandRunOptions {
+  return {
+    onSession: (session) => logSessionReady(client, session.url),
+  };
+}
+
+function ensureBinaryForCommand(
+  client: OpenCodeClient,
+  binaryClient?: CommandDeps["binaryClient"],
+  requiredFeatures?: readonly PluginFeature[],
+): EnsurePlannotatorBinaryResult {
+  const binary = (binaryClient?.ensurePlannotatorBinary ?? ensurePlannotatorBinary)({
+    requiredFeatures,
+    sourceRoot: findPlannotatorSourceRoot(dirname(fileURLToPath(import.meta.url))),
+  });
+  if (!binary.ok) logBinaryError(client, binary.message);
+  return binary;
+}
+
+export async function loadAvailableAgents(client: OpenCodeClient, directory?: string): Promise<PluginAgentInfo[] | undefined> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await client.app.agents({
+        query: { directory },
+      });
+      return response.data ?? undefined;
+    } catch (err) {
+      lastError = err;
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  client.app.log({
+    level: "info",
+    message: `[Plannotator] OpenCode agent list unavailable; agent switching is disabled for this session.${lastError instanceof Error ? ` ${lastError.message}` : ""}`,
+  });
+  return undefined;
 }
 
 export async function handleReviewCommand(
-  event: any,
+  event: OpenCodeCommandEvent,
   deps: CommandDeps
 ) {
-  const { client, reviewHtmlContent, getSharingEnabled, getShareBaseUrl, directory } = deps;
+  const { client, getSharingEnabled, getShareBaseUrl, getPasteApiUrl, directory, binaryClient } = deps;
 
-  // @ts-ignore - Event properties contain arguments
-  const reviewArgs = parseReviewArgs(event.properties?.arguments || "");
-  const urlArg = reviewArgs.prUrl;
-  const isPRMode = urlArg !== undefined;
+  const rawArgs = event.properties?.arguments || "";
+  const reviewArgs = parseReviewArgs(rawArgs);
+  const isPRMode = reviewArgs.prUrl !== undefined;
 
-  let rawPatch: string;
-  let gitRef: string;
-  let diffError: string | undefined;
-  let userDiffType: DiffType | undefined;
-  let gitContext: Awaited<ReturnType<typeof prepareLocalReviewDiff>>["gitContext"] | undefined;
-  let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
+  client.app.log({ level: "info", message: isPRMode ? "Opening PR review UI..." : "Opening code review UI..." });
 
-  if (isPRMode) {
-    const prRef = parsePRUrl(urlArg);
-    if (!prRef) {
-      client.app.log({ level: "error", message: `Invalid PR/MR URL: ${urlArg}` });
-      return;
-    }
+  const binary = ensureBinaryForCommand(client, binaryClient, ["code-review"]);
+  if (!binary.ok) return;
 
-    client.app.log({ level: "info", message: `Fetching ${getMRLabel(prRef)} ${getMRNumberLabel(prRef)} from ${getDisplayRepo(prRef)}...` });
-
-    try {
-      await checkPRAuth(prRef);
-    } catch (err) {
-      const cliName = getCliName(prRef);
-      client.app.log({ level: "error", message: err instanceof Error ? err.message : `${cliName} auth check failed` });
-      return;
-    }
-
-    try {
-      const pr = await fetchPR(prRef);
-      rawPatch = pr.rawPatch;
-      gitRef = `${getMRLabel(prRef)} ${getMRNumberLabel(prRef)}`;
-      prMetadata = pr.metadata;
-    } catch (err) {
-      client.app.log({ level: "error", message: err instanceof Error ? err.message : `Failed to fetch ${getMRLabel(prRef)} ${getMRNumberLabel(prRef)}` });
-      return;
-    }
-  } else {
-    client.app.log({ level: "info", message: "Opening code review UI..." });
-
-    const config = loadConfig();
-    const diffResult = await prepareLocalReviewDiff({
-      cwd: directory,
-      vcsType: reviewArgs.vcsType,
-      configuredDiffType: resolveDefaultDiffType(config),
-      hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
-    });
-    gitContext = diffResult.gitContext;
-    userDiffType = diffResult.diffType;
-    rawPatch = diffResult.rawPatch;
-    gitRef = diffResult.gitRef;
-    diffError = diffResult.error;
-  }
-
-  const server = await startReviewServer({
-    rawPatch,
-    gitRef,
-    error: diffError,
+  const availableAgents = await loadAvailableAgents(client, directory);
+  const response = await (binaryClient?.runPluginReview ?? runPluginReview)(binary.path, {
     origin: "opencode",
-    diffType: isPRMode ? undefined : userDiffType,
-    gitContext,
-    prMetadata,
+    cwd: directory,
+    args: rawArgs,
     sharingEnabled: await getSharingEnabled(),
     shareBaseUrl: getShareBaseUrl(),
-    htmlContent: reviewHtmlContent,
-    opencodeClient: client,
-    onReady: (url, isRemote, port) => {
-      handleReviewServerReady(url, isRemote, port);
-      if (isRemote) {
-        client.app.log({ level: "info", message: `[Plannotator] Open in browser: ${url}` });
-      }
-    },
-  });
+    pasteApiUrl: getPasteApiUrl(),
+    availableAgents,
+  }, undefined, sessionReadyOptions(client));
 
-  const result = await server.waitForDecision();
-  await Bun.sleep(1500);
-  server.stop();
+  if (!response.ok) {
+    logBinaryError(client, response.error.message);
+    return;
+  }
+
+  const result = response.result;
 
   if (result.exit) {
     return;
   }
 
   if (result.feedback) {
-    // @ts-ignore - Event properties contain sessionID
     const sessionId = event.properties?.sessionID;
 
     if (sessionId) {
@@ -165,145 +191,39 @@ export async function handleReviewCommand(
 }
 
 export async function handleAnnotateCommand(
-  event: any,
+  event: OpenCodeCommandEvent,
   deps: CommandDeps
 ) {
-  const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl, directory } = deps;
+  const { client, getSharingEnabled, getShareBaseUrl, getPasteApiUrl, directory, binaryClient } = deps;
 
-  // @ts-ignore - Event properties contain arguments
   const rawArgs = event.properties?.arguments || event.arguments || "";
-  // #570: split --gate / --json out of the args; rest is the file path.
-  // --json is accepted silently (OpenCode writes to session, not stdout).
-  // parseAnnotateArgs strips leading @ on filePath (reference-mode convention).
-  // `rawFilePath` preserves it for the scoped-package markdown fallback.
-  const { filePath, rawFilePath, gate, renderHtml: renderHtmlFlag } = parseAnnotateArgs(rawArgs);
+  const { filePath } = parseAnnotateArgs(rawArgs);
 
   if (!filePath) {
     client.app.log({ level: "error", message: "Usage: /plannotator-annotate <file.md | file.html | https://... | folder/> [--gate] [--json]" });
     return;
   }
 
-  let markdown: string;
-  let rawHtml: string | undefined;
-  let absolutePath: string;
-  let folderPath: string | undefined;
-  let annotateMode: "annotate" | "annotate-folder" = "annotate";
-  let isFolder = false;
-  let sourceInfo: string | undefined;
-  let sourceConverted = false;
+  client.app.log({ level: "info", message: `Opening annotation UI for ${filePath}...` });
 
-  // --- URL annotation ---
-  const isUrl = /^https?:\/\//i.test(filePath);
+  const binary = ensureBinaryForCommand(client, binaryClient, ["annotate"]);
+  if (!binary.ok) return;
 
-  if (isUrl) {
-    const useJina = resolveUseJina(false, loadConfig());
-    client.app.log({ level: "info", message: `Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}...` });
-    try {
-      const result = await urlToMarkdown(filePath, { useJina });
-      markdown = result.markdown;
-      sourceConverted = isConvertedSource(result.source);
-    } catch (err) {
-      client.app.log({ level: "error", message: `Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}` });
-      return;
-    }
-    absolutePath = filePath;
-    sourceInfo = filePath;
-  } else {
-    const projectRoot = directory || process.cwd();
-    const resolvedArg = resolveUserPath(filePath, projectRoot);
-
-    try {
-      isFolder = statSync(resolvedArg).isDirectory();
-    } catch {
-      // Not a directory, fall through to file resolution.
-    }
-
-    if (isFolder) {
-      if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED, /\.(mdx?|html?)$/i)) {
-        client.app.log({ level: "error", message: `No markdown or HTML files found in ${resolvedArg}` });
-        return;
-      }
-      folderPath = resolvedArg;
-      absolutePath = resolvedArg;
-      markdown = "";
-      annotateMode = "annotate-folder";
-      client.app.log({ level: "info", message: `Opening annotation UI for folder ${resolvedArg}...` });
-    } else if (/\.html?$/i.test(resolvedArg)) {
-      let fileSize: number;
-      try {
-        fileSize = statSync(resolvedArg).size;
-      } catch {
-        client.app.log({ level: "error", message: `File not found: ${filePath}` });
-        return;
-      }
-      if (fileSize > 10 * 1024 * 1024) {
-        client.app.log({ level: "error", message: `File too large (${Math.round(fileSize / 1024 / 1024)}MB, max 10MB)` });
-        return;
-      }
-      const html = await Bun.file(resolvedArg).text();
-      if (renderHtmlFlag) {
-        rawHtml = html;
-        markdown = "";
-      } else {
-        markdown = htmlToMarkdown(html);
-        sourceConverted = true;
-      }
-      absolutePath = resolvedArg;
-      sourceInfo = path.basename(resolvedArg);
-      client.app.log({ level: "info", message: `${renderHtmlFlag ? "Raw HTML" : "Converted"}: ${absolutePath}` });
-    } else {
-      // Markdown file annotation
-      client.app.log({ level: "info", message: `Opening annotation UI for ${filePath}...` });
-      // Strip-first with literal-@ fallback (scoped-package-style names).
-      let resolved = await resolveMarkdownFile(filePath, projectRoot);
-      if (resolved.kind === "not_found" && rawFilePath !== filePath) {
-        resolved = await resolveMarkdownFile(rawFilePath, projectRoot);
-      }
-
-      if (resolved.kind === "ambiguous") {
-        client.app.log({
-          level: "error",
-          message: `Ambiguous filename "${resolved.input}" — found ${resolved.matches.length} matches:\n${resolved.matches.map((m) => `  ${m}`).join("\n")}`,
-        });
-        return;
-      }
-      if (resolved.kind === "not_found") {
-        client.app.log({ level: "error", message: `File not found: ${resolved.input}` });
-        return;
-      }
-
-      absolutePath = resolved.path;
-      client.app.log({ level: "info", message: `Resolved: ${absolutePath}` });
-      markdown = await Bun.file(absolutePath).text();
-    }
-  }
-
-  const server = await startAnnotateServer({
-    markdown,
-    filePath: absolutePath,
+  const response = await (binaryClient?.runPluginAnnotate ?? runPluginAnnotate)(binary.path, {
     origin: "opencode",
-    mode: annotateMode,
-    folderPath,
-    sourceInfo,
-    sourceConverted,
-    rawHtml,
-    renderHtml: renderHtmlFlag,
+    cwd: directory,
+    args: rawArgs,
     sharingEnabled: await getSharingEnabled(),
     shareBaseUrl: getShareBaseUrl(),
     pasteApiUrl: getPasteApiUrl(),
-    gate,
-    htmlContent,
-    onReady: (url, isRemote, port) => {
-      handleAnnotateServerReady(url, isRemote, port);
-      if (isRemote) {
-        client.app.log({ level: "info", message: `[Plannotator] Open in browser: ${url}` });
-      }
-    },
-  });
+  }, undefined, sessionReadyOptions(client));
 
-  const result = await server.waitForDecision();
-  await Bun.sleep(1500);
-  server.stop();
+  if (!response.ok) {
+    logBinaryError(client, response.error.message);
+    return;
+  }
+
+  const result = response.result;
 
   // Both exit and approve are "no-op for the agent" — skip session injection.
   if (result.exit || result.approved) {
@@ -311,7 +231,6 @@ export async function handleAnnotateCommand(
   }
 
   if (result.feedback) {
-    // @ts-ignore - Event properties contain sessionID
     const sessionId = event.properties?.sessionID;
 
     if (sessionId) {
@@ -322,8 +241,8 @@ export async function handleAnnotateCommand(
             parts: [{
               type: "text",
               text: getAnnotateFileFeedbackPrompt("opencode", undefined, {
-                fileHeader: isFolder ? "Folder" : "File",
-                filePath: absolutePath,
+                fileHeader: result.mode === "annotate-folder" ? "Folder" : "File",
+                filePath: result.filePath ?? filePath,
                 feedback: result.feedback,
               }),
             }],
@@ -342,17 +261,15 @@ export async function handleAnnotateCommand(
  * so the caller can set it as output.parts for the agent to see.
  */
 export async function handleAnnotateLastCommand(
-  event: any,
+  event: OpenCodeCommandEvent,
   deps: CommandDeps
 ): Promise<string | null> {
-  const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl } = deps;
+  const { client, getSharingEnabled, getShareBaseUrl, getPasteApiUrl, directory, binaryClient } = deps;
 
-  // @ts-ignore - Event properties contain arguments
   const rawArgs = event.properties?.arguments || event.arguments || "";
   // #570: support --gate on /plannotator-last (Stop-hook review-gate pattern).
   const { gate } = parseAnnotateArgs(rawArgs);
 
-  // @ts-ignore - Event properties contain sessionID
   const sessionId = event.properties?.sessionID;
   if (!sessionId) {
     client.app.log({ level: "error", message: "No active session." });
@@ -360,9 +277,18 @@ export async function handleAnnotateLastCommand(
   }
 
   // Fetch messages from session
-  const messagesResponse = await client.session.messages({
-    path: { id: sessionId },
-  });
+  let messagesResponse: Awaited<ReturnType<OpenCodeClient["session"]["messages"]>>;
+  try {
+    messagesResponse = await client.session.messages({
+      path: { id: sessionId },
+    });
+  } catch (err) {
+    client.app.log({
+      level: "error",
+      message: `[Plannotator] Could not read the current session messages.${err instanceof Error ? ` ${err.message}` : ""}`,
+    });
+    return null;
+  }
   const messages = messagesResponse.data;
 
   // Walk backward, find last assistant message with text
@@ -372,8 +298,8 @@ export async function handleAnnotateLastCommand(
       const msg = messages[i];
       if (msg.info.role === "assistant") {
         const textParts = msg.parts
-          .filter((p: any) => p.type === "text" && p.text?.trim())
-          .map((p: any) => p.text);
+          .filter((p) => p.type === "text" && p.text?.trim())
+          .map((p) => p.text!);
         if (textParts.length > 0) {
           lastText = textParts.join("\n");
           break;
@@ -389,27 +315,27 @@ export async function handleAnnotateLastCommand(
 
   client.app.log({ level: "info", message: "Opening annotation UI for last message..." });
 
-  const server = await startAnnotateServer({
+  const binary = ensureBinaryForCommand(client, binaryClient, ["annotate-last"]);
+  if (!binary.ok) return null;
+
+  const response = await (binaryClient?.runPluginAnnotate ?? runPluginAnnotate)(binary.path, {
     markdown: lastText,
     filePath: "last-message",
     origin: "opencode",
+    cwd: directory,
     mode: "annotate-last",
     sharingEnabled: await getSharingEnabled(),
     shareBaseUrl: getShareBaseUrl(),
     pasteApiUrl: getPasteApiUrl(),
     gate,
-    htmlContent,
-    onReady: (url, isRemote, port) => {
-      handleAnnotateServerReady(url, isRemote, port);
-      if (isRemote) {
-        client.app.log({ level: "info", message: `[Plannotator] Open in browser: ${url}` });
-      }
-    },
-  });
+  }, undefined, sessionReadyOptions(client));
 
-  const result = await server.waitForDecision();
-  await Bun.sleep(1500);
-  server.stop();
+  if (!response.ok) {
+    logBinaryError(client, response.error.message);
+    return null;
+  }
+
+  const result = response.result;
 
   // Both exit and approve signal "don't inject feedback" — return null.
   if (result.exit || result.approved) {
@@ -420,32 +346,25 @@ export async function handleAnnotateLastCommand(
 }
 
 export async function handleArchiveCommand(
-  event: any,
+  _event: OpenCodeCommandEvent,
   deps: CommandDeps
 ) {
-  const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl } = deps;
+  const { client, getSharingEnabled, getShareBaseUrl, getPasteApiUrl, directory, binaryClient } = deps;
 
   client.app.log({ level: "info", message: "Opening plan archive..." });
 
-  const server = await startPlannotatorServer({
-    plan: "",
+  const binary = ensureBinaryForCommand(client, binaryClient, ["archive"]);
+  if (!binary.ok) return;
+
+  const response = await (binaryClient?.runPluginArchive ?? runPluginArchive)(binary.path, {
     origin: "opencode",
-    mode: "archive",
+    cwd: directory,
     sharingEnabled: await getSharingEnabled(),
     shareBaseUrl: getShareBaseUrl(),
     pasteApiUrl: getPasteApiUrl(),
-    htmlContent,
-    onReady: (url, isRemote, port) => {
-      handleServerReady(url, isRemote, port);
-      if (isRemote) {
-        client.app.log({ level: "info", message: `[Plannotator] Open in browser: ${url}` });
-      }
-    },
-  });
+  }, undefined, sessionReadyOptions(client));
 
-  if (server.waitForDone) {
-    await server.waitForDone();
+  if (!response.ok) {
+    logBinaryError(client, response.error.message);
   }
-  await Bun.sleep(1500);
-  server.stop();
 }

@@ -36,22 +36,11 @@ if (_proto?.constructor && _proto.constructor !== Response && _proto.constructor
   }
 }
 import {
-  startPlannotatorServer,
-  handleServerReady,
-} from "@plannotator/server";
-import {
-  startReviewServer,
-  handleReviewServerReady,
-} from "@plannotator/server/review";
-import {
-  startAnnotateServer,
-  handleAnnotateServerReady,
-} from "@plannotator/server/annotate";
-import {
   handleReviewCommand,
   handleAnnotateCommand,
   handleAnnotateLastCommand,
   handleArchiveCommand,
+  loadAvailableAgents,
   type CommandDeps,
 } from "./commands";
 import {
@@ -79,44 +68,15 @@ import {
   shouldRejectSubmitPlanForAgent,
   type PlannotatorOpenCodeOptions,
 } from "./workflow";
-
-// Lazy-load HTML at first use instead of embedding in the bundle.
-// The two SPA files are ~20 MB combined — inlining them as string literals
-// adds ~160ms to module parse time (see GitHub issue #410).
-let _planHtml: string | null = null;
-let _reviewHtml: string | null = null;
-
-function resolveBundledHtmlPath(filename: string): string {
-  const candidates = [
-    path.join(import.meta.dir, filename),
-    path.join(import.meta.dir, "..", filename),
-  ];
-
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  throw new Error(`Could not find bundled HTML asset: ${filename}`);
-}
-
-function readBundledHtml(filename: string): string {
-  return readFileSync(resolveBundledHtmlPath(filename), "utf-8");
-}
-
-function getPlanHtml(): string {
-  if (!_planHtml) _planHtml = readBundledHtml("plannotator.html");
-  return _planHtml;
-}
-
-function getReviewHtml(): string {
-  if (!_reviewHtml) _reviewHtml = readBundledHtml("review-editor.html");
-  return _reviewHtml;
-}
+import {
+  findPlannotatorSourceRoot,
+  ensurePlannotatorBinary,
+  runPluginPlan,
+} from "./binary-client";
 
 const DEFAULT_PLAN_TIMEOUT_SECONDS = 345_600; // 96 hours
 const MAX_PLAN_SIZE = 5 * 1024 * 1024; // 5MB
+const SOURCE_ROOT = findPlannotatorSourceRoot(import.meta.dir);
 
 // ── Edit-based plan management ────────────────────────────────────────────
 
@@ -290,10 +250,6 @@ function getLastUserAgentFromMessages(messages: any[] | undefined): string | und
 export const PlannotatorPlugin: Plugin = async (ctx, rawOptions?: PlannotatorOpenCodeOptions) => {
   const workflowOptions = normalizeWorkflowOptions(rawOptions);
 
-  // Preload HTML in background — populates the sync cache before first use
-  Bun.file(resolveBundledHtmlPath("plannotator.html")).text().then(h => { _planHtml = h; });
-  Bun.file(resolveBundledHtmlPath("review-editor.html")).text().then(h => { _reviewHtml = h; });
-
   let cachedAgents: any[] | null = null;
 
   async function getSharingEnabled(): Promise<boolean> {
@@ -316,6 +272,10 @@ export const PlannotatorPlugin: Plugin = async (ctx, rawOptions?: PlannotatorOpe
 
   function getPasteApiUrl(): string | undefined {
     return process.env.PLANNOTATOR_PASTE_URL || undefined;
+  }
+
+  function logSessionReady(url: string): void {
+    ctx.client.app.log({ level: "info", message: `[Plannotator] Open in browser: ${url}` });
   }
 
   function getPlanTimeoutSeconds(): number | null {
@@ -491,8 +451,6 @@ Do NOT proceed with implementation until your plan is approved.`);
 
       const deps: CommandDeps = {
         client: ctx.client,
-        htmlContent: getPlanHtml(),
-        reviewHtmlContent: getReviewHtml(),
         getSharingEnabled,
         getShareBaseUrl,
         getPasteApiUrl,
@@ -595,45 +553,48 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
           // Write backing file
           writeFileSync(backingPath, planContent, "utf-8");
 
-          const sharingEnabled = await getSharingEnabled();
-          const server = await startPlannotatorServer({
-            plan: planContent,
-            origin: "opencode",
-            sharingEnabled,
-            shareBaseUrl: getShareBaseUrl(),
-            pasteApiUrl: getPasteApiUrl(),
-            htmlContent: getPlanHtml(),
-            opencodeClient: ctx.client,
-            onReady: async (url, isRemote, port) => {
-              handleServerReady(url, isRemote, port);
-              if (isRemote) {
-                ctx.client.app.log({ level: "info", message: `[Plannotator] Open in browser: ${url}` });
-              }
-            },
+          const binary = ensurePlannotatorBinary({
+            requiredFeatures: ["plan-review"],
+            sourceRoot: SOURCE_ROOT,
           });
+          if (!binary.ok) {
+            return `[Plannotator] ${binary.message}`;
+          }
 
+          const sharingEnabled = await getSharingEnabled();
           const timeoutSeconds = getPlanTimeoutSeconds();
           const timeoutMs = timeoutSeconds === null ? null : timeoutSeconds * 1000;
+          const availableAgents = await loadAvailableAgents(ctx.client, ctx.directory);
+          const response = await runPluginPlan(
+            binary.path,
+            {
+              plan: planContent,
+              planFilePath: backingPath,
+              cwd: ctx.directory,
+              origin: "opencode",
+              sharingEnabled,
+              shareBaseUrl: getShareBaseUrl(),
+              pasteApiUrl: getPasteApiUrl(),
+              availableAgents,
+            },
+            undefined,
+            {
+              timeoutMs,
+              onSession: (session) => logSessionReady(session.url),
+            },
+          );
 
-          const result = timeoutMs === null
-            ? await server.waitForDecision()
-            : await new Promise<Awaited<ReturnType<typeof server.waitForDecision>>>((resolve) => {
-                const timeoutId = setTimeout(
-                  () =>
-                    resolve({
-                      approved: false,
-                      feedback: `[Plannotator] No response within ${timeoutSeconds} seconds. Port released automatically. Please call submit_plan again.`,
-                    }),
-                  timeoutMs
-                );
+          if (!response.ok) {
+            if (
+              timeoutSeconds !== null &&
+              /etimedout|timed out|timeout/i.test(response.error.message)
+            ) {
+              return `[Plannotator] No response within ${timeoutSeconds} seconds. Please call submit_plan again.`;
+            }
+            return `[Plannotator] ${response.error.message}`;
+          }
 
-                server.waitForDecision().then((r) => {
-                  clearTimeout(timeoutId);
-                  resolve(r);
-                });
-              });
-          await Bun.sleep(1500);
-          server.stop();
+          const result = response.result;
 
           if (result.approved) {
             const shouldSwitchAgent = result.agentSwitch && result.agentSwitch !== 'disabled';

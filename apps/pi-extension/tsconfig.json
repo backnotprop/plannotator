@@ -11,6 +11,6 @@
     "moduleDetection": "force",
     "types": ["node"]
   },
-  "include": ["*.ts", "server/**/*.ts"],
+  "include": ["*.ts", "generated/**/*.ts"],
   "exclude": ["**/*.test.ts"]
 }

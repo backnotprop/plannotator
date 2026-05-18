@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/pi-extension",
-  "version": "0.19.18",
+  "version": "0.19.17",
   "type": "module",
   "description": "Plannotator Pi extension - interactive plan review with annotations, annotate agent messages, and review code/PRs",
   "author": "backnotprop",
@@ -22,22 +22,19 @@
   "files": [
     "index.ts",
     "assistant-message.ts",
+    "binary-client.ts",
     "current-pi-session.ts",
     "plannotator-browser.ts",
     "plannotator-events.ts",
-    "server.ts",
     "tool-scope.ts",
     "config.ts",
     "plannotator.json",
-    "server/",
     "generated/",
     "README.md",
-    "plannotator.html",
-    "review-editor.html",
     "skills/"
   ],
   "scripts": {
-    "build": "cp ../hook/dist/index.html plannotator.html && cp ../hook/dist/review.html review-editor.html && rm -rf skills && cp -r ../skills skills && bash vendor.sh",
+    "build": "rm -rf skills && cp -r ../skills skills && bash vendor.sh",
     "prepublishOnly": "cd ../.. && bun run build:pi"
   },
   "dependencies": {

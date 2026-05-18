@@ -54,8 +54,6 @@ import { parseAnnotateArgs } from "./generated/annotate-args.js";
 import { parseReviewArgs } from "./generated/review-args.js";
 import { resolveAtReference } from "./generated/at-reference.js";
 import {
-	hasPlanBrowserHtml,
-	hasReviewBrowserHtml,
 	getStartupErrorMessage,
 	openArchiveBrowserAction,
 	startCodeReviewBrowserSession,
@@ -101,16 +99,9 @@ type PersistedPlannotatorState = {
 	savedState?: SavedPhaseState;
 };
 
-function getPlanReviewAvailabilityWarning(options: { hasUI: boolean; hasPlanHtml: boolean }): string | null {
-	const { hasUI, hasPlanHtml } = options;
-	if (hasUI && hasPlanHtml) return null;
-	if (!hasUI && !hasPlanHtml) {
-		return "Plannotator: interactive plan review is unavailable in this session (no UI support and missing built assets). Plans will auto-approve on exit_plan_mode.";
-	}
-	if (!hasUI) {
-		return "Plannotator: interactive plan review is unavailable in this session (no UI support). Plans will auto-approve on exit_plan_mode.";
-	}
-	return "Plannotator: interactive plan review assets are missing. Rebuild the extension to restore the browser UI. Plans will auto-approve on exit_plan_mode.";
+function getPlanReviewAvailabilityWarning(options: { hasUI: boolean }): string | null {
+	if (options.hasUI) return null;
+	return "Plannotator: interactive plan review is unavailable in this session (no UI support). Plans will auto-approve on exit_plan_mode.";
 }
 
 function safeNotify(
@@ -355,7 +346,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 		ctx.ui.notify(
 			"Plannotator: planning mode enabled.",
 		);
-		const warning = getPlanReviewAvailabilityWarning({ hasUI: ctx.hasUI, hasPlanHtml: hasPlanBrowserHtml() });
+		const warning = getPlanReviewAvailabilityWarning({ hasUI: ctx.hasUI });
 		if (warning) {
 			ctx.ui.notify(warning, "warning");
 		}
@@ -409,14 +400,6 @@ export default function plannotator(pi: ExtensionAPI): void {
 	pi.registerCommand("plannotator-review", {
 		description: "Open interactive code review for current changes or a PR URL; pass --git to force Git in JJ workspaces",
 		handler: async (args, ctx) => {
-			if (!hasReviewBrowserHtml()) {
-				ctx.ui.notify(
-					"Code review UI not available. Run 'bun run build' in the pi-extension directory.",
-					"error",
-				);
-				return;
-			}
-
 			currentPiSession.update(ctx);
 			const origin = getPiSessionIdentity(ctx);
 
@@ -496,13 +479,6 @@ export default function plannotator(pi: ExtensionAPI): void {
 			const { filePath, rawFilePath, gate, renderHtml: renderHtmlFlag } = parseAnnotateArgs(args ?? "");
 			if (!filePath) {
 				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.html | https://... | folder/> [--gate] [--json]", "error");
-				return;
-			}
-			if (!hasPlanBrowserHtml()) {
-				ctx.ui.notify(
-					"Annotation UI not available. Run 'bun run build' in the pi-extension directory.",
-					"error",
-				);
 				return;
 			}
 
@@ -652,14 +628,6 @@ export default function plannotator(pi: ExtensionAPI): void {
 			// #570: support --gate on /plannotator-last for Stop-hook review gate.
 			const { gate } = parseAnnotateArgs(args ?? "");
 
-			if (!hasPlanBrowserHtml()) {
-				ctx.ui.notify(
-					"Annotation UI not available. Run 'bun run build' in the pi-extension directory.",
-					"error",
-				);
-				return;
-			}
-
 			currentPiSession.update(ctx);
 			const origin = getPiSessionIdentity(ctx);
 
@@ -721,14 +689,6 @@ export default function plannotator(pi: ExtensionAPI): void {
 	pi.registerCommand("plannotator-archive", {
 		description: "Browse saved plan decisions",
 		handler: async (_args, ctx) => {
-			if (!hasPlanBrowserHtml()) {
-				ctx.ui.notify(
-					"Archive UI not available. Run 'bun run build' in the pi-extension directory.",
-					"error",
-				);
-				return;
-			}
-
 			ctx.ui.notify("Opening plan archive...", "info");
 
 			try {
@@ -863,8 +823,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 			lastSubmittedPath = inputPath;
 			checklistItems = parseChecklist(planContent);
 
-			// Non-interactive or no HTML: auto-approve
-			if (!ctx.hasUI || !hasPlanBrowserHtml()) {
+			// Non-interactive Pi sessions cannot show the review UI, so keep the
+			// existing headless fallback. Runtime startup failures are handled below.
+			if (!ctx.hasUI) {
 				phase = "executing";
 				await applyPhaseConfig(ctx, { restoreSavedState: true });
 				pi.appendEntry("plannotator-execute", { lastSubmittedPath });
@@ -1265,7 +1226,7 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 
 		if (phase === "planning") {
 			checklistItems = [];
-			const warning = getPlanReviewAvailabilityWarning({ hasUI: ctx.hasUI, hasPlanHtml: hasPlanBrowserHtml() });
+			const warning = getPlanReviewAvailabilityWarning({ hasUI: ctx.hasUI });
 			if (warning) {
 				ctx.ui.notify(warning, "warning");
 			}

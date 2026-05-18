@@ -1,11 +1,11 @@
-import { planReviewSurface, annotateSurface, goalSetupSurface } from '../../../../packages/editor/shortcuts';
+import { planReviewSurface, annotateSurface } from '../../../../packages/editor/shortcuts';
 import { codeReviewSurface } from '../../../../packages/review-editor/shortcuts';
 import { listRegistryShortcutSections } from '../../../../packages/ui/shortcuts';
 import type { ShortcutSurface } from '../../../../packages/ui/shortcuts';
 
 const slugify = (value: string) => value.toLowerCase().replace(/\s+/g, '-');
 
-const allSurfaces: ShortcutSurface[] = [planReviewSurface, annotateSurface, goalSetupSurface, codeReviewSurface];
+const allSurfaces: ShortcutSurface[] = [planReviewSurface, annotateSurface, codeReviewSurface];
 
 export const shortcutReferenceSurfaces = allSurfaces.map((surface) => ({
   ...surface,

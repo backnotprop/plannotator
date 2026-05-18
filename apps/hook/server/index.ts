@@ -1,7 +1,7 @@
 /**
  * Plannotator CLI for Claude Code, Codex, Gemini CLI, and Copilot CLI
  *
- * Supports nine modes:
+ * Supports eight modes:
  *
  * 1. Plan Review (default, no args):
  *    - Spawned by Claude/Gemini/Codex hook entrypoints
@@ -37,11 +37,7 @@
  *    - Annotate the last assistant message from a Copilot CLI session
  *    - Parses events.jsonl from session state
  *
- * 8. Goal Setup (`plannotator setup-goal interview|facts <bundle.json>`):
- *    - Opens the bundled question or facts acceptance UI
- *    - Outputs structured JSON for setup-goal workflows
- *
- * 9. Improve Context (`plannotator improve-context`):
+ * 8. Improve Context (`plannotator improve-context`):
  *    - Spawned by PreToolUse hook on EnterPlanMode
  *    - Reads improvement hook file from ~/.plannotator/hooks/
  *    - Returns additionalContext or silently passes through
@@ -75,6 +71,7 @@ import {
 import { type DiffType, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
 import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
 import { parseReviewArgs } from "@plannotator/shared/review-args";
+import { parseAnnotateArgs } from "@plannotator/shared/annotate-args";
 import {
   normalizeGoalSetupBundle,
   type GoalSetupStage,
@@ -105,6 +102,18 @@ import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import { AGENT_CONFIG, type Origin } from "@plannotator/shared/agents";
 import {
+  createPluginErrorResponse,
+  createPluginSuccessResponse,
+  getPluginCapabilities,
+  type PluginAnnotateRequest,
+  type PluginArchiveRequest,
+  type PluginBaseRequest,
+  type PluginClientOrigin,
+  type PluginPlanRequest,
+  type PluginReviewRequest,
+  type PluginSessionInfo,
+} from "@plannotator/shared/plugin-protocol";
+import {
   findSessionLogsByAncestorWalk,
   findSessionLogsForCwd,
   getLastRenderedMessage,
@@ -125,14 +134,35 @@ import {
 import path from "path";
 import { tmpdir } from "os";
 
-// Embed the built HTML at compile time
-// @ts-ignore - Bun import attribute for text
-import planHtml from "../dist/index.html" with { type: "text" };
-const planHtmlContent = planHtml as unknown as string;
+let planHtmlContentPromise: Promise<string> | undefined;
+let reviewHtmlContentPromise: Promise<string> | undefined;
+let htmlAssetsPromise: Promise<typeof import("./html-assets")> | undefined;
 
-// @ts-ignore - Bun import attribute for text
-import reviewHtml from "../dist/review.html" with { type: "text" };
-const reviewHtmlContent = reviewHtml as unknown as string;
+function getHtmlAssets() {
+  htmlAssetsPromise ??= import("./html-assets");
+  return htmlAssetsPromise;
+}
+
+function getPlanHtmlContent(): Promise<string> {
+  planHtmlContentPromise ??= getHtmlAssets().then((mod) => mod.planHtmlContent);
+  return planHtmlContentPromise;
+}
+
+function getReviewHtmlContent(): Promise<string> {
+  reviewHtmlContentPromise ??= getHtmlAssets().then((mod) => mod.reviewHtmlContent);
+  return reviewHtmlContentPromise;
+}
+
+async function loadGoalSetupBundle(
+  stage: GoalSetupStage,
+  bundlePath: string,
+) {
+  const raw =
+    bundlePath === "-"
+      ? await Bun.stdin.text()
+      : await Bun.file(path.resolve(bundlePath)).text();
+  return normalizeGoalSetupBundle(JSON.parse(raw), stage);
+}
 
 // Check for subcommand
 const args = process.argv.slice(2);
@@ -217,17 +247,6 @@ function emitAnnotateOutcome(result: {
   if (result.feedback) console.log(result.feedback);
 }
 
-async function loadGoalSetupBundle(
-  stage: GoalSetupStage,
-  bundlePath: string
-) {
-  const raw =
-    bundlePath === "-"
-      ? await Bun.stdin.text()
-      : await Bun.file(path.resolve(bundlePath)).text();
-  return normalizeGoalSetupBundle(JSON.parse(raw), stage);
-}
-
 if (isVersionInvocation(args)) {
   console.log(formatVersion());
   process.exit(0);
@@ -275,6 +294,679 @@ const detectedOrigin: Origin =
   process.env.GEMINI_CLI ? "gemini-cli" :
   "claude-code";
 
+function registerProcessCleanup(cleanup: () => void): () => void {
+  let cleaned = false;
+  const run = () => {
+    if (cleaned) return;
+    cleaned = true;
+    cleanup();
+  };
+  const onSigint = () => {
+    run();
+    process.exit(130);
+  };
+  const onSigterm = () => {
+    run();
+    process.exit(143);
+  };
+
+  process.once("exit", run);
+  process.once("SIGINT", onSigint);
+  process.once("SIGTERM", onSigterm);
+
+  return () => {
+    process.removeListener("exit", run);
+    process.removeListener("SIGINT", onSigint);
+    process.removeListener("SIGTERM", onSigterm);
+    run();
+  };
+}
+
+function cleanupWorktreeSession(
+  repoDir: string,
+  sessionDir: string,
+  worktreePool: WorktreePool | undefined,
+  fallbackWorktreePath: string,
+): void {
+  try {
+    const entries = [...(worktreePool?.entries() ?? [])];
+    if (entries.length > 0) {
+      for (const entry of entries) {
+        Bun.spawnSync(["git", "worktree", "remove", "--force", entry.path], { cwd: repoDir });
+      }
+    } else {
+      Bun.spawnSync(["git", "worktree", "remove", "--force", fallbackWorktreePath], { cwd: repoDir });
+    }
+  } catch {}
+  try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
+}
+
+function emitPluginError(code: string, message: string, exitCode = 1): never {
+  console.log(JSON.stringify(createPluginErrorResponse(code, message)));
+  process.exit(exitCode);
+}
+
+async function readPluginRequest<T extends PluginBaseRequest>(): Promise<Partial<T>> {
+  try {
+    const raw = await Bun.stdin.text();
+    return raw.trim() ? JSON.parse(raw) : {};
+  } catch (err) {
+    emitPluginError(
+      "invalid-json",
+      err instanceof Error ? err.message : "Invalid JSON request",
+    );
+  }
+}
+
+function getPluginOrigin(request: Partial<PluginBaseRequest>): PluginClientOrigin {
+  const originIndex = args.indexOf("--origin");
+  const originArg = originIndex >= 0 ? args[originIndex + 1] : undefined;
+  const origin = request.origin || originArg || detectedOrigin;
+  if (origin !== "opencode" && origin !== "pi") {
+    emitPluginError(
+      "invalid-origin",
+      `Plugin origin must be "opencode" or "pi"; got ${String(origin || "")}`,
+    );
+  }
+  return origin;
+}
+
+function applyPluginCwd(request: Partial<PluginBaseRequest>): void {
+  if (!request.cwd) return;
+  try {
+    process.chdir(request.cwd);
+  } catch (err) {
+    emitPluginError(
+      "invalid-cwd",
+      err instanceof Error ? err.message : `Invalid cwd: ${request.cwd}`,
+    );
+  }
+}
+
+function pluginSessionInfo(
+  mode: PluginSessionInfo["mode"],
+  server: { url: string; port: number; isRemote: boolean },
+): PluginSessionInfo {
+  return {
+    mode,
+    url: server.url,
+    port: server.port,
+    isRemote: server.isRemote,
+  };
+}
+
+function emitPluginSessionReady(session: PluginSessionInfo): void {
+  console.error(`PLANNOTATOR_SESSION_READY ${JSON.stringify(session)}`);
+}
+
+async function runPluginPlanCommand(): Promise<void> {
+  const request = await readPluginRequest<PluginPlanRequest>();
+  const origin = getPluginOrigin(request);
+  applyPluginCwd(request);
+
+  let planContent = typeof request.plan === "string" ? request.plan : "";
+  if (!planContent && request.planFilePath) {
+    try {
+      const planPath = path.isAbsolute(request.planFilePath)
+        ? request.planFilePath
+        : path.resolve(process.cwd(), request.planFilePath);
+      planContent = await Bun.file(planPath).text();
+    } catch (err) {
+      emitPluginError(
+        "plan-read-failed",
+        err instanceof Error ? err.message : `Could not read plan file: ${request.planFilePath}`,
+      );
+    }
+  }
+
+  if (!planContent.trim()) {
+    emitPluginError(
+      "missing-plan",
+      "Plugin plan requests must include a non-empty plan or planFilePath.",
+    );
+  }
+
+  const effectiveSharingEnabled = request.sharingEnabled ?? sharingEnabled;
+  const effectiveShareBaseUrl = request.shareBaseUrl ?? shareBaseUrl;
+  const effectivePasteApiUrl = request.pasteApiUrl ?? pasteApiUrl;
+  const planProject = (await detectProjectName()) ?? "_unknown";
+
+  const server = await startPlannotatorServer({
+    plan: planContent,
+    origin,
+    permissionMode: request.permissionMode,
+    sharingEnabled: effectiveSharingEnabled,
+    shareBaseUrl: effectiveShareBaseUrl,
+    pasteApiUrl: effectivePasteApiUrl,
+    htmlContent: await getPlanHtmlContent(),
+    opencodeClient: request.availableAgents
+      ? { app: { agents: async () => ({ data: request.availableAgents }) } }
+      : undefined,
+    onReady: async (url, isRemote, port) => {
+      handleServerReady(url, isRemote, port);
+
+      if (isRemote && effectiveSharingEnabled) {
+        await writeRemoteShareLink(planContent, effectiveShareBaseUrl, "review the plan", "plan only").catch(() => {});
+      }
+    },
+  });
+
+  registerSession({
+    pid: process.pid,
+    port: server.port,
+    url: server.url,
+    mode: "plan",
+    project: planProject,
+    startedAt: new Date().toISOString(),
+    label: `plugin-plan-${origin}-${planProject}`,
+  });
+
+  const session = pluginSessionInfo("plan", server);
+  emitPluginSessionReady(session);
+  const result = await server.waitForDecision();
+  await Bun.sleep(1500);
+  server.stop();
+
+  console.log(JSON.stringify(createPluginSuccessResponse(result, session)));
+}
+
+async function runPluginArchiveCommand(): Promise<void> {
+  const request = await readPluginRequest<PluginArchiveRequest>();
+  const origin = getPluginOrigin(request);
+  applyPluginCwd(request);
+
+  const effectiveSharingEnabled = request.sharingEnabled ?? sharingEnabled;
+  const effectiveShareBaseUrl = request.shareBaseUrl ?? shareBaseUrl;
+  const effectivePasteApiUrl = request.pasteApiUrl ?? pasteApiUrl;
+  const archiveProject = (await detectProjectName()) ?? "_unknown";
+
+  const server = await startPlannotatorServer({
+    plan: "",
+    origin,
+    mode: "archive",
+    customPlanPath: request.customPlanPath,
+    sharingEnabled: effectiveSharingEnabled,
+    shareBaseUrl: effectiveShareBaseUrl,
+    pasteApiUrl: effectivePasteApiUrl,
+    htmlContent: await getPlanHtmlContent(),
+    onReady: (url, isRemote, port) => {
+      handleServerReady(url, isRemote, port);
+    },
+  });
+
+  registerSession({
+    pid: process.pid,
+    port: server.port,
+    url: server.url,
+    mode: "archive",
+    project: archiveProject,
+    startedAt: new Date().toISOString(),
+    label: `plugin-archive-${origin}-${archiveProject}`,
+  });
+
+  const session = pluginSessionInfo("archive", server);
+  emitPluginSessionReady(session);
+  if (server.waitForDone) await server.waitForDone();
+  await Bun.sleep(500);
+  server.stop();
+
+  console.log(JSON.stringify(createPluginSuccessResponse({ opened: true }, session)));
+}
+
+async function runPluginAnnotateCommand(defaultMode: "annotate" | "annotate-last" = "annotate"): Promise<void> {
+  const request = await readPluginRequest<PluginAnnotateRequest>();
+  const origin = getPluginOrigin(request);
+  applyPluginCwd(request);
+
+  const directMarkdown = typeof request.markdown === "string";
+  const hasRawArgs = typeof request.args === "string";
+  const parsedArgs = hasRawArgs ? parseAnnotateArgs(request.args ?? "") : undefined;
+  const structuredFilePath = typeof request.filePath === "string" ? request.filePath : "";
+  const directFilePath = structuredFilePath.trim().length > 0;
+  const gate = request.gate ?? parsedArgs?.gate ?? false;
+  const renderHtml = request.renderHtml ?? (typeof request.rawHtml === "string" ? true : parsedArgs?.renderHtml ?? false);
+
+  let markdown = directMarkdown ? request.markdown! : "";
+  let rawHtml = request.rawHtml;
+  let absolutePath = directFilePath ? structuredFilePath : "";
+  let folderPath = request.folderPath;
+  let annotateMode: "annotate" | "annotate-folder" | "annotate-last" = request.mode ?? defaultMode;
+  let sourceInfo = request.sourceInfo;
+  let sourceConverted = request.sourceConverted ?? false;
+
+  if (folderPath) {
+    const resolvedFolder = path.isAbsolute(folderPath) ? folderPath : resolveUserPath(folderPath, process.cwd());
+    folderPath = resolvedFolder;
+    absolutePath = resolvedFolder;
+    markdown = directMarkdown ? markdown : "";
+    annotateMode = "annotate-folder";
+  } else if (!directMarkdown && typeof rawHtml !== "string") {
+    const rawFilePath = parsedArgs?.rawFilePath || structuredFilePath;
+    if (!rawFilePath) {
+      emitPluginError(
+        "missing-annotate-target",
+        "Plugin annotate requests must include args, markdown, filePath, folderPath, or rawHtml.",
+      );
+    }
+
+    const filePath = parsedArgs?.filePath || structuredFilePath;
+    const projectRoot = process.cwd();
+    const isUrl = /^https?:\/\//i.test(filePath);
+
+    if (isUrl) {
+      const useJina = resolveUseJina(cliNoJina, loadConfig());
+      console.error(`Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}`);
+      try {
+        const result = await urlToMarkdown(filePath, { useJina });
+        markdown = result.markdown;
+        sourceConverted = isConvertedSource(result.source);
+      } catch (err) {
+        emitPluginError("url-fetch-failed", `Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      absolutePath = filePath;
+      sourceInfo = filePath;
+    } else {
+      const folderCandidate = resolveAtReference(rawFilePath, (candidate) => {
+        try { return statSync(resolveUserPath(candidate, projectRoot)).isDirectory(); }
+        catch { return false; }
+      });
+
+      if (folderCandidate !== null) {
+        const resolvedArg = resolveUserPath(folderCandidate, projectRoot);
+        if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED, /\.(mdx?|html?)$/i)) {
+          emitPluginError("empty-folder", `No markdown or HTML files found in ${resolvedArg}`);
+        }
+        folderPath = resolvedArg;
+        absolutePath = resolvedArg;
+        markdown = "";
+        annotateMode = "annotate-folder";
+        console.error(`Folder: ${resolvedArg}`);
+      } else {
+        const htmlCandidate = resolveAtReference(rawFilePath, (candidate) => {
+          const abs = resolveUserPath(candidate, projectRoot);
+          return /\.html?$/i.test(abs) && existsSync(abs);
+        });
+
+        if (htmlCandidate !== null) {
+          const resolvedArg = resolveUserPath(htmlCandidate, projectRoot);
+          const htmlFile = Bun.file(resolvedArg);
+          if (htmlFile.size > 10 * 1024 * 1024) {
+            emitPluginError("file-too-large", `File too large (${Math.round(htmlFile.size / 1024 / 1024)}MB, max 10MB): ${resolvedArg}`);
+          }
+          const html = await htmlFile.text();
+          if (renderHtml) {
+            rawHtml = html;
+            markdown = "";
+          } else {
+            markdown = htmlToMarkdown(html);
+            sourceConverted = true;
+          }
+          absolutePath = resolvedArg;
+          sourceInfo = path.basename(resolvedArg);
+          console.error(`${renderHtml ? "Raw HTML" : "Converted"}: ${absolutePath}`);
+        } else {
+          let resolved = resolveMarkdownFile(filePath, projectRoot);
+          if (resolved.kind === "not_found" && rawFilePath !== filePath) {
+            resolved = resolveMarkdownFile(rawFilePath, projectRoot);
+          }
+          if (resolved.kind === "ambiguous") {
+            emitPluginError(
+              "ambiguous-file",
+              `Ambiguous filename "${resolved.input}" — found ${resolved.matches.length} matches:\n${resolved.matches.map((match) => `  ${match}`).join("\n")}`,
+            );
+          }
+          if (resolved.kind === "not_found") {
+            emitPluginError("file-not-found", `File not found: ${resolved.input}`);
+          }
+          absolutePath = resolved.path;
+          markdown = await Bun.file(absolutePath).text();
+          console.error(`Resolved: ${absolutePath}`);
+        }
+      }
+    }
+  }
+
+  if (!absolutePath) absolutePath = annotateMode === "annotate-last" ? "last-message" : "document";
+
+  const effectiveSharingEnabled = request.sharingEnabled ?? sharingEnabled;
+  const effectiveShareBaseUrl = request.shareBaseUrl ?? shareBaseUrl;
+  const effectivePasteApiUrl = request.pasteApiUrl ?? pasteApiUrl;
+  const annotateProject = (await detectProjectName()) ?? "_unknown";
+
+  const server = await startAnnotateServer({
+    markdown,
+    filePath: absolutePath,
+    origin,
+    mode: annotateMode,
+    folderPath,
+    sourceInfo,
+    sourceConverted,
+    sharingEnabled: effectiveSharingEnabled,
+    shareBaseUrl: effectiveShareBaseUrl,
+    pasteApiUrl: effectivePasteApiUrl,
+    gate,
+    rawHtml,
+    renderHtml,
+    htmlContent: await getPlanHtmlContent(),
+    onReady: async (url, isRemote, port) => {
+      handleAnnotateServerReady(url, isRemote, port);
+
+      if (isRemote && effectiveSharingEnabled && markdown) {
+        await writeRemoteShareLink(markdown, effectiveShareBaseUrl, "annotate", "document only").catch(() => {});
+      }
+    },
+  });
+
+  registerSession({
+    pid: process.pid,
+    port: server.port,
+    url: server.url,
+    mode: "annotate",
+    project: annotateProject,
+    startedAt: new Date().toISOString(),
+    label: folderPath
+      ? `plugin-annotate-${origin}-${path.basename(folderPath)}`
+      : `plugin-annotate-${origin}-${annotateMode === "annotate-last" ? "last" : path.basename(absolutePath)}`,
+  });
+
+  const session = pluginSessionInfo("annotate", server);
+  emitPluginSessionReady(session);
+  const result = await server.waitForDecision();
+  await Bun.sleep(1500);
+  server.stop();
+
+  console.log(JSON.stringify(createPluginSuccessResponse({
+    ...result,
+    filePath: absolutePath,
+    mode: annotateMode,
+  }, session)));
+}
+
+async function runPluginReviewCommand(): Promise<void> {
+  const request = await readPluginRequest<PluginReviewRequest>();
+  const origin = getPluginOrigin(request);
+  applyPluginCwd(request);
+
+  const reviewArgs = parseReviewArgs(request.args ?? "");
+  const urlArg = request.prUrl ?? reviewArgs.prUrl;
+  const isPRMode = urlArg !== undefined;
+  const useLocal = isPRMode && (request.useLocal ?? reviewArgs.useLocal);
+
+  let rawPatch: string;
+  let gitRef: string;
+  let diffError: string | undefined;
+  let gitContext: Awaited<ReturnType<typeof prepareLocalReviewDiff>>["gitContext"] | undefined;
+  let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
+  let initialDiffType: DiffType | undefined;
+  let initialBase: string | undefined;
+  let agentCwd: string | undefined;
+  let worktreePool: WorktreePool | undefined;
+  let worktreeCleanup: (() => void | Promise<void>) | undefined;
+
+  if (isPRMode) {
+    const prRef = parsePRUrl(urlArg);
+    if (!prRef) {
+      emitPluginError(
+        "invalid-pr-url",
+        `Invalid PR/MR URL: ${urlArg}\nSupported formats:\n  GitHub: https://github.com/owner/repo/pull/123\n  GitLab: https://gitlab.com/group/project/-/merge_requests/42`,
+      );
+    }
+
+    const cliName = getCliName(prRef);
+    const cliUrl = getCliInstallUrl(prRef);
+
+    try {
+      await checkPRAuth(prRef);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("not found") || msg.includes("ENOENT")) {
+        emitPluginError(
+          "pr-auth-failed",
+          `${cliName === "gh" ? "GitHub" : "GitLab"} CLI (${cliName}) is not installed. Install it from ${cliUrl}`,
+        );
+      }
+      emitPluginError("pr-auth-failed", msg);
+    }
+
+    console.error(`Fetching ${getMRLabel(prRef)} ${getMRNumberLabel(prRef)} from ${getDisplayRepo(prRef)}...`);
+    try {
+      const pr = await fetchPR(prRef);
+      rawPatch = pr.rawPatch;
+      gitRef = `${getMRLabel(prRef)} ${getMRNumberLabel(prRef)}`;
+      prMetadata = pr.metadata;
+    } catch (err) {
+      emitPluginError("pr-fetch-failed", err instanceof Error ? err.message : `Failed to fetch ${getMRLabel(prRef)} ${getMRNumberLabel(prRef)}`);
+    }
+
+    if (useLocal && prMetadata) {
+      let localPath: string | undefined;
+      let sessionDir: string | undefined;
+      try {
+        const repoDir = process.cwd();
+        const identifier = prMetadata.platform === "github"
+          ? `${prMetadata.owner}-${prMetadata.repo}-${prMetadata.number}`
+          : `${prMetadata.projectPath.replace(/\//g, "-")}-${prMetadata.iid}`;
+        const suffix = Math.random().toString(36).slice(2, 8);
+        sessionDir = path.join(realpathSync(tmpdir()), `plannotator-pr-${identifier}-${suffix}`);
+        const prNumber = prMetadata.platform === "github" ? prMetadata.number : prMetadata.iid;
+        localPath = path.join(sessionDir, "pool", `pr-${prNumber}`);
+        const fetchRefStr = prMetadata.platform === "github"
+          ? `refs/pull/${prMetadata.number}/head`
+          : `refs/merge-requests/${prMetadata.iid}/head`;
+
+        if (prMetadata.baseBranch.includes("..") || prMetadata.baseBranch.startsWith("-")) throw new Error(`Invalid base branch: ${prMetadata.baseBranch}`);
+        if (!/^[0-9a-f]{40,64}$/i.test(prMetadata.baseSha)) throw new Error(`Invalid base SHA: ${prMetadata.baseSha}`);
+
+        let isSameRepo = false;
+        try {
+          const remoteResult = await gitRuntime.runGit(["remote", "get-url", "origin"]);
+          if (remoteResult.exitCode === 0) {
+            const remoteUrl = remoteResult.stdout.trim();
+            const currentRepo = parseRemoteUrl(remoteUrl);
+            const prRepo = prMetadata.platform === "github"
+              ? `${prMetadata.owner}/${prMetadata.repo}`
+              : prMetadata.projectPath;
+            const repoMatches = !!currentRepo && currentRepo.toLowerCase() === prRepo.toLowerCase();
+            const sshHost = remoteUrl.match(/^[^@]+@([^:]+):/)?.[1];
+            const httpsHost = (() => { try { return new URL(remoteUrl).hostname; } catch { return null; } })();
+            const remoteHost = (sshHost || httpsHost || "").toLowerCase();
+            const prHost = prMetadata.host.toLowerCase();
+            isSameRepo = repoMatches && remoteHost === prHost;
+          }
+        } catch {}
+
+        if (isSameRepo) {
+          console.error("Fetching PR branch and creating local worktree...");
+          await fetchRef(gitRuntime, prMetadata.baseBranch, { cwd: repoDir });
+          await ensureObjectAvailable(gitRuntime, prMetadata.baseSha, { cwd: repoDir });
+          await fetchRef(gitRuntime, fetchRefStr, { cwd: repoDir });
+
+          await createWorktree(gitRuntime, {
+            ref: "FETCH_HEAD",
+            path: localPath,
+            detach: true,
+            cwd: repoDir,
+          });
+
+          // worktreePool is assigned after registration; read it at cleanup
+          // time so early exits still fall back to removing localPath.
+          worktreeCleanup = registerProcessCleanup(() => cleanupWorktreeSession(
+            repoDir,
+            sessionDir,
+            worktreePool,
+            localPath,
+          ));
+        } else {
+          const prRepo = prMetadata.platform === "github"
+            ? `${prMetadata.owner}/${prMetadata.repo}`
+            : prMetadata.projectPath;
+          if (/^-/.test(prRepo)) throw new Error(`Invalid repository identifier: ${prRepo}`);
+          const cli = prMetadata.platform === "github" ? "gh" : "glab";
+          const host = prMetadata.host;
+          const isDefaultHost = host === "github.com" || host === "gitlab.com";
+          const cloneEnv = isDefaultHost ? undefined : {
+            ...process.env,
+            ...(prMetadata.platform === "github" ? { GH_HOST: host } : { GITLAB_HOST: host }),
+          };
+
+          console.error(`Cloning ${prRepo} (shallow)...`);
+          const cloneResult = Bun.spawnSync(
+            [cli, "repo", "clone", prRepo, localPath, "--", "--depth=1", "--no-checkout"],
+            { stderr: "pipe", env: cloneEnv },
+          );
+          if (cloneResult.exitCode !== 0) {
+            throw new Error(`${cli} repo clone failed: ${new TextDecoder().decode(cloneResult.stderr).trim()}`);
+          }
+
+          console.error("Fetching PR branch...");
+          const fetchResult = Bun.spawnSync(
+            ["git", "fetch", "--depth=200", "origin", fetchRefStr],
+            { cwd: localPath, stderr: "pipe" },
+          );
+          if (fetchResult.exitCode !== 0) throw new Error(`Failed to fetch PR head ref: ${new TextDecoder().decode(fetchResult.stderr).trim()}`);
+
+          const checkoutResult = Bun.spawnSync(["git", "checkout", "FETCH_HEAD"], { cwd: localPath, stderr: "pipe" });
+          if (checkoutResult.exitCode !== 0) {
+            throw new Error(`git checkout FETCH_HEAD failed: ${new TextDecoder().decode(checkoutResult.stderr).trim()}`);
+          }
+
+          const baseFetch = Bun.spawnSync(["git", "fetch", "--depth=200", "origin", prMetadata.baseSha], { cwd: localPath, stderr: "pipe" });
+          if (baseFetch.exitCode !== 0) console.error("Warning: failed to fetch baseSha, agent diffs may be inaccurate");
+          Bun.spawnSync(["git", "branch", "--", prMetadata.baseBranch, prMetadata.baseSha], { cwd: localPath, stderr: "pipe" });
+          Bun.spawnSync(["git", "update-ref", `refs/remotes/origin/${prMetadata.baseBranch}`, prMetadata.baseSha], { cwd: localPath, stderr: "pipe" });
+
+          worktreeCleanup = registerProcessCleanup(() => {
+            try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
+          });
+        }
+
+        agentCwd = localPath;
+        worktreePool = createWorktreePool(
+          { sessionDir, repoDir, isSameRepo },
+          { path: localPath, prUrl: prMetadata.url, number: prNumber, ready: true },
+        );
+
+        console.error(`Local checkout ready at ${localPath}`);
+      } catch (err) {
+        console.error("Warning: --local failed, falling back to remote diff");
+        console.error(err instanceof Error ? err.message : String(err));
+        if (worktreeCleanup) {
+          worktreeCleanup();
+        } else if (sessionDir) {
+          try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
+        }
+        agentCwd = undefined;
+        worktreePool = undefined;
+        worktreeCleanup = undefined;
+      }
+    }
+  } else {
+    const config = loadConfig();
+    const diffResult = await prepareLocalReviewDiff({
+      vcsType: request.vcsType ?? reviewArgs.vcsType,
+      requestedDiffType: request.diffType as DiffType | undefined,
+      requestedBase: request.defaultBranch,
+      configuredDiffType: resolveDefaultDiffType(config),
+      hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
+    });
+    gitContext = diffResult.gitContext;
+    initialDiffType = diffResult.diffType;
+    initialBase = diffResult.base;
+    rawPatch = diffResult.rawPatch;
+    gitRef = diffResult.gitRef;
+    diffError = diffResult.error;
+  }
+
+  const effectiveSharingEnabled = request.sharingEnabled ?? sharingEnabled;
+  const effectiveShareBaseUrl = request.shareBaseUrl ?? shareBaseUrl;
+  const reviewProject = (await detectProjectName()) ?? "_unknown";
+
+  const server = await startReviewServer({
+    rawPatch,
+    gitRef,
+    error: diffError,
+    origin,
+    diffType: gitContext ? (initialDiffType ?? "unstaged") : undefined,
+    gitContext,
+    initialBase,
+    prMetadata,
+    agentCwd,
+    worktreePool,
+    sharingEnabled: effectiveSharingEnabled,
+    shareBaseUrl: effectiveShareBaseUrl,
+    htmlContent: await getReviewHtmlContent(),
+    opencodeClient: request.availableAgents
+      ? { app: { agents: async () => ({ data: request.availableAgents }) } }
+      : undefined,
+    onCleanup: worktreeCleanup,
+    onReady: async (url, isRemote, port) => {
+      handleReviewServerReady(url, isRemote, port);
+
+      if (isRemote && effectiveSharingEnabled && rawPatch) {
+        await writeRemoteShareLink(rawPatch, effectiveShareBaseUrl, "review changes", "diff only").catch(() => {});
+      }
+    },
+  });
+
+  registerSession({
+    pid: process.pid,
+    port: server.port,
+    url: server.url,
+    mode: "review",
+    project: reviewProject,
+    startedAt: new Date().toISOString(),
+    label: isPRMode && prMetadata
+      ? `plugin-${getMRLabel(prMetadata).toLowerCase()}-review-${getDisplayRepo(prMetadata)}${getMRNumberLabel(prMetadata)}`
+      : `plugin-review-${origin}-${reviewProject}`,
+  });
+
+  const session = pluginSessionInfo("review", server);
+  emitPluginSessionReady(session);
+  const result = await server.waitForDecision();
+  await Bun.sleep(1500);
+  server.stop();
+
+  console.log(JSON.stringify(createPluginSuccessResponse(result, session)));
+}
+
+if (args[0] === "plugin") {
+  const command = args[1];
+  if (command === "capabilities") {
+    console.log(JSON.stringify(getPluginCapabilities()));
+    process.exit(0);
+  }
+
+  if (command === "plan") {
+    await runPluginPlanCommand();
+    process.exit(0);
+  }
+
+  if (command === "review") {
+    await runPluginReviewCommand();
+    process.exit(0);
+  }
+
+  if (command === "annotate" || command === "annotate-last") {
+    await runPluginAnnotateCommand(command === "annotate-last" ? "annotate-last" : "annotate");
+    process.exit(0);
+  }
+
+  if (command === "archive") {
+    await runPluginArchiveCommand();
+    process.exit(0);
+  }
+
+  console.log(
+    JSON.stringify(
+      createPluginErrorResponse(
+        "unknown-plugin-command",
+        command ? `Unknown plugin command: ${command}` : "Missing plugin command",
+      ),
+    ),
+  );
+  process.exit(1);
+}
+
 if (args[0] === "sessions") {
   // ============================================
   // SESSION DISCOVERY MODE
@@ -318,68 +1010,6 @@ if (args[0] === "sessions") {
     console.error(`  #${i + 1}  ${s.mode.padEnd(9)} ${s.project.padEnd(20)} ${s.url.padEnd(28)} ${ageStr} ago`);
   }
   console.error(`\nReopen with: plannotator sessions --open [N]`);
-  process.exit(0);
-
-} else if (args[0] === "setup-goal") {
-  // ============================================
-  // GOAL SETUP MODE
-  // ============================================
-
-  const stage = args[1] as GoalSetupStage | undefined;
-  const bundlePath = args[2];
-
-  if ((stage !== "interview" && stage !== "facts") || !bundlePath) {
-    console.error(
-      "Usage: plannotator setup-goal <interview|facts> <bundle.json | -> [--json]"
-    );
-    process.exit(1);
-  }
-
-  let bundle: Awaited<ReturnType<typeof loadGoalSetupBundle>>;
-  try {
-    bundle = await loadGoalSetupBundle(stage, bundlePath);
-  } catch (err) {
-    console.error(
-      `Failed to load goal setup bundle: ${err instanceof Error ? err.message : String(err)}`
-    );
-    process.exit(1);
-  }
-
-  const goalProject = (await detectProjectName()) ?? "_unknown";
-
-  const server = await startGoalSetupServer({
-    bundle,
-    origin: detectedOrigin,
-    htmlContent: planHtmlContent,
-    onReady: (url, isRemote, port) => {
-      handleGoalSetupServerReady(url, isRemote, port);
-    },
-  });
-
-  registerSession({
-    pid: process.pid,
-    port: server.port,
-    url: server.url,
-    mode: "goal-setup",
-    project: goalProject,
-    startedAt: new Date().toISOString(),
-    label: `goal-setup-${bundle.stage}-${bundle.goalSlug || goalProject}`,
-  });
-
-  const result = await server.waitForDecision();
-  await Bun.sleep(800);
-  server.stop();
-
-  if (result.exit) {
-    console.log(JSON.stringify({ decision: "dismissed", stage: bundle.stage }));
-  } else if (result.result) {
-    const output = {
-      decision: "submitted",
-      stage: result.result.stage,
-      result: result.result,
-    };
-    console.log(jsonFlag ? JSON.stringify(output) : JSON.stringify(output, null, 2));
-  }
   process.exit(0);
 
 } else if (args[0] === "review") {
@@ -503,19 +1133,12 @@ if (args[0] === "sessions") {
             cwd: repoDir,
           });
 
-          worktreeCleanup = async () => {
-            if (worktreePool) await worktreePool.cleanup(gitRuntime);
-            try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
-          };
-          process.once("exit", () => {
-            // Best-effort sync cleanup: remove each pool worktree from git, then rm session dir
-            try {
-              for (const entry of worktreePool?.entries() ?? []) {
-                Bun.spawnSync(["git", "worktree", "remove", "--force", entry.path], { cwd: repoDir });
-              }
-            } catch {}
-            try { Bun.spawnSync(["rm", "-rf", sessionDir]); } catch {}
-          });
+          worktreeCleanup = registerProcessCleanup(() => cleanupWorktreeSession(
+            repoDir,
+            sessionDir,
+            worktreePool,
+            localPath,
+          ));
         } else {
           // ── Cross-repo: shallow clone + fetch PR head ──
           const prRepo = prMetadata.platform === "github"
@@ -562,9 +1185,8 @@ if (args[0] === "sessions") {
           Bun.spawnSync(["git", "branch", "--", prMetadata.baseBranch, prMetadata.baseSha], { cwd: localPath, stderr: "pipe" });
           Bun.spawnSync(["git", "update-ref", `refs/remotes/origin/${prMetadata.baseBranch}`, prMetadata.baseSha], { cwd: localPath, stderr: "pipe" });
 
-          worktreeCleanup = () => { try { rmSync(sessionDir, { recursive: true, force: true }); } catch {} };
-          process.once("exit", () => {
-            try { Bun.spawnSync(["rm", "-rf", sessionDir]); } catch {}
+          worktreeCleanup = registerProcessCleanup(() => {
+            try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
           });
         }
 
@@ -582,7 +1204,11 @@ if (args[0] === "sessions") {
       } catch (err) {
         console.error(`Warning: --local failed, falling back to remote diff`);
         console.error(err instanceof Error ? err.message : String(err));
-        if (sessionDir) try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
+        if (worktreeCleanup) {
+          worktreeCleanup();
+        } else if (sessionDir) {
+          try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
+        }
         agentCwd = undefined;
         worktreePool = undefined;
         worktreeCleanup = undefined;
@@ -618,7 +1244,7 @@ if (args[0] === "sessions") {
     worktreePool,
     sharingEnabled,
     shareBaseUrl,
-    htmlContent: reviewHtmlContent,
+    htmlContent: await getReviewHtmlContent(),
     onCleanup: worktreeCleanup,
     onReady: async (url, isRemote, port) => {
       handleReviewServerReady(url, isRemote, port);
@@ -800,7 +1426,7 @@ if (args[0] === "sessions") {
     gate: gateFlag,
     rawHtml,
     renderHtml: renderHtmlFlag,
-    htmlContent: planHtmlContent,
+    htmlContent: await getPlanHtmlContent(),
     onReady: async (url, isRemote, port) => {
       handleAnnotateServerReady(url, isRemote, port);
 
@@ -856,7 +1482,7 @@ if (args[0] === "sessions") {
       if (process.env.PLANNOTATOR_DEBUG) {
         console.error(`[DEBUG] Rollout: ${rolloutPath}`);
       }
-      const msg = getLastCodexMessage(rolloutPath, { beforeActiveTurn: true });
+      const msg = getLastCodexMessage(rolloutPath);
       if (msg) {
         lastMessage = { messageId: codexThreadId, text: msg.text, lineNumbers: [] };
       }
@@ -931,7 +1557,7 @@ if (args[0] === "sessions") {
     shareBaseUrl,
     pasteApiUrl,
     gate: gateFlag,
-    htmlContent: planHtmlContent,
+    htmlContent: await getPlanHtmlContent(),
     onReady: async (url, isRemote, port) => {
       handleAnnotateServerReady(url, isRemote, port);
 
@@ -973,7 +1599,7 @@ if (args[0] === "sessions") {
     mode: "archive",
     sharingEnabled,
     shareBaseUrl,
-    htmlContent: planHtmlContent,
+    htmlContent: await getPlanHtmlContent(),
     onReady: (url, isRemote, port) => {
       handleServerReady(url, isRemote, port);
     },
@@ -993,6 +1619,68 @@ if (args[0] === "sessions") {
 
   await Bun.sleep(500);
   server.stop();
+  process.exit(0);
+
+} else if (args[0] === "setup-goal") {
+  // ============================================
+  // GOAL SETUP MODE
+  // ============================================
+
+  const stage = args[1] as GoalSetupStage | undefined;
+  const bundlePath = args[2];
+
+  if ((stage !== "interview" && stage !== "facts") || !bundlePath) {
+    console.error(
+      "Usage: plannotator setup-goal <interview|facts> <bundle.json | -> [--json]"
+    );
+    process.exit(1);
+  }
+
+  let bundle: Awaited<ReturnType<typeof loadGoalSetupBundle>>;
+  try {
+    bundle = await loadGoalSetupBundle(stage, bundlePath);
+  } catch (err) {
+    console.error(
+      `Failed to load goal setup bundle: ${err instanceof Error ? err.message : String(err)}`
+    );
+    process.exit(1);
+  }
+
+  const goalProject = (await detectProjectName()) ?? "_unknown";
+
+  const server = await startGoalSetupServer({
+    bundle,
+    origin: detectedOrigin,
+    htmlContent: await getPlanHtmlContent(),
+    onReady: (url, isRemote, port) => {
+      handleGoalSetupServerReady(url, isRemote, port);
+    },
+  });
+
+  registerSession({
+    pid: process.pid,
+    port: server.port,
+    url: server.url,
+    mode: "goal-setup",
+    project: goalProject,
+    startedAt: new Date().toISOString(),
+    label: `goal-setup-${bundle.stage}-${bundle.goalSlug || goalProject}`,
+  });
+
+  const result = await server.waitForDecision();
+  await Bun.sleep(800);
+  server.stop();
+
+  if (result.exit) {
+    console.log(JSON.stringify({ decision: "dismissed", stage: bundle.stage }));
+  } else if (result.result) {
+    const output = {
+      decision: "submitted",
+      stage: result.result.stage,
+      result: result.result,
+    };
+    console.log(jsonFlag ? JSON.stringify(output) : JSON.stringify(output, null, 2));
+  }
   process.exit(0);
 
 } else if (args[0] === "copilot-plan") {
@@ -1035,7 +1723,7 @@ if (args[0] === "sessions") {
     sharingEnabled,
     shareBaseUrl,
     pasteApiUrl,
-    htmlContent: planHtmlContent,
+    htmlContent: await getPlanHtmlContent(),
     onReady: async (url, isRemote, port) => {
       handleServerReady(url, isRemote, port);
 
@@ -1120,7 +1808,7 @@ if (args[0] === "sessions") {
     sharingEnabled,
     shareBaseUrl,
     gate: gateFlag,
-    htmlContent: planHtmlContent,
+    htmlContent: await getPlanHtmlContent(),
     onReady: async (url, isRemote, port) => {
       handleAnnotateServerReady(url, isRemote, port);
 
@@ -1224,7 +1912,7 @@ if (args[0] === "sessions") {
       sharingEnabled,
       shareBaseUrl,
       pasteApiUrl,
-      htmlContent: planHtmlContent,
+      htmlContent: await getPlanHtmlContent(),
       onReady: async (url, isRemote, port) => {
         handleServerReady(url, isRemote, port);
 
@@ -1303,7 +1991,7 @@ if (args[0] === "sessions") {
     sharingEnabled,
     shareBaseUrl,
     pasteApiUrl,
-    htmlContent: planHtmlContent,
+    htmlContent: await getPlanHtmlContent(),
     onReady: async (url, isRemote, port) => {
       handleServerReady(url, isRemote, port);
 

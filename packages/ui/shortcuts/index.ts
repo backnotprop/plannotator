@@ -8,7 +8,6 @@ export { commentPopoverShortcuts } from './plan-review/commentPopover.shortcuts'
 export { imageAnnotatorShortcuts, useImageAnnotatorShortcuts } from './plan-review/imageAnnotator.shortcuts';
 export { inputMethodShortcuts } from './plan-review/inputMethod.shortcuts';
 export { viewerShortcuts, useViewerShortcuts } from './plan-review/viewer.shortcuts';
-export { goalSetupShortcuts, useGoalSetupShortcuts } from './plan-review/goalSetup.shortcuts';
 
 // code-review scopes
 export { reviewAnnotationToolbarShortcuts, useReviewAnnotationToolbarShortcuts } from './code-review/annotationToolbar.shortcuts';

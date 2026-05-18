@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/opencode",
-  "version": "0.19.18",
+  "version": "0.19.17",
   "description": "Plannotator plugin for OpenCode - interactive plan review with visual annotation",
   "author": "backnotprop",
   "license": "MIT OR Apache-2.0",
@@ -25,12 +25,10 @@
   "files": [
     "dist",
     "commands",
-    "README.md",
-    "plannotator.html",
-    "review-editor.html"
+    "README.md"
   ],
   "scripts": {
-    "build": "cp ../hook/dist/index.html ./plannotator.html && cp ../review/dist/index.html ./review-editor.html && bun build index.ts --outfile dist/index.js --target bun --external @opencode-ai/plugin",
+    "build": "bun build index.ts --outfile dist/index.js --target bun --external @opencode-ai/plugin",
     "postinstall": "mkdir -p ${XDG_CONFIG_HOME:-$HOME/.config}/opencode/commands && cp ./commands/*.md ${XDG_CONFIG_HOME:-$HOME/.config}/opencode/commands/ 2>/dev/null || true",
     "prepublishOnly": "bun run build"
   },
@@ -38,7 +36,6 @@
     "@opencode-ai/plugin": "^1.1.10"
   },
   "devDependencies": {
-    "@plannotator/server": "workspace:*",
     "@plannotator/shared": "workspace:*"
   },
   "peerDependencies": {

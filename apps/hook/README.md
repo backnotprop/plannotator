@@ -23,6 +23,8 @@ curl -fsSL https://plannotator.ai/install.cmd -o install.cmd && install.cmd && d
 
 Released binaries ship with SHA256 sidecars and [SLSA build provenance](https://slsa.dev/) attestations from v0.17.2 onwards. See the [installation docs](https://plannotator.ai/docs/getting-started/installation/#verifying-your-install) for version pinning and verification commands.
 
+The released binary owns Plannotator's browser server runtime for Claude Code, OpenCode, and Pi. See [Single Binary Runtime](../../docs/single-binary-runtime.md) for the plugin client boundary and daemon-next design.
+
 ---
 
 [Plugin Installation](#plugin-installation) · [Manual Installation (Hooks)](#manual-installation-hooks) · [Obsidian Integration](#obsidian-integration)  

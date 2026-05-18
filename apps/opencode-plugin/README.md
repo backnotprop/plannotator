@@ -34,7 +34,19 @@ Restart OpenCode. By default, the `submit_plan` tool is available to OpenCode's 
 > ```bash
 > curl -fsSL https://plannotator.ai/install.sh | bash
 > ```
-> This also clears any cached plugin versions.
+> This also installs or updates the `plannotator` binary and clears any cached plugin versions.
+
+## Runtime Model
+
+The OpenCode plugin is a client of the installed `plannotator` binary. It keeps OpenCode-specific behavior such as `submit_plan`, prompt transforms, slash-command interception, feedback injection, and agent switching, but the browser UI and HTTP server are owned by the Bun binary.
+
+Binary discovery order:
+
+1. `PLANNOTATOR_BIN`
+2. `plannotator` on `PATH`
+3. Standard install locations such as `~/.local/bin/plannotator`
+
+If the binary is missing or too old for the plugin protocol, the plugin runs the official installer. Set `PLANNOTATOR_DISABLE_AUTO_INSTALL=1` to turn that off in controlled environments.
 
 ## Workflow Modes
 
@@ -144,6 +156,8 @@ Register the tool but manage prompts and permissions yourself:
 | `PLANNOTATOR_SHARE_URL` | Custom share portal URL for self-hosting. Default: `https://share.plannotator.ai`. |
 | `PLANNOTATOR_PASTE_URL` | Custom paste service URL for self-hosting. Default: `https://plannotator-paste.plannotator.workers.dev`. |
 | `PLANNOTATOR_PLAN_TIMEOUT_SECONDS` | Timeout for `submit_plan` review wait. Default: `345600` (96h). Set `0` to disable timeout. |
+| `PLANNOTATOR_BIN` | Explicit path to the installed `plannotator` binary used by the plugin client. |
+| `PLANNOTATOR_DISABLE_AUTO_INSTALL` | Set to `1`, `true`, or `yes` to prevent the plugin from running the official installer when the binary is missing or incompatible. |
 
 ## Devcontainer / Docker
 
