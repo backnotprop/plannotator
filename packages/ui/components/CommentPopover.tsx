@@ -22,6 +22,8 @@ interface CommentPopoverProps {
   onClose: () => void;
   /** Opt-in: persist text + images across close/reopen, keyed by this string. Cleared on submit. */
   draftKey?: string;
+  /** Whether image attachments are available in this comment surface. */
+  allowImages?: boolean;
 }
 
 const MAX_POPOVER_WIDTH = 384;
@@ -66,17 +68,18 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   onSubmit,
   onClose,
   draftKey,
+  allowImages = true,
 }) => {
   const [mode, setMode] = useState<'popover' | 'dialog'>('popover');
   const initialDraft = draftKey ? draftStore.get(draftKey) : undefined;
   const [text, setText] = useState(initialDraft?.text ?? initialText);
-  const [images, setImages] = useState<ImageAttachment[]>(initialDraft?.images ?? []);
+  const [images, setImages] = useState<ImageAttachment[]>(allowImages ? initialDraft?.images ?? [] : []);
   const [position, setPosition] = useState<{ top: number; left: number; flipAbove: boolean; width: number } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const { dragPosition, dragHandleProps, wasDragged, reset: resetDrag } = useDraggable(popoverRef);
 
-  useCommentDraftSync(draftKey, text, images);
+  useCommentDraftSync(draftKey, text, allowImages ? images : []);
 
   // Reset drag when anchor changes (new annotation) or mode switches
   useEffect(() => { resetDrag(); }, [anchorEl, anchorRect, resetDrag]);
@@ -131,11 +134,11 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   }, [mode, onClose]);
 
   const handleSubmit = useCallback(() => {
-    if (text.trim() || images.length > 0) {
+    if (text.trim() || (allowImages && images.length > 0)) {
       if (draftKey) draftStore.delete(draftKey);
-      onSubmit(text, images.length > 0 ? images : undefined);
+      onSubmit(text, allowImages && images.length > 0 ? images : undefined);
     }
-  }, [text, images, onSubmit, draftKey]);
+  }, [text, images, onSubmit, draftKey, allowImages]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Escape') {
@@ -159,7 +162,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       ? `"${contextText.length > 50 ? contextText.slice(0, 50) + '...' : contextText}"`
       : 'Comment';
 
-  const canSubmit = text.trim().length > 0 || images.length > 0;
+  const canSubmit = text.trim().length > 0 || (allowImages && images.length > 0);
 
   if (mode === 'dialog') {
     return createPortal(
@@ -222,12 +225,14 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           {/* Footer */}
           <div className="flex items-center justify-between px-4 py-3 border-t border-border/50">
             <div className="flex items-center gap-2">
-              <AttachmentsButton
-                images={images}
-                onAdd={(img) => setImages((prev) => [...prev, img])}
-                onRemove={(path) => setImages((prev) => prev.filter((i) => i.path !== path))}
-                variant="inline"
-              />
+              {allowImages && (
+                <AttachmentsButton
+                  images={images}
+                  onAdd={(img) => setImages((prev) => [...prev, img])}
+                  onRemove={(path) => setImages((prev) => prev.filter((i) => i.path !== path))}
+                  variant="inline"
+                />
+              )}
             </div>
             <div className="flex items-center gap-3">
               <span className="text-[10px] text-muted-foreground">{submitHint}</span>
@@ -318,12 +323,14 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       {/* Footer */}
       <div className="flex items-center justify-between px-3 py-2 border-t border-border/50">
         <div className="flex items-center gap-2">
-          <AttachmentsButton
-            images={images}
-            onAdd={(img) => setImages((prev) => [...prev, img])}
-            onRemove={(path) => setImages((prev) => prev.filter((i) => i.path !== path))}
-            variant="inline"
-          />
+          {allowImages && (
+            <AttachmentsButton
+              images={images}
+              onAdd={(img) => setImages((prev) => [...prev, img])}
+              onRemove={(path) => setImages((prev) => prev.filter((i) => i.path !== path))}
+              variant="inline"
+            />
+          )}
         </div>
         <div className="flex items-center gap-3">
           <span className="text-[10px] text-muted-foreground">{submitHint}</span>

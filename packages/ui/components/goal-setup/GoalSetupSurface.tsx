@@ -1089,6 +1089,7 @@ const FactsSurface = React.forwardRef<GoalSetupSurfaceHandle, {
           isGlobal={false}
           initialText={commentingFact.comment || ''}
           draftKey={goalFactCommentDraftKey(bundle, commentingFact.id)}
+          allowImages={false}
           onSubmit={(text) => {
             updateFact(commentingFact.id, { comment: text });
             setCommentingId(null);
