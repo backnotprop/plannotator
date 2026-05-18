@@ -135,23 +135,6 @@ const App: React.FC = () => {
   //   icon  → labels hidden                    — fallback below that
   const planAreaRef = useRef<HTMLDivElement>(null);
   const [actionsLabelMode, setActionsLabelMode] = useState<ActionsLabelMode>('full');
-  // useLayoutEffect + synchronous getBoundingClientRect so the initial
-  // bucket is set before the browser paints. Otherwise narrow viewports
-  // get a one-frame flash of "Global comment"/"Copy plan" labels before
-  // the ResizeObserver callback collapses them.
-  useLayoutEffect(() => {
-    const el = planAreaRef.current;
-    if (!el) return;
-    const bucket = (w: number): ActionsLabelMode =>
-      w >= 800 ? 'full' : w >= 680 ? 'short' : 'icon';
-    setActionsLabelMode(bucket(el.getBoundingClientRect().width));
-    const ro = new ResizeObserver(([entry]) => {
-      const next = bucket(entry.contentRect.width);
-      setActionsLabelMode((prev) => (prev === next ? prev : next));
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
   const [isApiMode, setIsApiMode] = useState(false);
   const [origin, setOrigin] = useState<Origin | null>(null);
   const [gitUser, setGitUser] = useState<string | undefined>();
@@ -657,6 +640,26 @@ const App: React.FC = () => {
     setRenderAs,
   );
 
+  // useLayoutEffect + synchronous getBoundingClientRect so the initial
+  // bucket is set before the browser paints. Otherwise narrow viewports
+  // get a one-frame flash of "Global comment"/"Copy plan" labels before
+  // the ResizeObserver callback collapses them.
+  useLayoutEffect(() => {
+    if (isLoading && !isSharedSession) return;
+
+    const el = planAreaRef.current;
+    if (!el) return;
+    const bucket = (w: number): ActionsLabelMode =>
+      w >= 800 ? 'full' : w >= 680 ? 'short' : 'icon';
+    setActionsLabelMode(bucket(el.getBoundingClientRect().width));
+    const ro = new ResizeObserver(([entry]) => {
+      const next = bucket(entry.contentRect.width);
+      setActionsLabelMode((prev) => (prev === next ? prev : next));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isLoading, isSharedSession]);
+
   // Auto-save annotation drafts
   const { draftBanner, restoreDraft, dismissDraft } = useAnnotationDraft({
     annotations: allAnnotations,
@@ -1149,6 +1152,7 @@ const App: React.FC = () => {
       if (linkedDocHook.isActive) return;
 
       if (goalSetupMode) {
+        if (document.querySelector('[data-comment-popover="true"]')) return;
         if (isTextField && !target?.closest('.goal-shell')) return;
         e.preventDefault();
         if (goalSetupAction.canSubmit) goalSetupSurfaceRef.current?.submit();

@@ -32,7 +32,7 @@ import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { parseAnnotateArgs } from "@plannotator/shared/annotate-args";
 import { parseReviewArgs } from "@plannotator/shared/review-args";
 import { urlToMarkdown, isConvertedSource } from "@plannotator/shared/url-to-markdown";
-import { readFileSync, statSync } from "fs";
+import { statSync } from "fs";
 import path from "path";
 
 /** Shared dependencies injected by the plugin */
