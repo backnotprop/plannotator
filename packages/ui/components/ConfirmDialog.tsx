@@ -36,11 +36,13 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
         event.preventDefault();
+        event.stopPropagation();
         if (onConfirm) onConfirm();
         else onClose();
       }
       if (event.key === 'Escape') {
         event.preventDefault();
+        event.stopPropagation();
         onClose();
       }
     };
@@ -74,8 +76,15 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
-      <div className={`bg-card border border-border rounded-xl w-full shadow-2xl p-6 ${wide ? 'max-w-md' : 'max-w-sm'}`}>
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm p-4"
+      data-plannotator-confirm-dialog="true"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className={`bg-card border border-border rounded-xl w-full shadow-2xl p-6 ${wide ? 'max-w-md' : 'max-w-sm'}`}
+      >
         <div className="flex items-center gap-3 mb-4">
           <div className={`w-10 h-10 rounded-full flex items-center justify-center ${iconColors[variant]}`}>
             {icons[variant]}

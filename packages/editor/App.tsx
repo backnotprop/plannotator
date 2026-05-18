@@ -1128,9 +1128,12 @@ const App: React.FC = () => {
       // Only handle Cmd/Ctrl+Enter
       if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
 
-      // Don't intercept if typing in an input/textarea
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      const isTextField = tag === 'INPUT' || tag === 'TEXTAREA' || Boolean(target?.isContentEditable);
+
+      // Let active confirmation dialogs own Cmd/Ctrl+Enter and Escape.
+      if (document.querySelector('[data-plannotator-confirm-dialog="true"]')) return;
 
       // Don't intercept if any modal is open
       if (showExport || showImport || showFeedbackPrompt || showClaudeCodeWarning ||
@@ -1145,12 +1148,17 @@ const App: React.FC = () => {
       // Don't submit while viewing a linked doc
       if (linkedDocHook.isActive) return;
 
-      e.preventDefault();
-
       if (goalSetupMode) {
+        if (isTextField && !target?.closest('.goal-shell')) return;
+        e.preventDefault();
         if (goalSetupAction.canSubmit) goalSetupSurfaceRef.current?.submit();
         return;
       }
+
+      // Don't intercept if typing in an input/textarea outside goal setup.
+      if (isTextField) return;
+
+      e.preventDefault();
 
       // Annotate mode: gate-enabled + no annotations → approve (empty stdout).
       // Otherwise: send feedback.

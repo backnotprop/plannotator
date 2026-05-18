@@ -391,7 +391,10 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
             : [...current.selectedOptionIds, option.id],
         });
       } else {
-        updateAnswer(activeQuestionId, { selectedOptionIds: [option.id], customAnswer: '' });
+        updateAnswer(activeQuestionId, {
+          selectedOptionIds: current.selectedOptionIds.includes(option.id) ? [] : [option.id],
+          customAnswer: '',
+        });
       }
     };
 
@@ -615,17 +618,20 @@ const QuestionAnswerControls: React.FC<{
 
   const useRecommendation = () => {
     const patch: Partial<GoalSetupQuestionAnswer> = {};
+    const hasRecommendedOptions = Boolean(question.recommendedOptionIds?.length && supportsOptions);
     if (question.recommendedOptionIds?.length && supportsOptions) {
       patch.selectedOptionIds = isMulti
         ? question.recommendedOptionIds
         : [question.recommendedOptionIds[0]];
+      if (!isMulti) patch.customAnswer = '';
     }
     if (question.recommendedAnswer) {
       if (showTextArea) {
         patch.answer = supportsText ? question.recommendedAnswer : undefined;
         patch.customAnswer = !supportsText ? question.recommendedAnswer : undefined;
-      } else if (supportsCustom) {
+      } else if (supportsCustom && !(mode === 'single-custom' && hasRecommendedOptions)) {
         patch.customAnswer = question.recommendedAnswer;
+        if (mode === 'single-custom') patch.selectedOptionIds = [];
       }
     }
     if (Object.keys(patch).length === 0) return;
@@ -808,6 +814,8 @@ const FactsSurface = React.forwardRef<GoalSetupSurfaceHandle, {
   onSubmitted?: () => void;
   onActionStateChange?: (state: GoalSetupActionState) => void;
 }>(({ bundle, onSubmitted, onActionStateChange }, ref) => {
+  // Product choice: facts stay visible after acceptance so later review passes keep context.
+  // `showAccepted` is legacy model state and does not hide rows in this surface.
   const [facts, setFacts] = useState<GoalSetupFactResult[]>(() =>
     bundle.facts.map((fact) => ({
       id: fact.id,
@@ -1080,7 +1088,7 @@ const FactsSurface = React.forwardRef<GoalSetupSurfaceHandle, {
           contextText={commentingFact.text}
           isGlobal={false}
           initialText={commentingFact.comment || ''}
-          draftKey={`goal-fact-${commentingFact.id}`}
+          draftKey={goalFactCommentDraftKey(bundle, commentingFact.id)}
           onSubmit={(text) => {
             updateFact(commentingFact.id, { comment: text });
             setCommentingId(null);
@@ -1187,10 +1195,6 @@ const StatusDot: React.FC<{ complete: boolean; skipped?: boolean }> = ({ complet
 function hasAnswer(question: GoalSetupQuestion, answer: GoalSetupQuestionAnswer): boolean {
   const text = buildAnswerText(question, answer);
   return text.trim().length > 0;
-}
-
-function isQuestionSubmittable(question: GoalSetupQuestion, answer: GoalSetupQuestionAnswer): boolean {
-  return question.required === false || hasAnswer(question, answer);
 }
 
 function buildAnswerText(question: GoalSetupQuestion, answer: GoalSetupQuestionAnswer): string {
@@ -1315,4 +1319,9 @@ function indentMarkdownBlock(text: string, prefix: string): string[] {
   const trimmed = text.trim();
   if (!trimmed) return [`${prefix}_None_`];
   return trimmed.split(/\r?\n/).map((line) => `${prefix}${line}`);
+}
+
+function goalFactCommentDraftKey(bundle: GoalSetupFactsBundle, factId: string): string {
+  const scope = bundle.goalSlug || bundle.title || 'untitled-goal';
+  return `goal-fact-${scope}-${factId}`;
 }

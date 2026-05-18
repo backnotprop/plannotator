@@ -1,4 +1,6 @@
 import { createServer } from "node:http";
+import { existsSync, readFileSync } from "node:fs";
+import os from "node:os";
 
 import {
 	createFactsResult,
@@ -47,6 +49,19 @@ function coerceFacts(body: Record<string, unknown>): GoalSetupFactResult[] {
 	return facts as GoalSetupFactResult[];
 }
 
+/** Detect if running inside WSL (Windows Subsystem for Linux). */
+function detectWSL(): boolean {
+	if (process.platform !== "linux") return false;
+	if (os.release().toLowerCase().includes("microsoft")) return true;
+	try {
+		if (existsSync("/proc/version")) {
+			const content = readFileSync("/proc/version", "utf-8").toLowerCase();
+			return content.includes("wsl") || content.includes("microsoft");
+		}
+	} catch { /* ignore */ }
+	return false;
+}
+
 export async function startGoalSetupServer(options: {
 	bundle: GoalSetupBundle;
 	htmlContent: string;
@@ -54,6 +69,7 @@ export async function startGoalSetupServer(options: {
 }): Promise<GoalSetupServerResult> {
 	const gitUser = detectGitUser();
 	const repoInfo = getRepoInfo();
+	const wslFlag = detectWSL();
 
 	let settled = false;
 	let resolveDecision!: (result: { result?: GoalSetupResult; exit?: boolean }) => void;
@@ -78,15 +94,17 @@ export async function startGoalSetupServer(options: {
 				sharingEnabled: false,
 				repoInfo,
 				projectRoot: process.cwd(),
+				isWSL: wslFlag,
 				serverConfig: getServerConfig(gitUser),
 			});
 		} else if (url.pathname === "/api/config" && req.method === "POST") {
 			try {
-				const body = (await parseBody(req)) as { displayName?: string; diffOptions?: Record<string, unknown>; conventionalComments?: boolean };
+				const body = (await parseBody(req)) as { displayName?: string; diffOptions?: Record<string, unknown>; conventionalComments?: boolean; conventionalLabels?: unknown[] | null };
 				const toSave: Record<string, unknown> = {};
 				if (body.displayName !== undefined) toSave.displayName = body.displayName;
 				if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
 				if (body.conventionalComments !== undefined) toSave.conventionalComments = body.conventionalComments;
+				if (body.conventionalLabels !== undefined) toSave.conventionalLabels = body.conventionalLabels;
 				if (Object.keys(toSave).length > 0) saveConfig(toSave as Parameters<typeof saveConfig>[0]);
 				json(res, { ok: true });
 			} catch {
