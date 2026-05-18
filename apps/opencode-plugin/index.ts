@@ -16,7 +16,8 @@
  */
 
 import { type Plugin, tool } from "@opencode-ai/plugin";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
+import { homedir } from "os";
 import path from "path";
 
 // OpenCode's @hono/node-server patches global.Response with a polyfill that
@@ -67,6 +68,7 @@ import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import {
   stripConflictingPlanModeRules,
 } from "./plan-mode";
+import { sanitizeTag } from "@plannotator/shared/project";
 import {
   applyWorkflowConfig,
   isPlanningAgent,
@@ -127,12 +129,13 @@ interface PlanEdit {
 }
 
 /**
- * Backing file for the current plan. Managed entirely by the plugin;
+ * Backing file for the current plan. Stored outside the workspace in
+ * `~/.plannotator/active/{project}/_active-plan.md` so it never appears
+ * in git status or editor file trees. Managed entirely by the plugin;
  * the agent never sees or touches this file directly.
  */
-export function getPlanBackingPath(directory: string): string {
-  const planDir = path.join(directory, ".opencode", "plans");
-  return path.join(planDir, "_active-plan.md");
+export function getPlanBackingPath(project: string): string {
+  return path.join(homedir(), ".plannotator", "active", project, "_active-plan.md");
 }
 
 /**
@@ -560,7 +563,8 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
           }
 
           // Read existing backing file (empty on first call)
-          const backingPath = getPlanBackingPath(ctx.directory);
+          const project = sanitizeTag(path.basename(ctx.directory)) || "_unknown";
+          const backingPath = getPlanBackingPath(project);
           const backingDir = path.dirname(backingPath);
           mkdirSync(backingDir, { recursive: true });
 
@@ -636,6 +640,9 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
           server.stop();
 
           if (result.approved) {
+            // Clean up backing file after approval
+            try { unlinkSync(backingPath); } catch { /* already gone */ }
+
             const shouldSwitchAgent = result.agentSwitch && result.agentSwitch !== 'disabled';
             const targetAgent = result.agentSwitch || 'build';
 

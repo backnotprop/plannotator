@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { homedir } from "os";
+import path from "path";
 import {
   applyEdits,
   formatWithLineNumbers,
@@ -162,14 +164,14 @@ describe("formatWithLineNumbers", () => {
 // ── getPlanBackingPath ─────────────────────────────────────────────────────
 
 describe("getPlanBackingPath", () => {
-  test("returns path inside .opencode/plans within the given directory", () => {
-    const result = getPlanBackingPath("/some/project");
-    expect(result).toBe("/some/project/.opencode/plans/_active-plan.md");
+  test("returns path inside ~/.plannotator/active/{project}/_active-plan.md", () => {
+    const result = getPlanBackingPath("myproject");
+    expect(result).toBe(path.join(homedir(), ".plannotator", "active", "myproject", "_active-plan.md"));
   });
 
-  test("uses the provided directory as the root", () => {
-    const result = getPlanBackingPath("/home/user/myproject");
-    expect(result).toContain("/home/user/myproject");
+  test("uses the provided project name as the directory segment", () => {
+    const result = getPlanBackingPath("some-project");
+    expect(result).toContain(path.join(".plannotator", "active", "some-project"));
     expect(result).toContain("_active-plan.md");
   });
 });
