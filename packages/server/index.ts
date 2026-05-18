@@ -568,6 +568,14 @@ export async function startPlannotatorServer(
           // Favicon
           if (url.pathname === "/favicon.svg") return handleFavicon();
 
+          // API 404 guard: unknown /api/* routes should return JSON, not HTML
+          if (url.pathname.startsWith("/api/")) {
+            return Response.json(
+              { error: "Not found", path: url.pathname },
+              { status: 404 },
+            );
+          }
+
           // Serve embedded HTML for all other routes (SPA)
           return new Response(htmlContent, {
             headers: { "Content-Type": "text/html" },
