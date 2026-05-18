@@ -1084,14 +1084,16 @@ const FactsSurface = React.forwardRef<GoalSetupSurfaceHandle, {
 
       {commentingFact && (
         <CommentPopover
+          key={commentingFact.id}
           anchorEl={commentingAnchor}
           contextText={commentingFact.text}
           isGlobal={false}
           initialText={commentingFact.comment || ''}
           draftKey={goalFactCommentDraftKey(bundle, commentingFact.id)}
           allowImages={false}
+          allowEmptySubmit
           onSubmit={(text) => {
-            updateFact(commentingFact.id, { comment: text });
+            updateFact(commentingFact.id, { comment: text.trim() ? text : undefined });
             setCommentingId(null);
           }}
           onClose={() => setCommentingId(null)}

@@ -24,6 +24,8 @@ interface CommentPopoverProps {
   draftKey?: string;
   /** Whether image attachments are available in this comment surface. */
   allowImages?: boolean;
+  /** Whether submitting empty text is allowed, for editors that support clearing. */
+  allowEmptySubmit?: boolean;
 }
 
 const MAX_POPOVER_WIDTH = 384;
@@ -69,6 +71,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   onClose,
   draftKey,
   allowImages = true,
+  allowEmptySubmit = false,
 }) => {
   const [mode, setMode] = useState<'popover' | 'dialog'>('popover');
   const initialDraft = draftKey ? draftStore.get(draftKey) : undefined;
@@ -78,6 +81,12 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const { dragPosition, dragHandleProps, wasDragged, reset: resetDrag } = useDraggable(popoverRef);
+
+  useEffect(() => {
+    const nextDraft = draftKey ? draftStore.get(draftKey) : undefined;
+    setText(nextDraft?.text ?? initialText);
+    setImages(allowImages ? nextDraft?.images ?? [] : []);
+  }, [draftKey, initialText, allowImages]);
 
   useCommentDraftSync(draftKey, text, allowImages ? images : []);
 
@@ -134,11 +143,12 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   }, [mode, onClose]);
 
   const handleSubmit = useCallback(() => {
-    if (text.trim() || (allowImages && images.length > 0)) {
+    const canSubmitEmpty = allowEmptySubmit && initialText.trim().length > 0;
+    if (text.trim() || (allowImages && images.length > 0) || canSubmitEmpty) {
       if (draftKey) draftStore.delete(draftKey);
       onSubmit(text, allowImages && images.length > 0 ? images : undefined);
     }
-  }, [text, images, onSubmit, draftKey, allowImages]);
+  }, [text, images, onSubmit, draftKey, allowImages, allowEmptySubmit, initialText]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Escape') {
@@ -162,7 +172,10 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       ? `"${contextText.length > 50 ? contextText.slice(0, 50) + '...' : contextText}"`
       : 'Comment';
 
-  const canSubmit = text.trim().length > 0 || (allowImages && images.length > 0);
+  const canSubmit =
+    text.trim().length > 0 ||
+    (allowImages && images.length > 0) ||
+    (allowEmptySubmit && initialText.trim().length > 0);
 
   if (mode === 'dialog') {
     return createPortal(
