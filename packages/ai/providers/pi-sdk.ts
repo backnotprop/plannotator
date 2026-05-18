@@ -64,6 +64,9 @@ class PiProcess {
 			for (const listener of this.listeners) {
 				listener({ type: "process_exited" });
 			}
+		}).catch(() => {
+			// Swallow — proc.exited rejection shouldn't crash the host process.
+			// The cleanup above already ran in the .then() callback.
 		});
 	}
 

@@ -181,6 +181,9 @@ export async function startReviewServer(
   if (gitContext && !options.initialBase && !isPRMode) {
     detectRemoteDefaultCompareTarget(gitContext.cwd, sessionVcsType).then((remote) => {
       if (remote && !baseEverSwitched) currentBase = remote;
+    }).catch(() => {
+      // Non-critical: remote default branch detection is best-effort.
+      // Failure shouldn't affect server startup or review flow.
     });
   }
 
