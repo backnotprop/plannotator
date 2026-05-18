@@ -70,5 +70,27 @@ export function getServerPort(): number {
  * container or host network interface for SSH/devcontainer/Docker forwarding.
  */
 export function getServerHostname(): string {
+  // Explicit host override (e.g., Tailscale IP)
+  const hostOverride = process.env.PLANNOTATOR_HOST;
+  if (hostOverride) return hostOverride;
+
   return isRemoteSession() ? "0.0.0.0" : LOOPBACK_HOST;
+}
+
+/**
+ * Get the URL for accessing the server.
+ *
+ * Priority:
+ * 1. PLANNOTATOR_SERVER_URL — full URL override (e.g., "https://myhost.example.com")
+ * 2. PLANNOTATOR_HOST — hostname override with the actual port
+ * 3. Default — http://localhost:{port}
+ */
+export function getServerUrl(port: number): string {
+  const serverUrl = process.env.PLANNOTATOR_SERVER_URL;
+  if (serverUrl) return serverUrl;
+
+  const hostname = getServerHostname();
+  // For 0.0.0.0 (remote), advertise localhost since 0.0.0.0 isn't clickable
+  const displayHost = hostname === "0.0.0.0" ? "localhost" : hostname;
+  return `http://${displayHost}:${port}`;
 }

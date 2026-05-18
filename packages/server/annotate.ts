@@ -11,7 +11,7 @@
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
  */
 
-import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
+import { isRemoteSession, getServerHostname, getServerPort, getServerUrl } from "./remote";
 import { getRepoInfo } from "./repo";
 import type { Origin } from "@plannotator/shared/agents";
 import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon } from "./shared-handlers";
@@ -343,7 +343,7 @@ export async function startAnnotateServer(
   }
 
   const port = server.port!;
-  const serverUrl = `http://localhost:${port}`;
+  const serverUrl = getServerUrl(port);
 
   // Notify caller that server is ready
   if (onReady) {

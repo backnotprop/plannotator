@@ -9,7 +9,7 @@
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
  */
 
-import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
+import { isRemoteSession, getServerHostname, getServerPort, getServerUrl } from "./remote";
 import type { Origin } from "@plannotator/shared/agents";
 import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath, getVcsContext, detectRemoteDefaultCompareTarget, gitRuntime } from "./vcs";
 import { parseWorktreeDiffType, resolveBaseBranch } from "@plannotator/shared/review-core";
@@ -1185,7 +1185,7 @@ export async function startReviewServer(
   }
 
   const port = server.port!;
-  serverUrl = `http://localhost:${port}`;
+  serverUrl = getServerUrl(port);
   const exitHandler = () => agentJobs.killAll();
   process.once("exit", exitHandler);
 

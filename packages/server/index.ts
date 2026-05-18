@@ -14,7 +14,7 @@
 
 import type { Origin } from "@plannotator/shared/agents";
 import { resolve } from "path";
-import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
+import { isRemoteSession, getServerHostname, getServerPort, getServerUrl } from "./remote";
 import { openEditorDiff } from "./ide";
 import {
   saveToObsidian,
@@ -53,7 +53,7 @@ import { createExternalAnnotationHandler } from "./external-annotations";
 import { isWSL } from "./browser";
 
 // Re-export utilities
-export { isRemoteSession, getServerPort } from "./remote";
+export { isRemoteSession, getServerPort, getServerUrl, getServerHostname } from "./remote";
 export { openBrowser } from "./browser";
 export * from "./integrations";
 export * from "./storage";
@@ -607,7 +607,7 @@ export async function startPlannotatorServer(
   }
 
   const port = server.port!;
-  const serverUrl = `http://localhost:${port}`;
+  const serverUrl = getServerUrl(port);
 
   // Notify caller that server is ready
   if (onReady) {
