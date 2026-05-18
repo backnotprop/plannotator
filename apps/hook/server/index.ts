@@ -63,10 +63,6 @@ import {
 } from "@plannotator/server/annotate";
 import { loadConfig, resolveUseJina } from "@plannotator/shared/config";
 import { parseReviewArgs } from "@plannotator/shared/review-args";
-import {
-  normalizeGoalSetupBundle,
-  type GoalSetupStage,
-} from "@plannotator/shared/goal-setup";
 import { statSync, existsSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import {
@@ -81,6 +77,7 @@ import { cleanupDaemonState, discoverDaemon, waitForDaemonShutdown } from "@plan
 import { startDaemonRuntime } from "@plannotator/server/daemon/runtime";
 import { createDaemonSessionFactory } from "@plannotator/server/daemon/session-factory";
 import { getDaemonStartCommand } from "@plannotator/server/daemon/start-command";
+import { createDaemonBrowserAuthUrl } from "@plannotator/server/daemon/state";
 import { formatRemoteShareNotice } from "@plannotator/server/share-url";
 import { hostnameOrFallback } from "@plannotator/shared/project";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
@@ -123,7 +120,9 @@ import path from "path";
 
 let planHtmlContentPromise: Promise<string> | undefined;
 let reviewHtmlContentPromise: Promise<string> | undefined;
+let daemonShellHtmlContentPromise: Promise<string> | undefined;
 let htmlAssetsPromise: Promise<typeof import("./html-assets")> | undefined;
+let daemonShellHtmlPromise: Promise<typeof import("./daemon-shell-html")> | undefined;
 
 function getHtmlAssets() {
   htmlAssetsPromise ??= import("./html-assets");
@@ -140,12 +139,10 @@ function getReviewHtmlContent(): Promise<string> {
   return reviewHtmlContentPromise;
 }
 
-async function loadGoalSetupBundle(stage: GoalSetupStage, bundlePath: string) {
-  const raw =
-    bundlePath === "-"
-      ? await Bun.stdin.text()
-      : await Bun.file(path.resolve(bundlePath)).text();
-  return normalizeGoalSetupBundle(JSON.parse(raw), stage);
+function getDaemonShellHtmlContent(): Promise<string> {
+  daemonShellHtmlPromise ??= import("./daemon-shell-html");
+  daemonShellHtmlContentPromise ??= daemonShellHtmlPromise.then((mod) => mod.daemonShellHtmlContent);
+  return daemonShellHtmlContentPromise;
 }
 
 // Check for subcommand
@@ -286,7 +283,11 @@ async function runDaemonCommand(): Promise<void> {
       console.log(JSON.stringify({ ok: false, code: daemon.code, message: daemon.message }));
       process.exit(1);
     }
-    console.log(JSON.stringify({ ok: true, status: daemon.status }));
+    console.log(JSON.stringify({
+      ok: true,
+      status: daemon.status,
+      browserUrl: createDaemonBrowserAuthUrl(daemon.state),
+    }));
     process.exit(0);
   }
 
@@ -320,7 +321,12 @@ async function runDaemonCommand(): Promise<void> {
   if (command === "start") {
     const existing = await discoverDaemon();
     if (existing.ok) {
-      console.log(JSON.stringify({ ok: true, alreadyRunning: true, status: existing.status }));
+      console.log(JSON.stringify({
+        ok: true,
+        alreadyRunning: true,
+        status: existing.status,
+        browserUrl: createDaemonBrowserAuthUrl(existing.state),
+      }));
       process.exit(0);
     }
     if (existing.state && (existing.code === "incompatible" || existing.code === "unhealthy")) {
@@ -331,27 +337,59 @@ async function runDaemonCommand(): Promise<void> {
     }
 
     if (!foreground) {
+      const startLogPath = path.join(tmpdir(), `plannotator-daemon-start-${process.pid}-${Date.now()}.log`);
       const child = Bun.spawn(getDaemonStartCommand(process.argv, process.execPath, launcherCwd), {
         cwd: getInvocationCwd(),
         stdin: "ignore",
         stdout: "ignore",
-        stderr: "ignore",
+        stderr: Bun.file(startLogPath),
+        detached: true,
       });
       child.unref();
+      let startExit: { exitCode?: number; error?: unknown } | undefined;
+      void child.exited
+        .then((exitCode) => {
+          startExit = { exitCode };
+        })
+        .catch((error) => {
+          startExit = { error };
+        });
 
       for (let attempt = 0; attempt < 30; attempt++) {
         await Bun.sleep(100);
         const daemon = await discoverDaemon();
         if (daemon.ok) {
-          console.log(JSON.stringify({ ok: true, started: true, status: daemon.status }));
+          try { rmSync(startLogPath, { force: true }); } catch {}
+          console.log(JSON.stringify({
+            ok: true,
+            started: true,
+            status: daemon.status,
+            browserUrl: createDaemonBrowserAuthUrl(daemon.state),
+          }));
           process.exit(0);
+        }
+        if (startExit) {
+          const log = await readDaemonStartLog(startLogPath);
+          const detail = startExit.error instanceof Error
+            ? startExit.error.message
+            : `exited with code ${startExit.exitCode ?? "unknown"}`;
+          console.log(JSON.stringify({
+            ok: false,
+            code: "daemon-start-failed",
+            message: `Plannotator daemon start ${detail}.${log ? `\n${log}` : ""}`,
+          }));
+          process.exit(1);
         }
       }
 
+      if (!startExit) {
+        await stopDaemonStartChild(child);
+      }
+      const log = await readDaemonStartLog(startLogPath);
       console.log(JSON.stringify({
         ok: false,
         code: "daemon-start-failed",
-        message: "Timed out waiting for the Plannotator daemon to start.",
+        message: `Timed out waiting for the Plannotator daemon to start.${log ? `\n${log}` : ""}`,
       }));
       process.exit(1);
     }
@@ -359,6 +397,7 @@ async function runDaemonCommand(): Promise<void> {
     let runtime: Awaited<ReturnType<typeof startDaemonRuntime>>;
     try {
       runtime = await startDaemonRuntime({
+        shellHtmlContent: await getDaemonShellHtmlContent(),
         createSession: createDaemonSessionFactory({
           planHtmlContent: await getPlanHtmlContent(),
           reviewHtmlContent: await getReviewHtmlContent(),
@@ -371,15 +410,17 @@ async function runDaemonCommand(): Promise<void> {
         },
       });
     } catch (err) {
-      console.log(JSON.stringify({
+      const payload = {
         ok: false,
         code: "daemon-start-failed",
         message: err instanceof Error ? err.message : "Failed to start Plannotator daemon.",
-      }));
+      };
+      console.error(JSON.stringify(payload));
+      console.log(JSON.stringify(payload));
       process.exit(1);
     }
 
-    console.log(JSON.stringify({ ok: true, started: true, status: {
+    console.log(JSON.stringify({ ok: true, started: true, browserUrl: createDaemonBrowserAuthUrl(runtime.state), status: {
       pid: runtime.state.pid,
       endpoint: {
         hostname: runtime.state.hostname,
@@ -580,8 +621,12 @@ async function ensureDaemonClient(options: { pluginError?: boolean } = {}) {
   fail("daemon-start-failed", "Timed out waiting for the Plannotator daemon to start.");
 }
 
-function registerDaemonSessionInterruptCleanup(cancelSession: () => Promise<void>): () => void {
+function registerDaemonSessionInterruptCleanup(
+  cancelSession: () => Promise<void>,
+  options: { cancelOnSigterm?: boolean } = {},
+): () => void {
   let cancelling = false;
+  const cancelOnSigterm = options.cancelOnSigterm ?? true;
   const handleSignal = (exitCode: number) => {
     if (cancelling) return;
     cancelling = true;
@@ -590,10 +635,10 @@ function registerDaemonSessionInterruptCleanup(cancelSession: () => Promise<void
   const onSigint = () => handleSignal(130);
   const onSigterm = () => handleSignal(143);
   process.once("SIGINT", onSigint);
-  process.once("SIGTERM", onSigterm);
+  if (cancelOnSigterm) process.once("SIGTERM", onSigterm);
   return () => {
     process.off("SIGINT", onSigint);
-    process.off("SIGTERM", onSigterm);
+    if (cancelOnSigterm) process.off("SIGTERM", onSigterm);
   };
 }
 
@@ -631,10 +676,13 @@ async function runDaemonSessionRequest(request: PluginRequest, options: { plugin
       fail(created.error.code, created.error.message);
     }
     createdSessionId = created.session.id;
-    unregisterInterruptCleanup = registerDaemonSessionInterruptCleanup(cancelCreatedSession);
+    unregisterInterruptCleanup = registerDaemonSessionInterruptCleanup(cancelCreatedSession, {
+      cancelOnSigterm: !options.pluginError,
+    });
 
     const sessionUrl = new URL(created.session.url);
     const sessionPort = Number(sessionUrl.port);
+    const browserSessionUrl = createDaemonBrowserAuthUrl(daemon.state, sessionUrl.pathname);
     const session: PluginSessionInfo = {
       mode: created.session.mode,
       url: created.session.url,
@@ -652,11 +700,11 @@ async function runDaemonSessionRequest(request: PluginRequest, options: { plugin
 
     await withProcessCwd(request.cwd, async () => {
       if (request.action === "review") {
-        await handleReviewServerReady(created.session.url, daemon.state.isRemote, sessionPort);
+        await handleReviewServerReady(browserSessionUrl, daemon.state.isRemote, sessionPort);
       } else if (request.action === "annotate" || request.action === "annotate-last") {
-        await handleAnnotateServerReady(created.session.url, daemon.state.isRemote, sessionPort);
+        await handleAnnotateServerReady(browserSessionUrl, daemon.state.isRemote, sessionPort);
       } else {
-        await handleServerReady(created.session.url, daemon.state.isRemote, sessionPort);
+        await handleServerReady(browserSessionUrl, daemon.state.isRemote, sessionPort);
       }
     });
 
@@ -817,7 +865,7 @@ if (args[0] === "sessions") {
       console.error(`Session #${n} not found. ${sessions.length} active session(s).`);
       process.exit(1);
     }
-    await openBrowser(session.url, { isRemote: daemon.status.endpoint.isRemote });
+    await openBrowser(createDaemonBrowserAuthUrl(daemon.state, new URL(session.url).pathname), { isRemote: daemon.status.endpoint.isRemote });
     console.error(`Opened ${session.mode} session in browser: ${session.url}`);
     process.exit(0);
   }
@@ -1003,55 +1051,6 @@ if (args[0] === "sessions") {
     shareBaseUrl,
     pasteApiUrl,
   });
-  process.exit(0);
-
-} else if (args[0] === "setup-goal") {
-  // ============================================
-  // GOAL SETUP MODE
-  // ============================================
-
-  const stage = args[1] as GoalSetupStage | undefined;
-  const bundlePath = args[2];
-
-  if ((stage !== "interview" && stage !== "facts") || !bundlePath) {
-    console.error(
-      "Usage: plannotator setup-goal <interview|facts> <bundle.json | -> [--json]",
-    );
-    process.exit(1);
-  }
-
-  let bundle: Awaited<ReturnType<typeof loadGoalSetupBundle>>;
-  try {
-    bundle = await loadGoalSetupBundle(stage, bundlePath);
-  } catch (err) {
-    console.error(
-      `Failed to load goal setup bundle: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    process.exit(1);
-  }
-
-  const outcome = await runDaemonSessionRequest({
-    action: "goal-setup",
-    origin: detectedOrigin,
-    cwd: getInvocationCwd(),
-    bundle,
-    stage,
-    goalSlug: bundle.goalSlug,
-  });
-
-  if (outcome?.result) {
-    const result = outcome.result as { result?: unknown; exit?: boolean };
-    if (result.exit) {
-      console.log(JSON.stringify({ decision: "dismissed", stage }));
-    } else if (result.result) {
-      const output = {
-        decision: "submitted",
-        stage,
-        result: result.result,
-      };
-      console.log(jsonFlag ? JSON.stringify(output) : JSON.stringify(output, null, 2));
-    }
-  }
   process.exit(0);
 
 } else if (args[0] === "copilot-plan") {

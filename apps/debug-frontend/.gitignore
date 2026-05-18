@@ -1,0 +1,4 @@
+node_modules
+dist
+.vitest-attachments
+src/**/__screenshots__

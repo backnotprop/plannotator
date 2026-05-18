@@ -135,7 +135,13 @@ describe("OpenCode binary client", () => {
   });
 
   test("uses the local source shim before auto-installing", () => {
-    const existing = new Set(["/repo/plannotator/bin/plannotator.js"]);
+    const existing = new Set([
+      "/repo/plannotator/bin/plannotator.js",
+      "/repo/plannotator/apps/hook/server/index.ts",
+      "/repo/plannotator/apps/hook/dist/index.html",
+      "/repo/plannotator/apps/hook/dist/review.html",
+      "/repo/plannotator/apps/debug-frontend/dist/index.html",
+    ]);
     const commands: Array<[string, string[]]> = [];
     const run: CommandRunner = (command, args) => {
       commands.push([command, args]);

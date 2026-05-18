@@ -1,0 +1,27 @@
+{
+  "name": "@plannotator/debug-tui",
+  "description": "Terminal UI agent simulator for testing daemon sessions. Not production code.",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/main.tsx",
+    "run": "bun run src/cli.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:e2e": "PLANNOTATOR_AGENT_SIMULATOR_E2E=1 vitest run src/e2e/full-loop.test.ts",
+    "check": "bun run typecheck && bun run test"
+  },
+  "dependencies": {
+    "@opentui/core": "0.2.6",
+    "@opentui/react": "0.2.6",
+    "@plannotator/shared": "workspace:*",
+    "react": "^19.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@types/react": "^19.2.0",
+    "typescript": "~5.8.2",
+    "vitest": "^4.0.16"
+  }
+}

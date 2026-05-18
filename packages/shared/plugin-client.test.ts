@@ -42,6 +42,23 @@ describe("unsafeWindowsShellInvocationError", () => {
     ).toContain("opencode!calc");
   });
 
+  test("rejects grouping and quote metacharacters in Windows command wrapper arguments", () => {
+    expect(
+      unsafeWindowsShellInvocationError(
+        "C:\\Tools\\plannotator.cmd",
+        ["plugin", "plan", "--origin", "opencode)"],
+        "win32",
+      ),
+    ).toContain("opencode)");
+    expect(
+      unsafeWindowsShellInvocationError(
+        "C:\\Tools\\plannotator.cmd",
+        ["plugin", "plan", "--origin", 'opencode"'],
+        "win32",
+      ),
+    ).toContain('opencode"');
+  });
+
   test("does not apply shell-wrapper checks on non-Windows platforms", () => {
     expect(
       unsafeWindowsShellInvocationError(

@@ -88,7 +88,7 @@ function hasTimeout(timeoutMs: number | null | undefined): timeoutMs is number {
 }
 
 function hasWindowsShellMetachar(value: string): boolean {
-  return /[&|<>^%!]/.test(value);
+  return /[&|<>^%!()"]/.test(value);
 }
 
 function shouldUseShell(command: string, platform: NodeJS.Platform = process.platform): boolean {
@@ -399,6 +399,8 @@ export function runPluginAnnotate(
   run: PluginCommandRunner = defaultPluginRunner,
   options: CommandRunOptions = {},
 ): Promise<PluginResponse<PluginAnnotateResult>> {
+  // annotate-last is part of the JSON request mode; the binary intentionally
+  // shares the same plugin annotate subcommand for all annotation flows.
   return runPluginCommand(binaryPath, "annotate", request, run, options);
 }
 

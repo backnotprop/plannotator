@@ -1,5 +1,6 @@
 import type {
   DaemonRemoteShareNotice,
+  DaemonSessionEvent,
   DaemonSessionMode,
   DaemonSessionStatus,
   DaemonSessionSummary,
@@ -52,6 +53,8 @@ type Waiter<TResult> = {
   reject: (err: Error) => void;
 };
 
+export type DaemonSessionStoreListener = (event: DaemonSessionEvent) => void;
+
 const TERMINAL_STATUSES = new Set<DaemonSessionStatus>([
   "completed",
   "cancelled",
@@ -71,12 +74,20 @@ export function createDaemonSessionId(): string {
 export class DaemonSessionStore {
   private sessions = new Map<string, DaemonSessionRecord>();
   private waiters = new Map<string, Waiter<unknown>[]>();
+  private listeners = new Set<DaemonSessionStoreListener>();
   private readonly idFactory: () => string;
   private readonly now: () => number;
 
   constructor(options: DaemonSessionStoreOptions = {}) {
     this.idFactory = options.idFactory ?? createDaemonSessionId;
     this.now = options.now ?? (() => Date.now());
+  }
+
+  onMutation(listener: DaemonSessionStoreListener): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
   }
 
   create<TResult = unknown>(input: CreateDaemonSessionInput<TResult>): DaemonSessionRecord<TResult> {
@@ -100,6 +111,7 @@ export class DaemonSessionStore {
       ...(input.remoteShare && { remoteShare: input.remoteShare }),
     };
     this.sessions.set(id, record);
+    this.emit("session-created", record);
     if (TERMINAL_STATUSES.has(record.status)) this.resolveWaiters(record);
     return record;
   }
@@ -149,7 +161,9 @@ export class DaemonSessionStore {
     record.updatedAt = iso(now);
     record.expiresAt = iso(now + TERMINAL_SESSION_TTL_MS);
     this.resolveWaiters(record);
+    this.emit("session-updated", record);
     void this.disposeResources(record);
+    this.releaseRoutingPayloads(record);
     return record;
   }
 
@@ -162,7 +176,9 @@ export class DaemonSessionStore {
     record.updatedAt = iso(now);
     record.expiresAt = iso(now + TERMINAL_SESSION_TTL_MS);
     this.resolveWaiters(record);
+    this.emit("session-updated", record);
     void this.disposeResources(record);
+    this.releaseRoutingPayloads(record);
     return record;
   }
 
@@ -175,6 +191,7 @@ export class DaemonSessionStore {
     record.updatedAt = iso(now);
     record.expiresAt = iso(now + TERMINAL_SESSION_TTL_MS);
     this.resolveWaiters(record);
+    this.emit("session-updated", record);
     await this.disposeRecord(record);
     return record;
   }
@@ -196,6 +213,7 @@ export class DaemonSessionStore {
     this.sessions.delete(id);
     this.rejectWaiters(id, new Error(`Session deleted: ${id}`));
     await this.disposeRecord(record);
+    this.emit("session-removed", record);
     return true;
   }
 
@@ -214,6 +232,7 @@ export class DaemonSessionStore {
       record.updatedAt = iso(now);
       expired.push(record);
       this.resolveWaiters(record);
+      this.emit("session-updated", record);
       await this.removeRecord(record);
     }
     return expired;
@@ -229,9 +248,20 @@ export class DaemonSessionStore {
         record.updatedAt = iso(now);
         record.expiresAt = iso(now + TERMINAL_SESSION_TTL_MS);
         this.resolveWaiters(record);
+        this.emit("session-updated", record);
       }
       await this.disposeRecord(record);
     }
+  }
+
+  private emit(type: DaemonSessionEvent["type"], record: DaemonSessionRecord): void {
+    if (this.listeners.size === 0) return;
+    const event: DaemonSessionEvent = {
+      type,
+      at: iso(this.now()),
+      session: this.summary(record, { includeRemoteShare: true }),
+    };
+    for (const listener of this.listeners) listener(event);
   }
 
   private resolveWaiters(record: DaemonSessionRecord): void {
@@ -249,12 +279,12 @@ export class DaemonSessionStore {
   private async removeRecord(record: DaemonSessionRecord): Promise<void> {
     this.sessions.delete(record.id);
     await this.disposeRecord(record);
+    this.emit("session-removed", record);
   }
 
   private async disposeRecord(record: DaemonSessionRecord): Promise<void> {
     await this.disposeResources(record);
-    record.htmlContent = undefined;
-    record.handleRequest = undefined;
+    this.releaseRoutingPayloads(record);
   }
 
   private async disposeResources(record: DaemonSessionRecord): Promise<void> {
@@ -267,5 +297,10 @@ export class DaemonSessionStore {
     } catch {
       // Best-effort cleanup; callers observe session status separately.
     }
+  }
+
+  private releaseRoutingPayloads(record: DaemonSessionRecord): void {
+    record.htmlContent = undefined;
+    record.handleRequest = undefined;
   }
 }

@@ -7,6 +7,7 @@ import { createDaemonState, getDaemonPaths, writeDaemonState } from "./state";
 import { cleanupDaemonState, DaemonClient, discoverDaemon } from "./client";
 
 let dirs: string[] = [];
+const AUTH_TOKEN = "test-auth-token-test-auth-token-1234";
 const envKeys = ["PLANNOTATOR_REMOTE", "PLANNOTATOR_PORT", "SSH_TTY", "SSH_CONNECTION"];
 const originalEnv: Record<string, string | undefined> = Object.fromEntries(
   envKeys.map((key) => [key, process.env[key]]),
@@ -41,6 +42,7 @@ function state() {
     hostname: "127.0.0.1",
     isRemote: false,
     remoteSource: "local",
+    authToken: AUTH_TOKEN,
     startedAt: "2026-01-01T00:00:00.000Z",
   });
 }
@@ -59,7 +61,7 @@ describe("DaemonClient", () => {
     await client.createSession({ request: { action: "plan", origin: "opencode", plan: "x" } });
 
     expect(calls[0].url).toBe("http://localhost:4321/daemon/sessions");
-    expect(calls[0].headers.get("authorization")).toBeNull();
+    expect(calls[0].headers.get("authorization")).toBe(`Bearer ${AUTH_TOKEN}`);
     expect(calls[0].headers.get("content-type")).toBe("application/json");
     expect(await calls[0].json()).toEqual({ request: { action: "plan", origin: "opencode", plan: "x" } });
   });

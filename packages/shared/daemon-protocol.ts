@@ -9,15 +9,26 @@ export const PLANNOTATOR_DAEMON_FEATURES = [
   "status",
   "sessions",
   "session-create",
+  "session-bootstrap",
   "session-result-wait",
   "session-cancel",
   "shutdown",
+  "events",
+  "debug-events",
+] as const;
+
+export const PLANNOTATOR_DAEMON_SESSION_VIEWS = [
+  "plan",
+  "review",
+  "annotate",
+  "archive",
+  "setup-goal",
 ] as const;
 
 export type DaemonFeature = (typeof PLANNOTATOR_DAEMON_FEATURES)[number];
 export type DaemonSessionMode = PluginSessionMode;
+export type DaemonSessionView = (typeof PLANNOTATOR_DAEMON_SESSION_VIEWS)[number];
 export type DaemonSessionStatus =
-  | "pending"
   | "active"
   | "completed"
   | "cancelled"
@@ -82,6 +93,14 @@ export interface DaemonCreateSessionResponse {
   session: DaemonSessionSummary;
 }
 
+export interface DaemonSessionBootstrapResponse {
+  ok: true;
+  session: DaemonSessionSummary;
+  apiBase: string;
+  capabilities: DaemonCapabilities;
+  supportedSessionViews: DaemonSessionView[];
+}
+
 export interface DaemonSessionResultResponse<T = unknown> {
   ok: true;
   session: DaemonSessionSummary;
@@ -107,6 +126,7 @@ export type DaemonErrorCode =
   | "session-not-found"
   | "session-cancelled"
   | "session-expired"
+  | "unauthorized"
   | "invalid-request"
   | "internal-error";
 
@@ -121,6 +141,55 @@ export interface DaemonErrorResponse {
 }
 
 export type DaemonResponse<T> = T | DaemonErrorResponse;
+
+export type DaemonEventType =
+  | "snapshot"
+  | "daemon-status"
+  | "session-created"
+  | "session-updated"
+  | "session-removed"
+  | "daemon-error"
+  | "debug-log";
+
+export type DaemonEvent =
+  | {
+      type: "snapshot";
+      at: string;
+      status: DaemonStatus;
+      sessions: DaemonSessionSummary[];
+    }
+  | {
+      type: "daemon-status";
+      at: string;
+      status: DaemonStatus;
+    }
+  | {
+      type: "session-created" | "session-updated" | "session-removed";
+      at: string;
+      session: DaemonSessionSummary;
+    }
+  | {
+      type: "daemon-error";
+      at: string;
+      code: DaemonErrorCode | string;
+      message: string;
+      sessionId?: string;
+    }
+  | {
+      type: "debug-log";
+      at: string;
+      source: string;
+      message: string;
+      level?: "debug" | "info" | "warn" | "error";
+      sessionId?: string;
+      scenarioId?: string;
+      data?: unknown;
+    };
+
+export type DaemonSessionEvent = Extract<
+  DaemonEvent,
+  { type: "session-created" | "session-updated" | "session-removed" }
+>;
 
 export function getDaemonCapabilities(): DaemonCapabilities {
   return {
@@ -143,6 +212,10 @@ export function createDaemonErrorResponse(
     protocolVersion: PLANNOTATOR_DAEMON_PROTOCOL_VERSION,
     error: { code, message },
   };
+}
+
+export function serializeDaemonEvent(event: DaemonEvent): string {
+  return `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
 }
 
 export function isCompatibleDaemonCapabilities(

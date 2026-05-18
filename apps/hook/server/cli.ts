@@ -29,7 +29,6 @@ export function formatTopLevelHelp(): string {
     "  plannotator annotate <file.md | file.html | https://... | folder/>  [--no-jina] [--gate] [--json] [--hook]",
     "  plannotator last",
     "  plannotator archive",
-    "  plannotator setup-goal <interview|facts> <bundle.json | -> [--json]",
     "  plannotator sessions",
     "  plannotator daemon start|status|stop",
     "  plannotator improve-context",

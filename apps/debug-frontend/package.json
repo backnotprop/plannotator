@@ -1,0 +1,44 @@
+{
+  "name": "@plannotator/debug-frontend",
+  "description": "Debug/development harness UI for the Plannotator daemon runtime. Not production code.",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && bun run scripts/verify-single-file-build.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint . --fix",
+    "fmt": "oxfmt --ignore-path .oxfmtignore --write .",
+    "fmt:check": "oxfmt --ignore-path .oxfmtignore --check .",
+    "test": "vitest run",
+    "test:browser": "vitest run --config vitest.browser.config.ts",
+    "check": "bun run typecheck && bun run lint && bun run fmt:check && bun run test"
+  },
+  "dependencies": {
+    "@plannotator/shared": "workspace:*",
+    "@plannotator/ui": "workspace:*",
+    "@tanstack/react-router": "^1.141.0",
+    "immer": "^10.2.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "zustand": "^5.0.13"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.18",
+    "@tanstack/router-plugin": "^1.141.0",
+    "@types/node": "^22.14.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "@vitest/browser-playwright": "^4.0.16",
+    "oxfmt": "^0.17.0",
+    "oxlint": "^1.31.0",
+    "tailwindcss": "^4.1.18",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0",
+    "vite-plugin-singlefile": "^2.0.3",
+    "vitest": "^4.0.16"
+  }
+}

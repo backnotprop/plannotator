@@ -5,6 +5,7 @@ import { createDaemonFetchHandler, type DaemonFetchContext } from "./server";
 import type { DaemonCreateSessionRequest } from "@plannotator/shared/daemon-protocol";
 
 export interface StartDaemonRuntimeOptions extends DaemonStateOptions {
+  shellHtmlContent: string;
   createSession: (
     request: DaemonCreateSessionRequest,
     context: DaemonFetchContext,
@@ -73,6 +74,7 @@ export async function startDaemonRuntime(options: StartDaemonRuntimeOptions): Pr
     handler = createDaemonFetchHandler({
       state,
       store,
+      shellHtmlContent: options.shellHtmlContent,
       createSession: options.createSession,
       onShutdown: async () => {
         await runtime?.stop();

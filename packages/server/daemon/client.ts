@@ -75,6 +75,12 @@ export class DaemonClient {
   private async requestJson(path: string, init: RequestInit): Promise<unknown> {
     const headers = new Headers(init.headers);
     if (init.body && !headers.has("content-type")) headers.set("content-type", "application/json");
+    if (path !== "/daemon/capabilities") {
+      const token = stateAuthToken(this.state);
+      if (token && !headers.has("authorization")) {
+        headers.set("authorization", `Bearer ${token}`);
+      }
+    }
 
     const res = await this.fetchImpl(`${this.state.baseUrl}${path}`, {
       ...init,
@@ -96,6 +102,20 @@ function stateBaseUrl(state: unknown): string | undefined {
 function statePid(state: unknown): number | undefined {
   const pid = (state as { pid?: unknown } | null)?.pid;
   return typeof pid === "number" && Number.isInteger(pid) && pid > 0 ? pid : undefined;
+}
+
+function stateAuthToken(state: unknown): string | undefined {
+  const token = (state as { authToken?: unknown } | null)?.authToken;
+  return typeof token === "string" && token.length > 0 ? token : undefined;
+}
+
+function withDaemonAuth(state: unknown, headers?: HeadersInit): Headers {
+  const next = new Headers(headers);
+  const token = stateAuthToken(state);
+  if (token && !next.has("authorization")) {
+    next.set("authorization", `Bearer ${token}`);
+  }
+  return next;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -133,7 +153,9 @@ async function pollDaemonStatus(
   while (Date.now() < deadline) {
     if (pid && !isAlive(pid)) return evaluate({ kind: "pid-exited" }) ?? false;
     try {
-      const res = await fetchImpl(`${baseUrl}/daemon/status`);
+      const res = await fetchImpl(`${baseUrl}/daemon/status`, {
+        headers: withDaemonAuth(state),
+      });
       const status = await res.json().catch(() => null) as { pid?: unknown } | null;
       const decision = evaluate({ kind: "status", ok: res.ok, pid: status?.pid });
       if (decision !== undefined) return decision;
@@ -189,7 +211,7 @@ export async function cleanupDaemonState(state: unknown, options: DaemonClientOp
     try {
       const res = await fetchImpl(`${baseUrl}/daemon/shutdown`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: withDaemonAuth(state, { "content-type": "application/json" }),
         body: "{}",
       });
       endpointResponded = true;
@@ -208,7 +230,7 @@ export async function cleanupDaemonState(state: unknown, options: DaemonClientOp
         if (await waitForDaemonReachable(state, options)) {
           const retry = await fetchImpl(`${baseUrl}/daemon/shutdown`, {
             method: "POST",
-            headers: { "content-type": "application/json" },
+            headers: withDaemonAuth(state, { "content-type": "application/json" }),
             body: "{}",
           });
           if (!retry.ok) {

@@ -7,6 +7,13 @@ import { startDaemonRuntime, type DaemonRuntime } from "./runtime";
 
 let dirs: string[] = [];
 let runtimes: DaemonRuntime[] = [];
+const shellHtml = "<html><head></head><body>Shell</body></html>";
+
+function daemonAuthHeaders(runtime: DaemonRuntime, headers?: HeadersInit): Headers {
+  const next = new Headers(headers);
+  next.set("authorization", `Bearer ${runtime.state.authToken}`);
+  return next;
+}
 
 function tempBase(): string {
   const dir = mkdtempSync(join(tmpdir(), "plannotator-daemon-runtime-"));
@@ -28,6 +35,7 @@ describe("startDaemonRuntime", () => {
       baseDir,
       hostname: "127.0.0.1",
       port: 0,
+      shellHtmlContent: shellHtml,
       createSession: (_request, { endpoint }) => runtime.store.create({
         id: "s1",
         mode: "plan",
@@ -53,6 +61,7 @@ describe("startDaemonRuntime", () => {
       baseDir,
       hostname: "127.0.0.1",
       port: 0,
+      shellHtmlContent: shellHtml,
       createSession: (_request, { endpoint }) => runtime.store.create({
         id: "s1",
         mode: "plan",
@@ -67,6 +76,7 @@ describe("startDaemonRuntime", () => {
       baseDir,
       hostname: "127.0.0.1",
       port: 0,
+      shellHtmlContent: shellHtml,
       createSession: () => {
         throw new Error("should not create");
       },
@@ -79,6 +89,7 @@ describe("startDaemonRuntime", () => {
       baseDir,
       hostname: "127.0.0.1",
       port: 0,
+      shellHtmlContent: shellHtml,
       createSession: (_request, { endpoint }) => runtime.store.create({
         id: "s1",
         mode: "plan",
@@ -90,7 +101,7 @@ describe("startDaemonRuntime", () => {
 
     const res = await fetch(`${runtime.state.baseUrl}/daemon/shutdown`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: daemonAuthHeaders(runtime, { "content-type": "application/json" }),
       body: "{}",
     });
     expect((await res.json()).shuttingDown).toBe(true);
@@ -109,6 +120,7 @@ describe("startDaemonRuntime", () => {
       baseDir,
       hostname: "127.0.0.1",
       port: 0,
+      shellHtmlContent: shellHtml,
       createSession: (_request, { endpoint, store }) => store.create({
         id: "s1",
         mode: "plan",
@@ -125,7 +137,7 @@ describe("startDaemonRuntime", () => {
     try {
       const create = await fetch(`${runtime.state.baseUrl}/daemon/sessions`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: daemonAuthHeaders(runtime, { "content-type": "application/json" }),
         body: JSON.stringify({ request: { action: "plan", origin: "opencode", cwd: process.cwd(), plan: "# Plan" } }),
       });
       expect(create.status).toBe(201);
