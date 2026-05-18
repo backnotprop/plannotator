@@ -19,11 +19,14 @@ import { createWorktree, ensureObjectAvailable, fetchRef } from "@plannotator/sh
 import { createWorktreePool, type WorktreePool } from "@plannotator/shared/worktree-pool";
 import type {
   PluginAnnotateRequest,
+  PluginGoalSetupRequest,
   PluginPlanRequest,
   PluginReviewRequest,
 } from "@plannotator/shared/plugin-protocol";
+import { normalizeGoalSetupBundle } from "@plannotator/shared/goal-setup";
 import { createPlannotatorSession } from "../index";
 import { createAnnotateSession } from "../annotate";
+import { createGoalSetupSession } from "../goal-setup";
 import { createReviewSession } from "../review";
 import { detectProjectName } from "../project";
 import { createRemoteShareNotice } from "../share-url";
@@ -637,6 +640,29 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
         handleRequest: session.handleRequest,
         dispose: registerSessionDecision(context, id, () => session.waitForDecision(), () => session.dispose()),
         remoteShare,
+      });
+      return record;
+    }
+
+    if (request.action === "goal-setup") {
+      const bundle = normalizeGoalSetupBundle(request.bundle, request.stage);
+      const session = await createGoalSetupSession({
+        cwd,
+        bundle,
+        origin: request.origin,
+        htmlContent: options.planHtmlContent,
+      });
+      const record = context.store.create({
+        id,
+        mode: "goal-setup",
+        url,
+        project,
+        label: `goal-setup-${bundle.stage}-${request.goalSlug || project}`,
+        origin: request.origin,
+        ttlMs,
+        htmlContent: session.htmlContent,
+        handleRequest: session.handleRequest,
+        dispose: registerSessionDecision(context, id, () => session.waitForDecision(), () => session.dispose()),
       });
       return record;
     }
