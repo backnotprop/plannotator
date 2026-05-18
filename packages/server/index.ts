@@ -81,6 +81,10 @@ export interface ServerOptions {
   onReady?: (url: string, isRemote: boolean, port: number) => void;
   /** OpenCode client for querying available agents (OpenCode only) */
   opencodeClient?: OpencodeClient;
+  /** Optional session ID for isolating storage and decisions per session */
+  sessionId?: string;
+  /** Working directory for the project (defaults to process.cwd()) */
+  cwd?: string;
   /** When set to "archive", server runs in read-only archive browser mode */
   mode?: "archive";
   /** Custom plan save path — used by archive mode to find saved plans */
@@ -94,6 +98,10 @@ export interface ServerResult {
   url: string;
   /** Whether running in remote mode */
   isRemote: boolean;
+  /** Session ID (provided or auto-generated) */
+  sessionId: string;
+  /** Working directory for the project */
+  cwd: string;
   /** Wait for user decision (approve/deny) */
   waitForDecision: () => Promise<{
     approved: boolean;
@@ -125,7 +133,9 @@ const RETRY_DELAY_MS = 500;
 export async function startPlannotatorServer(
   options: ServerOptions
 ): Promise<ServerResult> {
-  const { plan, origin, htmlContent, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, onReady, mode, customPlanPath } = options;
+  const { plan, origin, htmlContent, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, onReady, mode, customPlanPath, sessionId: optSessionId, cwd: optCwd } = options;
+  const sessionId = optSessionId ?? crypto.randomUUID();
+  const cwd = optCwd ?? process.cwd();
 
   const isRemote = isRemoteSession();
   const configuredPort = getServerPort();
@@ -618,6 +628,8 @@ export async function startPlannotatorServer(
     port,
     url: serverUrl,
     isRemote,
+    sessionId,
+    cwd,
     waitForDecision: () => decisionPromise,
     ...(donePromise && { waitForDone: () => donePromise }),
     stop: () => server.stop(),
