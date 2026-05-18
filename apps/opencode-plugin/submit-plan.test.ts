@@ -53,6 +53,11 @@ describe("applyEdits", () => {
     expect(result).toEqual(["hello"]);
   });
 
+  test("edit on empty file (start=1, end=1) — splice clamps gracefully (#742)", () => {
+    const result = applyEdits([], [{ start: 1, end: 1, content: "# Plan\nGoals" }]);
+    expect(result).toEqual(["# Plan", "Goals"]);
+  });
+
   test("content with trailing newline produces trailing empty string", () => {
     const result = applyEdits([], [{ start: 1, content: "line1\nline2\n" }]);
     expect(result).toEqual(["line1", "line2", ""]);
@@ -125,6 +130,12 @@ describe("validateEdits", () => {
 
   test("passes for empty file with start=1", () => {
     expect(validateEdits([], [{ start: 1, content: "hello" }])).toBeNull();
+  });
+
+  test("passes for empty file with start=1 and end=1 (#742)", () => {
+    // Agent or framework may include end on first call; validation should
+    // not reject it since applyEdits handles this via splice clamping.
+    expect(validateEdits([], [{ start: 1, end: 1, content: "# Plan\nGoals" }])).toBeNull();
   });
 });
 

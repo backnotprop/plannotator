@@ -185,7 +185,11 @@ export function validateEdits(existingLines: string[], edits: PlanEdit[]): strin
       if (!Number.isInteger(edit.end) || edit.end < edit.start) {
         return `end (${edit.end}) must be >= start (${edit.start})`;
       }
-      if (edit.end > lineCount) {
+      // On an empty file (lineCount === 0) every edit is a pure insert;
+      // end is semantically meaningless and applyEdits handles it via splice
+      // clamping. Rejecting here breaks first-call payloads where the agent
+      // or framework includes end (see #742).
+      if (edit.end > lineCount && lineCount > 0) {
         return `end (${edit.end}) exceeds file length (${lineCount})`;
       }
     }
