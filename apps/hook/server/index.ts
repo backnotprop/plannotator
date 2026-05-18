@@ -771,7 +771,7 @@ if (args[0] === "sessions") {
       if (process.env.PLANNOTATOR_DEBUG) {
         console.error(`[DEBUG] Rollout: ${rolloutPath}`);
       }
-      const msg = getLastCodexMessage(rolloutPath);
+      const msg = getLastCodexMessage(rolloutPath, { beforeActiveTurn: true });
       if (msg) {
         lastMessage = { messageId: codexThreadId, text: msg.text, lineNumbers: [] };
       }
