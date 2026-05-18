@@ -154,7 +154,6 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
   const [noteOpenForId, setNoteOpenForId] = useState<string | null>(null);
   const [recommendationActionForId, setRecommendationActionForId] = useState<{
     id: string;
-    action: 'accept' | 'dismiss';
     nonce: number;
   } | null>(null);
   const questionRefs = useRef(new Map<string, HTMLDivElement>());
@@ -319,7 +318,7 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
         const key = event.key.toLowerCase();
         if (key === 'u') {
           event.preventDefault();
-          setRecommendationActionForId({ id: activeQuestionId, action: 'accept', nonce: Date.now() });
+          setRecommendationActionForId({ id: activeQuestionId, nonce: Date.now() });
           return;
         }
         if (key === 'k') {
@@ -566,7 +565,7 @@ const QuestionAnswerControls: React.FC<{
   noteOpen: boolean;
   onNoteOpenChange: (open: boolean) => void;
   onSkip: () => void;
-  recommendationCommand: { action: 'accept' | 'dismiss'; nonce: number } | null;
+  recommendationCommand: { nonce: number } | null;
 }> = ({ question, answer, onChange, noteOpen, onNoteOpenChange, onSkip, recommendationCommand }) => {
   const mode = question.answerMode || 'text';
   const options = question.options || [];
@@ -616,7 +615,7 @@ const QuestionAnswerControls: React.FC<{
     });
   };
 
-  const useRecommendation = () => {
+  const applyRecommendation = () => {
     const patch: Partial<GoalSetupQuestionAnswer> = {};
     const hasRecommendedOptions = Boolean(question.recommendedOptionIds?.length && supportsOptions);
     if (question.recommendedOptionIds?.length && supportsOptions) {
@@ -626,10 +625,11 @@ const QuestionAnswerControls: React.FC<{
       if (!isMulti) patch.customAnswer = '';
     }
     if (question.recommendedAnswer) {
-      if (showTextArea) {
-        patch.answer = supportsText ? question.recommendedAnswer : undefined;
-        patch.customAnswer = !supportsText ? question.recommendedAnswer : undefined;
-      } else if (supportsCustom && !(mode === 'single-custom' && hasRecommendedOptions)) {
+      if (supportsText) {
+        patch.answer = question.recommendedAnswer;
+      } else if (mode === 'custom') {
+        patch.customAnswer = question.recommendedAnswer;
+      } else if (supportsCustom && !hasRecommendedOptions) {
         patch.customAnswer = question.recommendedAnswer;
         if (mode === 'single-custom') patch.selectedOptionIds = [];
       }
@@ -641,7 +641,7 @@ const QuestionAnswerControls: React.FC<{
 
   useEffect(() => {
     if (!recommendationCommand) return;
-    if (recommendationCommand.action === 'accept') useRecommendation();
+    applyRecommendation();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recommendationCommand?.nonce]);
 
@@ -665,7 +665,7 @@ const QuestionAnswerControls: React.FC<{
           {canUseRecommendation && (
             <button
               type="button"
-              onClick={useRecommendation}
+              onClick={applyRecommendation}
               className="mt-0.5 shrink-0 rounded-md bg-primary/15 px-2.5 py-1 text-[12px] font-medium text-primary hover:bg-primary/25"
             >
               Use
@@ -834,6 +834,7 @@ const FactsSurface = React.forwardRef<GoalSetupSurfaceHandle, {
   const [error, setError] = useState('');
   const { copied, copy } = useGoalSetupCopy(setError);
   const commentButtons = useRef(new Map<string, HTMLButtonElement>());
+  const commentDrafts = useRef(new Map<string, string>());
 
   const liveFacts = facts.filter((fact) => !fact.removed);
   const acceptedCount = liveFacts.filter((fact) => fact.accepted).length;
@@ -850,16 +851,32 @@ const FactsSurface = React.forwardRef<GoalSetupSurfaceHandle, {
     );
   }, []);
 
+  const withOpenCommentDraft = useCallback((sourceFacts: GoalSetupFactResult[]) => {
+    if (!commentingId) return sourceFacts;
+    const draft = commentDrafts.current.get(commentingId);
+    if (draft === undefined) return sourceFacts;
+    return sourceFacts.map((fact) =>
+      fact.id === commentingId ? { ...fact, comment: draft.trim() ? draft : '' } : fact
+    );
+  }, [commentingId]);
+
   const submitFacts = useCallback(async (nextFacts = facts) => {
     if (submitState === 'submitting') return;
-    setSubmitState('submitting');
+    const factsToSubmit = withOpenCommentDraft(nextFacts);
+    const blankFact = factsToSubmit.find((fact) => !fact.removed && !fact.text.trim());
+    if (blankFact) {
+      setError('Fact text cannot be empty. Edit the blank fact or remove it before submitting.');
+      setEditingId(blankFact.id);
+      return;
+    }
     setError('');
+    setSubmitState('submitting');
     try {
       await submitGoalSetup({
         stage: 'facts',
         title: bundle.title,
         goalSlug: bundle.goalSlug,
-        facts: nextFacts,
+        facts: factsToSubmit,
       });
       setSubmitState('submitted');
       onSubmitted?.();
@@ -867,7 +884,7 @@ const FactsSurface = React.forwardRef<GoalSetupSurfaceHandle, {
       setError(err instanceof Error ? err.message : 'Submission failed');
       setSubmitState('error');
     }
-  }, [bundle.goalSlug, bundle.title, facts, onSubmitted, submitState]);
+  }, [bundle.goalSlug, bundle.title, facts, onSubmitted, submitState, withOpenCommentDraft]);
 
   const handleSubmit = useCallback(() => {
     submitFacts();
@@ -880,12 +897,12 @@ const FactsSurface = React.forwardRef<GoalSetupSurfaceHandle, {
   }, []);
 
   const copyFactsJson = useCallback(() => {
-    copy('facts-json', JSON.stringify(buildFactsCopyPayload(bundle, facts), null, 2));
-  }, [bundle, copy, facts]);
+    copy('facts-json', JSON.stringify(buildFactsCopyPayload(bundle, withOpenCommentDraft(facts)), null, 2));
+  }, [bundle, copy, facts, withOpenCommentDraft]);
 
   const copyFactsMarkdown = useCallback(() => {
-    copy('facts-markdown', formatFactsMarkdown(bundle, facts));
-  }, [bundle, copy, facts]);
+    copy('facts-markdown', formatFactsMarkdown(bundle, withOpenCommentDraft(facts)));
+  }, [bundle, copy, facts, withOpenCommentDraft]);
 
   React.useImperativeHandle(ref, () => ({ submit: handleSubmit }), [handleSubmit]);
 
@@ -1092,11 +1109,18 @@ const FactsSurface = React.forwardRef<GoalSetupSurfaceHandle, {
           draftKey={goalFactCommentDraftKey(bundle, commentingFact.id)}
           allowImages={false}
           allowEmptySubmit
+          onDraftChange={(text) => {
+            commentDrafts.current.set(commentingFact.id, text);
+          }}
           onSubmit={(text) => {
-            updateFact(commentingFact.id, { comment: text.trim() ? text : undefined });
+            commentDrafts.current.delete(commentingFact.id);
+            updateFact(commentingFact.id, { comment: text.trim() ? text : '' });
             setCommentingId(null);
           }}
-          onClose={() => setCommentingId(null)}
+          onClose={() => {
+            commentDrafts.current.delete(commentingFact.id);
+            setCommentingId(null);
+          }}
         />
       )}
     </section>

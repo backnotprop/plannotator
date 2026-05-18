@@ -290,14 +290,21 @@ export function createFactsResult(
   const byId = new Map(facts.map((fact) => [fact.id, fact]));
   const merged = bundle.facts.map((fact) => {
     const next = byId.get(fact.id);
+    const removed = asBoolean(next?.removed, fact.removed);
+    const text = asString(next?.text, fact.text).trim();
+    if (!removed && !text) {
+      throw new Error(`Fact "${fact.id}" text cannot be empty; edit it or remove the fact.`);
+    }
+    const comment = (next && Object.prototype.hasOwnProperty.call(next, "comment")
+      ? asString(next.comment)
+      : asString(fact.comment)
+    ).trim();
     return {
       id: fact.id,
-      text: asString(next?.text, fact.text).trim() || fact.text,
+      text: text || fact.text,
       accepted: asBoolean(next?.accepted, fact.accepted),
-      removed: asBoolean(next?.removed, fact.removed),
-      ...(asString(next?.comment, fact.comment).trim()
-        ? { comment: asString(next?.comment, fact.comment).trim() }
-        : {}),
+      removed,
+      ...(comment ? { comment } : {}),
       automatedVerification: asBoolean(
         next?.automatedVerification,
         fact.automatedVerification

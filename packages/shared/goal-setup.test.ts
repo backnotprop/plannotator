@@ -189,4 +189,43 @@ describe("goal setup model", () => {
       recommendedAutomatedVerification: true,
     });
   });
+
+  test("allows submitted facts to clear existing comments", () => {
+    const bundle = normalizeFactsBundle({
+      stage: "facts",
+      facts: [{ id: "a", text: "A", comment: "Needs detail." }],
+    });
+
+    const result = createFactsResult(bundle, [
+      {
+        id: "a",
+        text: "A",
+        accepted: true,
+        removed: false,
+        comment: "",
+        automatedVerification: false,
+      },
+    ]);
+
+    expect(result.facts[0].comment).toBeUndefined();
+  });
+
+  test("rejects blank live fact text", () => {
+    const bundle = normalizeFactsBundle({
+      stage: "facts",
+      facts: [{ id: "a", text: "A" }],
+    });
+
+    expect(() =>
+      createFactsResult(bundle, [
+        {
+          id: "a",
+          text: "   ",
+          accepted: true,
+          removed: false,
+          automatedVerification: false,
+        },
+      ])
+    ).toThrow('Fact "a" text cannot be empty');
+  });
 });

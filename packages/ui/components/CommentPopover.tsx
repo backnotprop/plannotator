@@ -18,6 +18,8 @@ interface CommentPopoverProps {
   initialText?: string;
   /** Called on submit with comment text and optional images */
   onSubmit: (text: string, images?: ImageAttachment[]) => void;
+  /** Optional live draft observer for submit paths outside the popover. */
+  onDraftChange?: (text: string, images?: ImageAttachment[]) => void;
   /** Called when popover is closed/cancelled */
   onClose: () => void;
   /** Opt-in: persist text + images across close/reopen, keyed by this string. Cleared on submit. */
@@ -68,6 +70,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   isGlobal,
   initialText = '',
   onSubmit,
+  onDraftChange,
   onClose,
   draftKey,
   allowImages = true,
@@ -89,6 +92,10 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   }, [draftKey, initialText, allowImages]);
 
   useCommentDraftSync(draftKey, text, allowImages ? images : []);
+
+  useEffect(() => {
+    onDraftChange?.(text, allowImages ? images : undefined);
+  }, [allowImages, images, onDraftChange, text]);
 
   // Reset drag when anchor changes (new annotation) or mode switches
   useEffect(() => { resetDrag(); }, [anchorEl, anchorRect, resetDrag]);
