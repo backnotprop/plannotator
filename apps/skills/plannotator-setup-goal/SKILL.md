@@ -21,6 +21,8 @@ mkdir -p goals/<slug>
 
 Use `goals/<slug>/` for both working JSON files and final docs. The JSON files are provenance and iteration state; the markdown files are the human-readable authoritative goal package.
 
+**Browser session patience rule:** Plannotator goal setup is a user-driven browser session. After launching an interview or facts command, be absolutely patient and keep waiting on the user until they submit, dismiss, or explicitly ask you to stop. Do not close, kill, restart, refresh, or open a second copy just because the UI is idle or the user is taking time. Never close and reopen the session as a way to update state; if a rerun is needed after the prior session ends, update the working JSON file and launch a new command from that file.
+
 ### 2. Interview Bundle
 
 Build a compact bundle of questions that can derive every "fact" this goal should produce. Package the questions together so the user can answer them quickly in the Plannotator goal setup UI. For each question, include your recommended answer and use options when they make answering faster.
@@ -69,7 +71,7 @@ Write the interview bundle before showing it to the user:
 
 Supported `answerMode` values: `text`, `single`, `multi`, `custom`, `single-custom`, `multi-custom`.
 
-Run this as a monitored foreground process and wait patiently for the browser session to finish:
+Run this as a monitored foreground process and wait patiently for the browser session to finish. The command may appear idle while the user is reading, editing, or asking questions; leave it running:
 
 ```bash
 plannotator setup-goal interview goals/<slug>/interview.json --json
@@ -81,7 +83,7 @@ The command returns JSON on stdout with the submitted answers. Write that exact 
 plannotator setup-goal interview goals/<slug>/interview.json --json | tee goals/<slug>/interview-result.json
 ```
 
-If the user revises, update `interview.json` and rerun the command instead of reconstructing the whole bundle from memory. If the session is dismissed, stop and tell the user the goal setup was closed.
+If the user revises after the session finishes, update `interview.json` and rerun the command instead of reconstructing the whole bundle from memory. If the session is dismissed, stop and tell the user the goal setup was closed.
 
 Before moving to facts, read every answer and note carefully:
 
@@ -117,7 +119,7 @@ Write the facts review bundle before showing it to the user. If revising after a
 }
 ```
 
-Run this as a monitored foreground process and wait patiently for the browser session to finish:
+Run this as a monitored foreground process and wait patiently for the browser session to finish. The command may appear idle while the user is reviewing, editing, or asking questions; leave it running:
 
 ```bash
 plannotator setup-goal facts goals/<slug>/facts-review.json --json

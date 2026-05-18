@@ -2,8 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
   ChevronDown,
+  Copy,
   Edit3,
-  HelpCircle,
   MessageSquare,
   Plus,
   TestTube2,
@@ -64,6 +64,38 @@ async function submitGoalSetup(payload: unknown): Promise<void> {
     }
     throw new Error(message);
   }
+}
+
+async function copyGoalSetupText(text: string): Promise<void> {
+  if (!navigator.clipboard?.writeText) {
+    throw new Error('Clipboard is unavailable in this browser');
+  }
+  await navigator.clipboard.writeText(text);
+}
+
+function useGoalSetupCopy(onError: (message: string) => void) {
+  const [copied, setCopied] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timeout = window.setTimeout(() => setCopied(null), 1400);
+    return () => window.clearTimeout(timeout);
+  }, [copied]);
+
+  const copy = useCallback(
+    async (id: string, text: string) => {
+      try {
+        await copyGoalSetupText(text);
+        onError('');
+        setCopied(id);
+      } catch (err) {
+        onError(err instanceof Error ? err.message : 'Copy failed');
+      }
+    },
+    [onError]
+  );
+
+  return { copied, copy };
 }
 
 export const GoalSetupSurface = React.forwardRef<GoalSetupSurfaceHandle, GoalSetupSurfaceProps>(({
@@ -129,6 +161,7 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
   const didAutoFocus = useRef(false);
   const [submitState, setSubmitState] = useState<SubmitState>('idle');
   const [error, setError] = useState('');
+  const { copied, copy } = useGoalSetupCopy(setError);
 
   const focusQuestionControl = useCallback(
     (questionId: string, options?: { scroll?: boolean }) => {
@@ -166,6 +199,14 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
 
   const completedCount = answerList.filter((answer) => answer.completed).length;
   const [showIncompleteWarning, setShowIncompleteWarning] = useState(false);
+
+  const copyInterviewJson = useCallback(() => {
+    copy('interview-json', JSON.stringify(buildInterviewCopyPayload(bundle, answerList), null, 2));
+  }, [answerList, bundle, copy]);
+
+  const copyInterviewMarkdown = useCallback(() => {
+    copy('interview-markdown', formatInterviewMarkdown(bundle, answerList));
+  }, [answerList, bundle, copy]);
 
   const incompleteQuestions = useMemo(
     () =>
@@ -383,7 +424,7 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
       />
 
       <div className="goal-shell" data-has-active={activeQuestionId !== null ? 'true' : 'false'}>
-        <header className="mb-3 flex items-baseline justify-between gap-4">
+        <header className="mb-3 flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
               Goal interview
@@ -392,8 +433,24 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
               {bundle.title || 'Answer the setup questions'}
             </h1>
           </div>
-          <div className="shrink-0 font-mono text-[11px] text-muted-foreground">
-            {completedCount}/{bundle.questions.length} answered
+          <div className="flex shrink-0 items-center gap-2">
+            <div className="flex items-center gap-1">
+              <GoalCopyButton
+                onClick={copyInterviewJson}
+                copied={copied === 'interview-json'}
+                format="JSON"
+                title="Copy all questions and answers as raw JSON"
+              />
+              <GoalCopyButton
+                onClick={copyInterviewMarkdown}
+                copied={copied === 'interview-markdown'}
+                format="Markdown"
+                title="Copy all questions and answers as markdown"
+              />
+            </div>
+            <div className="font-mono text-[11px] text-muted-foreground">
+              {completedCount}/{bundle.questions.length} answered
+            </div>
           </div>
         </header>
 
@@ -767,6 +824,7 @@ const FactsSurface = React.forwardRef<GoalSetupSurfaceHandle, {
   const [showHelp, setShowHelp] = useState(false);
   const [submitState, setSubmitState] = useState<SubmitState>('idle');
   const [error, setError] = useState('');
+  const { copied, copy } = useGoalSetupCopy(setError);
   const commentButtons = useRef(new Map<string, HTMLButtonElement>());
 
   const liveFacts = facts.filter((fact) => !fact.removed);
@@ -784,7 +842,7 @@ const FactsSurface = React.forwardRef<GoalSetupSurfaceHandle, {
     );
   }, []);
 
-  const handleSubmit = async () => {
+  const submitFacts = useCallback(async (nextFacts = facts) => {
     if (submitState === 'submitting') return;
     setSubmitState('submitting');
     setError('');
@@ -793,7 +851,7 @@ const FactsSurface = React.forwardRef<GoalSetupSurfaceHandle, {
         stage: 'facts',
         title: bundle.title,
         goalSlug: bundle.goalSlug,
-        facts,
+        facts: nextFacts,
       });
       setSubmitState('submitted');
       onSubmitted?.();
@@ -801,7 +859,25 @@ const FactsSurface = React.forwardRef<GoalSetupSurfaceHandle, {
       setError(err instanceof Error ? err.message : 'Submission failed');
       setSubmitState('error');
     }
-  };
+  }, [bundle.goalSlug, bundle.title, facts, onSubmitted, submitState]);
+
+  const handleSubmit = useCallback(() => {
+    submitFacts();
+  }, [submitFacts]);
+
+  const acceptAllFacts = useCallback(() => {
+    setFacts((current) =>
+      current.map((fact) => (fact.removed ? fact : { ...fact, accepted: true }))
+    );
+  }, []);
+
+  const copyFactsJson = useCallback(() => {
+    copy('facts-json', JSON.stringify(buildFactsCopyPayload(bundle, facts), null, 2));
+  }, [bundle, copy, facts]);
+
+  const copyFactsMarkdown = useCallback(() => {
+    copy('facts-markdown', formatFactsMarkdown(bundle, facts));
+  }, [bundle, copy, facts]);
 
   React.useImperativeHandle(ref, () => ({ submit: handleSubmit }), [handleSubmit]);
 
@@ -817,7 +893,7 @@ const FactsSurface = React.forwardRef<GoalSetupSurfaceHandle, {
   return (
     <section className="w-full">
       <div className="goal-shell">
-        <header className="mb-3 flex items-baseline justify-between gap-4">
+        <header className="mb-3 flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
               Fact review
@@ -835,8 +911,33 @@ const FactsSurface = React.forwardRef<GoalSetupSurfaceHandle, {
               </button>
             </div>
           </div>
-          <div className="shrink-0 font-mono text-[11px] text-muted-foreground">
-            {acceptedCount}/{liveFacts.length} accepted
+          <div className="flex shrink-0 items-center gap-2">
+            <div className="flex items-center gap-1">
+              <GoalCopyButton
+                onClick={copyFactsJson}
+                copied={copied === 'facts-json'}
+                format="JSON"
+                title="Copy all facts as raw JSON"
+              />
+              <GoalCopyButton
+                onClick={copyFactsMarkdown}
+                copied={copied === 'facts-markdown'}
+                format="Markdown"
+                title="Copy all facts as markdown"
+              />
+              <GoalHeaderButton
+                onClick={acceptAllFacts}
+                disabled={liveFacts.length === 0 || submitState === 'submitting'}
+                title="Accept every visible fact"
+                className="gap-1.5 text-success hover:bg-success/10 hover:text-success"
+              >
+                <Check className="h-3.5 w-3.5" />
+                Accept all
+              </GoalHeaderButton>
+            </div>
+            <div className="font-mono text-[11px] text-muted-foreground">
+              {acceptedCount}/{liveFacts.length} accepted
+            </div>
           </div>
         </header>
 
@@ -992,6 +1093,50 @@ const FactsSurface = React.forwardRef<GoalSetupSurfaceHandle, {
 });
 FactsSurface.displayName = 'FactsSurface';
 
+const GoalHeaderButton: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement>> = ({
+  className,
+  type = 'button',
+  ...props
+}) => (
+  <button
+    type={type}
+    className={cx(
+      'inline-flex h-6 items-center rounded-md px-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-40',
+      className
+    )}
+    {...props}
+  />
+);
+
+const GoalCopyButton: React.FC<{
+  copied: boolean;
+  format: 'JSON' | 'Markdown';
+} & React.ButtonHTMLAttributes<HTMLButtonElement>> = ({
+  copied,
+  format,
+  className,
+  title,
+  ...props
+}) => (
+  <GoalHeaderButton
+    className={cx(
+      'gap-1.5 bg-muted/50 px-2.5',
+      copied && 'bg-success/10 text-success hover:bg-success/10 hover:text-success',
+      className
+    )}
+    title={copied ? `Copied ${format}` : title}
+    aria-label={`Copy ${format}`}
+    {...props}
+  >
+    {copied ? (
+      <Check className="h-3.5 w-3.5" aria-hidden="true" />
+    ) : (
+      <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+    )}
+    <span>Copy {format}</span>
+  </GoalHeaderButton>
+);
+
 const GoalShortcutPill: React.FC = () => (
   <div
     role="status"
@@ -1058,4 +1203,116 @@ function buildAnswerText(question: GoalSetupQuestion, answer: GoalSetupQuestionA
       ? answer.answer.trim()
       : answer.customAnswer.trim();
   return [...selectedLabels, freeText].filter(Boolean).join('\n');
+}
+
+function buildInterviewCopyPayload(
+  bundle: GoalSetupInterviewBundle,
+  answers: GoalSetupQuestionAnswer[]
+) {
+  return {
+    stage: 'interview',
+    title: bundle.title,
+    goalSlug: bundle.goalSlug,
+    questions: bundle.questions,
+    answers,
+  };
+}
+
+function buildFactsCopyPayload(
+  bundle: GoalSetupFactsBundle,
+  facts: GoalSetupFactResult[]
+) {
+  return {
+    stage: 'facts',
+    title: bundle.title,
+    goalSlug: bundle.goalSlug,
+    facts,
+  };
+}
+
+function formatInterviewMarkdown(
+  bundle: GoalSetupInterviewBundle,
+  answers: GoalSetupQuestionAnswer[]
+): string {
+  const answerById = new Map(answers.map((answer) => [answer.questionId, answer]));
+  const lines = [`# ${bundle.title || 'Goal interview'}`, '', '## Questions'];
+
+  bundle.questions.forEach((question, index) => {
+    const answer = answerById.get(question.id);
+    const answerText = answer?.answer?.trim() || '';
+    const note = answer?.note?.trim() || '';
+    const status = answer?.skipped ? 'skipped' : answer?.completed ? 'answered' : 'unanswered';
+
+    lines.push('', `${index + 1}. ${question.prompt}`);
+    lines.push(`   - Status: ${status}`);
+
+    if (question.description) {
+      lines.push(`   - Context: ${question.description}`);
+    }
+
+    if (question.recommendedAnswer) {
+      lines.push('   - Recommended answer:');
+      lines.push(...indentMarkdownBlock(question.recommendedAnswer, '     '));
+    }
+
+    if (question.options?.length) {
+      lines.push('   - Options:');
+      for (const option of question.options) {
+        const selected = answer?.selectedOptionIds.includes(option.id) ?? false;
+        const recommended = question.recommendedOptionIds?.includes(option.id) ?? false;
+        const description = option.description ? ` - ${option.description}` : '';
+        lines.push(
+          `     - [${selected ? 'x' : ' '}] ${option.label}${recommended ? ' (recommended)' : ''}${description}`
+        );
+      }
+    }
+
+    lines.push('   - Answer:');
+    lines.push(...indentMarkdownBlock(answerText || '_No answer yet_', '     '));
+
+    if (note) {
+      lines.push('   - Note:');
+      lines.push(...indentMarkdownBlock(note, '     '));
+    }
+  });
+
+  return `${lines.join('\n').trimEnd()}\n`;
+}
+
+function formatFactsMarkdown(
+  bundle: GoalSetupFactsBundle,
+  facts: GoalSetupFactResult[]
+): string {
+  const lines = [`# ${bundle.title || 'Facts'}`, '', '## Facts'];
+
+  if (facts.length === 0) {
+    lines.push('', 'No facts.');
+    return `${lines.join('\n').trimEnd()}\n`;
+  }
+
+  for (const fact of facts) {
+    const status = fact.removed ? 'removed' : fact.accepted ? 'accepted' : 'pending';
+    const checkbox = fact.accepted && !fact.removed ? 'x' : ' ';
+    const factText = fact.removed ? `~~${fact.text}~~` : fact.text;
+    const verification = `${fact.automatedVerification ? 'yes' : 'no'}${
+      fact.recommendedAutomatedVerification ? ' (recommended)' : ''
+    }`;
+
+    lines.push('', `- [${checkbox}] ${factText}`);
+    lines.push(`  - Status: ${status}`);
+    lines.push(`  - Automated verification: ${verification}`);
+
+    if (fact.comment?.trim()) {
+      lines.push('  - Comment:');
+      lines.push(...indentMarkdownBlock(fact.comment, '    '));
+    }
+  }
+
+  return `${lines.join('\n').trimEnd()}\n`;
+}
+
+function indentMarkdownBlock(text: string, prefix: string): string[] {
+  const trimmed = text.trim();
+  if (!trimmed) return [`${prefix}_None_`];
+  return trimmed.split(/\r?\n/).map((line) => `${prefix}${line}`);
 }

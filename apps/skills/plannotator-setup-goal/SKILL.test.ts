@@ -12,6 +12,8 @@ describe("plannotator-setup-goal skill", () => {
     expect(skill).toContain("goals/<slug>/interview-result.json");
     expect(skill).toContain("Do not ask obvious confirmation questions");
     expect(skill).toContain("Before moving to facts, read every answer and note carefully");
+    expect(skill).toContain("be absolutely patient and keep waiting on the user");
+    expect(skill).toContain("Do not close, kill, restart, refresh, or open a second copy");
     expect(skill).not.toContain("setup-goal interview -");
     expect(skill).not.toContain("one at a time");
   });
