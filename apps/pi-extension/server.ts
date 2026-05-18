@@ -17,10 +17,6 @@ export {
 	startAnnotateServer,
 } from "./server/serverAnnotate.js";
 export {
-	type GoalSetupServerResult,
-	startGoalSetupServer,
-} from "./server/serverGoalSetup.js";
-export {
 	type PlanServerResult,
 	startPlanReviewServer,
 } from "./server/serverPlan.js";

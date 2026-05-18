@@ -14,7 +14,6 @@
  * - [DONE:n] markers for execution progress tracking
  * - /plannotator-review command for code review
  * - /plannotator-annotate command for markdown annotation
- * - /plannotator-setup-goal command for bundled goal interviews and facts
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -40,11 +39,6 @@ import { loadConfig, resolveUseJina } from "./generated/config.js";
 import { readImprovementHook } from "./generated/improvement-hooks.js";
 import { composeImproveContext } from "./generated/pfm-reminder.js";
 import {
-	normalizeGoalSetupBundle,
-	type GoalSetupBundle,
-	type GoalSetupStage,
-} from "./generated/goal-setup.js";
-import {
 	getReviewApprovedPrompt,
 	getReviewDeniedSuffix,
 	getPlanDeniedPrompt,
@@ -67,7 +61,6 @@ import {
 	startCodeReviewBrowserSession,
 	startLastMessageAnnotationSession,
 	startMarkdownAnnotationSession,
-	startGoalSetupSession,
 	openPlanReviewBrowser,
 	registerPlannotatorEventListeners,
 } from "./plannotator-events.js";
@@ -647,79 +640,6 @@ export default function plannotator(pi: ExtensionAPI): void {
 			} catch (err) {
 				ctx.ui.notify(
 					`Failed to start annotation UI: ${getStartupErrorMessage(err)}`,
-					"error",
-				);
-			}
-		},
-	});
-
-	pi.registerCommand("plannotator-setup-goal", {
-		description: "Open interactive goal setup UI",
-		handler: async (args, ctx) => {
-			const parts = (args ?? "")
-				.trim()
-				.split(/\s+/)
-				.filter(Boolean)
-				.filter((part) => part !== "--json");
-			const stage = parts[0] as GoalSetupStage | undefined;
-			const rawPath = parts[1];
-
-			if ((stage !== "interview" && stage !== "facts") || !rawPath) {
-				ctx.ui.notify("Usage: /plannotator-setup-goal <interview|facts> <bundle.json> [--json]", "error");
-				return;
-			}
-			if (!hasPlanBrowserHtml()) {
-				ctx.ui.notify(
-					"Goal setup UI not available. Run 'bun run build' in the pi-extension directory.",
-					"error",
-				);
-				return;
-			}
-
-			let bundle: GoalSetupBundle;
-			const bundlePath = resolve(ctx.cwd, rawPath);
-			try {
-				bundle = normalizeGoalSetupBundle(JSON.parse(readFileSync(bundlePath, "utf-8")), stage);
-			} catch (err) {
-				ctx.ui.notify(`Failed to load goal setup bundle: ${err instanceof Error ? err.message : String(err)}`, "error");
-				return;
-			}
-
-			currentPiSession.update(ctx);
-			const origin = getPiSessionIdentity(ctx);
-
-			try {
-				const session = await startGoalSetupSession(ctx, bundle);
-				ctx.ui.notify("Goal setup opened. You can keep chatting while it runs.", "info");
-				void session
-					.waitForDecision()
-					.then((result) => {
-						try {
-							if (result.exit) {
-								safeNotify(ctx, "Goal setup session closed.", "info", origin);
-								return;
-							}
-							if (!result.result) {
-								safeNotify(ctx, "Goal setup closed without a result.", "info", origin);
-								return;
-							}
-							sendUserMessageWithCurrentSessionFallback(
-								pi,
-								`Plannotator goal setup ${result.result.stage} result:\n\n\`\`\`json\n${JSON.stringify(result.result, null, 2)}\n\`\`\``,
-								{ deliverAs: "followUp" },
-								"Plannotator goal setup result could not be sent",
-								origin,
-							);
-						} catch (err) {
-							reportBackgroundError(ctx, "Plannotator goal setup result could not be sent", err, origin);
-						}
-					})
-					.catch((err) => {
-						reportBackgroundError(ctx, "Plannotator goal setup session failed", err, origin);
-					});
-			} catch (err) {
-				ctx.ui.notify(
-					`Failed to start goal setup UI: ${getStartupErrorMessage(err)}`,
 					"error",
 				);
 			}

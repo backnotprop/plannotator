@@ -9,7 +9,6 @@ import {
 	prepareLocalReviewDiff,
 	reviewRuntime,
 	startAnnotateServer,
-	startGoalSetupServer,
 	startPlanReviewServer,
 	startReviewServer,
 	type DiffType,
@@ -27,7 +26,6 @@ import {
 import { parseRemoteUrl } from "./generated/repo.js";
 import { fetchRef, createWorktree, removeWorktree, ensureObjectAvailable } from "./generated/worktree.js";
 import { loadConfig, resolveDefaultDiffType } from "./generated/config.js";
-import type { GoalSetupBundle, GoalSetupResult } from "./generated/goal-setup.js";
 export { getLastAssistantMessageText } from "./assistant-message.js";
 
 export type AnnotateMode = "annotate" | "annotate-folder" | "annotate-last";
@@ -507,23 +505,6 @@ export async function startMarkdownAnnotationSession(
 		sharingEnabled: process.env.PLANNOTATOR_SHARE !== "disabled",
 		shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
 		pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
-	});
-
-	return startBrowserDecisionSession(server, ctx, server.waitForDecision);
-}
-
-export async function startGoalSetupSession(
-	ctx: ExtensionContext,
-	bundle: GoalSetupBundle,
-): Promise<BrowserDecisionSession<{ result?: GoalSetupResult; exit?: boolean }>> {
-	if (!ctx.hasUI || !planHtmlContent) {
-		throw new Error("Plannotator goal setup browser is unavailable in this session.");
-	}
-
-	const server = await startGoalSetupServer({
-		bundle,
-		origin: "pi",
-		htmlContent: planHtmlContent,
 	});
 
 	return startBrowserDecisionSession(server, ctx, server.waitForDecision);
