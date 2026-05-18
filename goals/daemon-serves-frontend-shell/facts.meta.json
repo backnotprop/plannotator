@@ -1,0 +1,74 @@
+{
+  "facts": [
+    {
+      "id": "fact-daemon-shell",
+      "text": "Every daemon-backed session URL at /s/<sessionId> serves the new apps/frontend React shell, regardless of whether the session mode is plan, review, annotate, archive, or setup-goal.",
+      "comment": "",
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-direct-servers-unchanged",
+      "text": "This goal does not migrate the older direct non-daemon startPlannotatorServer, startReviewServer, or startAnnotateServer HTML paths; those paths keep using their current mode-specific HTML until a separate UI migration.",
+      "comment": "",
+      "recommendedAutomatedVerification": false,
+      "automatedVerification": false
+    },
+    {
+      "id": "fact-single-file-artifact",
+      "text": "The frontend shell is built for daemon serving as a single-file HTML artifact, so a refreshed /s/<sessionId> page does not depend on separate /assets JavaScript or CSS routes.",
+      "comment": "",
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-build-chain",
+      "text": "The repository build scripts prepare the frontend shell before building the hook binary/runtime that imports the daemon-served shell asset.",
+      "comment": "",
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-bootstrap-contract",
+      "text": "The shell bootstraps a session through GET /s/<sessionId>/api/session and receives the session summary, apiBase, daemon capabilities, and supported session views.",
+      "comment": "",
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-api-forwarding",
+      "text": "Existing per-mode backend APIs remain routed through /s/<sessionId>/api/* to the original plan, review, annotate, archive, and setup-goal session handlers.",
+      "comment": "",
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-shell-session-state",
+      "text": "The frontend shell keeps using TanStack Router for /s/$sessionId routing and Zustand with Immer for session state, including success and missing-session/error states.",
+      "comment": "",
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-ui-migration-deferred",
+      "text": "The implementation may keep mode-specific placeholder views in the shell; migrating the full legacy plan review, code review, annotate, and archive user interfaces is out of scope for this goal.",
+      "comment": "",
+      "recommendedAutomatedVerification": false,
+      "automatedVerification": false
+    },
+    {
+      "id": "fact-verification",
+      "text": "Completion requires frontend typecheck/lint/format/unit tests, frontend browser-mode tests, daemon integration tests for shell serving and session bootstrap, and relevant build script checks; a full live daemon plus browser end-to-end test is not required in this phase.",
+      "comment": "",
+      "recommendedAutomatedVerification": false,
+      "automatedVerification": false
+    },
+    {
+      "id": "fact-static-assets-note",
+      "text": "Separate static asset serving is intentionally deferred; it can be reconsidered later if the real UI migration needs code splitting, cacheable chunks, or non-single-file frontend assets.",
+      "comment": "The interview answer asked what static assets meant; the working assumption is single-file HTML for this goal, with separate hashed asset serving deferred.",
+      "recommendedAutomatedVerification": false,
+      "automatedVerification": false
+    }
+  ]
+}

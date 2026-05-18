@@ -15,6 +15,7 @@ export const PLANNOTATOR_PLUGIN_FEATURES = [
 
 export type PluginFeature = (typeof PLANNOTATOR_PLUGIN_FEATURES)[number];
 export type PluginClientOrigin = Extract<Origin, "opencode" | "pi">;
+export type PluginRequestOrigin = Origin;
 export type PluginSessionMode = "plan" | "review" | "annotate" | "archive";
 
 export interface PluginCapabilities {
@@ -27,11 +28,12 @@ export interface PluginCapabilities {
 }
 
 export interface PluginBaseRequest {
-  origin: PluginClientOrigin;
+  origin: PluginRequestOrigin;
   cwd?: string;
   sharingEnabled?: boolean;
   shareBaseUrl?: string;
   pasteApiUrl?: string;
+  timeoutMs?: number | null;
 }
 
 export interface PluginAgentInfo {
@@ -60,6 +62,9 @@ export interface PluginReviewRequest extends PluginBaseRequest {
 
 export interface PluginAnnotateRequest extends PluginBaseRequest {
   args?: string;
+  noJina?: boolean;
+  useJina?: boolean;
+  jinaApiKey?: string;
   markdown?: string;
   filePath?: string;
   mode?: "annotate" | "annotate-folder" | "annotate-last";
@@ -153,7 +158,7 @@ export function getPluginCapabilities(): PluginCapabilities {
     minClientVersion: PLANNOTATOR_PLUGIN_MIN_CLIENT_VERSION,
     features: [...PLANNOTATOR_PLUGIN_FEATURES],
     daemonReady: true,
-    multiSessionDaemon: false,
+    multiSessionDaemon: true,
   };
 }
 

@@ -26,15 +26,19 @@ import { resolveUserPath } from "@plannotator/shared/resolve-file";
 export type { ObsidianConfig, BearConfig, OctarineConfig, IntegrationResult };
 export { detectObsidianVaults, extractTitle, generateFrontmatter, generateFilename, generateOctarineFrontmatter, stripH1, buildHashtags, buildBearContent };
 
+export interface IntegrationOptions {
+	cwd?: string;
+}
+
 /**
  * Extract tags from markdown content using simple heuristics
  * Includes project name detection (git repo or directory name)
  */
-export async function extractTags(markdown: string): Promise<string[]> {
+export async function extractTags(markdown: string, options: IntegrationOptions = {}): Promise<string[]> {
 	const tags = new Set<string>(["plannotator"]);
 
 	// Add project name tag (git repo name or directory fallback)
-	const projectName = await detectProjectName();
+	const projectName = await detectProjectName(options.cwd);
 	if (projectName) {
 		tags.add(projectName);
 	}
@@ -95,6 +99,7 @@ export async function extractTags(markdown: string): Promise<string[]> {
  */
 export async function saveToObsidian(
 	config: ObsidianConfig,
+	options: IntegrationOptions = {},
 ): Promise<IntegrationResult> {
 	try {
 		const { vaultPath, folder, plan } = config;
@@ -103,7 +108,7 @@ export async function saveToObsidian(
 			return { success: false, error: "Vault path is required" };
 		}
 
-		const normalizedVault = resolveUserPath(vaultPath);
+		const normalizedVault = resolveUserPath(vaultPath, options.cwd);
 
 		// Validate vault path exists and is a directory
 		if (!existsSync(normalizedVault)) {
@@ -139,7 +144,7 @@ export async function saveToObsidian(
 		const filePath = join(targetFolder, filename);
 
 		// Generate content with frontmatter and backlink
-		const tags = await extractTags(plan);
+		const tags = await extractTags(plan, options);
 		const frontmatter = generateFrontmatter(tags);
 		const content = `${frontmatter}\n\n[[Plannotator Plans]]\n\n${plan}`;
 
@@ -158,6 +163,7 @@ export async function saveToObsidian(
  */
 export async function saveToBear(
 	config: BearConfig,
+	options: IntegrationOptions = {},
 ): Promise<IntegrationResult> {
 	try {
 		const { plan, customTags, tagPosition = "append" } = config;
@@ -165,7 +171,7 @@ export async function saveToBear(
 		const title = extractTitle(plan);
 		const body = stripH1(plan);
 
-		const tags = customTags?.trim() ? undefined : await extractTags(plan);
+		const tags = customTags?.trim() ? undefined : await extractTags(plan, options);
 		const hashtags = buildHashtags(customTags, tags ?? []);
 
 		const content = buildBearContent(body, hashtags, tagPosition);
@@ -186,6 +192,7 @@ export async function saveToBear(
  */
 export async function saveToOctarine(
 	config: OctarineConfig,
+	options: IntegrationOptions = {},
 ): Promise<IntegrationResult> {
 	try {
 		const { plan } = config;
@@ -198,7 +205,7 @@ export async function saveToOctarine(
 		const basename = filename.replace(/\.md$/, "");
 		const path = folder ? `${folder}/${basename}` : basename;
 
-		const tags = await extractTags(plan);
+		const tags = await extractTags(plan, options);
 		const frontmatter = generateOctarineFrontmatter(tags);
 		const content = `${frontmatter}\n\n${plan}`;
 

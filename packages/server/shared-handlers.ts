@@ -7,39 +7,47 @@
  */
 
 import { mkdirSync } from "fs";
+import { isAbsolute, resolve as resolvePath } from "path";
 import { openBrowser } from "./browser";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
 import { saveDraft, loadDraft, deleteDraft } from "./draft";
 import { FAVICON_SVG } from "@plannotator/shared/favicon";
 
 /** Serve images from local paths or temp uploads. Used by all 3 servers. */
-export async function handleImage(req: Request): Promise<Response> {
+export async function handleImage(req: Request, defaultBase?: string): Promise<Response> {
   const url = new URL(req.url);
   const imagePath = url.searchParams.get("path");
   if (!imagePath) {
     return new Response("Missing path parameter", { status: 400 });
   }
-  const validation = validateImagePath(imagePath);
-  if (!validation.valid) {
-    return new Response(validation.error!, { status: 403 });
+
+  const requestBase = url.searchParams.get("base") || undefined;
+  const candidates = [] as string[];
+  if (isAbsolute(imagePath)) {
+    candidates.push(imagePath);
+  } else if (requestBase) {
+    candidates.push(resolvePath(requestBase, imagePath));
+  } else if (defaultBase) {
+    candidates.push(resolvePath(defaultBase, imagePath));
+  } else {
+    candidates.push(imagePath);
   }
+
+  let lastValidationError: string | undefined;
   try {
-    const file = Bun.file(validation.resolved);
-    if (await file.exists()) {
-      return new Response(file);
-    }
-    // If not found and a base directory is provided, try resolving relative to it
-    const base = url.searchParams.get("base");
-    if (base && !imagePath.startsWith("/")) {
-      const { resolve: resolvePath } = await import("path");
-      const fromBase = resolvePath(base, imagePath);
-      const baseValidation = validateImagePath(fromBase);
-      if (baseValidation.valid) {
-        const baseFile = Bun.file(baseValidation.resolved);
-        if (await baseFile.exists()) {
-          return new Response(baseFile);
-        }
+    for (const candidate of candidates) {
+      const validation = validateImagePath(candidate);
+      if (!validation.valid) {
+        lastValidationError = validation.error;
+        continue;
       }
+      const file = Bun.file(validation.resolved);
+      if (await file.exists()) {
+        return new Response(file);
+      }
+    }
+    if (lastValidationError) {
+      return new Response(lastValidationError, { status: 403 });
     }
     return new Response("File not found", { status: 404 });
   } catch {

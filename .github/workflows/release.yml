@@ -170,22 +170,29 @@ jobs:
             local ok=0
 
             for _ in $(seq 1 60); do
-              if curl -sf "http://127.0.0.1:${port}${endpoint}" -o /dev/null 2>/dev/null; then
-                ok=1
-                break
+              local sessions
+              sessions="$(curl -sf "http://127.0.0.1:${port}/daemon/sessions" 2>/dev/null || true)"
+              if [ -n "$sessions" ]; then
+                local session_url
+                session_url="$(python3 -c 'import json,sys; data=json.load(sys.stdin); sessions=data.get("sessions") or []; print(sessions[0].get("url","") if sessions else "")' <<< "$sessions")"
+                if [ -n "$session_url" ] && curl -sf "${session_url}${endpoint}" -o /dev/null 2>/dev/null; then
+                  ok=1
+                  break
+                fi
               fi
               sleep 0.5
             done
 
             kill "$pid" 2>/dev/null || true
             wait "$pid" 2>/dev/null || true
+            PLANNOTATOR_PORT="$port" "$BINARY" daemon stop >/dev/null 2>&1 || true
 
             if [ "$ok" = "0" ]; then
-              echo "FAIL: ${label} did not respond on :${port}${endpoint}"
+              echo "FAIL: ${label} did not expose a daemon-scoped ${endpoint}"
               exit 1
             fi
 
-            echo "OK: ${label} responded on :${port}${endpoint}"
+            echo "OK: ${label} exposed daemon-scoped ${endpoint}"
           }
 
           # 2. review: exercises server startup, bundled HTML, git diff, and HTTP.
@@ -232,9 +239,14 @@ jobs:
             try {
               for ($i = 0; $i -lt 60; $i++) {
                 try {
-                  Invoke-WebRequest -Uri "http://127.0.0.1:$Port$Endpoint" -UseBasicParsing -TimeoutSec 1 | Out-Null
-                  $ok = $true
-                  break
+                  $sessionsResponse = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/daemon/sessions" -UseBasicParsing -TimeoutSec 1
+                  $sessionsBody = $sessionsResponse.Content | ConvertFrom-Json
+                  if ($sessionsBody.sessions.Count -gt 0) {
+                    $sessionUrl = $sessionsBody.sessions[0].url
+                    Invoke-WebRequest -Uri "$sessionUrl$Endpoint" -UseBasicParsing -TimeoutSec 1 | Out-Null
+                    $ok = $true
+                    break
+                  }
                 } catch {
                   if ($process.HasExited) {
                     break
@@ -247,6 +259,7 @@ jobs:
                 Stop-Process -Id $process.Id -Force
                 Wait-Process -Id $process.Id -ErrorAction SilentlyContinue
               }
+              & $binary daemon stop *> $null
               Remove-Item Env:\PLANNOTATOR_PORT -ErrorAction SilentlyContinue
             }
 
@@ -255,10 +268,10 @@ jobs:
               Get-Content $stdout -ErrorAction SilentlyContinue
               Write-Host "stderr:"
               Get-Content $stderr -ErrorAction SilentlyContinue
-              throw "FAIL: $Label did not respond on :$Port$Endpoint"
+              throw "FAIL: $Label did not expose a daemon-scoped $Endpoint"
             }
 
-            Write-Host "OK: $Label responded on :$Port$Endpoint"
+            Write-Host "OK: $Label exposed daemon-scoped $Endpoint"
           }
 
           # 2. review: exercises server startup, bundled HTML, git diff, and HTTP.

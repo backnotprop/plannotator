@@ -1,0 +1,271 @@
+import type {
+  DaemonRemoteShareNotice,
+  DaemonSessionMode,
+  DaemonSessionStatus,
+  DaemonSessionSummary,
+} from "@plannotator/shared/daemon-protocol";
+import type { SessionRequestHandler } from "../session-handler";
+
+export interface DaemonSessionRecord<TResult = unknown> {
+  id: string;
+  mode: DaemonSessionMode;
+  status: DaemonSessionStatus;
+  url: string;
+  project: string;
+  label: string;
+  origin?: string;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt?: string;
+  result?: TResult;
+  error?: string;
+  remoteShare?: DaemonRemoteShareNotice;
+  htmlContent?: string;
+  handleRequest?: SessionRequestHandler;
+  dispose?: () => void | Promise<void>;
+  disposed?: boolean;
+}
+
+export interface CreateDaemonSessionInput<TResult = unknown> {
+  id?: string;
+  mode: DaemonSessionMode;
+  url: string;
+  project: string;
+  label: string;
+  origin?: string;
+  ttlMs?: number;
+  now?: number;
+  htmlContent?: string;
+  handleRequest?: SessionRequestHandler;
+  dispose?: () => void | Promise<void>;
+  result?: TResult;
+  remoteShare?: DaemonRemoteShareNotice;
+}
+
+export interface DaemonSessionStoreOptions {
+  idFactory?: () => string;
+  now?: () => number;
+}
+
+type Waiter<TResult> = {
+  resolve: (record: DaemonSessionRecord<TResult>) => void;
+  reject: (err: Error) => void;
+};
+
+const TERMINAL_STATUSES = new Set<DaemonSessionStatus>([
+  "completed",
+  "cancelled",
+  "expired",
+  "failed",
+]);
+const TERMINAL_SESSION_TTL_MS = 60_000;
+
+function iso(ms: number): string {
+  return new Date(ms).toISOString();
+}
+
+export function createDaemonSessionId(): string {
+  return `sess_${Date.now().toString(36)}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+}
+
+export class DaemonSessionStore {
+  private sessions = new Map<string, DaemonSessionRecord>();
+  private waiters = new Map<string, Waiter<unknown>[]>();
+  private readonly idFactory: () => string;
+  private readonly now: () => number;
+
+  constructor(options: DaemonSessionStoreOptions = {}) {
+    this.idFactory = options.idFactory ?? createDaemonSessionId;
+    this.now = options.now ?? (() => Date.now());
+  }
+
+  create<TResult = unknown>(input: CreateDaemonSessionInput<TResult>): DaemonSessionRecord<TResult> {
+    const now = input.now ?? this.now();
+    const id = input.id ?? this.idFactory();
+    const record: DaemonSessionRecord<TResult> = {
+      id,
+      mode: input.mode,
+      status: input.result === undefined ? "active" : "completed",
+      url: input.url,
+      project: input.project,
+      label: input.label,
+      ...(input.origin && { origin: input.origin }),
+      createdAt: iso(now),
+      updatedAt: iso(now),
+      ...(input.ttlMs !== undefined && { expiresAt: iso(now + input.ttlMs) }),
+      ...(input.htmlContent && { htmlContent: input.htmlContent }),
+      ...(input.handleRequest && { handleRequest: input.handleRequest }),
+      ...(input.dispose && { dispose: input.dispose }),
+      ...(input.result !== undefined && { result: input.result }),
+      ...(input.remoteShare && { remoteShare: input.remoteShare }),
+    };
+    this.sessions.set(id, record);
+    if (TERMINAL_STATUSES.has(record.status)) this.resolveWaiters(record);
+    return record;
+  }
+
+  get<TResult = unknown>(id: string): DaemonSessionRecord<TResult> | undefined {
+    return this.sessions.get(id) as DaemonSessionRecord<TResult> | undefined;
+  }
+
+  list(): DaemonSessionSummary[] {
+    return [...this.sessions.values()]
+      .filter((record) => !TERMINAL_STATUSES.has(record.status))
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .map((record) => this.summary(record));
+  }
+
+  activeCount(): number {
+    return [...this.sessions.values()].filter((record) => !TERMINAL_STATUSES.has(record.status)).length;
+  }
+
+  totalCount(): number {
+    return this.sessions.size;
+  }
+
+  summary(record: DaemonSessionRecord, options: { includeRemoteShare?: boolean } = {}): DaemonSessionSummary {
+    return {
+      id: record.id,
+      mode: record.mode,
+      status: record.status,
+      url: record.url,
+      project: record.project,
+      label: record.label,
+      ...(record.origin && { origin: record.origin }),
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+      ...(record.expiresAt && { expiresAt: record.expiresAt }),
+      ...(record.error && { error: record.error }),
+      ...(options.includeRemoteShare && record.remoteShare && { remoteShare: record.remoteShare }),
+    };
+  }
+
+  complete<TResult = unknown>(id: string, result: TResult): DaemonSessionRecord<TResult> | undefined {
+    const record = this.sessions.get(id) as DaemonSessionRecord<TResult> | undefined;
+    if (!record || TERMINAL_STATUSES.has(record.status)) return record;
+    record.status = "completed";
+    record.result = result;
+    const now = this.now();
+    record.updatedAt = iso(now);
+    record.expiresAt = iso(now + TERMINAL_SESSION_TTL_MS);
+    this.resolveWaiters(record);
+    void this.disposeResources(record);
+    return record;
+  }
+
+  fail(id: string, error: string): DaemonSessionRecord | undefined {
+    const record = this.sessions.get(id);
+    if (!record || TERMINAL_STATUSES.has(record.status)) return record;
+    record.status = "failed";
+    record.error = error;
+    const now = this.now();
+    record.updatedAt = iso(now);
+    record.expiresAt = iso(now + TERMINAL_SESSION_TTL_MS);
+    this.resolveWaiters(record);
+    void this.disposeResources(record);
+    return record;
+  }
+
+  async cancel(id: string, reason = "Session cancelled."): Promise<DaemonSessionRecord | undefined> {
+    const record = this.sessions.get(id);
+    if (!record || TERMINAL_STATUSES.has(record.status)) return record;
+    record.status = "cancelled";
+    record.error = reason;
+    const now = this.now();
+    record.updatedAt = iso(now);
+    record.expiresAt = iso(now + TERMINAL_SESSION_TTL_MS);
+    this.resolveWaiters(record);
+    await this.disposeRecord(record);
+    return record;
+  }
+
+  waitForResult<TResult = unknown>(id: string): Promise<DaemonSessionRecord<TResult>> {
+    const record = this.sessions.get(id) as DaemonSessionRecord<TResult> | undefined;
+    if (!record) return Promise.reject(new Error(`Session not found: ${id}`));
+    if (TERMINAL_STATUSES.has(record.status)) return Promise.resolve(record);
+    return new Promise((resolve, reject) => {
+      const waiters = this.waiters.get(id) ?? [];
+      waiters.push({ resolve: resolve as (record: DaemonSessionRecord<unknown>) => void, reject });
+      this.waiters.set(id, waiters);
+    });
+  }
+
+  async delete(id: string): Promise<boolean> {
+    const record = this.sessions.get(id);
+    if (!record) return false;
+    this.sessions.delete(id);
+    this.rejectWaiters(id, new Error(`Session deleted: ${id}`));
+    await this.disposeRecord(record);
+    return true;
+  }
+
+  async cleanupExpired(now = this.now()): Promise<DaemonSessionRecord[]> {
+    const expired: DaemonSessionRecord[] = [];
+    for (const record of [...this.sessions.values()]) {
+      if (!record.expiresAt) continue;
+      if (new Date(record.expiresAt).getTime() > now) continue;
+      if (TERMINAL_STATUSES.has(record.status)) {
+        expired.push(record);
+        await this.removeRecord(record);
+        continue;
+      }
+      record.status = "expired";
+      record.error = "Session expired.";
+      record.updatedAt = iso(now);
+      expired.push(record);
+      this.resolveWaiters(record);
+      await this.removeRecord(record);
+    }
+    return expired;
+  }
+
+  async cancelAll(reason = "Daemon shutting down."): Promise<void> {
+    const records = [...this.sessions.values()];
+    for (const record of records) {
+      if (!TERMINAL_STATUSES.has(record.status)) {
+        record.status = "cancelled";
+        record.error = reason;
+        const now = this.now();
+        record.updatedAt = iso(now);
+        record.expiresAt = iso(now + TERMINAL_SESSION_TTL_MS);
+        this.resolveWaiters(record);
+      }
+      await this.disposeRecord(record);
+    }
+  }
+
+  private resolveWaiters(record: DaemonSessionRecord): void {
+    const waiters = this.waiters.get(record.id) ?? [];
+    this.waiters.delete(record.id);
+    for (const waiter of waiters) waiter.resolve(record);
+  }
+
+  private rejectWaiters(id: string, err: Error): void {
+    const waiters = this.waiters.get(id) ?? [];
+    this.waiters.delete(id);
+    for (const waiter of waiters) waiter.reject(err);
+  }
+
+  private async removeRecord(record: DaemonSessionRecord): Promise<void> {
+    this.sessions.delete(record.id);
+    await this.disposeRecord(record);
+  }
+
+  private async disposeRecord(record: DaemonSessionRecord): Promise<void> {
+    await this.disposeResources(record);
+    record.htmlContent = undefined;
+    record.handleRequest = undefined;
+  }
+
+  private async disposeResources(record: DaemonSessionRecord): Promise<void> {
+    if (record.disposed) return;
+    record.disposed = true;
+    const dispose = record.dispose;
+    record.dispose = undefined;
+    try {
+      await dispose?.();
+    } catch {
+      // Best-effort cleanup; callers observe session status separately.
+    }
+  }
+}

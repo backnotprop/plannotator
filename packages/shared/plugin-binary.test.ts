@@ -229,8 +229,13 @@ describe("plugin binary install and capabilities", () => {
 
   test("parses and validates plugin capabilities", () => {
     const capabilities = getPluginCapabilities();
+    const rolloutCompatible = {
+      ...capabilities,
+      multiSessionDaemon: false,
+    };
 
     expect(parsePluginCapabilities(JSON.stringify(capabilities))).toEqual(capabilities);
+    expect(parsePluginCapabilities(JSON.stringify(rolloutCompatible))).toEqual(rolloutCompatible);
     expect(isCompatiblePluginBinary(capabilities)).toBe(true);
     expect(parsePluginCapabilities(JSON.stringify({
       ...capabilities,

@@ -22,6 +22,7 @@ import { createExternalAnnotationHandler } from "./external-annotations";
 import { saveConfig, detectGitUser, getServerConfig } from "./config";
 import { dirname, resolve as resolvePath } from "path";
 import { isWSL } from "./browser";
+import type { SessionRequestHandler } from "./session-handler";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -31,6 +32,8 @@ export { handleServerReady as handleAnnotateServerReady } from "./shared-handler
 // --- Types ---
 
 export interface AnnotateServerOptions {
+  /** Working directory for repo/project-relative behavior */
+  cwd?: string;
   /** Markdown content of the file to annotate */
   markdown: string;
   /** Original file path (for display purposes) */
@@ -82,26 +85,23 @@ export interface AnnotateServerResult {
   stop: () => void;
 }
 
+export interface AnnotateSession {
+  htmlContent: string;
+  handleRequest: SessionRequestHandler;
+  waitForDecision: AnnotateServerResult["waitForDecision"];
+  dispose: () => void;
+}
+
 // --- Server Implementation ---
 
 const MAX_RETRIES = 5;
 const RETRY_DELAY_MS = 500;
 
-/**
- * Start the Annotate server
- *
- * Handles:
- * - Remote detection and port configuration
- * - API routes (/api/plan with mode:"annotate", /api/feedback)
- * - Port conflict retries
- */
-export async function startAnnotateServer(
+export async function createAnnotateSession(
   options: AnnotateServerOptions
-): Promise<AnnotateServerResult> {
-  // Side-channel pre-warm so /api/doc/exists POSTs land on warm cache.
-  void warmFileListCache(process.cwd(), "code");
-
+): Promise<AnnotateSession> {
   const {
+    cwd = process.cwd(),
     markdown,
     filePath,
     htmlContent,
@@ -116,13 +116,13 @@ export async function startAnnotateServer(
     gate = false,
     rawHtml,
     renderHtml = false,
-    onReady,
   } = options;
 
-  const isRemote = isRemoteSession();
-  const configuredPort = getServerPort();
+  // Side-channel pre-warm so /api/doc/exists POSTs land on warm cache.
+  void warmFileListCache(cwd, "code");
+
   const wslFlag = await isWSL();
-  const gitUser = detectGitUser();
+  const gitUser = detectGitUser(cwd);
   const draftSource =
     mode === "annotate-folder" && folderPath
       ? `folder:${resolvePath(folderPath)}`
@@ -131,7 +131,7 @@ export async function startAnnotateServer(
   const externalAnnotations = createExternalAnnotationHandler("plan");
 
   // Detect repo info (cached for this session)
-  const repoInfo = await getRepoInfo();
+  const repoInfo = await getRepoInfo(cwd);
 
   // Decision promise
   let resolveDecision: (result: {
@@ -149,17 +149,7 @@ export async function startAnnotateServer(
     resolveDecision = resolve;
   });
 
-  // Start server with retry logic
-  let server: ReturnType<typeof Bun.serve> | null = null;
-
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      server = Bun.serve({
-        hostname: getServerHostname(),
-        port: configuredPort,
-
-        async fetch(req, server) {
-          const url = new URL(req.url);
+  const handleRequest: SessionRequestHandler = async (req, url, context) => {
 
           // API: Get plan content (reuse /api/plan so the plan editor UI works)
           if (url.pathname === "/api/plan" && req.method === "GET") {
@@ -177,7 +167,7 @@ export async function startAnnotateServer(
               shareBaseUrl,
               pasteApiUrl,
               repoInfo,
-              projectRoot: folderPath || process.cwd(),
+              projectRoot: folderPath || cwd,
               isWSL: wslFlag,
               serverConfig: getServerConfig(gitUser),
             });
@@ -201,7 +191,7 @@ export async function startAnnotateServer(
 
           // API: Serve images (local paths or temp uploads)
           if (url.pathname === "/api/image") {
-            return handleImage(req);
+            return handleImage(req, cwd);
           }
 
           // API: Serve a linked markdown document
@@ -211,14 +201,14 @@ export async function startAnnotateServer(
             if (!url.searchParams.has("base") && !/^https?:\/\//i.test(filePath)) {
               const docUrl = new URL(req.url);
               docUrl.searchParams.set("base", dirname(filePath));
-              return handleDoc(new Request(docUrl.toString()));
+              return handleDoc(new Request(docUrl.toString()), { projectRoot: cwd });
             }
-            return handleDoc(req);
+            return handleDoc(req, { projectRoot: cwd });
           }
 
           // API: Batch existence check for code-file paths the renderer detected
           if (url.pathname === "/api/doc/exists" && req.method === "POST") {
-            return handleDocExists(req);
+            return handleDocExists(req, { projectRoot: cwd });
           }
 
           // API: Detect Obsidian vaults
@@ -238,7 +228,7 @@ export async function startAnnotateServer(
 
           // API: List markdown files in a directory as a tree
           if (url.pathname === "/api/reference/files" && req.method === "GET") {
-            return handleFileBrowserFiles(req);
+            return handleFileBrowserFiles(req, folderPath || cwd);
           }
 
           // API: Upload image -> save to temp -> return path
@@ -255,7 +245,7 @@ export async function startAnnotateServer(
 
           // API: External annotations (SSE-based, for any external tool)
           const externalResponse = await externalAnnotations.handle(req, url, {
-            disableIdleTimeout: () => server.timeout(req, 0),
+            disableIdleTimeout: () => context?.disableIdleTimeout?.(),
           });
           if (externalResponse) return externalResponse;
 
@@ -303,6 +293,48 @@ export async function startAnnotateServer(
           // Serve embedded HTML for all other routes (SPA)
           return new Response(htmlContent, {
             headers: { "Content-Type": "text/html" },
+          });
+  };
+
+  return {
+    htmlContent,
+    handleRequest,
+    waitForDecision: () => decisionPromise,
+    dispose: () => {
+      externalAnnotations.dispose();
+    },
+  };
+}
+
+/**
+ * Start the Annotate server
+ *
+ * Handles:
+ * - Remote detection and port configuration
+ * - API routes (/api/plan with mode:"annotate", /api/feedback)
+ * - Port conflict retries
+ */
+export async function startAnnotateServer(
+  options: AnnotateServerOptions
+): Promise<AnnotateServerResult> {
+  const { onReady } = options;
+  const session = await createAnnotateSession(options);
+  const isRemote = isRemoteSession();
+  const configuredPort = getServerPort();
+
+  // Start server with retry logic
+  let server: ReturnType<typeof Bun.serve> | null = null;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      server = Bun.serve({
+        hostname: getServerHostname(),
+        port: configuredPort,
+
+        async fetch(req, server) {
+          const url = new URL(req.url);
+          return session.handleRequest(req, url, {
+            disableIdleTimeout: () => server.timeout(req, 0),
           });
         },
 
@@ -354,7 +386,10 @@ export async function startAnnotateServer(
     port,
     url: serverUrl,
     isRemote,
-    waitForDecision: () => decisionPromise,
-    stop: () => server.stop(),
+    waitForDecision: session.waitForDecision,
+    stop: () => {
+      server.stop();
+      session.dispose();
+    },
   };
 }

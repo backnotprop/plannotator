@@ -35,6 +35,7 @@ export interface ExternalAnnotationHandler {
   ) => Promise<Response | null>;
   /** Push annotations directly into the store (bypasses HTTP, reuses same validation). */
   addAnnotations: (body: unknown) => { ids: string[] } | { error: string };
+  dispose: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -52,19 +53,27 @@ export function createExternalAnnotationHandler(
   mode: "plan" | "review",
 ): ExternalAnnotationHandler {
   const store: AnnotationStore<StorableAnnotation> = createAnnotationStore();
-  const subscribers = new Set<ReadableStreamDefaultController>();
+  const subscribers = new Map<ReadableStreamDefaultController, { heartbeatTimer: ReturnType<typeof setInterval> | null }>();
   const encoder = new TextEncoder();
   const transform = mode === "plan" ? transformPlanInput : transformReviewInput;
+  let disposed = false;
+
+  const removeSubscriber = (controller: ReadableStreamDefaultController) => {
+    const subscription = subscribers.get(controller);
+    if (subscription?.heartbeatTimer) clearInterval(subscription.heartbeatTimer);
+    subscribers.delete(controller);
+  };
 
   // Wire store mutations → SSE broadcast
   store.onMutation((event: ExternalAnnotationEvent<StorableAnnotation>) => {
+    if (disposed) return;
     const data = encoder.encode(serializeSSEEvent(event));
-    for (const controller of subscribers) {
+    for (const controller of subscribers.keys()) {
       try {
         controller.enqueue(data);
       } catch {
         // Controller closed — clean up on next iteration
-        subscribers.delete(controller);
+        removeSubscriber(controller);
       }
     }
   });
@@ -86,12 +95,13 @@ export function createExternalAnnotationHandler(
       if (url.pathname === STREAM && req.method === "GET") {
         options?.disableIdleTimeout?.();
 
-        let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
         let ctrl: ReadableStreamDefaultController;
 
         const stream = new ReadableStream({
           start(controller) {
             ctrl = controller;
+            const subscription = { heartbeatTimer: null as ReturnType<typeof setInterval> | null };
+            subscribers.set(controller, subscription);
 
             // Send current state as snapshot
             const snapshot: ExternalAnnotationEvent<StorableAnnotation> = {
@@ -100,22 +110,18 @@ export function createExternalAnnotationHandler(
             };
             controller.enqueue(encoder.encode(serializeSSEEvent(snapshot)));
 
-            subscribers.add(controller);
-
             // Heartbeat to keep connection alive
-            heartbeatTimer = setInterval(() => {
+            subscription.heartbeatTimer = setInterval(() => {
               try {
                 controller.enqueue(encoder.encode(HEARTBEAT_COMMENT));
               } catch {
                 // Stream closed
-                if (heartbeatTimer) clearInterval(heartbeatTimer);
-                subscribers.delete(controller);
+                removeSubscriber(controller);
               }
             }, HEARTBEAT_INTERVAL_MS);
           },
           cancel() {
-            if (heartbeatTimer) clearInterval(heartbeatTimer);
-            subscribers.delete(ctrl);
+            removeSubscriber(ctrl);
           },
         });
 
@@ -202,6 +208,18 @@ export function createExternalAnnotationHandler(
 
       // Not handled — pass through
       return null;
+    },
+
+    dispose(): void {
+      disposed = true;
+      for (const controller of Array.from(subscribers.keys())) {
+        removeSubscriber(controller);
+        try {
+          controller.close();
+        } catch {
+          // Stream may already be closed by the client.
+        }
+      }
     },
   };
 }

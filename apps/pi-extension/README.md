@@ -253,3 +253,15 @@ State persists across session restarts via Pi's `appendEntry` API.
 | `PLANNOTATOR_BROWSER` | Custom browser to open Plannotator sessions. |
 | `PLANNOTATOR_SHARE_URL` | Custom share portal URL for self-hosting. |
 | `PLANNOTATOR_PASTE_URL` | Custom paste service URL for self-hosting. |
+
+## Daemon Runtime
+
+Pi continues to call the installed `plannotator` binary through the plugin command protocol. Inside the binary, plan/review/annotate/archive sessions are created through one long-running daemon. The first UI request auto-starts the daemon; compatible later requests reuse it.
+
+```bash
+plannotator daemon status
+plannotator daemon stop
+plannotator sessions
+```
+
+`daemon status` reports the daemon PID, endpoint, protocol version, and active session count. If you change `PLANNOTATOR_REMOTE` or `PLANNOTATOR_PORT`, stop the daemon before starting a new session with the new settings.

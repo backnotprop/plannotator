@@ -18,7 +18,7 @@ describe("plugin protocol", () => {
       minClientVersion: PLANNOTATOR_PLUGIN_MIN_CLIENT_VERSION,
       features: [...PLANNOTATOR_PLUGIN_FEATURES],
       daemonReady: true,
-      multiSessionDaemon: false,
+      multiSessionDaemon: true,
     });
   });
 

@@ -4,14 +4,31 @@
  * Run: bun test packages/server/integrations.test.ts
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import {
   extractTitle,
   extractTags,
+  saveToObsidian,
   stripH1,
   buildHashtags,
   buildBearContent,
 } from "./integrations";
+
+let tempDirs: string[] = [];
+
+function tempDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), "plannotator-integrations-"));
+  tempDirs.push(dir);
+  return dir;
+}
+
+afterEach(() => {
+  for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
+  tempDirs = [];
+});
 
 describe("extractTitle", () => {
   test("extracts plain H1", () => {
@@ -168,5 +185,33 @@ describe("extractTags", () => {
   test("limits to 7 tags", async () => {
     const tags = await extractTags("# One Two Three Four\n\n```go\n```\n```python\n```\n```ruby\n```\n```swift\n```");
     expect(tags.length).toBeLessThanOrEqual(7);
+  });
+
+  test("uses the provided cwd for project tags", async () => {
+    const root = tempDir();
+    const cwd = join(root, "RepoB");
+    mkdirSync(cwd);
+
+    const tags = await extractTags("# Simple Plan\n\nContent", { cwd });
+    expect(tags).toContain("repob");
+  });
+});
+
+describe("saveToObsidian", () => {
+  test("resolves relative vault paths against the provided cwd", async () => {
+    const root = tempDir();
+    const cwd = join(root, "RepoB");
+    const vault = join(cwd, "vault");
+    mkdirSync(vault, { recursive: true });
+
+    const result = await saveToObsidian({
+      vaultPath: "vault",
+      folder: "plans",
+      plan: "# Relative Vault Plan\n\nContent",
+    }, { cwd });
+
+    expect(result.success).toBe(true);
+    expect(result.path?.startsWith(join(vault, "plans"))).toBe(true);
+    expect(existsSync(result.path!)).toBe(true);
   });
 });

@@ -13,6 +13,7 @@ import * as http from "http";
 // ── State ──────────────────────────────────────────────────────────
 
 let activeProxyPort: number | null = null;
+let activeProxySessionPath = "";
 let commentController: vscode.CommentController | null = null;
 let annotationDecorationType: vscode.TextEditorDecorationType | null = null;
 
@@ -24,11 +25,13 @@ const decoratedRanges = new Map<string, vscode.Range[]>();
 
 // ── Public API ─────────────────────────────────────────────────────
 
-export function setActiveProxyPort(port: number | null): void {
+export function setActiveProxyPort(port: number | null, sessionPath = ""): void {
   activeProxyPort = port;
+  activeProxySessionPath = /^\/s\/[^/]+$/.test(sessionPath) ? sessionPath : "";
   if (port !== null) {
     createController();
   } else {
+    activeProxySessionPath = "";
     disposeAllThreads();
     clearAllDecorations();
     if (commentController) {
@@ -300,7 +303,7 @@ function requestProxy(
     }
 
     const req = http.request(
-      { hostname: "127.0.0.1", port, path: urlPath, method, headers },
+      { hostname: "127.0.0.1", port, path: scopedProxyPath(urlPath), method, headers },
       (res) => {
         let data = "";
         res.on("data", (chunk: string) => (data += chunk));
@@ -317,4 +320,11 @@ function requestProxy(
     if (body) req.write(body);
     req.end();
   });
+}
+
+function scopedProxyPath(urlPath: string): string {
+  if (activeProxySessionPath && urlPath.startsWith("/api/")) {
+    return `${activeProxySessionPath}${urlPath}`;
+  }
+  return urlPath;
 }

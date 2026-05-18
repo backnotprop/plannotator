@@ -328,6 +328,27 @@ describe("OpenCode binary client", () => {
     ]);
   });
 
+  test("includes the command timeout in plugin requests", async () => {
+    const response = createPluginSuccessResponse({ approved: true });
+    let inputBody: unknown;
+    const run: CommandRunner = (_command, _args, input) => {
+      inputBody = JSON.parse(input ?? "{}");
+      return { exitCode: 0, stdout: JSON.stringify(response), stderr: "" };
+    };
+
+    await runPluginPlan(
+      "/bin/plannotator",
+      {
+        origin: "opencode",
+        plan: "# Plan",
+      },
+      run,
+      { timeoutMs: 12_000 },
+    );
+
+    expect(inputBody).toMatchObject({ timeoutMs: 12_000 });
+  });
+
   test("turns malformed plugin plan output into a protocol error", async () => {
     const result = await runPluginPlan(
       "/bin/plannotator",

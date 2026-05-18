@@ -1087,7 +1087,7 @@ const ReviewApp: React.FC = () => {
   function applyPRResponse(data: PRSessionUpdate & {
     rawPatch: string; gitRef: string;
     repoInfo?: { display: string; branch?: string };
-    viewedFiles?: string[]; error?: string;
+    viewedFiles?: string[]; agentCwd?: string | null; error?: string;
   }) {
     const isPRSwitch = !!data.prMetadata;
     const nextFiles = parseDiffToFiles(data.rawPatch);
@@ -1111,6 +1111,7 @@ const ReviewApp: React.FC = () => {
       ...(data.prDiffScopeOptions && { prDiffScopeOptions: data.prDiffScopeOptions }),
     });
     if (data.repoInfo) setRepoInfo(data.repoInfo);
+    if (data.agentCwd !== undefined) setAgentCwd(data.agentCwd);
     if (data.prMetadata) {
       setViewedFiles(data.viewedFiles ? new Set(data.viewedFiles) : new Set());
     }

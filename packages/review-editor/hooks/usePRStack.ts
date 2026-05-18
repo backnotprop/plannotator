@@ -11,6 +11,7 @@ export interface PRSwitchResponse {
   prDiffScopeOptions?: unknown[];
   repoInfo?: unknown;
   viewedFiles?: string[];
+  agentCwd?: string | null;
   error?: string;
 }
 

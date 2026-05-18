@@ -33,6 +33,7 @@
     "./plugin-binary": "./plugin-binary.ts",
     "./plugin-client": "./plugin-client.ts",
     "./plugin-protocol": "./plugin-protocol.ts",
+    "./daemon-protocol": "./daemon-protocol.ts",
     "./improvement-hooks": "./improvement-hooks.ts",
     "./pfm-reminder": "./pfm-reminder.ts",
     "./worktree": "./worktree.ts",
@@ -41,7 +42,6 @@
     "./url-to-markdown": "./url-to-markdown.ts",
     "./tour": "./tour.ts",
     "./annotate-args": "./annotate-args.ts",
-    "./goal-setup": "./goal-setup.ts",
     "./at-reference": "./at-reference.ts",
     "./code-nav": "./code-nav.ts"
   },

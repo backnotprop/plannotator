@@ -8,7 +8,7 @@
 import { homedir } from "os";
 import { join } from "path";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 
 export type DefaultDiffType = 'uncommitted' | 'unstaged' | 'staged' | 'merge-base' | 'all';
 export type DiffLineBgIntensity = 'subtle' | 'normal' | 'strong';
@@ -173,9 +173,12 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): void {
  * Detect the git user name from `git config user.name`.
  * Returns null if git is unavailable, not in a repo, or user.name is not set.
  */
-export function detectGitUser(): string | null {
+export function detectGitUser(cwd = process.cwd()): string | null {
   try {
-    const name = execSync("git config user.name", { encoding: "utf-8", timeout: 3000 }).trim();
+    const name = execFileSync("git", ["-C", cwd, "config", "user.name"], {
+      encoding: "utf-8",
+      timeout: 3000,
+    }).trim();
     return name || null;
   } catch {
     return null;

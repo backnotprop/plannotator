@@ -4,6 +4,7 @@ import { urlToMarkdown } from "./url-to-markdown";
 // Track fetch calls to verify headers and URL selection
 let fetchCalls: { url: string; headers: Record<string, string> }[] = [];
 const originalFetch = globalThis.fetch;
+const originalJinaApiKey = process.env.JINA_API_KEY;
 
 beforeEach(() => {
   fetchCalls = [];
@@ -11,6 +12,11 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  if (originalJinaApiKey === undefined) {
+    delete process.env.JINA_API_KEY;
+  } else {
+    process.env.JINA_API_KEY = originalJinaApiKey;
+  }
 });
 
 /**
@@ -104,6 +110,66 @@ test("content negotiation: falls through to Jina when server returns HTML", asyn
   // Content negotiation fetch + Jina fetch
   expect(fetchCalls.length).toBeGreaterThanOrEqual(2);
   expect(fetchCalls[1].url).toContain("r.jina.ai");
+});
+
+test("Jina fetch uses the per-request API key when provided", async () => {
+  let callCount = 0;
+  globalThis.fetch = mock((url: string | URL | Request, init?: RequestInit) => {
+    const headers = init?.headers as Record<string, string> | undefined;
+    fetchCalls.push({ url: String(url), headers: headers ?? {} });
+    callCount++;
+
+    if (callCount === 1) {
+      return Promise.resolve(
+        new Response("<html><body>Hi</body></html>", {
+          status: 200,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
+      );
+    }
+    return Promise.resolve(
+      new Response("# From Jina", {
+        status: 200,
+        headers: { "content-type": "text/plain" },
+      }),
+    );
+  }) as typeof fetch;
+
+  await urlToMarkdown("https://example.com/page", {
+    useJina: true,
+    jinaApiKey: "request-key",
+  });
+
+  expect(fetchCalls[1].headers.Authorization).toBe("Bearer request-key");
+});
+
+test("Jina fetch does not read a stale process API key implicitly", async () => {
+  process.env.JINA_API_KEY = "daemon-start-key";
+  let callCount = 0;
+  globalThis.fetch = mock((url: string | URL | Request, init?: RequestInit) => {
+    const headers = init?.headers as Record<string, string> | undefined;
+    fetchCalls.push({ url: String(url), headers: headers ?? {} });
+    callCount++;
+
+    if (callCount === 1) {
+      return Promise.resolve(
+        new Response("<html><body>Hi</body></html>", {
+          status: 200,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
+      );
+    }
+    return Promise.resolve(
+      new Response("# From Jina", {
+        status: 200,
+        headers: { "content-type": "text/plain" },
+      }),
+    );
+  }) as typeof fetch;
+
+  await urlToMarkdown("https://example.com/page", { useJina: true });
+
+  expect(fetchCalls[1].headers.Authorization).toBeUndefined();
 });
 
 test("content negotiation: skipped for local URLs", async () => {

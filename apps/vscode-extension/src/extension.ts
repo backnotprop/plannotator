@@ -63,8 +63,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       },
     });
 
+    const parsedUrl = new URL(url);
     const panel = await panelManager.open(proxy.rewriteUrl(url));
-    setActiveProxyPort(proxy.port);
+    setActiveProxyPort(proxy.port, parsedUrl.pathname);
 
     // Auto-close this specific panel when plannotator signals completion
     proxy.events.on("close", () => panel.dispose());

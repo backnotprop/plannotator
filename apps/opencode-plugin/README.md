@@ -159,6 +159,18 @@ Register the tool but manage prompts and permissions yourself:
 | `PLANNOTATOR_BIN` | Explicit path to the installed `plannotator` binary used by the plugin client. |
 | `PLANNOTATOR_DISABLE_AUTO_INSTALL` | Set to `1`, `true`, or `yes` to prevent the plugin from running the official installer when the binary is missing or incompatible. |
 
+## Daemon Runtime
+
+OpenCode still calls the installed `plannotator` binary through the same plugin command surface, but plan/review/annotate/archive sessions are daemon-backed inside the binary. The first request auto-starts the daemon; compatible later requests reuse it.
+
+```bash
+plannotator daemon status
+plannotator daemon stop
+plannotator sessions
+```
+
+Use `daemon status` to see the daemon PID, endpoint, protocol version, and active session count. If remote/port settings change, stop the daemon before retrying with the new `PLANNOTATOR_REMOTE` or `PLANNOTATOR_PORT` values.
+
 ## Devcontainer / Docker
 
 Works in containerized environments. Set the env vars and forward the port:

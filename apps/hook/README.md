@@ -23,7 +23,7 @@ curl -fsSL https://plannotator.ai/install.cmd -o install.cmd && install.cmd && d
 
 Released binaries ship with SHA256 sidecars and [SLSA build provenance](https://slsa.dev/) attestations from v0.17.2 onwards. See the [installation docs](https://plannotator.ai/docs/getting-started/installation/#verifying-your-install) for version pinning and verification commands.
 
-The released binary owns Plannotator's browser server runtime for Claude Code, OpenCode, and Pi. See [Single Binary Runtime](../../docs/single-binary-runtime.md) for the plugin client boundary and daemon-next design.
+The released binary owns Plannotator's browser server runtime for Claude Code, OpenCode, and Pi. See [Single Binary Runtime](../../docs/single-binary-runtime.md) for the plugin client boundary and daemon runtime design.
 
 ---
 
@@ -83,6 +83,19 @@ When Claude Code calls `ExitPlanMode`, this hook intercepts and:
 | `PLANNOTATOR_PORT` | Fixed port to use. Default: random locally, `19432` for remote sessions. |
 | `PLANNOTATOR_BROWSER` | Custom browser to open plans in. macOS: app name or path. Linux/Windows: executable path. |
 | `PLANNOTATOR_SHARE_URL` | Custom share portal URL for self-hosting. Default: `https://share.plannotator.ai`. |
+
+## Daemon Runtime
+
+Plan, review, annotate, and archive sessions are created through one long-running `plannotator` daemon. Normal commands auto-start a compatible daemon when needed.
+
+```bash
+plannotator daemon status
+plannotator daemon stop
+plannotator daemon start
+plannotator sessions
+```
+
+`daemon status` reports the daemon PID, endpoint, protocol version, and active session count. If the running daemon was started with different remote/port settings, stop it and retry with the desired `PLANNOTATOR_REMOTE` / `PLANNOTATOR_PORT` values.
 
 ## Remote / Devcontainer Usage
 

@@ -498,7 +498,10 @@ export default function plannotator(pi: ExtensionAPI): void {
 				const useJina = resolveUseJina(false, loadConfig());
 				ctx.ui.notify(`Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}...`, "info");
 				try {
-					const result = await urlToMarkdown(filePath, { useJina });
+					const result = await urlToMarkdown(filePath, {
+						useJina,
+						jinaApiKey: process.env.JINA_API_KEY,
+					});
 					markdown = result.markdown;
 					sourceConverted = isConvertedSource(result.source);
 				} catch (err) {

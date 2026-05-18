@@ -20,10 +20,10 @@ export { sanitizeTag, extractRepoName, extractDirName } from "@plannotator/share
  * 2. Current directory name (fallback)
  * 3. null (if nothing useful found)
  */
-export async function detectProjectName(): Promise<string | null> {
+export async function detectProjectName(cwd = process.cwd()): Promise<string | null> {
   // Try git repo name first
   try {
-    const result = await $`git rev-parse --show-toplevel`.quiet().nothrow();
+    const result = await $`git -C ${cwd} rev-parse --show-toplevel`.quiet().nothrow();
     if (result.exitCode === 0) {
       const repoName = extractRepoName(result.stdout.toString());
       if (repoName) return repoName;
@@ -34,7 +34,6 @@ export async function detectProjectName(): Promise<string | null> {
 
   // Fallback to current directory name
   try {
-    const cwd = process.cwd();
     const dirName = extractDirName(cwd);
     if (dirName) return dirName;
   } catch {

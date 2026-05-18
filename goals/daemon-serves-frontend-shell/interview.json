@@ -1,0 +1,112 @@
+{
+  "stage": "interview",
+  "title": "Daemon serves the frontend shell",
+  "goalSlug": "daemon-serves-frontend-shell",
+  "questions": [
+    {
+      "id": "rollout_scope",
+      "prompt": "Which runtime paths should this goal change?",
+      "description": "The existing daemon already owns /s/<id> session URLs, while the older direct startPlannotatorServer/startReviewServer/startAnnotateServer paths still accept explicit HTML content.",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Make all daemon-backed sessions serve the new apps/frontend shell at /s/<sessionId>, while preserving direct non-daemon servers with their current old HTML until a later UI migration.",
+      "options": [
+        {
+          "id": "daemon_only",
+          "label": "Daemon only"
+        },
+        {
+          "id": "all_servers",
+          "label": "Daemon and direct servers"
+        }
+      ],
+      "required": true
+    },
+    {
+      "id": "asset_strategy",
+      "prompt": "How should the daemon serve the frontend build in this phase?",
+      "description": "The current old apps are bundled as single-file HTML. The new Vite shell currently emits separate asset files unless configured otherwise.",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Bundle the frontend shell as a single HTML artifact for daemon serving now. This keeps /s/<id> refreshes reliable, avoids new static-asset routing, and matches the existing release packaging model.",
+      "options": [
+        {
+          "id": "single_file",
+          "label": "Single-file HTML"
+        },
+        {
+          "id": "static_assets",
+          "label": "Serve asset files"
+        }
+      ],
+      "required": true
+    },
+    {
+      "id": "migration_boundary",
+      "prompt": "What UI behavior is in and out of scope for this wiring pass?",
+      "description": "The shell is intentionally a production-grade skeleton; it can bootstrap sessions and show mode-specific placeholders, but the existing full plan/review/annotate/archive interfaces are not yet migrated into it.",
+      "answerMode": "multi-custom",
+      "recommendedAnswer": "In scope: daemon serves the shell, shell bootstraps against the real daemon APIs, routing works on refresh, build scripts package the shell, and tests prove the integration. Out of scope: migrating the full legacy plan, review, annotate, and archive UIs into the shell.",
+      "recommendedOptionIds": [
+        "serve_shell",
+        "bootstrap_real_api",
+        "tests",
+        "defer_legacy_ui_migration"
+      ],
+      "options": [
+        {
+          "id": "serve_shell",
+          "label": "Serve shell"
+        },
+        {
+          "id": "bootstrap_real_api",
+          "label": "Real bootstrap API"
+        },
+        {
+          "id": "tests",
+          "label": "Strong tests"
+        },
+        {
+          "id": "defer_legacy_ui_migration",
+          "label": "Defer UI migration"
+        }
+      ],
+      "required": true
+    },
+    {
+      "id": "verification_boundary",
+      "prompt": "What level of verification should this goal require before implementation is considered complete?",
+      "description": "You said full end-to-end testing does not need to happen in this sequel phase, but the wiring should still be reliable.",
+      "answerMode": "multi-custom",
+      "recommendedAnswer": "Require build/type/lint/tests for apps/frontend, daemon unit/integration tests proving /s/<id> serves shell HTML and /s/<id>/api/session still bootstraps, package/build script coverage, and a focused browser-mode shell test. Do not require a full live daemon plus browser E2E in this phase.",
+      "recommendedOptionIds": [
+        "frontend_check",
+        "daemon_integration",
+        "browser_mode",
+        "build_scripts",
+        "no_live_e2e"
+      ],
+      "options": [
+        {
+          "id": "frontend_check",
+          "label": "Frontend check"
+        },
+        {
+          "id": "daemon_integration",
+          "label": "Daemon integration"
+        },
+        {
+          "id": "browser_mode",
+          "label": "Browser mode"
+        },
+        {
+          "id": "build_scripts",
+          "label": "Build scripts"
+        },
+        {
+          "id": "no_live_e2e",
+          "label": "No live E2E"
+        }
+      ],
+      "required": true
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 /**
  * Builds the clipboard payload that teaches an external agent (Claude Code,
  * Codex, custom scripts, etc.) how to post annotations into a live Plannotator
- * **plan-review** session via the /api/external-annotations HTTP API.
+ * **plan-review** session via the external-annotations HTTP API.
  *
  * Plan mode and code-review mode have different annotation shapes (plan uses
  * `originalText` for inline highlighting; review uses `filePath` + line ranges
@@ -12,11 +12,11 @@
  * it top-to-bottom and start posting in 30 seconds. Edit freely — this file is
  * the single source of truth for the agent-facing contract surface.
  *
- * The only dynamic value is `origin`, which is interpolated at click time from
- * `window.location.origin` so the agent gets the correct base URL whether the
- * server is running on a random local port or the fixed remote port (19432).
+ * The only dynamic value is `apiBase`, which is interpolated at click time from
+ * the runtime API base so the agent gets the correct session URL whether the
+ * UI is served from a standalone root server or the long-running daemon.
  */
-export function buildPlanAgentInstructions(origin: string): string {
+export function buildPlanAgentInstructions(apiBase: string): string {
   return `# Plannotator — External Annotations
 
 You can submit review feedback on the user's current plan-review session by POSTing annotations to a small HTTP API. The user will see them immediately — inline highlights on the plan and entries in a sidebar — and can accept, edit, or delete them.
@@ -24,7 +24,7 @@ You can submit review feedback on the user's current plan-review session by POST
 This is one-way submission. Any tool can post: linters, agents, scripts. The user does not see who you are unless you tell them via \`text\` or \`author\`.
 
 ## Base URL
-${origin}
+${apiBase}
 
 All endpoints below are relative to that base. No authentication.
 
@@ -38,7 +38,7 @@ There is no "send" or "done" step — each POST is live the moment it lands.
 ## Reading the plan
 
 \`\`\`sh
-curl -s ${origin}/api/plan | jq -r .plan
+curl -s ${apiBase}/plan | jq -r .plan
 \`\`\`
 
 **Line numbers do not apply and cannot be referenced.** The renderer pins your comments to the plan by matching the \`originalText\` field as a verbatim substring of the rendered text. Quote the exact phrase, never say "line 12."
@@ -53,7 +53,7 @@ You have exactly two shapes to choose from:
 ## Posting an inline comment
 
 \`\`\`sh
-curl -s ${origin}/api/external-annotations \\
+curl -s ${apiBase}/external-annotations \\
   -H 'Content-Type: application/json' \\
   -d '{
     "source": "claude-code",
@@ -68,7 +68,7 @@ curl -s ${origin}/api/external-annotations \\
 ## Posting a global comment
 
 \`\`\`sh
-curl -s ${origin}/api/external-annotations \\
+curl -s ${apiBase}/external-annotations \\
   -H 'Content-Type: application/json' \\
   -d '{
     "source": "claude-code",
@@ -92,7 +92,7 @@ Both endpoints return \`201 {"ids": ["<uuid>"]}\` on success, \`400 {"error": ".
 ## Batching
 
 \`\`\`sh
-curl -s ${origin}/api/external-annotations \\
+curl -s ${apiBase}/external-annotations \\
   -H 'Content-Type: application/json' \\
   -d '{
     "annotations": [
@@ -109,16 +109,16 @@ Batches are atomic: if any item fails validation, the whole batch is rejected wi
 
 \`\`\`sh
 # List everything (yours and others')
-curl -s ${origin}/api/external-annotations | jq
+curl -s ${apiBase}/external-annotations | jq
 
 # Delete one annotation by id — works on any source, including the user's
-curl -s -X DELETE "${origin}/api/external-annotations?id=<uuid>"
+curl -s -X DELETE "${apiBase}/external-annotations?id=<uuid>"
 
 # Delete all annotations from one source — the standard cleanup before reposting
-curl -s -X DELETE "${origin}/api/external-annotations?source=claude-code"
+curl -s -X DELETE "${apiBase}/external-annotations?source=claude-code"
 
 # Delete everything in the session
-curl -s -X DELETE ${origin}/api/external-annotations
+curl -s -X DELETE ${apiBase}/external-annotations
 \`\`\`
 
 You have full delete authority. Use it responsibly.
@@ -128,14 +128,14 @@ You have full delete authority. Use it responsibly.
 If you re-run on the same session, your previous annotations are still there. POSTing again will create duplicates. Standard pattern:
 
 \`\`\`sh
-curl -s -X DELETE "${origin}/api/external-annotations?source=claude-code"
-curl -s ${origin}/api/external-annotations -H 'Content-Type: application/json' -d '{ ...fresh annotations... }'
+curl -s -X DELETE "${apiBase}/external-annotations?source=claude-code"
+curl -s ${apiBase}/external-annotations -H 'Content-Type: application/json' -d '{ ...fresh annotations... }'
 \`\`\`
 
 This is why \`source\` matters. Pick a stable identifier and stick with it.
 
 ## Notes
-- The plan can change underneath you. If the user denies and resubmits, refetch \`/api/plan\` — your prior \`originalText\` substrings may no longer match.
+- The plan can change underneath you. If the user denies and resubmits, refetch \`${apiBase}/plan\` — your prior \`originalText\` substrings may no longer match.
 - No idempotency. Posting the same annotation twice creates two entries.
 - This API is local to the user's machine. Treat it as a UI surface, not a public service.
 `;

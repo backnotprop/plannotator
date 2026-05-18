@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { apiPath } from '../utils/api';
 
 /**
  * Get the display URL for an image path or URL
@@ -7,7 +8,7 @@ export const getImageSrc = (path: string, base?: string): string => {
   if (path.startsWith('http://') || path.startsWith('https://')) {
     return path; // Remote URL, use directly
   }
-  let url = `/api/image?path=${encodeURIComponent(path)}`;
+  let url = `${apiPath('/image')}?path=${encodeURIComponent(path)}`;
   if (base && !path.startsWith('/')) {
     url += `&base=${encodeURIComponent(base)}`;
   }

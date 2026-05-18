@@ -13,7 +13,6 @@
  */
 
 import type { Origin } from "@plannotator/shared/agents";
-import { resolve } from "path";
 import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
 import { openEditorDiff } from "./ide";
 import {
@@ -47,10 +46,11 @@ import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft } from "./draft";
 import { handleDoc, handleDocExists, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, handleFileBrowserFiles } from "./reference-handlers";
-import { warmFileListCache } from "@plannotator/shared/resolve-file";
+import { resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
 import { createEditorAnnotationHandler } from "./editor-annotations";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { isWSL } from "./browser";
+import type { SessionRequestHandler } from "./session-handler";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -63,6 +63,8 @@ export { type VaultNode, buildFileTree } from "@plannotator/shared/reference-com
 // --- Types ---
 
 export interface ServerOptions {
+  /** Working directory for repo/project-relative behavior */
+  cwd?: string;
   /** The plan markdown content */
   plan: string;
   /** Origin identifier (e.g., "claude-code", "opencode") */
@@ -108,6 +110,14 @@ export interface ServerResult {
   stop: () => void;
 }
 
+export interface PlannotatorSession {
+  htmlContent: string;
+  handleRequest: SessionRequestHandler;
+  waitForDecision: ServerResult["waitForDecision"];
+  waitForDone?: () => Promise<void>;
+  dispose: () => void;
+}
+
 // --- Server Implementation ---
 
 const MAX_RETRIES = 5;
@@ -122,19 +132,22 @@ const RETRY_DELAY_MS = 500;
  * - Obsidian/Bear integrations
  * - Port conflict retries
  */
-export async function startPlannotatorServer(
+export async function createPlannotatorSession(
   options: ServerOptions
-): Promise<ServerResult> {
-  const { plan, origin, htmlContent, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, onReady, mode, customPlanPath } = options;
+): Promise<PlannotatorSession> {
+  const { cwd = process.cwd(), plan, origin, htmlContent, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, mode, customPlanPath } = options;
+  const resolvePlanStoragePath = (customPath?: string | null): string | undefined => {
+    if (!customPath?.trim()) return undefined;
+    return resolveUserPath(customPath, cwd);
+  };
+  const archiveCustomPath = resolvePlanStoragePath(customPlanPath);
 
-  const isRemote = isRemoteSession();
-  const configuredPort = getServerPort();
   const wslFlag = await isWSL();
-  const gitUser = detectGitUser();
+  const gitUser = detectGitUser(cwd);
 
   // Side-channel pre-warm: kick off the code-file walk now so the
   // renderer's POST /api/doc/exists lands on warm cache.
-  void warmFileListCache(process.cwd(), "code");
+  void warmFileListCache(cwd, "code");
 
   // --- Archive mode setup ---
   let archivePlans: ArchivedPlan[] = [];
@@ -143,9 +156,9 @@ export async function startPlannotatorServer(
   let donePromise: Promise<void> | undefined;
 
   if (mode === "archive") {
-    archivePlans = listArchivedPlans(customPlanPath ?? undefined);
+    archivePlans = listArchivedPlans(archiveCustomPath);
     initialArchivePlan = archivePlans.length > 0
-      ? readArchivedPlan(archivePlans[0].filename, customPlanPath ?? undefined) ?? ""
+      ? readArchivedPlan(archivePlans[0].filename, archiveCustomPath) ?? ""
       : "";
     donePromise = new Promise<void>((resolve) => { resolveDone = resolve; });
   }
@@ -182,8 +195,8 @@ export async function startPlannotatorServer(
   }>;
 
   if (mode !== "archive") {
-    repoInfo = await getRepoInfo();
-    project = (await detectProjectName()) ?? "_unknown";
+    repoInfo = await getRepoInfo(cwd);
+    project = (await detectProjectName(cwd)) ?? "_unknown";
     const historyResult = saveToHistory(project, slug, plan);
     currentPlanPath = historyResult.path;
     previousPlan =
@@ -204,17 +217,7 @@ export async function startPlannotatorServer(
     decisionPromise = new Promise(() => {});
   }
 
-  // Start server with retry logic
-  let server: ReturnType<typeof Bun.serve> | null = null;
-
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      server = Bun.serve({
-        hostname: getServerHostname(),
-        port: configuredPort,
-
-        async fetch(req, server) {
-          const url = new URL(req.url);
+  const handleRequest: SessionRequestHandler = async (req, url, context) => {
 
           // API: Get a specific plan version from history
           if (url.pathname === "/api/plan/version") {
@@ -245,7 +248,7 @@ export async function startPlannotatorServer(
           // API: List archived plans (from ~/.plannotator/plans/)
           // Cached for session lifetime — new plans won't appear during a single review
           if (url.pathname === "/api/archive/plans" && req.method === "GET") {
-            const customPath = url.searchParams.get("customPath") || undefined;
+            const customPath = resolvePlanStoragePath(url.searchParams.get("customPath"));
             if (!cachedArchivePlans) cachedArchivePlans = listArchivedPlans(customPath);
             return Response.json({ plans: cachedArchivePlans });
           }
@@ -256,7 +259,7 @@ export async function startPlannotatorServer(
             if (!filename) {
               return Response.json({ error: "Missing filename parameter" }, { status: 400 });
             }
-            const customPath = url.searchParams.get("customPath") || undefined;
+            const customPath = resolvePlanStoragePath(url.searchParams.get("customPath"));
             const content = readArchivedPlan(filename, customPath);
             if (content === null) {
               return Response.json({ error: "Plan not found" }, { status: 404 });
@@ -284,17 +287,17 @@ export async function startPlannotatorServer(
                 serverConfig: getServerConfig(gitUser),
               });
             }
-            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, projectRoot: process.cwd(), isWSL: wslFlag, serverConfig: getServerConfig(gitUser) });
+            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, projectRoot: cwd, isWSL: wslFlag, serverConfig: getServerConfig(gitUser) });
           }
 
           // API: Serve a linked markdown document
           if (url.pathname === "/api/doc" && req.method === "GET") {
-            return handleDoc(req);
+            return handleDoc(req, { projectRoot: cwd });
           }
 
           // API: Batch existence check for code-file paths the renderer detected
           if (url.pathname === "/api/doc/exists" && req.method === "POST") {
-            return handleDocExists(req);
+            return handleDocExists(req, { projectRoot: cwd });
           }
 
           // API: Hook status for the Settings Hooks tab
@@ -337,7 +340,7 @@ export async function startPlannotatorServer(
 
           // API: Serve images (local paths or temp uploads)
           if (url.pathname === "/api/image") {
-            return handleImage(req);
+            return handleImage(req, cwd);
           }
 
           // API: Upload image -> save to temp -> return path
@@ -387,7 +390,7 @@ export async function startPlannotatorServer(
 
           // API: List markdown files in a directory as a tree
           if (url.pathname === "/api/reference/files" && req.method === "GET") {
-            return handleFileBrowserFiles(req);
+            return handleFileBrowserFiles(req, cwd);
           }
 
           // API: Get available agents (OpenCode only)
@@ -408,7 +411,7 @@ export async function startPlannotatorServer(
 
           // API: External annotations (SSE-based, for any external tool)
           const externalResponse = await externalAnnotations?.handle(req, url, {
-            disableIdleTimeout: () => server.timeout(req, 0),
+            disableIdleTimeout: () => context?.disableIdleTimeout?.(),
           });
           if (externalResponse) return externalResponse;
 
@@ -426,13 +429,13 @@ export async function startPlannotatorServer(
               // Run integrations in parallel — they're independent
               const promises: Promise<void>[] = [];
               if (body.obsidian?.vaultPath && body.obsidian?.plan) {
-                promises.push(saveToObsidian(body.obsidian).then(r => { results.obsidian = r; }));
+                promises.push(saveToObsidian(body.obsidian, { cwd }).then(r => { results.obsidian = r; }));
               }
               if (body.bear?.plan) {
-                promises.push(saveToBear(body.bear).then(r => { results.bear = r; }));
+                promises.push(saveToBear(body.bear, { cwd }).then(r => { results.bear = r; }));
               }
               if (body.octarine?.plan && body.octarine?.workspace) {
-                promises.push(saveToOctarine(body.octarine).then(r => { results.octarine = r; }));
+                promises.push(saveToOctarine(body.octarine, { cwd }).then(r => { results.octarine = r; }));
               }
               await Promise.allSettled(promises);
 
@@ -451,6 +454,10 @@ export async function startPlannotatorServer(
 
           // API: Approve plan
           if (url.pathname === "/api/approve" && req.method === "POST") {
+            if (mode === "archive") {
+              return Response.json({ error: "Archive sessions do not support approval." }, { status: 404 });
+            }
+
             // Check for note integrations and optional feedback
             let feedback: string | undefined;
             let agentSwitch: string | undefined;
@@ -486,20 +493,20 @@ export async function startPlannotatorServer(
               // Capture plan save settings
               if (body.planSave !== undefined) {
                 planSaveEnabled = body.planSave.enabled;
-                planSaveCustomPath = body.planSave.customPath;
+                planSaveCustomPath = resolvePlanStoragePath(body.planSave.customPath);
               }
 
               // Run integrations in parallel — they're independent
               const integrationResults: Record<string, IntegrationResult> = {};
               const integrationPromises: Promise<void>[] = [];
               if (body.obsidian?.vaultPath && body.obsidian?.plan) {
-                integrationPromises.push(saveToObsidian(body.obsidian).then(r => { integrationResults.obsidian = r; }));
+                integrationPromises.push(saveToObsidian(body.obsidian, { cwd }).then(r => { integrationResults.obsidian = r; }));
               }
               if (body.bear?.plan) {
-                integrationPromises.push(saveToBear(body.bear).then(r => { integrationResults.bear = r; }));
+                integrationPromises.push(saveToBear(body.bear, { cwd }).then(r => { integrationResults.bear = r; }));
               }
               if (body.octarine?.plan && body.octarine?.workspace) {
-                integrationPromises.push(saveToOctarine(body.octarine).then(r => { integrationResults.octarine = r; }));
+                integrationPromises.push(saveToOctarine(body.octarine, { cwd }).then(r => { integrationResults.octarine = r; }));
               }
               await Promise.allSettled(integrationPromises);
 
@@ -534,6 +541,10 @@ export async function startPlannotatorServer(
 
           // API: Deny with feedback
           if (url.pathname === "/api/deny" && req.method === "POST") {
+            if (mode === "archive") {
+              return Response.json({ error: "Archive sessions do not support denial." }, { status: 404 });
+            }
+
             let feedback = "Plan rejected by user";
             let planSaveEnabled = true; // default to enabled for backwards compat
             let planSaveCustomPath: string | undefined;
@@ -547,7 +558,7 @@ export async function startPlannotatorServer(
               // Capture plan save settings
               if (body.planSave !== undefined) {
                 planSaveEnabled = body.planSave.enabled;
-                planSaveCustomPath = body.planSave.customPath;
+                planSaveCustomPath = resolvePlanStoragePath(body.planSave.customPath);
               }
             } catch {
               // Use default feedback
@@ -571,6 +582,41 @@ export async function startPlannotatorServer(
           // Serve embedded HTML for all other routes (SPA)
           return new Response(htmlContent, {
             headers: { "Content-Type": "text/html" },
+          });
+  };
+
+  return {
+    htmlContent,
+    handleRequest,
+    waitForDecision: () => decisionPromise,
+    ...(donePromise && { waitForDone: () => donePromise }),
+    dispose: () => {
+      externalAnnotations?.dispose();
+    },
+  };
+}
+
+export async function startPlannotatorServer(
+  options: ServerOptions
+): Promise<ServerResult> {
+  const { onReady } = options;
+  const session = await createPlannotatorSession(options);
+  const isRemote = isRemoteSession();
+  const configuredPort = getServerPort();
+
+  // Start server with retry logic
+  let server: ReturnType<typeof Bun.serve> | null = null;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      server = Bun.serve({
+        hostname: getServerHostname(),
+        port: configuredPort,
+
+        async fetch(req, server) {
+          const url = new URL(req.url);
+          return session.handleRequest(req, url, {
+            disableIdleTimeout: () => server.timeout(req, 0),
           });
         },
 
@@ -618,8 +664,11 @@ export async function startPlannotatorServer(
     port,
     url: serverUrl,
     isRemote,
-    waitForDecision: () => decisionPromise,
-    ...(donePromise && { waitForDone: () => donePromise }),
-    stop: () => server.stop(),
+    waitForDecision: session.waitForDecision,
+    ...(session.waitForDone && { waitForDone: session.waitForDone }),
+    stop: () => {
+      server.stop();
+      session.dispose();
+    },
   };
 }

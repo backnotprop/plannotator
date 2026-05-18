@@ -24,17 +24,23 @@ import { preloadFile } from "@pierre/diffs/ssr";
 
 // --- Route handlers ---
 
+export interface ReferenceHandlerOptions {
+	projectRoot?: string;
+}
+
 /** Serve a linked markdown document. Resolves absolute, relative, or bare filename paths. */
-export async function handleDoc(req: Request): Promise<Response> {
+export async function handleDoc(req: Request, options: ReferenceHandlerOptions = {}): Promise<Response> {
 	const url = new URL(req.url);
 	const requestedPath = url.searchParams.get("path");
 	if (!requestedPath) {
 		return Response.json({ error: "Missing path parameter" }, { status: 400 });
 	}
 
+	const projectRoot = options.projectRoot ?? process.cwd();
+
 	// Side-channel: kick off a code-file walk for the project root so that any
 	// /api/doc/exists POST issued by the rendered linked-doc lands on warm cache.
-	void warmFileListCache(process.cwd(), "code");
+	void warmFileListCache(projectRoot, "code");
 
 	// If a base directory is provided, try resolving relative to it first
 	// (used by annotate mode to resolve paths relative to the source file).
@@ -43,7 +49,7 @@ export async function handleDoc(req: Request): Promise<Response> {
 	// server (see annotate.ts /api/doc route). The standalone HTML block
 	// below (no base) retains its cwd-based containment check.
 	const base = url.searchParams.get("base");
-	const resolvedBase = base ? resolveUserPath(base) : null;
+	const resolvedBase = base ? resolveUserPath(base, projectRoot) : null;
 	if (
 		resolvedBase &&
 		!isAbsoluteUserPath(requestedPath) &&
@@ -64,7 +70,6 @@ export async function handleDoc(req: Request): Promise<Response> {
 	}
 
 	// HTML files: resolve directly (not via resolveMarkdownFile which only handles .md/.mdx)
-	const projectRoot = process.cwd();
 	if (/\.html?$/i.test(requestedPath)) {
 		const resolvedHtml = resolveUserPath(requestedPath, resolvedBase || projectRoot);
 		if (!isWithinProjectRoot(resolvedHtml, projectRoot)) {
@@ -188,7 +193,7 @@ export async function handleDoc(req: Request): Promise<Response> {
  * resolved base before passing it to `resolveCodeFile` (or filter `r.path`
  * before recording a found result). Mirror in apps/pi-extension/server/reference.ts.
  */
-export async function handleDocExists(req: Request): Promise<Response> {
+export async function handleDocExists(req: Request, options: ReferenceHandlerOptions = {}): Promise<Response> {
 	let body: unknown;
 	try {
 		body = await req.json();
@@ -202,12 +207,12 @@ export async function handleDocExists(req: Request): Promise<Response> {
 	if (paths.length > 500) {
 		return Response.json({ error: "Too many paths (max 500)" }, { status: 400 });
 	}
+	const projectRoot = options.projectRoot ?? process.cwd();
 	const baseRaw = (body as { base?: unknown })?.base;
 	const baseDir = typeof baseRaw === "string" && baseRaw.length > 0
-		? resolveUserPath(baseRaw)
+		? resolveUserPath(baseRaw, projectRoot)
 		: undefined;
 
-	const projectRoot = process.cwd();
 	const results: Record<
 		string,
 		| { status: "found"; resolved: string }
@@ -357,7 +362,7 @@ export async function handleObsidianDoc(req: Request): Promise<Response> {
 // --- File Browser ---
 
 /** List markdown files in a directory as a nested tree. */
-export async function handleFileBrowserFiles(req: Request): Promise<Response> {
+export async function handleFileBrowserFiles(req: Request, projectRoot = process.cwd()): Promise<Response> {
 	const url = new URL(req.url);
 	const dirPath = url.searchParams.get("dirPath");
 	if (!dirPath) {
@@ -367,7 +372,7 @@ export async function handleFileBrowserFiles(req: Request): Promise<Response> {
 		);
 	}
 
-	const resolvedDir = resolveUserPath(dirPath);
+	const resolvedDir = resolveUserPath(dirPath, projectRoot);
 	if (!existsSync(resolvedDir) || !statSync(resolvedDir).isDirectory()) {
 		return Response.json({ error: "Invalid directory path" }, { status: 400 });
 	}

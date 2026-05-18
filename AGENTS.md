@@ -44,6 +44,7 @@ plannotator/
 │   │   ├── index.ts              # startPlannotatorServer(), handleServerReady()
 │   │   ├── review.ts             # startReviewServer(), handleReviewServerReady()
 │   │   ├── annotate.ts           # startAnnotateServer(), handleAnnotateServerReady()
+│   │   ├── daemon/               # Long-running daemon runtime, state, client, and session store
 │   │   ├── storage.ts            # Re-exports from @plannotator/shared/storage
 │   │   ├── share-url.ts          # Server-side share URL generation for remote sessions
 │   │   ├── remote.ts             # isRemoteSession(), getServerPort()
@@ -98,6 +99,8 @@ Plannotator has one server implementation:
 - **Bun server** (`packages/server/`) — owns plan review, code review, annotate, archive, and shared browser APIs.
 
 Claude Code runs this server through the released `plannotator` binary entrypoint. OpenCode and Pi do not package their own server implementations; they call the same binary through the plugin protocol in `packages/shared/plugin-protocol.ts`. Runtime-agnostic logic (store, validation, types) lives in `packages/shared/`.
+
+Daemon-backed commands run through one long-running `plannotator` process per user/machine environment. `plannotator daemon start|status|stop` manage that lifecycle, while normal plan/review/annotate/archive commands auto-start a compatible daemon and create session-scoped browser URLs at `/s/<sessionId>`. Browser API calls must use `/s/<sessionId>/api/...`; root `/api/...` routes are not a daemon session boundary.
 
 ## Installation
 
@@ -215,6 +218,24 @@ Done → POST /api/done closes the browser
 During normal plan review, an Archive sidebar tab provides the same browsing via linked doc overlay without leaving the current session.
 
 ## Server API
+
+### Daemon Runtime (`packages/server/daemon/`)
+
+The daemon is the single long-running Bun server used by normal plan/review/annotate/archive commands. It owns a session store and exposes browser sessions at `/s/<sessionId>`. Session browser APIs are scoped under `/s/<sessionId>/api/...`; root `/api/...` is not a valid daemon session API boundary.
+
+| Endpoint              | Method | Purpose                                    |
+| --------------------- | ------ | ------------------------------------------ |
+| `/daemon/capabilities` | GET | Return daemon protocol/capability metadata |
+| `/daemon/status` | GET | Return daemon process, endpoint, and session counts |
+| `/daemon/sessions` | GET | List active sessions (`?clean=1` also reaps expired sessions before listing) |
+| `/daemon/sessions` | POST | Create a plan/review/annotate/archive session from a plugin-protocol request |
+| `/daemon/sessions/:id` | GET | Fetch a session summary |
+| `/daemon/sessions/:id/result` | GET | Wait for a session decision/result |
+| `/daemon/sessions/:id/cancel` | POST | Cancel a session and dispose its resources |
+| `/daemon/sessions/:id` | DELETE | Delete a session record |
+| `/daemon/shutdown` | POST | Ask the daemon to stop |
+| `/s/:id` | GET | Serve the browser HTML for a session |
+| `/s/:id/api/...` | Any | Route browser API requests to that session's plan/review/annotate handler |
 
 ### Plan Server (`packages/server/index.ts`)
 

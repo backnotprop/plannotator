@@ -49,6 +49,7 @@ import { type PRMetadata, type PRReviewFileComment, type PRStackTree, type PRLis
 import { createAIEndpoints, ProviderRegistry, SessionManager, createProvider, type AIEndpoints, type PiSDKConfig } from "@plannotator/ai";
 import { isWSL } from "./browser";
 import { handleCodeNavResolve, extractChangedFiles } from "./code-nav";
+import type { SessionRequestHandler } from "./session-handler";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -60,6 +61,8 @@ export { handleServerReady as handleReviewServerReady } from "./shared-handlers"
 // --- Types ---
 
 export interface ReviewServerOptions {
+  /** Working directory for repo/project-relative behavior */
+  cwd?: string;
   /** Raw git diff patch string */
   rawPatch: string;
   /** Git ref used for the diff (e.g., "HEAD", "main..HEAD", "--staged") */
@@ -119,23 +122,41 @@ export interface ReviewServerResult {
   stop: () => void;
 }
 
+export interface ReviewSession {
+  htmlContent: string;
+  handleRequest: SessionRequestHandler;
+  waitForDecision: ReviewServerResult["waitForDecision"];
+  setServerUrl: (url: string) => void;
+  dispose: () => void;
+}
+
+export interface ResolveReviewScopedAgentCwdOptions {
+  isPRMode: boolean;
+  prUrl?: string;
+  worktreePool?: Pick<import("@plannotator/shared/worktree-pool").WorktreePool, "resolve">;
+  agentCwd?: string;
+  currentDiffType: DiffType;
+  gitContextCwd?: string;
+}
+
+export function resolveReviewScopedAgentCwd(
+  options: ResolveReviewScopedAgentCwdOptions,
+): string | undefined {
+  if (options.isPRMode && options.prUrl && options.worktreePool) {
+    return options.worktreePool.resolve(options.prUrl) ?? options.agentCwd;
+  }
+  return options.agentCwd ?? resolveVcsCwd(options.currentDiffType, options.gitContextCwd);
+}
+
 // --- Server Implementation ---
 
 const MAX_RETRIES = 5;
 const RETRY_DELAY_MS = 500;
 
-/**
- * Start the Code Review server
- *
- * Handles:
- * - Remote detection and port configuration
- * - API routes (/api/diff, /api/feedback)
- * - Port conflict retries
- */
-export async function startReviewServer(
+export async function createReviewSession(
   options: ReviewServerOptions
-): Promise<ReviewServerResult> {
-  const { htmlContent, origin, gitContext, sharingEnabled = true, shareBaseUrl, onReady } = options;
+): Promise<ReviewSession> {
+  const { cwd = process.cwd(), htmlContent, origin, gitContext, sharingEnabled = true, shareBaseUrl } = options;
 
   let prMetadata = options.prMetadata;
   const isPRMode = !!prMetadata;
@@ -169,6 +190,7 @@ export async function startReviewServer(
   const detectedCompareTarget = (): string => gitContext?.defaultBranch || gitContext?.compareTarget?.fallback || "main";
   let currentBase = options.initialBase || detectedCompareTarget();
   let baseEverSwitched = false;
+  let currentAgentCwd = options.agentCwd;
 
   const resolveReviewBase = (requestedBase?: string): string => {
     return resolveBaseBranch(requestedBase, detectedCompareTarget());
@@ -186,12 +208,18 @@ export async function startReviewServer(
 
   // Agent jobs — background process manager (late-binds serverUrl via getter)
   let serverUrl = "";
+  const resolveScopedAgentCwd = (): string | undefined => {
+    return resolveReviewScopedAgentCwd({
+      isPRMode,
+      prUrl: prMetadata?.url,
+      worktreePool: options.worktreePool,
+      agentCwd: currentAgentCwd,
+      currentDiffType,
+      gitContextCwd: gitContext?.cwd,
+    });
+  };
   const resolveAgentCwd = (): string => {
-    if (options.worktreePool && prMetadata) {
-      const poolPath = options.worktreePool.resolve(prMetadata.url);
-      if (poolPath) return poolPath;
-    }
-    return options.agentCwd ?? resolveVcsCwd(currentDiffType, gitContext?.cwd) ?? process.cwd();
+    return resolveScopedAgentCwd() ?? cwd;
   };
   const agentJobs = createAgentJobHandler({
     mode: "review",
@@ -200,7 +228,7 @@ export async function startReviewServer(
 
     async buildCommand(provider, config) {
       const cwd = resolveAgentCwd();
-      const hasAgentLocalAccess = !!options.worktreePool || !!options.agentCwd || !!gitContext;
+      const hasAgentLocalAccess = !!resolveScopedAgentCwd();
       const userMessageOptions = { defaultBranch: currentBase, hasLocalAccess: hasAgentLocalAccess, prDiffScope: currentPRDiffScope };
 
       // Snapshot the diff context at launch — stored on the job so
@@ -342,7 +370,7 @@ export async function startReviewServer(
     const claudePath = Bun.which("claude");
     const provider = await createProvider({
       type: "claude-agent-sdk",
-      cwd: process.cwd(),
+      cwd,
       ...(claudePath && { claudeExecutablePath: claudePath }),
     });
     aiRegistry.register(provider);
@@ -358,7 +386,7 @@ export async function startReviewServer(
     const codexPath = Bun.which("codex");
     const provider = await createProvider({
       type: "codex-sdk",
-      cwd: process.cwd(),
+      cwd,
       ...(codexPath && { codexExecutablePath: codexPath }),
     });
     aiRegistry.register(provider);
@@ -373,7 +401,7 @@ export async function startReviewServer(
     if (piPath) {
       const provider = await createProvider({
         type: "pi-sdk",
-        cwd: process.cwd(),
+        cwd,
         piExecutablePath: piPath,
       } as PiSDKConfig);
       if (provider instanceof PiSDKProvider) {
@@ -392,7 +420,7 @@ export async function startReviewServer(
     if (opencodePath) {
       const provider = await createProvider({
         type: "opencode-sdk",
-        cwd: process.cwd(),
+        cwd,
       });
       if (provider instanceof OpenCodeProvider) {
         await provider.fetchModels();
@@ -412,16 +440,14 @@ export async function startReviewServer(
     });
   }
 
-  const isRemote = isRemoteSession();
-  const configuredPort = getServerPort();
   const wslFlag = await isWSL();
-  const gitUser = detectGitUser();
+  const gitUser = detectGitUser(cwd);
 
   // Detect repo info (cached for this session)
   // In PR mode, derive from metadata instead of local git
   let repoInfo = isPRMode && prMetadata
     ? { display: getDisplayRepo(prMetadata), branch: `${getMRLabel(prMetadata)} ${getMRNumberLabel(prMetadata)}` }
-    : await getRepoInfo();
+    : await getRepoInfo(cwd);
   if (gitContext?.repository?.displayFallback) {
     repoInfo = {
       ...repoInfo,
@@ -434,7 +460,7 @@ export async function startReviewServer(
   const platformUser = prRef ? await getPRUser(prRef) : null;
   let prStackInfo = prMetadata ? getPRStackInfo(prMetadata) : null;
   let prDiffScopeOptions = prMetadata
-    ? getPRDiffScopeOptions(prMetadata, !!(options.worktreePool || options.agentCwd))
+    ? getPRDiffScopeOptions(prMetadata, !!resolveScopedAgentCwd())
     : [];
 
   // Fetch full stack tree (best-effort — always try in PR mode so root PRs
@@ -450,7 +476,7 @@ export async function startReviewServer(
     const resolved = resolveStackInfo(prMetadata, prStackTree, prStackInfo);
     if (resolved && !prStackInfo) {
       prStackInfo = resolved;
-      prDiffScopeOptions = getPRDiffScopeOptions(prMetadata, !!(options.worktreePool || options.agentCwd));
+      prDiffScopeOptions = getPRDiffScopeOptions(prMetadata, !!resolveScopedAgentCwd());
     }
   }
 
@@ -485,17 +511,7 @@ export async function startReviewServer(
     resolveDecision = resolve;
   });
 
-  // Start server with retry logic
-  let server: ReturnType<typeof Bun.serve> | null = null;
-
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      server = Bun.serve({
-        hostname: getServerHostname(),
-        port: configuredPort,
-
-        async fetch(req, server) {
-          const url = new URL(req.url);
+  const handleRequest: SessionRequestHandler = async (req, url, context) => {
 
           // API: Get tour result
           if (url.pathname.match(/^\/api\/tour\/[^/]+$/) && req.method === "GET") {
@@ -535,7 +551,7 @@ export async function startReviewServer(
               shareBaseUrl,
               repoInfo,
               isWSL: wslFlag,
-              ...(options.agentCwd && { agentCwd: options.agentCwd }),
+              ...(currentAgentCwd && { agentCwd: currentAgentCwd }),
               ...(isPRMode && {
                 prMetadata,
                 platformUser,
@@ -654,14 +670,14 @@ export async function startReviewServer(
               }
 
               const fullStackOption = prDiffScopeOptions.find((option) => option.id === "full-stack");
-              if (!fullStackOption?.enabled || !(options.worktreePool || options.agentCwd)) {
+              const fullStackCwd = resolveScopedAgentCwd();
+              if (!fullStackOption?.enabled || !fullStackCwd) {
                 return Response.json(
                   { error: "Full stack diff requires a stacked PR and a local checkout" },
                   { status: 400 },
                 );
               }
 
-              const fullStackCwd = (options.worktreePool && prMetadata ? options.worktreePool.resolve(prMetadata.url) : undefined) ?? options.agentCwd;
               const result = await runPRFullStackDiff(gitRuntime, prMetadata, fullStackCwd);
 
               if (result.error) {
@@ -756,24 +772,26 @@ export async function startReviewServer(
                 prStackTreeCache.set(body.url, prStackTree);
               }
 
-              // Ensure worktree for the new PR (pool creates a fresh one, no shared-state mutation)
-              let hasLocalForNewPR = false;
+              // Ensure local access for the new PR. Same-repo sessions use a
+              // per-PR pool; cross-repo --local sessions reuse the mutable clone.
+              let agentCwdForNewPR: string | null = null;
               if (options.worktreePool) {
                 try {
-                  await options.worktreePool.ensure(gitRuntime, pr.metadata);
-                  hasLocalForNewPR = true;
-                } catch {
-                  // Pool creation failed — full-stack will be disabled
-                }
+                  const entry = await options.worktreePool.ensure(gitRuntime, pr.metadata);
+                  agentCwdForNewPR = entry.path;
+                } catch {}
               } else if (options.agentCwd) {
-                hasLocalForNewPR = await checkoutPRHead(gitRuntime, pr.metadata, options.agentCwd);
+                if (await checkoutPRHead(gitRuntime, pr.metadata, options.agentCwd)) {
+                  agentCwdForNewPR = options.agentCwd;
+                }
               }
 
               prStackInfo = resolveStackInfo(pr.metadata, prStackTree, prStackInfo);
 
               prDiffScopeOptions = prStackInfo
-                ? getPRDiffScopeOptions(pr.metadata, hasLocalForNewPR)
+                ? getPRDiffScopeOptions(pr.metadata, !!agentCwdForNewPR)
                 : [];
+              currentAgentCwd = agentCwdForNewPR ?? undefined;
 
               // Fetch viewed files for the new PR
               let switchedViewedFiles: string[] = [];
@@ -801,6 +819,7 @@ export async function startReviewServer(
                 prDiffScope: currentPRDiffScope,
                 prDiffScopeOptions,
                 repoInfo,
+                agentCwd: agentCwdForNewPR,
                 ...(switchedViewedFiles.length > 0 && { viewedFiles: switchedViewedFiles }),
                 ...(currentError ? { error: currentError } : {}),
               });
@@ -846,7 +865,7 @@ export async function startReviewServer(
 
             // Full-stack PR mode uses local git for file expansion because
             // the patch is no longer the platform's layer diff.
-            const fileContentCwd = (options.worktreePool && prMetadata) ? options.worktreePool.resolve(prMetadata.url) : options.agentCwd;
+            const fileContentCwd = resolveScopedAgentCwd();
             if (
               isPRMode &&
               currentPRDiffScope === "full-stack" &&
@@ -905,22 +924,21 @@ export async function startReviewServer(
 
           // API: Code navigation (search-based symbol resolution)
           if (url.pathname === "/api/code-nav/resolve" && req.method === "POST") {
-            const hasCodeNavAccess = !!gitContext || !!options.agentCwd || !!options.worktreePool;
-            if (!hasCodeNavAccess) {
+            const navCwd = resolveScopedAgentCwd();
+            if (!navCwd) {
               return Response.json(
                 { error: "Code navigation requires local access" },
                 { status: 400 },
               );
             }
-            const navCwd = resolveAgentCwd();
             const changedFiles = extractChangedFiles(currentPatch);
             return handleCodeNavResolve(req, navCwd, changedFiles);
           }
 
           // API: Code navigation file preview (read file from working tree)
           if (url.pathname === "/api/code-nav/file" && req.method === "GET") {
-            const hasCodeNavAccess = !!gitContext || !!options.agentCwd || !!options.worktreePool;
-            if (!hasCodeNavAccess) {
+            const navCwd = resolveScopedAgentCwd();
+            if (!navCwd) {
               return Response.json({ error: "Code navigation requires local access" }, { status: 400 });
             }
             const filePath = url.searchParams.get("path");
@@ -931,7 +949,6 @@ export async function startReviewServer(
               return Response.json({ error: "Invalid path" }, { status: 400 });
             }
             try {
-              const navCwd = resolveAgentCwd();
               const content = await Bun.file(`${navCwd}/${filePath}`).text();
               return Response.json({ content });
             } catch {
@@ -985,7 +1002,7 @@ export async function startReviewServer(
 
           // API: Serve images (local paths or temp uploads)
           if (url.pathname === "/api/image") {
-            return handleImage(req);
+            return handleImage(req, cwd);
           }
 
           // API: Upload image -> save to temp -> return path
@@ -1011,13 +1028,13 @@ export async function startReviewServer(
 
           // API: External annotations (SSE-based, for any external tool)
           const externalResponse = await externalAnnotations.handle(req, url, {
-            disableIdleTimeout: () => server.timeout(req, 0),
+            disableIdleTimeout: () => context?.disableIdleTimeout?.(),
           });
           if (externalResponse) return externalResponse;
 
           // API: Agent jobs (background review agents)
           const agentResponse = await agentJobs.handle(req, url, {
-            disableIdleTimeout: () => server.timeout(req, 0),
+            disableIdleTimeout: () => context?.disableIdleTimeout?.(),
           });
           if (agentResponse) return agentResponse;
 
@@ -1150,6 +1167,65 @@ export async function startReviewServer(
           return new Response(htmlContent, {
             headers: { "Content-Type": "text/html" },
           });
+  };
+
+  const exitHandler = () => agentJobs.killAll();
+  process.once("exit", exitHandler);
+
+  return {
+    htmlContent,
+    handleRequest,
+    waitForDecision: () => decisionPromise,
+    setServerUrl: (url) => {
+      serverUrl = url;
+    },
+    dispose: () => {
+      process.removeListener("exit", exitHandler);
+      externalAnnotations.dispose();
+      agentJobs.killAll();
+      aiSessionManager.disposeAll();
+      aiRegistry.disposeAll();
+      // Invoke cleanup callback (e.g., remove temp worktree)
+      if (options.onCleanup) {
+        try {
+          const result = options.onCleanup();
+          if (result instanceof Promise) result.catch(() => {});
+        } catch { /* best effort */ }
+      }
+    },
+  };
+}
+
+/**
+ * Start the Code Review server
+ *
+ * Handles:
+ * - Remote detection and port configuration
+ * - API routes (/api/diff, /api/feedback)
+ * - Port conflict retries
+ */
+export async function startReviewServer(
+  options: ReviewServerOptions
+): Promise<ReviewServerResult> {
+  const { onReady } = options;
+  const session = await createReviewSession(options);
+  const isRemote = isRemoteSession();
+  const configuredPort = getServerPort();
+
+  // Start server with retry logic
+  let server: ReturnType<typeof Bun.serve> | null = null;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      server = Bun.serve({
+        hostname: getServerHostname(),
+        port: configuredPort,
+
+        async fetch(req, server) {
+          const url = new URL(req.url);
+          return session.handleRequest(req, url, {
+            disableIdleTimeout: () => server.timeout(req, 0),
+          });
         },
 
         error(err) {
@@ -1171,6 +1247,8 @@ export async function startReviewServer(
         continue;
       }
 
+      session.dispose();
+
       if (isAddressInUse) {
         const hint = isRemote ? " (set PLANNOTATOR_PORT to use different port)" : "";
         throw new Error(`Port ${configuredPort} in use after ${MAX_RETRIES} retries${hint}`);
@@ -1185,9 +1263,8 @@ export async function startReviewServer(
   }
 
   const port = server.port!;
-  serverUrl = `http://localhost:${port}`;
-  const exitHandler = () => agentJobs.killAll();
-  process.once("exit", exitHandler);
+  const serverUrl = `http://localhost:${port}`;
+  session.setServerUrl(serverUrl);
 
   // Notify caller that server is ready
   if (onReady) {
@@ -1198,20 +1275,10 @@ export async function startReviewServer(
     port,
     url: serverUrl,
     isRemote,
-    waitForDecision: () => decisionPromise,
+    waitForDecision: session.waitForDecision,
     stop: () => {
-      process.removeListener("exit", exitHandler);
-      agentJobs.killAll();
-      aiSessionManager.disposeAll();
-      aiRegistry.disposeAll();
+      session.dispose();
       server.stop();
-      // Invoke cleanup callback (e.g., remove temp worktree)
-      if (options.onCleanup) {
-        try {
-          const result = options.onCleanup();
-          if (result instanceof Promise) result.catch(() => {});
-        } catch { /* best effort */ }
-      }
     },
   };
 }

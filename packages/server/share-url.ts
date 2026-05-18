@@ -6,6 +6,7 @@
  */
 
 import { compress } from "@plannotator/shared/compress";
+import type { DaemonRemoteShareNotice } from "@plannotator/shared/daemon-protocol";
 
 const DEFAULT_SHARE_BASE = "https://share.plannotator.ai";
 
@@ -33,6 +34,29 @@ export function formatSize(bytes: number): string {
   return kb < 100 ? `${kb.toFixed(1)} KB` : `${Math.round(kb)} KB`;
 }
 
+export async function createRemoteShareNotice(
+  content: string,
+  shareBaseUrl: string | undefined,
+  verb: string,
+  noun: string
+): Promise<DaemonRemoteShareNotice> {
+  const url = await generateRemoteShareUrl(content, shareBaseUrl);
+  return {
+    url,
+    verb,
+    noun,
+    size: formatSize(new TextEncoder().encode(url).length),
+  };
+}
+
+export function formatRemoteShareNotice(notice: DaemonRemoteShareNotice): string {
+  return (
+    `\n  Open this link on your local machine to ${notice.verb}:\n` +
+    `  ${notice.url}\n\n` +
+    `  (${notice.size} — ${notice.noun}, annotations added in browser)\n\n`
+  );
+}
+
 /**
  * Generate a remote share URL and write it to stderr for the user.
  * Silently does nothing on failure.
@@ -43,11 +67,7 @@ export async function writeRemoteShareLink(
   verb: string,
   noun: string
 ): Promise<void> {
-  const shareUrl = await generateRemoteShareUrl(content, shareBaseUrl);
-  const size = formatSize(new TextEncoder().encode(shareUrl).length);
-  process.stderr.write(
-    `\n  Open this link on your local machine to ${verb}:\n` +
-    `  ${shareUrl}\n\n` +
-    `  (${size} — ${noun}, annotations added in browser)\n\n`
-  );
+  process.stderr.write(formatRemoteShareNotice(
+    await createRemoteShareNotice(content, shareBaseUrl, verb, noun),
+  ));
 }

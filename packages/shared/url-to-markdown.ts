@@ -10,6 +10,8 @@ import { htmlToMarkdown } from "./html-to-markdown";
 export interface UrlToMarkdownOptions {
   /** Whether to use Jina Reader (true) or plain fetch+Turndown (false). */
   useJina: boolean;
+  /** Optional Jina Reader API key to use for this request. */
+  jinaApiKey?: string;
 }
 
 export interface UrlToMarkdownResult {
@@ -103,7 +105,7 @@ export async function urlToMarkdown(
 
   if (options.useJina && !local) {
     try {
-      const markdown = await fetchViaJina(url);
+      const markdown = await fetchViaJina(url, options.jinaApiKey);
       return { markdown, source: "jina" };
     } catch (err) {
       process.stderr.write(
@@ -257,7 +259,7 @@ async function fetchViaContentNegotiation(url: string): Promise<string | null> {
 }
 
 /** Fetch via Jina Reader — returns markdown directly. */
-async function fetchViaJina(url: string): Promise<string> {
+async function fetchViaJina(url: string, apiKey?: string): Promise<string> {
   // Strip fragment (never sent to server) and encode for Jina's path-based API
   const cleanUrl = url.split("#")[0];
   const jinaUrl = `https://r.jina.ai/${cleanUrl}`;
@@ -265,7 +267,6 @@ async function fetchViaJina(url: string): Promise<string> {
     Accept: "text/plain",
   };
 
-  const apiKey = process.env.JINA_API_KEY;
   if (apiKey) {
     headers.Authorization = `Bearer ${apiKey}`;
   }

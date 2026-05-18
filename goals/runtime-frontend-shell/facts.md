@@ -1,0 +1,24 @@
+# Runtime Frontend Shell Facts
+
+- A new runtime frontend application is added as a standalone Vite React TypeScript app in the monorepo.
+- The new runtime frontend uses TanStack Router for its route tree, route loaders, and session route typing.
+- The new runtime frontend uses Zustand for runtime, session, and shell UI state that must be shared across routes.
+- The new runtime frontend uses Immer for nested state updates where mutable draft syntax makes the store code clearer.
+- The skeleton uses existing Plannotator shared types and data structures whenever they exist, rather than inventing parallel frontend-only shapes.
+- The first implementation is a production-grade skeleton only and does not migrate the existing plan, annotate, archive, or review UIs.
+- The production-grade skeleton is organized as top-level product modules (`plan`, `review`, `annotate`, `archive`, `setup-goal`, `sessions`) plus focused app/daemon/shared/testing infrastructure folders.
+- The skeleton includes minimal stub session views for plan review, code review, annotate, archive, and setup-goal sessions.
+- Each stub session view renders from real daemon/session bootstrap data instead of hard-coded fake mode selection.
+- The shell is designed for one long-running daemon that can host multiple live Plannotator sessions at once, including planning sessions, code review sessions, annotate sessions, archive sessions, setup-goal sessions, and PR review sessions.
+- The shell can list session summaries, open a selected session, and keep the selected session state isolated from other sessions.
+- The canonical session URL is an explicit session route such as `/s/$sessionId`, with validated session id params and no ambiguous dynamic route design.
+- The backend exposes a small session bootstrap contract for the new shell, returning session mode, project, origin, label, status, apiBase, and capabilities.
+- Existing mode-specific backend APIs remain intact during the skeleton phase.
+- The frontend includes a typed API client for daemon and session-scoped backend calls, including consistent loading and error handling behavior.
+- The shell has deliberate loading, empty, not-found, and backend-error states for session listing and session bootstrap.
+- OxLint and the Oxc formatter are configured for the new runtime frontend with package scripts suitable for CI, without reformatting the rest of the repository.
+- Automated tests cover route loading, session id validation, API client behavior, Zustand/Immer store behavior, and mode-to-session-view selection.
+- Browser-level integration tests run the built shell against a controlled daemon-compatible test server and verify session listing, session opening, bootstrap success, bootstrap failure, and stub session-view rendering.
+- The test suite avoids shallow coverage-only tests and favors behavior that would catch broken routing, broken backend contracts, or broken state transitions.
+- The new app can be built and tested independently without replacing the currently served plan/review HTML bundles in this phase.
+- The implementation documents the runtime shell architecture, commands, backend bootstrap contract, and future migration path from current plan/review apps into the shell.
