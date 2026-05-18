@@ -173,6 +173,13 @@ export async function startPlannotatorServer(
     agentSwitch?: string;
     permissionMode?: string;
   }) => void;
+  let decisionResult: {
+    approved: boolean;
+    feedback?: string;
+    savedPath?: string;
+    agentSwitch?: string;
+    permissionMode?: string;
+  } | null = null;
   let decisionPromise: Promise<{
     approved: boolean;
     feedback?: string;
@@ -528,7 +535,9 @@ export async function startPlannotatorServer(
 
             // Use permission mode from client request if provided, otherwise fall back to hook input
             const effectivePermissionMode = requestedPermissionMode || permissionMode;
-            resolveDecision({ approved: true, feedback, savedPath, agentSwitch, permissionMode: effectivePermissionMode });
+            const result = { approved: true, feedback, savedPath, agentSwitch, permissionMode: effectivePermissionMode };
+            decisionResult = result;
+            resolveDecision(result);
             return Response.json({ ok: true, savedPath });
           }
 
@@ -561,8 +570,65 @@ export async function startPlannotatorServer(
             }
 
             deleteDraft(draftKey);
-            resolveDecision({ approved: false, feedback, savedPath });
+            const result = { approved: false, feedback, savedPath };
+            decisionResult = result;
+            resolveDecision(result);
             return Response.json({ ok: true, savedPath });
+          }
+
+          // --- Decision polling endpoint ---
+          // For remote clients that can't await waitForDecision() directly.
+          if (url.pathname === "/api/decision" && req.method === "GET") {
+            // Check if the decision has been made by looking at the stored result
+            if (decisionResult) {
+              return Response.json(decisionResult);
+            }
+            return Response.json({ pending: true });
+          }
+
+          // --- Decision SSE stream ---
+          // Real-time notification for remote clients.
+          if (url.pathname === "/api/decision/stream" && req.method === "GET") {
+            const stream = new ReadableStream({
+              start(controller) {
+                const encoder = new TextEncoder();
+                const send = (data: unknown) => {
+                  try {
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+                  } catch { /* stream already closed */ }
+                };
+
+                // If already decided, send immediately
+                if (decisionResult) {
+                  send(decisionResult);
+                  controller.close();
+                  return;
+                }
+
+                // Poll until decided (simpler than promise-based for single-session)
+                const interval = setInterval(() => {
+                  if (decisionResult) {
+                    clearInterval(interval);
+                    send(decisionResult);
+                    try { controller.close(); } catch { /* already closed */ }
+                  }
+                }, 200);
+
+                // Abort cleanup
+                req.signal.addEventListener("abort", () => {
+                  clearInterval(interval);
+                  try { controller.close(); } catch { /* already closed */ }
+                });
+              },
+            });
+
+            return new Response(stream, {
+              headers: {
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+              },
+            });
           }
 
           // Favicon
