@@ -19,16 +19,9 @@ import {
 import { useTheme } from "@plannotator/ui/components/ThemeProvider";
 import { useDaemonEventStore } from "../../daemon/events/event-store";
 import type { SessionSummary } from "../../daemon/contracts";
-import { getSessionModeMeta } from "../../shared/session-meta";
+import { getSessionModeMeta, formatSessionLabel } from "../../shared/session-meta";
 
 const MODE_ORDER = ["plan", "review", "annotate", "goal-setup", "archive"];
-
-function formatSessionLabel(label: string): string {
-  return label
-    .replace(/^plugin-(plan|review|annotate|archive)-/, "")
-    .replace(/^(claude-code|opencode|pi|plannotator-frontend)-/, "")
-    .replace(/^goal-setup-(interview|facts)-/, "");
-}
 
 interface AppSidebarProps {
   onAddProject: () => void;
@@ -116,7 +109,7 @@ export function AppSidebar({ onAddProject }: AppSidebarProps) {
                                 isTerminal && "text-muted-foreground/60 line-through",
                               )}
                             >
-                              {formatSessionLabel(session.label)}
+                              {formatSessionLabel(session.label, session.mode)}
                             </span>
                           </Link>
                         </SidebarMenuButton>

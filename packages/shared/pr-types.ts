@@ -211,6 +211,7 @@ export interface PRListItem {
   author: string;
   url: string;
   baseBranch: string;
+  headBranch: string;
   state: 'open' | 'closed' | 'merged';
 }
 

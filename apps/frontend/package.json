@@ -43,6 +43,7 @@
     "zustand": "^5.0.13"
   },
   "devDependencies": {
+    "@radix-ui/react-context-menu": "^2.2.16",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/router-plugin": "^1.141.0",
     "@types/node": "^22.14.0",

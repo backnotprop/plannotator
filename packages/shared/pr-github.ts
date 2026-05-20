@@ -633,7 +633,7 @@ export async function fetchGhPRList(
   const result = await runtime.runCommand("gh", [
     "pr", "list",
     "--repo", repoFlag(ref),
-    "--json", "number,title,author,url,baseRefName,state",
+    "--json", "number,title,author,url,baseRefName,headRefName,state",
     "--limit", "30",
     "--state", "all",
   ]);
@@ -646,6 +646,7 @@ export async function fetchGhPRList(
     author: { login: string };
     url: string;
     baseRefName: string;
+    headRefName: string;
     state: string;
   }>;
 
@@ -656,6 +657,7 @@ export async function fetchGhPRList(
     author: pr.author.login,
     url: pr.url,
     baseBranch: pr.baseRefName,
+    headBranch: pr.headRefName,
     state: (pr.state === "OPEN" ? "open" : pr.state === "MERGED" ? "merged" : "closed") as PRListItem["state"],
   }));
 }

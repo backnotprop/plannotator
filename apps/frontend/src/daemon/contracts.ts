@@ -69,6 +69,26 @@ export interface DirectoryListResponse {
   dirs: DirectoryEntry[];
 }
 
+export interface PRListItem {
+  id: string;
+  number: number;
+  title: string;
+  author: string;
+  url: string;
+  baseBranch: string;
+  headBranch: string;
+  state: "open" | "closed" | "merged";
+}
+
+export interface PRListResponse {
+  ok: true;
+  prs: PRListItem[];
+  platform: "github" | "gitlab" | null;
+  defaultBranch?: string;
+  error?: "no-remote" | "no-cli" | "auth-failed";
+  message?: string;
+}
+
 export type SessionLifecycleStatus = DaemonSessionStatus;
 export type DaemonServerMessage = DaemonWebSocketServerMessage;
 
