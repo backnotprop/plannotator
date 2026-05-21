@@ -538,33 +538,38 @@ export function createDaemonFetchHandler(options: DaemonServerOptions): DaemonFe
         }
       }
 
-      const projectRoute = url.pathname.match(/^\/daemon\/projects\/([^/]+)$/);
-      if (projectRoute && req.method === "DELETE") {
-        const name = decodeURIComponent(projectRoute[1]);
+      if (url.pathname === "/daemon/projects" && req.method === "DELETE") {
+        const cwd = url.searchParams.get("cwd");
+        if (!cwd) {
+          return json(createDaemonErrorResponse("invalid-request", "Project deletion requires a cwd query parameter."), { status: 400 });
+        }
         const clean = url.searchParams.get("clean") === "1";
         const entries = readProjectRegistry();
-        const project = entries.find((e) => e.name === name);
+        const project = entries.find((e) => e.cwd === cwd);
         if (!project) {
-          return json(createDaemonErrorResponse("invalid-request", `Project not found: ${name}`), { status: 404 });
+          return json(createDaemonErrorResponse("invalid-request", `Project not found: ${cwd}`), { status: 404 });
         }
         const childCwds = entries.filter((e) => e.parentCwd === project.cwd).map((e) => e.cwd);
         const projectCwds = new Set([project.cwd, ...childCwds]);
-        const remaining = entries.filter((e) => e.name !== name && !projectCwds.has(e.cwd));
+        const remaining = entries.filter((e) => !projectCwds.has(e.cwd));
         writeProjectRegistry(remaining);
 
         if (clean) {
           for (const record of store.list()) {
-            if (record.project === name || projectCwds.has(record.cwd ?? "")) {
+            if (record.project === project.name || projectCwds.has(record.cwd ?? "")) {
               void store.cancel(record.id, "Project removed.");
             }
           }
-          try {
-            const { join } = await import("path");
-            const { homedir } = await import("os");
-            const { rmSync } = await import("fs");
-            const historyDir = join(homedir(), ".plannotator", "history", name);
-            rmSync(historyDir, { recursive: true, force: true });
-          } catch {}
+          const safeName = project.name.replace(/[/\\]/g, "").replace(/\.\./g, "");
+          if (safeName) {
+            try {
+              const { join } = await import("path");
+              const { homedir } = await import("os");
+              const { rmSync } = await import("fs");
+              const historyDir = join(homedir(), ".plannotator", "history", safeName);
+              rmSync(historyDir, { recursive: true, force: true });
+            } catch {}
+          }
         }
 
         return json({ ok: true });
@@ -629,15 +634,23 @@ export function createDaemonFetchHandler(options: DaemonServerOptions): DaemonFe
         }
       }
 
-      if (url.pathname === "/daemon/projects/prs" && req.method === "GET") {
+      if ((url.pathname === "/daemon/projects/prs" || url.pathname === "/daemon/projects/prs/detailed") && req.method === "GET") {
+        const isDetailed = url.pathname.endsWith("/detailed");
         const cwd = url.searchParams.get("cwd");
         if (!cwd) {
           return json(createDaemonErrorResponse("invalid-request", "PR listing requires a cwd query parameter."), { status: 400 });
         }
         const now = Date.now();
-        const cached = prListCache.get(cwd);
-        if (cached && now - cached.time < 30_000) {
-          return json({ ok: true, prs: cached.prs, platform: cached.platform, defaultBranch: cached.defaultBranch });
+        if (!isDetailed) {
+          const cached = prListCache.get(cwd);
+          if (cached && now - cached.time < 30_000) {
+            return json({ ok: true, prs: cached.prs, platform: cached.platform, defaultBranch: cached.defaultBranch });
+          }
+        } else {
+          const cached = prDetailedListCache.get(cwd);
+          if (cached && now - cached.time < 30_000) {
+            return json({ ok: true, prs: cached.prs, platform: cached.platform });
+          }
         }
         try {
           const { execSync } = await import("child_process");
@@ -670,75 +683,23 @@ export function createDaemonFetchHandler(options: DaemonServerOptions): DaemonFe
             const isNotFound = message.includes("not found") || message.includes("ENOENT");
             return json({ ok: true, prs: [], platform, error: isNotFound ? "no-cli" : "auth-failed", message });
           }
-          let prs: PRListItem[];
-          try {
-            prs = await fetchPRList(ref);
-          } catch {
-            return json({ ok: true, prs: [], platform });
-          }
-          let defaultBranch = "main";
-          try {
-            const { execSync } = await import("child_process");
-            const symRef = execSync("git symbolic-ref refs/remotes/origin/HEAD", { cwd, encoding: "utf-8" }).trim();
-            const branch = symRef.replace(/^refs\/remotes\/origin\//, "");
-            if (branch) defaultBranch = branch;
-          } catch {}
-          prListCache.set(cwd, { prs, platform, defaultBranch, time: now });
-          return json({ ok: true, prs, platform, defaultBranch });
-        } catch {
-          return json({ ok: true, prs: [], platform: null });
-        }
-      }
-
-      if (url.pathname === "/daemon/projects/prs/detailed" && req.method === "GET") {
-        const cwd = url.searchParams.get("cwd");
-        if (!cwd) {
-          return json(createDaemonErrorResponse("invalid-request", "PR listing requires a cwd query parameter."), { status: 400 });
-        }
-        const now = Date.now();
-        const cached = prDetailedListCache.get(cwd);
-        if (cached && now - cached.time < 30_000) {
-          return json({ ok: true, prs: cached.prs, platform: cached.platform });
-        }
-        try {
-          const { execSync } = await import("child_process");
-          let remoteUrl: string;
-          try {
-            remoteUrl = execSync("git remote get-url origin", { cwd, encoding: "utf-8" }).trim();
-          } catch {
-            return json({ ok: true, prs: [], platform: null, error: "no-remote" });
-          }
-          const host = parseRemoteHost(remoteUrl);
-          const repoPath = parseRemoteUrl(remoteUrl);
-          if (!host || !repoPath) {
-            return json({ ok: true, prs: [], platform: null, error: "no-remote" });
-          }
-          const isGitLab = host.toLowerCase().includes("gitlab");
-          const platform = isGitLab ? "gitlab" : "github";
-          let ref: PRRef;
-          if (isGitLab) {
-            ref = { platform: "gitlab", host, projectPath: repoPath, iid: 0 };
+          if (isDetailed) {
+            let prs: PRDetailedListItem[];
+            try { prs = await fetchPRDetailedList(ref); } catch { return json({ ok: true, prs: [], platform }); }
+            prDetailedListCache.set(cwd, { prs, platform, time: now });
+            return json({ ok: true, prs, platform });
           } else {
-            const parts = repoPath.split("/");
-            const owner = parts.slice(0, -1).join("/");
-            const repo = parts[parts.length - 1];
-            ref = { platform: "github", host, owner, repo, number: 0 };
+            let prs: PRListItem[];
+            try { prs = await fetchPRList(ref); } catch { return json({ ok: true, prs: [], platform }); }
+            let defaultBranch = "main";
+            try {
+              const symRef = execSync("git symbolic-ref refs/remotes/origin/HEAD", { cwd, encoding: "utf-8" }).trim();
+              const branch = symRef.replace(/^refs\/remotes\/origin\//, "");
+              if (branch) defaultBranch = branch;
+            } catch {}
+            prListCache.set(cwd, { prs, platform, defaultBranch, time: now });
+            return json({ ok: true, prs, platform, defaultBranch });
           }
-          try {
-            await checkPRAuth(ref);
-          } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            const isNotFound = message.includes("not found") || message.includes("ENOENT");
-            return json({ ok: true, prs: [], platform, error: isNotFound ? "no-cli" : "auth-failed", message });
-          }
-          let prs: PRDetailedListItem[];
-          try {
-            prs = await fetchPRDetailedList(ref);
-          } catch {
-            return json({ ok: true, prs: [], platform });
-          }
-          prDetailedListCache.set(cwd, { prs, platform, time: now });
-          return json({ ok: true, prs, platform });
         } catch {
           return json({ ok: true, prs: [], platform: null });
         }

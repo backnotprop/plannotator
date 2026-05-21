@@ -59,7 +59,15 @@ export function LandingPage({ onAddProject }: LandingPageProps) {
     async (action: "review" | "archive") => {
       if (selectionCount === 0) return;
       setLoading(action);
-      const items = [...selections.values()];
+      let items = [...selections.values()];
+      if (action === "archive") {
+        const seen = new Set<string>();
+        items = items.filter((sel) => {
+          if (seen.has(sel.cwd)) return false;
+          seen.add(sel.cwd);
+          return true;
+        });
+      }
 
       const results = await Promise.allSettled(
         items.map(async (sel) => {
@@ -229,7 +237,7 @@ export function LandingPage({ onAddProject }: LandingPageProps) {
           </main>
             </div>
             <div className="h-full w-full shrink-0">
-              <GitDashboard onBack={() => setViewIndex(0)} />
+              <GitDashboard active={viewIndex === 1} onBack={() => setViewIndex(0)} />
             </div>
           </div>
         </div>
@@ -294,14 +302,14 @@ function ProjectNode({
   const hasChildren = children.length > 0;
 
   useEffect(() => {
-    if (worktreesFetched) return;
+    if (!expanded || worktreesFetched) return;
     setWorktreesFetched(true);
     daemonApiClient.listWorktrees(project.cwd).then((result) => {
       if (result.ok) {
         setWorktrees(result.data.worktrees.filter((wt) => wt.path !== project.cwd));
       }
     });
-  }, [project.cwd, worktreesFetched]);
+  }, [expanded, project.cwd, worktreesFetched]);
 
   useEffect(() => {
     if (!expanded || prsFetched) return;
@@ -326,7 +334,7 @@ function ProjectNode({
       `Remove "${project.name}"?\n\nThis will cancel active sessions and delete plan history for this project.`,
     );
     if (!ok) return;
-    const removed = await projectStore.getState().removeProject(project.name, true);
+    const removed = await projectStore.getState().removeProject(project.cwd, true);
     if (removed) {
       toast.success(`Removed ${project.name}`);
     } else {

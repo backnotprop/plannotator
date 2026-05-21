@@ -16,6 +16,7 @@ export interface GitDashboardState {
   loading: boolean;
   error?: string;
   lastFetchedAt: number | null;
+  lastProjectCount: number;
 }
 
 export interface GitDashboardActions {
@@ -40,6 +41,7 @@ const initialState: GitDashboardState = {
   prs: [],
   loading: false,
   lastFetchedAt: null,
+  lastProjectCount: 0,
 };
 
 export const gitDashboardStore = createStore<GitDashboardStore>()(
@@ -63,11 +65,18 @@ export const gitDashboardStore = createStore<GitDashboardStore>()(
       );
 
       const allPRs: GitDashboardPR[] = [];
+      const errors: string[] = [];
 
       for (const outcome of results) {
         if (outcome.status === "rejected") continue;
         const { project, result } = outcome.value;
-        if (!result.ok || result.data.prs.length === 0) continue;
+        if (!result.ok) continue;
+        if (result.data.error) {
+          const e = result.data.error;
+          if (e === "no-cli") errors.push(`${project.name}: GitHub/GitLab CLI not installed`);
+          else if (e === "auth-failed") errors.push(`${project.name}: CLI not authenticated`);
+          continue;
+        }
         for (const pr of result.data.prs) {
           allPRs.push({
             ...pr,
@@ -94,6 +103,10 @@ export const gitDashboardStore = createStore<GitDashboardStore>()(
         state.prs = deduplicated;
         state.loading = false;
         state.lastFetchedAt = Date.now();
+        state.lastProjectCount = topLevel.length;
+        if (deduplicated.length === 0 && errors.length > 0) {
+          state.error = errors.join(". ");
+        }
       });
     },
 

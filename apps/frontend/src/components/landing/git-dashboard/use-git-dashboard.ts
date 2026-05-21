@@ -55,19 +55,21 @@ export function formatRelativeTime(iso: string): string {
 
 const STALE_MS = 30_000;
 
-export function useGitDashboard() {
+export function useGitDashboard(active = true) {
   const projects = useProjectStore((s) => s.projects);
   const prs = useGitDashboardStore((s) => s.prs);
   const loading = useGitDashboardStore((s) => s.loading);
   const error = useGitDashboardStore((s) => s.error);
   const lastFetchedAt = useGitDashboardStore((s) => s.lastFetchedAt);
+  const lastProjectCount = useGitDashboardStore((s) => s.lastProjectCount);
   const fetchAllPRs = useGitDashboardStore((s) => s.fetchAllPRs);
 
   useEffect(() => {
-    if (projects.length === 0) return;
-    const stale = !lastFetchedAt || Date.now() - lastFetchedAt > STALE_MS;
+    if (!active || projects.length === 0) return;
+    const topLevelCount = projects.filter((p) => !p.parentCwd).length;
+    const stale = !lastFetchedAt || Date.now() - lastFetchedAt > STALE_MS || topLevelCount !== lastProjectCount;
     if (stale && !loading) fetchAllPRs(projects);
-  }, [projects, lastFetchedAt, loading, fetchAllPRs]);
+  }, [active, projects, lastFetchedAt, lastProjectCount, loading, fetchAllPRs]);
 
   const groups = useMemo(() => groupPRs(prs), [prs]);
   const metrics = useMemo(() => computeMetrics(prs), [prs]);

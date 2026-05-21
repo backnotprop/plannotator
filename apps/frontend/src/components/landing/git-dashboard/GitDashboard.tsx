@@ -10,11 +10,12 @@ import { PRGroup } from "./PRGroup";
 import { PRRow } from "./PRRow";
 
 interface GitDashboardProps {
+  active: boolean;
   onBack: () => void;
 }
 
-export function GitDashboard({ onBack }: GitDashboardProps) {
-  const { groups, metrics, loading, isEmpty } = useGitDashboard();
+export function GitDashboard({ active, onBack }: GitDashboardProps) {
+  const { groups, metrics, loading, error, isEmpty } = useGitDashboard(active);
   const [launchingId, setLaunchingId] = useState<string | null>(null);
   const navigate = useNavigate();
 
@@ -51,7 +52,7 @@ export function GitDashboard({ onBack }: GitDashboardProps) {
 
         {!loading && isEmpty && (
           <div className="py-20 text-center text-sm text-muted-foreground">
-            No pull requests found across your projects
+            {error ?? "No pull requests found across your projects"}
           </div>
         )}
 

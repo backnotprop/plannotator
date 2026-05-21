@@ -68,7 +68,7 @@ export interface DaemonApiClient {
     cwd: string,
     name?: string,
   ): Promise<DaemonApiResult<{ ok: true; project: ProjectEntry }>>;
-  removeProject(name: string, clean?: boolean): Promise<DaemonApiResult<{ ok: true }>>;
+  removeProject(cwd: string, clean?: boolean): Promise<DaemonApiResult<{ ok: true }>>;
   listWorktrees(cwd: string): Promise<DaemonApiResult<WorktreeListResponse>>;
   listDirectories(path?: string): Promise<DaemonApiResult<DirectoryListResponse>>;
   listPRs(cwd: string): Promise<DaemonApiResult<PRListResponse>>;
@@ -466,11 +466,12 @@ export function createDaemonApiClient(options: DaemonApiClientOptions = {}): Dae
       );
     },
 
-    removeProject(name, clean) {
-      const qs = clean ? "?clean=1" : "";
+    removeProject(cwd, clean) {
+      const params = new URLSearchParams({ cwd });
+      if (clean) params.set("clean", "1");
       return requestJson(
         fetchImpl,
-        joinUrl(options.baseUrl, `/daemon/projects/${encodeURIComponent(name)}${qs}`),
+        joinUrl(options.baseUrl, `/daemon/projects?${params}`),
         isDeleteSessionResponse,
         { method: "DELETE" },
       );
