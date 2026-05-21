@@ -1,8 +1,6 @@
 import { useCallback, useMemo } from "react";
 import { Link, useMatchRoute } from "@tanstack/react-router";
 import { Moon, Settings, Sun } from "lucide-react";
-// import bannerImg from "../../assets/banner2.webp";
-// import mascotImg from "../../assets/mascot.webp";
 import { TaterSpriteSidebar } from "./TaterSpriteSidebar";
 import { appStore } from "../../stores/app-store";
 import { cn } from "@/lib/utils";
@@ -25,7 +23,7 @@ import { getSessionModeMeta, formatSessionLabel } from "../../shared/session-met
 
 const MODE_ORDER = ["plan", "review", "annotate", "goal-setup", "archive"];
 
-export function AppSidebar() {
+export function AppSidebarContent() {
   const sessions = useDaemonEventStore((s) => s.sessions);
   const { resolvedMode, setMode } = useTheme();
   const matchRoute = useMatchRoute();
@@ -45,7 +43,7 @@ export function AppSidebar() {
   }, [resolvedMode, setMode]);
 
   return (
-    <Sidebar collapsible="offcanvas">
+    <>
       <SidebarHeader>
         <Link to="/" className="flex items-end gap-2 px-3 pt-2">
           <TaterSpriteSidebar />
@@ -67,21 +65,6 @@ export function AppSidebar() {
             </span>
           </div>
         </Link>
-        {/* <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton size="lg" asChild>
-              <Link to="/">
-                <img src={mascotImg} alt="Plannotator" className="size-8 rounded-lg object-cover" />
-                <div className="grid flex-1 text-left leading-tight">
-                  <span className="truncate text-sm font-semibold">Plannotator</span>
-                  <span className="truncate text-[11px] text-muted-foreground">
-                    {sessions.length} session{sessions.length !== 1 ? "s" : ""}
-                  </span>
-                </div>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu> */}
       </SidebarHeader>
 
       <SidebarContent className="pt-4">
@@ -112,7 +95,6 @@ export function AppSidebar() {
                         <SidebarMenuButton
                           asChild
                           isActive={isActive}
-                          tooltip={session.label}
                           className="h-7 pr-7 text-xs"
                         >
                           <Link to="/s/$sessionId" params={{ sessionId: session.id }}>
@@ -156,6 +138,14 @@ export function AppSidebar() {
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
+    </>
+  );
+}
+
+export function AppSidebar() {
+  return (
+    <Sidebar collapsible="offcanvas">
+      <AppSidebarContent />
     </Sidebar>
   );
 }
