@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 
@@ -16,12 +16,15 @@ interface CreatePiAIRuntimeOptions {
 
 function whichCmd(cmd: string): string | null {
 	try {
-		return (
-			execSync(`which ${cmd}`, {
-				encoding: "utf-8",
-				stdio: ["pipe", "pipe", "pipe"],
-			}).trim() || null
-		);
+		const bin = process.platform === "win32" ? "where" : "which";
+		const output = execFileSync(bin, [cmd], {
+			encoding: "utf-8",
+			stdio: ["pipe", "pipe", "pipe"],
+		});
+		return output
+			.split(/\r?\n/)
+			.map((line) => line.trim())
+			.find(Boolean) ?? null;
 	} catch {
 		return null;
 	}

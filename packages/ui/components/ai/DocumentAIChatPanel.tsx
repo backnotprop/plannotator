@@ -24,6 +24,33 @@ function truncate(text: string, max = 180): string {
   return `${text.slice(0, max).trimEnd()}...`;
 }
 
+function formatToolInput(toolName: string, input: Record<string, unknown>): string | null {
+  if (!input || Object.keys(input).length === 0) return null;
+
+  if (toolName === 'Bash' && typeof input.command === 'string') {
+    return input.command;
+  }
+  if ((toolName === 'Read' || toolName === 'Write' || toolName === 'Edit') && typeof input.file_path === 'string') {
+    return input.file_path;
+  }
+  if (toolName === 'Glob' && typeof input.pattern === 'string') {
+    return input.pattern;
+  }
+  if (toolName === 'Grep' && typeof input.pattern === 'string') {
+    const path = typeof input.path === 'string' ? ` in ${input.path}` : '';
+    return `${input.pattern}${path}`;
+  }
+  if ((toolName === 'WebFetch' || toolName === 'WebSearch') && typeof input.url === 'string') {
+    return input.url;
+  }
+
+  try {
+    return truncate(JSON.stringify(input), 240);
+  } catch {
+    return String(input);
+  }
+}
+
 export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
   messages,
   isCreatingSession,
@@ -172,14 +199,22 @@ const PermissionCard: React.FC<{
   permission: PendingPermission;
   onRespond: (requestId: string, allow: boolean) => void;
 }> = ({ permission, onRespond }) => {
+  const label = permission.title || permission.displayName || permission.toolName;
+  const toolInput = formatToolInput(permission.toolName, permission.toolInput);
+
   return (
     <div className="p-2.5 rounded-lg border border-warning/30 bg-warning/5">
       <p className="text-[10px] font-medium text-warning uppercase tracking-wider mb-1">
         Permission Request
       </p>
       <p className="text-xs font-mono text-foreground/80 break-all">
-        {permission.title || permission.displayName || permission.toolName}
+        {label}
       </p>
+      {toolInput && (
+        <p className="mt-1 px-2 py-1 rounded bg-background/60 border border-warning/20 text-[10px] font-mono text-foreground/80 break-all">
+          {toolInput}
+        </p>
+      )}
       {permission.description && (
         <p className="text-[10px] text-muted-foreground mt-0.5">{permission.description}</p>
       )}
