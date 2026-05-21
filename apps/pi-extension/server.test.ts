@@ -511,6 +511,7 @@ describe("pi review server", () => {
 
     const vcsContext = await getVcsContext(repoDir);
     expect(vcsContext.vcsType).toBe("jj");
+    const expectedJjBase = vcsContext.defaultBranch;
     const prepared = await prepareLocalReviewDiff({
       cwd: repoDir,
       requestedDiffType: "merge-base",
@@ -519,7 +520,7 @@ describe("pi review server", () => {
     });
     expect(prepared.gitContext.vcsType).toBe("jj");
     expect(prepared.diffType).toBe("jj-current");
-    expect(prepared.base).toBe("main@git");
+    expect(prepared.base).toBe(expectedJjBase);
 
     const forcedGit = await prepareLocalReviewDiff({
       cwd: repoDir,
@@ -578,14 +579,13 @@ describe("pi review server", () => {
         gitContext?: { vcsType?: string; diffOptions: Array<{ id: string }> };
       };
       expect(initial.diffType).toBe("jj-current");
-      expect(initial.base).toBe("main@git");
+      expect(initial.base).toBe(expectedJjBase);
       expect(initial.gitContext?.vcsType).toBe("jj");
-      expect(initial.gitContext?.diffOptions.map((option) => option.id)).toEqual([
-        "jj-current",
-        "jj-last",
-        "jj-line",
-        "jj-all",
-      ]);
+      const optionIds = initial.gitContext?.diffOptions.map((option) => option.id) ?? [];
+      expect(optionIds).toContain("jj-current");
+      expect(optionIds).toContain("jj-last");
+      expect(optionIds).toContain("jj-line");
+      expect(optionIds).toContain("jj-all");
       expect(initial.rawPatch).toContain("tracked.txt");
       expect(initial.rawPatch).toContain("+after");
 

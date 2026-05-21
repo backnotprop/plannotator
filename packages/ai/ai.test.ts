@@ -205,12 +205,21 @@ describe("Context builders", () => {
   test("buildSystemPrompt for plan-review", () => {
     const ctx: AIContext = {
       mode: "plan-review",
-      plan: { plan: "# My Plan\n\nStep 1: do things" },
+      plan: {
+        plan: "# My Plan\n\nStep 1: do things",
+        previousPlan: "# Old Plan",
+        version: 3,
+        totalVersions: 4,
+        project: "plannotator",
+      },
     };
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain("Plannotator");
     expect(prompt).toContain("# My Plan");
     expect(prompt).toContain("Step 1: do things");
+    expect(prompt).toContain("Plan version: 3 of 4");
+    expect(prompt).toContain("Project: plannotator");
+    expect(prompt).toContain("# Old Plan");
   });
 
   test("buildSystemPrompt for code-review", () => {
@@ -226,11 +235,20 @@ describe("Context builders", () => {
   test("buildSystemPrompt for annotate", () => {
     const ctx: AIContext = {
       mode: "annotate",
-      annotate: { content: "# Doc\nSome content", filePath: "/tmp/test.md" },
+      annotate: {
+        content: "# Doc\nSome content",
+        filePath: "/tmp/test.md",
+        sourceInfo: "https://example.com/doc.html",
+        sourceConverted: true,
+        renderAs: "html",
+      },
     };
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain("Plannotator");
     expect(prompt).toContain("/tmp/test.md");
+    expect(prompt).toContain("https://example.com/doc.html");
+    expect(prompt).toContain("Render mode: html");
+    expect(prompt).toContain("converted before annotation");
   });
 
   test("buildForkPreamble includes context and instructions", () => {

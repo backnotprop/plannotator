@@ -33,7 +33,7 @@ class ToolbarErrorBoundary extends React.Component<
   }
 }
 
-import { CommentPopover } from './CommentPopover';
+import { CommentPopover, type CommentAskAIContext } from './CommentPopover';
 import { TaterSpriteSitting } from './TaterSpriteSitting';
 import { AttachmentsButton } from './AttachmentsButton';
 import { GraphvizBlock } from './GraphvizBlock';
@@ -96,6 +96,7 @@ interface ViewerProps {
   // Checkbox toggle props
   onToggleCheckbox?: (blockId: string, checked: boolean) => void;
   checkboxOverrides?: Map<string, boolean>;
+  onAskAI?: (question: string, context: CommentAskAIContext) => void;
 }
 
 export interface ViewerHandle {
@@ -170,6 +171,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   sourceInfo,
   onToggleCheckbox,
   checkboxOverrides,
+  onAskAI,
 }, ref) => {
   const [copied, setCopied] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
@@ -200,6 +202,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   const [viewerCommentPopover, setViewerCommentPopover] = useState<{
     anchorEl: HTMLElement;
     contextText: string;
+    selectedText?: string;
     initialText?: string;
     isGlobal: boolean;
     codeBlock?: { block: Block; element: HTMLElement };
@@ -263,6 +266,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       setViewerCommentPopover({
         anchorEl: element,
         contextText: (codeEl.textContent || '').slice(0, 80),
+        selectedText: codeEl.textContent || '',
         isGlobal: false,
         codeBlock: { block: blocks.find(b => b.id === blockId)!, element },
       });
@@ -479,6 +483,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     setViewerCommentPopover({
       anchorEl: hoveredCodeBlock.element,
       contextText: codeText.slice(0, 80),
+      selectedText: codeText,
       initialText: initialChar,
       isGlobal: false,
       codeBlock: hoveredCodeBlock,
@@ -808,15 +813,22 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 
         {/* Comment popover — hook handles text selection, Viewer handles global + code block */}
         {hookCommentPopover && (
-          <CommentPopover
-            anchorEl={hookCommentPopover.anchorEl}
-            contextText={hookCommentPopover.contextText}
-            isGlobal={false}
-            initialText={hookCommentPopover.initialText}
-            onSubmit={hookCommentSubmit}
-            onClose={hookCommentClose}
-          />
-        )}
+            <CommentPopover
+              anchorEl={hookCommentPopover.anchorEl}
+              contextText={hookCommentPopover.contextText}
+              isGlobal={false}
+              initialText={hookCommentPopover.initialText}
+              onSubmit={hookCommentSubmit}
+              onClose={hookCommentClose}
+              onAskAI={onAskAI}
+              askAIContext={{
+                kind: 'selection',
+                label: 'Selected text',
+                text: hookCommentPopover.selectedText ?? hookCommentPopover.contextText,
+                sourcePath: linkedDocInfo?.filepath ?? sourceInfo,
+              }}
+            />
+          )}
         {viewerCommentPopover && (
           <CommentPopover
             anchorEl={viewerCommentPopover.anchorEl}
@@ -825,6 +837,13 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             initialText={viewerCommentPopover.initialText}
             onSubmit={handleViewerCommentSubmit}
             onClose={handleViewerCommentClose}
+            onAskAI={onAskAI}
+            askAIContext={{
+              kind: viewerCommentPopover.isGlobal ? 'general' : 'selection',
+              label: viewerCommentPopover.isGlobal ? 'Document' : 'Code block',
+              text: viewerCommentPopover.selectedText,
+              sourcePath: linkedDocInfo?.filepath ?? sourceInfo,
+            }}
           />
         )}
 
@@ -924,5 +943,4 @@ function groupBlocks(blocks: Block[]): RenderGroup[] {
   }
   return groups;
 }
-
 

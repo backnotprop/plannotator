@@ -7,6 +7,7 @@ import { Settings } from '@plannotator/ui/components/Settings';
 import { PlanHeaderMenu } from '@plannotator/ui/components/PlanHeaderMenu';
 import type { CallbackConfig } from '@plannotator/ui/utils/callback';
 import type { UIPreferences } from '@plannotator/ui/utils/uiPreferences';
+import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
 
 interface AppHeaderProps {
   // Mode flags (stable after mount)
@@ -25,6 +26,9 @@ interface AppHeaderProps {
   isSubmitting: boolean;
   isExiting: boolean;
   isPanelOpen: boolean;
+  aiAvailable: boolean;
+  isAIChatOpen: boolean;
+  aiHasMessages: boolean;
   hasAnyAnnotations: boolean;
   linkedDocIsActive: boolean;
   callbackShareUrlReady: boolean;
@@ -52,6 +56,7 @@ interface AppHeaderProps {
   onFeedback: () => void;
   onApprove: () => void;
   onAnnotationPanelToggle: () => void;
+  onAIChatToggle: () => void;
   onArchiveCopy: () => void;
   onArchiveDone: () => void;
   onTaterModeChange: (enabled: boolean) => void;
@@ -91,6 +96,9 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   isSubmitting,
   isExiting,
   isPanelOpen,
+  aiAvailable,
+  isAIChatOpen,
+  aiHasMessages,
   hasAnyAnnotations,
   linkedDocIsActive,
   callbackShareUrlReady,
@@ -112,6 +120,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   onFeedback,
   onApprove,
   onAnnotationPanelToggle,
+  onAIChatToggle,
   onArchiveCopy,
   onArchiveDone,
   onTaterModeChange,
@@ -276,6 +285,23 @@ export const AppHeader = React.memo<AppHeaderProps>(({
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
             </svg>
+          </button>
+        )}
+        {!goalSetupMode && aiAvailable && (
+          <button
+            onClick={onAIChatToggle}
+            className={`relative p-1.5 rounded-md text-xs font-medium transition-all ${
+              isAIChatOpen
+                ? 'bg-primary/15 text-primary'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+            }`}
+            title={isAIChatOpen ? 'Hide AI chat' : 'Show AI chat'}
+            aria-label={isAIChatOpen ? 'Hide AI chat' : 'Show AI chat'}
+          >
+            <SparklesIcon className="w-4 h-4" />
+            {aiHasMessages && !isAIChatOpen && (
+              <span className="absolute top-0 right-0 w-1.5 h-1.5 rounded-full bg-primary" />
+            )}
           </button>
         )}
 

@@ -17,9 +17,12 @@ import { getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo } from '
 import { configStore, useConfigValue } from '@plannotator/ui/config';
 import { loadDiffFont } from '@plannotator/ui/utils/diffFonts';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
-import { getAIProviderSettings, saveAIProviderSettings, getPreferredModel } from '@plannotator/ui/utils/aiProvider';
-import { AISetupDialog } from '@plannotator/ui/components/AISetupDialog';
-import { needsAISetup } from '@plannotator/ui/utils/aiSetup';
+import {
+  getAIProviderSettings,
+  resolveAIModelForProvider,
+  resolveAIProviderSelection,
+  saveAIProviderSelection,
+} from '@plannotator/ui/utils/aiProvider';
 import { DiffTypeSetupDialog } from '@plannotator/ui/components/DiffTypeSetupDialog';
 import { needsDiffTypeSetup } from '@plannotator/ui/utils/diffTypeSetup';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/types';
@@ -41,7 +44,7 @@ import { DockviewReact, type DockviewReadyEvent, type DockviewApi } from 'dockvi
 import { ReviewHeaderMenu } from './components/ReviewHeaderMenu';
 import { ReviewSidebar } from './components/ReviewSidebar';
 import type { ReviewSidebarTab } from './components/ReviewSidebar';
-import { SparklesIcon } from './components/SparklesIcon';
+import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
 import { ReviewAgentsIcon } from '@plannotator/ui/components/ReviewAgentsIcon';
 import { useSidebar } from '@plannotator/ui/hooks/useSidebar';
 import { FileTree } from './components/FileTree';
@@ -405,6 +408,7 @@ const ReviewApp: React.FC = () => {
   // AI Chat
   const [aiAvailable, setAiAvailable] = useState(false);
   const [aiProviders, setAiProviders] = useState<Array<{ id: string; name: string; capabilities: Record<string, boolean>; models?: Array<{ id: string; label: string; default?: boolean }> }>>([]);
+  const [aiDefaultProvider, setAiDefaultProvider] = useState<string | null>(null);
   const [aiConfig, setAiConfig] = useState(() => {
     const saved = getAIProviderSettings();
     const pid = saved.providerId;
@@ -414,8 +418,6 @@ const ReviewApp: React.FC = () => {
       reasoningEffort: null as string | null,
     };
   });
-  const [showAISetup, setShowAISetup] = useState(false);
-  const [aiCheckComplete, setAiCheckComplete] = useState(false);
   const [showDiffTypeSetup, setShowDiffTypeSetup] = useState(false);
   const [diffTypeSetupPending, setDiffTypeSetupPending] = useState(false);
   const aiChat = useAIChat({
@@ -464,26 +466,56 @@ const ReviewApp: React.FC = () => {
           setAiAvailable(true);
           const providers = data.providers ?? [];
           setAiProviders(providers);
+          setAiDefaultProvider(data.defaultProvider ?? null);
         }
-        setAiCheckComplete(true);
       })
-      .catch(() => { setAiCheckComplete(true); });
+      .catch(() => {});
   }, []);
 
-  const handleAIConfigChange = useCallback((config: { providerId?: string | null; model?: string | null }) => {
+  useEffect(() => {
+    if (!aiAvailable || aiProviders.length === 0) return;
     setAiConfig(prev => {
-      const next = { ...prev, ...config };
-      // If provider changed, load that provider's preferred model
-      if (config.providerId !== undefined && config.providerId !== prev.providerId) {
-        next.model = config.providerId ? getPreferredModel(config.providerId) : null;
-      }
-      // Persist provider selection
       const saved = getAIProviderSettings();
-      saveAIProviderSettings({ ...saved, providerId: next.providerId });
+      const selection = resolveAIProviderSelection({
+        providers: aiProviders,
+        origin,
+        settings: saved,
+        serverDefaultProvider: aiDefaultProvider,
+      });
+
+      if (prev.providerId === selection.providerId && prev.model === selection.model) return prev;
+
+      saveAIProviderSelection({
+        providerId: selection.providerId,
+        model: selection.model,
+        origin,
+        settings: saved,
+      });
+
+      return { ...prev, providerId: selection.providerId, model: selection.model };
+    });
+  }, [aiAvailable, aiProviders, aiDefaultProvider, origin]);
+
+  const handleAIConfigChange = useCallback((config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => {
+    setAiConfig(prev => {
+      const saved = getAIProviderSettings();
+      const providerId = config.providerId !== undefined ? config.providerId : prev.providerId;
+      const providerChanged = config.providerId !== undefined && config.providerId !== prev.providerId;
+      const provider = aiProviders.find(p => p.id === providerId) ?? null;
+      const model = providerChanged
+        ? (config.model !== undefined ? config.model : resolveAIModelForProvider(provider, saved.preferredModels))
+        : (config.model !== undefined ? config.model : prev.model);
+      const next = { ...prev, ...config, providerId, model };
+      saveAIProviderSelection({
+        providerId: next.providerId,
+        model: next.model,
+        origin,
+        settings: saved,
+      });
       return next;
     });
     aiChat.resetSession();
-  }, [aiChat]);
+  }, [aiChat, aiProviders, origin]);
 
   const handleAskAI = useCallback((question: string) => {
     if (!pendingSelection || !files[activeFileIndex]) return;
@@ -834,13 +866,13 @@ const ReviewApp: React.FC = () => {
       .finally(() => setIsLoading(false));
   }, []);
 
-  // Show diff type setup dialog only after AI setup dialog is dismissed (avoid stacking)
+  // Show diff type setup after the initial diff payload marks it pending.
   useEffect(() => {
-    if (diffTypeSetupPending && aiCheckComplete && !showAISetup) {
+    if (diffTypeSetupPending) {
       setDiffTypeSetupPending(false);
       setShowDiffTypeSetup(true);
     }
-  }, [diffTypeSetupPending, aiCheckComplete, showAISetup]);
+  }, [diffTypeSetupPending]);
 
   const handleDiffStyleChange = useCallback((style: 'split' | 'unified') => {
     configStore.set('diffStyle', style);
@@ -2398,16 +2430,6 @@ const ReviewApp: React.FC = () => {
           cancelText="Cancel"
           variant="warning"
           showCancel
-        />
-
-        {/* AI setup dialog — first-run only */}
-        <AISetupDialog
-          isOpen={showAISetup}
-          providers={aiProviders}
-          onComplete={(providerId) => {
-            setShowAISetup(false);
-            handleAIConfigChange({ providerId });
-          }}
         />
 
         {/* Diff type setup dialog — first-run only */}

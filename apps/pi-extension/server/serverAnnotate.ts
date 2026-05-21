@@ -11,6 +11,7 @@ import {
 	handleUploadRequest,
 } from "./handlers.js";
 import { html, json, parseBody, requestUrl } from "./helpers.js";
+import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.js";
 
 import { listenOnPort } from "./network.js";
 
@@ -86,11 +87,13 @@ export async function startAnnotateServer(options: {
 	const repoInfo = getRepoInfo();
 
 	const externalAnnotations = createExternalAnnotationHandler("plan");
+	const aiRuntime = await createPiAIRuntime();
 
 	const server = createServer(async (req, res) => {
 		const url = requestUrl(req);
 
 		if (await externalAnnotations.handle(req, res, url)) return;
+		if (url.pathname.startsWith("/api/ai/") && await handlePiAIRequest(req, res, url, aiRuntime)) return;
 
 		if (url.pathname === "/api/plan" && req.method === "GET") {
 			json(res, {
@@ -180,6 +183,9 @@ export async function startAnnotateServer(options: {
 		portSource,
 		url: `http://localhost:${port}`,
 		waitForDecision: () => decisionPromise,
-		stop: () => server.close(),
+		stop: () => {
+			aiRuntime?.dispose();
+			server.close();
+		},
 	};
 }

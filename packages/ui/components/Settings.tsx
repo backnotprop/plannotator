@@ -61,7 +61,7 @@ import { KeyboardShortcuts } from './KeyboardShortcuts';
 import { type QuickLabel, getQuickLabels, saveQuickLabels, resetQuickLabels, DEFAULT_QUICK_LABELS, getLabelColors, LABEL_COLOR_MAP } from '../utils/quickLabels';
 import { ThemeTab } from './ThemeTab';
 import { isMac, modKey, altKey } from '../utils/platform';
-import { getAIProviderSettings } from '../utils/aiProvider';
+import { getAIProviderSettings, resolveAIProviderSelection } from '../utils/aiProvider';
 import { AISettingsTab } from './AISettingsTab';
 import { HooksTab } from './settings/HooksTab';
 import { OverlayScrollArea } from './OverlayScrollArea';
@@ -84,7 +84,7 @@ interface SettingsProps {
   externalOpen?: boolean;
   onExternalClose?: () => void;
   /** Available AI providers (from /api/ai/capabilities). */
-  aiProviders?: Array<{ id: string; name: string; capabilities: Record<string, boolean> }>;
+  aiProviders?: Array<{ id: string; name: string; capabilities: Record<string, boolean>; models?: Array<{ id: string; label: string; default?: boolean }> }>;
   /** Git user name from `git config user.name`, for quick identity set */
   gitUser?: string;
 }
@@ -696,7 +696,8 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       setAutoCloseDelayState(getAutoCloseDelay());
       setDefaultNotesApp(getDefaultNotesApp());
       setQuickLabelsState(getQuickLabels());
-      setAiProvider(getAIProviderSettings().providerId);
+      const aiSettings = getAIProviderSettings();
+      setAiProvider(resolveAIProviderSelection({ providers: aiProviders, origin, settings: aiSettings }).providerId);
       setFileBrowserSettings(getFileBrowserSettings());
 
       // Validate agent setting when dialog opens
@@ -704,7 +705,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
         setAgentWarning(getAgentWarning());
       }
     }
-  }, [showDialog, availableAgents, origin, getAgentWarning]);
+  }, [showDialog, availableAgents, origin, getAgentWarning, aiProviders.length]);
 
   useEffect(() => {
     if (!showDialog) return;
@@ -1640,6 +1641,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                   <AISettingsTab
                     providers={aiProviders}
                     selectedProviderId={aiProvider}
+                    origin={origin}
                     onProviderChange={setAiProvider}
                   />
                 )}

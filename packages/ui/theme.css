@@ -482,3 +482,88 @@ body:has([data-popout="true"]) .os-scrollbar {
 .directive-warning .directive-title { color: #f59e0b; }
 .directive-danger, .directive-caution { background: color-mix(in srgb, #ef4444 10%, transparent); border-color: color-mix(in srgb, #ef4444 40%, transparent); }
 .directive-danger .directive-title, .directive-caution .directive-title { color: #ef4444; }
+
+/* Shared AI chat rendering */
+.ai-streaming-cursor {
+  display: inline-block;
+  width: 0.45em;
+  height: 1em;
+  background: currentColor;
+  border-radius: 1px;
+  vertical-align: -0.15em;
+  animation: ai-cursor-blink 1s steps(2, start) infinite;
+}
+
+@keyframes ai-cursor-blink {
+  0%, 45% { opacity: 1; }
+  46%, 100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-streaming-cursor {
+    animation: none;
+  }
+}
+
+.ai-markdown {
+  line-height: 1.55;
+}
+.ai-markdown p {
+  margin: 0.45rem 0;
+}
+.ai-markdown p:first-child {
+  margin-top: 0;
+}
+.ai-markdown p:last-child {
+  margin-bottom: 0;
+}
+.ai-markdown h1,
+.ai-markdown h2,
+.ai-markdown h3,
+.ai-markdown h4,
+.ai-markdown h5,
+.ai-markdown h6 {
+  font-weight: 600;
+  margin: 0.75rem 0 0.35rem;
+}
+.ai-markdown h1 { font-size: 0.875rem; }
+.ai-markdown h2 { font-size: 0.8125rem; }
+.ai-markdown h3,
+.ai-markdown h4,
+.ai-markdown h5,
+.ai-markdown h6 { font-size: 0.75rem; }
+.ai-markdown ul,
+.ai-markdown ol {
+  margin: 0.45rem 0;
+  padding-left: 1rem;
+}
+.ai-markdown ul { list-style: disc; }
+.ai-markdown ol { list-style: decimal; }
+.ai-markdown li {
+  margin: 0.15rem 0;
+}
+.ai-markdown code {
+  background: color-mix(in oklab, var(--muted) 70%, transparent);
+  border: 1px solid color-mix(in oklab, var(--border) 45%, transparent);
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.9em;
+}
+.ai-markdown pre {
+  background: color-mix(in oklab, var(--muted) 55%, transparent);
+  border: 1px solid color-mix(in oklab, var(--border) 45%, transparent);
+  border-radius: 6px;
+  padding: 0.6rem;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+.ai-markdown pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+.ai-markdown blockquote {
+  border-left: 2px solid color-mix(in oklab, var(--primary) 45%, transparent);
+  padding-left: 0.6rem;
+  color: var(--muted-foreground);
+}

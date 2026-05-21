@@ -1,7 +1,14 @@
 import type React from 'react';
 import { getProviderMeta } from './ProviderIcons';
-import { saveAIProviderSettings, savePreferredModel, getAIProviderSettings } from '../utils/aiProvider';
+import {
+  getAIProviderSettings,
+  resolveAIModelForProvider,
+  resolveAIProviderSelection,
+  saveAIProviderSelection,
+  savePreferredModel,
+} from '../utils/aiProvider';
 import { useState } from 'react';
+import type { Origin } from '@plannotator/shared/agents';
 
 interface AIProviderModel {
   id: string;
@@ -19,23 +26,28 @@ interface AIProvider {
 interface AISettingsTabProps {
   providers: AIProvider[];
   selectedProviderId: string | null;
+  origin?: Origin | null;
   onProviderChange: (providerId: string | null) => void;
 }
 
 export const AISettingsTab: React.FC<AISettingsTabProps> = ({
   providers,
   selectedProviderId,
+  origin,
   onProviderChange,
 }) => {
-  const effectiveSelection = selectedProviderId ?? providers[0]?.id ?? null;
+  const settings = getAIProviderSettings();
+  const originDefault = resolveAIProviderSelection({ providers, origin, settings }).providerId;
+  const effectiveSelection = selectedProviderId ?? originDefault ?? providers[0]?.id ?? null;
   const [preferredModels, setPreferredModels] = useState<Record<string, string>>(() =>
     getAIProviderSettings().preferredModels
   );
 
   const handleSelectProvider = (providerId: string) => {
     onProviderChange(providerId);
-    const settings = getAIProviderSettings();
-    saveAIProviderSettings({ ...settings, providerId });
+    const provider = providers.find(p => p.id === providerId) ?? null;
+    const model = resolveAIModelForProvider(provider, getAIProviderSettings().preferredModels);
+    saveAIProviderSelection({ providerId, model, origin });
   };
 
   const handleModelChange = (providerId: string, modelId: string) => {

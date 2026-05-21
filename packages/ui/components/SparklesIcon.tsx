@@ -6,7 +6,7 @@ interface SparklesIconProps {
 }
 
 /**
- * Three-star sparkle icon adapted from the automations branch.
+ * Three-star sparkle icon used for Ask AI entry points.
  * Uses currentColor for fill so it inherits from parent text color.
  */
 export const SparklesIcon: React.FC<SparklesIconProps> = ({ className = 'w-3 h-3', animated = false }) => (

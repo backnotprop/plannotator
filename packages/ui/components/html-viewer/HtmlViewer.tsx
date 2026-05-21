@@ -13,7 +13,7 @@ import { AnnotationType } from "../../types";
 import { getIdentity } from "../../utils/identity";
 import { AnnotationToolbar } from "../AnnotationToolbar";
 import { AttachmentsButton } from "../AttachmentsButton";
-import { CommentPopover } from "../CommentPopover";
+import { CommentPopover, type CommentAskAIContext } from "../CommentPopover";
 import { FloatingQuickLabelPicker } from "../FloatingQuickLabelPicker";
 import type { ViewerHandle } from "../Viewer";
 import { useHtmlAnnotation } from "./useHtmlAnnotation";
@@ -75,6 +75,7 @@ export interface HtmlViewerProps {
   onAddGlobalAttachment?: (image: ImageAttachment) => void;
   onRemoveGlobalAttachment?: (path: string) => void;
   maxWidth?: number | null;
+  onAskAI?: (question: string, context: CommentAskAIContext) => void;
 }
 
 export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
@@ -90,6 +91,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onAddGlobalAttachment,
       onRemoveGlobalAttachment,
       maxWidth,
+      onAskAI,
     },
     ref,
   ) => {
@@ -272,6 +274,12 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               isGlobal={false}
               onSubmit={hook.handleCommentSubmit}
               onClose={hook.handleCommentClose}
+              onAskAI={onAskAI}
+              askAIContext={{
+                kind: "selection",
+                label: "Selected HTML",
+                text: hook.commentPopover.selectedText ?? hook.commentPopover.contextText,
+              }}
             />,
             document.body,
           )}
@@ -297,6 +305,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               isGlobal={true}
               onSubmit={handleGlobalCommentSubmit}
               onClose={() => setGlobalCommentPopover(null)}
+              onAskAI={onAskAI}
+              askAIContext={{ kind: "general", label: "Document" }}
             />,
             document.body,
           )}

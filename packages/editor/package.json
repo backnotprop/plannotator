@@ -8,6 +8,7 @@
     "./shortcuts": "./shortcuts.ts"
   },
   "dependencies": {
+    "@plannotator/ai": "workspace:*",
     "@plannotator/shared": "workspace:*",
     "@plannotator/ui": "workspace:*",
     "react": "^19.2.3",

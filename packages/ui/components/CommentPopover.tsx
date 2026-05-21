@@ -4,6 +4,14 @@ import type { ImageAttachment } from '../types';
 import { AttachmentsButton } from './AttachmentsButton';
 import { submitHint } from '../utils/platform';
 import { useDraggable } from '../hooks/useDraggable';
+import { SparklesIcon } from './SparklesIcon';
+
+export interface CommentAskAIContext {
+  kind: 'general' | 'selection';
+  label?: string;
+  text?: string;
+  sourcePath?: string;
+}
 
 interface CommentPopoverProps {
   /** Element to anchor the popover near (re-reads position on scroll) */
@@ -28,6 +36,10 @@ interface CommentPopoverProps {
   allowImages?: boolean;
   /** Whether submitting empty text is allowed, for editors that support clearing. */
   allowEmptySubmit?: boolean;
+  /** Optional Ask AI action. Absent by default so existing comment surfaces are unchanged. */
+  onAskAI?: (question: string, context: CommentAskAIContext) => void;
+  askAIContext?: CommentAskAIContext;
+  askAIDisabled?: boolean;
 }
 
 const MAX_POPOVER_WIDTH = 384;
@@ -75,6 +87,9 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   draftKey,
   allowImages = true,
   allowEmptySubmit = false,
+  onAskAI,
+  askAIContext,
+  askAIDisabled = false,
 }) => {
   const [mode, setMode] = useState<'popover' | 'dialog'>('popover');
   const initialDraft = draftKey ? draftStore.get(draftKey) : undefined;
@@ -157,6 +172,18 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     }
   }, [text, images, onSubmit, draftKey, allowImages, allowEmptySubmit, initialText]);
 
+  const handleAskAI = useCallback(() => {
+    const question = text.trim();
+    if (!question || !onAskAI) {
+      textareaRef.current?.focus();
+      return;
+    }
+    onAskAI(question, askAIContext ?? {
+      kind: isGlobal ? 'general' : 'selection',
+      text: contextText,
+    });
+  }, [askAIContext, contextText, isGlobal, onAskAI, text]);
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Escape') {
       e.stopPropagation();
@@ -183,6 +210,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     text.trim().length > 0 ||
     (allowImages && images.length > 0) ||
     (allowEmptySubmit && initialText.trim().length > 0);
+  const canAskAI = !!onAskAI && !askAIDisabled && text.trim().length > 0;
 
   if (mode === 'dialog') {
     return createPortal(
@@ -255,6 +283,17 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
               )}
             </div>
             <div className="flex items-center gap-3">
+              {onAskAI && (
+                <button
+                  onClick={handleAskAI}
+                  disabled={!canAskAI}
+                  className="inline-flex items-center gap-1 px-2 py-1.5 text-xs font-medium rounded-md text-muted-foreground hover:text-primary hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  title={canAskAI ? 'Ask AI this question' : 'Type a question to ask AI'}
+                >
+                  <SparklesIcon className="w-3 h-3" />
+                  Ask AI
+                </button>
+              )}
               <span className="text-[10px] text-muted-foreground">{submitHint}</span>
               <button
                 onClick={handleSubmit}
@@ -353,6 +392,17 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           )}
         </div>
         <div className="flex items-center gap-3">
+          {onAskAI && (
+            <button
+              onClick={handleAskAI}
+              disabled={!canAskAI}
+              className="inline-flex items-center gap-1 px-2 py-1.5 text-xs font-medium rounded-md text-muted-foreground hover:text-primary hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              title={canAskAI ? 'Ask AI this question' : 'Type a question to ask AI'}
+            >
+              <SparklesIcon className="w-3 h-3" />
+              Ask AI
+            </button>
+          )}
           <span className="text-[10px] text-muted-foreground">{submitHint}</span>
           <button
             onClick={handleSubmit}

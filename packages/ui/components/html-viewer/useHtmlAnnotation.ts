@@ -125,6 +125,7 @@ export function useHtmlAnnotation({
           setCommentPopover({
             anchorEl: anchor,
             contextText: msg.text,
+            selectedText: msg.text,
           });
         } else if (currentMode === "quickLabel") {
           setQuickLabelPicker({
@@ -210,7 +211,7 @@ export function useHtmlAnnotation({
       if (!text) return;
       const anchor = anchorRef.current ?? getOrCreateAnchor();
       setToolbarState(null);
-      setCommentPopover({ anchorEl: anchor, contextText: text, initialText: initialChar });
+      setCommentPopover({ anchorEl: anchor, contextText: text, selectedText: text, initialText: initialChar });
     },
     [getOrCreateAnchor],
   );

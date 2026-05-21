@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     "./components/*": "./components/*.tsx",
+    "./components/ai/*": "./components/ai/*.tsx",
     "./components/core/*": "./components/core/*.tsx",
     "./components/goal-setup/*": "./components/goal-setup/*.tsx",
     "./components/ImageAnnotator": "./components/ImageAnnotator/index.tsx",
@@ -18,6 +19,7 @@
   },
   "dependencies": {
     "@pierre/diffs": "^1.1.12",
+    "@plannotator/ai": "workspace:*",
     "@plannotator/shared": "workspace:*",
     "@plannotator/web-highlighter": "^0.8.1",
     "@radix-ui/react-dialog": "^1.1.15",

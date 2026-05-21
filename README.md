@@ -38,10 +38,10 @@ Interactive Plan & Code Review for AI Coding Agents. Mark up and refine your pla
 ### Features
 
 <table>
-<tr><td><strong>Visual Plan Review</strong></td><td>Built-in hook</td><td>Approve or deny agent plans with inline annotations</td></tr>
+<tr><td><strong>Visual Plan Review</strong></td><td>Built-in hook</td><td>Approve or deny agent plans with inline annotations and Ask AI side chat</td></tr>
 <tr><td><strong>Plan Diff</strong></td><td>Automatic</td><td>See what changed when the agent revises a plan</td></tr>
 <tr><td><strong>Code Review</strong></td><td><code>/plannotator-review</code></td><td>View git diffs or remote PRs. Package annotations and ask AI about the code as you review.</td></tr>
-<tr><td><strong>Annotate Any File</strong></td><td><code>/plannotator-annotate &lt;file|folder|url&gt;</code></td><td>Annotate markdown, HTML, URLs, or folders and send feedback to your agent</td></tr>
+<tr><td><strong>Annotate Any File</strong></td><td><code>/plannotator-annotate &lt;file|folder|url&gt;</code></td><td>Annotate markdown, HTML, URLs, or folders, ask AI about the active document, and send feedback to your agent</td></tr>
 <tr><td><strong>Annotate Last Message</strong></td><td><code>/plannotator-last</code></td><td>Annotate the agent's last response and send structured feedback</td></tr>
 </table>
 
@@ -255,8 +255,9 @@ When your AI agent finishes planning, Plannotator:
 
 1. Opens the Plannotator UI in your browser
 2. Lets you annotate the plan visually (delete, insert, replace, comment)
-3. **Approve** → Agent proceeds with implementation
-4. **Request changes** → Your annotations are sent back as structured feedback
+3. Lets you ask AI about the plan or a highlighted selection when a provider is available
+4. **Approve** → Agent proceeds with implementation
+5. **Request changes** → Your annotations are sent back as structured feedback
 
 (Similar flow for code review, except you can also comment on specific lines of code diffs)
 
