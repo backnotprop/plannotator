@@ -18,6 +18,9 @@ export function SidebarPeek() {
   }, []);
 
   const hide = useCallback(() => {
+    if (hideTimeout.current) {
+      clearTimeout(hideTimeout.current);
+    }
     hideTimeout.current = setTimeout(() => setVisible(false), 150);
   }, []);
 

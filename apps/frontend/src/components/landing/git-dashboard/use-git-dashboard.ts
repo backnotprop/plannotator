@@ -64,15 +64,23 @@ export function useGitDashboard(active = true) {
   const lastProjectCount = useGitDashboardStore((s) => s.lastProjectCount);
   const fetchAllPRs = useGitDashboardStore((s) => s.fetchAllPRs);
 
+  const clear = useGitDashboardStore((s) => s.clear);
+
   useEffect(() => {
-    if (!active || projects.length === 0) return;
-    const topLevelCount = projects.filter((p) => !p.parentCwd).length;
-    const stale = !lastFetchedAt || Date.now() - lastFetchedAt > STALE_MS || topLevelCount !== lastProjectCount;
+    if (!active) return;
+    const topLevel = projects.filter((p) => !p.parentCwd);
+    if (topLevel.length === 0) {
+      if (prs.length > 0) clear();
+      return;
+    }
+    const stale = !lastFetchedAt || Date.now() - lastFetchedAt > STALE_MS || topLevel.length !== lastProjectCount;
     if (stale && !loading) fetchAllPRs(projects);
-  }, [active, projects, lastFetchedAt, lastProjectCount, loading, fetchAllPRs]);
+  }, [active, projects, prs.length, lastFetchedAt, lastProjectCount, loading, fetchAllPRs, clear]);
 
   const groups = useMemo(() => groupPRs(prs), [prs]);
   const metrics = useMemo(() => computeMetrics(prs), [prs]);
 
-  return { groups, metrics, loading, error, isEmpty: prs.length === 0 };
+  const isEmpty = groups.open.length === 0 && groups.draft.length === 0 && groups.merged.length === 0;
+
+  return { groups, metrics, loading, error, isEmpty };
 }

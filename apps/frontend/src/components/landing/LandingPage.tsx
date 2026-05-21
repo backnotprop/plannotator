@@ -298,7 +298,7 @@ function ProjectNode({
   const [prDefaultBranch, setPrDefaultBranch] = useState("main");
   const [prError, setPrError] = useState<string | null>(null);
   const [prsLoading, setPrsLoading] = useState(false);
-  const [prsFetched, setPrsFetched] = useState(false);
+  const [prsFetchedAt, setPrsFetchedAt] = useState(0);
   const hasChildren = children.length > 0;
 
   useEffect(() => {
@@ -312,8 +312,9 @@ function ProjectNode({
   }, [expanded, project.cwd, worktreesFetched]);
 
   useEffect(() => {
-    if (!expanded || prsFetched) return;
-    setPrsFetched(true);
+    if (!expanded) return;
+    const stale = !prsFetchedAt || Date.now() - prsFetchedAt > 30_000;
+    if (!stale || prsLoading) return;
     setPrsLoading(true);
     daemonApiClient.listPRs(project.cwd).then((result) => {
       if (result.ok) {
@@ -323,8 +324,9 @@ function ProjectNode({
         if (result.data.error) setPrError(result.data.error);
       }
       setPrsLoading(false);
+      setPrsFetchedAt(Date.now());
     });
-  }, [expanded, project.cwd, prsFetched]);
+  }, [expanded, project.cwd, prsFetchedAt, prsLoading]);
 
   const hasWorktrees = hasChildren || worktrees.length > 0;
   const isSelected = selections.has(project.cwd);
@@ -340,7 +342,7 @@ function ProjectNode({
     } else {
       toast.error(`Failed to remove ${project.name}`);
     }
-  }, [project.name]);
+  }, [project.name, project.cwd]);
 
   return (
     <ContextMenu.Root>
