@@ -61,7 +61,7 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
         piExecutablePath: piPath,
       } as PiSDKConfig);
       if (provider instanceof PiSDKProvider) {
-        await provider.fetchModels();
+        void provider.fetchModels().catch(() => {});
       }
       registry.register(provider);
     }
@@ -78,7 +78,7 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
         cwd,
       });
       if (provider instanceof OpenCodeProvider) {
-        await provider.fetchModels();
+        void provider.fetchModels().catch(() => {});
       }
       registry.register(provider);
     }

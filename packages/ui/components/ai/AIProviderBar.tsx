@@ -1,20 +1,9 @@
 import React from 'react';
 import { getProviderMeta } from '../ProviderIcons';
-
-interface AIProviderModel {
-  id: string;
-  label: string;
-  default?: boolean;
-}
-
-interface AIProviderInfo {
-  id: string;
-  name: string;
-  models?: AIProviderModel[];
-}
+import { AI_REASONING_EFFORTS, type AIProviderOption } from '../../utils/aiProvider';
 
 interface AIProviderBarProps {
-  providers: AIProviderInfo[];
+  providers: AIProviderOption[];
   selectedProviderId: string | null;
   selectedModel: string | null;
   selectedReasoningEffort?: string | null;
@@ -22,13 +11,6 @@ interface AIProviderBarProps {
   onModelChange: (model: string) => void;
   onReasoningEffortChange?: (effort: string | null) => void;
 }
-
-const REASONING_EFFORTS = [
-  { id: 'low', label: 'Low' },
-  { id: 'medium', label: 'Medium' },
-  { id: 'high', label: 'High' },
-  { id: 'xhigh', label: 'Max' },
-] as const;
 
 export const AIProviderBar: React.FC<AIProviderBarProps> = ({
   providers,
@@ -98,7 +80,7 @@ export const AIProviderBar: React.FC<AIProviderBarProps> = ({
           aria-label="Reasoning effort"
         >
           <option value="">Auto</option>
-          {REASONING_EFFORTS.map(effort => (
+          {AI_REASONING_EFFORTS.map(effort => (
             <option key={effort.id} value={effort.id}>
               {effort.label}
             </option>

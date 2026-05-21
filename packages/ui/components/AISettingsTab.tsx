@@ -6,21 +6,13 @@ import {
   resolveAIProviderSelection,
   saveAIProviderSelection,
   savePreferredModel,
+  type AIProviderOption,
 } from '../utils/aiProvider';
 import { useState } from 'react';
 import type { Origin } from '@plannotator/shared/agents';
 
-interface AIProviderModel {
-  id: string;
-  label: string;
-  default?: boolean;
-}
-
-interface AIProvider {
-  id: string;
-  name: string;
+interface AIProvider extends AIProviderOption {
   capabilities: Record<string, boolean>;
-  models?: AIProviderModel[];
 }
 
 interface AISettingsTabProps {

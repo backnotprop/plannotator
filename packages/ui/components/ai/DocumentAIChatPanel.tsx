@@ -1,17 +1,11 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
 import type { AIChatEntry, PendingPermission } from '../../hooks/useAIChat';
+import type { AIProviderOption } from '../../utils/aiProvider';
+import { formatRelativeTime, renderChatMarkdown } from '../../utils/aiChatFormat';
 import { OverlayScrollArea } from '../OverlayScrollArea';
 import { SparklesIcon } from '../SparklesIcon';
 import { AIProviderBar } from './AIProviderBar';
 import { submitHint } from '../../utils/platform';
-
-interface AIProviderInfo {
-  id: string;
-  name: string;
-  models?: Array<{ id: string; label: string; default?: boolean }>;
-}
 
 interface DocumentAIChatPanelProps {
   messages: AIChatEntry[];
@@ -20,32 +14,9 @@ interface DocumentAIChatPanelProps {
   onAskGeneral?: (question: string) => void;
   permissionRequests?: PendingPermission[];
   onRespondToPermission?: (requestId: string, allow: boolean) => void;
-  aiProviders?: AIProviderInfo[];
+  aiProviders?: AIProviderOption[];
   aiConfig?: { providerId: string | null; model: string | null; reasoningEffort?: string | null };
   onAIConfigChange?: (config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => void;
-}
-
-function renderChatMarkdown(text: string): React.ReactNode {
-  const html = marked.parse(text, { async: false, breaks: true }) as string;
-  const clean = DOMPurify.sanitize(html, {
-    ALLOWED_TAGS: [
-      'p', 'br', 'strong', 'em', 'code', 'pre', 'ul', 'ol', 'li',
-      'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'a', 'blockquote',
-    ],
-    ALLOWED_ATTR: ['href', 'target', 'rel', 'class'],
-  });
-
-  return <div className="ai-markdown" dangerouslySetInnerHTML={{ __html: clean }} />;
-}
-
-function formatRelativeTime(ts: number): string {
-  const seconds = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-  if (seconds < 60) return 'now';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 function truncate(text: string, max = 180): string {
@@ -66,12 +37,14 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [generalInput, setGeneralInput] = useState('');
+  const latestMessage = messages[messages.length - 1];
+  const latestResponseText = latestMessage?.response.text ?? '';
 
   useEffect(() => {
     if (!scrollRef.current) return;
     const last = scrollRef.current.querySelector('[data-ai-message]:last-child');
     last?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages.length]);
+  }, [messages.length, latestResponseText]);
 
   const handleGeneralSubmit = useCallback(() => {
     const question = generalInput.trim();
@@ -90,7 +63,11 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
                 <SparklesIcon className="w-5 h-5" />
               </div>
               <p className="text-xs">
-                Select text and click <strong>Ask AI</strong>, or ask a general question below.
+                {onAskGeneral ? (
+                  <>Select text and click <strong>Ask AI</strong>, or ask a general question below.</>
+                ) : (
+                  <>Select text and click <strong>Ask AI</strong>.</>
+                )}
               </p>
             </div>
           )}

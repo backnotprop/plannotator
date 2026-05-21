@@ -499,6 +499,34 @@ describe("AI endpoints", () => {
     expect(createRes.status).toBe(200);
   });
 
+  test("session creation clamps client-supplied cost controls", async () => {
+    const { reg, endpoints } = setup();
+    let seenOptions: { maxTurns?: number; maxBudgetUsd?: number } | null = null;
+    reg.register({
+      ...mockProvider("mock"),
+      async createSession(opts) {
+        seenOptions = opts;
+        return mockSession(`session-${++sessionCounter}`, null);
+      },
+    });
+
+    const createRes = await endpoints["/api/ai/session"](
+      new Request("http://localhost/api/ai/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: { mode: "plan-review", plan: { plan: "# Test" } },
+          maxTurns: 9999,
+          maxBudgetUsd: 9999,
+        }),
+      })
+    );
+
+    expect(createRes.status).toBe(200);
+    expect(seenOptions?.maxTurns).toBe(99);
+    expect(seenOptions?.maxBudgetUsd).toBe(5);
+  });
+
   test("session creation fails for unknown provider ID", async () => {
     const { reg, endpoints } = setup();
     reg.register(mockProvider("mock"));

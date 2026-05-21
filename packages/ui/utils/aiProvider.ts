@@ -39,6 +39,17 @@ export interface AIProviderSelection {
   model: string | null;
 }
 
+export const AI_REASONING_EFFORTS = [
+  { id: 'low', label: 'Low' },
+  { id: 'medium', label: 'Medium' },
+  { id: 'high', label: 'High' },
+  { id: 'xhigh', label: 'Max' },
+] as const;
+
+export function originHasDedicatedAIProvider(origin: Origin | null | undefined): boolean {
+  return getAgentAIProviderTypes(origin).length > 0;
+}
+
 /**
  * Get current AI provider settings from storage
  */
@@ -170,20 +181,40 @@ export function saveAIProviderSelection(options: {
   settings?: AIProviderSettings;
 }): void {
   const settings = options.settings ?? getAIProviderSettings();
+  saveAIProviderSettings(applyAIProviderSelection(settings, options));
+}
+
+export function applyAIProviderSelection(
+  settings: AIProviderSettings,
+  options: {
+    providerId: string | null;
+    model?: string | null;
+    origin?: Origin | null;
+  },
+): AIProviderSettings {
   const preferredModels = { ...settings.preferredModels };
   if (options.providerId && options.model) {
     preferredModels[options.providerId] = options.model;
   }
 
   const providerByOrigin = { ...settings.providerByOrigin };
-  if (options.origin && options.providerId) {
-    providerByOrigin[options.origin] = options.providerId;
+  let providerId = settings.providerId;
+  const hasOriginDefault = originHasDedicatedAIProvider(options.origin);
+
+  if (options.origin && hasOriginDefault) {
+    if (options.providerId) {
+      providerByOrigin[options.origin] = options.providerId;
+    } else {
+      delete providerByOrigin[options.origin];
+    }
+  } else {
+    providerId = options.providerId;
   }
 
-  saveAIProviderSettings({
+  return {
     ...settings,
-    providerId: options.providerId,
+    providerId,
     preferredModels,
     providerByOrigin,
-  });
+  };
 }

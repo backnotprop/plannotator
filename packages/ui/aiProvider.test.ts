@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  applyAIProviderSelection,
   findOriginAIProvider,
   resolveAIProviderSelection,
   type AIProviderOption,
@@ -74,5 +75,26 @@ describe('AI provider origin defaults', () => {
     });
 
     expect(selection.providerId).toBe('codex-local');
+  });
+
+  it('stores explicit choices for mapped origins without changing the global fallback', () => {
+    const next = applyAIProviderSelection(
+      settings({ providerId: 'claude-local' }),
+      { providerId: 'codex-local', model: 'codex-alt', origin: 'codex' },
+    );
+
+    expect(next.providerId).toBe('claude-local');
+    expect(next.providerByOrigin.codex).toBe('codex-local');
+    expect(next.preferredModels['codex-local']).toBe('codex-alt');
+  });
+
+  it('stores explicit choices as the global fallback for origins without a dedicated provider', () => {
+    const next = applyAIProviderSelection(
+      settings({ providerId: 'claude-local' }),
+      { providerId: 'codex-local', model: 'codex-alt', origin: 'gemini-cli' },
+    );
+
+    expect(next.providerId).toBe('codex-local');
+    expect(next.providerByOrigin['gemini-cli']).toBeUndefined();
   });
 });

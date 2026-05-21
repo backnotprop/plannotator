@@ -426,6 +426,16 @@ const ReviewApp: React.FC = () => {
     model: aiConfig.model,
     reasoningEffort: aiConfig.reasoningEffort,
   });
+  const {
+    messages: aiMessages,
+    isCreatingSession: aiIsCreatingSession,
+    isStreaming: aiIsStreaming,
+    permissionRequests: aiPermissionRequests,
+    respondToPermission: respondToAIPermission,
+    ask: askAI,
+    resetSession: resetAISession,
+    sessionId: aiSessionId,
+  } = aiChat;
 
   const codeNav = useCodeNav();
 
@@ -485,13 +495,6 @@ const ReviewApp: React.FC = () => {
 
       if (prev.providerId === selection.providerId && prev.model === selection.model) return prev;
 
-      saveAIProviderSelection({
-        providerId: selection.providerId,
-        model: selection.model,
-        origin,
-        settings: saved,
-      });
-
       return { ...prev, providerId: selection.providerId, model: selection.model };
     });
   }, [aiAvailable, aiProviders, aiDefaultProvider, origin]);
@@ -514,8 +517,8 @@ const ReviewApp: React.FC = () => {
       });
       return next;
     });
-    aiChat.resetSession();
-  }, [aiChat, aiProviders, origin]);
+    resetAISession();
+  }, [aiProviders, origin, resetAISession]);
 
   const handleAskAI = useCallback((question: string) => {
     if (!pendingSelection || !files[activeFileIndex]) return;
@@ -524,7 +527,7 @@ const ReviewApp: React.FC = () => {
     const side = pendingSelection.side === 'additions' ? 'new' : 'old';
     const selectedCode = extractLinesFromPatch(files[activeFileIndex].patch, lineStart, lineEnd, side);
 
-    aiChat.ask({
+    askAI({
       prompt: question,
       filePath: files[activeFileIndex].path,
       lineStart,
@@ -532,7 +535,7 @@ const ReviewApp: React.FC = () => {
       side,
       selectedCode: selectedCode || undefined,
     });
-  }, [pendingSelection, files, activeFileIndex, aiChat]);
+  }, [activeFileIndex, askAI, files, pendingSelection]);
 
   const handleViewAIResponse = useCallback((questionId?: string) => {
     reviewSidebar.open('ai');
@@ -560,13 +563,13 @@ const ReviewApp: React.FC = () => {
     const selStart = Math.min(pendingSelection.start, pendingSelection.end);
     const selEnd = Math.max(pendingSelection.start, pendingSelection.end);
     const side = pendingSelection.side === 'additions' ? 'new' : 'old';
-    return aiChat.messages.filter(m => {
+    return aiMessages.filter(m => {
       const q = m.question;
       return q.filePath === filePath && q.side === side &&
         q.lineStart != null && q.lineEnd != null &&
         q.lineStart <= selEnd && q.lineEnd >= selStart;
     });
-  }, [pendingSelection, files, activeFileIndex, aiChat.messages]);
+  }, [pendingSelection, files, activeFileIndex, aiMessages]);
 
   // Click AI marker in diff → scroll sidebar to that Q&A
   const [scrollToQuestionId, setScrollToQuestionId] = useState<string | null>(null);
@@ -579,8 +582,8 @@ const ReviewApp: React.FC = () => {
 
   // General AI question from sidebar input
   const handleAskGeneral = useCallback((question: string) => {
-    aiChat.ask({ prompt: question });
-  }, [aiChat.ask]);
+    askAI({ prompt: question });
+  }, [askAI]);
 
   // Resizable panels
   const panelResize = useResizablePanel({ storageKey: 'plannotator-review-panel-width' });
@@ -1422,9 +1425,9 @@ const ReviewApp: React.FC = () => {
     activeSearchMatchId,
     activeSearchMatch: activeSearchMatch?.filePath === files[activeFileIndex]?.path ? activeSearchMatch : null,
     aiAvailable,
-    aiMessages: aiChat.messages,
+    aiMessages,
     onAskAI: handleAskAI,
-    isAILoading: aiChat.isCreatingSession || aiChat.isStreaming,
+    isAILoading: aiIsCreatingSession || aiIsStreaming,
     onViewAIResponse: handleViewAIResponse,
     onClickAIMarker: handleClickAIMarker,
     aiHistoryForSelection,
@@ -1454,7 +1457,7 @@ const ReviewApp: React.FC = () => {
     handleToggleViewed, stagedFiles, stagingFile, stageFile,
     canStageFiles, stageError, isSearchPending, debouncedSearchQuery,
     activeFileSearchMatches, activeSearchMatchId, activeSearchMatch,
-    aiAvailable, aiChat.messages, aiChat.isCreatingSession, aiChat.isStreaming,
+    aiAvailable, aiMessages, aiIsCreatingSession, aiIsStreaming,
     handleAskAI, handleViewAIResponse, handleClickAIMarker,
     aiHistoryForSelection, agentJobs.jobs, prMetadata, prContext,
     isPRContextLoading, prContextError, fetchPRContext, platformUser, openDiffFile,
@@ -2110,7 +2113,7 @@ const ReviewApp: React.FC = () => {
                 title="AI Chat"
               >
                 <SparklesIcon className="w-4 h-4" />
-                {aiChat.messages.length > 0 && !(reviewSidebar.isOpen && reviewSidebar.activeTab === 'ai') && (
+                {aiMessages.length > 0 && !(reviewSidebar.isOpen && reviewSidebar.activeTab === 'ai') && (
                   <span className="absolute top-0 right-0 w-1.5 h-1.5 rounded-full bg-primary" />
                 )}
               </button>
@@ -2286,19 +2289,19 @@ const ReviewApp: React.FC = () => {
                 onDeleteEditorAnnotation={deleteEditorAnnotation}
                 prMetadata={prMetadata}
                 aiAvailable={aiAvailable}
-                aiMessages={aiChat.messages}
-                isAICreatingSession={aiChat.isCreatingSession}
-                isAIStreaming={aiChat.isStreaming}
+                aiMessages={aiMessages}
+                isAICreatingSession={aiIsCreatingSession}
+                isAIStreaming={aiIsStreaming}
                 onScrollToAILines={handleScrollToAILines}
                 activeFilePath={files[activeFileIndex]?.path}
                 scrollToQuestionId={scrollToQuestionId}
                 onAskGeneral={handleAskGeneral}
-                aiPermissionRequests={aiChat.permissionRequests}
-                onRespondToPermission={aiChat.respondToPermission}
+                aiPermissionRequests={aiPermissionRequests}
+                onRespondToPermission={respondToAIPermission}
                 aiProviders={aiProviders}
                 aiConfig={aiConfig}
                 onAIConfigChange={handleAIConfigChange}
-                hasAISession={!!aiChat.sessionId}
+                hasAISession={!!aiSessionId}
                 agentJobs={agentJobs.jobs}
                 agentCapabilities={agentJobs.capabilities}
                 onAgentLaunch={agentJobs.launchJob}

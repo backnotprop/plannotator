@@ -71,7 +71,7 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 					piExecutablePath: piPath,
 				} as any);
 				if (provider && "fetchModels" in provider) {
-					await (provider as { fetchModels: () => Promise<void> }).fetchModels();
+					void (provider as { fetchModels: () => Promise<void> }).fetchModels().catch(() => {});
 				}
 				registry.register(provider);
 			}
@@ -88,7 +88,7 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 					cwd,
 				});
 				if (provider && "fetchModels" in provider) {
-					await (provider as { fetchModels: () => Promise<void> }).fetchModels();
+					void (provider as { fetchModels: () => Promise<void> }).fetchModels().catch(() => {});
 				}
 				registry.register(provider);
 			}

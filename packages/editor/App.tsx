@@ -893,13 +893,6 @@ const App: React.FC = () => {
 
             if (prev.providerId === selection.providerId && prev.model === selection.model) return prev;
 
-            saveAIProviderSelection({
-              providerId: selection.providerId,
-              model: selection.model,
-              origin,
-              settings: saved,
-            });
-
             return { ...prev, providerId: selection.providerId, model: selection.model };
           });
         } else {
@@ -1486,8 +1479,8 @@ const App: React.FC = () => {
   }, [blocks, allAnnotations, globalAttachments, linkedDocHook.getDocAnnotations, editorAnnotations, codeAnnotations, sourceConverted, annotateSource, linkedDocHook.isActive, linkedDocHook.filepath]);
 
   const aiAnnotationsContext = useMemo(
-    () => annotationsOutput === 'User reviewed the document and has no feedback.' ? undefined : annotationsOutput,
-    [annotationsOutput],
+    () => hasAnyAnnotations ? annotationsOutput : undefined,
+    [annotationsOutput, hasAnyAnnotations],
   );
 
   const aiDocumentPath = linkedDocHook.isActive
@@ -1499,9 +1492,15 @@ const App: React.FC = () => {
     : sourceConverted;
   const aiRenderAs = linkedDocHook.isActive ? 'markdown' : renderAs;
   const aiDocumentMode = annotateMode || linkedDocHook.isActive;
+  const hasAIDocumentContext =
+    !aiDocumentMode ||
+    annotateSource !== 'folder' ||
+    linkedDocHook.isActive ||
+    !!sourceFilePath;
 
   const aiContext = useMemo<AIContext | null>(() => {
     if (!aiSessionEnabled || archive.archiveMode || goalSetupMode) return null;
+    if (aiDocumentMode && !hasAIDocumentContext) return null;
 
     if (aiDocumentMode) {
       return {
@@ -1536,6 +1535,7 @@ const App: React.FC = () => {
     aiSourceConverted,
     aiSourceInfo,
     aiDocumentMode,
+    hasAIDocumentContext,
     archive.archiveMode,
     goalSetupMode,
     markdown,
@@ -1552,16 +1552,30 @@ const App: React.FC = () => {
     reasoningEffort: aiConfig.reasoningEffort,
     threadTitle: aiDocumentMode ? 'Document chat' : 'Plan chat',
   });
+  const {
+    messages: aiMessages,
+    isCreatingSession: aiIsCreatingSession,
+    isStreaming: aiIsStreaming,
+    permissionRequests: aiPermissionRequests,
+    respondToPermission: respondToAIPermission,
+    ask: askAI,
+    resetSession: resetAISession,
+    resetThread: resetAIThread,
+    sessionId: aiSessionId,
+  } = aiChat;
+  const canUseAI = aiAvailable && aiContext !== null;
 
-  const aiDocumentKey = `${aiDocumentMode ? 'document' : 'plan'}:${aiRenderAs}:${aiDocumentPath}:${versionInfo?.version ?? 'current'}`;
+  const aiDocumentKey = aiContext
+    ? `${aiDocumentMode ? 'document' : 'plan'}:${aiRenderAs}:${aiDocumentPath}:${versionInfo?.version ?? 'current'}`
+    : 'none';
   const previousAIDocumentKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (!aiSessionEnabled) return;
     if (previousAIDocumentKeyRef.current && previousAIDocumentKeyRef.current !== aiDocumentKey) {
-      aiChat.resetThread();
+      resetAIThread();
     }
     previousAIDocumentKeyRef.current = aiDocumentKey;
-  }, [aiChat, aiDocumentKey, aiSessionEnabled]);
+  }, [aiDocumentKey, aiSessionEnabled, resetAIThread]);
 
   const handleAIConfigChange = useCallback((config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => {
     setAIConfig(prev => {
@@ -1581,13 +1595,16 @@ const App: React.FC = () => {
       });
       return next;
     });
-    aiChat.resetSession();
-  }, [aiChat, aiProviders, origin]);
+    resetAISession();
+  }, [aiProviders, origin, resetAISession]);
 
   const openAIChat = useCallback(() => {
+    if (wideModeType !== null) {
+      exitWideMode({ restore: false, panelOpen: true });
+    }
     setRightSidebarTab('ai');
     setIsPanelOpen(true);
-  }, []);
+  }, [exitWideMode, wideModeType]);
 
   const handleOpenAIAnnouncement = useCallback(() => {
     dismissPlanAIAnnouncement();
@@ -1595,10 +1612,10 @@ const App: React.FC = () => {
   }, [dismissPlanAIAnnouncement, openAIChat]);
 
   const handleAskAI = useCallback((question: string, context?: CommentAskAIContext) => {
-    if (!aiAvailable) return;
+    if (!canUseAI) return;
     dismissPlanAIAnnouncement();
     openAIChat();
-    aiChat.ask({
+    askAI({
       prompt: question,
       scope: context ? {
         kind: context.kind,
@@ -1606,9 +1623,9 @@ const App: React.FC = () => {
         text: context.text,
         sourcePath: context.sourcePath ?? aiDocumentPath,
       } : undefined,
-      contextUpdate: aiChat.sessionId ? aiAnnotationsContext : undefined,
+      contextUpdate: aiSessionId ? aiAnnotationsContext : undefined,
     });
-  }, [aiAnnotationsContext, aiAvailable, aiChat, aiDocumentPath, dismissPlanAIAnnouncement, openAIChat]);
+  }, [aiAnnotationsContext, aiDocumentPath, aiSessionId, askAI, canUseAI, dismissPlanAIAnnouncement, openAIChat]);
 
   const handleAskGeneralAI = useCallback((question: string) => {
     handleAskAI(question, { kind: 'general', label: aiDocumentMode ? 'Document' : 'Plan', sourcePath: aiDocumentPath });
@@ -1898,7 +1915,7 @@ const App: React.FC = () => {
   const selectedAIProvider = aiProviders.find(provider => provider.id === aiConfig.providerId) ?? null;
   const shouldShowPlanAIAnnouncement =
     showPlanAIAnnouncement &&
-    aiAvailable &&
+    canUseAI &&
     aiSessionEnabled &&
     isApiMode &&
     !isSharedSession &&
@@ -1934,9 +1951,9 @@ const App: React.FC = () => {
           isSubmitting={isSubmitting}
           isExiting={isExiting}
           isPanelOpen={isPanelOpen && rightSidebarTab === 'annotations'}
-          aiAvailable={aiAvailable}
+          aiAvailable={canUseAI}
           isAIChatOpen={isPanelOpen && rightSidebarTab === 'ai'}
-          aiHasMessages={aiChat.messages.length > 0}
+          aiHasMessages={aiMessages.length > 0}
           hasAnyAnnotations={hasAnyAnnotations}
           linkedDocIsActive={linkedDocHook.isActive}
           callbackShareUrlReady={callbackConfig ? Boolean(shareUrl || shortShareUrl) : true}
@@ -2206,7 +2223,7 @@ const App: React.FC = () => {
                     onAddGlobalAttachment={handleAddGlobalAttachment}
                     onRemoveGlobalAttachment={handleRemoveGlobalAttachment}
                     maxWidth={annotateReaderMaxWidth}
-                    onAskAI={aiAvailable ? handleAskAI : undefined}
+                    onAskAI={canUseAI ? handleAskAI : undefined}
                   />
                 ) : (
                   <Viewer
@@ -2244,7 +2261,7 @@ const App: React.FC = () => {
                     onToggleCheckbox={checkbox.toggle}
                     checkboxOverrides={checkbox.overrides}
                     actionsLabelMode={actionsLabelMode}
-                    onAskAI={aiAvailable ? handleAskAI : undefined}
+                    onAskAI={canUseAI ? handleAskAI : undefined}
                   />
                 )}
               </div>
@@ -2252,7 +2269,7 @@ const App: React.FC = () => {
           </OverlayScrollArea>
 
           {/* Resize Handle */}
-          {isPanelOpen && wideModeType === null && !goalSetupMode && <ResizeHandle {...panelResize.handleProps} className="hidden md:block" side="right" />}
+          {isPanelOpen && wideModeType === null && !goalSetupMode && (rightSidebarTab === 'annotations' || canUseAI) && <ResizeHandle {...panelResize.handleProps} className="hidden md:block" side="right" />}
 
           {/* Annotation Panel */}
           <AnnotationPanel
@@ -2279,7 +2296,7 @@ const App: React.FC = () => {
             otherFileAnnotations={otherFileAnnotations}
             onOtherFileAnnotationsClick={handleFlashAnnotatedFiles}
           />
-          {isPanelOpen && rightSidebarTab === 'ai' && wideModeType === null && !goalSetupMode && (
+          {isPanelOpen && rightSidebarTab === 'ai' && wideModeType === null && !goalSetupMode && canUseAI && (
             <aside
               data-annotation-panel="true"
               className={`border-l border-border/50 bg-card/30 backdrop-blur-sm flex flex-col flex-shrink-0 ${
@@ -2303,20 +2320,20 @@ const App: React.FC = () => {
                   <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground truncate">
                     AI
                   </h2>
-                  {aiChat.messages.length > 0 && (
+                  {aiMessages.length > 0 && (
                     <span className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                      {aiChat.messages.length}
+                      {aiMessages.length}
                     </span>
                   )}
                 </div>
               </div>
               <DocumentAIChatPanel
-                messages={aiChat.messages}
-                isCreatingSession={aiChat.isCreatingSession}
-                isStreaming={aiChat.isStreaming}
+                messages={aiMessages}
+                isCreatingSession={aiIsCreatingSession}
+                isStreaming={aiIsStreaming}
                 onAskGeneral={handleAskGeneralAI}
-                permissionRequests={aiChat.permissionRequests}
-                onRespondToPermission={aiChat.respondToPermission}
+                permissionRequests={aiPermissionRequests}
+                onRespondToPermission={respondToAIPermission}
                 aiProviders={aiProviders}
                 aiConfig={aiConfig}
                 onAIConfigChange={handleAIConfigChange}

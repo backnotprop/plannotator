@@ -83,6 +83,15 @@ function createThread(title = 'Chat'): AIChatThread {
   };
 }
 
+function createAbortError(message: string): Error {
+  if (typeof DOMException !== 'undefined') {
+    return new DOMException(message, 'AbortError');
+  }
+  const err = new Error(message);
+  err.name = 'AbortError';
+  return err;
+}
+
 export function useAIChat({
   context,
   providerId,
@@ -97,6 +106,8 @@ export function useAIChat({
   const [error, setError] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
+  const sessionEpochRef = useRef(0);
+  const createRequestRef = useRef(0);
   const sessionIdRef = useRef<string | null>(null);
   sessionIdRef.current = thread.sessionId;
 
@@ -112,11 +123,12 @@ export function useAIChat({
     setThread(prev => ({ ...prev, sessionId }));
   }, []);
 
-  const createSession = useCallback(async (signal: AbortSignal): Promise<string> => {
+  const createSession = useCallback(async (signal: AbortSignal, epoch: number): Promise<string> => {
     if (!context) {
       throw new Error('AI context is unavailable');
     }
 
+    const requestId = ++createRequestRef.current;
     setIsCreatingSession(true);
     try {
       const res = await fetch('/api/ai/session', {
@@ -137,10 +149,20 @@ export function useAIChat({
       }
 
       const data = await res.json() as { sessionId: string };
+      if (signal.aborted || epoch !== sessionEpochRef.current) {
+        fetch('/api/ai/abort', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: data.sessionId }),
+        }).catch(() => {});
+        throw createAbortError('AI session creation was superseded');
+      }
       setSessionId(data.sessionId);
       return data.sessionId;
     } finally {
-      setIsCreatingSession(false);
+      if (createRequestRef.current === requestId) {
+        setIsCreatingSession(false);
+      }
     }
   }, [context, model, providerId, reasoningEffort, setSessionId]);
 
@@ -151,6 +173,7 @@ export function useAIChat({
 
     const controller = new AbortController();
     abortRef.current = controller;
+    const epoch = sessionEpochRef.current;
     setError(null);
 
     const questionId = generateId('ai-question');
@@ -179,7 +202,11 @@ export function useAIChat({
     try {
       let sid = sessionIdRef.current;
       if (!sid) {
-        sid = await createSession(controller.signal);
+        sid = await createSession(controller.signal, epoch);
+      }
+
+      if (controller.signal.aborted || epoch !== sessionEpochRef.current) {
+        throw createAbortError('AI question was superseded');
       }
 
       const fullPrompt = buildPrompt(params);
@@ -347,26 +374,34 @@ export function useAIChat({
   }, [updatePermissions]);
 
   const resetSession = useCallback(() => {
+    sessionEpochRef.current += 1;
+    createRequestRef.current += 1;
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
     }
     setSessionId(null);
+    setIsCreatingSession(false);
     setIsStreaming(false);
   }, [setSessionId]);
 
   const resetThread = useCallback(() => {
+    sessionEpochRef.current += 1;
+    createRequestRef.current += 1;
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
     }
     setThread(createThread(threadTitle));
+    setIsCreatingSession(false);
     setIsStreaming(false);
     setError(null);
   }, [threadTitle]);
 
   useEffect(() => {
     return () => {
+      sessionEpochRef.current += 1;
+      createRequestRef.current += 1;
       if (abortRef.current) {
         abortRef.current.abort();
       }
