@@ -551,13 +551,6 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
     return count > 0 ? { count, files } : undefined;
   }, [allAnnotationCounts, linkedDocHook.filepath]);
 
-  const linkedDocInfo = useMemo(() => {
-    if (!linkedDocHook.isActive) return null;
-    const dir = fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath);
-    const label = dir?.isVault ? 'Vault File' : fileBrowser.activeFile ? 'File' : undefined;
-    return { filepath: linkedDocHook.filepath!, onBack: handleLinkedDocBack, label, backLabel };
-  }, [linkedDocHook.isActive, linkedDocHook.filepath, handleLinkedDocBack, fileBrowser.dirs, fileBrowser.activeDirPath, fileBrowser.activeFile, backLabel]);
-
   // Flash highlight for annotated files in the sidebar
   const [highlightedFiles, setHighlightedFiles] = useState<Set<string> | undefined>();
   const flashTimerRef = React.useRef<ReturnType<typeof setTimeout>>();
@@ -583,6 +576,13 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
     : annotateSource === 'file' ? 'file'
     : annotateSource === 'message' ? 'message'
     : 'plan';
+
+  const linkedDocInfo = useMemo(() => {
+    if (!linkedDocHook.isActive) return null;
+    const dir = fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath);
+    const label = dir?.isVault ? 'Vault File' : fileBrowser.activeFile ? 'File' : undefined;
+    return { filepath: linkedDocHook.filepath!, onBack: handleLinkedDocBack, label, backLabel };
+  }, [linkedDocHook.isActive, linkedDocHook.filepath, handleLinkedDocBack, fileBrowser.dirs, fileBrowser.activeDirPath, fileBrowser.activeFile, backLabel]);
 
   // Track active section for TOC highlighting
   const headingCount = useMemo(() => blocks.filter(b => b.type === 'heading').length, [blocks]);
