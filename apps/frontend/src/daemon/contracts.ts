@@ -80,6 +80,23 @@ export interface PRListItem {
   state: "open" | "closed" | "merged";
 }
 
+export interface PRDetailedListItem extends PRListItem {
+  additions: number;
+  deletions: number;
+  commentCount: number;
+  updatedAt: string;
+  isDraft: boolean;
+  reviewDecision: string;
+}
+
+export interface PRDetailedListResponse {
+  ok: true;
+  prs: PRDetailedListItem[];
+  platform: "github" | "gitlab" | null;
+  error?: "no-remote" | "no-cli" | "auth-failed";
+  message?: string;
+}
+
 export interface PRListResponse {
   ok: true;
   prs: PRListItem[];

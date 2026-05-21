@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@fontsource-variable/geist-mono": "^5.2.7",
+    "@fontsource-variable/instrument-sans": "^5.2.8",
     "@fontsource-variable/inter": "^5.2.8",
     "@plannotator/code-review": "workspace:*",
     "@plannotator/plan-review": "workspace:*",
@@ -34,6 +35,7 @@
     "clsx": "^2.1.1",
     "immer": "^10.2.0",
     "lucide-react": "^1.14.0",
+    "motion": "^12.38.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "sonner": "^2.0.7",

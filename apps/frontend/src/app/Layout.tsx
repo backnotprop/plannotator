@@ -48,11 +48,9 @@ function LayoutContent() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  const openAddProject = useCallback(() => setAddProjectOpen(true), [setAddProjectOpen]);
-
   return (
     <>
-      <AppSidebar onAddProject={openAddProject} />
+      <AppSidebar />
       <main className="relative flex-1 overflow-hidden">
         <div
           className="absolute inset-0"

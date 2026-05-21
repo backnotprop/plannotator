@@ -24,8 +24,8 @@ import { readImprovementHook, getImprovementHookExpectedPath } from "@plannotato
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import { readSnapshot } from "./session-store";
 import { parseRemoteUrl, parseRemoteHost } from "@plannotator/shared/repo";
-import { checkPRAuth, fetchPRList } from "../pr";
-import type { PRRef, PRListItem } from "@plannotator/shared/pr-types";
+import { checkPRAuth, fetchPRList, fetchPRDetailedList } from "../pr";
+import type { PRRef, PRListItem, PRDetailedListItem } from "@plannotator/shared/pr-types";
 
 const RESULT_DELETE_GRACE_MS = 2_000;
 const DAEMON_AUTH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
@@ -221,6 +221,7 @@ function sessionShellHtml(shellHtmlContent: string, sessionId: string): string {
 export function createDaemonFetchHandler(options: DaemonServerOptions): DaemonFetchHandler {
   const store = options.store ?? new DaemonSessionStore();
   const prListCache = new Map<string, { prs: PRListItem[]; platform: string; defaultBranch: string; time: number }>();
+  const prDetailedListCache = new Map<string, { prs: PRDetailedListItem[]; platform: string; time: number }>();
   const endpoint: DaemonEndpoint = {
     hostname: options.state.hostname,
     port: options.state.port,
@@ -684,6 +685,60 @@ export function createDaemonFetchHandler(options: DaemonServerOptions): DaemonFe
           } catch {}
           prListCache.set(cwd, { prs, platform, defaultBranch, time: now });
           return json({ ok: true, prs, platform, defaultBranch });
+        } catch {
+          return json({ ok: true, prs: [], platform: null });
+        }
+      }
+
+      if (url.pathname === "/daemon/projects/prs/detailed" && req.method === "GET") {
+        const cwd = url.searchParams.get("cwd");
+        if (!cwd) {
+          return json(createDaemonErrorResponse("invalid-request", "PR listing requires a cwd query parameter."), { status: 400 });
+        }
+        const now = Date.now();
+        const cached = prDetailedListCache.get(cwd);
+        if (cached && now - cached.time < 30_000) {
+          return json({ ok: true, prs: cached.prs, platform: cached.platform });
+        }
+        try {
+          const { execSync } = await import("child_process");
+          let remoteUrl: string;
+          try {
+            remoteUrl = execSync("git remote get-url origin", { cwd, encoding: "utf-8" }).trim();
+          } catch {
+            return json({ ok: true, prs: [], platform: null, error: "no-remote" });
+          }
+          const host = parseRemoteHost(remoteUrl);
+          const repoPath = parseRemoteUrl(remoteUrl);
+          if (!host || !repoPath) {
+            return json({ ok: true, prs: [], platform: null, error: "no-remote" });
+          }
+          const isGitLab = host.toLowerCase().includes("gitlab");
+          const platform = isGitLab ? "gitlab" : "github";
+          let ref: PRRef;
+          if (isGitLab) {
+            ref = { platform: "gitlab", host, projectPath: repoPath, iid: 0 };
+          } else {
+            const parts = repoPath.split("/");
+            const owner = parts.slice(0, -1).join("/");
+            const repo = parts[parts.length - 1];
+            ref = { platform: "github", host, owner, repo, number: 0 };
+          }
+          try {
+            await checkPRAuth(ref);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            const isNotFound = message.includes("not found") || message.includes("ENOENT");
+            return json({ ok: true, prs: [], platform, error: isNotFound ? "no-cli" : "auth-failed", message });
+          }
+          let prs: PRDetailedListItem[];
+          try {
+            prs = await fetchPRDetailedList(ref);
+          } catch {
+            return json({ ok: true, prs: [], platform });
+          }
+          prDetailedListCache.set(cwd, { prs, platform, time: now });
+          return json({ ok: true, prs, platform });
         } catch {
           return json({ ok: true, prs: [], platform: null });
         }

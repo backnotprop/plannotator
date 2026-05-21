@@ -215,6 +215,15 @@ export interface PRListItem {
   state: 'open' | 'closed' | 'merged';
 }
 
+export interface PRDetailedListItem extends PRListItem {
+  additions: number;
+  deletions: number;
+  commentCount: number;
+  updatedAt: string;
+  isDraft: boolean;
+  reviewDecision: string;
+}
+
 // --- Label Helpers ---
 // Accept either PRRef or PRMetadata (both have `platform` discriminant)
 

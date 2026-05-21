@@ -11,9 +11,9 @@
  * browser-safe.
  */
 
-import { checkGhAuth, getGhUser, fetchGhPR, fetchGhPRContext, fetchGhPRFileContent, submitGhPRReview, fetchGhPRViewedFiles, markGhFilesViewed, fetchGhPRStack, fetchGhPRList } from "./pr-github";
+import { checkGhAuth, getGhUser, fetchGhPR, fetchGhPRContext, fetchGhPRFileContent, submitGhPRReview, fetchGhPRViewedFiles, markGhFilesViewed, fetchGhPRStack, fetchGhPRList, fetchGhPRDetailedList } from "./pr-github";
 import { checkGlAuth, getGlUser, fetchGlMR, fetchGlMRContext, fetchGlFileContent, submitGlMRReview } from "./pr-gitlab";
-import type { PRRuntime, PRRef, PRMetadata, PRContext, PRReviewFileComment, PRStackTree, PRListItem } from "./pr-types";
+import type { PRRuntime, PRRef, PRMetadata, PRContext, PRReviewFileComment, PRStackTree, PRListItem, PRDetailedListItem } from "./pr-types";
 
 // Re-export the browser-safe surface so server callers can keep using
 // pr-provider as a single facade. Browser code imports from pr-types
@@ -120,4 +120,12 @@ export async function fetchPRList(
 ): Promise<PRListItem[]> {
   if (ref.platform === "github") return fetchGhPRList(runtime, ref);
   return []; // GitLab: not yet implemented
+}
+
+export async function fetchPRDetailedList(
+  runtime: PRRuntime,
+  ref: PRRef,
+): Promise<PRDetailedListItem[]> {
+  if (ref.platform === "github") return fetchGhPRDetailedList(runtime, ref);
+  return [];
 }

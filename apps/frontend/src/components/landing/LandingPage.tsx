@@ -9,6 +9,7 @@ import { PullRequestIcon } from "@plannotator/ui/components/PullRequestIcon";
 import { ASCII_BANNER } from "./ascii-banner";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useProjectStore, projectStore } from "../../stores/project-store";
+import { GitDashboard } from "./git-dashboard/GitDashboard";
 import { useDaemonEventStore } from "../../daemon/events/event-store";
 import { daemonApiClient } from "../../daemon/api/client";
 import { getSessionModeMeta, formatSessionLabel } from "../../shared/session-meta";
@@ -34,6 +35,9 @@ export function LandingPage({ onAddProject }: LandingPageProps) {
   const sessions = useDaemonEventStore((s) => s.sessions);
   const [selections, setSelections] = useState<Map<string, Selection>>(new Map());
   const [loading, setLoading] = useState<string | null>(null);
+  const [viewIndex, setViewIndex] = useState(() =>
+    typeof window !== "undefined" && window.location.hash === "#dashboard" ? 1 : 0,
+  );
   const navigate = useNavigate();
 
   const toggleSelection = useCallback((sel: Omit<Selection, "key">) => {
@@ -105,12 +109,20 @@ export function LandingPage({ onAddProject }: LandingPageProps) {
 
   return (
     <div className="isolate flex h-full flex-col bg-muted">
-      <nav className="flex h-10 shrink-0 items-center gap-2 px-3">
-        <SidebarTrigger className="-ml-1" />
-      </nav>
-
-      <div className="flex-1 overflow-hidden p-2 pt-0">
-        <div className="h-full overflow-hidden rounded-xl bg-card shadow-[var(--card-shadow)]">
+      <div className="flex-1 overflow-hidden p-2">
+        <div className="relative h-full overflow-hidden rounded-xl bg-card shadow-[var(--card-shadow)]">
+          <div className="absolute top-2 left-2 z-10">
+            <SidebarTrigger />
+          </div>
+          <div
+            className="flex h-full"
+            style={{
+              transform: `translateX(${-viewIndex * 100}%)`,
+              transition: "transform 500ms cubic-bezier(0.4, 0, 0.2, 1)",
+              willChange: "transform",
+            }}
+          >
+            <div className="h-full w-full shrink-0">
           <main className="flex h-full items-center justify-center overflow-auto">
             <div className="w-full max-w-2xl px-6">
               <pre
@@ -180,6 +192,13 @@ export function LandingPage({ onAddProject }: LandingPageProps) {
                             <Archive className="size-3.5" />
                             {loading === "archive" ? "Opening…" : "Browse Archive"}
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => setViewIndex(1)}
+                            className="ml-auto text-[12px] text-muted-foreground hover:text-foreground"
+                          >
+                            Git Dashboard →
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -187,9 +206,9 @@ export function LandingPage({ onAddProject }: LandingPageProps) {
 
                   {sessions.length > 0 && (
                     <div>
-                      <span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                      <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                         Active sessions
-                      </span>
+                      </div>
                       <SessionList sessions={sessions} />
                     </div>
                   )}
@@ -208,6 +227,11 @@ export function LandingPage({ onAddProject }: LandingPageProps) {
               )}
             </div>
           </main>
+            </div>
+            <div className="h-full w-full shrink-0">
+              <GitDashboard onBack={() => setViewIndex(0)} />
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -688,6 +712,7 @@ function WorktreeList({
   );
 }
 
+
 function SessionList({ sessions }: { sessions: SessionSummary[] }) {
   return (
     <div className="overflow-hidden rounded-lg border border-border">
@@ -705,9 +730,9 @@ function SessionList({ sessions }: { sessions: SessionSummary[] }) {
               "text-foreground hover:bg-surface-1",
             )}
           >
-            <Icon className="size-3.5 shrink-0 text-primary" />
-            <span className="font-medium">{formatSessionLabel(session.label, session.mode)}</span>
-            <span className="ml-auto text-[11px] text-muted-foreground">{meta.label}</span>
+            <Icon className="size-3.5 shrink-0 text-muted-foreground/50" />
+            <span className="text-muted-foreground">{formatSessionLabel(session.label, session.mode)}</span>
+            <span className="ml-auto text-[11px] text-muted-foreground/50">{meta.label}</span>
           </Link>
         );
       })}

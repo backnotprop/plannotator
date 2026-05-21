@@ -14,6 +14,7 @@ import type {
   WorktreeListResponse,
   DirectoryListResponse,
   PRListResponse,
+  PRDetailedListResponse,
 } from "../contracts";
 import {
   DaemonHubActionError,
@@ -71,6 +72,7 @@ export interface DaemonApiClient {
   listWorktrees(cwd: string): Promise<DaemonApiResult<WorktreeListResponse>>;
   listDirectories(path?: string): Promise<DaemonApiResult<DirectoryListResponse>>;
   listPRs(cwd: string): Promise<DaemonApiResult<PRListResponse>>;
+  listDetailedPRs(cwd: string): Promise<DaemonApiResult<PRDetailedListResponse>>;
   createReviewSession(cwd: string, prUrl?: string): Promise<DaemonApiResult<SessionResponse>>;
   createArchiveSession(cwd: string): Promise<DaemonApiResult<SessionResponse>>;
 }
@@ -193,6 +195,10 @@ function isDirectoryList(value: unknown): value is DirectoryListResponse {
 }
 
 function isPRList(value: unknown): value is PRListResponse {
+  return hasOkTrue(value) && Array.isArray((value as { prs?: unknown }).prs);
+}
+
+function isPRDetailedList(value: unknown): value is PRDetailedListResponse {
   return hasOkTrue(value) && Array.isArray((value as { prs?: unknown }).prs);
 }
 
@@ -491,6 +497,14 @@ export function createDaemonApiClient(options: DaemonApiClientOptions = {}): Dae
         fetchImpl,
         joinUrl(options.baseUrl, `/daemon/projects/prs?cwd=${encodeURIComponent(cwd)}`),
         isPRList,
+      );
+    },
+
+    listDetailedPRs(cwd) {
+      return requestJson(
+        fetchImpl,
+        joinUrl(options.baseUrl, `/daemon/projects/prs/detailed?cwd=${encodeURIComponent(cwd)}`),
+        isPRDetailedList,
       );
     },
 

@@ -1,6 +1,9 @@
 import { useCallback, useMemo } from "react";
 import { Link, useMatchRoute } from "@tanstack/react-router";
-import { Check, FolderPlus, Moon, Settings, Sun } from "lucide-react";
+import { Moon, Settings, Sun } from "lucide-react";
+// import bannerImg from "../../assets/banner2.webp";
+// import mascotImg from "../../assets/mascot.webp";
+import { TaterSpriteSidebar } from "./TaterSpriteSidebar";
 import { appStore } from "../../stores/app-store";
 import { cn } from "@/lib/utils";
 import {
@@ -12,7 +15,6 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
-  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
@@ -23,11 +25,7 @@ import { getSessionModeMeta, formatSessionLabel } from "../../shared/session-met
 
 const MODE_ORDER = ["plan", "review", "annotate", "goal-setup", "archive"];
 
-interface AppSidebarProps {
-  onAddProject: () => void;
-}
-
-export function AppSidebar({ onAddProject }: AppSidebarProps) {
+export function AppSidebar() {
   const sessions = useDaemonEventStore((s) => s.sessions);
   const { resolvedMode, setMode } = useTheme();
   const matchRoute = useMatchRoute();
@@ -49,13 +47,31 @@ export function AppSidebar({ onAddProject }: AppSidebarProps) {
   return (
     <Sidebar collapsible="offcanvas">
       <SidebarHeader>
-        <SidebarMenu>
+        <Link to="/" className="flex items-end gap-2 px-3 pt-2">
+          <TaterSpriteSidebar />
+          <div className="flex flex-col">
+            <span className="text-base font-semibold tracking-tight leading-tight" style={{ fontFamily: "'Instrument Sans Variable', 'Instrument Sans', system-ui, sans-serif" }}>
+              Plannotator
+            </span>
+            <span className="text-[10px] text-muted-foreground">
+              v{__APP_VERSION__} ·{" "}
+              <a
+                href="https://github.com/backnotprop/plannotator/issues"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-foreground"
+                onClick={(e) => e.stopPropagation()}
+              >
+                Send feedback
+              </a>
+            </span>
+          </div>
+        </Link>
+        {/* <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <Link to="/">
-                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground text-xs font-bold">
-                  P
-                </div>
+                <img src={mascotImg} alt="Plannotator" className="size-8 rounded-lg object-cover" />
                 <div className="grid flex-1 text-left leading-tight">
                   <span className="truncate text-sm font-semibold">Plannotator</span>
                   <span className="truncate text-[11px] text-muted-foreground">
@@ -65,22 +81,25 @@ export function AppSidebar({ onAddProject }: AppSidebarProps) {
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
-        </SidebarMenu>
+        </SidebarMenu> */}
       </SidebarHeader>
 
-      <SidebarContent>
+      <SidebarContent className="pt-4">
         {MODE_ORDER.map((mode) => {
           const modeSessions = grouped.get(mode);
           if (!modeSessions?.length) return null;
           const meta = getSessionModeMeta(mode);
 
+          const Icon = meta.icon;
           return (
             <SidebarGroup key={mode}>
-              <SidebarGroupLabel>{meta.label}s</SidebarGroupLabel>
+              <SidebarGroupLabel>
+                <Icon className="size-3.5 text-muted-foreground/60" />
+                {meta.label}s
+              </SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
                   {modeSessions.map((session) => {
-                    const Icon = meta.icon;
                     const isActive = !!matchRoute({
                       to: "/s/$sessionId",
                       params: { sessionId: session.id },
@@ -94,15 +113,10 @@ export function AppSidebar({ onAddProject }: AppSidebarProps) {
                           asChild
                           isActive={isActive}
                           tooltip={session.label}
-                          className="pr-7"
+                          className="h-7 pr-7 text-xs"
                         >
                           <Link to="/s/$sessionId" params={{ sessionId: session.id }}>
-                            <Icon
-                              className={cn(
-                                isTerminal && "text-muted-foreground/40",
-                                session.status === "active" && !isActive && "text-primary",
-                              )}
-                            />
+                            <span className="size-3.5 shrink-0" aria-hidden />
                             <span
                               className={cn(
                                 "truncate",
@@ -113,16 +127,6 @@ export function AppSidebar({ onAddProject }: AppSidebarProps) {
                             </span>
                           </Link>
                         </SidebarMenuButton>
-                        {session.status === "active" && (
-                          <SidebarMenuBadge>
-                            <span className="h-2 w-2 rounded-full bg-primary" />
-                          </SidebarMenuBadge>
-                        )}
-                        {isTerminal && (
-                          <SidebarMenuBadge>
-                            <Check className="h-3 w-3 text-muted-foreground/40" />
-                          </SidebarMenuBadge>
-                        )}
                       </SidebarMenuItem>
                     );
                   })}
@@ -135,12 +139,6 @@ export function AppSidebar({ onAddProject }: AppSidebarProps) {
 
       <SidebarFooter>
         <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton onClick={onAddProject} tooltip="Add project">
-              <FolderPlus />
-              <span>Add project</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton
               onClick={() => appStore.getState().setSettingsOpen(true)}
