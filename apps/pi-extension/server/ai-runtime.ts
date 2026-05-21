@@ -36,6 +36,7 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 		const cwd = options.cwd ?? process.cwd();
 		const registry = new ai.ProviderRegistry();
 		const sessionManager = new ai.SessionManager();
+		const modelDiscovery: Promise<void>[] = [];
 
 		try {
 			await import("../generated/ai/providers/claude-agent-sdk.js");
@@ -74,7 +75,11 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 					piExecutablePath: piPath,
 				} as any);
 				if (provider && "fetchModels" in provider) {
-					void (provider as { fetchModels: () => Promise<void> }).fetchModels().catch(() => {});
+					modelDiscovery.push(
+						(provider as { fetchModels: () => Promise<void> })
+							.fetchModels()
+							.catch(() => {}),
+					);
 				}
 				registry.register(provider);
 			}
@@ -91,7 +96,11 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 					cwd,
 				});
 				if (provider && "fetchModels" in provider) {
-					void (provider as { fetchModels: () => Promise<void> }).fetchModels().catch(() => {});
+					modelDiscovery.push(
+						(provider as { fetchModels: () => Promise<void> })
+							.fetchModels()
+							.catch(() => {}),
+					);
 				}
 				registry.register(provider);
 			}
@@ -104,6 +113,9 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 				registry,
 				sessionManager,
 				getCwd: options.getCwd,
+				beforeCapabilities: async () => {
+					await Promise.allSettled(modelDiscovery);
+				},
 			}),
 			dispose: () => {
 				sessionManager.disposeAll();

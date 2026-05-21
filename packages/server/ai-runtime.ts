@@ -23,6 +23,7 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
   const cwd = options.cwd ?? process.cwd();
   const registry = new ProviderRegistry();
   const sessionManager = new SessionManager();
+  const modelDiscovery: Promise<void>[] = [];
 
   try {
     await import("@plannotator/ai/providers/claude-agent-sdk");
@@ -61,7 +62,7 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
         piExecutablePath: piPath,
       } as PiSDKConfig);
       if (provider instanceof PiSDKProvider) {
-        void provider.fetchModels().catch(() => {});
+        modelDiscovery.push(provider.fetchModels().catch(() => {}));
       }
       registry.register(provider);
     }
@@ -78,7 +79,7 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
         cwd,
       });
       if (provider instanceof OpenCodeProvider) {
-        void provider.fetchModels().catch(() => {});
+        modelDiscovery.push(provider.fetchModels().catch(() => {}));
       }
       registry.register(provider);
     }
@@ -90,6 +91,9 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
     registry,
     sessionManager,
     getCwd: options.getCwd,
+    beforeCapabilities: async () => {
+      await Promise.allSettled(modelDiscovery);
+    },
   });
 
   return {

@@ -61,6 +61,8 @@ export interface AIEndpointDeps {
   sessionManager: SessionManager;
   /** Resolve the current working directory for new AI sessions. */
   getCwd?: () => string;
+  /** Optional hook to finish lazy provider capability loading before reporting capabilities. */
+  beforeCapabilities?: () => Promise<void> | void;
 }
 
 const MAX_CLIENT_MAX_TURNS = 99;
@@ -91,10 +93,11 @@ function clampPositiveNumber(value: unknown, max: number): number | undefined {
  * ```
  */
 export function createAIEndpoints(deps: AIEndpointDeps) {
-  const { registry, sessionManager, getCwd } = deps;
+  const { registry, sessionManager, getCwd, beforeCapabilities } = deps;
 
   return {
     "/api/ai/capabilities": async (_req: Request) => {
+      await beforeCapabilities?.();
       const defaultEntry = registry.getDefault();
       const providerDetails = registry.list().map(id => {
         const p = registry.get(id)!;

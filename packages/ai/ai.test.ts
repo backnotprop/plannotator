@@ -418,6 +418,30 @@ describe("AI endpoints", () => {
     expect(data.providers[0].capabilities.fork).toBe(true);
   });
 
+  test("capabilities waits for pending provider discovery", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    const provider = mockProvider("pi-sdk") as AIProvider & {
+      models?: Array<{ id: string; label: string; default?: boolean }>;
+    };
+    reg.register(provider);
+    const endpoints = createAIEndpoints({
+      registry: reg,
+      sessionManager: sm,
+      beforeCapabilities: async () => {
+        provider.models = [{ id: "pi/model", label: "Pi Model", default: true }];
+      },
+    });
+
+    const res = await endpoints["/api/ai/capabilities"](
+      new Request("http://localhost/api/ai/capabilities")
+    );
+    const data = await res.json();
+    expect(data.providers[0].models).toEqual([
+      { id: "pi/model", label: "Pi Model", default: true },
+    ]);
+  });
+
   test("capabilities lists multiple providers", async () => {
     const { reg, endpoints } = setup();
     reg.register(mockProvider("claude-agent-sdk"), "claude-1");
