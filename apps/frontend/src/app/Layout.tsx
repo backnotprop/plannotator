@@ -4,6 +4,7 @@ import { Toaster } from "sonner";
 import { SidebarProvider, useSidebar } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppSidebar } from "../components/sidebar/AppSidebar";
+import { SidebarPeek } from "../components/sidebar/SidebarPeek";
 import { AddProjectDialog } from "../components/landing/AddProjectDialog";
 import { AppSettingsDialog } from "../components/settings/AppSettingsDialog";
 import { SessionSurface } from "../components/sessions/SessionSurface";
@@ -48,11 +49,10 @@ function LayoutContent() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  const openAddProject = useCallback(() => setAddProjectOpen(true), [setAddProjectOpen]);
-
   return (
     <>
-      <AppSidebar onAddProject={openAddProject} />
+      <AppSidebar />
+      <SidebarPeek />
       <main className="relative flex-1 overflow-hidden">
         <div
           className="absolute inset-0"

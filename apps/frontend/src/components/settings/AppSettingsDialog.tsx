@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { Settings } from "lucide-react";
+import { X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useAppStore } from "../../stores/app-store";
@@ -153,7 +153,7 @@ export function AppSettingsDialog() {
   return (
     <>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="p-0">
+        <DialogContent className="p-0" hideClose>
           <DialogTitle className="sr-only">Settings</DialogTitle>
           <Tabs
             key={mountKey}
@@ -162,44 +162,67 @@ export function AppSettingsDialog() {
             orientation="vertical"
             className="flex h-[min(600px,80vh)]"
           >
-            <div className="w-44 shrink-0 border-r border-border overflow-y-auto py-2 px-2">
-              <div className="flex items-center gap-2 px-3 pb-3 pt-1">
-                <Settings className="size-4 text-muted-foreground" />
+            <div className="flex w-44 shrink-0 flex-col border-r border-border">
+              <div className="px-4 pb-1 pt-4">
                 <span className="text-sm font-semibold">Settings</span>
+                <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                  <span>v{__APP_VERSION__}</span>
+                  <span>·</span>
+                  <a
+                    href="https://github.com/backnotprop/plannotator/issues"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:text-foreground"
+                  >
+                    Send feedback
+                  </a>
+                </div>
               </div>
 
-              <TabsList className="flex-col gap-0.5">
-                <SectionLabel>General</SectionLabel>
-                {GENERAL_TABS.map((tab) => (
-                  <TabsTrigger key={tab.id} value={tab.id} className="w-full justify-start h-8">
-                    {tab.label}
-                  </TabsTrigger>
-                ))}
+              <div className="flex-1 overflow-y-auto px-2 py-2">
+                <TabsList className="flex-col gap-0.5">
+                  <SectionLabel>General</SectionLabel>
+                  {GENERAL_TABS.map((tab) => (
+                    <TabsTrigger key={tab.id} value={tab.id} className="w-full justify-start h-8">
+                      {tab.label}
+                    </TabsTrigger>
+                  ))}
 
-                <SectionLabel>Plan Review</SectionLabel>
-                {PLAN_TABS.map((tab) => (
-                  <TabsTrigger key={tab.id} value={tab.id} className="w-full justify-start h-8">
-                    {tab.label}
-                  </TabsTrigger>
-                ))}
+                  <SectionLabel>Plan Review</SectionLabel>
+                  {PLAN_TABS.map((tab) => (
+                    <TabsTrigger key={tab.id} value={tab.id} className="w-full justify-start h-8">
+                      {tab.label}
+                    </TabsTrigger>
+                  ))}
 
-                <SectionLabel>Code Review</SectionLabel>
-                {REVIEW_TABS.map((tab) => (
-                  <TabsTrigger key={tab.id} value={tab.id} className="w-full justify-start h-8">
-                    {tab.label}
-                  </TabsTrigger>
-                ))}
+                  <SectionLabel>Code Review</SectionLabel>
+                  {REVIEW_TABS.map((tab) => (
+                    <TabsTrigger key={tab.id} value={tab.id} className="w-full justify-start h-8">
+                      {tab.label}
+                    </TabsTrigger>
+                  ))}
 
-                <SectionLabel>Integrations</SectionLabel>
-                {INTEGRATION_TABS.map((tab) => (
-                  <TabsTrigger key={tab.id} value={tab.id} className="w-full justify-start h-8">
-                    {tab.label}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
+                  <SectionLabel>Integrations</SectionLabel>
+                  {INTEGRATION_TABS.map((tab) => (
+                    <TabsTrigger key={tab.id} value={tab.id} className="w-full justify-start h-8">
+                      {tab.label}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6">
+            <div className="flex flex-1 flex-col overflow-hidden">
+              <div className="flex shrink-0 items-center justify-end border-b border-border px-4 py-2">
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="rounded-md p-1.5 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto px-5 py-5">
               {/* General */}
               <TabsContent value="general">
                 <GeneralTab gitUser={gitUser} />
@@ -277,6 +300,7 @@ export function AppSettingsDialog() {
               <TabsContent value="int-octarine">
                 <OctarineTab />
               </TabsContent>
+              </div>
             </div>
           </Tabs>
         </DialogContent>

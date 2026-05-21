@@ -17,12 +17,15 @@ import { DaemonSessionStore, type DaemonSessionRecord } from "./session-store";
 import { DaemonEventHub } from "./event-hub";
 import type { SessionEventFamily, SessionRequestContext, SessionSnapshotProvider } from "../session-handler";
 import { handleFavicon } from "../shared-handlers";
-import { addProject, listProjects, removeProject } from "./project-registry";
+import { addProject, listProjects, readProjectRegistry, writeProjectRegistry } from "./project-registry";
 import { loadConfig, saveConfig, getServerConfig, detectGitUser } from "@plannotator/shared/config";
 import { detectObsidianVaults } from "../integrations";
 import { readImprovementHook, getImprovementHookExpectedPath } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import { readSnapshot } from "./session-store";
+import { parseRemoteUrl, parseRemoteHost } from "@plannotator/shared/repo";
+import { checkPRAuth, fetchPRList, fetchPRDetailedList } from "../pr";
+import type { PRRef, PRListItem, PRDetailedListItem } from "@plannotator/shared/pr-types";
 
 const RESULT_DELETE_GRACE_MS = 2_000;
 const DAEMON_AUTH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
@@ -217,6 +220,8 @@ function sessionShellHtml(shellHtmlContent: string, sessionId: string): string {
 
 export function createDaemonFetchHandler(options: DaemonServerOptions): DaemonFetchHandler {
   const store = options.store ?? new DaemonSessionStore();
+  const prListCache = new Map<string, { prs: PRListItem[]; platform: string; defaultBranch: string; time: number }>();
+  const prDetailedListCache = new Map<string, { prs: PRDetailedListItem[]; platform: string; time: number }>();
   const endpoint: DaemonEndpoint = {
     hostname: options.state.hostname,
     port: options.state.port,
@@ -478,20 +483,27 @@ export function createDaemonFetchHandler(options: DaemonServerOptions): DaemonFe
       if (url.pathname === "/daemon/fs/list" && req.method === "GET") {
         const rawPath = url.searchParams.get("path") ?? "~";
         try {
-          const { readdirSync, statSync } = await import("fs");
+          const { readdirSync, statSync, existsSync } = await import("fs");
           const { homedir } = await import("os");
-          const { join, resolve: resolvePath } = await import("path");
+          const { join, dirname, basename, resolve: resolvePath } = await import("path");
           const resolved = rawPath === "~" || rawPath === "~/"
             ? homedir()
             : rawPath.startsWith("~/")
               ? join(homedir(), rawPath.slice(2))
               : resolvePath(rawPath);
-          const entries = readdirSync(resolved, { withFileTypes: true });
+          let listDir = resolved;
+          let prefix = "";
+          const isDir = existsSync(resolved) && statSync(resolved).isDirectory();
+          if (!isDir) {
+            listDir = dirname(resolved);
+            prefix = basename(resolved).toLowerCase();
+          }
+          const entries = readdirSync(listDir, { withFileTypes: true });
           const dirs = entries
-            .filter((e) => e.isDirectory() && !e.name.startsWith("."))
-            .map((e) => ({ name: e.name, path: join(resolved, e.name) }))
+            .filter((e) => e.isDirectory() && !e.name.startsWith(".") && (!prefix || e.name.toLowerCase().startsWith(prefix)))
+            .map((e) => ({ name: e.name, path: join(listDir, e.name) }))
             .sort((a, b) => a.name.localeCompare(b.name));
-          return json({ ok: true, path: resolved, dirs });
+          return json({ ok: true, path: isDir ? resolved : listDir, dirs });
         } catch {
           return json({ ok: true, path: rawPath, dirs: [] });
         }
@@ -526,13 +538,43 @@ export function createDaemonFetchHandler(options: DaemonServerOptions): DaemonFe
         }
       }
 
-      const projectRoute = url.pathname.match(/^\/daemon\/projects\/([^/]+)$/);
-      if (projectRoute && req.method === "DELETE") {
-        const name = decodeURIComponent(projectRoute[1]);
-        const removed = removeProject(name);
-        if (!removed) {
-          return json(createDaemonErrorResponse("invalid-request", `Project not found: ${name}`), { status: 404 });
+      if (url.pathname === "/daemon/projects" && req.method === "DELETE") {
+        const cwd = url.searchParams.get("cwd");
+        if (!cwd) {
+          return json(createDaemonErrorResponse("invalid-request", "Project deletion requires a cwd query parameter."), { status: 400 });
         }
+        const clean = url.searchParams.get("clean") === "1";
+        const entries = readProjectRegistry();
+        const project = entries.find((e) => e.cwd === cwd);
+        if (!project) {
+          return json(createDaemonErrorResponse("invalid-request", `Project not found: ${cwd}`), { status: 404 });
+        }
+        const childCwds = entries.filter((e) => e.parentCwd === project.cwd).map((e) => e.cwd);
+        const projectCwds = new Set([project.cwd, ...childCwds]);
+        const remaining = entries.filter((e) => !projectCwds.has(e.cwd));
+        writeProjectRegistry(remaining);
+
+        if (clean) {
+          for (const record of store.list()) {
+            if (record.project === project.name || projectCwds.has(record.cwd ?? "")) {
+              void store.cancel(record.id, "Project removed.");
+            }
+          }
+          const safeName = project.name.replace(/[/\\]/g, "");
+          if (safeName && safeName.length > 0 && !/^\.+$/.test(safeName)) {
+            try {
+              const { join, resolve, sep } = await import("path");
+              const { homedir } = await import("os");
+              const { rmSync } = await import("fs");
+              const historyRoot = resolve(homedir(), ".plannotator", "history");
+              const historyDir = resolve(join(historyRoot, safeName));
+              if (historyDir.startsWith(historyRoot + sep)) {
+                rmSync(historyDir, { recursive: true, force: true });
+              }
+            } catch {}
+          }
+        }
+
         return json({ ok: true });
       }
 
@@ -592,6 +634,77 @@ export function createDaemonFetchHandler(options: DaemonServerOptions): DaemonFe
           return json({ ok: true, worktrees: withActivity });
         } catch (err) {
           return json({ ok: true, worktrees: [] });
+        }
+      }
+
+      if ((url.pathname === "/daemon/projects/prs" || url.pathname === "/daemon/projects/prs/detailed") && req.method === "GET") {
+        const isDetailed = url.pathname.endsWith("/detailed");
+        const cwd = url.searchParams.get("cwd");
+        if (!cwd) {
+          return json(createDaemonErrorResponse("invalid-request", "PR listing requires a cwd query parameter."), { status: 400 });
+        }
+        const now = Date.now();
+        if (!isDetailed) {
+          const cached = prListCache.get(cwd);
+          if (cached && now - cached.time < 30_000) {
+            return json({ ok: true, prs: cached.prs, platform: cached.platform, defaultBranch: cached.defaultBranch });
+          }
+        } else {
+          const cached = prDetailedListCache.get(cwd);
+          if (cached && now - cached.time < 30_000) {
+            return json({ ok: true, prs: cached.prs, platform: cached.platform });
+          }
+        }
+        try {
+          const { execSync } = await import("child_process");
+          let remoteUrl: string;
+          try {
+            remoteUrl = execSync("git remote get-url origin", { cwd, encoding: "utf-8" }).trim();
+          } catch {
+            return json({ ok: true, prs: [], platform: null, error: "no-remote" });
+          }
+          const host = parseRemoteHost(remoteUrl);
+          const repoPath = parseRemoteUrl(remoteUrl);
+          if (!host || !repoPath) {
+            return json({ ok: true, prs: [], platform: null, error: "no-remote" });
+          }
+          const isGitLab = host.toLowerCase().includes("gitlab");
+          const platform = isGitLab ? "gitlab" : "github";
+          let ref: PRRef;
+          if (isGitLab) {
+            ref = { platform: "gitlab", host, projectPath: repoPath, iid: 0 };
+          } else {
+            const parts = repoPath.split("/");
+            const owner = parts.slice(0, -1).join("/");
+            const repo = parts[parts.length - 1];
+            ref = { platform: "github", host, owner, repo, number: 0 };
+          }
+          try {
+            await checkPRAuth(ref);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            const isNotFound = message.includes("not found") || message.includes("ENOENT");
+            return json({ ok: true, prs: [], platform, error: isNotFound ? "no-cli" : "auth-failed", message });
+          }
+          if (isDetailed) {
+            let prs: PRDetailedListItem[];
+            try { prs = await fetchPRDetailedList(ref); } catch { return json({ ok: true, prs: [], platform }); }
+            prDetailedListCache.set(cwd, { prs, platform, time: now });
+            return json({ ok: true, prs, platform });
+          } else {
+            let prs: PRListItem[];
+            try { prs = await fetchPRList(ref); } catch { return json({ ok: true, prs: [], platform }); }
+            let defaultBranch = "main";
+            try {
+              const symRef = execSync("git symbolic-ref refs/remotes/origin/HEAD", { cwd, encoding: "utf-8" }).trim();
+              const branch = symRef.replace(/^refs\/remotes\/origin\//, "");
+              if (branch) defaultBranch = branch;
+            } catch {}
+            prListCache.set(cwd, { prs, platform, defaultBranch, time: now });
+            return json({ ok: true, prs, platform, defaultBranch });
+          }
+        } catch {
+          return json({ ok: true, prs: [], platform: null });
         }
       }
 

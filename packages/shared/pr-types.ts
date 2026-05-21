@@ -211,7 +211,17 @@ export interface PRListItem {
   author: string;
   url: string;
   baseBranch: string;
+  headBranch: string;
   state: 'open' | 'closed' | 'merged';
+}
+
+export interface PRDetailedListItem extends PRListItem {
+  additions: number;
+  deletions: number;
+  commentCount: number;
+  updatedAt: string;
+  isDraft: boolean;
+  reviewDecision: string;
 }
 
 // --- Label Helpers ---
