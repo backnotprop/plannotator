@@ -560,8 +560,8 @@ export function createDaemonFetchHandler(options: DaemonServerOptions): DaemonFe
               void store.cancel(record.id, "Project removed.");
             }
           }
-          const safeName = project.name.replace(/[/\\]/g, "").replace(/\.\./g, "");
-          if (safeName) {
+          const safeName = project.name.replace(/[/\\]/g, "");
+          if (safeName && safeName.length > 0 && !/^\.+$/.test(safeName)) {
             try {
               const { join } = await import("path");
               const { homedir } = await import("os");
