@@ -142,7 +142,7 @@ export function AppSettingsDialog() {
         if (data?.providers) setAiProviders(data.providers);
       })
       .catch(() => {});
-  }, [open]);
+  }, [open, activeSessionId]);
 
   const handleAiProviderChange = useCallback((providerId: string | null) => {
     setAiProviderId(providerId);

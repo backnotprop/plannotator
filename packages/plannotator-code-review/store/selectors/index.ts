@@ -1,7 +1,6 @@
 import type { CodeAnnotation } from '@plannotator/ui/types';
-import type { ReviewStore } from '../create-review-store';
 
-export function selectAllAnnotations(state: ReviewStore): CodeAnnotation[] {
+export function selectAllAnnotations(state: { localAnnotations: CodeAnnotation[]; externalAnnotations: CodeAnnotation[] }): CodeAnnotation[] {
   const { localAnnotations, externalAnnotations } = state;
   if (externalAnnotations.length === 0) return localAnnotations;
   if (localAnnotations.length === 0) return externalAnnotations;

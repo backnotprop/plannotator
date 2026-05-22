@@ -413,23 +413,10 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
   // live WebSocket versions. Prefer the live version when both exist (same source,
   // type, and originalText). This avoids the timing issues of an effect-based
   // cleanup — draft-restored externals persist until live events re-deliver them.
-  const allAnnotations = useMemo(() => {
-    if (externalAnnotations.length === 0) return localAnnotations;
-
-    const local = localAnnotations.filter(a => {
-      if (!a.source) return true;
-      return !externalAnnotations.some(ext =>
-        ext.source === a.source &&
-        ext.type === a.type &&
-        ext.filePath === a.filePath &&
-        ext.lineStart === a.lineStart &&
-        ext.lineEnd === a.lineEnd &&
-        ext.side === a.side
-      );
-    });
-
-    return [...local, ...externalAnnotations];
-  }, [localAnnotations, externalAnnotations]);
+  const allAnnotations = useMemo(
+    () => selectAllAnnotations({ localAnnotations, externalAnnotations }),
+    [localAnnotations, externalAnnotations],
+  );
   // Auto-save and auto-restore code annotation drafts
   useCodeAnnotationDraft({
     annotations: allAnnotations,
@@ -1139,12 +1126,12 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
     dockApi?.getPanel(REVIEW_DIFF_PANEL_ID)?.api.close();
     needsInitialDiffPanel.current = true;
     setDiffData(prev => prev ? { ...prev, rawPatch: data.rawPatch, gitRef: data.gitRef } : prev);
+    const currentPath = files[activeFileIndex]?.path;
     storeApi.getState().setFiles(nextFiles);
     if (isPRSwitch) {
       storeApi.getState().setFocusedFile(0);
     } else {
-      const currentFile = files[activeFileIndex];
-      const preserved = currentFile ? nextFiles.findIndex(f => f.path === currentFile.path) : -1;
+      const preserved = currentPath ? nextFiles.findIndex(f => f.path === currentPath) : -1;
       storeApi.getState().setFocusedFile(preserved >= 0 ? preserved : 0);
     }
     storeApi.getState().setPendingSelection(null);
@@ -2551,7 +2538,9 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
   );
 };
 
-export default ReviewApp;
+export default function ReviewAppStandalone(props: { __embedded?: boolean; headerLeft?: React.ReactNode; onOpenSettings?: () => void }) {
+  return <ReviewStoreProvider><ReviewApp {...props} /></ReviewStoreProvider>;
+}
 
 export function ReviewAppEmbedded({ headerLeft, onOpenSettings }: { headerLeft?: React.ReactNode; onOpenSettings?: () => void }) {
   return (

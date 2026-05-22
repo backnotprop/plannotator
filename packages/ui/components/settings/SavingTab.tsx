@@ -37,7 +37,7 @@ export const SavingTab: React.FC<SavingTabProps> = ({ onNavigateTab }) => {
     if (defaultNotesApp === 'obsidian' && !obsidianAvailable) handleDefaultNotesAppChange('ask');
     else if (defaultNotesApp === 'bear' && !bearAvailable) handleDefaultNotesAppChange('ask');
     else if (defaultNotesApp === 'octarine' && !octarineAvailable) handleDefaultNotesAppChange('ask');
-  });
+  }, [defaultNotesApp, obsidianAvailable, bearAvailable, octarineAvailable]);
 
   const handlePlanSaveChange = (updates: Partial<PlanSaveSettings>) => {
     const next = { ...planSave, ...updates };
