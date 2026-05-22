@@ -49,6 +49,7 @@ import { type PRMetadata, type PRReviewFileComment, type PRStackTree, type PRLis
 import { createAIEndpoints, ProviderRegistry, SessionManager, createProvider, type AIEndpoints, type PiSDKConfig } from "@plannotator/ai";
 import { isWSL } from "./browser";
 import { handleCodeNavResolve, extractChangedFiles } from "./code-nav";
+import { createDecisionCycle, resolveAndCycle } from "./session-handler";
 import type { SessionEventBridge, SessionRequestHandler } from "./session-handler";
 
 // Re-export utilities
@@ -506,13 +507,7 @@ export async function createReviewSession(
 
   // Decision promise
   type ReviewDecisionResult = { approved: boolean; feedback: string; annotations: unknown[]; agentSwitch?: string; exit?: boolean };
-  let currentCycle: { promise: Promise<ReviewDecisionResult>; resolve: (result: ReviewDecisionResult) => void };
-  function startNewCycle() {
-    let resolve: (result: ReviewDecisionResult) => void;
-    const promise = new Promise<ReviewDecisionResult>((r) => { resolve = r; });
-    currentCycle = { promise, resolve: resolve! };
-  }
-  startNewCycle();
+  const decisionCycle = createDecisionCycle<ReviewDecisionResult>();
 
   const handleRequest: SessionRequestHandler = async (req, url, context) => {
 
@@ -1044,7 +1039,7 @@ export async function createReviewSession(
           // API: Exit review session without feedback
           if (url.pathname === "/api/exit" && req.method === "POST") {
             deleteDraft(draftKey);
-            currentCycle.resolve({ approved: false, feedback: "", annotations: [], exit: true });
+            decisionCycle.resolve({ approved: false, feedback: "", annotations: [], exit: true });
             return Response.json({ ok: true });
           }
 
@@ -1060,16 +1055,12 @@ export async function createReviewSession(
 
               deleteDraft(draftKey);
               const isApproved = body.approved ?? false;
-              const isAgentSession = !!origin;
-              currentCycle.resolve({
-                approved: isApproved,
-                feedback: body.feedback || "",
-                annotations: body.annotations || [],
-                agentSwitch: body.agentSwitch,
-              });
-              if (!isApproved && isAgentSession) startNewCycle();
+              const result = { approved: isApproved, feedback: body.feedback || "", annotations: body.annotations || [], agentSwitch: body.agentSwitch };
+              const resubmit = isApproved
+                ? (decisionCycle.resolve(result), {})
+                : resolveAndCycle(decisionCycle, result, origin);
 
-              return Response.json({ ok: true, ...(!isApproved && isAgentSession && { awaitingResubmission: true }) });
+              return Response.json({ ok: true, ...resubmit });
             } catch (err) {
               const message =
                 err instanceof Error ? err.message : "Failed to process feedback";
@@ -1178,10 +1169,18 @@ export async function createReviewSession(
   const exitHandler = () => agentJobs.killAll();
   process.once("exit", exitHandler);
 
+  function handleUpdateContent(rawPatch: string, gitRef: string) {
+    currentPatch = rawPatch;
+    currentGitRef = gitRef;
+    deleteDraft(draftKey);
+    draftKey = contentHash(rawPatch);
+    options.sessionEvents?.publishEvent("session-revision", { rawPatch, gitRef });
+  }
+
   return {
     htmlContent,
     handleRequest,
-    waitForDecision: () => currentCycle.promise,
+    waitForDecision: () => decisionCycle.promise(),
     setServerUrl: (url) => {
       serverUrl = url;
     },
@@ -1205,13 +1204,7 @@ export async function createReviewSession(
       diffType: currentDiffType,
       gitContext: gitContext ? { currentBranch: gitContext.currentBranch, base: currentBase } : undefined,
     }),
-    updateContent: (rawPatch: string, gitRef: string) => {
-      currentPatch = rawPatch;
-      currentGitRef = gitRef;
-      deleteDraft(draftKey);
-      draftKey = contentHash(rawPatch);
-      options.sessionEvents?.publishEvent("session-revision", { rawPatch, gitRef });
-    },
+    updateContent: handleUpdateContent,
   };
 }
 

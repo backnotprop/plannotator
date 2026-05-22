@@ -50,6 +50,7 @@ import { resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-
 import { createEditorAnnotationHandler } from "./editor-annotations";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { isWSL } from "./browser";
+import { createDecisionCycle, resolveAndCycle } from "./session-handler";
 import type { SessionEventBridge, SessionRequestHandler } from "./session-handler";
 
 // Re-export utilities
@@ -196,12 +197,7 @@ export async function createPlannotatorSession(
     agentSwitch?: string;
     permissionMode?: string;
   };
-  let currentCycle: { promise: Promise<DecisionResult>; resolve: (result: DecisionResult) => void };
-  function startNewCycle() {
-    let resolve: (result: DecisionResult) => void;
-    const promise = new Promise<DecisionResult>((r) => { resolve = r; });
-    currentCycle = { promise, resolve: resolve! };
-  }
+  const decisionCycle = createDecisionCycle<DecisionResult>();
 
   if (mode !== "archive") {
     repoInfo = await getRepoInfo(cwd);
@@ -218,10 +214,8 @@ export async function createPlannotatorSession(
       project,
     };
 
-    startNewCycle();
   } else {
-    // Never-resolving promise — archive mode uses waitForDone instead
-    startNewCycle();
+    // Archive mode: decision cycle exists but is never resolved (uses waitForDone instead)
   }
 
   const handleRequest: SessionRequestHandler = async (req, url, context) => {
@@ -542,7 +536,7 @@ export async function createPlannotatorSession(
 
             // Use permission mode from client request if provided, otherwise fall back to hook input
             const effectivePermissionMode = requestedPermissionMode || permissionMode;
-            currentCycle.resolve({ approved: true, feedback, savedPath, agentSwitch, permissionMode: effectivePermissionMode });
+            decisionCycle.resolve({ approved: true, feedback, savedPath, agentSwitch, permissionMode: effectivePermissionMode });
             return Response.json({ ok: true, savedPath });
           }
 
@@ -579,10 +573,8 @@ export async function createPlannotatorSession(
             }
 
             deleteDraft(draftKey);
-            const isAgentSession = !!origin;
-            currentCycle.resolve({ approved: false, feedback, savedPath });
-            if (isAgentSession) startNewCycle();
-            return Response.json({ ok: true, savedPath, ...(isAgentSession && { awaitingResubmission: true }) });
+            const resubmit = resolveAndCycle(decisionCycle, { approved: false, feedback, savedPath }, origin);
+            return Response.json({ ok: true, savedPath, ...resubmit });
           }
 
           // Favicon
@@ -614,7 +606,7 @@ export async function createPlannotatorSession(
   return {
     htmlContent,
     handleRequest,
-    waitForDecision: () => currentCycle.promise,
+    waitForDecision: () => decisionCycle.promise(),
     ...(donePromise && { waitForDone: () => donePromise }),
     dispose: () => {
       externalAnnotations?.dispose();

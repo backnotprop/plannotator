@@ -27,3 +27,39 @@ export type SessionRequestHandler = (
   url: URL,
   context?: SessionRequestContext,
 ) => Response | Promise<Response>;
+
+/**
+ * Manages a resolvable decision cycle for session servers.
+ * Each deny/feedback starts a new cycle; approve/exit is final.
+ */
+export function createDecisionCycle<T>() {
+  let current: { promise: Promise<T>; resolve: (result: T) => void };
+  function start() {
+    let resolve: (result: T) => void;
+    const promise = new Promise<T>((r) => { resolve = r; });
+    current = { promise, resolve: resolve! };
+  }
+  start();
+  return {
+    promise: () => current.promise,
+    resolve: (result: T) => current.resolve(result),
+    startNew: () => start(),
+  };
+}
+
+/**
+ * Resolve the current decision cycle. If the session has an agent origin,
+ * start a new cycle and include `awaitingResubmission: true` in the response.
+ */
+export function resolveAndCycle<T>(
+  cycle: ReturnType<typeof createDecisionCycle<T>>,
+  result: T,
+  origin: string | undefined,
+): { awaitingResubmission?: true } {
+  cycle.resolve(result);
+  if (origin) {
+    cycle.startNew();
+    return { awaitingResubmission: true };
+  }
+  return {};
+}
