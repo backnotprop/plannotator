@@ -25,6 +25,7 @@ import {
 	prRefFromMetadata,
 } from "../generated/pr-provider.js";
 import {
+	type DiffOption,
 	type DiffType,
 	type GitContext,
 	getFileContentsForDiff as getFileContentsForDiffCore,
@@ -120,8 +121,9 @@ interface WorkspaceRepoRuntimeState {
 	platformUser: string | null;
 	diffType?: DiffType;
 	gitContext?: GitContext;
-	rawPatch?: string;
-	gitRef?: string;
+	diffOptions?: DiffOption[];
+	rawPatch: string;
+	gitRef: string;
 	error?: string;
 }
 

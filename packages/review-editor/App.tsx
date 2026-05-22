@@ -180,6 +180,7 @@ const ReviewApp: React.FC = () => {
   const [origin, setOrigin] = useState<Origin | null>(null);
   const [gitUser, setGitUser] = useState<string | undefined>();
   const [isWSL, setIsWSL] = useState(false);
+  const [reviewMode, setReviewMode] = useState<string | null>(null);
   const [diffType, setDiffType] = useState<string>('uncommitted');
   const [gitContext, setGitContext] = useState<GitContext | null>(null);
   // Two bases:
@@ -723,6 +724,7 @@ const ReviewApp: React.FC = () => {
         rawPatch: string;
         gitRef: string;
         origin?: Origin;
+        mode?: string;
         diffType?: string;
         base?: string;
         gitContext?: GitContext;
@@ -755,6 +757,7 @@ const ReviewApp: React.FC = () => {
           sharingEnabled: data.sharingEnabled,
         });
         setFiles(apiFiles);
+        setReviewMode(data.mode ?? null);
         if (data.origin) setOrigin(data.origin);
         if (data.diffType) setDiffType(data.diffType);
         if (data.gitContext) {
@@ -784,7 +787,7 @@ const ReviewApp: React.FC = () => {
         if (data.error) setDiffError(data.error);
         if (data.isWSL) setIsWSL(true);
         // Mark diff type setup as pending on first run (local mode only)
-        if (data.diffType && !data.prMetadata && data.gitContext?.vcsType !== 'p4' && data.gitContext?.vcsType !== 'jj' && needsDiffTypeSetup()) {
+        if (data.diffType && data.mode !== 'workspace' && !data.prMetadata && data.gitContext && data.gitContext.vcsType !== 'p4' && data.gitContext.vcsType !== 'jj' && needsDiffTypeSetup()) {
           setDiffTypeSetupPending(true);
         }
       })
@@ -1894,6 +1897,15 @@ const ReviewApp: React.FC = () => {
                     title={platformActionError}
                   >
                     {platformActionError}
+                  </div>
+                )}
+
+                {reviewMode === 'workspace' && diffError && files.length > 0 && (
+                  <div
+                    className="text-xs text-amber-700 dark:text-amber-300 px-2 py-1 bg-amber-500/10 rounded border border-amber-500/25 max-w-[240px] truncate"
+                    title={diffError}
+                  >
+                    Some workspace changes could not be loaded
                   </div>
                 )}
 

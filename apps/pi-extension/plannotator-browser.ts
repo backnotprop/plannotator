@@ -107,6 +107,7 @@ interface WorkspaceRepoRuntimeState {
 	platformUser: string | null;
 	diffType?: DiffType;
 	gitContext?: Awaited<ReturnType<typeof getVcsContext>>;
+	diffOptions?: Awaited<ReturnType<typeof getVcsContext>>["diffOptions"];
 	rawPatch: string;
 	gitRef: string;
 	error?: string;
@@ -118,7 +119,10 @@ interface LocalWorkspaceReview {
 	repos: WorkspaceRepoRuntimeState[];
 }
 
-async function buildLocalWorkspaceReview(root: string): Promise<LocalWorkspaceReview> {
+async function buildLocalWorkspaceReview(
+	root: string,
+	options: { hideWhitespace?: boolean } = {},
+): Promise<LocalWorkspaceReview> {
 	const resolvedRoot = resolve(root);
 	const repoPaths = discoverWorkspaceRepoPaths(resolvedRoot);
 	const labels = buildWorkspaceRepoLabels(resolvedRoot, repoPaths);
@@ -127,7 +131,9 @@ async function buildLocalWorkspaceReview(root: string): Promise<LocalWorkspaceRe
 		try {
 			const gitContext = await getVcsContext(cwd, "git");
 			const diffType: DiffType = "uncommitted";
-			const diff = await runVcsDiff(diffType, gitContext.defaultBranch, cwd);
+			const diff = await runVcsDiff(diffType, gitContext.defaultBranch, cwd, {
+				hideWhitespace: options.hideWhitespace,
+			});
 			return {
 				id: `repo-${index + 1}`,
 				label,
@@ -137,6 +143,7 @@ async function buildLocalWorkspaceReview(root: string): Promise<LocalWorkspaceRe
 				platformUser: null,
 				diffType,
 				gitContext,
+				diffOptions: gitContext.diffOptions,
 				rawPatch: prefixWorkspacePatchPaths(diff.patch, label),
 				gitRef: diff.label,
 				error: diff.error,
@@ -490,7 +497,9 @@ export async function startCodeReviewBrowserSession(
 			// overrode the detected default; otherwise it matches gitCtx already.
 			initialBase = result.base;
 		} else {
-			workspace = await buildLocalWorkspaceReview(cwd);
+			workspace = await buildLocalWorkspaceReview(cwd, {
+				hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
+			});
 			if (workspace.repos.length === 0) {
 				throw new Error("Not in a git repo and no nested git repositories were found.");
 			}

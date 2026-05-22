@@ -85,6 +85,7 @@ describe("buildAgentReviewUserMessage", () => {
     expect(message).toContain("api/src/file.ts");
     expect(message).toContain("- api/ -> /tmp/workspace/api");
     expect(message).toContain("- web/ -> /tmp/workspace/web");
+    expect(message).toContain("git -C <child-repo-folder>");
     expect(message).toContain(patch);
   });
 });
@@ -107,5 +108,6 @@ describe("buildClaudeCommand", () => {
     expect(allowedTools).toContain("Bash(jj file show:*)");
     expect(allowedTools).toContain("Bash(jj cat:*)");
     expect(allowedTools).toContain("Bash(jj bookmark list:*)");
+    expect(allowedTools).toContain("Bash(git -C:*)");
   });
 });

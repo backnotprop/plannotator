@@ -41,8 +41,8 @@ export function normalizeWorkspacePath(path: string): string {
 }
 
 function prefixRepoPath(label: string, filePath: string): string {
+  if (filePath === "/dev/null") return filePath;
   const normalizedFilePath = normalizeWorkspacePath(filePath);
-  if (normalizedFilePath === "/dev/null") return normalizedFilePath;
   return `${normalizeWorkspacePath(label)}/${normalizedFilePath}`;
 }
 
@@ -179,7 +179,10 @@ export function buildWorkspaceRepoLabels(root: string, repoPaths: string[]): str
 
 export function aggregateWorkspacePatch(repos: WorkspacePatchEntry[]): WorkspacePatchAggregate {
   const selected = repos.filter((repo) => repo.selected);
-  const trimmedPatches = selected.map((repo) => repo.rawPatch.trim()).filter(Boolean);
+  const trimmedPatches = selected
+    .map((repo) => repo.rawPatch)
+    .filter((patch) => patch.trim().length > 0)
+    .map((patch) => patch.replace(/\n+$/, ""));
   return {
     rawPatch: trimmedPatches.join("\n\n"),
     gitRef: selected.map((repo) => repo.gitRef || repo.label).filter(Boolean).join(" | ") || "Workspace review",

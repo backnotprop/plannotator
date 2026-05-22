@@ -112,7 +112,9 @@ export async function handleReviewCommand(
       gitRef = diffResult.gitRef;
       diffError = diffResult.error;
     } else {
-      workspace = await buildLocalWorkspaceReview(cwd);
+      workspace = await buildLocalWorkspaceReview(cwd, {
+        hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
+      });
       if (workspace.repos.length === 0) {
         client.app.log({ level: "error", message: "Not in a git repo and no nested git repositories were found." });
         return;

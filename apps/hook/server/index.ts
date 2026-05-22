@@ -510,7 +510,9 @@ if (args[0] === "sessions") {
       gitRef = diffResult.gitRef;
       diffError = diffResult.error;
     } else {
-      workspace = await buildLocalWorkspaceReview(process.cwd());
+      workspace = await buildLocalWorkspaceReview(process.cwd(), {
+        hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
+      });
       if (workspace.repos.length === 0) {
         console.error("Not in a git repo and no nested git repositories were found.");
         process.exit(1);

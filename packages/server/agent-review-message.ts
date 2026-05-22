@@ -60,7 +60,7 @@ export function buildWorkspacePromptContextLines(
     `You are starting in the workspace root: ${workspace.root}`,
     "The workspace root is not itself the git repository for these changes.",
     "Each changed path in the diff is prefixed with the child repository folder, such as `api/src/file.ts`.",
-    "If you need to run git commands, first `cd` into the matching child repository.",
+    "If you need to run git commands, run them from the workspace root with `git -C <child-repo-folder> ...`.",
   ];
 
   if (options.includeReportingInstruction) {

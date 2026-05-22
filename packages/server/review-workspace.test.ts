@@ -125,6 +125,31 @@ describe("review-workspace", () => {
       expect(result).not.toContain("rename a/repo-a/from");
       expect(result).not.toContain("copy a/repo-a/from");
     });
+
+    it("does not prefix /dev/null when it appears in metadata", () => {
+      const result = prefixPatchPaths("rename from /dev/null", "repo-a");
+
+      expect(result).toBe("rename from /dev/null");
+    });
+  });
+
+  describe("aggregateWorkspacePatch", () => {
+    it("preserves real trailing spaces in patch lines", () => {
+      const aggregate = aggregateWorkspacePatch([{
+        label: "api",
+        selected: true,
+        rawPatch: [
+          "diff --git a/api/file.txt b/api/file.txt",
+          "@@ -1 +1 @@",
+          "-before",
+          "+after   ",
+          "",
+        ].join("\n"),
+        gitRef: "Uncommitted changes",
+      }]);
+
+      expect(aggregate.rawPatch).toEndWith("+after   ");
+    });
   });
 
   describe("resolveWorkspaceFilePath", () => {
@@ -330,6 +355,24 @@ describe("review-workspace", () => {
   });
 
   describe("workspace review server integration", () => {
+    it("passes hide-whitespace through child repo diffs", async () => {
+      const root = makeTempDir("plannotator-workspace-whitespace-");
+      const api = join(root, "api");
+      mkdirSync(api, { recursive: true });
+      initRepo(api);
+
+      writeFileSync(join(api, "tracked.txt"), "const value = 1;\n", "utf-8");
+      git(api, ["add", "tracked.txt"]);
+      git(api, ["commit", "-m", "add tracked"]);
+      writeFileSync(join(api, "tracked.txt"), "const    value    =    1;\n", "utf-8");
+
+      const workspace = await buildLocalWorkspaceReview(root, { hideWhitespace: true });
+      const aggregate = aggregateWorkspacePatch(workspace.repos);
+
+      expect(workspace.repos[0]?.selected).toBe(false);
+      expect(aggregate.rawPatch).toBe("");
+    }, 15_000);
+
     it("serves combined diffs and maps prefixed paths back to child repos", async () => {
       const root = makeTempDir("plannotator-workspace-server-");
       const api = join(root, "api");

@@ -27,7 +27,14 @@ export interface LocalWorkspaceReview extends WorkspaceReviewState {
   repos: WorkspaceRepoRuntimeState[];
 }
 
-export async function buildWorkspaceLocalRepos(root: string): Promise<WorkspaceRepoRuntimeState[]> {
+interface WorkspaceReviewBuildOptions {
+  hideWhitespace?: boolean;
+}
+
+export async function buildWorkspaceLocalRepos(
+  root: string,
+  options: WorkspaceReviewBuildOptions = {},
+): Promise<WorkspaceRepoRuntimeState[]> {
   const resolvedRoot = resolve(root);
   const repoPaths = discoverWorkspaceRepoPaths(resolvedRoot);
   const labels = buildWorkspaceRepoLabels(resolvedRoot, repoPaths);
@@ -37,7 +44,9 @@ export async function buildWorkspaceLocalRepos(root: string): Promise<WorkspaceR
     try {
       const gitContext = await getVcsContext(cwd, "git");
       const diffType: DiffType = "uncommitted";
-      const diffResult = await runVcsDiff(diffType, gitContext.defaultBranch, cwd);
+      const diffResult = await runVcsDiff(diffType, gitContext.defaultBranch, cwd, {
+        hideWhitespace: options.hideWhitespace,
+      });
       return {
         id: `repo-${index + 1}`,
         label,
@@ -70,10 +79,13 @@ export async function buildWorkspaceLocalRepos(root: string): Promise<WorkspaceR
   return repos;
 }
 
-export async function buildLocalWorkspaceReview(root: string): Promise<LocalWorkspaceReview> {
+export async function buildLocalWorkspaceReview(
+  root: string,
+  options: WorkspaceReviewBuildOptions = {},
+): Promise<LocalWorkspaceReview> {
   return {
     mode: "workspace",
     root: resolve(root),
-    repos: await buildWorkspaceLocalRepos(root),
+    repos: await buildWorkspaceLocalRepos(root, options),
   };
 }
