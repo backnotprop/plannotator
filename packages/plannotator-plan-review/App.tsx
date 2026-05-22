@@ -1129,7 +1129,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
   const handleAnnotateFeedback = async () => {
     setIsSubmitting(true);
     try {
-      await fetch('/api/feedback', {
+      const response = await fetch('/api/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1138,7 +1138,13 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
           codeAnnotations,
         }),
       });
-      setSubmitted('denied'); // reuse 'denied' state for "feedback sent" overlay
+      const data = await response.json().catch(() => ({}));
+      if (data.awaitingResubmission) {
+        setAwaitingResubmission(true);
+        setIsSubmitting(false);
+      } else {
+        setSubmitted('denied');
+      }
     } catch {
       setIsSubmitting(false);
     }

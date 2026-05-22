@@ -36,6 +36,7 @@ import { isTypingTarget, useReviewSearch, type ReviewSearchMatch } from './hooks
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
 import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotations';
 import { useAgentJobs } from '@plannotator/ui/hooks/useAgentJobs';
+import { subscribeToDaemonSessionFamily } from '@plannotator/ui/utils/daemonHub';
 import { exportEditorAnnotations } from '@plannotator/ui/utils/parser';
 import { ResizeHandle } from '@plannotator/ui/components/ResizeHandle';
 import { DockviewReact, type DockviewReadyEvent, type DockviewApi } from 'dockview-react';
@@ -238,6 +239,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
   const [isApproving, setIsApproving] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
   const [submitted, setSubmitted] = useState<'approved' | 'feedback' | 'exited' | false>(false);
+  const [awaitingResubmission, setAwaitingResubmission] = useState(false);
   const [showApproveWarning, setShowApproveWarning] = useState(false);
   const [showExitWarning, setShowExitWarning] = useState(false);
   const [sharingEnabled, setSharingEnabled] = useState(true);
@@ -307,6 +309,28 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
   // so this should be addressed as a broader refactor.
   const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<CodeAnnotation>({ enabled: !!origin });
   const agentJobs = useAgentJobs({ enabled: !!origin });
+
+  // Listen for session-revision events (diff refresh after feedback)
+  useEffect(() => {
+    if (!origin || !awaitingResubmission) return;
+    const unsubscribe = subscribeToDaemonSessionFamily("session-revision", (msg) => {
+      if (msg.type !== "event" || !msg.payload) return;
+      const revision = msg.payload as { rawPatch?: string; gitRef?: string };
+      if (revision.rawPatch) {
+        const newFiles = parseDiffToFiles(revision.rawPatch);
+        setDiffData(prev => prev ? { ...prev, rawPatch: revision.rawPatch!, gitRef: revision.gitRef ?? prev.gitRef } : prev);
+        storeApi.getState().setFiles(newFiles);
+        storeApi.getState().setFocusedFile(0);
+        storeApi.getState().setLocalAnnotations([]);
+        storeApi.getState().selectAnnotation(null);
+        storeApi.getState().setPendingSelection(null);
+        setAwaitingResubmission(false);
+        setSubmitted(false);
+        setIsSendingFeedback(false);
+      }
+    });
+    return unsubscribe;
+  }, [origin, awaitingResubmission, storeApi]);
 
   // Tour dialog state — opens as an overlay instead of a dock panel
   const [tourDialogJobId, setTourDialogJobId] = useState<string | null>(null);
@@ -1528,7 +1552,13 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
         }),
       });
       if (res.ok) {
-        setSubmitted('feedback');
+        const data = await res.json().catch(() => ({}));
+        if (data.awaitingResubmission) {
+          setAwaitingResubmission(true);
+          setIsSendingFeedback(false);
+        } else {
+          setSubmitted('feedback');
+        }
       } else {
         throw new Error('Failed to send');
       }
@@ -2153,7 +2183,13 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
         </header>
 
         {/* Embedded completion banner — inline, non-blocking */}
-        {__embedded && !legacyTabMode && <CompletionBanner submitted={submitted} title={completionTitle} subtitle={completionSubtitle} />}
+        {__embedded && !legacyTabMode && (
+          <CompletionBanner
+            submitted={awaitingResubmission ? 'awaiting' : submitted}
+            title={awaitingResubmission ? 'Feedback sent' : completionTitle}
+            subtitle={awaitingResubmission ? 'Waiting for agent to revise...' : completionSubtitle}
+          />
+        )}
 
         {/* Main content */}
         <div className={`flex-1 flex overflow-hidden ${isResizing ? 'select-none' : ''}`}>
