@@ -95,6 +95,7 @@ export function AppSettingsDialog() {
 
   // Fetch git user and config from daemon on open
   const [gitUser, setGitUser] = useState<string | undefined>();
+  const [legacyTabMode, setLegacyTabMode] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -107,7 +108,10 @@ export function AppSettingsDialog() {
     fetch("/daemon/config")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data?.config) configStore.init(data.config);
+        if (data?.config) {
+          configStore.init(data.config);
+          setLegacyTabMode(!!data.config.legacyTabMode);
+        }
       })
       .catch(() => {});
   }, [open]);
@@ -225,7 +229,18 @@ export function AppSettingsDialog() {
               <div className="flex-1 overflow-y-auto px-5 py-5">
                 {/* General */}
                 <TabsContent value="general">
-                  <GeneralTab gitUser={gitUser} />
+                  <GeneralTab
+                    gitUser={gitUser}
+                    legacyTabMode={legacyTabMode}
+                    onLegacyTabModeChange={(enabled) => {
+                      setLegacyTabMode(enabled);
+                      fetch("/daemon/config", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ legacyTabMode: enabled }),
+                      }).catch(() => {});
+                    }}
+                  />
                 </TabsContent>
                 <TabsContent value="theme">
                   <ThemeTab

@@ -236,7 +236,7 @@ The daemon is the single long-running Bun server used by normal plan/review/anno
 | `/daemon/sessions/:id` | DELETE | Delete a session record |
 | `/daemon/shutdown` | POST | Ask the daemon to stop |
 | `/daemon/config` | GET | Read global config (`~/.plannotator/config.json`) |
-| `/daemon/config` | POST | Write global config keys (allowlisted: `displayName`, `pfmReminder`, `diffOptions`, `conventionalComments`, `conventionalLabels`) |
+| `/daemon/config` | POST | Write global config keys (allowlisted: `displayName`, `pfmReminder`, `legacyTabMode`, `diffOptions`, `conventionalComments`, `conventionalLabels`) |
 | `/daemon/git/user` | GET | Return git user name from `git config user.name` |
 | `/daemon/vaults` | GET | Detect available Obsidian vaults |
 | `/daemon/obsidian/vaults` | GET | Alias for `/daemon/vaults` |

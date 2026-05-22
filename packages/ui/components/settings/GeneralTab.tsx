@@ -2,13 +2,16 @@ import React, { useState } from 'react';
 import { getIdentity, regenerateIdentity, setCustomIdentity } from '../../utils/identity';
 import { getAutoCloseDelay, setAutoCloseDelay, AUTO_CLOSE_OPTIONS, type AutoCloseDelay } from '../../utils/storage';
 import { GitUser } from '../../icons/GitUser';
+import { ToggleSwitch } from './shared';
 
 interface GeneralTabProps {
   gitUser?: string;
   onIdentityChange?: (oldIdentity: string, newIdentity: string) => void;
+  legacyTabMode?: boolean;
+  onLegacyTabModeChange?: (enabled: boolean) => void;
 }
 
-export const GeneralTab: React.FC<GeneralTabProps> = ({ gitUser, onIdentityChange }) => {
+export const GeneralTab: React.FC<GeneralTabProps> = ({ gitUser, onIdentityChange, legacyTabMode, onLegacyTabModeChange }) => {
   const [identity, setIdentity] = useState(() => getIdentity());
   const [autoClose, setAutoClose] = useState<AutoCloseDelay>(() => getAutoCloseDelay());
 
@@ -102,6 +105,18 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ gitUser, onIdentityChang
           {AUTO_CLOSE_OPTIONS.find(o => o.value === autoClose)?.description}
         </div>
       </div>
+
+      {onLegacyTabModeChange && (
+        <>
+          <div className="border-t border-border" />
+          <ToggleSwitch
+            checked={legacyTabMode ?? false}
+            onChange={onLegacyTabModeChange}
+            label="Open sessions in new tabs"
+            description="Each session opens in a separate browser tab with auto-close, like the classic Plannotator experience"
+          />
+        </>
+      )}
     </div>
   );
 };
