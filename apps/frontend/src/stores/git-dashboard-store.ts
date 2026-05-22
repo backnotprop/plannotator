@@ -16,7 +16,7 @@ export interface GitDashboardState {
   loading: boolean;
   error?: string;
   lastFetchedAt: number | null;
-  lastProjectCount: number;
+  lastProjectKey: string;
 }
 
 export interface GitDashboardActions {
@@ -41,7 +41,7 @@ const initialState: GitDashboardState = {
   prs: [],
   loading: false,
   lastFetchedAt: null,
-  lastProjectCount: 0,
+  lastProjectKey: "",
 };
 
 export const gitDashboardStore = createStore<GitDashboardStore>()(
@@ -103,7 +103,10 @@ export const gitDashboardStore = createStore<GitDashboardStore>()(
         state.prs = deduplicated;
         state.loading = false;
         state.lastFetchedAt = Date.now();
-        state.lastProjectCount = topLevel.length;
+        state.lastProjectKey = topLevel
+          .map((p) => p.cwd)
+          .sort()
+          .join("|");
         if (deduplicated.length === 0 && errors.length > 0) {
           state.error = errors.join(". ");
         }

@@ -47,6 +47,16 @@ export function LandingPage({ onAddProject }: LandingPageProps) {
   const projects = useProjectStore((s) => s.projects);
   const sessions = useDaemonEventStore((s) => s.sessions);
   const [selections, setSelections] = useState<Map<string, Selection>>(new Map());
+  useEffect(() => {
+    const cwds = new Set(projects.map((p) => p.cwd));
+    setSelections((prev) => {
+      const next = new Map<string, Selection>();
+      for (const [k, sel] of prev) {
+        if (cwds.has(sel.cwd)) next.set(k, sel);
+      }
+      return next.size === prev.size ? prev : next;
+    });
+  }, [projects]);
   const [loading, setLoading] = useState<string | null>(null);
   const [viewIndex, setViewIndex] = useState(() =>
     typeof window !== "undefined" && window.location.hash === "#dashboard" ? 1 : 0,
@@ -334,7 +344,7 @@ function ProjectNode({
         setPrs(result.data.prs);
         setPrPlatform(result.data.platform);
         if (result.data.defaultBranch) setPrDefaultBranch(result.data.defaultBranch);
-        if (result.data.error) setPrError(result.data.error);
+        setPrError(result.data.error ?? null);
       }
       setPrsLoading(false);
       setPrsFetchedAt(Date.now());

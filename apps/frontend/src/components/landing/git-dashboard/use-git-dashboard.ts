@@ -61,7 +61,7 @@ export function useGitDashboard(active = true) {
   const loading = useGitDashboardStore((s) => s.loading);
   const error = useGitDashboardStore((s) => s.error);
   const lastFetchedAt = useGitDashboardStore((s) => s.lastFetchedAt);
-  const lastProjectCount = useGitDashboardStore((s) => s.lastProjectCount);
+  const lastProjectKey = useGitDashboardStore((s) => s.lastProjectKey);
   const fetchAllPRs = useGitDashboardStore((s) => s.fetchAllPRs);
 
   const clear = useGitDashboardStore((s) => s.clear);
@@ -73,12 +73,14 @@ export function useGitDashboard(active = true) {
       if (prs.length > 0) clear();
       return;
     }
+    const projectKey = topLevel
+      .map((p) => p.cwd)
+      .sort()
+      .join("|");
     const stale =
-      !lastFetchedAt ||
-      Date.now() - lastFetchedAt > STALE_MS ||
-      topLevel.length !== lastProjectCount;
+      !lastFetchedAt || Date.now() - lastFetchedAt > STALE_MS || projectKey !== lastProjectKey;
     if (stale && !loading) fetchAllPRs(projects);
-  }, [active, projects, prs.length, lastFetchedAt, lastProjectCount, loading, fetchAllPRs, clear]);
+  }, [active, projects, prs.length, lastFetchedAt, lastProjectKey, loading, fetchAllPRs, clear]);
 
   const groups = useMemo(() => groupPRs(prs), [prs]);
   const metrics = useMemo(() => computeMetrics(prs), [prs]);
