@@ -139,6 +139,7 @@ export async function createAnnotateSession(
     registerSnapshotProvider: (provider) =>
       options.sessionEvents?.registerSnapshotProvider("external-annotations", provider),
   });
+  options.sessionEvents?.registerSnapshotProvider("session-revision", () => null);
 
   // Detect repo info (cached for this session)
   const repoInfo = await getRepoInfo(cwd);

@@ -596,7 +596,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
     const unsubscribe = subscribeToDaemonSessionFamily("session-revision", (msg) => {
       if (msg.type !== "event" || !msg.payload) return;
       const revision = msg.payload as { plan?: string; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string } };
-      if (revision.plan) {
+      if (revision.plan !== undefined) {
         setMarkdown(revision.plan);
         if (revision.previousPlan !== undefined) setPreviousPlan(revision.previousPlan);
         if (revision.versionInfo) setVersionInfo(revision.versionInfo);

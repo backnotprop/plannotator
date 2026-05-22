@@ -51,13 +51,15 @@ export function createDecisionCycle<T>() {
  * Resolve the current decision cycle. If the session has an agent origin,
  * start a new cycle and include `awaitingResubmission: true` in the response.
  */
+const NON_AGENT_ORIGINS = new Set(["plannotator-frontend"]);
+
 export function resolveAndCycle<T>(
   cycle: ReturnType<typeof createDecisionCycle<T>>,
   result: T,
   origin: string | undefined,
 ): { awaitingResubmission?: true } {
   cycle.resolve(result);
-  if (origin) {
+  if (origin && !NON_AGENT_ORIGINS.has(origin)) {
     cycle.startNew();
     return { awaitingResubmission: true };
   }

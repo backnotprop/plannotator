@@ -20,6 +20,7 @@ export interface DaemonSessionRecord<TResult = unknown> {
   label: string;
   origin?: string;
   matchKey?: string;
+  ttlMs?: number;
   createdAt: string;
   updatedAt: string;
   expiresAt?: string;
@@ -174,6 +175,7 @@ export class DaemonSessionStore {
       ...(input.cwd && { cwd: input.cwd }),
       ...(input.origin && { origin: input.origin }),
       ...(input.matchKey && { matchKey: input.matchKey }),
+      ...(input.ttlMs !== undefined && { ttlMs: input.ttlMs }),
       createdAt: iso(now),
       updatedAt: iso(now),
       ...(input.ttlMs !== undefined && { expiresAt: iso(now + input.ttlMs) }),
@@ -277,7 +279,7 @@ export class DaemonSessionStore {
     record.result = undefined;
     const now = this.now();
     record.updatedAt = iso(now);
-    record.expiresAt = undefined;
+    record.expiresAt = record.ttlMs !== undefined ? iso(now + record.ttlMs) : undefined;
     this.emit("session-updated", record);
     return record;
   }

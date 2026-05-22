@@ -178,6 +178,7 @@ export async function createPlannotatorSession(
     registerSnapshotProvider: (provider) =>
       options.sessionEvents?.registerSnapshotProvider("external-annotations", provider),
   }) : null;
+  if (mode !== "archive") options.sessionEvents?.registerSnapshotProvider("session-revision", () => null);
   const slug = mode !== "archive" ? generateSlug(plan) : "";
 
   // Lazy cache for in-session archive browsing (plan review sidebar tab)

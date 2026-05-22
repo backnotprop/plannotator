@@ -316,7 +316,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
     const unsubscribe = subscribeToDaemonSessionFamily("session-revision", (msg) => {
       if (msg.type !== "event" || !msg.payload) return;
       const revision = msg.payload as { rawPatch?: string; gitRef?: string };
-      if (revision.rawPatch) {
+      if (revision.rawPatch !== undefined) {
         const newFiles = parseDiffToFiles(revision.rawPatch);
         setDiffData(prev => prev ? { ...prev, rawPatch: revision.rawPatch!, gitRef: revision.gitRef ?? prev.gitRef } : prev);
         storeApi.getState().setFiles(newFiles);

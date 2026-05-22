@@ -147,7 +147,7 @@ function registerPersistentDecision(
   const decisionLoop = async () => {
     while (true) {
       const result = await Promise.race([session.waitForDecision(), disposed]);
-      if (result.approved) {
+      if (result.approved || result.exit) {
         context.store.complete(id, result);
         return;
       }

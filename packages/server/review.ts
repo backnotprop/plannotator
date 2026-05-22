@@ -174,6 +174,7 @@ export async function createReviewSession(
     registerSnapshotProvider: (provider) =>
       options.sessionEvents?.registerSnapshotProvider("external-annotations", provider),
   });
+  options.sessionEvents?.registerSnapshotProvider("session-revision", () => null);
 
   const tour = createTourSession();
 
