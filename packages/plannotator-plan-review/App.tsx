@@ -59,6 +59,7 @@ import { useArchive } from '@plannotator/ui/hooks/useArchive';
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
 import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotations';
 import { useExternalAnnotationHighlights } from '@plannotator/ui/hooks/useExternalAnnotationHighlights';
+import { subscribeToDaemonSessionFamily } from '@plannotator/ui/utils/daemonHub';
 import { buildPlanAgentInstructions } from '@plannotator/ui/utils/planAgentInstructions';
 import { useFileBrowser } from '@plannotator/ui/hooks/useFileBrowser';
 import { isVaultBrowserEnabled } from '@plannotator/ui/utils/obsidian';
@@ -184,6 +185,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
   const [submitted, setSubmitted] = useState<'approved' | 'denied' | 'exited' | null>(null);
+  const [awaitingResubmission, setAwaitingResubmission] = useState(false);
   const [pendingPasteImage, setPendingPasteImage] = useState<{ file: File; blobUrl: string; initialName: string } | null>(null);
   const [showPermissionModeSetup, setShowPermissionModeSetup] = useState(false);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
@@ -587,6 +589,29 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
 
   const { editorAnnotations, deleteEditorAnnotation } = useEditorAnnotations();
   const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<Annotation>({ enabled: isApiMode && !goalSetupMode });
+
+  // Listen for session-revision events (plan resubmission after deny)
+  useEffect(() => {
+    if (!isApiMode || !awaitingResubmission) return;
+    const unsubscribe = subscribeToDaemonSessionFamily("session-revision", (msg) => {
+      if (msg.type !== "event" || !msg.payload) return;
+      const revision = msg.payload as { plan?: string; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string } };
+      if (revision.plan) {
+        setMarkdown(revision.plan);
+        if (revision.previousPlan !== undefined) setPreviousPlan(revision.previousPlan);
+        if (revision.versionInfo) setVersionInfo(revision.versionInfo);
+        setAnnotations([]);
+        setCodeAnnotations([]);
+        setGlobalAttachments([]);
+        setSelectedAnnotationId(null);
+        setSelectedCodeAnnotationId(null);
+        setAwaitingResubmission(false);
+        setSubmitted(null);
+        setIsSubmitting(false);
+      }
+    });
+    return unsubscribe;
+  }, [isApiMode, awaitingResubmission]);
 
   // Drive DOM highlights for SSE-delivered external annotations. Disabled
   // while a linked doc overlay is open (Viewer DOM is hidden) and while the
@@ -1077,7 +1102,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
     setIsSubmitting(true);
     try {
       const planSaveSettings = getPlanSaveSettings();
-      await fetch('/api/deny', {
+      const response = await fetch('/api/deny', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1088,7 +1113,13 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
           },
         })
       });
-      setSubmitted('denied');
+      const data = await response.json().catch(() => ({}));
+      if (data.awaitingResubmission) {
+        setAwaitingResubmission(true);
+        setIsSubmitting(false);
+      } else {
+        setSubmitted('denied');
+      }
     } catch {
       setIsSubmitting(false);
     }
@@ -1803,7 +1834,13 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
         />
 
         {/* Embedded completion banner — inline, non-blocking (skipped in legacy tab mode) */}
-        {__embedded && !legacyTabMode && <CompletionBanner submitted={submitted} title={completionTitle} subtitle={completionSubtitle} />}
+        {__embedded && !legacyTabMode && (
+          <CompletionBanner
+            submitted={awaitingResubmission ? 'awaiting' : submitted}
+            title={awaitingResubmission ? 'Feedback sent' : completionTitle}
+            subtitle={awaitingResubmission ? 'Waiting for agent to revise...' : completionSubtitle}
+          />
+        )}
 
         {/* Linked document error banner */}
         {linkedDocHook.error && (
