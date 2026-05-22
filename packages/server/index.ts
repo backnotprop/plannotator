@@ -594,6 +594,23 @@ export async function createPlannotatorSession(
           });
   };
 
+  function handleUpdateContent(newPlan: string) {
+    plan = newPlan;
+    const historyResult = saveToHistory(project, slug, newPlan);
+    currentPlanPath = historyResult.path;
+    previousPlan = historyResult.version > 1
+      ? getPlanVersion(project, slug, historyResult.version - 1)
+      : null;
+    versionInfo = {
+      version: historyResult.version,
+      totalVersions: getVersionCount(project, slug),
+      project,
+    };
+    deleteDraft(draftKey);
+    draftKey = contentHash(newPlan);
+    options.sessionEvents?.publishEvent("session-revision", { plan: newPlan, previousPlan, versionInfo });
+  }
+
   return {
     htmlContent,
     handleRequest,
@@ -604,22 +621,7 @@ export async function createPlannotatorSession(
     },
     slug: mode !== "archive" ? slug : undefined,
     getSnapshot: mode !== "archive" ? () => ({ plan, origin }) : undefined,
-    updateContent: mode !== "archive" ? (newPlan: string) => {
-      plan = newPlan;
-      const historyResult = saveToHistory(project, slug, newPlan);
-      currentPlanPath = historyResult.path;
-      previousPlan = historyResult.version > 1
-        ? getPlanVersion(project, slug, historyResult.version - 1)
-        : null;
-      versionInfo = {
-        version: historyResult.version,
-        totalVersions: getVersionCount(project, slug),
-        project,
-      };
-      deleteDraft(draftKey);
-      draftKey = contentHash(newPlan);
-      options.sessionEvents?.publishEvent("session-revision", { plan: newPlan, previousPlan, versionInfo });
-    } : undefined,
+    updateContent: mode !== "archive" ? handleUpdateContent : undefined,
   };
 }
 

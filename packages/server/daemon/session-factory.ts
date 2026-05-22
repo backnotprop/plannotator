@@ -532,6 +532,8 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
   }
   const sessionRefs = new Map<string, { matchKey: string; session: PersistableSession }>();
 
+  // Search for an awaiting-resubmission session with the given matchKey.
+  // Side effect: prunes terminal sessions from sessionRefs during the scan.
   function findAwaitingSession(store: DaemonFetchContext["store"], matchKey: string) {
     for (const [sessionId, ref] of sessionRefs) {
       const record = store.get(sessionId);
