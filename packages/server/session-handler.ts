@@ -3,7 +3,7 @@ export interface SessionRequestContext {
   upgradeWebSocket?: (data: unknown) => Response | undefined;
 }
 
-export type SessionEventFamily = "external-annotations" | "agent-jobs";
+export type SessionEventFamily = "external-annotations" | "agent-jobs" | "session-revision";
 
 export type SessionEventPublisher = (
   family: SessionEventFamily,
