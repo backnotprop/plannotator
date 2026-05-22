@@ -130,6 +130,8 @@ export interface ReviewSession {
   waitForDecision: ReviewServerResult["waitForDecision"];
   setServerUrl: (url: string) => void;
   dispose: () => void;
+  updateContent?: (rawPatch: string, gitRef: string) => void;
+  getSnapshot?: () => unknown;
 }
 
 export interface ResolveReviewScopedAgentCwdOptions {
@@ -503,22 +505,14 @@ export async function createReviewSession(
   }
 
   // Decision promise
-  let resolveDecision: (result: {
-    approved: boolean;
-    feedback: string;
-    annotations: unknown[];
-    agentSwitch?: string;
-    exit?: boolean;
-  }) => void;
-  const decisionPromise = new Promise<{
-    approved: boolean;
-    feedback: string;
-    annotations: unknown[];
-    agentSwitch?: string;
-    exit?: boolean;
-  }>((resolve) => {
-    resolveDecision = resolve;
-  });
+  type ReviewDecisionResult = { approved: boolean; feedback: string; annotations: unknown[]; agentSwitch?: string; exit?: boolean };
+  let currentCycle: { promise: Promise<ReviewDecisionResult>; resolve: (result: ReviewDecisionResult) => void };
+  function startNewCycle() {
+    let resolve: (result: ReviewDecisionResult) => void;
+    const promise = new Promise<ReviewDecisionResult>((r) => { resolve = r; });
+    currentCycle = { promise, resolve: resolve! };
+  }
+  startNewCycle();
 
   const handleRequest: SessionRequestHandler = async (req, url, context) => {
 
@@ -1050,7 +1044,7 @@ export async function createReviewSession(
           // API: Exit review session without feedback
           if (url.pathname === "/api/exit" && req.method === "POST") {
             deleteDraft(draftKey);
-            resolveDecision({ approved: false, feedback: "", annotations: [], exit: true });
+            currentCycle.resolve({ approved: false, feedback: "", annotations: [], exit: true });
             return Response.json({ ok: true });
           }
 
@@ -1065,14 +1059,17 @@ export async function createReviewSession(
               };
 
               deleteDraft(draftKey);
-              resolveDecision({
-                approved: body.approved ?? false,
+              const isApproved = body.approved ?? false;
+              const isAgentSession = !!origin;
+              currentCycle.resolve({
+                approved: isApproved,
                 feedback: body.feedback || "",
                 annotations: body.annotations || [],
                 agentSwitch: body.agentSwitch,
               });
+              if (!isApproved && isAgentSession) startNewCycle();
 
-              return Response.json({ ok: true });
+              return Response.json({ ok: true, ...(!isApproved && isAgentSession && { awaitingResubmission: true }) });
             } catch (err) {
               const message =
                 err instanceof Error ? err.message : "Failed to process feedback";
@@ -1184,7 +1181,7 @@ export async function createReviewSession(
   return {
     htmlContent,
     handleRequest,
-    waitForDecision: () => decisionPromise,
+    waitForDecision: () => currentCycle.promise,
     setServerUrl: (url) => {
       serverUrl = url;
     },
@@ -1194,13 +1191,26 @@ export async function createReviewSession(
       agentJobs.dispose();
       aiSessionManager.disposeAll();
       aiRegistry.disposeAll();
-      // Invoke cleanup callback (e.g., remove temp worktree)
       if (options.onCleanup) {
         try {
           const result = options.onCleanup();
           if (result instanceof Promise) result.catch(() => {});
         } catch { /* best effort */ }
       }
+    },
+    getSnapshot: () => ({
+      rawPatch: currentPatch,
+      gitRef: currentGitRef,
+      origin,
+      diffType: currentDiffType,
+      gitContext: gitContext ? { currentBranch: gitContext.currentBranch, base: currentBase } : undefined,
+    }),
+    updateContent: (rawPatch: string, gitRef: string) => {
+      currentPatch = rawPatch;
+      currentGitRef = gitRef;
+      deleteDraft(draftKey);
+      draftKey = contentHash(rawPatch);
+      options.sessionEvents?.publishEvent("session-revision", { rawPatch, gitRef });
     },
   };
 }

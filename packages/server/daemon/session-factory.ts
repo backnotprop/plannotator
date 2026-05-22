@@ -97,6 +97,26 @@ function createSessionEventBridge(context: DaemonFetchContext, id: string): Sess
   };
 }
 
+interface SessionDecisionResult {
+  approved?: boolean;
+  feedback?: string;
+  [key: string]: unknown;
+}
+
+function createDecisionScope(dispose: () => void | Promise<void>) {
+  let releaseDecisionWait: (() => void) | undefined;
+  const disposed = new Promise<never>((_, reject) => {
+    releaseDecisionWait = () => reject(new Error("Session disposed."));
+  });
+  disposed.catch(() => {});
+  const cleanup = () => {
+    releaseDecisionWait?.();
+    releaseDecisionWait = undefined;
+    return dispose();
+  };
+  return { disposed, cleanup };
+}
+
 function registerSessionDecision<TResult, TStored = TResult>(
   context: DaemonFetchContext,
   id: string,
@@ -104,11 +124,7 @@ function registerSessionDecision<TResult, TStored = TResult>(
   dispose: () => void | Promise<void>,
   mapResult: (result: TResult) => TStored = (result) => result as unknown as TStored,
 ): () => void | Promise<void> {
-  let releaseDecisionWait: (() => void) | undefined;
-  const disposed = new Promise<never>((_, reject) => {
-    releaseDecisionWait = () => reject(new Error("Session disposed."));
-  });
-  disposed.catch(() => {});
+  const { disposed, cleanup } = createDecisionScope(dispose);
 
   void Promise.race([waitForDecision(), disposed])
     .then((result) => context.store.complete(id, mapResult(result)))
@@ -118,23 +134,15 @@ function registerSessionDecision<TResult, TStored = TResult>(
       }
     });
 
-  return () => {
-    releaseDecisionWait?.();
-    releaseDecisionWait = undefined;
-    return dispose();
-  };
+  return cleanup;
 }
 
 function registerPersistentDecision(
   context: DaemonFetchContext,
   id: string,
-  session: { waitForDecision: () => Promise<{ approved: boolean; [key: string]: unknown }>; dispose: () => void | Promise<void> },
+  session: { waitForDecision: () => Promise<SessionDecisionResult>; dispose: () => void | Promise<void> },
 ): () => void | Promise<void> {
-  let releaseDecisionWait: (() => void) | undefined;
-  const disposed = new Promise<never>((_, reject) => {
-    releaseDecisionWait = () => reject(new Error("Session disposed."));
-  });
-  disposed.catch(() => {});
+  const { disposed, cleanup } = createDecisionScope(session.dispose);
 
   const decisionLoop = async () => {
     while (true) {
@@ -154,11 +162,7 @@ function registerPersistentDecision(
     }
   });
 
-  return () => {
-    releaseDecisionWait?.();
-    releaseDecisionWait = undefined;
-    return session.dispose();
-  };
+  return cleanup;
 }
 
 function resolvePlanFilePath(planFilePath: string, cwd: string): string {
@@ -520,7 +524,13 @@ async function prepareReviewInput(request: PluginReviewRequest, cwd: string) {
 }
 
 export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions) {
-  const sessionRefs = new Map<string, { matchKey: string; session: PlannotatorSession }>();
+  interface PersistableSession {
+    waitForDecision: () => Promise<SessionDecisionResult>;
+    dispose: () => void | Promise<void>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    updateContent?: (...args: any[]) => void;
+  }
+  const sessionRefs = new Map<string, { matchKey: string; session: PersistableSession }>();
 
   function findAwaitingSession(store: DaemonFetchContext["store"], matchKey: string) {
     for (const [sessionId, ref] of sessionRefs) {
@@ -647,6 +657,18 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
 
     if (request.action === "annotate" || request.action === "annotate-last") {
       const input = await resolveAnnotateInput(request, cwd, request.action);
+      const isFileBased = input.mode === "annotate" || input.mode === "annotate-folder";
+      const matchKey = isFileBased ? `annotate:${input.filePath}` : undefined;
+
+      if (matchKey) {
+        const existing = findAwaitingSession(context.store, matchKey);
+        if (existing && existing.session.updateContent) {
+          (existing.session.updateContent as (m: string) => void)(input.markdown);
+          context.store.reactivate(existing.record.id);
+          return existing.record;
+        }
+      }
+
       const remoteShare = context.endpoint.isRemote && sharingEnabled && input.markdown
         ? await createRemoteShareNotice(input.markdown, shareBaseUrl, "annotate", "document only").catch(() => undefined)
         : undefined;
@@ -670,21 +692,34 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
           ? `plugin-annotate-${request.origin}-${basename(input.folderPath)}${branch ? `-${branch}` : ""}`
           : `plugin-annotate-${request.origin}-${input.mode === "annotate-last" ? "last" : basename(input.filePath)}${branch ? `-${branch}` : ""}`,
         origin: request.origin,
+        matchKey,
         ttlMs,
         handleRequest: session.handleRequest,
-        dispose: registerSessionDecision(context, id, () => session.waitForDecision(), () => session.dispose(), (result) => ({
-          ...result,
-          filePath: input.filePath,
-          mode: input.mode,
-        })),
+        dispose: isFileBased
+          ? registerPersistentDecision(context, id, session)
+          : registerSessionDecision(context, id, () => session.waitForDecision(), () => session.dispose(), (result) => ({
+              ...result, filePath: input.filePath, mode: input.mode,
+            })),
         remoteShare,
-        snapshot: () => ({ plan: input.markdown, filePath: input.filePath, mode: input.mode, sourceInfo: input.sourceInfo }),
+        snapshot: session.getSnapshot ?? (() => ({ plan: input.markdown, filePath: input.filePath, mode: input.mode, sourceInfo: input.sourceInfo })),
       });
+      if (matchKey) sessionRefs.set(id, { matchKey, session });
       return record;
     }
 
     if (request.action === "review") {
       const input = await prepareReviewInput(request, cwd);
+      const reviewMatchKey = input.prMetadata
+        ? `review:${input.prMetadata.url}`
+        : branch ? `review:${project}:${branch}` : `review:${project}`;
+
+      const existingReview = findAwaitingSession(context.store, reviewMatchKey);
+      if (existingReview && existingReview.session.updateContent) {
+        (existingReview.session.updateContent as (rawPatch: string, gitRef: string) => void)(input.rawPatch, input.gitRef);
+        context.store.reactivate(existingReview.record.id);
+        return existingReview.record;
+      }
+
       const sessionError = [input.error, input.localWarning].filter(Boolean).join("\n\n") || undefined;
       const remoteShare = context.endpoint.isRemote && sharingEnabled
         ? await createRemoteShareNotice(input.rawPatch, shareBaseUrl, "review changes", "diff only").catch(() => undefined)
@@ -727,18 +762,20 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
           ? `plugin-${getMRLabel(input.prMetadata).toLowerCase()}-review-${getDisplayRepo(input.prMetadata)}${getMRNumberLabel(input.prMetadata)}`
           : branch ? `plugin-review-${request.origin}-${project}-${branch}` : `plugin-review-${request.origin}-${project}`,
         origin: request.origin,
+        matchKey: reviewMatchKey,
         ttlMs,
         handleRequest: session.handleRequest,
-        dispose: registerSessionDecision(context, id, () => session.waitForDecision(), () => session.dispose()),
+        dispose: registerPersistentDecision(context, id, session),
         remoteShare,
-        snapshot: () => ({
+        snapshot: session.getSnapshot ?? (() => ({
           rawPatch: input.rawPatch,
           gitRef: input.gitRef,
           origin: request.origin,
           diffType: input.gitContext ? (input.diffType ?? "unstaged") : undefined,
           gitContext: input.gitContext ? { currentBranch: input.gitContext.currentBranch, base: input.base } : undefined,
-        }),
+        })),
       });
+      sessionRefs.set(id, { matchKey: reviewMatchKey, session });
       return record;
     }
 

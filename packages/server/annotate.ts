@@ -92,6 +92,8 @@ export interface AnnotateSession {
   handleRequest: SessionRequestHandler;
   waitForDecision: AnnotateServerResult["waitForDecision"];
   dispose: () => void;
+  updateContent?: (newMarkdown: string) => void;
+  getSnapshot?: () => unknown;
 }
 
 // --- Server Implementation ---
@@ -104,7 +106,7 @@ export async function createAnnotateSession(
 ): Promise<AnnotateSession> {
   const {
     cwd = process.cwd(),
-    markdown,
+    markdown: initialMarkdown,
     filePath,
     htmlContent,
     origin,
@@ -119,6 +121,7 @@ export async function createAnnotateSession(
     rawHtml,
     renderHtml = false,
   } = options;
+  let markdown = initialMarkdown;
 
   // Side-channel pre-warm so /api/doc/exists POSTs land on warm cache.
   void warmFileListCache(cwd, "code");
@@ -129,7 +132,7 @@ export async function createAnnotateSession(
     mode === "annotate-folder" && folderPath
       ? `folder:${resolvePath(folderPath)}`
       : renderHtml && rawHtml ? rawHtml : markdown;
-  const draftKey = contentHash(draftSource);
+  let draftKey = contentHash(draftSource);
   const externalAnnotations = createExternalAnnotationHandler("plan", {
     publishEvent: (event) => options.sessionEvents?.publishEvent("external-annotations", event),
     registerSnapshotProvider: (provider) =>
@@ -139,21 +142,15 @@ export async function createAnnotateSession(
   // Detect repo info (cached for this session)
   const repoInfo = await getRepoInfo(cwd);
 
-  // Decision promise
-  let resolveDecision: (result: {
-    feedback: string;
-    annotations: unknown[];
-    exit?: boolean;
-    approved?: boolean;
-  }) => void;
-  const decisionPromise = new Promise<{
-    feedback: string;
-    annotations: unknown[];
-    exit?: boolean;
-    approved?: boolean;
-  }>((resolve) => {
-    resolveDecision = resolve;
-  });
+  // Decision cycle — each deny/feedback starts a new cycle; approve/exit is final
+  type AnnotateDecisionResult = { feedback: string; annotations: unknown[]; exit?: boolean; approved?: boolean };
+  let currentCycle: { promise: Promise<AnnotateDecisionResult>; resolve: (result: AnnotateDecisionResult) => void };
+  function startNewCycle() {
+    let resolve: (result: AnnotateDecisionResult) => void;
+    const promise = new Promise<AnnotateDecisionResult>((r) => { resolve = r; });
+    currentCycle = { promise, resolve: resolve! };
+  }
+  startNewCycle();
 
   const handleRequest: SessionRequestHandler = async (req, url, context) => {
 
@@ -258,14 +255,14 @@ export async function createAnnotateSession(
           // API: Exit annotation session without feedback
           if (url.pathname === "/api/exit" && req.method === "POST") {
             deleteDraft(draftKey);
-            resolveDecision({ feedback: "", annotations: [], exit: true });
+            currentCycle.resolve({ feedback: "", annotations: [], exit: true });
             return Response.json({ ok: true });
           }
 
           // API: Approve the annotation session (review-gate UX, #570)
           if (url.pathname === "/api/approve" && req.method === "POST") {
             deleteDraft(draftKey);
-            resolveDecision({ feedback: "", annotations: [], approved: true });
+            currentCycle.resolve({ feedback: "", annotations: [], approved: true });
             return Response.json({ ok: true });
           }
 
@@ -278,12 +275,14 @@ export async function createAnnotateSession(
               };
 
               deleteDraft(draftKey);
-              resolveDecision({
+              const isAgentSession = !!origin;
+              currentCycle.resolve({
                 feedback: body.feedback || "",
                 annotations: body.annotations || [],
               });
+              if (isAgentSession) startNewCycle();
 
-              return Response.json({ ok: true });
+              return Response.json({ ok: true, ...(isAgentSession && { awaitingResubmission: true }) });
             } catch (err) {
               const message =
                 err instanceof Error
@@ -302,13 +301,22 @@ export async function createAnnotateSession(
           });
   };
 
+  const isFileBased = mode === "annotate" || mode === "annotate-folder";
+
   return {
     htmlContent,
     handleRequest,
-    waitForDecision: () => decisionPromise,
+    waitForDecision: () => currentCycle.promise,
     dispose: () => {
       externalAnnotations.dispose();
     },
+    getSnapshot: isFileBased ? () => ({ plan: markdown, filePath, mode, sourceInfo }) : undefined,
+    updateContent: isFileBased ? (newMarkdown: string) => {
+      markdown = newMarkdown;
+      deleteDraft(draftKey);
+      draftKey = contentHash(newMarkdown);
+      options.sessionEvents?.publishEvent("session-revision", { plan: newMarkdown });
+    } : undefined,
   };
 }
 
