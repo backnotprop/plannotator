@@ -48,7 +48,12 @@ export function AppSidebarContent() {
         <Link to="/" className="flex items-end gap-2 px-3 pt-2">
           <TaterSpriteSidebar />
           <div className="flex flex-col">
-            <span className="text-base font-semibold tracking-tight leading-tight" style={{ fontFamily: "'Instrument Sans Variable', 'Instrument Sans', system-ui, sans-serif" }}>
+            <span
+              className="text-base font-semibold tracking-tight leading-tight"
+              style={{
+                fontFamily: "'Instrument Sans Variable', 'Instrument Sans', system-ui, sans-serif",
+              }}
+            >
               Plannotator
             </span>
             <span className="text-[10px] text-muted-foreground">
@@ -92,11 +97,7 @@ export function AppSidebarContent() {
 
                     return (
                       <SidebarMenuItem key={session.id}>
-                        <SidebarMenuButton
-                          asChild
-                          isActive={isActive}
-                          className="h-7 pr-7 text-xs"
-                        >
+                        <SidebarMenuButton asChild isActive={isActive} className="h-7 pr-7 text-xs">
                           <Link to="/s/$sessionId" params={{ sessionId: session.id }}>
                             <span className="size-3.5 shrink-0" aria-hidden />
                             <span

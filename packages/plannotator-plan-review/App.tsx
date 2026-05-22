@@ -21,7 +21,7 @@ import { getCallbackConfig, CallbackAction, executeCallback } from '@plannotator
 import { useAgents } from '@plannotator/ui/hooks/useAgents';
 import { useActiveSection } from '@plannotator/ui/hooks/useActiveSection';
 import { storage } from '@plannotator/ui/utils/storage';
-import { configStore } from '@plannotator/ui/config';
+import { configStore, useConfigValue } from '@plannotator/ui/config';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { CompletionBanner } from '@plannotator/ui/components/CompletionBanner';
 import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
@@ -142,10 +142,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
   const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<EditorMode>(getEditorMode);
   const [inputMethod, setInputMethod] = useState<InputMethod>(getInputMethod);
-  const [taterMode, setTaterMode] = useState(() => {
-    const stored = storage.getItem('plannotator-tater-mode');
-    return stored === 'true';
-  });
+  const taterMode = useConfigValue('taterMode');
   const [uiPrefs, setUiPrefs] = useState(() => getUIPreferences());
 
   // Plan-area width (inside the OverlayScrollArea, after sidebar/panel
@@ -740,8 +737,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
   }, [pendingSharedAnnotations, clearPendingSharedAnnotations, resetExternalHighlights]);
 
   const handleTaterModeChange = useCallback((enabled: boolean) => {
-    setTaterMode(enabled);
-    storage.setItem('plannotator-tater-mode', String(enabled));
+    configStore.set('taterMode', enabled);
   }, []);
 
   const handleEditorModeChange = (mode: EditorMode) => {

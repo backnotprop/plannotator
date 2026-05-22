@@ -223,83 +223,83 @@ export function AppSettingsDialog() {
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto px-5 py-5">
-              {/* General */}
-              <TabsContent value="general">
-                <GeneralTab gitUser={gitUser} />
-              </TabsContent>
-              <TabsContent value="theme">
-                <ThemeTab
-                  onPreview={() => {
-                    setOpen(false);
-                    setThemePreview(true);
-                  }}
-                />
-              </TabsContent>
-              <TabsContent value="shortcuts">
-                <div className="space-y-6">
-                  <div>
-                    <div className="mb-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                      Plan Review
+                {/* General */}
+                <TabsContent value="general">
+                  <GeneralTab gitUser={gitUser} />
+                </TabsContent>
+                <TabsContent value="theme">
+                  <ThemeTab
+                    onPreview={() => {
+                      setOpen(false);
+                      setThemePreview(true);
+                    }}
+                  />
+                </TabsContent>
+                <TabsContent value="shortcuts">
+                  <div className="space-y-6">
+                    <div>
+                      <div className="mb-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                        Plan Review
+                      </div>
+                      <KeyboardShortcuts mode="plan" />
                     </div>
-                    <KeyboardShortcuts mode="plan" />
-                  </div>
-                  <div className="border-t border-border pt-6">
-                    <div className="mb-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                      Code Review
+                    <div className="border-t border-border pt-6">
+                      <div className="mb-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                        Code Review
+                      </div>
+                      <KeyboardShortcuts mode="review" />
                     </div>
-                    <KeyboardShortcuts mode="review" />
                   </div>
-                </div>
-              </TabsContent>
+                </TabsContent>
 
-              {/* Plan Review */}
-              <TabsContent value="plan-general">
-                <PlanGeneralTab origin={activeOrigin} />
-              </TabsContent>
-              <TabsContent value="plan-display">
-                <PlanDisplayTab />
-              </TabsContent>
-              <TabsContent value="plan-saving">
-                <SavingTab onNavigateTab={setActiveTab} />
-              </TabsContent>
-              <TabsContent value="plan-labels">
-                <LabelsTab />
-              </TabsContent>
-              <TabsContent value="plan-hooks">
-                <HooksTab fetchFn={daemonFetch} />
-              </TabsContent>
+                {/* Plan Review */}
+                <TabsContent value="plan-general">
+                  <PlanGeneralTab origin={activeOrigin} />
+                </TabsContent>
+                <TabsContent value="plan-display">
+                  <PlanDisplayTab />
+                </TabsContent>
+                <TabsContent value="plan-saving">
+                  <SavingTab onNavigateTab={setActiveTab} />
+                </TabsContent>
+                <TabsContent value="plan-labels">
+                  <LabelsTab />
+                </TabsContent>
+                <TabsContent value="plan-hooks">
+                  <HooksTab fetchFn={daemonFetch} />
+                </TabsContent>
 
-              {/* Code Review */}
-              <TabsContent value="review-git">
-                <GitTab />
-              </TabsContent>
-              <TabsContent value="review-display">
-                <ReviewDisplayTab />
-              </TabsContent>
-              <TabsContent value="review-comments">
-                <CommentsTab />
-              </TabsContent>
-              <TabsContent value="review-ai">
-                <AISettingsTab
-                  providers={aiProviders}
-                  selectedProviderId={aiProviderId}
-                  onProviderChange={handleAiProviderChange}
-                />
-              </TabsContent>
+                {/* Code Review */}
+                <TabsContent value="review-git">
+                  <GitTab />
+                </TabsContent>
+                <TabsContent value="review-display">
+                  <ReviewDisplayTab />
+                </TabsContent>
+                <TabsContent value="review-comments">
+                  <CommentsTab />
+                </TabsContent>
+                <TabsContent value="review-ai">
+                  <AISettingsTab
+                    providers={aiProviders}
+                    selectedProviderId={aiProviderId}
+                    onProviderChange={handleAiProviderChange}
+                  />
+                </TabsContent>
 
-              {/* Integrations */}
-              <TabsContent value="int-files">
-                <FilesTab />
-              </TabsContent>
-              <TabsContent value="int-obsidian">
-                <ObsidianTab fetchFn={daemonFetch} />
-              </TabsContent>
-              <TabsContent value="int-bear">
-                <BearTab />
-              </TabsContent>
-              <TabsContent value="int-octarine">
-                <OctarineTab />
-              </TabsContent>
+                {/* Integrations */}
+                <TabsContent value="int-files">
+                  <FilesTab />
+                </TabsContent>
+                <TabsContent value="int-obsidian">
+                  <ObsidianTab fetchFn={daemonFetch} />
+                </TabsContent>
+                <TabsContent value="int-bear">
+                  <BearTab />
+                </TabsContent>
+                <TabsContent value="int-octarine">
+                  <OctarineTab />
+                </TabsContent>
               </div>
             </div>
           </Tabs>

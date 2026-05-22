@@ -42,10 +42,7 @@ export function SidebarPeek() {
   return (
     <>
       {/* Hover strip — invisible hit area on left edge */}
-      <div
-        className="fixed left-0 top-0 z-40 h-full w-2"
-        onMouseEnter={show}
-      />
+      <div className="fixed left-0 top-0 z-40 h-full w-2" onMouseEnter={show} />
       {/* Backdrop overlay */}
       {backdropMounted && (
         <div
@@ -61,9 +58,7 @@ export function SidebarPeek() {
       <div
         className="fixed left-0 top-1/2 z-50 h-[80vh] w-[16rem] rounded-lg border border-border bg-sidebar text-sidebar-foreground shadow-[0_8px_40px_-12px_rgba(0,0,0,0.3)]"
         style={{
-          transform: visible
-            ? "translate(0px, -50%)"
-            : "translate(-100%, -50%)",
+          transform: visible ? "translate(0px, -50%)" : "translate(-100%, -50%)",
           transition: "transform 150ms cubic-bezier(0.4, 0, 0.2, 1)",
           willChange: "transform",
         }}

@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Code2, Archive, Folder, FolderPlus, ChevronRight, ChevronDown, Trash2 } from "lucide-react";
+import {
+  Code2,
+  Archive,
+  Folder,
+  FolderPlus,
+  ChevronRight,
+  ChevronDown,
+  Trash2,
+} from "lucide-react";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -13,7 +21,12 @@ import { GitDashboard } from "./git-dashboard/GitDashboard";
 import { useDaemonEventStore } from "../../daemon/events/event-store";
 import { daemonApiClient } from "../../daemon/api/client";
 import { getSessionModeMeta, formatSessionLabel } from "../../shared/session-meta";
-import type { ProjectEntry, PRListItem, SessionSummary, WorktreeEntry } from "../../daemon/contracts";
+import type {
+  ProjectEntry,
+  PRListItem,
+  SessionSummary,
+  WorktreeEntry,
+} from "../../daemon/contracts";
 
 interface LandingPageProps {
   onAddProject: () => void;
@@ -131,110 +144,110 @@ export function LandingPage({ onAddProject }: LandingPageProps) {
             }}
           >
             <div className="h-full w-full shrink-0">
-          <main className="flex h-full items-center justify-center overflow-auto">
-            <div className="w-full max-w-2xl px-6">
-              <pre
-                className="mb-8 select-none overflow-x-auto text-[5px] leading-[1.2] text-foreground/70 sm:text-[6px] md:text-[7px]"
-                aria-hidden="true"
-              >
-                {ASCII_BANNER}
-              </pre>
+              <main className="flex h-full items-center justify-center overflow-auto">
+                <div className="w-full max-w-2xl px-6">
+                  <pre
+                    className="mb-8 select-none overflow-x-auto text-[5px] leading-[1.2] text-foreground/70 sm:text-[6px] md:text-[7px]"
+                    aria-hidden="true"
+                  >
+                    {ASCII_BANNER}
+                  </pre>
 
-              {projects.length === 0 && sessions.length === 0 ? (
-                <EmptyState onAddProject={onAddProject} />
-              ) : (
-                <div className="flex flex-col gap-8">
-                  {projects.length > 0 && (
-                    <div>
-                      <div className="mb-2 flex items-center justify-between">
-                        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                          Select project
-                        </span>
+                  {projects.length === 0 && sessions.length === 0 ? (
+                    <EmptyState onAddProject={onAddProject} />
+                  ) : (
+                    <div className="flex flex-col gap-8">
+                      {projects.length > 0 && (
+                        <div>
+                          <div className="mb-2 flex items-center justify-between">
+                            <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                              Select project
+                            </span>
+                            <button
+                              type="button"
+                              onClick={onAddProject}
+                              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-foreground/80 hover:bg-surface-1 hover:text-foreground"
+                            >
+                              <FolderPlus className="size-3.5" />
+                              Add project
+                            </button>
+                          </div>
+                          <ProjectTable
+                            projects={projects}
+                            selections={selections}
+                            onToggle={toggleSelection}
+                          />
+
+                          <div className="mt-6">
+                            <span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                              Launch
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                disabled={selectionCount === 0 || loading === "review"}
+                                onClick={() => handleAction("review")}
+                                className={cn(
+                                  "inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-[12px] font-medium",
+                                  "hover:bg-surface-1 active:scale-[0.97]",
+                                  "disabled:pointer-events-none disabled:opacity-40",
+                                )}
+                              >
+                                <Code2 className="size-3.5" />
+                                {loading === "review"
+                                  ? "Starting…"
+                                  : selectionCount > 1
+                                    ? `Code Review (${selectionCount})`
+                                    : "Code Review"}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={selectionCount === 0 || loading === "archive"}
+                                onClick={() => handleAction("archive")}
+                                className={cn(
+                                  "inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-[12px] font-medium",
+                                  "hover:bg-surface-1 active:scale-[0.97]",
+                                  "disabled:pointer-events-none disabled:opacity-40",
+                                )}
+                              >
+                                <Archive className="size-3.5" />
+                                {loading === "archive" ? "Opening…" : "Browse Archive"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setViewIndex(1)}
+                                className="ml-auto text-[12px] text-muted-foreground hover:text-foreground"
+                              >
+                                Git Dashboard →
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {sessions.length > 0 && (
+                        <div>
+                          <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                            Active sessions
+                          </div>
+                          <SessionList sessions={sessions} />
+                        </div>
+                      )}
+
+                      {projects.length === 0 && (
                         <button
                           type="button"
                           onClick={onAddProject}
-                          className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-foreground/80 hover:bg-surface-1 hover:text-foreground"
+                          className="inline-flex items-center gap-1.5 text-[12px] text-foreground/80 hover:text-foreground"
                         >
                           <FolderPlus className="size-3.5" />
-                          Add project
+                          Add project to launch sessions
                         </button>
-                      </div>
-                      <ProjectTable
-                        projects={projects}
-                        selections={selections}
-                        onToggle={toggleSelection}
-                      />
-
-                      <div className="mt-6">
-                        <span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                          Launch
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            disabled={selectionCount === 0 || loading === "review"}
-                            onClick={() => handleAction("review")}
-                            className={cn(
-                              "inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-[12px] font-medium",
-                              "hover:bg-surface-1 active:scale-[0.97]",
-                              "disabled:pointer-events-none disabled:opacity-40",
-                            )}
-                          >
-                            <Code2 className="size-3.5" />
-                            {loading === "review"
-                              ? "Starting…"
-                              : selectionCount > 1
-                                ? `Code Review (${selectionCount})`
-                                : "Code Review"}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={selectionCount === 0 || loading === "archive"}
-                            onClick={() => handleAction("archive")}
-                            className={cn(
-                              "inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-[12px] font-medium",
-                              "hover:bg-surface-1 active:scale-[0.97]",
-                              "disabled:pointer-events-none disabled:opacity-40",
-                            )}
-                          >
-                            <Archive className="size-3.5" />
-                            {loading === "archive" ? "Opening…" : "Browse Archive"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setViewIndex(1)}
-                            className="ml-auto text-[12px] text-muted-foreground hover:text-foreground"
-                          >
-                            Git Dashboard →
-                          </button>
-                        </div>
-                      </div>
+                      )}
                     </div>
-                  )}
-
-                  {sessions.length > 0 && (
-                    <div>
-                      <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                        Active sessions
-                      </div>
-                      <SessionList sessions={sessions} />
-                    </div>
-                  )}
-
-                  {projects.length === 0 && (
-                    <button
-                      type="button"
-                      onClick={onAddProject}
-                      className="inline-flex items-center gap-1.5 text-[12px] text-foreground/80 hover:text-foreground"
-                    >
-                      <FolderPlus className="size-3.5" />
-                      Add project to launch sessions
-                    </button>
                   )}
                 </div>
-              )}
-            </div>
-          </main>
+              </main>
             </div>
             <div className="h-full w-full shrink-0">
               <GitDashboard active={viewIndex === 1} onBack={() => setViewIndex(0)} />
@@ -352,9 +365,7 @@ function ProjectNode({
             className={cn(
               "flex w-full items-center gap-3 px-3 py-2 text-[13px]",
               !isFirst && "border-t border-border",
-              isSelected
-                ? "bg-primary/10 text-foreground"
-                : "text-foreground hover:bg-surface-1",
+              isSelected ? "bg-primary/10 text-foreground" : "text-foreground hover:bg-surface-1",
             )}
           >
             <button
@@ -367,7 +378,9 @@ function ProjectNode({
               {project.branch && (
                 <span className="text-[11px] text-muted-foreground">{project.branch}</span>
               )}
-              <span className="ml-auto truncate text-[11px] text-muted-foreground">{project.cwd}</span>
+              <span className="ml-auto truncate text-[11px] text-muted-foreground">
+                {project.cwd}
+              </span>
             </button>
             <button
               type="button"
@@ -438,7 +451,10 @@ interface PRStack {
   label: string;
 }
 
-function buildStacks(prs: PRListItem[], defaultBranch: string): { stacks: PRStack[]; loose: PRListItem[] } {
+function buildStacks(
+  prs: PRListItem[],
+  defaultBranch: string,
+): { stacks: PRStack[]; loose: PRListItem[] } {
   const byHead = new Map<string, PRListItem>();
   for (const pr of prs) byHead.set(pr.headBranch, pr);
 
@@ -487,7 +503,9 @@ function PRRow({
   return (
     <button
       type="button"
-      onClick={() => onToggle({ cwd: projectCwd, label: `${projectName} / #${pr.number}`, prUrl: pr.url })}
+      onClick={() =>
+        onToggle({ cwd: projectCwd, label: `${projectName} / #${pr.number}`, prUrl: pr.url })
+      }
       className={cn(
         "flex items-center gap-2 rounded-md border px-2 py-1 text-left text-[11px]",
         selections.has(pr.url)
@@ -512,7 +530,15 @@ function PRRow({
 
 function StackIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 500 400" fill="none" stroke="currentColor" strokeWidth={28} strokeLinejoin="round" strokeLinecap="round">
+    <svg
+      className={className}
+      viewBox="0 0 500 400"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={28}
+      strokeLinejoin="round"
+      strokeLinecap="round"
+    >
       <polygon points="250,30 470,160 250,290 30,160" />
       <polyline points="30,220 250,350 470,220" />
       <polyline points="30,280 250,410 470,280" />
@@ -591,7 +617,10 @@ function PRList({
     [prs, showAll],
   );
   const hiddenCount = prs.length - visible.length;
-  const { stacks, loose } = useMemo(() => buildStacks(visible, defaultBranch), [visible, defaultBranch]);
+  const { stacks, loose } = useMemo(
+    () => buildStacks(visible, defaultBranch),
+    [visible, defaultBranch],
+  );
 
   if (loading) {
     return <div className="py-1 text-[11px] text-muted-foreground">Loading PRs…</div>;
@@ -617,7 +646,9 @@ function PRList({
     );
   }
   if (platform === "gitlab" && prs.length === 0) {
-    return <div className="py-1 text-[11px] text-muted-foreground">GitLab MR listing coming soon</div>;
+    return (
+      <div className="py-1 text-[11px] text-muted-foreground">GitLab MR listing coming soon</div>
+    );
   }
   if (visible.length === 0 && !showAll) {
     return (
@@ -626,7 +657,11 @@ function PRList({
         {hiddenCount > 0 && (
           <>
             {" · "}
-            <button type="button" onClick={() => setShowAll(true)} className="underline hover:text-foreground">
+            <button
+              type="button"
+              onClick={() => setShowAll(true)}
+              className="underline hover:text-foreground"
+            >
               show {hiddenCount} closed/merged
             </button>
           </>
@@ -715,13 +750,14 @@ function WorktreeList({
         >
           <Folder className="size-3.5 shrink-0 text-muted-foreground" />
           <span className="truncate">{wt.branch}</span>
-          <span className="ml-auto shrink-0 truncate text-[10px] text-muted-foreground">{wt.path}</span>
+          <span className="ml-auto shrink-0 truncate text-[10px] text-muted-foreground">
+            {wt.path}
+          </span>
         </button>
       ))}
     </div>
   );
 }
-
 
 function SessionList({ sessions }: { sessions: SessionSummary[] }) {
   return (
@@ -741,7 +777,9 @@ function SessionList({ sessions }: { sessions: SessionSummary[] }) {
             )}
           >
             <Icon className="size-3.5 shrink-0 text-muted-foreground/50" />
-            <span className="text-muted-foreground">{formatSessionLabel(session.label, session.mode)}</span>
+            <span className="text-muted-foreground">
+              {formatSessionLabel(session.label, session.mode)}
+            </span>
             <span className="ml-auto text-[11px] text-muted-foreground/50">{meta.label}</span>
           </Link>
         );

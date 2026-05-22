@@ -514,7 +514,14 @@ export function createDaemonApiClient(options: DaemonApiClientOptions = {}): Dae
         fetchImpl,
         joinUrl(options.baseUrl, "/daemon/sessions"),
         isSessionResponse,
-        jsonPost({ request: { action: "review", origin: "plannotator-frontend", cwd, ...(prUrl && { prUrl }) } }),
+        jsonPost({
+          request: {
+            action: "review",
+            origin: "plannotator-frontend",
+            cwd,
+            ...(prUrl && { prUrl }),
+          },
+        }),
       );
     },
 

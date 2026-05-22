@@ -88,9 +88,7 @@ export function createProjectStore(initial: Partial<ProjectStoreState> = {}) {
           return false;
         }
         set((state) => {
-          state.projects = state.projects.filter(
-            (p) => p.cwd !== cwd && p.parentCwd !== cwd,
-          );
+          state.projects = state.projects.filter((p) => p.cwd !== cwd && p.parentCwd !== cwd);
         });
         return true;
       },

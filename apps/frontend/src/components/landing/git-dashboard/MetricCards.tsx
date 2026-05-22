@@ -34,9 +34,22 @@ export function MetricCards({ metrics }: { metrics: DashboardMetrics }) {
   return (
     <div className="hidden flex-col gap-1 xl:flex xl:sticky xl:top-0 xl:h-fit">
       <h2 className="mb-1 text-sm font-medium text-muted-foreground">Pull Requests</h2>
-      <MetricCard label="Open" count={metrics.open} active onClick={() => scrollToGroup("pr-group-open")} />
-      <MetricCard label="Draft" count={metrics.draft} onClick={() => scrollToGroup("pr-group-draft")} />
-      <MetricCard label="Merged" count={metrics.merged} onClick={() => scrollToGroup("pr-group-merged")} />
+      <MetricCard
+        label="Open"
+        count={metrics.open}
+        active
+        onClick={() => scrollToGroup("pr-group-open")}
+      />
+      <MetricCard
+        label="Draft"
+        count={metrics.draft}
+        onClick={() => scrollToGroup("pr-group-draft")}
+      />
+      <MetricCard
+        label="Merged"
+        count={metrics.merged}
+        onClick={() => scrollToGroup("pr-group-merged")}
+      />
     </div>
   );
 }

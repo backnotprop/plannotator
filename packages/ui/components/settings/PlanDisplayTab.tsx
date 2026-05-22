@@ -6,15 +6,15 @@ import {
   type UIPreferences,
   type PlanWidth,
 } from '../../utils/uiPreferences';
+import { configStore, useConfigValue } from '../../config';
 import { ToggleSwitch } from './shared';
 
 interface PlanDisplayTabProps {
   onUIPreferencesChange?: (prefs: UIPreferences) => void;
-  taterMode?: boolean;
-  onTaterModeChange?: (enabled: boolean) => void;
 }
 
-export const PlanDisplayTab: React.FC<PlanDisplayTabProps> = ({ onUIPreferencesChange, taterMode = false, onTaterModeChange }) => {
+export const PlanDisplayTab: React.FC<PlanDisplayTabProps> = ({ onUIPreferencesChange }) => {
+  const taterMode = useConfigValue('taterMode');
   const [uiPrefs, setUiPrefs] = useState<UIPreferences>(() => getUIPreferences());
 
   const handleChange = (updates: Partial<UIPreferences>) => {
@@ -114,16 +114,12 @@ export const PlanDisplayTab: React.FC<PlanDisplayTabProps> = ({ onUIPreferencesC
         </div>
       </div>
 
-      {onTaterModeChange && (
-        <>
-          <div className="border-t border-border" />
-          <ToggleSwitch
-            checked={taterMode}
-            onChange={onTaterModeChange}
-            label="Tater Mode"
-          />
-        </>
-      )}
+      <div className="border-t border-border" />
+      <ToggleSwitch
+        checked={taterMode}
+        onChange={(v) => configStore.set('taterMode', v)}
+        label="Tater Mode"
+      />
     </div>
   );
 };

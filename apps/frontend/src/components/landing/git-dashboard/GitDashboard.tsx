@@ -61,23 +61,53 @@ export function GitDashboard({ active, onBack }: GitDashboardProps) {
             <div className="grid gap-10 xl:grid-cols-[minmax(0,1fr)_minmax(13rem,16rem)]">
               <div>
                 {groups.open.length > 0 && (
-                  <PRGroup id="pr-group-open" title="Open" icon={GitPullRequest} count={groups.open.length}>
+                  <PRGroup
+                    id="pr-group-open"
+                    title="Open"
+                    icon={GitPullRequest}
+                    count={groups.open.length}
+                  >
                     {groups.open.map((pr) => (
-                      <PRRow key={pr.url} pr={pr} loading={launchingId === pr.url} onSelect={handleSelect} />
+                      <PRRow
+                        key={pr.url}
+                        pr={pr}
+                        loading={launchingId === pr.url}
+                        onSelect={handleSelect}
+                      />
                     ))}
                   </PRGroup>
                 )}
                 {groups.draft.length > 0 && (
-                  <PRGroup id="pr-group-draft" title="Draft" icon={FileEdit} count={groups.draft.length}>
+                  <PRGroup
+                    id="pr-group-draft"
+                    title="Draft"
+                    icon={FileEdit}
+                    count={groups.draft.length}
+                  >
                     {groups.draft.map((pr) => (
-                      <PRRow key={pr.url} pr={pr} loading={launchingId === pr.url} onSelect={handleSelect} />
+                      <PRRow
+                        key={pr.url}
+                        pr={pr}
+                        loading={launchingId === pr.url}
+                        onSelect={handleSelect}
+                      />
                     ))}
                   </PRGroup>
                 )}
                 {groups.merged.length > 0 && (
-                  <PRGroup id="pr-group-merged" title="Recently merged" icon={GitMerge} count={groups.merged.length}>
+                  <PRGroup
+                    id="pr-group-merged"
+                    title="Recently merged"
+                    icon={GitMerge}
+                    count={groups.merged.length}
+                  >
                     {groups.merged.map((pr) => (
-                      <PRRow key={pr.url} pr={pr} loading={launchingId === pr.url} onSelect={handleSelect} />
+                      <PRRow
+                        key={pr.url}
+                        pr={pr}
+                        loading={launchingId === pr.url}
+                        onSelect={handleSelect}
+                      />
                     ))}
                   </PRGroup>
                 )}

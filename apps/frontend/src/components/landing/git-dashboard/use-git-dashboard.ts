@@ -73,14 +73,18 @@ export function useGitDashboard(active = true) {
       if (prs.length > 0) clear();
       return;
     }
-    const stale = !lastFetchedAt || Date.now() - lastFetchedAt > STALE_MS || topLevel.length !== lastProjectCount;
+    const stale =
+      !lastFetchedAt ||
+      Date.now() - lastFetchedAt > STALE_MS ||
+      topLevel.length !== lastProjectCount;
     if (stale && !loading) fetchAllPRs(projects);
   }, [active, projects, prs.length, lastFetchedAt, lastProjectCount, loading, fetchAllPRs, clear]);
 
   const groups = useMemo(() => groupPRs(prs), [prs]);
   const metrics = useMemo(() => computeMetrics(prs), [prs]);
 
-  const isEmpty = groups.open.length === 0 && groups.draft.length === 0 && groups.merged.length === 0;
+  const isEmpty =
+    groups.open.length === 0 && groups.draft.length === 0 && groups.merged.length === 0;
 
   return { groups, metrics, loading, error, isEmpty };
 }
