@@ -41,6 +41,7 @@ export interface CreateDaemonSessionInput<TResult = unknown> {
   cwd?: string;
   label: string;
   origin?: string;
+  matchKey?: string;
   ttlMs?: number;
   now?: number;
   htmlContent?: string;
@@ -172,6 +173,7 @@ export class DaemonSessionStore {
       label: input.label,
       ...(input.cwd && { cwd: input.cwd }),
       ...(input.origin && { origin: input.origin }),
+      ...(input.matchKey && { matchKey: input.matchKey }),
       createdAt: iso(now),
       updatedAt: iso(now),
       ...(input.ttlMs !== undefined && { expiresAt: iso(now + input.ttlMs) }),

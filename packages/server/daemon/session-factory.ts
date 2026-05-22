@@ -24,7 +24,8 @@ import type {
   PluginReviewRequest,
 } from "@plannotator/shared/plugin-protocol";
 import { normalizeGoalSetupBundle } from "@plannotator/shared/goal-setup";
-import { createPlannotatorSession } from "../index";
+import { createPlannotatorSession, type PlannotatorSession } from "../index";
+import { generateSlug } from "../storage";
 import { createAnnotateSession } from "../annotate";
 import { createGoalSetupSession } from "../goal-setup";
 import { createReviewSession } from "../review";
@@ -107,6 +108,7 @@ function registerSessionDecision<TResult, TStored = TResult>(
   const disposed = new Promise<never>((_, reject) => {
     releaseDecisionWait = () => reject(new Error("Session disposed."));
   });
+  disposed.catch(() => {});
 
   void Promise.race([waitForDecision(), disposed])
     .then((result) => context.store.complete(id, mapResult(result)))
@@ -120,6 +122,42 @@ function registerSessionDecision<TResult, TStored = TResult>(
     releaseDecisionWait?.();
     releaseDecisionWait = undefined;
     return dispose();
+  };
+}
+
+function registerPersistentDecision(
+  context: DaemonFetchContext,
+  id: string,
+  session: { waitForDecision: () => Promise<{ approved: boolean; [key: string]: unknown }>; dispose: () => void | Promise<void> },
+): () => void | Promise<void> {
+  let releaseDecisionWait: (() => void) | undefined;
+  const disposed = new Promise<never>((_, reject) => {
+    releaseDecisionWait = () => reject(new Error("Session disposed."));
+  });
+  disposed.catch(() => {});
+
+  const decisionLoop = async () => {
+    while (true) {
+      const result = await Promise.race([session.waitForDecision(), disposed]);
+      if (result.approved) {
+        context.store.complete(id, result);
+        return;
+      }
+      context.store.suspend(id, result);
+    }
+  };
+
+  void decisionLoop().catch((err) => {
+    const record = context.store.get(id);
+    if (record && record.status === "active" || record?.status === "awaiting-resubmission") {
+      context.store.fail(id, err instanceof Error ? err.message : String(err));
+    }
+  });
+
+  return () => {
+    releaseDecisionWait?.();
+    releaseDecisionWait = undefined;
+    return session.dispose();
   };
 }
 
@@ -482,6 +520,19 @@ async function prepareReviewInput(request: PluginReviewRequest, cwd: string) {
 }
 
 export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions) {
+  const sessionRefs = new Map<string, { matchKey: string; session: PlannotatorSession }>();
+
+  function findAwaitingSession(store: DaemonFetchContext["store"], matchKey: string) {
+    for (const [sessionId, ref] of sessionRefs) {
+      const record = store.get(sessionId);
+      if (!record) { sessionRefs.delete(sessionId); continue; }
+      if (record.status !== "awaiting-resubmission") continue;
+      if (record.matchKey !== matchKey) continue;
+      return { record, session: ref.session };
+    }
+    return null;
+  }
+
   return async function createSession(
     createRequest: DaemonCreateSessionRequest,
     context: DaemonFetchContext,
@@ -513,6 +564,15 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
 
     if (request.action === "plan") {
       const plan = await readPlanRequest(request, cwd);
+      const matchKey = `plan:${project}:${generateSlug(plan)}`;
+
+      const existing = findAwaitingSession(context.store, matchKey);
+      if (existing && existing.session.updateContent) {
+        existing.session.updateContent(plan);
+        context.store.reactivate(existing.record.id);
+        return existing.record;
+      }
+
       const remoteShare = context.endpoint.isRemote && sharingEnabled
         ? await createRemoteShareNotice(plan, shareBaseUrl, "review the plan", "plan only").catch(() => undefined)
         : undefined;
@@ -538,12 +598,14 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
         cwd,
         label: branch ? `plugin-plan-${request.origin}-${project}-${branch}` : `plugin-plan-${request.origin}-${project}`,
         origin: request.origin,
+        matchKey,
         ttlMs,
         handleRequest: session.handleRequest,
-        dispose: registerSessionDecision(context, id, () => session.waitForDecision(), () => session.dispose()),
+        dispose: registerPersistentDecision(context, id, session),
         remoteShare,
-        snapshot: () => ({ plan, origin: request.origin }),
+        snapshot: session.getSnapshot ?? (() => ({ plan, origin: request.origin })),
       });
+      sessionRefs.set(id, { matchKey, session });
       return record;
     }
 
