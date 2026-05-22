@@ -149,7 +149,7 @@ function registerPersistentDecision(
 
   void decisionLoop().catch((err) => {
     const record = context.store.get(id);
-    if (record && record.status === "active" || record?.status === "awaiting-resubmission") {
+    if (record && (record.status === "active" || record.status === "awaiting-resubmission")) {
       context.store.fail(id, err instanceof Error ? err.message : String(err));
     }
   });
@@ -525,7 +525,10 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
   function findAwaitingSession(store: DaemonFetchContext["store"], matchKey: string) {
     for (const [sessionId, ref] of sessionRefs) {
       const record = store.get(sessionId);
-      if (!record) { sessionRefs.delete(sessionId); continue; }
+      if (!record || record.status === "completed" || record.status === "expired" || record.status === "failed" || record.status === "cancelled") {
+        sessionRefs.delete(sessionId);
+        continue;
+      }
       if (record.status !== "awaiting-resubmission") continue;
       if (record.matchKey !== matchKey) continue;
       return { record, session: ref.session };
