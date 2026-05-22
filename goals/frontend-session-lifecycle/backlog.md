@@ -131,3 +131,56 @@ The sidebar session hierarchy needs rethinking. Currently grouped by mode (plan,
 **Size:** Small
 
 The `AddProjectDialog` hand-rolls its own modal with `fixed inset-0 z-50`, manual backdrop click, and manual Escape handling. Once the shadcn Dialog component exists (created for the unified settings dialog), this should be migrated to use it. The search/typeahead content stays the same — just swap the outer modal wrapper. Eliminates having two different modal implementations in the app.
+
+---
+
+## GitLab custom domain detection
+
+**Priority:** Medium
+**Size:** Medium
+
+The daemon's PR listing endpoint (`packages/server/daemon/server.ts:671`) determines GitHub vs GitLab by checking `host.toLowerCase().includes("gitlab")`. Self-hosted GitLab instances on custom domains (e.g. `code.company.com`) are misidentified as GitHub, so `gh` is invoked instead of `glab`, and PR listing fails silently.
+
+Needs a more robust detection strategy — either try `glab auth status` first, examine the remote URL structure, or let the user configure platform per-project.
+
+---
+
+## PR stack splitting is order-dependent
+
+**Priority:** Low
+**Size:** Medium
+
+The `buildStacks` function in `LandingPage.tsx` walks PR chains by following `baseBranch` links. The algorithm processes PRs in API return order, which means if a middle PR is encountered before its descendants, the chain can be split incorrectly. Multi-PR stacks (3+) may display as loose PRs depending on timing.
+
+Fix: build chains from leaves upward (start with PRs whose head branch isn't anyone else's base), or use a proper topological sort.
+
+---
+
+## GitLab detailed PRs returns empty
+
+**Priority:** Medium
+**Size:** Medium
+
+`packages/shared/pr-provider.ts:129` returns an empty array for GitLab in `fetchPRDetailedList()`. The git dashboard shows "No pull requests found" for GitLab repos even when they have open MRs. The `glab mr list --json` command supports the same fields we need — someone just needs to implement `fetchGlMRDetailedList` following the GitHub pattern.
+
+---
+
+## configStore Zustand migration
+
+**Priority:** Medium
+**Size:** Medium
+
+The custom `configStore` in `packages/ui/config/configStore.ts` is a hand-rolled pub-sub singleton. It works but doesn't integrate with the Zustand stores used elsewhere in the frontend. Migrating it to Zustand would unify state management and enable selector-based subscriptions instead of the current broadcast-to-all-listeners pattern.
+
+Scoped in `goals/performance/backlog/configstore-zustand-migration.md`.
+
+---
+
+## Global keyboard registry cleanup
+
+**Priority:** Medium
+**Size:** Large
+
+10+ raw `window.addEventListener('keydown', ...)` handlers across both app surfaces bypass the keyboard shortcut registry that was built in PR #652. These should be consolidated into the registry for consistent handling, conflict detection, and the help modal.
+
+Scoped in `goals/performance/backlog/global-keyboard-registry.md`.
