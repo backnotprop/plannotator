@@ -4,14 +4,7 @@ import { useRouter } from "@tanstack/react-router";
 import { daemonApiClient, type DaemonApiClient } from "../api/client";
 import { connectDaemonEvents, type DaemonEventStreamController } from "./event-stream";
 import { useDaemonEventStore } from "./event-store";
-
-const MODE_LABELS: Record<string, string> = {
-  plan: "Plan Review",
-  review: "Code Review",
-  annotate: "Annotate",
-  archive: "Archive",
-  "goal-setup": "Goal Setup",
-};
+import { getSessionModeMeta, formatSessionLabel } from "../../shared/session-meta";
 
 export function useDaemonEvents(client: DaemonApiClient = daemonApiClient, enabled = true) {
   const applyEvent = useDaemonEventStore((state) => state.applyEvent);
@@ -22,17 +15,15 @@ export function useDaemonEvents(client: DaemonApiClient = daemonApiClient, enabl
 
   const handleSessionNotify = useCallback(
     (session: { id: string; mode: string; project: string; label: string }) => {
-      const modeLabel = MODE_LABELS[session.mode] ?? session.mode;
-      const cleanLabel = session.label
-        .replace(/^plugin-(plan|review|annotate|archive)-/, "")
-        .replace(/^(claude-code|opencode|pi|plannotator-frontend|codex|copilot-cli|gemini-cli)-/, "")
-        .replace(/^goal-setup-(interview|facts)-/, "");
-      toast(`${modeLabel} — ${session.project}`, {
-        description: cleanLabel !== session.project ? cleanLabel : undefined,
+      const meta = getSessionModeMeta(session.mode);
+      const displayLabel = formatSessionLabel(session.label, session.mode);
+      toast(`${meta.label} — ${session.project}`, {
+        description: displayLabel !== session.project ? displayLabel : undefined,
         duration: 8000,
         action: {
           label: "Open",
-          onClick: () => router.navigate({ to: "/s/$sessionId", params: { sessionId: session.id } }),
+          onClick: () =>
+            router.navigate({ to: "/s/$sessionId", params: { sessionId: session.id } }),
         },
       });
     },

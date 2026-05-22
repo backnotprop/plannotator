@@ -240,7 +240,9 @@ function ProjectRow({
     >
       <Folder className="size-3.5 shrink-0" />
       <span className="font-medium">{project.name}</span>
-      <span className="ml-auto truncate text-[11px] text-muted-foreground">{project.cwd.replace(/^\/Users\/[^/]+/, "~")}</span>
+      <span className="ml-auto truncate text-[11px] text-muted-foreground">
+        {project.cwd.replace(/^\/Users\/[^/]+/, "~")}
+      </span>
     </button>
   );
 }
@@ -269,11 +271,7 @@ function DirectoryRow({
         active ? "bg-primary/10 text-foreground" : "text-foreground hover:bg-surface-1",
       )}
     >
-      <button
-        type="button"
-        onClick={onSelect}
-        className="flex flex-1 items-center gap-2 text-left"
-      >
+      <button type="button" onClick={onSelect} className="flex flex-1 items-center gap-2 text-left">
         <Folder className="size-3.5 shrink-0" />
         <span className="font-medium">{dir.name}</span>
       </button>

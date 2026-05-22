@@ -10,12 +10,14 @@ export interface VisitedSession {
 
 export interface AppState {
   addProjectOpen: boolean;
+  settingsOpen: boolean;
   activeSessionId: string | null;
   visitedSessions: Record<string, VisitedSession>;
 }
 
 export interface AppActions {
   setAddProjectOpen(open: boolean): void;
+  setSettingsOpen(open: boolean): void;
   activateSession(sessionId: string, bootstrap: SessionBootstrap): void;
   deactivateSession(): void;
   removeSession(sessionId: string): void;
@@ -25,6 +27,7 @@ export type AppStore = AppState & AppActions;
 
 const initialState: AppState = {
   addProjectOpen: false,
+  settingsOpen: false,
   activeSessionId: null,
   visitedSessions: {},
 };
@@ -37,6 +40,11 @@ export function createAppStore(initial: Partial<AppState> = {}) {
       setAddProjectOpen(open) {
         set((state) => {
           state.addProjectOpen = open;
+        });
+      },
+      setSettingsOpen(open) {
+        set((state) => {
+          state.settingsOpen = open;
         });
       },
       activateSession(sessionId, bootstrap) {

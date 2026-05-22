@@ -30,7 +30,7 @@ import { createGoalSetupSession } from "../goal-setup";
 import { createReviewSession } from "../review";
 import { detectProjectName } from "../project";
 import { createRemoteShareNotice } from "../share-url";
-import { registerProject } from "./project-registry";
+import { addProject } from "./project-registry";
 import {
   gitRuntime,
   prepareLocalReviewDiff,
@@ -497,7 +497,7 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
     } catch {}
     try {
       const tmp = tmpdir();
-      if (!cwd.startsWith(tmp)) registerProject(project, cwd);
+      if (!cwd.startsWith(tmp)) addProject(cwd, project);
     } catch {}
     const id = createDaemonSessionId();
     const url = makeSessionUrl(context.endpoint.baseUrl, id);

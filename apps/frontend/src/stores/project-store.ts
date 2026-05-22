@@ -18,7 +18,7 @@ export interface ProjectStoreActions {
     name?: string,
     client?: DaemonApiClient,
   ): Promise<ProjectEntry | undefined>;
-  removeProject(name: string, client?: DaemonApiClient): Promise<boolean>;
+  removeProject(cwd: string, clean?: boolean, client?: DaemonApiClient): Promise<boolean>;
 }
 
 export type ProjectStore = ProjectStoreState & ProjectStoreActions;
@@ -79,8 +79,8 @@ export function createProjectStore(initial: Partial<ProjectStoreState> = {}) {
         return entry;
       },
 
-      async removeProject(name, client = daemonApiClient) {
-        const result = await client.removeProject(name);
+      async removeProject(cwd, clean, client = daemonApiClient) {
+        const result = await client.removeProject(cwd, clean);
         if (!result.ok) {
           set((state) => {
             state.error = result.error.message;
@@ -88,7 +88,7 @@ export function createProjectStore(initial: Partial<ProjectStoreState> = {}) {
           return false;
         }
         set((state) => {
-          state.projects = state.projects.filter((p) => p.name !== name);
+          state.projects = state.projects.filter((p) => p.cwd !== cwd && p.parentCwd !== cwd);
         });
         return true;
       },

@@ -4,6 +4,12 @@ declare global {
   }
 }
 
+let globalFetchBase: string | undefined;
+
+export function setGlobalFetchBase(base: string | undefined): void {
+  globalFetchBase = base;
+}
+
 function normalizeBase(base: string | undefined): string {
   if (!base) return "/api";
   const trimmed = base.trim();
@@ -19,7 +25,10 @@ function normalizePath(path: string): string {
 
 export function getApiBase(): string {
   if (typeof window === "undefined") return "/api";
-  return normalizeBase(window.__PLANNOTATOR_API_BASE__);
+  const sessionBase = window.__PLANNOTATOR_API_BASE__;
+  if (sessionBase) return normalizeBase(sessionBase);
+  if (globalFetchBase) return normalizeBase(globalFetchBase);
+  return "/api";
 }
 
 export function apiPath(path: string): string {

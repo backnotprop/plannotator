@@ -21,7 +21,7 @@ import { getCallbackConfig, CallbackAction, executeCallback } from '@plannotator
 import { useAgents } from '@plannotator/ui/hooks/useAgents';
 import { useActiveSection } from '@plannotator/ui/hooks/useActiveSection';
 import { storage } from '@plannotator/ui/utils/storage';
-import { configStore } from '@plannotator/ui/config';
+import { configStore, useConfigValue } from '@plannotator/ui/config';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { CompletionBanner } from '@plannotator/ui/components/CompletionBanner';
 import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
@@ -98,9 +98,26 @@ type NoteAutoSaveResults = {
   octarine?: boolean;
 };
 
-const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }> = ({ __embedded, headerLeft }) => {
+function useSessionVisible(rootRef: React.RefObject<HTMLElement | null>): boolean {
+  const [visible, setVisible] = useState(true);
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const container = el.parentElement;
+    if (!container) return;
+    const check = () => setVisible(getComputedStyle(el).visibility !== 'hidden');
+    check();
+    const observer = new MutationObserver(check);
+    observer.observe(container, { attributes: true, attributeFilter: ['style'] });
+    return () => observer.disconnect();
+  }, []);
+  return visible;
+}
+
+const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpenSettings?: () => void }> = ({ __embedded, headerLeft, onOpenSettings: externalOpenSettings }) => {
   const fetch = useSessionFetch();
   const rootRef = useRef<HTMLDivElement>(null);
+  const sessionVisible = useSessionVisible(rootRef);
   const isVisible = useCallback(() => {
     if (!rootRef.current) return true;
     return getComputedStyle(rootRef.current).visibility !== 'hidden';
@@ -125,10 +142,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }> = ({
   const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<EditorMode>(getEditorMode);
   const [inputMethod, setInputMethod] = useState<InputMethod>(getInputMethod);
-  const [taterMode, setTaterMode] = useState(() => {
-    const stored = storage.getItem('plannotator-tater-mode');
-    return stored === 'true';
-  });
+  const taterMode = useConfigValue('taterMode');
   const [uiPrefs, setUiPrefs] = useState(() => getUIPreferences());
 
   // Plan-area width (inside the OverlayScrollArea, after sidebar/panel
@@ -184,13 +198,14 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }> = ({
   const goalSetupMode = goalSetupBundle !== null;
 
   useEffect(() => {
-    const prev = document.title;
+    if (!sessionVisible) return;
     document.title = repoInfo ? `${repoInfo.display} · Plannotator` : "Plannotator";
-    return () => { document.title = prev; };
-  }, [repoInfo]);
+  }, [repoInfo, sessionVisible]);
 
   const [initialExportTab, setInitialExportTab] = useState<'share' | 'annotations' | 'notes'>();
   const [isPlanDiffActive, setIsPlanDiffActive] = useState(false);
+  const togglePlanDiff = useCallback(() => setIsPlanDiffActive(v => !v), []);
+  const closePlanDiff = useCallback(() => setIsPlanDiffActive(false), []);
   const [planDiffMode, setPlanDiffMode] = useState<PlanDiffMode>('clean');
   const [previousPlan, setPreviousPlan] = useState<string | null>(null);
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
@@ -559,6 +574,13 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }> = ({
     : annotateSource === 'message' ? 'message'
     : 'plan';
 
+  const linkedDocInfo = useMemo(() => {
+    if (!linkedDocHook.isActive) return null;
+    const dir = fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath);
+    const label = dir?.isVault ? 'Vault File' : fileBrowser.activeFile ? 'File' : undefined;
+    return { filepath: linkedDocHook.filepath!, onBack: handleLinkedDocBack, label, backLabel };
+  }, [linkedDocHook.isActive, linkedDocHook.filepath, handleLinkedDocBack, fileBrowser.dirs, fileBrowser.activeDirPath, fileBrowser.activeFile, backLabel]);
+
   // Track active section for TOC highlighting
   const headingCount = useMemo(() => blocks.filter(b => b.type === 'heading').length, [blocks]);
   const activeSection = useActiveSection(containerRef, headingCount, scrollViewport);
@@ -715,8 +737,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }> = ({
   }, [pendingSharedAnnotations, clearPendingSharedAnnotations, resetExternalHighlights]);
 
   const handleTaterModeChange = useCallback((enabled: boolean) => {
-    setTaterMode(enabled);
-    storage.setItem('plannotator-tater-mode', String(enabled));
+    configStore.set('taterMode', enabled);
   }, []);
 
   const handleEditorModeChange = (mode: EditorMode) => {
@@ -1668,7 +1689,10 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }> = ({
   const handleHeaderDownloadAnnotations = useCallback(() => headerHandlersRef.current.handleDownloadAnnotations(), []);
   const handleHeaderCopyAgentInstructions = useCallback(() => headerHandlersRef.current.handleCopyAgentInstructions(), []);
   const handleHeaderCopyShareLink = useCallback(() => headerHandlersRef.current.handleCopyShareLink(), []);
-  const handleOpenSettings = useCallback(() => setMobileSettingsOpen(true), []);
+  const handleOpenSettings = useCallback(() => {
+    if (externalOpenSettings) { externalOpenSettings(); return; }
+    setMobileSettingsOpen(true);
+  }, [externalOpenSettings]);
   const handleCloseSettings = useCallback(() => setMobileSettingsOpen(false), []);
   const handleOpenExport = useCallback(() => { setInitialExportTab(undefined); setShowExport(true); }, []);
   const handlePrint = useCallback(() => window.print(), []);
@@ -1719,6 +1743,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }> = ({
       <div ref={rootRef} data-print-region="root" className={`${__embedded ? 'h-full' : 'h-screen'} flex flex-col bg-background overflow-hidden`}>
         <AppHeader
           headerLeft={headerLeft}
+          skipBuiltInSettings={!!externalOpenSettings}
           isApiMode={isApiMode}
           annotateMode={annotateMode}
           archiveMode={archive.archiveMode}
@@ -1884,10 +1909,11 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }> = ({
                   planDiffStats={planDiff.diffStats}
                   isPlanDiffActive={isPlanDiffActive}
                   hasPreviousVersion={planDiff.hasPreviousVersion}
-                  onPlanDiffToggle={() => setIsPlanDiffActive(!isPlanDiffActive)}
+                  onPlanDiffToggle={togglePlanDiff}
                   archiveInfo={archive.currentInfo}
                   maxWidth={annotateReaderMaxWidth}
                   remountToken={linkedDocHook.isActive ? `doc:${linkedDocHook.filepath}` : 'plan'}
+                  containerRef={rootRef}
                 />
               )}
 
@@ -1924,7 +1950,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }> = ({
                     diffStats={planDiff.diffStats}
                     diffMode={planDiffMode}
                     onDiffModeChange={setPlanDiffMode}
-                    onPlanDiffToggle={() => setIsPlanDiffActive(false)}
+                    onPlanDiffToggle={closePlanDiff}
                     repoInfo={repoInfo}
                     baseVersionLabel={planDiff.diffBaseVersion != null ? `v${planDiff.diffBaseVersion}` : undefined}
                     baseVersion={planDiff.diffBaseVersion ?? undefined}
@@ -2016,13 +2042,13 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }> = ({
                     stickyActions={uiPrefs.stickyActionsEnabled}
                     planDiffStats={linkedDocHook.isActive ? null : planDiff.diffStats}
                     isPlanDiffActive={isPlanDiffActive}
-                    onPlanDiffToggle={() => setIsPlanDiffActive(!isPlanDiffActive)}
+                    onPlanDiffToggle={togglePlanDiff}
                     hasPreviousVersion={!linkedDocHook.isActive && planDiff.hasPreviousVersion}
                     showDemoBadge={!isApiMode && !isLoadingShared && !isSharedSession}
                     maxWidth={annotateReaderMaxWidth}
                     onOpenLinkedDoc={handleOpenLinkedDoc}
                     onOpenCodeFile={codeFilePopout.open}
-                    linkedDocInfo={linkedDocHook.isActive ? { filepath: linkedDocHook.filepath!, onBack: handleLinkedDocBack, label: fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath)?.isVault ? 'Vault File' : fileBrowser.activeFile ? 'File' : undefined, backLabel } : null}
+                    linkedDocInfo={linkedDocInfo}
                     imageBaseDir={imageBaseDir}
                     codePathBaseDir={activeDocBaseDir}
                     copyLabel={annotateSource === 'message' ? 'Copy message' : annotateSource === 'file' || annotateSource === 'folder' ? 'Copy file' : undefined}
@@ -2262,6 +2288,6 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }> = ({
 
 export default App;
 
-export function PlanAppEmbedded({ headerLeft }: { headerLeft?: React.ReactNode }) {
-  return <App __embedded headerLeft={headerLeft} />;
+export function PlanAppEmbedded({ headerLeft, onOpenSettings }: { headerLeft?: React.ReactNode; onOpenSettings?: () => void }) {
+  return <App __embedded headerLeft={headerLeft} onOpenSettings={onOpenSettings} />;
 }

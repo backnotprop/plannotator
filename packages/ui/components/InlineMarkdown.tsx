@@ -120,7 +120,7 @@ const CodeFileLink: React.FC<{
   display: string;
   onOpenCodeFile: (path: string) => void;
   baseDir?: string;
-}> = ({ candidate, display, onOpenCodeFile, baseDir }) => {
+}> = React.memo(({ candidate, display, onOpenCodeFile, baseDir }) => {
   const fetch = useSessionFetch();
   const validation = useCodePathValidation();
   const gate = gateCodePath(candidate, validation);
@@ -241,7 +241,7 @@ const CodeFileLink: React.FC<{
       )}
     </>
   );
-};
+});
 
 const DANGEROUS_PROTOCOL = /^\s*(javascript|data|vbscript|file)\s*:/i;
 function sanitizeLinkUrl(url: string): string | null {
@@ -395,7 +395,7 @@ export const InlineMarkdown: React.FC<{
   imageBaseDir?: string;
   onImageClick?: (src: string, alt: string) => void;
   githubRepo?: string;
-}> = ({ text, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo }) => {
+}> = React.memo(({ text, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo }) => {
   const validation = useCodePathValidation();
   const parts: React.ReactNode[] = [];
   let remaining = text;
@@ -975,4 +975,4 @@ export const InlineMarkdown: React.FC<{
   }
 
   return <>{parts}</>;
-};
+});

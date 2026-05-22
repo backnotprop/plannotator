@@ -37,6 +37,7 @@ export function useCodeAnnotationDraft({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasMountedRef = useRef(false);
   const restoredRef = useRef(false);
+  const draftExistsOnServerRef = useRef(false);
 
   // Load and auto-restore draft on mount
   useEffect(() => {
@@ -52,6 +53,7 @@ export function useCodeAnnotationDraft({
         const restoredViewed = Array.isArray(data?.viewedFiles) ? data.viewedFiles : [];
         if (restoredAnnotations.length > 0 || restoredViewed.length > 0) {
           restoredRef.current = true;
+          draftExistsOnServerRef.current = true;
           onRestore(restoredAnnotations, restoredViewed);
         }
         hasMountedRef.current = true;
@@ -65,9 +67,18 @@ export function useCodeAnnotationDraft({
   useEffect(() => {
     if (!isApiMode || submitted) return;
     if (!hasMountedRef.current) return;
-    if (annotations.length === 0 && viewedFiles.size === 0) return;
 
     if (timerRef.current) clearTimeout(timerRef.current);
+
+    if (annotations.length === 0 && viewedFiles.size === 0) {
+      if (draftExistsOnServerRef.current) {
+        timerRef.current = setTimeout(() => {
+          fetch('/api/draft', { method: 'DELETE' }).catch(() => {});
+          draftExistsOnServerRef.current = false;
+        }, DEBOUNCE_MS);
+      }
+      return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+    }
 
     timerRef.current = setTimeout(() => {
       const payload: DraftData = {
@@ -80,7 +91,7 @@ export function useCodeAnnotationDraft({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-      }).catch(() => {});
+      }).then(() => { draftExistsOnServerRef.current = true; }).catch(() => {});
     }, DEBOUNCE_MS);
 
     return () => {

@@ -122,3 +122,12 @@ The sidebar session hierarchy needs rethinking. Currently grouped by mode (plan,
 - No visual distinction between active and completed sessions
 
 **Needs design exploration before implementation.** Tied to #3 and #4.
+
+---
+
+## Migrate AddProjectDialog to Radix Dialog primitive
+
+**Priority:** Low — cosmetic consistency
+**Size:** Small
+
+The `AddProjectDialog` hand-rolls its own modal with `fixed inset-0 z-50`, manual backdrop click, and manual Escape handling. Once the shadcn Dialog component exists (created for the unified settings dialog), this should be migrated to use it. The search/typeahead content stays the same — just swap the outer modal wrapper. Eliminates having two different modal implementations in the app.

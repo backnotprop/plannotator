@@ -1013,18 +1013,18 @@ diffs-container {
 }
 
 /* Font size override — only takes effect when --diff-font-size-override is set on :root */
-:root[style*="--diff-font-size-override"] .review-comment-markdown .inline-code,
-:root[style*="--diff-font-size-override"] .review-comment-body .inline-code,
-:root[style*="--diff-font-size-override"] .review-comment-markdown .inline-code-block,
-:root[style*="--diff-font-size-override"] .review-comment-body .inline-code-block,
-:root[style*="--diff-font-size-override"] .review-comment-markdown .inline-code-block code,
-:root[style*="--diff-font-size-override"] .review-comment-body .inline-code-block code,
-:root[style*="--diff-font-size-override"] .export-code-block,
-:root[style*="--diff-font-size-override"] .suggestion-block-code code,
-:root[style*="--diff-font-size-override"] .suggestion-modal-original,
-:root[style*="--diff-font-size-override"] .suggestion-modal-original code,
-:root[style*="--diff-font-size-override"] .suggestion-diff,
-:root[style*="--diff-font-size-override"] .ai-markdown code {
+.has-font-size-override .review-comment-markdown .inline-code,
+.has-font-size-override .review-comment-body .inline-code,
+.has-font-size-override .review-comment-markdown .inline-code-block,
+.has-font-size-override .review-comment-body .inline-code-block,
+.has-font-size-override .review-comment-markdown .inline-code-block code,
+.has-font-size-override .review-comment-body .inline-code-block code,
+.has-font-size-override .export-code-block,
+.has-font-size-override .suggestion-block-code code,
+.has-font-size-override .suggestion-modal-original,
+.has-font-size-override .suggestion-modal-original code,
+.has-font-size-override .suggestion-diff,
+.has-font-size-override .ai-markdown code {
   font-size: var(--diff-font-size-override) !important;
 }
 

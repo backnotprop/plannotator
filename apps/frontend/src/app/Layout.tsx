@@ -4,9 +4,15 @@ import { Toaster } from "sonner";
 import { SidebarProvider, useSidebar } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppSidebar } from "../components/sidebar/AppSidebar";
+import { SidebarPeek } from "../components/sidebar/SidebarPeek";
 import { AddProjectDialog } from "../components/landing/AddProjectDialog";
+import { AppSettingsDialog } from "../components/settings/AppSettingsDialog";
 import { SessionSurface } from "../components/sessions/SessionSurface";
+import { appStore } from "../stores/app-store";
+import { setGlobalFetchBase } from "@plannotator/ui/utils/api";
 import { useDaemonEvents } from "../daemon/events/use-daemon-events";
+
+setGlobalFetchBase("/daemon");
 import { projectStore } from "../stores/project-store";
 import { useAppStore } from "../stores/app-store";
 
@@ -31,11 +37,22 @@ function LayoutContent() {
   }, [reportActiveSession, isOnSession, activeSessionId]);
   const showLanding = !isOnSession;
 
-  const openAddProject = useCallback(() => setAddProjectOpen(true), [setAddProjectOpen]);
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === ",") {
+        e.preventDefault();
+        const current = appStore.getState().settingsOpen;
+        appStore.getState().setSettingsOpen(!current);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   return (
     <>
-      <AppSidebar onAddProject={openAddProject} />
+      <AppSidebar />
+      <SidebarPeek />
       <main className="relative flex-1 overflow-hidden">
         <div
           className="absolute inset-0"
@@ -47,20 +64,26 @@ function LayoutContent() {
           <Outlet />
         </div>
 
-        {Object.values(visitedSessions).map(({ sessionId, bootstrap }) => (
-          <div
-            key={sessionId}
-            className={`absolute inset-0 overflow-hidden ${sidebarOpen ? "rounded-tl-xl border-l border-border/50" : ""}`}
-            style={{
-              visibility: sessionId === activeSessionId && isOnSession ? "visible" : "hidden",
-              zIndex: sessionId === activeSessionId && isOnSession ? 1 : 0,
-            }}
-          >
-            <SessionSurface bootstrap={bootstrap} />
-          </div>
-        ))}
+        {Object.values(visitedSessions).map(({ sessionId, bootstrap }) => {
+          const isActive = sessionId === activeSessionId && isOnSession;
+          return (
+            <div
+              key={sessionId}
+              className={`absolute inset-0 overflow-hidden ${sidebarOpen ? "rounded-tl-xl border-l border-border/50" : ""}`}
+              style={{
+                visibility: isActive ? "visible" : "hidden",
+                contentVisibility: isActive ? "visible" : "hidden",
+                containIntrinsicSize: isActive ? undefined : "auto 100vh",
+                zIndex: isActive ? 1 : 0,
+              }}
+            >
+              <SessionSurface bootstrap={bootstrap} />
+            </div>
+          );
+        })}
       </main>
       <AddProjectDialog open={addProjectOpen} onOpenChange={setAddProjectOpen} />
+      <AppSettingsDialog />
       <Toaster
         position="bottom-right"
         toastOptions={{

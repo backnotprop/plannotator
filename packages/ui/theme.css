@@ -313,6 +313,12 @@ html:not(.transitions-ready) * {
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   transition-duration: 150ms;
 }
+/* Skip color transitions on hidden keep-alive surfaces for performance.
+   With multiple sessions mounted via visibility:hidden, animating
+   thousands of elements on theme change causes visible lag. */
+[style*="visibility: hidden"] * {
+  transition-duration: 0s !important;
+}
 
 /* Focus states */
 :focus-visible {

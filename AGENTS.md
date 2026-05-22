@@ -235,6 +235,16 @@ The daemon is the single long-running Bun server used by normal plan/review/anno
 | `/daemon/sessions/:id/cancel` | POST | Cancel a session and dispose its resources |
 | `/daemon/sessions/:id` | DELETE | Delete a session record |
 | `/daemon/shutdown` | POST | Ask the daemon to stop |
+| `/daemon/config` | GET | Read global config (`~/.plannotator/config.json`) |
+| `/daemon/config` | POST | Write global config keys (allowlisted: `displayName`, `pfmReminder`, `diffOptions`, `conventionalComments`, `conventionalLabels`) |
+| `/daemon/git/user` | GET | Return git user name from `git config user.name` |
+| `/daemon/vaults` | GET | Detect available Obsidian vaults |
+| `/daemon/obsidian/vaults` | GET | Alias for `/daemon/vaults` |
+| `/daemon/hooks/status` | GET | Return PFM reminder and improvement hook status |
+| `/daemon/projects` | DELETE | Remove a project by `?cwd=` (optional `?clean=1` to cancel active sessions) |
+| `/daemon/projects/prs` | GET | List open PRs for a project (`?cwd=`) |
+| `/daemon/projects/prs/detailed` | GET | List PRs with review metadata for dashboard (`?cwd=`) |
+| `/daemon/fs/list` | GET | List directory contents (`?path=`) |
 | `/daemon/ws` | WebSocket | Multiplex daemon lifecycle events, session-scoped external annotation events, agent job events, and correlated session actions |
 | `/s/:id` | GET | Serve the browser HTML for a session |
 | `/s/:id/api/...` | Any | Route browser API requests to that session's plan/review/annotate handler |
