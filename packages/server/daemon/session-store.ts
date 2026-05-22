@@ -19,6 +19,7 @@ export interface DaemonSessionRecord<TResult = unknown> {
   cwd?: string;
   label: string;
   origin?: string;
+  matchKey?: string;
   createdAt: string;
   updatedAt: string;
   expiresAt?: string;
@@ -130,6 +131,7 @@ const TERMINAL_STATUSES = new Set<DaemonSessionStatus>([
   "failed",
 ]);
 const TERMINAL_SESSION_TTL_MS = 60_000;
+const AWAITING_RESUBMISSION_TTL_MS = 10 * 60_000;
 
 function iso(ms: number): string {
   return new Date(ms).toISOString();
@@ -250,6 +252,31 @@ export class DaemonSessionStore {
     this.emit("session-updated", record);
     void this.disposeResources(record);
     this.releaseRoutingPayloads(record);
+    return record;
+  }
+
+  suspend<TResult = unknown>(id: string, result: TResult, ttlMs = AWAITING_RESUBMISSION_TTL_MS): DaemonSessionRecord<TResult> | undefined {
+    const record = this.sessions.get(id) as DaemonSessionRecord<TResult> | undefined;
+    if (!record || record.status !== "active") return record;
+    record.status = "awaiting-resubmission";
+    record.result = result;
+    const now = this.now();
+    record.updatedAt = iso(now);
+    record.expiresAt = iso(now + ttlMs);
+    this.resolveWaiters(record);
+    this.emit("session-updated", record);
+    return record;
+  }
+
+  reactivate(id: string): DaemonSessionRecord | undefined {
+    const record = this.sessions.get(id);
+    if (!record || record.status !== "awaiting-resubmission") return record;
+    record.status = "active";
+    record.result = undefined;
+    const now = this.now();
+    record.updatedAt = iso(now);
+    record.expiresAt = undefined;
+    this.emit("session-updated", record);
     return record;
   }
 

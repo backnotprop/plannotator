@@ -1,7 +1,7 @@
 import type { PluginRequest, PluginSessionMode } from "./plugin-protocol";
 
 export const PLANNOTATOR_DAEMON_PROTOCOL = "plannotator-daemon";
-export const PLANNOTATOR_DAEMON_PROTOCOL_VERSION = 1;
+export const PLANNOTATOR_DAEMON_PROTOCOL_VERSION = 2;
 export const PLANNOTATOR_DAEMON_MIN_CLIENT_VERSION = 1;
 
 export const PLANNOTATOR_DAEMON_FEATURES = [
@@ -24,6 +24,7 @@ export const PLANNOTATOR_DAEMON_EVENT_FAMILIES = [
   "daemon",
   "external-annotations",
   "agent-jobs",
+  "session-revision",
 ] as const;
 
 export const PLANNOTATOR_DAEMON_SESSION_VIEWS = [
@@ -40,6 +41,7 @@ export type DaemonSessionMode = PluginSessionMode;
 export type DaemonSessionView = (typeof PLANNOTATOR_DAEMON_SESSION_VIEWS)[number];
 export type DaemonSessionStatus =
   | "active"
+  | "awaiting-resubmission"
   | "completed"
   | "cancelled"
   | "expired"
