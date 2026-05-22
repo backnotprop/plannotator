@@ -26,6 +26,7 @@ export {
 } from "./server/serverReview.js";
 export {
 	canStageFiles,
+	detectManagedVcs,
 	detectRemoteDefaultCompareTarget,
 	detectVcs,
 	getGitContext,

@@ -3,7 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { mkdir, writeFile, readFile, unlink } from "node:fs/promises";
 import type { DiffType } from "../vcs";
 import type { PRMetadata } from "../pr";
-import { getLocalDiffInstruction } from "../agent-review-message";
+import { buildWorkspacePromptContextLines, getLocalDiffInstruction, type WorkspaceReviewPromptContext } from "../agent-review-message";
 import type {
   CodeTourOutput,
   TourDiffAnchor,
@@ -288,9 +288,13 @@ callouts. The primary question is "what does this change do and why?" not
 export function buildTourUserMessage(
   patch: string,
   diffType: DiffType,
-  options?: { defaultBranch?: string; hasLocalAccess?: boolean; prDiffScope?: string },
+  options?: { defaultBranch?: string; hasLocalAccess?: boolean; prDiffScope?: string; workspace?: WorkspaceReviewPromptContext },
   prMetadata?: PRMetadata,
 ): string {
+  if (options?.workspace) {
+    return buildWorkspaceTourUserMessage(patch, options.workspace);
+  }
+
   if (prMetadata) {
     if (options?.prDiffScope === "full-stack") {
       return [
@@ -325,6 +329,21 @@ export function buildTourUserMessage(
 
   return [
     "Walk the reviewer through the following code changes as a guided tour.",
+    "",
+    "```diff",
+    patch,
+    "```",
+  ].join("\n");
+}
+
+function buildWorkspaceTourUserMessage(
+  patch: string,
+  workspace: WorkspaceReviewPromptContext,
+): string {
+  return [
+    "Walk the reviewer through the local workspace changes across multiple nested git repositories.",
+    "",
+    ...buildWorkspacePromptContextLines(workspace),
     "",
     "```diff",
     patch,
@@ -474,7 +493,7 @@ export interface TourSessionBuildCommandOptions {
   cwd: string;
   patch: string;
   diffType: DiffType;
-  options?: { defaultBranch?: string; hasLocalAccess?: boolean };
+  options?: { defaultBranch?: string; hasLocalAccess?: boolean; prDiffScope?: string; workspace?: WorkspaceReviewPromptContext };
   prMetadata?: PRMetadata;
   config?: Record<string, unknown>;
 }

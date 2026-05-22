@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildAgentReviewUserMessage, getLocalDiffInstruction } from "./agent-review-message";
+import { buildAgentReviewUserMessage, buildAgentReviewUserMessageForTarget, getLocalDiffInstruction } from "./agent-review-message";
 import { buildClaudeCommand } from "./claude-review";
 
 const patch = "diff --git a/src/large.ts b/src/large.ts\n+const value = 1;\n";
@@ -64,6 +64,27 @@ describe("buildAgentReviewUserMessage", () => {
     const message = buildAgentReviewUserMessage(patch, "p4-default");
 
     expect(message).toContain("Review the following code changes");
+    expect(message).toContain(patch);
+  });
+
+  test("builds workspace review instructions with prefixed paths and inline patch", () => {
+    const message = buildAgentReviewUserMessageForTarget({
+      kind: "workspace",
+      patch,
+      workspace: {
+        root: "/tmp/workspace",
+        repos: [
+          { label: "api", cwd: "/tmp/workspace/api", gitRef: "Uncommitted changes" },
+          { label: "web", cwd: "/tmp/workspace/web", gitRef: "Uncommitted changes" },
+        ],
+      },
+    });
+
+    expect(message).toContain("multiple nested git repositories");
+    expect(message).toContain("workspace root: /tmp/workspace");
+    expect(message).toContain("api/src/file.ts");
+    expect(message).toContain("- api/ -> /tmp/workspace/api");
+    expect(message).toContain("- web/ -> /tmp/workspace/web");
     expect(message).toContain(patch);
   });
 });

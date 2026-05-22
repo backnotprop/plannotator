@@ -8,6 +8,9 @@ import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import {
 	prepareLocalReviewDiff,
 	reviewRuntime,
+	detectManagedVcs,
+	getVcsContext,
+	runVcsDiff,
 	startAnnotateServer,
 	startPlanReviewServer,
 	startReviewServer,
@@ -26,6 +29,12 @@ import {
 import { parseRemoteUrl } from "./generated/repo.js";
 import { fetchRef, createWorktree, removeWorktree, ensureObjectAvailable } from "./generated/worktree.js";
 import { loadConfig, resolveDefaultDiffType } from "./generated/config.js";
+import {
+	aggregateWorkspacePatch,
+	buildWorkspaceRepoLabels,
+	discoverWorkspaceRepoPaths,
+	prefixWorkspacePatchPaths,
+} from "./generated/review-workspace-node.js";
 export { getLastAssistantMessageText } from "./assistant-message.js";
 
 export type AnnotateMode = "annotate" | "annotate-folder" | "annotate-last";
@@ -87,6 +96,67 @@ function openBrowserForServer(serverUrl: string, ctx: ExtensionContext): void {
 	} else if (!browserResult.opened) {
 		ctx.ui.notify(`Open this URL to review: ${serverUrl}`, "info");
 	}
+}
+
+interface WorkspaceRepoRuntimeState {
+	id: string;
+	label: string;
+	cwd: string;
+	selected: boolean;
+	source: "local";
+	platformUser: string | null;
+	diffType?: DiffType;
+	gitContext?: Awaited<ReturnType<typeof getVcsContext>>;
+	rawPatch: string;
+	gitRef: string;
+	error?: string;
+}
+
+interface LocalWorkspaceReview {
+	mode: "workspace";
+	root: string;
+	repos: WorkspaceRepoRuntimeState[];
+}
+
+async function buildLocalWorkspaceReview(root: string): Promise<LocalWorkspaceReview> {
+	const resolvedRoot = resolve(root);
+	const repoPaths = discoverWorkspaceRepoPaths(resolvedRoot);
+	const labels = buildWorkspaceRepoLabels(resolvedRoot, repoPaths);
+	const repos = await Promise.all(repoPaths.map(async (cwd, index) => {
+		const label = labels[index];
+		try {
+			const gitContext = await getVcsContext(cwd, "git");
+			const diffType: DiffType = "uncommitted";
+			const diff = await runVcsDiff(diffType, gitContext.defaultBranch, cwd);
+			return {
+				id: `repo-${index + 1}`,
+				label,
+				cwd,
+				selected: !!diff.patch.trim(),
+				source: "local" as const,
+				platformUser: null,
+				diffType,
+				gitContext,
+				rawPatch: prefixWorkspacePatchPaths(diff.patch, label),
+				gitRef: diff.label,
+				error: diff.error,
+			};
+		} catch (err) {
+			return {
+				id: `repo-${index + 1}`,
+				label,
+				cwd,
+				selected: false,
+				source: "local" as const,
+				platformUser: null,
+				rawPatch: "",
+				gitRef: "",
+				error: err instanceof Error ? err.message : String(err),
+			};
+		}
+	}));
+
+	return { mode: "workspace", root: resolvedRoot, repos };
 }
 
 async function openBrowserAndWait<T>(
@@ -232,6 +302,7 @@ export async function startCodeReviewBrowserSession(
 	let worktreeCleanup: (() => void | Promise<void>) | undefined;
 	let worktreePool: WorktreePool | undefined;
 	let exitHandler: (() => void) | undefined;
+	let workspace: LocalWorkspaceReview | undefined;
 
 	if (isPRMode && urlArg) {
 		// --- PR Review Mode ---
@@ -399,23 +470,37 @@ export async function startCodeReviewBrowserSession(
 		// --- Local Review Mode ---
 		const cwd = options.cwd ?? ctx.cwd;
 		const config = loadConfig();
-		const result = await prepareLocalReviewDiff({
-			cwd,
-			vcsType: options.vcsType,
-			requestedDiffType: options.diffType,
-			requestedBase: options.defaultBranch,
-			configuredDiffType: resolveDefaultDiffType(config),
-			hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
-		});
-		gitCtx = result.gitContext;
-		diffType = result.diffType;
-		rawPatch = result.rawPatch;
-		gitRef = result.gitRef;
-		diffError = result.error;
-		// Remember which base the initial diff was computed against so it can
-		// be forwarded to the server below. Only matters when the caller
-		// overrode the detected default; otherwise it matches gitCtx already.
-		initialBase = result.base;
+		const managedVcs = await detectManagedVcs(cwd, options.vcsType);
+		if (managedVcs) {
+			const result = await prepareLocalReviewDiff({
+				cwd,
+				vcsType: options.vcsType,
+				requestedDiffType: options.diffType,
+				requestedBase: options.defaultBranch,
+				configuredDiffType: resolveDefaultDiffType(config),
+				hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
+			});
+			gitCtx = result.gitContext;
+			diffType = result.diffType;
+			rawPatch = result.rawPatch;
+			gitRef = result.gitRef;
+			diffError = result.error;
+			// Remember which base the initial diff was computed against so it can
+			// be forwarded to the server below. Only matters when the caller
+			// overrode the detected default; otherwise it matches gitCtx already.
+			initialBase = result.base;
+		} else {
+			workspace = await buildLocalWorkspaceReview(cwd);
+			if (workspace.repos.length === 0) {
+				throw new Error("Not in a git repo and no nested git repositories were found.");
+			}
+			const aggregate = aggregateWorkspacePatch(workspace.repos);
+			rawPatch = aggregate.rawPatch;
+			gitRef = aggregate.gitRef;
+			diffError = aggregate.errors.length > 0 ? aggregate.errors.join("\n") : undefined;
+			diffType = "uncommitted";
+			agentCwd = workspace.root;
+		}
 	}
 
 	const server = await startReviewServer({
@@ -427,6 +512,7 @@ export async function startCodeReviewBrowserSession(
 		gitContext: gitCtx,
 		initialBase,
 		prMetadata,
+		workspace,
 		agentCwd,
 		worktreePool,
 		htmlContent: reviewHtmlContent,

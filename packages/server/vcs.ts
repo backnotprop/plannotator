@@ -46,6 +46,7 @@ const api = createVcsApi([
 
 export const {
   detectVcs,
+  detectManagedVcs,
   getVcsContext,
   detectRemoteDefaultCompareTarget,
   prepareLocalReviewDiff,
@@ -77,5 +78,4 @@ export {
   parseWorktreeDiffType,
   validateFilePath,
 } from "@plannotator/shared/vcs-core";
-
 

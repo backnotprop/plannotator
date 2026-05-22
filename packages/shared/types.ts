@@ -21,8 +21,6 @@ export type {
 } from "./review-core";
 
 export type {
-  WorkspaceRepoSource,
-  WorkspacePRCandidate,
   WorkspaceRepoState,
   WorkspaceReviewState,
 } from "./review-workspace";

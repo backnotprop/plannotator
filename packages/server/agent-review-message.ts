@@ -12,9 +12,79 @@ export interface AgentReviewUserMessageOptions {
   prDiffScope?: string;
 }
 
+export interface WorkspaceReviewPromptContext {
+  root: string;
+  repos: Array<{
+    label: string;
+    cwd: string;
+    gitRef?: string;
+  }>;
+}
+
+export type AgentReviewTarget =
+  | {
+      kind: "local";
+      patch: string;
+      diffType: DiffType;
+      options?: AgentReviewUserMessageOptions;
+    }
+  | {
+      kind: "pr";
+      patch: string;
+      diffType: DiffType;
+      options?: AgentReviewUserMessageOptions;
+      prMetadata: PRMetadata;
+    }
+  | {
+      kind: "workspace";
+      patch: string;
+      workspace: WorkspaceReviewPromptContext;
+    };
+
 export interface LocalDiffInstruction {
   target: string;
   inspect: string;
+}
+
+export function buildWorkspacePromptContextLines(
+  workspace: WorkspaceReviewPromptContext,
+  options: { includeReportingInstruction?: boolean } = {},
+): string[] {
+  const repoList = workspace.repos.length > 0
+    ? workspace.repos
+      .map((repo) => `- ${repo.label}/ -> ${repo.cwd}${repo.gitRef ? ` (${repo.gitRef})` : ""}`)
+      .join("\n")
+    : "- No changed child repositories were detected.";
+
+  const lines = [
+    `You are starting in the workspace root: ${workspace.root}`,
+    "The workspace root is not itself the git repository for these changes.",
+    "Each changed path in the diff is prefixed with the child repository folder, such as `api/src/file.ts`.",
+    "If you need to run git commands, first `cd` into the matching child repository.",
+  ];
+
+  if (options.includeReportingInstruction) {
+    lines.push("When reporting findings, use the same prefixed paths shown in the diff.");
+  }
+
+  return [
+    ...lines,
+    "",
+    "Repositories:",
+    repoList,
+  ];
+}
+
+export function buildAgentReviewUserMessageForTarget(target: AgentReviewTarget): string {
+  if (target.kind === "workspace") {
+    return buildWorkspaceReviewUserMessage(target.patch, target.workspace);
+  }
+  return buildAgentReviewUserMessage(
+    target.patch,
+    target.diffType,
+    target.options,
+    target.kind === "pr" ? target.prMetadata : undefined,
+  );
 }
 
 /** Build the dynamic user message shared by local Claude and Codex review jobs. */
@@ -56,6 +126,21 @@ export function buildAgentReviewUserMessage(
 
   return [
     "Review the following code changes and provide prioritized findings.",
+    "",
+    "```diff",
+    patch,
+    "```",
+  ].join("\n");
+}
+
+function buildWorkspaceReviewUserMessage(
+  patch: string,
+  workspace: WorkspaceReviewPromptContext,
+): string {
+  return [
+    "Review the local workspace changes across multiple nested git repositories.",
+    "",
+    ...buildWorkspacePromptContextLines(workspace, { includeReportingInstruction: true }),
     "",
     "```diff",
     patch,

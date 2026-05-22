@@ -12,11 +12,14 @@ import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 import {
+  aggregateWorkspacePatch,
+  buildLocalWorkspaceReview,
   prefixPatchPaths,
   resolveWorkspaceFilePath,
   discoverWorkspaceRepoPaths,
   type WorkspaceRepoRuntimeState,
 } from "./review-workspace";
+import { startReviewServer } from "./review";
 
 const tempDirs: string[] = [];
 
@@ -99,6 +102,28 @@ describe("review-workspace", () => {
       const result = prefixPatchPaths(patch, "frontend");
 
       expect(result).toContain("diff --git a/frontend/packages/ui/src/index.ts b/frontend/packages/ui/src/index.ts");
+    });
+
+    it("prefixes rename and copy metadata without corrupting the header keywords", () => {
+      const patch = [
+        "diff --git a/src/old.ts b/src/new.ts",
+        "similarity index 100%",
+        "rename from src/old.ts",
+        "rename to src/new.ts",
+        "diff --git a/src/source.ts b/src/copy.ts",
+        "similarity index 100%",
+        "copy from src/source.ts",
+        "copy to src/copy.ts",
+      ].join("\n");
+
+      const result = prefixPatchPaths(patch, "repo-a");
+
+      expect(result).toContain("rename from repo-a/src/old.ts");
+      expect(result).toContain("rename to repo-a/src/new.ts");
+      expect(result).toContain("copy from repo-a/src/source.ts");
+      expect(result).toContain("copy to repo-a/src/copy.ts");
+      expect(result).not.toContain("rename a/repo-a/from");
+      expect(result).not.toContain("copy a/repo-a/from");
     });
   });
 
@@ -302,5 +327,76 @@ describe("review-workspace", () => {
 
       expect(resolved?.repo.id).toBe("2");
     });
+  });
+
+  describe("workspace review server integration", () => {
+    it("serves combined diffs and maps prefixed paths back to child repos", async () => {
+      const root = makeTempDir("plannotator-workspace-server-");
+      const api = join(root, "api");
+      const web = join(root, "web");
+      mkdirSync(api, { recursive: true });
+      mkdirSync(web, { recursive: true });
+      initRepo(api);
+      initRepo(web);
+
+      writeFileSync(join(api, "tracked.txt"), "before\n", "utf-8");
+      git(api, ["add", "tracked.txt"]);
+      git(api, ["commit", "-m", "add tracked"]);
+      writeFileSync(join(api, "tracked.txt"), "after\n", "utf-8");
+      writeFileSync(join(web, "new.txt"), "new file\n", "utf-8");
+
+      const workspace = await buildLocalWorkspaceReview(root);
+      const aggregate = aggregateWorkspacePatch(workspace.repos);
+      const server = await startReviewServer({
+        rawPatch: aggregate.rawPatch,
+        gitRef: aggregate.gitRef,
+        error: aggregate.errors.join("\n") || undefined,
+        origin: "claude-code",
+        workspace,
+        agentCwd: workspace.root,
+        htmlContent: "<!doctype html><html><body>review</body></html>",
+      });
+
+      try {
+        const diffResponse = await fetch(`${server.url}/api/diff`);
+        expect(diffResponse.status).toBe(200);
+        const diffPayload = await diffResponse.json() as {
+          mode?: string;
+          rawPatch: string;
+          agentCwd?: string;
+        };
+        expect(diffPayload.mode).toBe("workspace");
+        expect(diffPayload.agentCwd).toBe(root);
+        expect("workspace" in diffPayload).toBe(false);
+        expect(diffPayload.rawPatch).toContain("diff --git a/api/tracked.txt b/api/tracked.txt");
+        expect(diffPayload.rawPatch).toContain("diff --git a/web/new.txt b/web/new.txt");
+
+        const fileContentResponse = await fetch(`${server.url}/api/file-content?path=api/tracked.txt`);
+        expect(fileContentResponse.status).toBe(200);
+        const fileContent = await fileContentResponse.json() as {
+          oldContent: string | null;
+          newContent: string | null;
+        };
+        expect(fileContent.oldContent).toBe("before\n");
+        expect(fileContent.newContent).toBe("after\n");
+
+        const stageResponse = await fetch(`${server.url}/api/git-add`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filePath: "web/new.txt" }),
+        });
+        expect(stageResponse.status).toBe(200);
+        expect(git(web, ["diff", "--staged", "--name-only"])).toContain("new.txt");
+
+        const invalidStageResponse = await fetch(`${server.url}/api/git-add`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filePath: "api/../web/new.txt" }),
+        });
+        expect(invalidStageResponse.status).toBe(400);
+      } finally {
+        server.stop();
+      }
+    }, 15_000);
   });
 });
