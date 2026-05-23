@@ -6,14 +6,14 @@ const isDocsActive = currentPath.startsWith('/docs/');
 const isBlogActive = currentPath.startsWith('/blog/');
 const isWorkspacesActive = currentPath.startsWith('/workspaces/');
 ---
-<nav class="fixed top-0 left-0 right-0 h-12 flex items-center justify-between px-6 bg-background/80 backdrop-blur-sm border-b border-border/30 z-50">
+<nav class="fixed top-0 left-0 right-0 h-12 flex items-center justify-between px-4 sm:px-6 bg-background/80 backdrop-blur-sm border-b border-border/30 z-50">
   <div class="flex items-center gap-2">
     <a href="/" class="text-sm font-semibold tracking-tight hover:text-primary transition-colors">
       Plannotator
     </a>
   </div>
   <div class="flex items-center gap-3">
-    <div class="flex items-center gap-2 text-xs">
+    <div class="flex items-center gap-1.5 sm:gap-2 text-xs">
       <a
         href="/docs/getting-started/installation/"
         class:list={[
@@ -54,6 +54,8 @@ const isWorkspacesActive = currentPath.startsWith('/workspaces/');
         GitHub
       </a>
     </div>
-    <ModeToggleIsland client:only="react" />
+    <div class="hidden sm:flex">
+      <ModeToggleIsland client:only="react" />
+    </div>
   </div>
 </nav>
