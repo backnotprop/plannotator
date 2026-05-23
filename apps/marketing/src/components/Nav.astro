@@ -23,11 +23,11 @@ const isWorkspacesActive = currentPath.startsWith('/workspaces/');
       >
         Docs
       </a>
-      <span class="text-muted-foreground/50">|</span>
+      <span class="text-muted-foreground/50 hidden sm:inline">|</span>
       <a
         href="/blog/"
         class:list={[
-          'transition-colors',
+          'transition-colors hidden sm:inline',
           isBlogActive ? 'text-foreground font-medium' : 'text-muted-foreground hover:text-foreground',
         ]}
       >
