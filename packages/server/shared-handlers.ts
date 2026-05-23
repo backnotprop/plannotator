@@ -141,7 +141,5 @@ export async function handleServerReady(
   isRemote: boolean,
   _port: number,
 ): Promise<void> {
-  const freshUrl = new URL(url);
-  freshUrl.searchParams.set("session", `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
-  await openBrowser(freshUrl.toString(), { isRemote });
+  await openBrowser(url, { isRemote });
 }
