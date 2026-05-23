@@ -180,25 +180,32 @@ const teamSizes = [
               ></textarea>
             </div>
 
-            <div
-              class="ws-check-row"
-              id="contributor-toggle"
-              role="checkbox"
-              aria-checked="false"
-              tabindex="0"
-            >
-              <span class="ws-box" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-              </span>
-              <span>I've contributed to or maintain the Plannotator OSS core.</span>
-            </div>
+            <!-- Progressive disclosure: the OSS-contributor claim is
+                 personal-scope (one human attesting they contributed), so
+                 it only makes sense for individual signups. Hidden until
+                 "Just me" is selected on team size; reset on any other
+                 team-size choice. -->
+            <div class="ws-contrib-block" id="contributor-block">
+              <div
+                class="ws-check-row"
+                id="contributor-toggle"
+                role="checkbox"
+                aria-checked="false"
+                tabindex="0"
+              >
+                <span class="ws-box" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                </span>
+                <span>I've contributed to or maintain the Plannotator OSS core.</span>
+              </div>
 
-            <p class="ws-contrib-note">
-              ↑ Early contributors and meaningful early supporters receive
-              <span class="ws-accent">lifetime free access</span> to Workspaces.
-            </p>
+              <p class="ws-contrib-note">
+                ↑ Early contributors and meaningful early supporters receive
+                <span class="ws-accent">lifetime free access</span> to Workspaces.
+              </p>
+            </div>
 
             {turnstileSitekey && (
               <div
@@ -347,6 +354,24 @@ const teamSizes = [
         });
       }
 
+      // OSS-contributor block only matters for individual signups. Show
+      // it when team size = "solo"; hide and reset state otherwise so a
+      // team signup doesn't accidentally carry is_contributor=true.
+      var contribBlock = document.getElementById('contributor-block');
+      var contribEl = document.getElementById('contributor-toggle');
+
+      function setContributorVisibility(visible) {
+        if (!contribBlock) return;
+        contribBlock.classList.toggle('is-visible', visible);
+        if (!visible && contributor) {
+          contributor = false;
+          if (contribEl) {
+            contribEl.classList.remove('on');
+            contribEl.setAttribute('aria-checked', 'false');
+          }
+        }
+      }
+
       // Pill picker
       document.querySelectorAll('.ws-pills').forEach(function (group) {
         var key = group.dataset.field;
@@ -363,13 +388,13 @@ const teamSizes = [
             p.classList.add('on');
             p.setAttribute('aria-pressed', 'true');
             fields[key] = v;
+            if (key === 'teamSize') setContributorVisibility(v === 'solo');
           }
           clearErr(group);
         });
       });
 
       // Contributor toggle (click + keyboard)
-      var contribEl = document.getElementById('contributor-toggle');
       function toggleContributor() {
         contributor = !contributor;
         contribEl.classList.toggle('on', contributor);
@@ -982,6 +1007,21 @@ const teamSizes = [
       letter-spacing: 0.02em;
       padding: 4px 14px 0;
       margin: 0 0 14px;
+    }
+
+    /* Progressive-disclosure wrapper. Hidden by default; the JS toggles
+       `.is-visible` when team size flips to "solo". Small fade-in keeps
+       the reveal from feeling like a layout jolt. */
+    .ws-contrib-block {
+      display: none;
+    }
+    .ws-contrib-block.is-visible {
+      display: block;
+      animation: ws-disclose 0.22s cubic-bezier(0.23, 1, 0.32, 1);
+    }
+    @keyframes ws-disclose {
+      from { opacity: 0; transform: translateY(-4px); }
+      to   { opacity: 1; transform: translateY(0); }
     }
 
     /* ── Turnstile slot (almost always invisible) ── */
