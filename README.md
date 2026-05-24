@@ -4,7 +4,7 @@
 
 # Plannotator
 
-Interactive Plan & Code Review for AI Coding Agents. Mark up and refine your plans or code diffs using a visual UI, share for team collaboration, and seamlessly integrate with **Claude Code**, **Copilot CLI**, **Gemini CLI**, **OpenCode**, **Pi**, and **Codex**.
+Interactive Plan & Code Review for AI Coding Agents. Mark up and refine your plans or code diffs using a visual UI, share for team collaboration, and seamlessly integrate with **Claude Code**, **Copilot CLI**, **Gemini CLI**, **OpenCode**, **Pi**, **Codex**, and **Droid**.
 
 **Plan Mode Demos:**
 <table>
@@ -64,6 +64,7 @@ Plannotator lets you privately share plans, annotations, and feedback with colle
 - [OpenCode](#install-for-opencode)
 - [Pi](#install-for-pi)
 - [Codex](#install-for-codex)
+- [Droid](#install-for-droid)
 
 ## Install for Claude Code
 
@@ -246,6 +247,44 @@ $plannotator-last            # Annotate the last agent message
 Plan review uses Codex's experimental `Stop` hook on macOS, Linux, and WSL.
 
 See [apps/codex/README.md](apps/codex/README.md) for details.
+
+---
+
+## Install for Droid
+
+**Install the `plannotator` command:**
+
+**macOS / Linux / WSL:**
+
+```bash
+curl -fsSL https://plannotator.ai/install.sh | bash
+```
+
+**Windows PowerShell:**
+
+```powershell
+irm https://plannotator.ai/install.ps1 | iex
+```
+
+**Then in Droid:**
+
+```bash
+droid plugin marketplace add https://github.com/backnotprop/plannotator
+droid plugin install plannotator@plannotator
+```
+
+This Droid plugin is commands-only. It adds:
+
+```text
+/plannotator-review
+/plannotator-annotate <file|folder|url>
+/plannotator-last
+/plannotator-archive
+```
+
+It does not currently intercept Droid's planning flow.
+
+See [apps/droid-plugin/README.md](apps/droid-plugin/README.md) for details.
 
 ---
 

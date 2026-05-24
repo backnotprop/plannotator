@@ -39,6 +39,7 @@ export type PromptSectionOverrides = Record<string, string | undefined>;
 
 export type PromptRuntime =
   | "claude-code"
+  | "droid"
   | "opencode"
   | "copilot-cli"
   | "pi"

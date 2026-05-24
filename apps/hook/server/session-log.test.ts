@@ -13,6 +13,7 @@ import {
   isHumanPrompt,
   findAnchorIndex,
   extractLastRenderedMessage,
+  findDroidSessionLogsForCwd,
   projectSlugFromCwd,
   findSessionLogsByAncestorWalk,
   findSessionLogsForCwd,
@@ -168,6 +169,24 @@ function buildLog(...lines: string[]): string {
   return lines.join("\n");
 }
 
+function droidMessage(
+  id: string,
+  role: "user" | "assistant",
+  text: string,
+  opts: { visibility?: string } = {},
+): string {
+  return JSON.stringify({
+    type: "message",
+    id,
+    timestamp: new Date().toISOString(),
+    message: {
+      role,
+      content: [{ type: "text", text }],
+    },
+    ...(opts.visibility ? { visibility: opts.visibility } : {}),
+  });
+}
+
 // --- Tests ---
 
 describe("projectSlugFromCwd", () => {
@@ -243,6 +262,27 @@ describe("isHumanPrompt", () => {
 
   test("rejects assistant entries", () => {
     const entry = JSON.parse(assistantText("msg_1", "hello"));
+    expect(isHumanPrompt(entry)).toBe(false);
+  });
+
+  test("accepts visible Droid user messages", () => {
+    const entry = JSON.parse(droidMessage("m_user", "user", "real human prompt"));
+    expect(isHumanPrompt(entry)).toBe(true);
+  });
+
+  test("rejects Droid system reminders and command notifications", () => {
+    expect(
+      isHumanPrompt(JSON.parse(droidMessage("m_sys", "user", "<system-reminder>\ninternal")))
+    ).toBe(false);
+    expect(
+      isHumanPrompt(JSON.parse(droidMessage("m_note", "user", "<system-notification>\ncommand output")))
+    ).toBe(false);
+  });
+
+  test("rejects hidden Droid user messages", () => {
+    const entry = JSON.parse(
+      droidMessage("m_hidden", "user", "hidden", { visibility: "llm_only" })
+    );
     expect(isHumanPrompt(entry)).toBe(false);
   });
 });
@@ -534,6 +574,36 @@ describe("extractLastRenderedMessage", () => {
     expect(result).not.toBeNull();
     expect(result!.text).toBe("Response before queue op");
   });
+
+  test("handles Droid transcript entries and ignores slash-command notifications", () => {
+    const log = buildLog(
+      droidMessage("ctx", "user", "<system-reminder>\ncontext", { visibility: "llm_only" }),
+      droidMessage("u1", "user", "Tell me a story."),
+      droidMessage("a1", "assistant", "Once upon a time."),
+      droidMessage("cmd", "user", "<system-notification>\nCommand file: /tmp/plannotator-last.js"),
+      droidMessage("u2", "user", "ANCHOR")
+    );
+    const entries = parseSessionLog(log);
+    const anchor = findAnchorIndex(entries, "ANCHOR")!;
+    const result = extractLastRenderedMessage(entries, anchor);
+    expect(result).not.toBeNull();
+    expect(result!.messageId).toBe("a1");
+    expect(result!.text).toBe("Once upon a time.");
+  });
+
+  test("uses top-level Droid message ids when message.id is absent", () => {
+    const log = buildLog(
+      droidMessage("u1", "user", "Hi"),
+      droidMessage("a-top-level-id", "assistant", "Factory answer"),
+      droidMessage("u2", "user", "ANCHOR")
+    );
+    const entries = parseSessionLog(log);
+    const anchor = findAnchorIndex(entries, "ANCHOR")!;
+    const result = extractLastRenderedMessage(entries, anchor);
+    expect(result).not.toBeNull();
+    expect(result!.messageId).toBe("a-top-level-id");
+    expect(result!.text).toBe("Factory answer");
+  });
 });
 
 describe("extractLastRenderedMessage — edge cases", () => {
@@ -616,6 +686,20 @@ describe("findSessionLogsByAncestorWalk", () => {
 
       const result = findSessionLogsByAncestorWalk(testDir, projectsDir);
       expect(result.every((p) => !p.includes(slugDir))).toBe(true);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("findDroidSessionLogsForCwd", () => {
+  test("finds session logs under the Factory sessions directory layout", () => {
+    const { projectsDir: sessionsDir, cleanup } = makeTempDirs("droid-cwd");
+    try {
+      const cwd = "/Users/example/project";
+      const logPath = writeSessionLog(sessionsDir, cwd, "droid-session-1");
+      const result = findDroidSessionLogsForCwd(cwd, sessionsDir);
+      expect(result[0]).toBe(logPath);
     } finally {
       cleanup();
     }
