@@ -204,7 +204,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
         }
       `}</style>
       <div className="flex items-center p-1 gap-0.5">
-        {isTouchDevice && (
+        {(isTouchDevice || !copyText) && (
           <>
             <ToolbarButton
               onClick={handleCopy}
