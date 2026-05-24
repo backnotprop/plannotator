@@ -26,13 +26,45 @@ const teamSizes = [
   description="Plannotator Workspaces is the hosted team layer for collaborating on agent plans, specs, code reviews, and verification standards. Plannotator core stays free and open source."
 >
   <Fragment slot="head">
-    <!-- Force light mode on this page only. We pin the light-theme tokens
-         directly inside `.ws-force-light` rather than relying on the
-         global `.light` class — the Nav's ModeToggleIsland hydrates a
-         React effect that calls `classList.remove('light')` on mount,
-         which would otherwise undo any earlier force-light attempt. */ -->
+    <!-- Page-scoped theme tokens. The page is now system-responsive: it
+         follows whatever theme the global Nav toggle has applied (Base.astro
+         adds `.light` on <html> for light/system+light, otherwise dark).
+         Light mode keeps the cleaner palette we previously force-pinned.
+         Dark mode gets a near-neutral, very-dark-gray palette specific to
+         this page — distinct from the standard plannotator dark theme used
+         everywhere else on the site. -->
     <style>
-      .ws-force-light {
+      /* Dark mode (default — applied when `.light` is NOT on <html>). */
+      .ws-page-scope {
+        --background: oklch(0.13 0 0);
+        --foreground: oklch(0.93 0 0);
+        --card: oklch(0.17 0 0);
+        --card-foreground: oklch(0.93 0 0);
+        --popover: oklch(0.18 0 0);
+        --popover-foreground: oklch(0.93 0 0);
+        --primary: oklch(0.75 0.18 280);
+        --primary-foreground: oklch(0.13 0 0);
+        --secondary: oklch(0.70 0.15 180);
+        --secondary-foreground: oklch(0.13 0 0);
+        --muted: oklch(0.22 0 0);
+        --muted-foreground: oklch(0.66 0 0);
+        --accent: oklch(0.72 0.18 60);
+        --accent-foreground: oklch(0.13 0 0);
+        --destructive: oklch(0.65 0.20 25);
+        --destructive-foreground: oklch(0.95 0 0);
+        --border: oklch(0.27 0 0);
+        --input: oklch(0.22 0 0);
+        --ring: oklch(0.75 0.18 280);
+        --success: oklch(0.72 0.17 150);
+        --success-foreground: oklch(0.13 0 0);
+        --warning: oklch(0.78 0.14 85);
+        --warning-foreground: oklch(0.13 0 0);
+        --code-bg: oklch(0.22 0 0);
+        color-scheme: dark;
+      }
+
+      /* Light mode (applied when Base.astro / Nav toggle sets `.light`). */
+      :global(html.light) .ws-page-scope {
         --background: oklch(0.97 0.005 260);
         --foreground: oklch(0.18 0.02 260);
         --card: oklch(1 0 0);
@@ -62,7 +94,7 @@ const teamSizes = [
     </style>
   </Fragment>
 
-  <div class="ws-force-light min-h-screen bg-background text-foreground">
+  <div class="ws-page-scope min-h-screen bg-background text-foreground">
     <Nav />
 
     <!-- Two independent flex columns so the hero (top of left column) and
