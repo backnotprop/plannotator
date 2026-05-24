@@ -535,7 +535,8 @@ function getVisibleTextBlocks(content: string | ContentBlock[] | undefined): str
 }
 
 function isHiddenTranscriptEntry(entry: SessionLogEntry): boolean {
-  return !!entry.visibility;
+  const visibility = entry.visibility?.trim().toLowerCase();
+  return visibility === "llm_only" || visibility === "assistant_only" || visibility === "hidden";
 }
 
 function getEntryMessageId(entry: SessionLogEntry): string | undefined {

@@ -45,15 +45,13 @@ function runPlannotator(args) {
     PLANNOTATOR_ORIGIN: "droid",
   };
 
-  let result;
+  let result = childProcess.spawnSync("plannotator", args, {
+    encoding: "utf8",
+    env,
+  });
 
-  if (repoBin) {
+  if (result.error && result.error.code === "ENOENT" && repoBin) {
     result = childProcess.spawnSync(process.execPath, [repoBin, ...args], {
-      encoding: "utf8",
-      env,
-    });
-  } else {
-    result = childProcess.spawnSync("plannotator", args, {
       encoding: "utf8",
       env,
     });

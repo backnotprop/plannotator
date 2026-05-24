@@ -270,6 +270,15 @@ describe("isHumanPrompt", () => {
     expect(isHumanPrompt(entry)).toBe(true);
   });
 
+  test("accepts Droid messages with visible transcript visibility", () => {
+    expect(
+      isHumanPrompt(JSON.parse(droidMessage("m_both", "user", "visible to both", { visibility: "both" })))
+    ).toBe(true);
+    expect(
+      isHumanPrompt(JSON.parse(droidMessage("m_user_only", "user", "visible to user", { visibility: "user_only" })))
+    ).toBe(true);
+  });
+
   test("rejects Droid system reminders and command notifications", () => {
     expect(
       isHumanPrompt(JSON.parse(droidMessage("m_sys", "user", "<system-reminder>\ninternal")))
