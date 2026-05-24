@@ -341,7 +341,7 @@ function buildWorkspaceTourUserMessage(
   workspace: WorkspaceReviewPromptContext,
 ): string {
   return [
-    "Walk the reviewer through the local workspace changes across multiple nested git repositories.",
+    "Walk the reviewer through the local workspace changes across multiple nested VCS repositories.",
     "",
     ...buildWorkspacePromptContextLines(workspace),
     "",

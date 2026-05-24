@@ -74,18 +74,19 @@ describe("buildAgentReviewUserMessage", () => {
       workspace: {
         root: "/tmp/workspace",
         repos: [
-          { label: "api", cwd: "/tmp/workspace/api", gitRef: "Uncommitted changes" },
-          { label: "web", cwd: "/tmp/workspace/web", gitRef: "Uncommitted changes" },
+          { label: "api", cwd: "/tmp/workspace/api", vcsType: "git", gitRef: "Uncommitted changes" },
+          { label: "web", cwd: "/tmp/workspace/web", vcsType: "jj", gitRef: "Uncommitted changes" },
         ],
       },
     });
 
-    expect(message).toContain("multiple nested git repositories");
+    expect(message).toContain("multiple nested VCS repositories");
     expect(message).toContain("workspace root: /tmp/workspace");
     expect(message).toContain("api/src/file.ts");
-    expect(message).toContain("- api/ -> /tmp/workspace/api");
-    expect(message).toContain("- web/ -> /tmp/workspace/web");
+    expect(message).toContain("- api/ [git] -> /tmp/workspace/api");
+    expect(message).toContain("- web/ [jj] -> /tmp/workspace/web");
     expect(message).toContain("git -C <child-repo-folder>");
+    expect(message).toContain("JJ child repos");
     expect(message).toContain(patch);
   });
 });

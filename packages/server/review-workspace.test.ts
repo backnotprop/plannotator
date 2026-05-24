@@ -17,9 +17,11 @@ import {
   prefixPatchPaths,
   resolveWorkspaceFilePath,
   discoverWorkspaceRepoPaths,
+  WorkspaceReviewSession,
   type WorkspaceRepoRuntimeState,
 } from "./review-workspace";
 import { startReviewServer } from "./review";
+import type { DiffType, GitContext } from "./vcs";
 
 const tempDirs: string[] = [];
 
@@ -70,6 +72,40 @@ describe("review-workspace", () => {
       expect(result).toContain("diff --git a/repo-a/src/index.ts b/repo-a/src/index.ts");
       expect(result).toContain("--- a/repo-a/src/index.ts");
       expect(result).toContain("+++ b/repo-a/src/index.ts");
+    });
+
+    it("preserves paths containing the diff header separator text", () => {
+      const patch = [
+        "diff --git a/foo b/bar.ts b/foo b/bar.ts",
+        "--- a/foo b/bar.ts",
+        "+++ b/foo b/bar.ts",
+        "@@ -1 +1 @@",
+        "-old",
+        "+new",
+      ].join("\n");
+
+      const result = prefixPatchPaths(patch, "api");
+
+      expect(result).toContain("diff --git \"a/api/foo b/bar.ts\" \"b/api/foo b/bar.ts\"");
+      expect(result).toContain("--- \"a/api/foo b/bar.ts\"");
+      expect(result).toContain("+++ \"b/api/foo b/bar.ts\"");
+    });
+
+    it("keeps quoted paths valid when prefixing workspace paths", () => {
+      const patch = [
+        "diff --git \"a/path with space.ts\" \"b/path with space.ts\"",
+        "--- \"a/path with space.ts\"",
+        "+++ \"b/path with space.ts\"",
+        "@@ -1 +1 @@",
+        "-old",
+        "+new",
+      ].join("\n");
+
+      const result = prefixPatchPaths(patch, "web");
+
+      expect(result).toContain("diff --git \"a/web/path with space.ts\" \"b/web/path with space.ts\"");
+      expect(result).toContain("--- \"a/web/path with space.ts\"");
+      expect(result).toContain("+++ \"b/web/path with space.ts\"");
     });
 
     it("handles /dev/null paths correctly", () => {
@@ -124,6 +160,51 @@ describe("review-workspace", () => {
       expect(result).toContain("copy to repo-a/src/copy.ts");
       expect(result).not.toContain("rename a/repo-a/from");
       expect(result).not.toContain("copy a/repo-a/from");
+    });
+
+    it("prefixes pure rename headers when there are no file path lines", () => {
+      const patch = [
+        "diff --git a/src/old.ts b/src/new.ts",
+        "similarity index 100%",
+        "rename from src/old.ts",
+        "rename to src/new.ts",
+      ].join("\n");
+
+      const result = prefixPatchPaths(patch, "repo-a");
+
+      expect(result).toContain("diff --git a/repo-a/src/old.ts b/repo-a/src/new.ts");
+      expect(result).toContain("rename from repo-a/src/old.ts");
+      expect(result).toContain("rename to repo-a/src/new.ts");
+    });
+
+    it("prefixes unquoted headers from the right when file path lines are absent", () => {
+      const patch = [
+        "diff --git a/foo b/old.bin b/new.bin",
+        "new file mode 100644",
+        "index 0000000..1234567",
+        "GIT binary patch",
+      ].join("\n");
+
+      const result = prefixPatchPaths(patch, "repo-a");
+
+      expect(result).toContain("diff --git \"a/repo-a/foo b/old.bin\" b/repo-a/new.bin");
+    });
+
+    it("does not treat hunk body lines as file headers", () => {
+      const patch = [
+        "diff --git a/src/file.txt b/src/file.txt",
+        "--- a/src/file.txt",
+        "+++ b/src/file.txt",
+        "@@ -1,2 +1,2 @@",
+        "---- a/not-a-header.txt",
+        "++++ b/not-a-header.txt",
+      ].join("\n");
+
+      const result = prefixPatchPaths(patch, "repo-a");
+
+      expect(result).toContain("diff --git a/repo-a/src/file.txt b/repo-a/src/file.txt");
+      expect(result).toContain("---- a/not-a-header.txt");
+      expect(result).toContain("++++ b/not-a-header.txt");
     });
 
     it("does not prefix /dev/null when it appears in metadata", () => {
@@ -186,6 +267,16 @@ describe("review-workspace", () => {
       expect(resolved?.repoRelativePath).toBe("file.ts");
     });
 
+    it("rejects bare repo labels", () => {
+      const repos = [
+        { id: "1", label: "repo-a", cwd: "/tmp/repo-a", selected: true, source: "local", rawPatch: "", gitRef: "" },
+      ] as WorkspaceRepoRuntimeState[];
+
+      const resolved = resolveWorkspaceFilePath(repos, "repo-a");
+
+      expect(resolved).toBeNull();
+    });
+
     it("validates file paths for directory traversal attacks", () => {
       const repos = [
         { id: "1", label: "repo", cwd: "/tmp/repo", selected: true, source: "local", rawPatch: "", gitRef: "" },
@@ -210,7 +301,7 @@ describe("review-workspace", () => {
       expect(repos).not.toContain(root);
     });
 
-    it("discovers multiple nested git repos", () => {
+    it("discovers multiple nested VCS repos", () => {
       const root = makeTempDir("plannotator-workspace-multi-");
       
       // Create nested repos
@@ -255,6 +346,16 @@ describe("review-workspace", () => {
       expect(repos).toHaveLength(1);
       expect(repos).toContain(parentRepo);
       expect(repos).not.toContain(grandchildRepo);
+    });
+
+    it("discovers nested jj repos", () => {
+      const root = makeTempDir("plannotator-workspace-jj-");
+      const jjRepo = join(root, "jj-app");
+      mkdirSync(join(jjRepo, ".jj"), { recursive: true });
+
+      const repos = discoverWorkspaceRepoPaths(root);
+
+      expect(repos).toEqual([jjRepo]);
     });
 
     it("skips ignored directories", () => {
@@ -355,6 +456,184 @@ describe("review-workspace", () => {
   });
 
   describe("workspace review server integration", () => {
+    it("maps one workspace mode across mixed Git and JJ repos", async () => {
+      const root = makeTempDir("plannotator-workspace-mixed-vcs-");
+      const gitRepo = join(root, "api");
+      const jjRepo = join(root, "web");
+      mkdirSync(join(gitRepo, ".git"), { recursive: true });
+      mkdirSync(join(jjRepo, ".jj"), { recursive: true });
+      const calls: Array<{ cwd?: string; diffType: DiffType }> = [];
+
+      const runtime = {
+        async getVcsContext(cwd?: string): Promise<GitContext> {
+          const isJj = cwd === jjRepo;
+          return {
+            vcsType: isJj ? "jj" : "git",
+            currentBranch: "main",
+            defaultBranch: "main",
+            cwd: cwd ?? root,
+            worktrees: [],
+            availableBranches: { local: [], remote: [] },
+            diffOptions: isJj
+              ? [{ id: "jj-current", label: "Current change" }, { id: "jj-last", label: "Last change" }]
+              : [{ id: "uncommitted", label: "Uncommitted changes" }, { id: "last-commit", label: "Last commit" }],
+          };
+        },
+        async runVcsDiff(diffType: DiffType, _defaultBranch?: string, cwd?: string) {
+          calls.push({ cwd, diffType });
+          return {
+            patch: [
+              "diff --git a/file.txt b/file.txt",
+              "--- a/file.txt",
+              "+++ b/file.txt",
+              "@@ -1 +1 @@",
+              "-old",
+              "+new",
+            ].join("\n"),
+            label: diffType,
+          };
+        },
+        async getVcsFileContentsForDiff() {
+          return { oldContent: null, newContent: null };
+        },
+        async canStageFiles() {
+          return true;
+        },
+        async stageFile() {},
+        async unstageFile() {},
+      };
+
+      const workspace = await WorkspaceReviewSession.create(runtime, root, {
+        requestedDiffType: "staged",
+      });
+
+      expect(workspace.diffType).toBe("workspace-current");
+      expect(workspace.diffOptions.map((option) => option.id)).toEqual([
+        "workspace-current",
+        "workspace-last",
+      ]);
+      expect(calls).toEqual(
+        expect.arrayContaining([
+          { cwd: gitRepo, diffType: "uncommitted" },
+          { cwd: jjRepo, diffType: "jj-current" },
+        ]),
+      );
+      expect(workspace.rawPatch).toContain("diff --git a/api/file.txt b/api/file.txt");
+      expect(workspace.rawPatch).toContain("diff --git a/web/file.txt b/web/file.txt");
+
+      calls.length = 0;
+      await workspace.rebuild({ diffType: "workspace-last" });
+      expect(calls).toEqual(
+        expect.arrayContaining([
+          { cwd: gitRepo, diffType: "last-commit" },
+          { cwd: jjRepo, diffType: "jj-last" },
+        ]),
+      );
+      await expect(workspace.rebuild({ diffType: "workspace-staged" })).rejects.toThrow(
+        "Workspace diff mode is not available",
+      );
+    });
+
+    it("normalizes agent annotation paths to workspace-prefixed paths", async () => {
+      const root = makeTempDir("plannotator-workspace-agent-path-");
+      const api = join(root, "api");
+      mkdirSync(join(api, ".git"), { recursive: true });
+
+      const runtime = {
+        async getVcsContext(cwd?: string): Promise<GitContext> {
+          return {
+            vcsType: "git",
+            currentBranch: "main",
+            defaultBranch: "main",
+            cwd: cwd ?? api,
+            worktrees: [],
+            availableBranches: { local: [], remote: [] },
+            diffOptions: [{ id: "uncommitted", label: "Uncommitted changes" }],
+          };
+        },
+        async runVcsDiff() {
+          return {
+            patch: [
+              "diff --git a/src/file.ts b/src/file.ts",
+              "--- a/src/file.ts",
+              "+++ b/src/file.ts",
+              "@@ -1 +1 @@",
+              "-old",
+              "+new",
+            ].join("\n"),
+            label: "Uncommitted changes",
+          };
+        },
+        async getVcsFileContentsForDiff() {
+          return { oldContent: null, newContent: null };
+        },
+        async canStageFiles() {
+          return true;
+        },
+        async stageFile() {},
+        async unstageFile() {},
+      };
+
+      const workspace = await WorkspaceReviewSession.create(runtime, root);
+
+      expect(workspace.normalizeAnnotationPath("api/src/file.ts")).toBe("api/src/file.ts");
+      expect(workspace.normalizeAnnotationPath("src/file.ts")).toBe("api/src/file.ts");
+      expect(workspace.normalizeAnnotationPath(join(api, "src/file.ts"))).toBe("api/src/file.ts");
+    });
+
+    it("keeps requested Git-only workspace modes available when another child repo fails detection", async () => {
+      const root = makeTempDir("plannotator-workspace-partial-failure-");
+      const api = join(root, "api");
+      const broken = join(root, "broken");
+      mkdirSync(join(api, ".git"), { recursive: true });
+      mkdirSync(join(broken, ".git"), { recursive: true });
+
+      const runtime = {
+        async getVcsContext(cwd?: string): Promise<GitContext> {
+          if (cwd === broken) throw new Error("broken repo");
+          return {
+            vcsType: "git",
+            currentBranch: "main",
+            defaultBranch: "main",
+            cwd: cwd ?? api,
+            worktrees: [],
+            availableBranches: { local: [], remote: [] },
+            diffOptions: [{ id: "staged", label: "Staged changes" }],
+          };
+        },
+        async runVcsDiff() {
+          return {
+            patch: [
+              "diff --git a/src/file.ts b/src/file.ts",
+              "--- a/src/file.ts",
+              "+++ b/src/file.ts",
+              "@@ -1 +1 @@",
+              "-old",
+              "+new",
+            ].join("\n"),
+            label: "Staged changes",
+          };
+        },
+        async getVcsFileContentsForDiff() {
+          return { oldContent: null, newContent: null };
+        },
+        async canStageFiles() {
+          return true;
+        },
+        async stageFile() {},
+        async unstageFile() {},
+      };
+
+      const workspace = await WorkspaceReviewSession.create(runtime, root, {
+        requestedDiffType: "staged",
+      });
+
+      expect(workspace.diffType).toBe("workspace-staged");
+      expect(workspace.diffOptions.map((option) => option.id)).toContain("workspace-staged");
+      expect(workspace.rawPatch).toContain("diff --git a/api/src/file.ts b/api/src/file.ts");
+      expect(workspace.error).toContain("broken repo");
+    });
+
     it("passes hide-whitespace through child repo diffs", async () => {
       const root = makeTempDir("plannotator-workspace-whitespace-");
       const api = join(root, "api");
@@ -406,13 +685,40 @@ describe("review-workspace", () => {
         const diffPayload = await diffResponse.json() as {
           mode?: string;
           rawPatch: string;
+          diffType?: string;
+          diffOptions?: Array<{ id: string }>;
           agentCwd?: string;
         };
         expect(diffPayload.mode).toBe("workspace");
+        expect(diffPayload.diffType).toBe("workspace-current");
+        expect(diffPayload.diffOptions?.map((option) => option.id)).toEqual([
+          "workspace-current",
+          "workspace-staged",
+          "workspace-unstaged",
+          "workspace-last",
+        ]);
         expect(diffPayload.agentCwd).toBe(root);
         expect("workspace" in diffPayload).toBe(false);
         expect(diffPayload.rawPatch).toContain("diff --git a/api/tracked.txt b/api/tracked.txt");
         expect(diffPayload.rawPatch).toContain("diff --git a/web/new.txt b/web/new.txt");
+
+        const lastResponse = await fetch(`${server.url}/api/diff/switch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ diffType: "workspace-last", hideWhitespace: true }),
+        });
+        expect(lastResponse.status).toBe(200);
+        const lastPayload = await lastResponse.json() as { diffType?: string; rawPatch: string; diffOptions?: Array<{ id: string }> };
+        expect(lastPayload.diffType).toBe("workspace-last");
+        expect(lastPayload.diffOptions?.map((option) => option.id)).toContain("workspace-current");
+        expect(lastPayload.rawPatch).toContain("diff --git a/api/tracked.txt b/api/tracked.txt");
+
+        const currentResponse = await fetch(`${server.url}/api/diff/switch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ diffType: "workspace-current", hideWhitespace: false }),
+        });
+        expect(currentResponse.status).toBe(200);
 
         const fileContentResponse = await fetch(`${server.url}/api/file-content?path=api/tracked.txt`);
         expect(fileContentResponse.status).toBe(200);

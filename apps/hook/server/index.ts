@@ -108,7 +108,7 @@ import {
 } from "./cli";
 import path from "path";
 import { tmpdir } from "os";
-import { aggregateWorkspacePatch, buildLocalWorkspaceReview } from "@plannotator/server/review-workspace";
+import { buildLocalWorkspaceReview, type WorkspaceDiffType } from "@plannotator/server/review-workspace";
 
 // Embed the built HTML at compile time
 // @ts-ignore - Bun import attribute for text
@@ -301,7 +301,7 @@ if (args[0] === "sessions") {
   let diffError: string | undefined;
   let gitContext: Awaited<ReturnType<typeof prepareLocalReviewDiff>>["gitContext"] | undefined;
   let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
-  let initialDiffType: DiffType | undefined;
+  let initialDiffType: DiffType | WorkspaceDiffType | undefined;
   let agentCwd: string | undefined;
   let worktreePool: WorktreePool | undefined;
   let worktreeCleanup: (() => void | Promise<void>) | undefined;
@@ -497,8 +497,9 @@ if (args[0] === "sessions") {
     // --- Local Review Mode ---
     const config = loadConfig();
     const managedVcs = await detectManagedVcs(process.cwd(), reviewArgs.vcsType);
+    const forcedVcs = !!reviewArgs.vcsType && reviewArgs.vcsType !== "auto";
 
-    if (managedVcs) {
+    if (managedVcs || forcedVcs) {
       const diffResult = await prepareLocalReviewDiff({
         vcsType: reviewArgs.vcsType,
         configuredDiffType: resolveDefaultDiffType(config),
@@ -511,17 +512,17 @@ if (args[0] === "sessions") {
       diffError = diffResult.error;
     } else {
       workspace = await buildLocalWorkspaceReview(process.cwd(), {
+        configuredDiffType: resolveDefaultDiffType(config),
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
       });
       if (workspace.repos.length === 0) {
-        console.error("Not in a git repo and no nested git repositories were found.");
+        console.error("Not in a VCS repo and no nested Git/JJ repositories were found.");
         process.exit(1);
       }
-      const aggregate = aggregateWorkspacePatch(workspace.repos);
-      rawPatch = aggregate.rawPatch;
-      gitRef = aggregate.gitRef;
-      diffError = aggregate.errors.length > 0 ? aggregate.errors.join("\n") : undefined;
-      initialDiffType = "uncommitted";
+      rawPatch = workspace.rawPatch;
+      gitRef = workspace.gitRef;
+      diffError = workspace.error;
+      initialDiffType = workspace.diffType;
       agentCwd = workspace.root;
     }
   }
@@ -534,7 +535,7 @@ if (args[0] === "sessions") {
     gitRef,
     error: diffError,
     origin: detectedOrigin,
-    diffType: workspace ? (initialDiffType ?? "uncommitted") : gitContext ? (initialDiffType ?? "unstaged") : undefined,
+    diffType: workspace ? (initialDiffType ?? workspace.diffType) : gitContext ? (initialDiffType ?? "unstaged") : undefined,
     gitContext,
     prMetadata,
     workspace,

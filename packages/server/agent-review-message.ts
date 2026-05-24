@@ -17,6 +17,7 @@ export interface WorkspaceReviewPromptContext {
   repos: Array<{
     label: string;
     cwd: string;
+    vcsType?: "git" | "jj";
     gitRef?: string;
   }>;
 }
@@ -52,15 +53,16 @@ export function buildWorkspacePromptContextLines(
 ): string[] {
   const repoList = workspace.repos.length > 0
     ? workspace.repos
-      .map((repo) => `- ${repo.label}/ -> ${repo.cwd}${repo.gitRef ? ` (${repo.gitRef})` : ""}`)
+      .map((repo) => `- ${repo.label}/${repo.vcsType ? ` [${repo.vcsType}]` : ""} -> ${repo.cwd}${repo.gitRef ? ` (${repo.gitRef})` : ""}`)
       .join("\n")
     : "- No changed child repositories were detected.";
 
   const lines = [
     `You are starting in the workspace root: ${workspace.root}`,
-    "The workspace root is not itself the git repository for these changes.",
+    "The workspace root is not itself the VCS repository for these changes.",
     "Each changed path in the diff is prefixed with the child repository folder, such as `api/src/file.ts`.",
-    "If you need to run git commands, run them from the workspace root with `git -C <child-repo-folder> ...`.",
+    "For Git child repos, inspect with `git -C <child-repo-folder> ...` from the workspace root.",
+    "For JJ child repos, treat the inline diff and prefixed files as authoritative review context.",
   ];
 
   if (options.includeReportingInstruction) {
@@ -138,7 +140,7 @@ function buildWorkspaceReviewUserMessage(
   workspace: WorkspaceReviewPromptContext,
 ): string {
   return [
-    "Review the local workspace changes across multiple nested git repositories.",
+    "Review the local workspace changes across multiple nested VCS repositories.",
     "",
     ...buildWorkspacePromptContextLines(workspace, { includeReportingInstruction: true }),
     "",

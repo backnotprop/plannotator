@@ -21,6 +21,7 @@ export type {
 } from "./review-core";
 
 export type {
+  WorkspaceDiffType,
   WorkspaceRepoState,
   WorkspaceReviewState,
 } from "./review-workspace";

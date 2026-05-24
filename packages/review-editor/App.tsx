@@ -51,6 +51,7 @@ import { usePRSession, type PRSessionUpdate } from './hooks/usePRSession';
 import { useAnnotationFactory } from './hooks/useAnnotationFactory';
 import { DEMO_DIFF } from './demoData';
 import { exportReviewFeedback } from './utils/exportFeedback';
+import { parseDiffToFiles } from './utils/diffParser';
 import { ReviewSubmissionDialog, buildReviewSubmission, type ReviewSubmission, type SubmissionTarget } from './components/ReviewSubmissionDialog';
 import { ReviewStateProvider, type ReviewState } from './dock/ReviewStateContext';
 import { JobLogsProvider } from './dock/JobLogsContext';
@@ -85,43 +86,11 @@ interface DiffData {
   origin?: Origin;
   diffType?: string;
   gitContext?: GitContext;
+  diffOptions?: DiffOption[];
   sharingEnabled?: boolean;
   prStackInfo?: PRStackInfo | null;
   prDiffScope?: PRDiffScope;
   prDiffScopeOptions?: PRDiffScopeOption[];
-}
-
-// Simple diff parser to extract files from unified diff
-function parseDiffToFiles(rawPatch: string): DiffFile[] {
-  const files: DiffFile[] = [];
-  const fileChunks = rawPatch.split(/^diff --git /m).filter(Boolean);
-
-  for (const chunk of fileChunks) {
-    const lines = chunk.split('\n');
-    const headerMatch = lines[0]?.match(/a\/(.+) b\/(.+)/);
-    if (!headerMatch) continue;
-
-    const oldPath = headerMatch[1];
-    const newPath = headerMatch[2];
-
-    let additions = 0;
-    let deletions = 0;
-
-    for (const line of lines) {
-      if (line.startsWith('+') && !line.startsWith('+++')) additions++;
-      if (line.startsWith('-') && !line.startsWith('---')) deletions++;
-    }
-
-    files.push({
-      path: newPath,
-      oldPath: oldPath !== newPath ? oldPath : undefined,
-      patch: 'diff --git ' + chunk,
-      additions,
-      deletions,
-    });
-  }
-
-  return files;
 }
 
 function getFileTabTitle(filePath: string): string {
@@ -183,6 +152,7 @@ const ReviewApp: React.FC = () => {
   const [reviewMode, setReviewMode] = useState<string | null>(null);
   const [diffType, setDiffType] = useState<string>('uncommitted');
   const [gitContext, setGitContext] = useState<GitContext | null>(null);
+  const [workspaceDiffOptions, setWorkspaceDiffOptions] = useState<DiffOption[] | null>(null);
   // Two bases:
   //   selectedBase  — what the picker is currently showing (UI intent).
   //                   Updates immediately when the user picks, so the chip
@@ -359,6 +329,7 @@ const ReviewApp: React.FC = () => {
   const hasSearchableFiles = files.length > 0;
   const shouldShowFileTree =
     hasSearchableFiles ||
+    (reviewMode === 'workspace' && !!workspaceDiffOptions?.length) ||
     !!gitContext?.diffOptions?.length ||
     !!gitContext?.worktrees?.length;
 
@@ -728,6 +699,7 @@ const ReviewApp: React.FC = () => {
         diffType?: string;
         base?: string;
         gitContext?: GitContext;
+        diffOptions?: DiffOption[];
         agentCwd?: string;
         sharingEnabled?: boolean;
         repoInfo?: { display: string; branch?: string };
@@ -754,10 +726,12 @@ const ReviewApp: React.FC = () => {
           origin: data.origin,
           diffType: data.diffType,
           gitContext: data.gitContext,
+          diffOptions: data.diffOptions,
           sharingEnabled: data.sharingEnabled,
         });
         setFiles(apiFiles);
         setReviewMode(data.mode ?? null);
+        setWorkspaceDiffOptions(data.mode === 'workspace' ? (data.diffOptions ?? []) : null);
         if (data.origin) setOrigin(data.origin);
         if (data.diffType) setDiffType(data.diffType);
         if (data.gitContext) {
@@ -800,6 +774,7 @@ const ReviewApp: React.FC = () => {
           gitRef: 'demo',
         });
         setFiles(demoFiles);
+        setWorkspaceDiffOptions(null);
       })
       .finally(() => setIsLoading(false));
   }, []);
@@ -1032,7 +1007,8 @@ const ReviewApp: React.FC = () => {
     onFileViewed: handleFileViewedFromStage,
   });
   // Staging is never available in PR review mode — the server rejects it and the UI shouldn't offer it.
-  const canStageFiles = canStageRaw && !prMetadata;
+  const canStageInWorkspace = reviewMode !== 'workspace' || workspaceDiffOptions?.some((option) => option.id === 'workspace-staged');
+  const canStageFiles = canStageRaw && !prMetadata && canStageInWorkspace;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -1119,6 +1095,7 @@ const ReviewApp: React.FC = () => {
         diffType: string;
         base?: string;
         gitContext?: GitContext;
+        diffOptions?: DiffOption[];
         error?: string;
       };
 
@@ -1129,6 +1106,7 @@ const ReviewApp: React.FC = () => {
         // If the current file was removed (whitespace-only), retarget the
         // dock panel to the first remaining file.
         setDiffData(prev => prev ? { ...prev, rawPatch: data.rawPatch, gitRef: data.gitRef } : prev);
+        if (data.diffOptions) setWorkspaceDiffOptions(data.diffOptions);
         setFiles(nextFiles);
         const currentPath = files[activeFileIndex]?.path;
         const nextIdx = currentPath ? nextFiles.findIndex(f => f.path === currentPath) : -1;
@@ -1144,6 +1122,7 @@ const ReviewApp: React.FC = () => {
         setDiffData(prev => prev ? { ...prev, rawPatch: data.rawPatch, gitRef: data.gitRef, diffType: data.diffType } : prev);
         setFiles(nextFiles);
         setDiffType(data.diffType);
+        if (data.diffOptions) setWorkspaceDiffOptions(data.diffOptions);
         if (data.base) {
           setSelectedBase(data.base);
           setCommittedBase(data.base);
@@ -1229,13 +1208,13 @@ const ReviewApp: React.FC = () => {
   // Preserves the active file since only whitespace hunks change.
   const hideWhitespaceInitialized = useRef(false);
   useEffect(() => {
-    if (!origin || !gitContext) return;
+    if (!origin || (!gitContext && reviewMode !== 'workspace')) return;
     if (!hideWhitespaceInitialized.current) {
       hideWhitespaceInitialized.current = true;
       return;
     }
     fetchDiffSwitch(diffType, selectedBase, { preserveFile: true });
-  }, [diffHideWhitespace, origin]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [diffHideWhitespace, origin, reviewMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Select annotation - switches file if needed and scrolls to it
   const handleSelectAnnotation = useCallback((id: string | null) => {
@@ -2077,7 +2056,7 @@ const ReviewApp: React.FC = () => {
                 hideViewedFiles={hideViewedFiles}
                 onToggleHideViewed={() => setHideViewedFiles(prev => !prev)}
                 enableKeyboardNav={!showExportModal && hasSearchableFiles}
-                diffOptions={gitContext?.diffOptions}
+                diffOptions={reviewMode === 'workspace' ? (workspaceDiffOptions ?? undefined) : gitContext?.diffOptions}
                 activeDiffType={activeDiffBase}
                 onSelectDiff={handleDiffSwitch}
                 isLoadingDiff={isLoadingDiff}
@@ -2169,6 +2148,10 @@ const ReviewApp: React.FC = () => {
                           {activeDiffBase === 'last-commit' && `No changes in the last commit${activeWorktreePath ? ' in this worktree' : ''}.`}
                           {activeDiffBase === 'jj-current' && "No changes in the current jj change."}
                           {activeDiffBase === 'jj-last' && "No changes in the last jj change."}
+                          {activeDiffBase === 'workspace-current' && "No current changes in the workspace repositories."}
+                          {activeDiffBase === 'workspace-staged' && "No staged changes in the workspace repositories."}
+                          {activeDiffBase === 'workspace-unstaged' && "No unstaged changes in the workspace repositories."}
+                          {activeDiffBase === 'workspace-last' && "No changes in the last change across workspace repositories."}
                           {activeDiffBase === 'jj-line' && `No changes in your line of work vs ${selectedBase || gitContext?.defaultBranch || '@-'}.`}
                           {activeDiffBase === 'jj-all' && "No files at the current jj change."}
                           {activeDiffBase === 'branch' && `No changes vs ${selectedBase || gitContext?.defaultBranch || 'main'}${activeWorktreePath ? ' in this worktree' : ''}.`}
@@ -2178,7 +2161,7 @@ const ReviewApp: React.FC = () => {
                       </>
                     )}
                   </div>
-                  {gitContext?.diffOptions && gitContext.diffOptions.length > 1 && (
+                  {((reviewMode === 'workspace' ? workspaceDiffOptions : gitContext?.diffOptions)?.length ?? 0) > 1 && (
                     <p className="text-xs text-muted-foreground/60">
                       Try selecting a different view from the dropdown.
                     </p>
