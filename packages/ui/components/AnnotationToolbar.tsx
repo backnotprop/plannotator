@@ -30,8 +30,6 @@ interface AnnotationToolbarProps {
   onRequestComment?: (initialChar?: string) => void;
   /** Called when a quick label chip is selected */
   onQuickLabel?: (label: QuickLabel) => void;
-  /** Text to copy (for text selection, pass source.text) */
-  copyText?: string;
   /** Close toolbar when element scrolls out of viewport */
   closeOnScrollOut?: boolean;
   /** Exit animation state */
@@ -48,44 +46,16 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   onClose,
   onRequestComment,
   onQuickLabel,
-  copyText,
   closeOnScrollOut = false,
   isExiting = false,
   onMouseEnter,
   onMouseLeave,
 }) => {
   const [position, setPosition] = useState<{ top: number; left?: number; right?: number } | null>(null);
-  const [copied, setCopied] = useState(false);
   const [showQuickLabels, setShowQuickLabels] = useState(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const zapButtonRef = useRef<HTMLButtonElement>(null);
   const quickLabels = useMemo(() => getQuickLabels(), []);
-
-  const handleCopy = async () => {
-    let textToCopy = copyText;
-    if (!textToCopy) {
-      const codeEl = element.querySelector('code');
-      textToCopy = codeEl?.textContent || element.textContent || '';
-    }
-    try {
-      await navigator.clipboard.writeText(textToCopy);
-    } catch {
-      const textarea = document.createElement('textarea');
-      textarea.value = textToCopy;
-      textarea.style.cssText = 'position:fixed;opacity:0';
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      textarea.remove();
-    }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
-
-  // Reset copied state when element changes
-  useEffect(() => {
-    setCopied(false);
-  }, [element]);
 
   // Update position on scroll/resize
   useEffect(() => {
@@ -207,13 +177,6 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       `}</style>
       <div className="flex items-center p-1 gap-0.5">
         <ToolbarButton
-          onClick={handleCopy}
-          icon={copied ? <CheckIcon /> : <CopyIcon />}
-          label={copied ? "Copied!" : "Copy"}
-          className={copied ? "text-success" : "text-muted-foreground hover:bg-muted hover:text-foreground"}
-        />
-        <div className="w-px h-5 bg-border mx-0.5" />
-        <ToolbarButton
           onClick={() => handleTypeSelect(AnnotationType.DELETION)}
           icon={<TrashIcon />}
           label="Delete"
@@ -266,18 +229,6 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
 };
 
 // Icons
-const CopyIcon = () => (
-  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-  </svg>
-);
-
-const CheckIcon = () => (
-  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-  </svg>
-);
-
 const TrashIcon = () => (
   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />

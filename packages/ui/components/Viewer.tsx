@@ -711,7 +711,6 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               onClose={handleToolbarClose}
               onRequestComment={handleRequestComment}
               onQuickLabel={handleQuickLabel}
-              copyText={toolbarState.selectionText}
               closeOnScrollOut
             />
           </ToolbarErrorBoundary>
