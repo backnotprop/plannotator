@@ -30,8 +30,10 @@ interface AnnotationToolbarProps {
   onRequestComment?: (initialChar?: string) => void;
   /** Called when a quick label chip is selected */
   onQuickLabel?: (label: QuickLabel) => void;
-  /** Text to copy on touch devices (keyboard users get Cmd+C via native copy event) */
+  /** Text to copy when the button is clicked */
   copyText?: string;
+  /** Hide the copy button (set when a keyboard copy handler exists) */
+  hideCopyButton?: boolean;
   /** Close toolbar when element scrolls out of viewport */
   closeOnScrollOut?: boolean;
   /** Exit animation state */
@@ -49,6 +51,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   onRequestComment,
   onQuickLabel,
   copyText,
+  hideCopyButton = false,
   closeOnScrollOut = false,
   isExiting = false,
   onMouseEnter,
@@ -60,7 +63,6 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   const toolbarRef = useRef<HTMLDivElement>(null);
   const zapButtonRef = useRef<HTMLButtonElement>(null);
   const quickLabels = useMemo(() => getQuickLabels(), []);
-  const isTouchDevice = useMemo(() => window.matchMedia('(pointer: coarse)').matches, []);
 
   useEffect(() => { setCopied(false); }, [element]);
 
@@ -204,7 +206,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
         }
       `}</style>
       <div className="flex items-center p-1 gap-0.5">
-        {(isTouchDevice || !copyText) && (
+        {!hideCopyButton && (
           <>
             <ToolbarButton
               onClick={handleCopy}

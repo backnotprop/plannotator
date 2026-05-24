@@ -712,6 +712,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               onRequestComment={handleRequestComment}
               onQuickLabel={handleQuickLabel}
               copyText={toolbarState.selectionText}
+              hideCopyButton={!window.matchMedia('(pointer: coarse)').matches}
               closeOnScrollOut
             />
           </ToolbarErrorBoundary>
