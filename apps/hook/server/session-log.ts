@@ -49,6 +49,7 @@ export interface SessionLogEntry {
   message?: {
     id?: string;
     role?: string;
+    visibility?: string;
     content?: string | ContentBlock[];
   };
   [key: string]: unknown;
@@ -169,6 +170,27 @@ export function findDroidSessionLogsByAncestorWalk(
     cwd,
     sessionsDirOverride ?? DEFAULT_FACTORY_SESSIONS_DIR,
   );
+}
+
+/**
+ * Best-effort current Droid/Factory session log resolution for a cwd.
+ *
+ * Factory does not expose per-process session metadata, so the safest
+ * available selector is the newest exact-cwd log, falling back to the newest
+ * log from the first ancestor slug with any sessions. Callers should inspect
+ * only this selected log and fail cleanly if it contains no assistant reply,
+ * rather than falling through to older sibling sessions.
+ */
+export function resolveDroidSessionLogForCwd(
+  cwd: string,
+  sessionsDirOverride?: string,
+): string | null {
+  const sessionsDir = sessionsDirOverride ?? DEFAULT_FACTORY_SESSIONS_DIR;
+  const exactLogs = findDroidSessionLogsForCwd(cwd, sessionsDir);
+  if (exactLogs.length > 0) return exactLogs[0];
+
+  const ancestorLogs = findDroidSessionLogsByAncestorWalk(cwd, sessionsDir);
+  return ancestorLogs[0] ?? null;
 }
 
 // --- Session Metadata Resolution ---
@@ -534,8 +556,12 @@ function getVisibleTextBlocks(content: string | ContentBlock[] | undefined): str
     .map((b: ContentBlock) => b.text!);
 }
 
+function getEntryVisibility(entry: SessionLogEntry): string | undefined {
+  return entry.visibility ?? entry.message?.visibility;
+}
+
 function isHiddenTranscriptEntry(entry: SessionLogEntry): boolean {
-  const visibility = entry.visibility?.trim().toLowerCase();
+  const visibility = getEntryVisibility(entry)?.trim().toLowerCase();
   return visibility === "llm_only" || visibility === "assistant_only" || visibility === "hidden";
 }
 

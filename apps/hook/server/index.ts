@@ -110,6 +110,7 @@ import {
   findSessionLogsByAncestorWalk,
   findSessionLogsForCwd,
   getLastRenderedMessage,
+  resolveDroidSessionLogForCwd,
   resolveSessionLogByAncestorPids,
   resolveSessionLogByCwdScan,
   type RenderedMessage,
@@ -869,31 +870,32 @@ if (args[0] === "sessions") {
     // Droid/Factory path: resolve the current repo's session log from
     // ~/.factory/sessions/<cwd-slug>/*.jsonl. Factory does not expose the same
     // per-process session metadata files as Claude Code, so the best available
-    // selector is "newest matching session log for this cwd", with an ancestor
-    // walk fallback for users who `cd` into a subdirectory after session start.
+    // selector is "newest current-session candidate for this cwd", with an
+    // ancestor walk fallback for users who `cd` into a subdirectory after
+    // session start.
     if (process.env.PLANNOTATOR_DEBUG) {
       console.error(`[DEBUG] Droid detected, project root: ${projectRoot}`);
     }
 
-    function tryDroidLogCandidates(label: string, getPaths: () => string[]): void {
-      if (lastMessage) return;
-      const paths = getPaths();
-      if (process.env.PLANNOTATOR_DEBUG) {
-        console.error(`[DEBUG] ${label}: ${paths.length ? paths.join(", ") : "(none)"}`);
-      }
-      for (const logPath of paths) {
-        lastMessage = getLastRenderedMessage(logPath);
-        if (lastMessage) return;
+    const cwdLogs = findDroidSessionLogsForCwd(projectRoot);
+    const ancestorLogs = cwdLogs.length === 0
+      ? findDroidSessionLogsByAncestorWalk(projectRoot)
+      : [];
+
+    if (process.env.PLANNOTATOR_DEBUG) {
+      console.error(`[DEBUG] Droid CWD session logs (mtime): ${cwdLogs.length ? cwdLogs.join(", ") : "(none)"}`);
+      if (cwdLogs.length === 0) {
+        console.error(`[DEBUG] Droid ancestor walk: ${ancestorLogs.length ? ancestorLogs.join(", ") : "(none)"}`);
       }
     }
 
-    tryDroidLogCandidates("Droid CWD session logs (mtime)", () =>
-      findDroidSessionLogsForCwd(projectRoot),
-    );
-
-    tryDroidLogCandidates("Droid ancestor walk", () =>
-      findDroidSessionLogsByAncestorWalk(projectRoot),
-    );
+    const droidLog = resolveDroidSessionLogForCwd(projectRoot);
+    if (process.env.PLANNOTATOR_DEBUG) {
+      console.error(`[DEBUG] Droid selected log: ${droidLog ?? "(none)"}`);
+    }
+    if (droidLog) {
+      lastMessage = getLastRenderedMessage(droidLog);
+    }
   } else {
     // Claude Code path: resolve session log
     //
