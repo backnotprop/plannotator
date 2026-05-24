@@ -6,7 +6,7 @@ author: "backnotprop"
 tags: ["pi", "integration", "plan-mode"]
 ---
 
-**Plannotator now supports [Pi](https://github.com/badlogic/pi-mono), the minimal terminal coding agent from Mario Zechner.** Install it as a Pi extension and you get file-based plan mode, visual plan review, code review, and markdown annotation — all through the same browser UI that Claude Code and OpenCode users already know.
+**Plannotator now supports [Pi](https://github.com/earendil-works/pi), the minimal terminal coding agent originally created by Mario Zechner (now part of Earendil Works).** Install it as a Pi extension and you get file-based plan mode, visual plan review, code review, and markdown annotation — all through the same browser UI that Claude Code and OpenCode users already know.
 
 ## Watch the Demo
 

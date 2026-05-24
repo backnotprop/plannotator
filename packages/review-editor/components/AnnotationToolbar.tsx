@@ -4,7 +4,7 @@ import { ToolbarState } from '../hooks/useAnnotationToolbar';
 import { useTabIndent } from '../hooks/useTabIndent';
 import { formatLineRange, formatTokenContext } from '../utils/formatLineRange';
 import { AskAIInput } from './AskAIInput';
-import { SparklesIcon } from './SparklesIcon';
+import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
 import { ConventionalLabelPicker, type LabelDef } from './ConventionalLabelPicker';
 import type { ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/types';
 import type { AIChatEntry } from '../hooks/useAIChat';

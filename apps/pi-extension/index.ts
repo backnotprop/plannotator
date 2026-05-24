@@ -18,13 +18,13 @@
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, resolve } from "node:path";
-import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
-import { Type } from "@mariozechner/pi-ai";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { Type } from "@earendil-works/pi-ai";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
-} from "@mariozechner/pi-coding-agent";
-import { Key } from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-coding-agent";
+import { Key } from "@earendil-works/pi-tui";
 import { buildPromptVariables, formatTodoList, loadPlannotatorConfig, renderTemplate, resolvePhaseProfile } from "./config.js";
 import {
 	type ChecklistItem,
@@ -36,6 +36,8 @@ import { FILE_BROWSER_EXCLUDED } from "./generated/reference-common.js";
 import { htmlToMarkdown } from "./generated/html-to-markdown.js";
 import { urlToMarkdown, isConvertedSource } from "./generated/url-to-markdown.js";
 import { loadConfig, resolveUseJina } from "./generated/config.js";
+import { readImprovementHook } from "./generated/improvement-hooks.js";
+import { composeImproveContext } from "./generated/pfm-reminder.js";
 import {
 	getReviewApprovedPrompt,
 	getReviewDeniedSuffix,
@@ -491,7 +493,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			// accepted (Pi writes back via sendUserMessage, not stdout).
 			// `rawFilePath` keeps any leading `@` for the literal-@ fallback
 			// (scoped-package-style names).
-			const { filePath, rawFilePath, gate } = parseAnnotateArgs(args ?? "");
+			const { filePath, rawFilePath, gate, renderHtml: renderHtmlFlag } = parseAnnotateArgs(args ?? "");
 			if (!filePath) {
 				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.html | https://... | folder/> [--gate] [--json]", "error");
 				return;
@@ -505,6 +507,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			}
 
 			let markdown: string;
+			let rawHtml: string | undefined;
 			let absolutePath: string;
 			let folderPath: string | undefined;
 			let mode: "annotate" | "annotate-folder" | undefined;
@@ -568,9 +571,14 @@ export default function plannotator(pi: ExtensionAPI): void {
 						return;
 					}
 					const html = readFileSync(absolutePath, "utf-8");
-					markdown = htmlToMarkdown(html);
+					if (renderHtmlFlag) {
+						rawHtml = html;
+						markdown = "";
+					} else {
+						markdown = htmlToMarkdown(html);
+						sourceConverted = true;
+					}
 					sourceInfo = basename(absolutePath);
-					sourceConverted = true;
 					ctx.ui.notify(`Opening annotation UI for ${filePath}...`, "info");
 				} else {
 					markdown = readFileSync(absolutePath, "utf-8");
@@ -591,6 +599,8 @@ export default function plannotator(pi: ExtensionAPI): void {
 					sourceInfo,
 					sourceConverted,
 					gate,
+					rawHtml,
+					renderHtmlFlag,
 				);
 				ctx.ui.notify("Annotation opened. You can keep chatting while it runs.", "info");
 				void session
@@ -981,6 +991,17 @@ export default function plannotator(pi: ExtensionAPI): void {
 		}
 
 		const todoStats = phase === "executing" ? formatTodoList(checklistItems) : formatTodoList([]);
+
+		let improveContext: string | null = null;
+		if (phase === "planning") {
+			const hook = readImprovementHook("enterplanmode-improve");
+			const pfmEnabled = loadConfig().pfmReminder === true;
+			improveContext = composeImproveContext({
+				pfmEnabled,
+				improvementHookContent: hook?.content ?? null,
+			});
+		}
+
 		if (profile?.systemPrompt) {
 			const rendered = renderTemplate(
 				profile.systemPrompt,
@@ -1000,7 +1021,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				);
 			}
 
-			return { systemPrompt: rendered.text };
+			return { systemPrompt: rendered.text + (improveContext ? "\n\n" + improveContext : "") };
 		}
 
 		if (phase === "planning") {
@@ -1072,7 +1093,7 @@ Your turn should only end by either:
 - Asking the user a question to gather more information.
 - Calling ${PLAN_SUBMIT_TOOL} when the plan is ready for review.
 
-Do not end your turn without doing one of these two things.`,
+Do not end your turn without doing one of these two things.` + (improveContext ? "\n\n---\n\n" + improveContext : ""),
 					display: false,
 				},
 			};

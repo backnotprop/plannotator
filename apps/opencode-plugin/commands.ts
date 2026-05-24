@@ -205,7 +205,7 @@ export async function handleAnnotateCommand(
   // --json is accepted silently (OpenCode writes to session, not stdout).
   // parseAnnotateArgs strips leading @ on filePath (reference-mode convention).
   // `rawFilePath` preserves it for the scoped-package markdown fallback.
-  const { filePath, rawFilePath, gate } = parseAnnotateArgs(rawArgs);
+  const { filePath, rawFilePath, gate, renderHtml: renderHtmlFlag } = parseAnnotateArgs(rawArgs);
 
   if (!filePath) {
     client.app.log({ level: "error", message: "Usage: /plannotator-annotate <file.md | file.html | https://... | folder/> [--gate] [--json]" });
@@ -213,6 +213,7 @@ export async function handleAnnotateCommand(
   }
 
   let markdown: string;
+  let rawHtml: string | undefined;
   let absolutePath: string;
   let folderPath: string | undefined;
   let annotateMode: "annotate" | "annotate-folder" = "annotate";
@@ -269,11 +270,16 @@ export async function handleAnnotateCommand(
         return;
       }
       const html = await Bun.file(resolvedArg).text();
-      markdown = htmlToMarkdown(html);
+      if (renderHtmlFlag) {
+        rawHtml = html;
+        markdown = "";
+      } else {
+        markdown = htmlToMarkdown(html);
+        sourceConverted = true;
+      }
       absolutePath = resolvedArg;
       sourceInfo = path.basename(resolvedArg);
-      sourceConverted = true;
-      client.app.log({ level: "info", message: `Converted: ${absolutePath}` });
+      client.app.log({ level: "info", message: `${renderHtmlFlag ? "Raw HTML" : "Converted"}: ${absolutePath}` });
     } else {
       // Markdown file annotation
       client.app.log({ level: "info", message: `Opening annotation UI for ${filePath}...` });
@@ -309,6 +315,8 @@ export async function handleAnnotateCommand(
     folderPath,
     sourceInfo,
     sourceConverted,
+    rawHtml,
+    renderHtml: renderHtmlFlag,
     sharingEnabled: await getSharingEnabled(),
     shareBaseUrl: getShareBaseUrl(),
     pasteApiUrl: getPasteApiUrl(),

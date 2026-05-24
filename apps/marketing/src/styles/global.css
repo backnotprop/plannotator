@@ -1279,3 +1279,41 @@
   opacity: 1;
   transform: scale(1.1);
 }
+
+/* ═══════════════════════════════════════════════════════
+   Landing CTA band — links to /workspaces/ from the home page.
+   The /workspaces/ page itself ships its own scoped IBM Plex
+   palette inline (see apps/marketing/src/pages/workspaces/),
+   so nothing else lives here.
+   ═══════════════════════════════════════════════════════ */
+
+/* ── Landing CTA band linking to Workspaces ── */
+
+.workspaces-cta-band {
+  position: relative;
+  overflow: hidden;
+}
+
+.workspaces-cta-band::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(800px 240px at 50% 0%, oklch(from var(--primary) l c h / 0.08), transparent 70%);
+  pointer-events: none;
+}
+
+.workspaces-cta-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--primary);
+  border: 1px solid oklch(from var(--primary) l c h / 0.45);
+  background: oklch(from var(--primary) l c h / 0.08);
+  padding: 0.25rem 0.625rem;
+  border-radius: 9999px;
+}

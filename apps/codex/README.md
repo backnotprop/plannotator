@@ -33,7 +33,7 @@ Add this to `~/.codex/config.toml` or `<repo>/.codex/config.toml`:
 
 ```toml
 [features]
-codex_hooks = true
+hooks = true
 ```
 
 Then create `~/.codex/hooks.json` or `<repo>/.codex/hooks.json`:

@@ -34,7 +34,7 @@ export const COLLAB_CONFIG = {
 | \`package.json\` | Root config |
 
 ## Overview
-Add real-time collaboration features to the editor using _**[WebSocket API](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API)**_ and *[operational transforms](https://en.wikipedia.org/wiki/Operational_transformation)*.
+Add real-time collaboration features to the editor using _**[WebSocket API](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API)**_ and *[operational transforms](https://en.wikipedia.org/wiki/Operational_transformation)*. The core rendering logic is in \`packages/ui/components/Viewer.tsx:140-180\` and the block parser at \`packages/ui/utils/parser.ts:261-286\`.
 
 ## Phase 1: Infrastructure
 

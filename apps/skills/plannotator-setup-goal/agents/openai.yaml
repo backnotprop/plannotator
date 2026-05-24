@@ -1,4 +1,4 @@
 interface:
-  display_name: "Plannotator Goal Setup"
-  short_description: "Build reviewed Codex goal packages"
-  default_prompt: "Use $plannotator-setup-goal to create a reviewed goal package for this project."
+  display_name: "Setup Goal"
+  short_description: "Turn an idea into a goal package for /goal"
+  default_prompt: "Use $plannotator-setup-goal to turn this idea into a goal package."

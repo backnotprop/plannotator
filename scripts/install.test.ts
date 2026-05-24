@@ -26,6 +26,13 @@ describe("install.sh", () => {
     expect(json.hooks.PermissionRequest[0].hooks[0].type).toBe("command");
     expect(json.hooks.PermissionRequest[0].hooks[0].command).toBe("plannotator");
     expect(json.hooks.PermissionRequest[0].hooks[0].timeout).toBe(345600);
+    // EnterPlanMode hook drives the compound-skill improvement-hook injection.
+    // It must be re-emitted on every install — see apps/hook/hooks/hooks.json.
+    expect(json.hooks.PreToolUse).toBeArray();
+    expect(json.hooks.PreToolUse[0].matcher).toBe("EnterPlanMode");
+    expect(json.hooks.PreToolUse[0].hooks[0].type).toBe("command");
+    expect(json.hooks.PreToolUse[0].hooks[0].command).toBe("plannotator improve-context");
+    expect(json.hooks.PreToolUse[0].hooks[0].timeout).toBe(5);
   });
 
   test("installs to ~/.local/bin", () => {
@@ -150,6 +157,11 @@ describe("install.ps1", () => {
     expect(script).toContain('"type": "command"');
     expect(script).toContain('"timeout": 345600');
     expect(script).toContain('"command":');
+    // EnterPlanMode hook drives the compound-skill improvement-hook injection.
+    expect(script).toContain('"PreToolUse"');
+    expect(script).toContain('"matcher": "EnterPlanMode"');
+    expect(script).toContain('"command": "$exePathJson improve-context"');
+    expect(script).toContain('"timeout": 5');
   });
 
   test("uses full exe path in hooks.json", () => {
@@ -206,8 +218,8 @@ describe("install.ps1", () => {
     expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\plannotator-compound" $agentsSkillsDir');
     expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\plannotator-setup-goal" $agentsSkillsDir');
     expect(script).toContain("if ($codexAvailable)");
-    expect(script).not.toContain('Copy-Item -Recurse -Force "apps\\skills\\*" $codexSkillsDir');
-    expect(script).not.toContain('Copy-Item -Recurse -Force "apps\\skills\\*" $agentsSkillsDir');
+    expect(script).not.toContain('Copy-Item -Recurse -Force "skills\\*" $codexSkillsDir');
+    expect(script).not.toContain('Copy-Item -Recurse -Force "skills\\*" $agentsSkillsDir');
     expect(script).not.toContain('Copy-Item -Recurse -Force "apps\\skills\\plannotator-review" $codexSkillsDir');
     expect(script).toContain('Skipping skills install (git not found)');
   });
@@ -267,6 +279,11 @@ describe("install.cmd", () => {
     expect(script).toContain('echo             "type": "command",');
     expect(script).toContain('echo             "command":');
     expect(script).toContain('echo             "timeout": 345600');
+    // EnterPlanMode hook drives the compound-skill improvement-hook injection.
+    expect(script).toContain('echo     "PreToolUse": [');
+    expect(script).toContain('echo         "matcher": "EnterPlanMode",');
+    expect(script).toContain('echo             "command": "!EXE_PATH! improve-context",');
+    expect(script).toContain('echo             "timeout": 5');
   });
 
   test("uses full exe path in hooks.json", () => {
@@ -316,8 +333,8 @@ describe("install.cmd", () => {
     expect(script).toContain('if exist "apps\\skills\\plannotator-last" xcopy /s /i /y /q "apps\\skills\\plannotator-last" "!CODEX_SKILLS_DIR!\\plannotator-last\\"');
     expect(script).toContain('if exist "apps\\skills\\plannotator-compound" xcopy /s /i /y /q "apps\\skills\\plannotator-compound" "!AGENTS_SKILLS_DIR!\\plannotator-compound\\"');
     expect(script).toContain('if exist "apps\\skills\\plannotator-setup-goal" xcopy /s /i /y /q "apps\\skills\\plannotator-setup-goal" "!AGENTS_SKILLS_DIR!\\plannotator-setup-goal\\"');
-    expect(script).not.toContain('xcopy /s /y /q "apps\\skills\\*" "!CODEX_SKILLS_DIR!\\"');
-    expect(script).not.toContain('xcopy /s /y /q "apps\\skills\\*" "!AGENTS_SKILLS_DIR!\\"');
+    expect(script).not.toContain('xcopy /s /y /q "skills\\*" "!CODEX_SKILLS_DIR!\\"');
+    expect(script).not.toContain('xcopy /s /y /q "skills\\*" "!AGENTS_SKILLS_DIR!\\"');
     expect(script).toContain("Skipping skills install");
   });
 
@@ -367,7 +384,7 @@ describe("install.cmd", () => {
     expect(script).toContain("Leaving Pi bundled skills enabled ^(global Plannotator agent skills not found^).");
     expect(script).toContain("Configured Pi to use global Plannotator skills and skip bundled package skills.");
     expect(script).toContain('set "PI_SHARED_SKILLS_AVAILABLE=0"');
-    expect(script).toContain('if exist "!PI_SHARED_SKILLS_DIR!\\plannotator-compound\\SKILL.md" if exist "!PI_SHARED_SKILLS_DIR!\\plannotator-setup-goal\\SKILL.md" set "PI_SHARED_SKILLS_AVAILABLE=1"');
+    expect(script).toContain('if exist "!PI_SHARED_SKILLS_DIR!\\plannotator-compound\\SKILL.md" if exist "!PI_SHARED_SKILLS_DIR!\\plannotator-setup-goal\\SKILL.md" if exist "!PI_SHARED_SKILLS_DIR!\\plannotator-visual-explainer\\SKILL.md" set "PI_SHARED_SKILLS_AVAILABLE=1"');
     expect(script).toContain('if "!PI_SHARED_SKILLS_AVAILABLE!"=="1"');
 
     const skillsInstallIndex = script.indexOf("REM Install skills (requires git)");

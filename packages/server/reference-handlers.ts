@@ -8,6 +8,7 @@
 import { existsSync, statSync } from "fs";
 import { resolve } from "path";
 import { buildFileTree, FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
+import { parseCodePath } from "@plannotator/shared/code-file";
 import { detectObsidianVaults } from "./integrations";
 import {
 	isAbsoluteUserPath,
@@ -83,7 +84,9 @@ export async function handleDoc(req: Request): Promise<Response> {
 	// Code files: try literal resolve first; on miss, fall back to the smart
 	// resolver which walks the project for case-insensitive / suffix matches.
 	if (isCodeFilePath(requestedPath)) {
-		const literalPath = resolveUserPath(requestedPath, resolvedBase || projectRoot);
+		const parsed = parseCodePath(requestedPath);
+		const cleanPath = parsed.filePath;
+		const literalPath = resolveUserPath(cleanPath, resolvedBase || projectRoot);
 		const literalAllowed = resolvedBase || isWithinProjectRoot(literalPath, projectRoot);
 
 		let resolvedCode: string | null = null;
@@ -95,7 +98,7 @@ export async function handleDoc(req: Request): Promise<Response> {
 		}
 
 		if (!resolvedCode) {
-			const result = await resolveCodeFile(requestedPath, projectRoot);
+			const result = await resolveCodeFile(cleanPath, projectRoot);
 			if (result.kind === "found") {
 				resolvedCode = result.path;
 			} else if (result.kind === "ambiguous") {
@@ -134,7 +137,7 @@ export async function handleDoc(req: Request): Promise<Response> {
 			} catch {
 				// Fall back to client-side rendering
 			}
-			return Response.json({ codeFile: true, contents, filepath: resolvedCode, prerenderedHTML });
+			return Response.json({ codeFile: true, contents, filepath: resolvedCode, prerenderedHTML, line: parsed.line, lineEnd: parsed.lineEnd });
 		} catch {
 			return Response.json({ error: `File not found: ${requestedPath}` }, { status: 404 });
 		}
@@ -215,7 +218,8 @@ export async function handleDocExists(req: Request): Promise<Response> {
 
 	await Promise.all(
 		(paths as string[]).map(async (p) => {
-			const r = await resolveCodeFile(p, projectRoot, baseDir);
+			const cleanP = parseCodePath(p).filePath;
+			const r = await resolveCodeFile(cleanP, projectRoot, baseDir);
 			if (r.kind === "found") {
 				results[p] = { status: "found", resolved: r.path };
 			} else if (r.kind === "ambiguous") {

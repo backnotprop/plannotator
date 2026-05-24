@@ -13,13 +13,16 @@ import { GitHubIcon } from '@plannotator/ui/components/GitHubIcon';
 import { GitLabIcon } from '@plannotator/ui/components/GitLabIcon';
 import { RepoIcon } from '@plannotator/ui/components/RepoIcon';
 import { PullRequestIcon } from '@plannotator/ui/components/PullRequestIcon';
-import { getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo } from '@plannotator/shared/pr-provider';
+import { getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo } from '@plannotator/shared/pr-types';
 import { configStore, useConfigValue } from '@plannotator/ui/config';
 import { loadDiffFont } from '@plannotator/ui/utils/diffFonts';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
-import { getAIProviderSettings, saveAIProviderSettings, getPreferredModel } from '@plannotator/ui/utils/aiProvider';
-import { AISetupDialog } from '@plannotator/ui/components/AISetupDialog';
-import { needsAISetup } from '@plannotator/ui/utils/aiSetup';
+import {
+  getAIProviderSettings,
+  resolveAIModelForProvider,
+  resolveAIProviderSelection,
+  saveAIProviderSelection,
+} from '@plannotator/ui/utils/aiProvider';
 import { DiffTypeSetupDialog } from '@plannotator/ui/components/DiffTypeSetupDialog';
 import { needsDiffTypeSetup } from '@plannotator/ui/utils/diffTypeSetup';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/types';
@@ -28,6 +31,8 @@ import { useCodeAnnotationDraft } from '@plannotator/ui/hooks/useCodeAnnotationD
 import { useGitAdd } from './hooks/useGitAdd';
 import { generateId } from './utils/generateId';
 import { useAIChat } from './hooks/useAIChat';
+import { toast, Toaster } from 'sonner';
+import { useCodeNav, type CodeNavRequest } from './hooks/useCodeNav';
 import { extractLinesFromPatch } from './utils/patchParser';
 import { isTypingTarget, useReviewSearch, type ReviewSearchMatch } from './hooks/useReviewSearch';
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
@@ -39,7 +44,7 @@ import { DockviewReact, type DockviewReadyEvent, type DockviewApi } from 'dockvi
 import { ReviewHeaderMenu } from './components/ReviewHeaderMenu';
 import { ReviewSidebar } from './components/ReviewSidebar';
 import type { ReviewSidebarTab } from './components/ReviewSidebar';
-import { SparklesIcon } from './components/SparklesIcon';
+import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
 import { ReviewAgentsIcon } from '@plannotator/ui/components/ReviewAgentsIcon';
 import { useSidebar } from '@plannotator/ui/hooks/useSidebar';
 import { FileTree } from './components/FileTree';
@@ -68,10 +73,11 @@ import {
   REVIEW_PR_COMMENTS_PANEL_ID,
   REVIEW_PR_CHECKS_PANEL_ID,
   REVIEW_ALL_FILES_PANEL_ID,
+  REVIEW_CODE_NAV_PANEL_ID,
 } from './dock/reviewPanelTypes';
 import type { DiffFile } from './types';
 import type { DiffOption, WorktreeInfo, GitContext } from '@plannotator/shared/types';
-import type { PRMetadata } from '@plannotator/shared/pr-provider';
+import type { PRMetadata } from '@plannotator/shared/pr-types';
 import type { PRDiffScope, PRDiffScopeOption, PRStackInfo, PRStackTree } from '@plannotator/shared/pr-stack';
 import { altKey } from '@plannotator/ui/utils/platform';
 import { TourDialog } from './components/tour/TourDialog';
@@ -374,6 +380,7 @@ const ReviewApp: React.FC = () => {
   // AI Chat
   const [aiAvailable, setAiAvailable] = useState(false);
   const [aiProviders, setAiProviders] = useState<Array<{ id: string; name: string; capabilities: Record<string, boolean>; models?: Array<{ id: string; label: string; default?: boolean }> }>>([]);
+  const [aiDefaultProvider, setAiDefaultProvider] = useState<string | null>(null);
   const [aiConfig, setAiConfig] = useState(() => {
     const saved = getAIProviderSettings();
     const pid = saved.providerId;
@@ -383,8 +390,6 @@ const ReviewApp: React.FC = () => {
       reasoningEffort: null as string | null,
     };
   });
-  const [showAISetup, setShowAISetup] = useState(false);
-  const [aiCheckComplete, setAiCheckComplete] = useState(false);
   const [showDiffTypeSetup, setShowDiffTypeSetup] = useState(false);
   const [diffTypeSetupPending, setDiffTypeSetupPending] = useState(false);
   const aiChat = useAIChat({
@@ -393,6 +398,46 @@ const ReviewApp: React.FC = () => {
     model: aiConfig.model,
     reasoningEffort: aiConfig.reasoningEffort,
   });
+  const {
+    messages: aiMessages,
+    isCreatingSession: aiIsCreatingSession,
+    isStreaming: aiIsStreaming,
+    permissionRequests: aiPermissionRequests,
+    respondToPermission: respondToAIPermission,
+    ask: askAI,
+    resetSession: resetAISession,
+    sessionId: aiSessionId,
+  } = aiChat;
+
+  const codeNav = useCodeNav();
+
+  const handleCodeNavRequest = useCallback((request: CodeNavRequest) => {
+    if (!gitContext && !agentCwd) {
+      toast('Code navigation requires a local checkout', {
+        description: 'Re-run with --local for PR reviews',
+        duration: 4000,
+      });
+      return;
+    }
+    codeNav.resolve(request);
+    if (!dockApi) return;
+    const existing = dockApi.getPanel(REVIEW_CODE_NAV_PANEL_ID);
+    if (existing) {
+      existing.api.setTitle(`References: ${request.symbol}`);
+      existing.api.setActive();
+    } else {
+      const refPanel = isAllFilesActive
+        ? REVIEW_ALL_FILES_PANEL_ID
+        : REVIEW_DIFF_PANEL_ID;
+      dockApi.addPanel({
+        id: REVIEW_CODE_NAV_PANEL_ID,
+        component: REVIEW_PANEL_TYPES.CODE_NAV,
+        title: `References: ${request.symbol}`,
+        position: { direction: 'below', referencePanel: refPanel },
+        initialHeight: 250,
+      });
+    }
+  }, [codeNav.resolve, dockApi, isAllFilesActive, gitContext, agentCwd]);
 
   // Check AI capabilities on mount
   useEffect(() => {
@@ -403,26 +448,49 @@ const ReviewApp: React.FC = () => {
           setAiAvailable(true);
           const providers = data.providers ?? [];
           setAiProviders(providers);
+          setAiDefaultProvider(data.defaultProvider ?? null);
         }
-        setAiCheckComplete(true);
       })
-      .catch(() => { setAiCheckComplete(true); });
+      .catch(() => {});
   }, []);
 
-  const handleAIConfigChange = useCallback((config: { providerId?: string | null; model?: string | null }) => {
+  useEffect(() => {
+    if (!aiAvailable || aiProviders.length === 0) return;
     setAiConfig(prev => {
-      const next = { ...prev, ...config };
-      // If provider changed, load that provider's preferred model
-      if (config.providerId !== undefined && config.providerId !== prev.providerId) {
-        next.model = config.providerId ? getPreferredModel(config.providerId) : null;
-      }
-      // Persist provider selection
       const saved = getAIProviderSettings();
-      saveAIProviderSettings({ ...saved, providerId: next.providerId });
+      const selection = resolveAIProviderSelection({
+        providers: aiProviders,
+        origin,
+        settings: saved,
+        serverDefaultProvider: aiDefaultProvider,
+      });
+
+      if (prev.providerId === selection.providerId && prev.model === selection.model) return prev;
+
+      return { ...prev, providerId: selection.providerId, model: selection.model };
+    });
+  }, [aiAvailable, aiProviders, aiDefaultProvider, origin]);
+
+  const handleAIConfigChange = useCallback((config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => {
+    setAiConfig(prev => {
+      const saved = getAIProviderSettings();
+      const providerId = config.providerId !== undefined ? config.providerId : prev.providerId;
+      const providerChanged = config.providerId !== undefined && config.providerId !== prev.providerId;
+      const provider = aiProviders.find(p => p.id === providerId) ?? null;
+      const model = providerChanged
+        ? (config.model !== undefined ? config.model : resolveAIModelForProvider(provider, saved.preferredModels))
+        : (config.model !== undefined ? config.model : prev.model);
+      const next = { ...prev, ...config, providerId, model };
+      saveAIProviderSelection({
+        providerId: next.providerId,
+        model: next.model,
+        origin,
+        settings: saved,
+      });
       return next;
     });
-    aiChat.resetSession();
-  }, [aiChat]);
+    resetAISession();
+  }, [aiProviders, origin, resetAISession]);
 
   const handleAskAI = useCallback((question: string) => {
     if (!pendingSelection || !files[activeFileIndex]) return;
@@ -431,7 +499,7 @@ const ReviewApp: React.FC = () => {
     const side = pendingSelection.side === 'additions' ? 'new' : 'old';
     const selectedCode = extractLinesFromPatch(files[activeFileIndex].patch, lineStart, lineEnd, side);
 
-    aiChat.ask({
+    askAI({
       prompt: question,
       filePath: files[activeFileIndex].path,
       lineStart,
@@ -439,7 +507,7 @@ const ReviewApp: React.FC = () => {
       side,
       selectedCode: selectedCode || undefined,
     });
-  }, [pendingSelection, files, activeFileIndex, aiChat]);
+  }, [activeFileIndex, askAI, files, pendingSelection]);
 
   const handleViewAIResponse = useCallback((questionId?: string) => {
     reviewSidebar.open('ai');
@@ -467,13 +535,13 @@ const ReviewApp: React.FC = () => {
     const selStart = Math.min(pendingSelection.start, pendingSelection.end);
     const selEnd = Math.max(pendingSelection.start, pendingSelection.end);
     const side = pendingSelection.side === 'additions' ? 'new' : 'old';
-    return aiChat.messages.filter(m => {
+    return aiMessages.filter(m => {
       const q = m.question;
       return q.filePath === filePath && q.side === side &&
         q.lineStart != null && q.lineEnd != null &&
         q.lineStart <= selEnd && q.lineEnd >= selStart;
     });
-  }, [pendingSelection, files, activeFileIndex, aiChat.messages]);
+  }, [pendingSelection, files, activeFileIndex, aiMessages]);
 
   // Click AI marker in diff → scroll sidebar to that Q&A
   const [scrollToQuestionId, setScrollToQuestionId] = useState<string | null>(null);
@@ -486,8 +554,8 @@ const ReviewApp: React.FC = () => {
 
   // General AI question from sidebar input
   const handleAskGeneral = useCallback((question: string) => {
-    aiChat.ask({ prompt: question });
-  }, [aiChat.ask]);
+    askAI({ prompt: question });
+  }, [askAI]);
 
   // Resizable panels
   const panelResize = useResizablePanel({ storageKey: 'plannotator-review-panel-width' });
@@ -779,13 +847,13 @@ const ReviewApp: React.FC = () => {
       .finally(() => setIsLoading(false));
   }, []);
 
-  // Show diff type setup dialog only after AI setup dialog is dismissed (avoid stacking)
+  // Show diff type setup after the initial diff payload marks it pending.
   useEffect(() => {
-    if (diffTypeSetupPending && aiCheckComplete && !showAISetup) {
+    if (diffTypeSetupPending) {
       setDiffTypeSetupPending(false);
       setShowDiffTypeSetup(true);
     }
-  }, [diffTypeSetupPending, aiCheckComplete, showAISetup]);
+  }, [diffTypeSetupPending]);
 
   const handleDiffStyleChange = useCallback((style: 'split' | 'unified') => {
     configStore.set('diffStyle', style);
@@ -1148,6 +1216,9 @@ const ReviewApp: React.FC = () => {
               defaultBranch: data.gitContext!.defaultBranch,
               diffOptions: data.gitContext!.diffOptions,
               compareTarget: data.gitContext!.compareTarget,
+              jjEvologs: data.gitContext!.jjEvologs,
+              // HEAD differs per worktree, so refresh the commit-baseline picker.
+              recentCommits: data.gitContext!.recentCommits,
             };
           });
         }
@@ -1175,7 +1246,7 @@ const ReviewApp: React.FC = () => {
       if (branch === selectedBase) return;
       const previous = selectedBase;
       setSelectedBase(branch);
-      if (activeDiffBase === 'branch' || activeDiffBase === 'merge-base' || activeDiffBase === 'jj-line') {
+      if (activeDiffBase === 'branch' || activeDiffBase === 'merge-base' || activeDiffBase === 'jj-line' || activeDiffBase === 'jj-evolog') {
         const ok = await fetchDiffSwitch(diffType, branch);
         if (!ok) setSelectedBase(previous);
       }
@@ -1189,8 +1260,22 @@ const ReviewApp: React.FC = () => {
       ? `worktree:${activeWorktreePath}:${baseDiffType}`
       : baseDiffType;
     if (fullDiffType === diffType) return;
-    await fetchDiffSwitch(fullDiffType);
-  }, [diffType, activeWorktreePath, fetchDiffSwitch]);
+    // For evolog, default to the second entry (previous state of @) so the
+    // server doesn't fall back to the jj bookmark/trunk revset.
+    // When leaving evolog, restore the base to the detected compare target
+    // so other base-dependent modes (jj-line) don't inherit a commit ID.
+    const enteringEvolog =
+      baseDiffType === 'jj-evolog' && gitContext?.jjEvologs && gitContext.jjEvologs.length >= 2;
+    const leavingEvolog =
+      !enteringEvolog && activeDiffBase === 'jj-evolog' && gitContext?.defaultBranch;
+    const baseOverride = enteringEvolog
+      ? gitContext!.jjEvologs![1].commitId
+      : leavingEvolog
+        ? gitContext!.defaultBranch
+        : undefined;
+    if (baseOverride) setSelectedBase(baseOverride);
+    await fetchDiffSwitch(fullDiffType, baseOverride);
+  }, [diffType, activeWorktreePath, fetchDiffSwitch, gitContext]);
 
   // Switch worktree context (or back to main repo). Preserves the current
   // diff mode across the switch — if the reviewer was looking at "PR Diff"
@@ -1289,7 +1374,7 @@ const ReviewApp: React.FC = () => {
     // the new patch to arrive before refetching — otherwise the viewer can
     // briefly pair an old patch with the new base's content.
     reviewBase:
-        (activeDiffBase === 'branch' || activeDiffBase === 'merge-base' || activeDiffBase === 'jj-line')
+        (activeDiffBase === 'branch' || activeDiffBase === 'merge-base' || activeDiffBase === 'jj-line' || activeDiffBase === 'jj-evolog')
         ? committedBase ?? undefined
         : undefined,
     activeDiffBase,
@@ -1322,9 +1407,9 @@ const ReviewApp: React.FC = () => {
     activeSearchMatchId,
     activeSearchMatch: activeSearchMatch?.filePath === files[activeFileIndex]?.path ? activeSearchMatch : null,
     aiAvailable,
-    aiMessages: aiChat.messages,
+    aiMessages,
     onAskAI: handleAskAI,
-    isAILoading: aiChat.isCreatingSession || aiChat.isStreaming,
+    isAILoading: aiIsCreatingSession || aiIsStreaming,
     onViewAIResponse: handleViewAIResponse,
     onClickAIMarker: handleClickAIMarker,
     aiHistoryForSelection,
@@ -1339,6 +1424,10 @@ const ReviewApp: React.FC = () => {
     onAllFilesVisibleFileChange: setAllFilesVisibleFile,
     isAllFilesActive,
     openTourPanel: handleOpenTour,
+    onCodeNavRequest: handleCodeNavRequest,
+    codeNavResult: codeNav.result,
+    codeNavIsLoading: codeNav.isLoading,
+    codeNavActiveSymbol: codeNav.activeSymbol,
   }), [
     files, activeFileIndex, diffStyle, diffOverflow, diffIndicators,
     diffLineDiffType, diffShowLineNumbers, diffShowBackground,
@@ -1350,11 +1439,12 @@ const ReviewApp: React.FC = () => {
     handleToggleViewed, stagedFiles, stagingFile, stageFile,
     canStageFiles, stageError, isSearchPending, debouncedSearchQuery,
     activeFileSearchMatches, activeSearchMatchId, activeSearchMatch,
-    aiAvailable, aiChat.messages, aiChat.isCreatingSession, aiChat.isStreaming,
+    aiAvailable, aiMessages, aiIsCreatingSession, aiIsStreaming,
     handleAskAI, handleViewAIResponse, handleClickAIMarker,
     aiHistoryForSelection, agentJobs.jobs, prMetadata, prContext,
     isPRContextLoading, prContextError, fetchPRContext, platformUser, openDiffFile,
     handleOpenTour, isAllFilesActive, handleAddAnnotationForFile,
+    handleCodeNavRequest, codeNav.result, codeNav.isLoading, codeNav.activeSymbol,
   ]);
 
   // Separate context for high-frequency job logs — prevents re-rendering all panels on every SSE event
@@ -2014,7 +2104,7 @@ const ReviewApp: React.FC = () => {
                 title="AI Chat"
               >
                 <SparklesIcon className="w-4 h-4" />
-                {aiChat.messages.length > 0 && !(reviewSidebar.isOpen && reviewSidebar.activeTab === 'ai') && (
+                {aiMessages.length > 0 && !(reviewSidebar.isOpen && reviewSidebar.activeTab === 'ai') && (
                   <span className="absolute top-0 right-0 w-1.5 h-1.5 rounded-full bg-primary" />
                 )}
               </button>
@@ -2070,6 +2160,9 @@ const ReviewApp: React.FC = () => {
                 detectedBase={prMetadata ? undefined : gitContext?.defaultBranch || gitContext?.compareTarget?.fallback}
                 onSelectBase={prMetadata ? undefined : handleBaseSelect}
                 compareTarget={gitContext?.compareTarget}
+                recentCommits={prMetadata ? undefined : gitContext?.recentCommits}
+                jjEvologs={prMetadata ? undefined : gitContext?.jjEvologs}
+                detectedEvoBase={prMetadata ? undefined : gitContext?.jjEvologs?.[1]?.commitId}
                 stagedFiles={stagedFiles}
                 onCopyRawDiff={handleCopyDiff}
                 canCopyRawDiff={!!diffData?.rawPatch}
@@ -2153,6 +2246,7 @@ const ReviewApp: React.FC = () => {
                           {activeDiffBase === 'workspace-unstaged' && "No unstaged changes in the workspace repositories."}
                           {activeDiffBase === 'workspace-last' && "No changes in the last change across workspace repositories."}
                           {activeDiffBase === 'jj-line' && `No changes in your line of work vs ${selectedBase || gitContext?.defaultBranch || '@-'}.`}
+                          {activeDiffBase === 'jj-evolog' && `No changes since evolution ${selectedBase ? selectedBase.slice(0, 8) : 'previous'} — the change looks the same as before.`}
                           {activeDiffBase === 'jj-all' && "No files at the current jj change."}
                           {activeDiffBase === 'branch' && `No changes vs ${selectedBase || gitContext?.defaultBranch || 'main'}${activeWorktreePath ? ' in this worktree' : ''}.`}
                           {activeDiffBase === 'merge-base' && `No changes vs ${selectedBase || gitContext?.defaultBranch || 'main'}${activeWorktreePath ? ' in this worktree' : ''}.`}
@@ -2190,19 +2284,19 @@ const ReviewApp: React.FC = () => {
                 onDeleteEditorAnnotation={deleteEditorAnnotation}
                 prMetadata={prMetadata}
                 aiAvailable={aiAvailable}
-                aiMessages={aiChat.messages}
-                isAICreatingSession={aiChat.isCreatingSession}
-                isAIStreaming={aiChat.isStreaming}
+                aiMessages={aiMessages}
+                isAICreatingSession={aiIsCreatingSession}
+                isAIStreaming={aiIsStreaming}
                 onScrollToAILines={handleScrollToAILines}
                 activeFilePath={files[activeFileIndex]?.path}
                 scrollToQuestionId={scrollToQuestionId}
                 onAskGeneral={handleAskGeneral}
-                aiPermissionRequests={aiChat.permissionRequests}
-                onRespondToPermission={aiChat.respondToPermission}
+                aiPermissionRequests={aiPermissionRequests}
+                onRespondToPermission={respondToAIPermission}
                 aiProviders={aiProviders}
                 aiConfig={aiConfig}
                 onAIConfigChange={handleAIConfigChange}
-                hasAISession={!!aiChat.sessionId}
+                hasAISession={!!aiSessionId}
                 agentJobs={agentJobs.jobs}
                 agentCapabilities={agentJobs.capabilities}
                 onAgentLaunch={agentJobs.launchJob}
@@ -2336,16 +2430,6 @@ const ReviewApp: React.FC = () => {
           showCancel
         />
 
-        {/* AI setup dialog — first-run only */}
-        <AISetupDialog
-          isOpen={showAISetup}
-          providers={aiProviders}
-          onComplete={(providerId) => {
-            setShowAISetup(false);
-            handleAIConfigChange({ providerId });
-          }}
-        />
-
         {/* Diff type setup dialog — first-run only */}
         {showDiffTypeSetup && (
           <DiffTypeSetupDialog
@@ -2419,6 +2503,16 @@ const ReviewApp: React.FC = () => {
         </button>
       )}
 
+    <Toaster
+      position="bottom-center"
+      toastOptions={{
+        style: {
+          '--normal-bg': 'var(--card)',
+          '--normal-border': 'var(--border)',
+          '--normal-text': 'var(--foreground)',
+        } as React.CSSProperties,
+      }}
+    />
     </JobLogsProvider>
     </ReviewStateProvider>
     </TooltipProvider>

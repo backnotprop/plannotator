@@ -1,0 +1,11 @@
+{
+  "name": "plannotator",
+  "description": "Interactive code review and annotation slash commands for Droid. No plan-mode integration.",
+  "version": "0.19.21",
+  "author": {
+    "name": "backnotprop"
+  },
+  "homepage": "https://github.com/backnotprop/plannotator",
+  "repository": "https://github.com/backnotprop/plannotator",
+  "license": "MIT OR Apache-2.0"
+}

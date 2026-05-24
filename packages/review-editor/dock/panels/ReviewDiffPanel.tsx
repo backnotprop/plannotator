@@ -71,6 +71,8 @@ export const ReviewDiffPanel: React.FC<IDockviewPanelProps> = (props) => {
         filePath={file.path}
         oldPath={file.oldPath}
         reviewBase={state.reviewBase}
+        prUrl={state.prMetadata?.url}
+        prDiffScope={state.prDiffScope}
         isFocused={isFocusedFile}
         diffStyle={state.diffStyle}
         diffOverflow={state.diffOverflow}
@@ -111,6 +113,7 @@ export const ReviewDiffPanel: React.FC<IDockviewPanelProps> = (props) => {
         aiMessages={aiMessagesForFile}
         onClickAIMarker={state.onClickAIMarker}
         aiHistoryMessages={isFocusedFile ? state.aiHistoryForSelection : []}
+        onCodeNavRequest={state.onCodeNavRequest}
       />
     </div>
   );

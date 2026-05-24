@@ -55,6 +55,15 @@ import AnnoReplace from './AnnoReplace.astro';
         </button>
         <button
           class="agent-btn"
+          data-agent="droid"
+          data-command="curl -fsSL https://plannotator.ai/install.sh | bash"
+          data-video=""
+        >
+          <img src="/assets/icon-droid.png" alt="" class="w-4 h-4 rounded-sm" />
+          <span>Droid</span>
+        </button>
+        <button
+          class="agent-btn"
           data-agent="copilot"
           data-command="curl -fsSL https://plannotator.ai/install.sh | bash"
           data-video=""
@@ -207,6 +216,21 @@ import AnnoReplace from './AnnoReplace.astro';
           '!plannotator last'
         ],
         detail: 'Then use in Codex:'
+      },
+      droid: {
+        steps: [
+          'droid plugin marketplace add https://github.com/backnotprop/plannotator',
+          'droid plugin install plannotator@plannotator',
+          'Open a fresh Droid session to load the plugin',
+          '/plannotator-review',
+          '/plannotator-annotate <file|folder|url>',
+          '/plannotator-last'
+        ],
+        detail: 'Commands-only integration. Installs browser-based review and annotation slash commands in Droid:',
+        link: {
+          text: 'Read the Droid install docs',
+          url: '/docs/getting-started/installation/#droid'
+        }
       },
       opencode: {
         steps: [

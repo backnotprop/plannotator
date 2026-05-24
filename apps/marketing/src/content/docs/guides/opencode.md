@@ -15,10 +15,10 @@ If you are upgrading from an older OpenCode setup, read the [0.19.1 migration gu
 The OpenCode plugin (`@plannotator/opencode`) hooks into OpenCode's plugin system:
 
 1. The plugin registers a `submit_plan` tool for OpenCode's built-in `plan` agent and any extra planning agents you configure
-2. When `submit_plan` is called with a plan, Plannotator starts a local server and opens the browser
+2. When `submit_plan` is called, Plannotator starts a local server and opens the browser
 3. The user reviews and annotates the plan
 4. On approval, the plugin returns a success response to the agent
-5. On denial, the plugin returns the feedback for the agent to revise
+5. On denial, the plugin returns feedback with the current plan state, and the agent applies targeted edits
 
 ## Workflow modes
 

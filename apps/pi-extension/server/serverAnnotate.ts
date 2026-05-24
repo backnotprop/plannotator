@@ -11,6 +11,7 @@ import {
 	handleUploadRequest,
 } from "./handlers.js";
 import { html, json, parseBody, requestUrl } from "./helpers.js";
+import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.js";
 
 import { listenOnPort } from "./network.js";
 
@@ -47,6 +48,8 @@ export async function startAnnotateServer(options: {
 	sourceInfo?: string;
 	sourceConverted?: boolean;
 	gate?: boolean;
+	rawHtml?: string;
+	renderHtml?: boolean;
 }): Promise<AnnotateServerResult> {
 	// Side-channel pre-warm so /api/doc/exists POSTs land on warm cache.
 	void warmFileListCache(process.cwd(), "code");
@@ -77,18 +80,20 @@ export async function startAnnotateServer(options: {
 	const draftSource =
 		options.mode === "annotate-folder" && options.folderPath
 			? `folder:${resolvePath(options.folderPath)}`
-			: options.markdown;
+			: options.renderHtml && options.rawHtml ? options.rawHtml : options.markdown;
 	const draftKey = contentHash(draftSource);
 
 	// Detect repo info (cached for this session)
 	const repoInfo = getRepoInfo();
 
 	const externalAnnotations = createExternalAnnotationHandler("plan");
+	const aiRuntime = await createPiAIRuntime();
 
 	const server = createServer(async (req, res) => {
 		const url = requestUrl(req);
 
 		if (await externalAnnotations.handle(req, res, url)) return;
+		if (url.pathname.startsWith("/api/ai/") && await handlePiAIRequest(req, res, url, aiRuntime)) return;
 
 		if (url.pathname === "/api/plan" && req.method === "GET") {
 			json(res, {
@@ -99,6 +104,8 @@ export async function startAnnotateServer(options: {
 				sourceInfo: options.sourceInfo,
 				sourceConverted: options.sourceConverted ?? false,
 				gate: options.gate ?? false,
+				renderAs: options.renderHtml && options.rawHtml ? 'html' : 'markdown',
+				...(options.renderHtml && options.rawHtml ? { rawHtml: options.rawHtml } : {}),
 				sharingEnabled,
 				shareBaseUrl,
 				pasteApiUrl,
@@ -176,6 +183,9 @@ export async function startAnnotateServer(options: {
 		portSource,
 		url: `http://localhost:${port}`,
 		waitForDecision: () => decisionPromise,
-		stop: () => server.close(),
+		stop: () => {
+			aiRuntime?.dispose();
+			server.close();
+		},
 	};
 }

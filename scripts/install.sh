@@ -337,7 +337,7 @@ if [ "$codex_available" -eq 1 ]; then
         if [ ! -f "$CODEX_CONFIG" ]; then
             cat > "$CODEX_CONFIG" << 'CODEX_CONFIG_EOF'
 [features]
-codex_hooks = true
+hooks = true
 CODEX_CONFIG_EOF
             echo "Created Codex config at ${CODEX_CONFIG}"
             return 0
@@ -349,7 +349,7 @@ CODEX_CONFIG_EOF
             echo "Add this manually to enable Plannotator plan review:"
             echo ""
             echo "  [features]"
-            echo "  codex_hooks = true"
+            echo "  hooks = true"
             return 1
         fi
 
@@ -366,15 +366,15 @@ CODEX_CONFIG_EOF
             {
                 if (is_table($0)) {
                     if (in_features && !saw_hook) {
-                        print "codex_hooks = true"
+                        print "hooks = true"
                         saw_hook = 1
                     }
                     in_features = ($0 ~ /^[[:space:]]*\[features\][[:space:]]*$/)
                     if (in_features) saw_features = 1
                 }
 
-                if (in_features && $0 ~ /^[[:space:]]*codex_hooks[[:space:]]*=/) {
-                    print "codex_hooks = true"
+                if (in_features && $0 ~ /^[[:space:]]*(codex_hooks|hooks)[[:space:]]*=/) {
+                    print "hooks = true"
                     saw_hook = 1
                     next
                 }
@@ -383,21 +383,21 @@ CODEX_CONFIG_EOF
             }
             END {
                 if (saw_features && in_features && !saw_hook) {
-                    print "codex_hooks = true"
+                    print "hooks = true"
                 } else if (!saw_features) {
                     print ""
                     print "[features]"
-                    print "codex_hooks = true"
+                    print "hooks = true"
                 }
             }
         ' "$CODEX_CONFIG" > "$tmp_config"; then
             mv "$tmp_config" "$CODEX_CONFIG"
-            echo "Enabled codex_hooks in ${CODEX_CONFIG}"
+            echo "Enabled Codex hooks in ${CODEX_CONFIG}"
             return 0
         fi
 
         rm -f "$tmp_config"
-        echo "Could not update ${CODEX_CONFIG}; add codex_hooks manually." >&2
+        echo "Could not update ${CODEX_CONFIG}; add hooks manually." >&2
         return 1
     }
 
@@ -510,6 +510,18 @@ if [ -f "$PLUGIN_HOOKS" ]; then
     cat > "$PLUGIN_HOOKS" << 'HOOKS_EOF'
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "EnterPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "plannotator improve-context",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "PermissionRequest": [
       {
         "matcher": "ExitPlanMode",
@@ -538,7 +550,8 @@ plannotator_shared_agent_skills_available() {
     local agents_skills_dir="$HOME/.agents/skills"
 
     [ -f "$agents_skills_dir/plannotator-compound/SKILL.md" ] &&
-        [ -f "$agents_skills_dir/plannotator-setup-goal/SKILL.md" ]
+        [ -f "$agents_skills_dir/plannotator-setup-goal/SKILL.md" ] &&
+        [ -f "$agents_skills_dir/plannotator-visual-explainer/SKILL.md" ]
 }
 
 configure_pi_plannotator_package_filter() {
@@ -681,7 +694,7 @@ COMMAND_EOF
 echo "Installed /plannotator-last command to ${CLAUDE_COMMANDS_DIR}/plannotator-last.md"
 
 # Install OpenCode slash command
-OPENCODE_COMMANDS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/command"
+OPENCODE_COMMANDS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/commands"
 mkdir -p "$OPENCODE_COMMANDS_DIR"
 
 cat > "$OPENCODE_COMMANDS_DIR/plannotator-review.md" << 'COMMAND_EOF'
@@ -786,6 +799,7 @@ if command -v git &>/dev/null; then
         cp -r apps/skills/* "$CLAUDE_SKILLS_DIR/"
         copy_skill_if_present apps/skills/plannotator-compound "$AGENTS_SKILLS_DIR"
         copy_skill_if_present apps/skills/plannotator-setup-goal "$AGENTS_SKILLS_DIR"
+        copy_skill_if_present apps/skills/plannotator-visual-explainer "$AGENTS_SKILLS_DIR"
         if [ "$codex_available" -eq 1 ]; then
             mkdir -p "$CODEX_SKILLS_DIR"
             copy_skill_if_present apps/skills/plannotator-review "$CODEX_SKILLS_DIR"
@@ -945,6 +959,23 @@ echo ""
 echo "Plans will open in your browser for review."
 echo "If settings.json was not auto-configured, see:"
 echo "  ~/.gemini/settings.json (add BeforeTool hook)"
+echo ""
+echo "=========================================="
+echo "  CODEX USERS"
+echo "=========================================="
+echo ""
+if [ "$codex_available" -eq 1 ]; then
+    echo "Restart Codex Desktop or CLI after installing."
+    echo "Plan review is configured through the Codex Stop hook."
+    echo ""
+    echo "Codex skills are also installed:"
+    echo "  \$plannotator-review"
+    echo "  \$plannotator-annotate <file|url|folder>"
+    echo "  \$plannotator-last"
+else
+    echo "Codex was not detected. After installing Codex, rerun this installer to add"
+    echo "the Stop hook and Codex skills."
+fi
 echo ""
 echo "=========================================="
 echo "  CLAUDE CODE USERS: YOU'RE ALL SET!"

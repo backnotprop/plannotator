@@ -1,6 +1,6 @@
 import type { CodeAnnotation, ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/types';
-import type { PRMetadata } from '@plannotator/shared/pr-provider';
-import { getMRLabel, getMRNumberLabel, getDisplayRepo } from '@plannotator/shared/pr-provider';
+import type { PRMetadata } from '@plannotator/shared/pr-types';
+import { getMRLabel, getMRNumberLabel, getDisplayRepo } from '@plannotator/shared/pr-types';
 
 /**
  * Format a conventional comment prefix per the Conventional Comments spec:

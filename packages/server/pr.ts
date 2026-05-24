@@ -5,15 +5,26 @@
  * Pre-binds a Bun-based runtime so consumers get a clean API.
  */
 
+import type {
+  PRRef,
+  PRMetadata,
+  PRContext,
+  PRRuntime,
+  PRReviewFileComment,
+  PRStackTree,
+  PRListItem,
+} from "@plannotator/shared/pr-types";
 import {
-  type PRRef,
-  type PRMetadata,
-  type PRContext,
-  type PRRuntime,
-  type PRReviewFileComment,
-  type PRStackTree,
-  type PRListItem,
   parsePRUrl as parsePRUrlCore,
+  prRefFromMetadata,
+  getPlatformLabel,
+  getMRLabel,
+  getMRNumberLabel,
+  getDisplayRepo,
+  getCliName,
+  getCliInstallUrl,
+} from "@plannotator/shared/pr-types";
+import {
   checkAuth as checkAuthCore,
   getUser as getUserCore,
   fetchPR as fetchPRCore,
@@ -24,18 +35,11 @@ import {
   markPRFilesViewed as markPRFilesViewedCore,
   fetchPRStack as fetchPRStackCore,
   fetchPRList as fetchPRListCore,
-  prRefFromMetadata,
-  getPlatformLabel,
-  getMRLabel,
-  getMRNumberLabel,
-  getDisplayRepo,
-  getCliName,
-  getCliInstallUrl,
 } from "@plannotator/shared/pr-provider";
 
-export type { PRRef, PRMetadata, PRContext, PRReviewFileComment, PRStackTree, PRListItem } from "@plannotator/shared/pr-provider";
-export { prRefFromMetadata, isSameProject, getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo, getCliName, getCliInstallUrl } from "@plannotator/shared/pr-provider";
-export type { GithubPRMetadata } from "@plannotator/shared/pr-provider";
+export type { PRRef, PRMetadata, PRContext, PRReviewFileComment, PRStackTree, PRListItem } from "@plannotator/shared/pr-types";
+export { prRefFromMetadata, isSameProject, getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo, getCliName, getCliInstallUrl } from "@plannotator/shared/pr-types";
+export type { GithubPRMetadata } from "@plannotator/shared/pr-types";
 
 const runtime: PRRuntime = {
   async runCommand(cmd, args) {

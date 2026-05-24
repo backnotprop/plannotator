@@ -61,6 +61,21 @@ export interface AIEndpointDeps {
   sessionManager: SessionManager;
   /** Resolve the current working directory for new AI sessions. */
   getCwd?: () => string;
+  /** Optional hook to finish lazy provider capability loading before reporting capabilities. */
+  beforeCapabilities?: () => Promise<void> | void;
+}
+
+const MAX_CLIENT_MAX_TURNS = 99;
+const MAX_CLIENT_BUDGET_USD = 5;
+
+function clampPositiveInteger(value: unknown, max: number): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.max(1, Math.min(max, Math.floor(value)));
+}
+
+function clampPositiveNumber(value: unknown, max: number): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined;
+  return Math.min(max, value);
 }
 
 /**
@@ -78,10 +93,11 @@ export interface AIEndpointDeps {
  * ```
  */
 export function createAIEndpoints(deps: AIEndpointDeps) {
-  const { registry, sessionManager, getCwd } = deps;
+  const { registry, sessionManager, getCwd, beforeCapabilities } = deps;
 
   return {
     "/api/ai/capabilities": async (_req: Request) => {
+      await beforeCapabilities?.();
       const defaultEntry = registry.getDefault();
       const providerDetails = registry.list().map(id => {
         const p = registry.get(id)!;
@@ -127,12 +143,14 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
       }
 
       try {
+        const boundedMaxTurns = clampPositiveInteger(maxTurns, MAX_CLIENT_MAX_TURNS);
+        const boundedMaxBudgetUsd = clampPositiveNumber(maxBudgetUsd, MAX_CLIENT_BUDGET_USD);
         const options: CreateSessionOptions = {
           context,
           cwd: getCwd?.(),
           model,
-          maxTurns,
-          maxBudgetUsd,
+          ...(boundedMaxTurns !== undefined && { maxTurns: boundedMaxTurns }),
+          ...(boundedMaxBudgetUsd !== undefined && { maxBudgetUsd: boundedMaxBudgetUsd }),
           reasoningEffort,
         };
 

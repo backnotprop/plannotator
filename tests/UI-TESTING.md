@@ -193,7 +193,7 @@ UI test scripts simulate plugin behavior locally:
 1. Builds the hook + review apps (unless `--skip-build`)
 2. Creates a disposable `HOME` and sample git repo
 3. Copies your Codex auth into the disposable config
-4. Enables `codex_hooks` and registers a `Stop` hook pointing at the local Plannotator entrypoint
+4. Enables `hooks` and registers a `Stop` hook pointing at the local Plannotator entrypoint
 5. Runs a real `codex exec` prompt that returns only a `<proposed_plan>` block
 6. Leaves behind rollout logs, Plannotator history, plan files, and session URLs in an artifact directory
 

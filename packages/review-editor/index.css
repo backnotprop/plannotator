@@ -112,23 +112,6 @@ diffs-container {
   --diffs-light: var(--foreground);
 }
 
-/* Diff line backgrounds - synchronized with plannotator colors */
-.diff-line-addition {
-  background: oklch(from var(--success) l c h / 0.12);
-}
-
-.diff-line-deletion {
-  background: oklch(from var(--destructive) l c h / 0.12);
-}
-
-.light .diff-line-addition {
-  background: oklch(from var(--success) l c h / 0.15);
-}
-
-.light .diff-line-deletion {
-  background: oklch(from var(--destructive) l c h / 0.15);
-}
-
 /* Review comment thread styling */
 .review-comment {
   position: relative;
@@ -1299,4 +1282,10 @@ diffs-container {
 
 .pr-switch-overlay {
   animation: overlay-fade-in 0.15s ease-out both;
+}
+
+/* Code navigation peek panel — strip hljs hardcoded background */
+.code-nav-peek code,
+.code-nav-peek .hljs {
+  background: transparent !important;
 }

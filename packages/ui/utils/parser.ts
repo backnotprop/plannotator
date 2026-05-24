@@ -387,15 +387,17 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
       lastLineWasBlank = true;
       continue;
     }
-    // List continuation: indented line after a list item merges into it
+    // List continuation: indented line after a list item merges into it.
+    // Tight (no blank line): 1+ whitespace, joined with \n (same paragraph).
+    // Loose (after blank line): 2+ spaces, joined with \n\n (new paragraph within the item).
     if (
-      !prevLineWasBlank &&
       buffer.length === 0 &&
       blocks.length > 0 &&
       blocks[blocks.length - 1].type === 'list-item' &&
-      /^\s+/.test(line)
+      (prevLineWasBlank ? /^\s{2,}/ : /^\s+/).test(line)
     ) {
-      blocks[blocks.length - 1].content += '\n' + trimmed;
+      const sep = prevLineWasBlank ? '\n\n' : '\n';
+      blocks[blocks.length - 1].content += sep + trimmed;
       continue;
     }
 

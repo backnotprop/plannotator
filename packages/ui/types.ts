@@ -175,6 +175,12 @@ export interface SelectedLineRange {
 export interface AIQuestion {
   id: string;
   prompt: string;
+  scope?: {
+    kind: 'general' | 'selection';
+    label?: string;
+    text?: string;
+    sourcePath?: string;
+  };
   /** undefined = general question (no file scope) */
   filePath?: string;
   /** undefined + filePath present = file-scoped; with filePath = line-scoped */

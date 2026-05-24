@@ -1,7 +1,7 @@
 /**
- * Plannotator CLI for Claude Code, Codex, Gemini CLI, and Copilot CLI
+ * Plannotator CLI for Claude Code, Droid, Codex, Gemini CLI, and Copilot CLI
  *
- * Supports eight modes:
+ * Supports nine modes:
  *
  * 1. Plan Review (default, no args):
  *    - Spawned by Claude/Gemini/Codex hook entrypoints
@@ -37,13 +37,18 @@
  *    - Annotate the last assistant message from a Copilot CLI session
  *    - Parses events.jsonl from session state
  *
- * 8. Improve Context (`plannotator improve-context`):
+ * 8. Goal Setup (`plannotator setup-goal interview|facts <bundle.json>`):
+ *    - Opens the bundled question or facts acceptance UI
+ *    - Outputs structured JSON for setup-goal workflows
+ *
+ * 9. Improve Context (`plannotator improve-context`):
  *    - Spawned by PreToolUse hook on EnterPlanMode
  *    - Reads improvement hook file from ~/.plannotator/hooks/
  *    - Returns additionalContext or silently passes through
  *
  * Global flags:
  *   --help             - Show top-level usage information
+ *   --version, -v      - Print version and exit
  *   --browser <name>   - Override which browser to open (e.g. "Google Chrome")
  *
  * Environment variables:
@@ -63,9 +68,17 @@ import {
   startAnnotateServer,
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
+import {
+  startGoalSetupServer,
+  handleGoalSetupServerReady,
+} from "@plannotator/server/goal-setup";
 import { type DiffType, gitRuntime, prepareLocalReviewDiff, detectManagedVcs } from "@plannotator/server/vcs";
 import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
 import { parseReviewArgs } from "@plannotator/shared/review-args";
+import {
+  normalizeGoalSetupBundle,
+  type GoalSetupStage,
+} from "@plannotator/shared/goal-setup";
 import { stripAtPrefix, resolveAtReference } from "@plannotator/shared/at-reference";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { urlToMarkdown, isConvertedSource } from "@plannotator/shared/url-to-markdown";
@@ -89,11 +102,15 @@ import { openBrowser } from "@plannotator/server/browser";
 import { detectProjectName } from "@plannotator/server/project";
 import { hostnameOrFallback } from "@plannotator/shared/project";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
+import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import { AGENT_CONFIG, type Origin } from "@plannotator/shared/agents";
 import {
+  findDroidSessionLogsByAncestorWalk,
+  findDroidSessionLogsForCwd,
   findSessionLogsByAncestorWalk,
   findSessionLogsForCwd,
   getLastRenderedMessage,
+  resolveDroidSessionLogForCwd,
   resolveSessionLogByAncestorPids,
   resolveSessionLogByCwdScan,
   type RenderedMessage,
@@ -103,8 +120,10 @@ import { findCopilotPlanContent, findCopilotSessionForCwd, getLastCopilotMessage
 import {
   formatInteractiveNoArgClarification,
   formatTopLevelHelp,
+  formatVersion,
   isInteractiveNoArgInvocation,
   isTopLevelHelpInvocation,
+  isVersionInvocation,
 } from "./cli";
 import path from "path";
 import { tmpdir } from "os";
@@ -148,6 +167,9 @@ const hookIdx = args.indexOf("--hook");
 const hookFlag = hookIdx !== -1;
 if (hookFlag) args.splice(hookIdx, 1);
 if (hookFlag) gateFlag = true;
+const renderHtmlIdx = args.indexOf("--render-html");
+const renderHtmlFlag = renderHtmlIdx !== -1;
+if (renderHtmlFlag) args.splice(renderHtmlIdx, 1);
 
 // Stdout matrix for annotate / annotate-last / copilot annotate-last (#570).
 //
@@ -199,6 +221,22 @@ function emitAnnotateOutcome(result: {
   if (result.feedback) console.log(result.feedback);
 }
 
+async function loadGoalSetupBundle(
+  stage: GoalSetupStage,
+  bundlePath: string
+) {
+  const raw =
+    bundlePath === "-"
+      ? await Bun.stdin.text()
+      : await Bun.file(path.resolve(bundlePath)).text();
+  return normalizeGoalSetupBundle(JSON.parse(raw), stage);
+}
+
+if (isVersionInvocation(args)) {
+  console.log(formatVersion());
+  process.exit(0);
+}
+
 if (isTopLevelHelpInvocation(args)) {
   console.log(formatTopLevelHelp());
   process.exit(0);
@@ -224,6 +262,7 @@ const pasteApiUrl = process.env.PLANNOTATOR_PASTE_URL || undefined;
 // Detect calling agent from environment variables set by agent runtimes.
 // Priority:
 //   PLANNOTATOR_ORIGIN (explicit override, validated against AGENT_CONFIG)
+//   > Droid command wrappers (PLANNOTATOR_ORIGIN=droid)
 //   > Codex (CODEX_THREAD_ID)
 //   > Copilot CLI (COPILOT_CLI)
 //   > OpenCode (OPENCODE)
@@ -284,6 +323,68 @@ if (args[0] === "sessions") {
     console.error(`  #${i + 1}  ${s.mode.padEnd(9)} ${s.project.padEnd(20)} ${s.url.padEnd(28)} ${ageStr} ago`);
   }
   console.error(`\nReopen with: plannotator sessions --open [N]`);
+  process.exit(0);
+
+} else if (args[0] === "setup-goal") {
+  // ============================================
+  // GOAL SETUP MODE
+  // ============================================
+
+  const stage = args[1] as GoalSetupStage | undefined;
+  const bundlePath = args[2];
+
+  if ((stage !== "interview" && stage !== "facts") || !bundlePath) {
+    console.error(
+      "Usage: plannotator setup-goal <interview|facts> <bundle.json | -> [--json]"
+    );
+    process.exit(1);
+  }
+
+  let bundle: Awaited<ReturnType<typeof loadGoalSetupBundle>>;
+  try {
+    bundle = await loadGoalSetupBundle(stage, bundlePath);
+  } catch (err) {
+    console.error(
+      `Failed to load goal setup bundle: ${err instanceof Error ? err.message : String(err)}`
+    );
+    process.exit(1);
+  }
+
+  const goalProject = (await detectProjectName()) ?? "_unknown";
+
+  const server = await startGoalSetupServer({
+    bundle,
+    origin: detectedOrigin,
+    htmlContent: planHtmlContent,
+    onReady: (url, isRemote, port) => {
+      handleGoalSetupServerReady(url, isRemote, port);
+    },
+  });
+
+  registerSession({
+    pid: process.pid,
+    port: server.port,
+    url: server.url,
+    mode: "goal-setup",
+    project: goalProject,
+    startedAt: new Date().toISOString(),
+    label: `goal-setup-${bundle.stage}-${bundle.goalSlug || goalProject}`,
+  });
+
+  const result = await server.waitForDecision();
+  await Bun.sleep(800);
+  server.stop();
+
+  if (result.exit) {
+    console.log(JSON.stringify({ decision: "dismissed", stage: bundle.stage }));
+  } else if (result.result) {
+    const output = {
+      decision: "submitted",
+      stage: result.result.stage,
+      result: result.result,
+    };
+    console.log(jsonFlag ? JSON.stringify(output) : JSON.stringify(output, null, 2));
+  }
   process.exit(0);
 
 } else if (args[0] === "review") {
@@ -611,6 +712,7 @@ if (args[0] === "sessions") {
   }
 
   let markdown: string;
+  let rawHtml: string | undefined;
   let absolutePath: string;
   let folderPath: string | undefined;
   let annotateMode: "annotate" | "annotate-folder" = "annotate";
@@ -670,11 +772,16 @@ if (args[0] === "sessions") {
           process.exit(1);
         }
         const html = await htmlFile.text();
-        markdown = htmlToMarkdown(html);
+        if (renderHtmlFlag) {
+          rawHtml = html;
+          markdown = "";
+        } else {
+          markdown = htmlToMarkdown(html);
+          sourceConverted = true;
+        }
         absolutePath = resolvedArg;
         sourceInfo = path.basename(resolvedArg);
-        sourceConverted = true;
-        console.error(`Converted: ${absolutePath}`);
+        console.error(`${renderHtmlFlag ? "Raw HTML" : "Converted"}: ${absolutePath}`);
       } else {
         // Single markdown file annotation mode
         // Strip-first with literal-@ fallback (scoped-package-style names).
@@ -717,6 +824,8 @@ if (args[0] === "sessions") {
     shareBaseUrl,
     pasteApiUrl,
     gate: gateFlag,
+    rawHtml,
+    renderHtml: renderHtmlFlag,
     htmlContent: planHtmlContent,
     onReady: async (url, isRemote, port) => {
       handleAnnotateServerReady(url, isRemote, port);
@@ -760,6 +869,7 @@ if (args[0] === "sessions") {
   const projectRoot = process.env.PLANNOTATOR_CWD || process.cwd();
   const codexThreadId = process.env.CODEX_THREAD_ID;
   const isCodex = !!codexThreadId;
+  const isDroid = detectedOrigin === "droid";
 
   let lastMessage: RenderedMessage | null = null;
 
@@ -773,10 +883,40 @@ if (args[0] === "sessions") {
       if (process.env.PLANNOTATOR_DEBUG) {
         console.error(`[DEBUG] Rollout: ${rolloutPath}`);
       }
-      const msg = getLastCodexMessage(rolloutPath);
+      const msg = getLastCodexMessage(rolloutPath, { beforeActiveTurn: true });
       if (msg) {
         lastMessage = { messageId: codexThreadId, text: msg.text, lineNumbers: [] };
       }
+    }
+  } else if (isDroid) {
+    // Droid/Factory path: resolve the current repo's session log from
+    // ~/.factory/sessions/<cwd-slug>/*.jsonl. Factory does not expose the same
+    // per-process session metadata files as Claude Code, so the best available
+    // selector is "newest current-session candidate for this cwd", with an
+    // ancestor walk fallback for users who `cd` into a subdirectory after
+    // session start.
+    if (process.env.PLANNOTATOR_DEBUG) {
+      console.error(`[DEBUG] Droid detected, project root: ${projectRoot}`);
+    }
+
+    const cwdLogs = findDroidSessionLogsForCwd(projectRoot);
+    const ancestorLogs = cwdLogs.length === 0
+      ? findDroidSessionLogsByAncestorWalk(projectRoot)
+      : [];
+
+    if (process.env.PLANNOTATOR_DEBUG) {
+      console.error(`[DEBUG] Droid CWD session logs (mtime): ${cwdLogs.length ? cwdLogs.join(", ") : "(none)"}`);
+      if (cwdLogs.length === 0) {
+        console.error(`[DEBUG] Droid ancestor walk: ${ancestorLogs.length ? ancestorLogs.join(", ") : "(none)"}`);
+      }
+    }
+
+    const droidLog = resolveDroidSessionLogForCwd(projectRoot);
+    if (process.env.PLANNOTATOR_DEBUG) {
+      console.error(`[DEBUG] Droid selected log: ${droidLog ?? "(none)"}`);
+    }
+    if (droidLog) {
+      lastMessage = getLastRenderedMessage(droidLog);
     }
   } else {
     // Claude Code path: resolve session log
@@ -837,10 +977,11 @@ if (args[0] === "sessions") {
     console.error(`[DEBUG] Found message ${lastMessage.messageId} (${lastMessage.text.length} chars)`);
   }
 
+  const annotatedMessage = lastMessage;
   const annotateProject = (await detectProjectName()) ?? "_unknown";
 
   const server = await startAnnotateServer({
-    markdown: lastMessage.text,
+    markdown: annotatedMessage.text,
     filePath: "last-message",
     origin: detectedOrigin,
     mode: "annotate-last",
@@ -853,7 +994,7 @@ if (args[0] === "sessions") {
       handleAnnotateServerReady(url, isRemote, port);
 
       if (isRemote && sharingEnabled) {
-        await writeRemoteShareLink(lastMessage.text, shareBaseUrl, "annotate", "message only").catch(() => {});
+        await writeRemoteShareLink(annotatedMessage.text, shareBaseUrl, "annotate", "message only").catch(() => {});
       }
     },
   });
@@ -1070,21 +1211,21 @@ if (args[0] === "sessions") {
   // ============================================
   //
   // Called by PreToolUse hook on EnterPlanMode.
-  // Reads the improvement hook file and returns additionalContext.
-  // No file = exit 0 silently (passthrough).
+  // Composes any enabled context sources (compound improvement hook,
+  // PFM reminder) into a single additionalContext payload.
+  // Nothing enabled = exit 0 silently (passthrough).
 
-  // Must consume stdin (Claude Code hooks deliver event JSON on stdin)
   await Bun.stdin.text();
 
   const hook = readImprovementHook("enterplanmode-improve");
-  if (!hook) process.exit(0);
+  const pfmEnabled = loadConfig().pfmReminder === true;
 
-  const context = [
-    "[Plannotator Improvement Hook]",
-    "The following corrective instructions were generated from analysis of previous plan denial patterns.",
-    "Apply these guidelines when writing your plan:\n",
-    hook.content,
-  ].join("\n");
+  const context = composeImproveContext({
+    pfmEnabled,
+    improvementHookContent: hook?.content ?? null,
+  });
+
+  if (context === null) process.exit(0);
 
   console.log(JSON.stringify({
     hookSpecificOutput: {

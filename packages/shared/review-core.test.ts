@@ -7,6 +7,7 @@ import {
   getDefaultBranch,
   getFileContentsForDiff,
   getGitContext,
+  listRecentCommits,
   parseWorktreeDiffType,
   runGitDiff,
   type DiffType,
@@ -222,6 +223,45 @@ describe("review-core", () => {
     return getDefaultBranch(runtime).then((result) => {
       expect(result).toBe("main");
     });
+  });
+
+  test("listRecentCommits returns HEAD ancestry with shortSha and subject", async () => {
+    const repoDir = initRepo();
+    writeFileSync(join(repoDir, "tracked.txt"), "second\n", "utf-8");
+    git(repoDir, ["add", "tracked.txt"]);
+    git(repoDir, ["commit", "-m", "second commit"]);
+    writeFileSync(join(repoDir, "tracked.txt"), "third\n", "utf-8");
+    git(repoDir, ["add", "tracked.txt"]);
+    git(repoDir, ["commit", "-m", "third commit"]);
+
+    const runtime = makeRuntime(repoDir);
+    const commits = await listRecentCommits(runtime, repoDir, 10);
+
+    expect(commits.length).toBe(3);
+    expect(commits[0].subject).toBe("third commit");
+    expect(commits[1].subject).toBe("second commit");
+    expect(commits[2].subject).toBe("initial");
+    for (const c of commits) {
+      expect(c.sha).toMatch(/^[0-9a-f]{40}$/);
+      expect(c.shortSha.length).toBeGreaterThanOrEqual(7);
+      expect(c.sha.startsWith(c.shortSha)).toBe(true);
+      expect(c.author).toBe("Review Core");
+      expect(c.relativeDate.length).toBeGreaterThan(0);
+    }
+  });
+
+  test("getGitContext includes recentCommits for the picker", async () => {
+    const repoDir = initRepo();
+    writeFileSync(join(repoDir, "tracked.txt"), "second\n", "utf-8");
+    git(repoDir, ["add", "tracked.txt"]);
+    git(repoDir, ["commit", "-m", "second commit"]);
+
+    const runtime = makeRuntime(repoDir);
+    const context = await getGitContext(runtime, repoDir);
+
+    expect(context.recentCommits).toBeDefined();
+    expect(context.recentCommits!.length).toBe(2);
+    expect(context.recentCommits![0].subject).toBe("second commit");
   });
 
   test("parseWorktreeDiffType recognises every DiffType suffix, including merge-base", () => {

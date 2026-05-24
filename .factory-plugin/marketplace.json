@@ -1,0 +1,14 @@
+{
+  "name": "plannotator",
+  "description": "Plannotator slash commands for Droid.",
+  "owner": {
+    "name": "backnotprop"
+  },
+  "plugins": [
+    {
+      "name": "plannotator",
+      "source": "./apps/droid-plugin",
+      "description": "Interactive code review and annotation slash commands for Droid. No plan-mode integration."
+    }
+  ]
+}

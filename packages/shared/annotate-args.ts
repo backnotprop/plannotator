@@ -43,6 +43,7 @@ export interface ParsedAnnotateArgs {
   gate: boolean;
   json: boolean;
   hook: boolean;
+  renderHtml: boolean;
 }
 
 type Segment = { type: "ws" | "tok"; text: string };
@@ -51,11 +52,12 @@ const FLAG_MAP = {
   "--gate": "gate",
   "--json": "json",
   "--hook": "hook",
+  "--render-html": "renderHtml",
 } as const satisfies Record<string, keyof Omit<ParsedAnnotateArgs, "filePath" | "rawFilePath">>;
 
 export function parseAnnotateArgs(raw: string): ParsedAnnotateArgs {
   const s = (raw ?? "").trim();
-  const flags = { gate: false, json: false, hook: false };
+  const flags = { gate: false, json: false, hook: false, renderHtml: false };
 
   const segments: Segment[] = [];
   for (let i = 0; i < s.length;) {

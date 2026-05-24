@@ -4,7 +4,7 @@ import type { AgentJobInfo } from '@plannotator/ui/types';
 import type { DiffFile } from '../types';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import type { ReviewSearchMatch } from '../utils/reviewSearch';
-import type { PRMetadata, PRContext } from '@plannotator/shared/pr-provider';
+import type { PRMetadata, PRContext } from '@plannotator/shared/pr-types';
 import type { PRDiffScope } from '@plannotator/shared/pr-stack';
 import type { FeedbackDiffContext } from '../utils/exportFeedback';
 
@@ -99,6 +99,12 @@ export interface ReviewState {
 
   // Tour
   openTourPanel: (jobId: string) => void;
+
+  // Code navigation
+  onCodeNavRequest?: (request: import('@plannotator/shared/code-nav').CodeNavRequest) => void;
+  codeNavResult: import('@plannotator/shared/code-nav').CodeNavResponse | null;
+  codeNavIsLoading: boolean;
+  codeNavActiveSymbol: string | null;
 }
 
 const ReviewStateContext = createContext<ReviewState | null>(null);

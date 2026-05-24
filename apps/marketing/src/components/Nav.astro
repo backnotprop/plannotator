@@ -4,15 +4,16 @@ import ModeToggleIsland from './ModeToggleIsland.tsx';
 const currentPath = Astro.url.pathname;
 const isDocsActive = currentPath.startsWith('/docs/');
 const isBlogActive = currentPath.startsWith('/blog/');
+const isWorkspacesActive = currentPath.startsWith('/workspaces/');
 ---
-<nav class="fixed top-0 left-0 right-0 h-12 flex items-center justify-between px-6 bg-background/80 backdrop-blur-sm border-b border-border/30 z-50">
+<nav class="fixed top-0 left-0 right-0 h-12 flex items-center justify-between px-4 sm:px-6 bg-background/80 backdrop-blur-sm border-b border-border/30 z-50">
   <div class="flex items-center gap-2">
     <a href="/" class="text-sm font-semibold tracking-tight hover:text-primary transition-colors">
       Plannotator
     </a>
   </div>
   <div class="flex items-center gap-3">
-    <div class="flex items-center gap-2 text-xs">
+    <div class="flex items-center gap-1.5 sm:gap-2 text-xs">
       <a
         href="/docs/getting-started/installation/"
         class:list={[
@@ -22,15 +23,26 @@ const isBlogActive = currentPath.startsWith('/blog/');
       >
         Docs
       </a>
-      <span class="text-muted-foreground/50">|</span>
+      <span class="text-muted-foreground/50 hidden sm:inline">|</span>
       <a
         href="/blog/"
         class:list={[
-          'transition-colors',
+          'transition-colors hidden sm:inline',
           isBlogActive ? 'text-foreground font-medium' : 'text-muted-foreground hover:text-foreground',
         ]}
       >
         Blog
+      </a>
+      <span class="text-muted-foreground/50">|</span>
+      <a
+        href="/workspaces/"
+        class:list={[
+          'transition-colors inline-flex items-center gap-1',
+          isWorkspacesActive ? 'text-foreground font-medium' : 'text-muted-foreground hover:text-foreground',
+        ]}
+      >
+        Workspaces
+        <span class="text-[0.6875rem] px-1 py-px rounded bg-primary/15 text-primary border border-primary/30 leading-none">soon</span>
       </a>
       <span class="text-muted-foreground/50">|</span>
       <a
@@ -42,6 +54,8 @@ const isBlogActive = currentPath.startsWith('/blog/');
         GitHub
       </a>
     </div>
-    <ModeToggleIsland client:only="react" />
+    <div class="hidden sm:flex">
+      <ModeToggleIsland client:only="react" />
+    </div>
   </div>
 </nav>

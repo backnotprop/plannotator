@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { createWorktreePool, type WorktreePool } from "./generated/worktree-pool.js";
 import { fileURLToPath } from "node:url";
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	prepareLocalReviewDiff,
 	reviewRuntime,
@@ -516,13 +516,15 @@ export async function startMarkdownAnnotationSession(
 	sourceInfo?: string,
 	sourceConverted?: boolean,
 	gate?: boolean,
+	rawHtml?: string,
+	renderHtml?: boolean,
 ): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean }>> {
 	if (!ctx.hasUI || !planHtmlContent) {
 		throw new Error("Plannotator annotation browser is unavailable in this session.");
 	}
 
 	let resolvedMarkdown = markdown;
-	if (!resolvedMarkdown.trim() && existsSync(filePath)) {
+	if (!renderHtml && !resolvedMarkdown.trim() && existsSync(filePath)) {
 		try {
 			const fileStat = statSync(filePath);
 			if (!fileStat.isDirectory()) {
@@ -542,6 +544,8 @@ export async function startMarkdownAnnotationSession(
 		sourceInfo,
 		sourceConverted,
 		gate,
+		rawHtml,
+		renderHtml,
 		htmlContent: planHtmlContent,
 		sharingEnabled: process.env.PLANNOTATOR_SHARE !== "disabled",
 		shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,

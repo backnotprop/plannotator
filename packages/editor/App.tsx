@@ -1,8 +1,12 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
+import { toast, Toaster } from 'sonner';
 import { type Origin, getAgentName } from '@plannotator/shared/agents';
 import { parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, exportCodeFileAnnotations, extractFrontmatter, wrapFeedbackForAgent, Frontmatter, type LinkedDocAnnotationEntry } from '@plannotator/ui/utils/parser';
 import { Viewer, ViewerHandle } from '@plannotator/ui/components/Viewer';
+import { HtmlViewer } from '@plannotator/ui/components/html-viewer';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
+import { DocumentAIChatPanel } from '@plannotator/ui/components/ai/DocumentAIChatPanel';
+import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
 import { ExportModal } from '@plannotator/ui/components/ExportModal';
 import { ImportModal } from '@plannotator/ui/components/ImportModal';
 import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
@@ -13,23 +17,29 @@ import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolst
 import { StickyHeaderLane } from '@plannotator/ui/components/StickyHeaderLane';
 import { TaterSpriteRunning } from '@plannotator/ui/components/TaterSpriteRunning';
 import { TaterSpritePullup } from '@plannotator/ui/components/TaterSpritePullup';
-import { Settings } from '@plannotator/ui/components/Settings';
-import { FeedbackButton, ApproveButton, ExitButton } from '@plannotator/ui/components/ToolbarButtons';
-import { ApproveDropdown } from '@plannotator/ui/components/ApproveDropdown';
 import { useSharing } from '@plannotator/ui/hooks/useSharing';
-import { getCallbackConfig, CallbackAction, executeCallback, type ToastPayload } from '@plannotator/ui/utils/callback';
+import { getCallbackConfig, CallbackAction, executeCallback } from '@plannotator/ui/utils/callback';
 import { useAgents } from '@plannotator/ui/hooks/useAgents';
 import { useActiveSection } from '@plannotator/ui/hooks/useActiveSection';
 import { storage } from '@plannotator/ui/utils/storage';
 import { configStore } from '@plannotator/ui/config';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
+import { PlanAIAnnouncementDialog } from '@plannotator/ui/components/PlanAIAnnouncementDialog';
 import { getObsidianSettings, getEffectiveVaultPath, isObsidianConfigured, CUSTOM_PATH_SENTINEL } from '@plannotator/ui/utils/obsidian';
 import { getBearSettings } from '@plannotator/ui/utils/bear';
 import { getOctarineSettings, isOctarineConfigured } from '@plannotator/ui/utils/octarine';
 import { getDefaultNotesApp } from '@plannotator/ui/utils/defaultNotesApp';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { getPlanSaveSettings } from '@plannotator/ui/utils/planSave';
+import {
+  getAIProviderSettings,
+  resolveAIModelForProvider,
+  resolveAIProviderSelection,
+  saveAIProviderSelection,
+} from '@plannotator/ui/utils/aiProvider';
+import { markPlanAIAnnouncementSeen, needsPlanAIAnnouncement } from '@plannotator/ui/utils/planAIAnnouncement';
+import { useAIChat } from '@plannotator/ui/hooks/useAIChat';
 import { getUIPreferences, type UIPreferences, type PlanWidth } from '@plannotator/ui/utils/uiPreferences';
 import { getEditorMode, saveEditorMode } from '@plannotator/ui/utils/editorMode';
 import { getInputMethod, saveInputMethod } from '@plannotator/ui/utils/inputMethod';
@@ -41,7 +51,6 @@ import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea'
 import { ScrollViewportContext } from '@plannotator/ui/hooks/useScrollViewport';
 import { useOverlayViewport } from '@plannotator/ui/hooks/useOverlayViewport';
 import { useIsMobile } from '@plannotator/ui/hooks/useIsMobile';
-import { PlanHeaderMenu } from '@plannotator/ui/components/PlanHeaderMenu';
 import {
   getPermissionModeSettings,
   needsPermissionModeSetup,
@@ -70,6 +79,14 @@ import type { ArchivedPlan } from '@plannotator/ui/components/sidebar/ArchiveBro
 import { PlanDiffViewer } from '@plannotator/ui/components/plan-diff/PlanDiffViewer';
 import { CodeFilePopout, type CodeFileAnnotationInput } from '@plannotator/ui/components/CodeFilePopout';
 import type { PlanDiffMode } from '@plannotator/ui/components/plan-diff/PlanDiffModeSwitcher';
+import {
+  GoalSetupSurface,
+  type GoalSetupActionState,
+  type GoalSetupSurfaceHandle,
+} from '@plannotator/ui/components/goal-setup/GoalSetupSurface';
+import type { GoalSetupBundle } from '@plannotator/shared/goal-setup';
+import type { AIContext } from '@plannotator/ai';
+import type { CommentAskAIContext } from '@plannotator/ui/components/CommentPopover';
 // Demo content toggle. Default: the original Real-time Collaboration plan.
 // Opt-in diff-engine stress test: `VITE_DIFF_DEMO=1 bun run dev:hook` swaps
 // in the 20-case Auth Service Refactor test plan. dev-mock-api.ts reads the
@@ -84,6 +101,7 @@ const DEMO_PLAN_CONTENT = USE_DIFF_DEMO
   ? DIFF_DEMO_PLAN_CONTENT
   : DEFAULT_DEMO_PLAN_CONTENT;
 import { useCheckboxOverrides } from './hooks/useCheckboxOverrides';
+import { AppHeader } from './components/AppHeader';
 
 type NoteAutoSaveResults = {
   obsidian?: boolean;
@@ -97,8 +115,8 @@ const App: React.FC = () => {
   const [codeAnnotations, setCodeAnnotations] = useState<CodeAnnotation[]>([]);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [selectedCodeAnnotationId, setSelectedCodeAnnotationId] = useState<string | null>(null);
-  const [blocks, setBlocks] = useState<Block[]>([]);
-  const [frontmatter, setFrontmatter] = useState<Frontmatter | null>(null);
+  const frontmatter = useMemo(() => extractFrontmatter(markdown).frontmatter, [markdown]);
+  const blocks = useMemo(() => parseMarkdownToBlocks(markdown), [markdown]);
   const [showExport, setShowExport] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
@@ -109,6 +127,7 @@ const App: React.FC = () => {
   const [showAgentWarning, setShowAgentWarning] = useState(false);
   const [agentWarningMessage, setAgentWarningMessage] = useState('');
   const [isPanelOpen, setIsPanelOpen] = useState(() => window.innerWidth >= 768);
+  const [rightSidebarTab, setRightSidebarTab] = useState<'annotations' | 'ai'>('annotations');
   const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<EditorMode>(getEditorMode);
   const [inputMethod, setInputMethod] = useState<InputMethod>(getInputMethod);
@@ -130,23 +149,6 @@ const App: React.FC = () => {
   //   icon  → labels hidden                    — fallback below that
   const planAreaRef = useRef<HTMLDivElement>(null);
   const [actionsLabelMode, setActionsLabelMode] = useState<ActionsLabelMode>('full');
-  // useLayoutEffect + synchronous getBoundingClientRect so the initial
-  // bucket is set before the browser paints. Otherwise narrow viewports
-  // get a one-frame flash of "Global comment"/"Copy plan" labels before
-  // the ResizeObserver callback collapses them.
-  useLayoutEffect(() => {
-    const el = planAreaRef.current;
-    if (!el) return;
-    const bucket = (w: number): ActionsLabelMode =>
-      w >= 800 ? 'full' : w >= 680 ? 'short' : 'icon';
-    setActionsLabelMode(bucket(el.getBoundingClientRect().width));
-    const ro = new ResizeObserver(([entry]) => {
-      const next = bucket(entry.contentRect.width);
-      setActionsLabelMode((prev) => (prev === next ? prev : next));
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
   const [isApiMode, setIsApiMode] = useState(false);
   const [origin, setOrigin] = useState<Origin | null>(null);
   const [gitUser, setGitUser] = useState<string | undefined>();
@@ -155,8 +157,18 @@ const App: React.FC = () => {
   const [annotateMode, setAnnotateMode] = useState(false);
   const [gate, setGate] = useState(false);
   const [annotateSource, setAnnotateSource] = useState<'file' | 'message' | 'folder' | null>(null);
+  const [goalSetupBundle, setGoalSetupBundle] = useState<GoalSetupBundle | null>(null);
+  const goalSetupSurfaceRef = useRef<GoalSetupSurfaceHandle>(null);
+  const [goalSetupAction, setGoalSetupAction] = useState<GoalSetupActionState>({
+    canSubmit: false,
+    isSubmitting: false,
+    submitted: false,
+    submitLabel: 'Submit',
+  });
   const [sourceInfo, setSourceInfo] = useState<string | undefined>();
   const [sourceConverted, setSourceConverted] = useState(false);
+  const [renderAs, setRenderAs] = useState<'markdown' | 'html'>('markdown');
+  const [rawHtml, setRawHtml] = useState('');
   const [sourceFilePath, setSourceFilePath] = useState<string | undefined>();
   const [imageBaseDir, setImageBaseDir] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
@@ -174,17 +186,30 @@ const App: React.FC = () => {
   const [wideModeType, setWideModeType] = useState<WideModeType | null>(null);
   const wideModeSnapshotRef = useRef<WideModeLayoutSnapshot | null>(null);
   const lastAppliedTocEnabledRef = useRef(uiPrefs.tocEnabled);
+  const goalSetupMode = goalSetupBundle !== null;
 
   useEffect(() => {
     document.title = repoInfo ? `${repoInfo.display} · Plannotator` : "Plannotator";
   }, [repoInfo]);
 
   const [initialExportTab, setInitialExportTab] = useState<'share' | 'annotations' | 'notes'>();
-  const [noteSaveToast, setNoteSaveToast] = useState<ToastPayload>(null);
   const [isPlanDiffActive, setIsPlanDiffActive] = useState(false);
   const [planDiffMode, setPlanDiffMode] = useState<PlanDiffMode>('clean');
   const [previousPlan, setPreviousPlan] = useState<string | null>(null);
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
+  const [aiSessionEnabled, setAISessionEnabled] = useState(false);
+  const [aiAvailable, setAiAvailable] = useState(false);
+  const [aiProviders, setAiProviders] = useState<Array<{ id: string; name: string; capabilities?: Record<string, boolean>; models?: Array<{ id: string; label: string; default?: boolean }> }>>([]);
+  const [aiConfig, setAIConfig] = useState(() => {
+    const saved = getAIProviderSettings();
+    const providerId = saved.providerId;
+    return {
+      providerId,
+      model: providerId ? (saved.preferredModels[providerId] ?? null) : null,
+      reasoningEffort: null as string | null,
+    };
+  });
+  const [showPlanAIAnnouncement, setShowPlanAIAnnouncement] = useState(needsPlanAIAnnouncement);
   const isMobile = useIsMobile();
 
   const viewerRef = useRef<ViewerHandle>(null);
@@ -267,10 +292,28 @@ const App: React.FC = () => {
   const handleAnnotationPanelToggle = useCallback(() => {
     if (wideModeType !== null) {
       exitWideMode({ restore: false, panelOpen: true });
+      setRightSidebarTab('annotations');
       return;
     }
-    setIsPanelOpen(prev => !prev);
-  }, [exitWideMode, wideModeType]);
+    setRightSidebarTab('annotations');
+    setIsPanelOpen(prev => rightSidebarTab === 'annotations' ? !prev : true);
+  }, [exitWideMode, rightSidebarTab, wideModeType]);
+
+  const dismissPlanAIAnnouncement = useCallback(() => {
+    markPlanAIAnnouncementSeen();
+    setShowPlanAIAnnouncement(false);
+  }, []);
+
+  const handleAIChatToggle = useCallback(() => {
+    dismissPlanAIAnnouncement();
+    if (wideModeType !== null) {
+      exitWideMode({ restore: false, panelOpen: true });
+      setRightSidebarTab('ai');
+      return;
+    }
+    setRightSidebarTab('ai');
+    setIsPanelOpen(prev => rightSidebarTab === 'ai' ? !prev : true);
+  }, [dismissPlanAIAnnouncement, exitWideMode, rightSidebarTab, wideModeType]);
 
   // Sync sidebar open state when preference changes in Settings
   useEffect(() => {
@@ -554,7 +597,7 @@ const App: React.FC = () => {
   const activeSection = useActiveSection(containerRef, headingCount, scrollViewport);
 
   const { editorAnnotations, deleteEditorAnnotation } = useEditorAnnotations();
-  const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<Annotation>({ enabled: isApiMode });
+  const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<Annotation>({ enabled: isApiMode && !goalSetupMode });
 
   // Drive DOM highlights for SSE-delivered external annotations. Disabled
   // while a linked doc overlay is open (Viewer DOM is hidden) and while the
@@ -562,7 +605,7 @@ const App: React.FC = () => {
   const { reset: resetExternalHighlights } = useExternalAnnotationHighlights({
     viewerRef,
     externalAnnotations,
-    enabled: isApiMode && !linkedDocHook.isActive && !isPlanDiffActive,
+    enabled: isApiMode && !goalSetupMode && !linkedDocHook.isActive && !isPlanDiffActive,
     planKey: markdown,
   });
 
@@ -636,15 +679,38 @@ const App: React.FC = () => {
       setIsLoading(false);
     },
     shareBaseUrl,
-    pasteApiUrl
+    pasteApiUrl,
+    rawHtml,
+    setRawHtml,
+    setRenderAs,
   );
+
+  // useLayoutEffect + synchronous getBoundingClientRect so the initial
+  // bucket is set before the browser paints. Otherwise narrow viewports
+  // get a one-frame flash of "Global comment"/"Copy plan" labels before
+  // the ResizeObserver callback collapses them.
+  useLayoutEffect(() => {
+    if (isLoading && !isSharedSession) return;
+
+    const el = planAreaRef.current;
+    if (!el) return;
+    const bucket = (w: number): ActionsLabelMode =>
+      w >= 800 ? 'full' : w >= 680 ? 'short' : 'icon';
+    setActionsLabelMode(bucket(el.getBoundingClientRect().width));
+    const ro = new ResizeObserver(([entry]) => {
+      const next = bucket(entry.contentRect.width);
+      setActionsLabelMode((prev) => (prev === next ? prev : next));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isLoading, isSharedSession]);
 
   // Auto-save annotation drafts
   const { draftBanner, restoreDraft, dismissDraft } = useAnnotationDraft({
     annotations: allAnnotations,
     codeAnnotations,
     globalAttachments,
-    isApiMode,
+    isApiMode: isApiMode && !goalSetupMode,
     isSharedSession,
     submitted: !!submitted,
   });
@@ -682,10 +748,10 @@ const App: React.FC = () => {
     }
   }, [pendingSharedAnnotations, clearPendingSharedAnnotations, resetExternalHighlights]);
 
-  const handleTaterModeChange = (enabled: boolean) => {
+  const handleTaterModeChange = useCallback((enabled: boolean) => {
     setTaterMode(enabled);
     storage.setItem('plannotator-tater-mode', String(enabled));
-  };
+  }, []);
 
   const handleEditorModeChange = (mode: EditorMode) => {
     setEditorMode(mode);
@@ -711,18 +777,27 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive'; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; gate?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string } }) => {
+      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; gate?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string } }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
+        setAISessionEnabled(data.mode !== 'archive' && data.mode !== 'goal-setup');
         // gitUser drives the "Use git name" button in Settings; stays undefined (button hidden) when unavailable
         setGitUser(data.serverConfig?.gitUser);
-        if (data.mode === 'archive') {
+        if (data.mode === 'goal-setup' && data.goalSetup) {
+          setGoalSetupBundle(data.goalSetup);
+          setMarkdown('');
+          setSharingEnabled(false);
+        } else if (data.mode === 'archive') {
           // Archive mode: show first archived plan or clear demo content
           setMarkdown(data.plan || '');
           if (data.archivePlans) archive.init(data.archivePlans);
           archive.fetchPlans();
           setSharingEnabled(false);
           sidebar.open('archive');
+        } else if (data.renderAs === 'html' && data.rawHtml) {
+          setRenderAs('html');
+          setRawHtml(data.rawHtml);
+          setMarkdown('');
         } else if (data.mode === 'annotate-folder') {
           // Folder annotation mode: clear demo content, let user pick a file
           setMarkdown('');
@@ -737,7 +812,7 @@ const App: React.FC = () => {
         if (data.mode === 'annotate-folder') {
           sidebar.open('files');
         }
-        if (data.mode && data.mode !== 'archive') {
+        if (data.mode === 'annotate' || data.mode === 'annotate-last' || data.mode === 'annotate-folder') {
           setAnnotateSource(data.mode === 'annotate-last' ? 'message' : data.mode === 'annotate-folder' ? 'folder' : 'file');
         }
         setSourceInfo(data.sourceInfo ?? undefined);
@@ -773,7 +848,7 @@ const App: React.FC = () => {
         if (data.origin) {
           setOrigin(data.origin);
           // For Claude Code, check if user needs to configure permission mode
-          if (data.origin === 'claude-code' && needsPermissionModeSetup()) {
+          if (data.origin === 'claude-code' && data.mode !== 'goal-setup' && needsPermissionModeSetup()) {
             setShowPermissionModeSetup(true);
           }
           // Load saved permission mode preference
@@ -786,15 +861,54 @@ const App: React.FC = () => {
       .catch(() => {
         // Not in API mode - use default content
         setIsApiMode(false);
+        setAISessionEnabled(false);
       })
       .finally(() => setIsLoading(false));
   }, [isLoadingShared, isSharedSession]);
 
   useEffect(() => {
-    const { frontmatter: fm } = extractFrontmatter(markdown);
-    setFrontmatter(fm);
-    setBlocks(parseMarkdownToBlocks(markdown));
-  }, [markdown]);
+    if (!aiSessionEnabled || !isApiMode || isSharedSession) {
+      setAiAvailable(false);
+      setAiProviders([]);
+      return;
+    }
+
+    let cancelled = false;
+    fetch('/api/ai/capabilities')
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (cancelled) return;
+        if (data?.available) {
+          const providers = data.providers ?? [];
+          setAiAvailable(true);
+          setAiProviders(providers);
+          setAIConfig(prev => {
+            const saved = getAIProviderSettings();
+            const selection = resolveAIProviderSelection({
+              providers,
+              origin,
+              settings: saved,
+              serverDefaultProvider: data.defaultProvider ?? null,
+            });
+
+            if (prev.providerId === selection.providerId && prev.model === selection.model) return prev;
+
+            return { ...prev, providerId: selection.providerId, model: selection.model };
+          });
+        } else {
+          setAiAvailable(false);
+          setAiProviders([]);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAiAvailable(false);
+          setAiProviders([]);
+        }
+      });
+
+    return () => { cancelled = true; };
+  }, [aiSessionEnabled, isApiMode, isSharedSession, origin]);
 
   // Auto-save to notes apps on plan arrival (each gated by its autoSave toggle)
   const autoSaveAttempted = useRef(false);
@@ -868,19 +982,18 @@ const App: React.FC = () => {
 
         const failed = targets.filter(t => !data.results?.[t.toLowerCase()]?.success);
         if (failed.length === 0) {
-          setNoteSaveToast({ type: 'success', message: `Auto-saved to ${targets.join(' & ')}` });
+          toast.success(`Auto-saved to ${targets.join(' & ')}`);
         } else {
-          setNoteSaveToast({ type: 'error', message: `Auto-save failed for ${failed.join(' & ')}` });
+          toast.error(`Auto-save failed for ${failed.join(' & ')}`);
         }
 
         return results;
       })
       .catch(() => {
         autoSaveResultsRef.current = {};
-        setNoteSaveToast({ type: 'error', message: 'Auto-save failed' });
+        toast.error('Auto-save failed');
         return {};
-      })
-      .finally(() => setTimeout(() => setNoteSaveToast(null), 3000));
+      });
     autoSavePromiseRef.current = autoSavePromise;
   }, [isApiMode, markdown, isSharedSession, annotateMode]);
 
@@ -1085,28 +1198,60 @@ const App: React.FC = () => {
     }
   }, []);
 
+  const handleGoalSetupSubmit = useCallback(() => {
+    goalSetupSurfaceRef.current?.submit();
+  }, []);
+
+  const handleGoalSetupExit = useCallback(async () => {
+    setIsExiting(true);
+    try {
+      const res = await fetch('/api/exit', { method: 'POST' });
+      if (res.ok) {
+        setSubmitted('exited');
+      } else {
+        throw new Error('Failed to exit');
+      }
+    } catch {
+      setIsExiting(false);
+    }
+  }, []);
+
   // Global keyboard shortcuts (Cmd/Ctrl+Enter to submit)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Only handle Cmd/Ctrl+Enter
       if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
 
-      // Don't intercept if typing in an input/textarea
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      const isTextField = tag === 'INPUT' || tag === 'TEXTAREA' || Boolean(target?.isContentEditable);
+
+      // Let active confirmation dialogs own Cmd/Ctrl+Enter and Escape.
+      if (document.querySelector('[data-plannotator-confirm-dialog="true"]')) return;
 
       // Don't intercept if any modal is open
       if (showExport || showImport || showFeedbackPrompt || showClaudeCodeWarning ||
           showExitWarning || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
 
       // Don't intercept if already submitted, submitting, or exiting
-      if (submitted || isSubmitting || isExiting) return;
+      if (submitted || isSubmitting || isExiting || goalSetupAction.isSubmitting) return;
 
       // Don't intercept in demo/share mode (no API)
       if (!isApiMode) return;
 
       // Don't submit while viewing a linked doc
       if (linkedDocHook.isActive) return;
+
+      if (goalSetupMode) {
+        if (document.querySelector('[data-comment-popover="true"]')) return;
+        if (isTextField && !target?.closest('.goal-shell')) return;
+        e.preventDefault();
+        if (goalSetupAction.canSubmit) goalSetupSurfaceRef.current?.submit();
+        return;
+      }
+
+      // Don't intercept if typing in an input/textarea outside goal setup.
+      if (isTextField) return;
 
       e.preventDefault();
 
@@ -1147,8 +1292,8 @@ const App: React.FC = () => {
   }, [
     showExport, showImport, showFeedbackPrompt, showClaudeCodeWarning, showExitWarning, showAgentWarning,
     showPermissionModeSetup, pendingPasteImage,
-    submitted, isSubmitting, isExiting, isApiMode, linkedDocHook.isActive, annotations.length, codeAnnotations.length, externalAnnotations.length, annotateMode,
-    gate, hasAnyAnnotations,
+    submitted, isSubmitting, isExiting, goalSetupAction.isSubmitting, isApiMode, linkedDocHook.isActive, annotations.length, codeAnnotations.length, externalAnnotations.length, annotateMode,
+    gate, hasAnyAnnotations, goalSetupMode, goalSetupAction.canSubmit,
     origin, getAgentWarning,
   ]);
 
@@ -1257,14 +1402,14 @@ const App: React.FC = () => {
     ));
   };
 
-  const handleIdentityChange = (oldIdentity: string, newIdentity: string) => {
+  const handleIdentityChange = useCallback((oldIdentity: string, newIdentity: string) => {
     setAnnotations(prev => prev.map(ann =>
       ann.author === oldIdentity ? { ...ann, author: newIdentity } : ann
     ));
     setCodeAnnotations(prev => prev.map(ann =>
       ann.author === oldIdentity ? { ...ann, author: newIdentity } : ann
     ));
-  };
+  }, []);
 
   const handleAddGlobalAttachment = (image: ImageAttachment) => {
     setGlobalAttachments(prev => [...prev, image]);
@@ -1333,6 +1478,159 @@ const App: React.FC = () => {
     return output;
   }, [blocks, allAnnotations, globalAttachments, linkedDocHook.getDocAnnotations, editorAnnotations, codeAnnotations, sourceConverted, annotateSource, linkedDocHook.isActive, linkedDocHook.filepath]);
 
+  const aiAnnotationsContext = useMemo(
+    () => hasAnyAnnotations ? annotationsOutput : undefined,
+    [annotationsOutput, hasAnyAnnotations],
+  );
+
+  const aiDocumentPath = linkedDocHook.isActive
+    ? linkedDocHook.filepath ?? 'linked document'
+    : sourceFilePath ?? (annotateSource === 'message' ? 'agent message' : annotateSource === 'folder' ? 'folder document' : 'plan');
+  const aiSourceInfo = linkedDocHook.isActive ? linkedDocHook.filepath ?? undefined : sourceInfo;
+  const aiSourceConverted = linkedDocHook.isActive
+    ? (linkedDocHook.getDocAnnotations().get(linkedDocHook.filepath ?? '')?.isConverted ?? false)
+    : sourceConverted;
+  const aiRenderAs = linkedDocHook.isActive ? 'markdown' : renderAs;
+  const aiDocumentMode = annotateMode || linkedDocHook.isActive;
+  const hasAIDocumentContext =
+    !aiDocumentMode ||
+    annotateSource !== 'folder' ||
+    linkedDocHook.isActive ||
+    !!sourceFilePath;
+
+  const aiContext = useMemo<AIContext | null>(() => {
+    if (!aiSessionEnabled || archive.archiveMode || goalSetupMode) return null;
+    if (aiDocumentMode && !hasAIDocumentContext) return null;
+
+    if (aiDocumentMode) {
+      return {
+        mode: 'annotate',
+        annotate: {
+          content: aiRenderAs === 'html' && rawHtml ? rawHtml : markdown,
+          filePath: aiDocumentPath,
+          sourceInfo: aiSourceInfo,
+          sourceConverted: aiSourceConverted,
+          renderAs: aiRenderAs,
+          annotations: aiAnnotationsContext,
+        },
+      };
+    }
+
+    return {
+      mode: 'plan-review',
+      plan: {
+        plan: markdown,
+        previousPlan: previousPlan ?? undefined,
+        version: versionInfo?.version,
+        totalVersions: versionInfo?.totalVersions,
+        project: versionInfo?.project,
+        annotations: aiAnnotationsContext,
+      },
+    };
+  }, [
+    aiAnnotationsContext,
+    aiDocumentPath,
+    aiRenderAs,
+    aiSessionEnabled,
+    aiSourceConverted,
+    aiSourceInfo,
+    aiDocumentMode,
+    hasAIDocumentContext,
+    archive.archiveMode,
+    goalSetupMode,
+    markdown,
+    previousPlan,
+    rawHtml,
+    renderAs,
+    versionInfo,
+  ]);
+
+  const aiChat = useAIChat({
+    context: aiContext,
+    providerId: aiConfig.providerId,
+    model: aiConfig.model,
+    reasoningEffort: aiConfig.reasoningEffort,
+    threadTitle: aiDocumentMode ? 'Document chat' : 'Plan chat',
+  });
+  const {
+    messages: aiMessages,
+    isCreatingSession: aiIsCreatingSession,
+    isStreaming: aiIsStreaming,
+    permissionRequests: aiPermissionRequests,
+    respondToPermission: respondToAIPermission,
+    ask: askAI,
+    resetSession: resetAISession,
+    resetThread: resetAIThread,
+    sessionId: aiSessionId,
+  } = aiChat;
+  const canUseAI = aiAvailable && aiContext !== null;
+
+  const aiDocumentKey = aiContext
+    ? `${aiDocumentMode ? 'document' : 'plan'}:${aiRenderAs}:${aiDocumentPath}:${versionInfo?.version ?? 'current'}`
+    : 'none';
+  const previousAIDocumentKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!aiSessionEnabled) return;
+    if (previousAIDocumentKeyRef.current && previousAIDocumentKeyRef.current !== aiDocumentKey) {
+      resetAIThread();
+    }
+    previousAIDocumentKeyRef.current = aiDocumentKey;
+  }, [aiDocumentKey, aiSessionEnabled, resetAIThread]);
+
+  const handleAIConfigChange = useCallback((config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => {
+    setAIConfig(prev => {
+      const saved = getAIProviderSettings();
+      const providerId = config.providerId !== undefined ? config.providerId : prev.providerId;
+      const providerChanged = config.providerId !== undefined && config.providerId !== prev.providerId;
+      const provider = aiProviders.find(p => p.id === providerId) ?? null;
+      const model = providerChanged
+        ? (config.model !== undefined ? config.model : resolveAIModelForProvider(provider, saved.preferredModels))
+        : (config.model !== undefined ? config.model : prev.model);
+      const next = { ...prev, ...config, providerId, model };
+      saveAIProviderSelection({
+        providerId: next.providerId,
+        model: next.model,
+        origin,
+        settings: saved,
+      });
+      return next;
+    });
+    resetAISession();
+  }, [aiProviders, origin, resetAISession]);
+
+  const openAIChat = useCallback(() => {
+    if (wideModeType !== null) {
+      exitWideMode({ restore: false, panelOpen: true });
+    }
+    setRightSidebarTab('ai');
+    setIsPanelOpen(true);
+  }, [exitWideMode, wideModeType]);
+
+  const handleOpenAIAnnouncement = useCallback(() => {
+    dismissPlanAIAnnouncement();
+    openAIChat();
+  }, [dismissPlanAIAnnouncement, openAIChat]);
+
+  const handleAskAI = useCallback((question: string, context?: CommentAskAIContext) => {
+    if (!canUseAI) return;
+    dismissPlanAIAnnouncement();
+    openAIChat();
+    askAI({
+      prompt: question,
+      scope: context ? {
+        kind: context.kind,
+        label: context.label,
+        text: context.text,
+        sourcePath: context.sourcePath ?? aiDocumentPath,
+      } : undefined,
+      contextUpdate: aiSessionId ? aiAnnotationsContext : undefined,
+    });
+  }, [aiAnnotationsContext, aiDocumentPath, aiSessionId, askAI, canUseAI, dismissPlanAIAnnouncement, openAIChat]);
+
+  const handleAskGeneralAI = useCallback((question: string) => {
+    handleAskAI(question, { kind: 'general', label: aiDocumentMode ? 'Document' : 'Plan', sourcePath: aiDocumentPath });
+  }, [aiDocumentMode, aiDocumentPath, handleAskAI]);
+
   // Bot callback config — read once from URL search params (?cb=&ct=)
   // TODO: bot callbacks post shareUrl which doesn't include code-file annotations.
   // If a user adds code comments and hits the callback button, those comments are silently dropped.
@@ -1340,21 +1638,22 @@ const App: React.FC = () => {
   const callbackConfig = React.useMemo(() => getCallbackConfig(), []);
 
   const callCallback = React.useCallback(async (action: CallbackAction) => {
-    if (!callbackConfig || isSubmitting || !shareUrl) return;
+    if (!callbackConfig || isSubmitting || (!shareUrl && !shortShareUrl)) return;
     setIsSubmitting(true);
     try {
-      const toast = await executeCallback(action, callbackConfig, shareUrl);
-      if (toast) {
-        setNoteSaveToast(toast);
-        setTimeout(() => setNoteSaveToast(null), 4000);
-        if (toast.type === 'success') {
+      const result = await executeCallback(action, callbackConfig, shortShareUrl || shareUrl);
+      if (result) {
+        if (result.type === 'success') {
+          toast.success(result.message);
           setSubmitted(action === CallbackAction.Approve ? 'approved' : 'denied');
+        } else {
+          toast.error(result.message);
         }
       }
     } finally {
       setIsSubmitting(false);
     }
-  }, [callbackConfig, isSubmitting, shareUrl]);
+  }, [callbackConfig, isSubmitting, shareUrl, shortShareUrl]);
 
   const handleCallbackApprove = React.useCallback(() => callCallback(CallbackAction.Approve), [callCallback]);
   const handleCallbackFeedback = React.useCallback(() => callCallback(CallbackAction.Feedback), [callCallback]);
@@ -1368,8 +1667,7 @@ const App: React.FC = () => {
     a.download = 'annotations.md';
     a.click();
     URL.revokeObjectURL(url);
-    setNoteSaveToast({ type: 'success', message: 'Downloaded annotations' });
-    setTimeout(() => setNoteSaveToast(null), 3000);
+    toast.success('Downloaded annotations');
   };
 
   const handleQuickSaveToNotes = async (target: 'obsidian' | 'bear' | 'octarine') => {
@@ -1415,14 +1713,13 @@ const App: React.FC = () => {
       const data = await res.json();
       const result = data.results?.[target];
       if (result?.success) {
-        setNoteSaveToast({ type: 'success', message: `Saved to ${targetName}` });
+        toast.success(`Saved to ${targetName}`);
       } else {
-        setNoteSaveToast({ type: 'error', message: result?.error || 'Save failed' });
+        toast.error(result?.error || 'Save failed');
       }
     } catch {
-      setNoteSaveToast({ type: 'error', message: 'Save failed' });
+      toast.error('Save failed');
     }
-    setTimeout(() => setNoteSaveToast(null), 3000);
   };
 
   // Agent Instructions — copy a clipboard payload teaching external agents
@@ -1433,21 +1730,21 @@ const App: React.FC = () => {
     const payload = buildPlanAgentInstructions(window.location.origin);
     try {
       await navigator.clipboard.writeText(payload);
-      setNoteSaveToast({ type: 'success', message: 'Agent instructions copied' });
+      toast.success('Agent instructions copied');
     } catch {
-      setNoteSaveToast({ type: 'error', message: 'Failed to copy' });
+      toast.error('Failed to copy');
     }
-    setTimeout(() => setNoteSaveToast(null), 3000);
   };
 
   const handleCopyShareLink = async () => {
+    const url = shortShareUrl || shareUrl;
+    if (!url) return;
     try {
-      await navigator.clipboard.writeText(shareUrl);
-      setNoteSaveToast({ type: 'success', message: 'Share link copied' });
+      await navigator.clipboard.writeText(url);
+      toast.success('Share link copied');
     } catch {
-      setNoteSaveToast({ type: 'error', message: 'Failed to copy' });
+      toast.error('Failed to copy');
     }
-    setTimeout(() => setNoteSaveToast(null), 3000);
   };
 
   // Cmd/Ctrl+S keyboard shortcut — save to default notes app
@@ -1518,236 +1815,189 @@ const App: React.FC = () => {
 
   const agentName = useMemo(() => getAgentName(origin), [origin]);
 
+  // Header handlers ref — stores latest handler references so the stable
+  // callbacks below always call the current version without needing useCallback
+  // dep arrays for every handler. This lets React.memo on AppHeader work.
+  const headerHandlersRef = useRef({
+    handleApprove,
+    handleDeny,
+    handleAnnotateApprove,
+    handleAnnotateFeedback,
+    handleAnnotateExit,
+    handleQuickSaveToNotes,
+    handleDownloadAnnotations,
+    handleCopyAgentInstructions,
+    handleCopyShareLink,
+    getAgentWarning,
+    getDocAnnotations: linkedDocHook.getDocAnnotations,
+  });
+  headerHandlersRef.current = {
+    handleApprove,
+    handleDeny,
+    handleAnnotateApprove,
+    handleAnnotateFeedback,
+    handleAnnotateExit,
+    handleQuickSaveToNotes,
+    handleDownloadAnnotations,
+    handleCopyAgentInstructions,
+    handleCopyShareLink,
+    getAgentWarning,
+    getDocAnnotations: linkedDocHook.getDocAnnotations,
+  };
+
+  const handleHeaderAnnotateExit = useCallback(() => {
+    if (hasAnyAnnotations) {
+      setExitWarningAction('close');
+      setShowExitWarning(true);
+    } else {
+      headerHandlersRef.current.handleAnnotateExit();
+    }
+  }, [hasAnyAnnotations]);
+
+  const handleHeaderFeedback = useCallback(() => {
+    const h = headerHandlersRef.current;
+    const docAnnotations = h.getDocAnnotations();
+    const hasDocAnnotations = Array.from(docAnnotations.values()).some(
+      (d) => d.annotations.length > 0 || d.globalAttachments.length > 0
+    );
+    if (allAnnotations.length === 0 && codeAnnotations.length === 0 && editorAnnotations.length === 0 && !hasDocAnnotations) {
+      setShowFeedbackPrompt(true);
+    } else {
+      h.handleDeny();
+    }
+  }, [allAnnotations.length, codeAnnotations.length, editorAnnotations.length]);
+
+  const handleHeaderApprove = useCallback(() => {
+    const h = headerHandlersRef.current;
+    if (annotateMode) {
+      if (hasAnyAnnotations) {
+        setExitWarningAction('approve');
+        setShowExitWarning(true);
+        return;
+      }
+      h.handleAnnotateApprove();
+      return;
+    }
+    if (origin === 'claude-code' && (allAnnotations.length > 0 || codeAnnotations.length > 0)) {
+      setShowClaudeCodeWarning(true);
+      return;
+    }
+    if (origin === 'opencode') {
+      const warning = h.getAgentWarning();
+      if (warning) {
+        setAgentWarningMessage(warning);
+        setShowAgentWarning(true);
+        return;
+      }
+    }
+    h.handleApprove();
+  }, [annotateMode, hasAnyAnnotations, origin, allAnnotations.length, codeAnnotations.length]);
+
+  const handleHeaderAnnotateFeedback = useCallback(() => headerHandlersRef.current.handleAnnotateFeedback(), []);
+  const handleHeaderAnnotateApprove = useCallback(() => headerHandlersRef.current.handleAnnotateApprove(), []);
+  const handleHeaderDownloadAnnotations = useCallback(() => headerHandlersRef.current.handleDownloadAnnotations(), []);
+  const handleHeaderCopyAgentInstructions = useCallback(() => headerHandlersRef.current.handleCopyAgentInstructions(), []);
+  const handleHeaderCopyShareLink = useCallback(() => headerHandlersRef.current.handleCopyShareLink(), []);
+  const handleOpenSettings = useCallback(() => setMobileSettingsOpen(true), []);
+  const handleCloseSettings = useCallback(() => setMobileSettingsOpen(false), []);
+  const handleOpenExport = useCallback(() => { setInitialExportTab(undefined); setShowExport(true); }, []);
+  const handlePrint = useCallback(() => window.print(), []);
+  const handleOpenImport = useCallback(() => setShowImport(true), []);
+  const handleSaveToObsidian = useCallback(() => headerHandlersRef.current.handleQuickSaveToNotes('obsidian'), []);
+  const handleSaveToOctarine = useCallback(() => headerHandlersRef.current.handleQuickSaveToNotes('octarine'), []);
+  const handleSaveToBear = useCallback(() => headerHandlersRef.current.handleQuickSaveToNotes('bear'), []);
+
   const planMaxWidth = useMemo(() => {
     const widths: Record<PlanWidth, number> = { compact: 832, default: 1040, wide: 1280 };
     return widths[uiPrefs.planWidth] ?? 832;
   }, [uiPrefs.planWidth]);
   const annotateReaderMaxWidth = canUseWideMode && wideModeType === 'wide' ? null : planMaxWidth;
+  const selectedAIProvider = aiProviders.find(provider => provider.id === aiConfig.providerId) ?? null;
+  const shouldShowPlanAIAnnouncement =
+    showPlanAIAnnouncement &&
+    canUseAI &&
+    aiSessionEnabled &&
+    isApiMode &&
+    !isSharedSession &&
+    !archive.archiveMode &&
+    !goalSetupMode &&
+    !showPermissionModeSetup &&
+    !submitted;
 
+
+  if (isLoading && !isSharedSession) {
+    return (
+      <ThemeProvider defaultTheme="dark">
+        <div className="h-screen bg-background" />
+      </ThemeProvider>
+    );
+  }
 
   return (
     <ThemeProvider defaultTheme="dark">
       <TooltipProvider delayDuration={900} skipDelayDuration={200} disableHoverableContent>
       <div data-print-region="root" className="h-screen flex flex-col bg-background overflow-hidden">
-        {/* Minimal Header */}
-        <header data-app-header="true" className="h-12 flex items-center justify-between px-2 md:px-4 border-b border-border/50 bg-card/50 backdrop-blur-xl sticky top-0 z-[50]">
-          <div className="flex items-center gap-2 md:gap-3">
-            <a
-              href="https://plannotator.ai"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 md:gap-2 hover:opacity-80 transition-opacity"
-            >
-              <span className="text-sm font-semibold tracking-tight">Plannotator</span>
-            </a>
-          </div>
-
-          <div className="flex items-center gap-1 md:gap-2">
-            {/* Bot callback buttons — only shown when ?cb=&ct= params are present */}
-            {callbackConfig && !isApiMode && isSharedSession && (
-              <>
-                <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
-                <FeedbackButton
-                  onClick={handleCallbackFeedback}
-                  disabled={isSubmitting || !shareUrl}
-                  isLoading={isSubmitting}
-                  title="Send feedback to bot"
-                />
-                <ApproveButton
-                  onClick={handleCallbackApprove}
-                  disabled={isSubmitting || !shareUrl}
-                  isLoading={isSubmitting}
-                  title="Approve design and notify bot"
-                />
-              </>
-            )}
-
-            {isApiMode && !linkedDocHook.isActive && archive.archiveMode && (
-              <>
-                <button
-                  onClick={archive.copy}
-                  className="px-2.5 py-1 rounded-md text-xs font-medium transition-all bg-muted text-foreground hover:bg-muted/80 border border-border"
-                  title="Copy plan content"
-                >
-                  <span className="hidden md:inline">Copy</span>
-                  <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                  </svg>
-                </button>
-                <button
-                  onClick={archive.done}
-                  className="px-2.5 py-1 rounded-md text-xs font-medium transition-all bg-success text-success-foreground hover:opacity-90"
-                  title="Close archive"
-                >
-                  Done
-                </button>
-              </>
-            )}
-
-            {isApiMode && (!linkedDocHook.isActive || annotateMode) && !archive.archiveMode && (
-              <>
-                {annotateMode ? (
-                  // Annotate mode: Close always visible, Send Annotations when annotations exist,
-                  // Approve only when gate (review) mode is enabled (#570).
-                  <>
-                    <ExitButton
-                      onClick={() => {
-                        if (hasAnyAnnotations) {
-                          setExitWarningAction('close');
-                          setShowExitWarning(true);
-                        } else {
-                          handleAnnotateExit();
-                        }
-                      }}
-                      disabled={isSubmitting || isExiting}
-                      isLoading={isExiting}
-                    />
-                    {hasAnyAnnotations && (
-                      <FeedbackButton
-                        onClick={handleAnnotateFeedback}
-                        disabled={isSubmitting || isExiting}
-                        isLoading={isSubmitting}
-                        label="Send Annotations"
-                        title="Send Annotations"
-                      />
-                    )}
-                  </>
-                ) : (
-                  // Plan mode: Send Feedback
-                  <FeedbackButton
-                    onClick={() => {
-                      const docAnnotations = linkedDocHook.getDocAnnotations();
-                      const hasDocAnnotations = Array.from(docAnnotations.values()).some(
-                        (d) => d.annotations.length > 0 || d.globalAttachments.length > 0
-                      );
-                      if (allAnnotations.length === 0 && codeAnnotations.length === 0 && editorAnnotations.length === 0 && !hasDocAnnotations) {
-                        setShowFeedbackPrompt(true);
-                      } else {
-                        handleDeny();
-                      }
-                    }}
-                    disabled={isSubmitting}
-                    isLoading={isSubmitting}
-                    label="Send Feedback"
-                    title="Send Feedback"
-                  />
-                )}
-
-                {(!annotateMode || gate) && (
-                  origin === 'opencode' && !annotateMode && availableAgents.length > 0 ? (
-                    <ApproveDropdown
-                      onApprove={() => {
-                        const warning = getAgentWarning();
-                        if (warning) {
-                          setAgentWarningMessage(warning);
-                          setShowAgentWarning(true);
-                          return;
-                        }
-                        handleApprove();
-                      }}
-                      agents={availableAgents}
-                      disabled={isSubmitting}
-                      isLoading={isSubmitting}
-                    />
-                  ) : (
-                    <div className="relative group/approve">
-                      <ApproveButton
-                        onClick={() => {
-                          if (annotateMode) {
-                            if (hasAnyAnnotations) {
-                              setExitWarningAction('approve');
-                              setShowExitWarning(true);
-                              return;
-                            }
-                            handleAnnotateApprove();
-                            return;
-                          }
-                          if (origin === 'claude-code' && (allAnnotations.length > 0 || codeAnnotations.length > 0)) {
-                            setShowClaudeCodeWarning(true);
-                            return;
-                          }
-                          if (origin === 'opencode') {
-                            const warning = getAgentWarning();
-                            if (warning) {
-                              setAgentWarningMessage(warning);
-                              setShowAgentWarning(true);
-                              return;
-                            }
-                          }
-                          handleApprove();
-                        }}
-                        disabled={isSubmitting || (annotateMode && isExiting)}
-                        isLoading={isSubmitting}
-                        dimmed={!annotateMode && (origin === 'claude-code' || origin === 'gemini-cli') && (allAnnotations.length > 0 || codeAnnotations.length > 0)}
-                        title={annotateMode ? 'Approve — no changes requested' : undefined}
-                      />
-                      {!annotateMode && (origin === 'claude-code' || origin === 'gemini-cli') && (allAnnotations.length > 0 || codeAnnotations.length > 0) && (
-                        <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
-                          <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
-                          <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
-                          {agentName} doesn't support feedback on approval. Your annotations won't be seen.
-                        </div>
-                      )}
-                    </div>
-                  )
-                )}
-
-                <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
-              </>
-            )}
-
-            {/* Annotations panel toggle — top-level header button */}
-            <button
-              onClick={handleAnnotationPanelToggle}
-              className={`p-1.5 rounded-md text-xs font-medium transition-all ${
-                isPanelOpen
-                  ? 'bg-primary/15 text-primary'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-              }`}
-              title={isPanelOpen ? 'Hide annotations' : 'Show annotations'}
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-              </svg>
-            </button>
-
-            {/* Settings dialog (controlled, button hidden — opened from PlanHeaderMenu) */}
-            <div className="hidden">
-              <Settings
-                taterMode={taterMode}
-                onTaterModeChange={handleTaterModeChange}
-                onIdentityChange={handleIdentityChange}
-                origin={origin}
-                onUIPreferencesChange={setUiPrefs}
-                externalOpen={mobileSettingsOpen}
-                onExternalClose={() => setMobileSettingsOpen(false)}
-                gitUser={gitUser}
-              />
-            </div>
-
-            <PlanHeaderMenu
-              appVersion={typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0'}
-              onOpenSettings={() => {
-                setMobileSettingsOpen(true);
-              }}
-              onOpenExport={() => { setInitialExportTab(undefined); setShowExport(true); }}
-              onCopyAgentInstructions={handleCopyAgentInstructions}
-              onDownloadAnnotations={handleDownloadAnnotations}
-              onPrint={() => window.print()}
-              onCopyShareLink={handleCopyShareLink}
-              onOpenImport={() => setShowImport(true)}
-              onSaveToObsidian={() => handleQuickSaveToNotes('obsidian')}
-              onSaveToBear={() => handleQuickSaveToNotes('bear')}
-              onSaveToOctarine={() => handleQuickSaveToNotes('octarine')}
-              sharingEnabled={canShareCurrentSession}
-              isApiMode={isApiMode}
-              agentInstructionsEnabled={isApiMode && !archive.archiveMode && !annotateMode}
-              obsidianConfigured={isObsidianConfigured()}
-              bearConfigured={getBearSettings().enabled}
-              octarineConfigured={isOctarineConfigured()}
-            />
-          </div>
-        </header>
+        <AppHeader
+          isApiMode={isApiMode}
+          annotateMode={annotateMode}
+          archiveMode={archive.archiveMode}
+          goalSetupMode={goalSetupMode}
+          goalSetupCanSubmit={goalSetupAction.canSubmit}
+          goalSetupIsSubmitting={goalSetupAction.isSubmitting}
+          goalSetupSubmitLabel={goalSetupAction.submitLabel}
+          gate={gate}
+          isSharedSession={isSharedSession}
+          origin={origin}
+          isSubmitting={isSubmitting}
+          isExiting={isExiting}
+          isPanelOpen={isPanelOpen && rightSidebarTab === 'annotations'}
+          aiAvailable={canUseAI}
+          isAIChatOpen={isPanelOpen && rightSidebarTab === 'ai'}
+          aiHasMessages={aiMessages.length > 0}
+          hasAnyAnnotations={hasAnyAnnotations}
+          linkedDocIsActive={linkedDocHook.isActive}
+          callbackShareUrlReady={callbackConfig ? Boolean(shareUrl || shortShareUrl) : true}
+          canShareCurrentSession={canShareCurrentSession}
+          agentName={agentName}
+          availableAgents={availableAgents}
+          showAnnotationsWarning={allAnnotations.length > 0 || codeAnnotations.length > 0}
+          callbackConfig={callbackConfig}
+          taterMode={taterMode}
+          mobileSettingsOpen={mobileSettingsOpen}
+          gitUser={gitUser}
+          onCallbackFeedback={handleCallbackFeedback}
+          onCallbackApprove={handleCallbackApprove}
+          onAnnotateExit={handleHeaderAnnotateExit}
+          onGoalSetupExit={handleGoalSetupExit}
+          onGoalSetupSubmit={handleGoalSetupSubmit}
+          onAnnotateFeedback={handleHeaderAnnotateFeedback}
+          onAnnotateApprove={handleHeaderAnnotateApprove}
+          onFeedback={handleHeaderFeedback}
+          onApprove={handleHeaderApprove}
+          onAnnotationPanelToggle={handleAnnotationPanelToggle}
+          onAIChatToggle={handleAIChatToggle}
+          onArchiveCopy={archive.copy}
+          onArchiveDone={archive.done}
+          onTaterModeChange={handleTaterModeChange}
+          onIdentityChange={handleIdentityChange}
+          onUIPreferencesChange={setUiPrefs}
+          onOpenSettings={handleOpenSettings}
+          onCloseSettings={handleCloseSettings}
+          onOpenExport={handleOpenExport}
+          onCopyAgentInstructions={handleHeaderCopyAgentInstructions}
+          onDownloadAnnotations={handleHeaderDownloadAnnotations}
+          onPrint={handlePrint}
+          onCopyShareLink={handleHeaderCopyShareLink}
+          onOpenImport={handleOpenImport}
+          onSaveToObsidian={handleSaveToObsidian}
+          onSaveToBear={handleSaveToBear}
+          onSaveToOctarine={handleSaveToOctarine}
+          appVersion={typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0'}
+          agentInstructionsEnabled={isApiMode && !archive.archiveMode && !annotateMode && !goalSetupMode}
+          obsidianConfigured={isObsidianConfigured()}
+          bearConfigured={getBearSettings().enabled}
+          octarineConfigured={isOctarineConfigured()}
+        />
 
         {/* Linked document error banner */}
         {linkedDocHook.error && (
@@ -1768,7 +2018,7 @@ const App: React.FC = () => {
           {/* Tater sprites — inside content wrapper so z-0 stacking context applies */}
           {taterMode && <TaterSpriteRunning />}
           {/* Left Sidebar: collapsed tab flags (when sidebar is closed) */}
-          {wideModeType === null && !sidebar.isOpen && (
+          {wideModeType === null && !sidebar.isOpen && !goalSetupMode && (
             <SidebarTabs
               activeTab={sidebar.activeTab}
               onToggleTab={toggleSidebarTab}
@@ -1781,7 +2031,7 @@ const App: React.FC = () => {
           )}
 
           {/* Left Sidebar: open state (TOC or Version Browser) */}
-          {sidebar.isOpen && (
+          {sidebar.isOpen && !goalSetupMode && (
             <>
               <SidebarContainer
                 activeTab={sidebar.activeTab}
@@ -1818,7 +2068,7 @@ const App: React.FC = () => {
                 isSelectingVersion={planDiff.isSelectingVersion}
                 fetchingVersion={planDiff.fetchingVersion}
                 onFetchVersions={planDiff.fetchVersions}
-                showArchiveTab={isApiMode && !annotateMode}
+                showArchiveTab={isApiMode && !annotateMode && !goalSetupMode}
                 archivePlans={archive.plans}
                 selectedArchiveFile={archive.selectedFile}
                 onArchiveSelect={archive.select}
@@ -1831,7 +2081,7 @@ const App: React.FC = () => {
           {/* Document Area */}
           <OverlayScrollArea
             element="main"
-            className={`flex-1 min-w-0 bg-grid ${!sidebar.isOpen && wideModeType === null ? 'lg:pl-[30px]' : ''}`}
+            className={`flex-1 min-w-0 bg-grid ${!goalSetupMode && !sidebar.isOpen && wideModeType === null ? 'lg:pl-[30px]' : ''}`}
             data-print-region="document"
             onViewportReady={handleViewportReady}
           >
@@ -1852,7 +2102,7 @@ const App: React.FC = () => {
                   truth there. Hidden in plan diff or archive mode, or when
                   sticky actions are disabled. remountToken re-anchors the
                   ResizeObserver when Viewer swaps content (linked docs). */}
-              {!isPlanDiffActive && !archive.archiveMode && uiPrefs.stickyActionsEnabled && (
+              {!goalSetupMode && !isPlanDiffActive && !archive.archiveMode && uiPrefs.stickyActionsEnabled && (
                 <StickyHeaderLane
                   inputMethod={inputMethod}
                   onInputMethodChange={handleInputMethodChange}
@@ -1871,7 +2121,7 @@ const App: React.FC = () => {
               )}
 
               {/* Annotation Toolstrip (hidden during plan diff and archive mode) */}
-              {!isPlanDiffActive && !archive.archiveMode && (
+              {!goalSetupMode && !isPlanDiffActive && !archive.archiveMode && (
                 <div data-print-hide className="w-full mb-3 md:mb-4 flex items-center justify-start" style={annotateReaderMaxWidth == null ? undefined : { maxWidth: annotateReaderMaxWidth }}>
                   <AnnotationToolstrip
                     inputMethod={inputMethod}
@@ -1884,7 +2134,19 @@ const App: React.FC = () => {
               )}
 
               {/* Plan Diff View — rendered when diff data exists, hidden when inactive */}
-              {planDiff.diffBlocks && planDiff.diffStats && (
+              {goalSetupBundle && (
+                <div className="w-full flex justify-center">
+                  <GoalSetupSurface
+                    ref={goalSetupSurfaceRef}
+                    bundle={goalSetupBundle}
+                    maxWidth={planMaxWidth}
+                    onActionStateChange={setGoalSetupAction}
+                    onSubmitted={() => setSubmitted('approved')}
+                  />
+                </div>
+              )}
+
+              {planDiff.diffBlocks && planDiff.diffStats && !goalSetupMode && (
                 <div className="w-full flex justify-center" style={{ display: isPlanDiffActive ? undefined : 'none' }}>
                   <PlanDiffViewer
                     diffBlocks={planDiff.diffBlocks}
@@ -1905,7 +2167,7 @@ const App: React.FC = () => {
                 </div>
               )}
               {/* Folder annotation empty state — shown before user picks a file */}
-              {annotateSource === 'folder' && !markdown && !linkedDocHook.isActive && (
+              {annotateSource === 'folder' && !markdown && !linkedDocHook.isActive && !goalSetupMode && (
                 <div className="w-full flex justify-center">
                   <div className="w-full max-w-3xl p-12 text-center text-muted-foreground">
                     <p className="text-lg font-medium mb-2">Select a file to annotate</p>
@@ -1914,7 +2176,7 @@ const App: React.FC = () => {
                 </div>
               )}
               {/* Normal Plan View — always mounted, hidden during diff mode */}
-              <div className="w-full flex justify-center relative" style={{ display: (isPlanDiffActive && planDiff.diffBlocks) || (annotateSource === 'folder' && !markdown && !linkedDocHook.isActive) ? 'none' : undefined }}>
+              <div className="w-full flex justify-center relative" style={{ display: goalSetupMode || (isPlanDiffActive && planDiff.diffBlocks) || (annotateSource === 'folder' && !markdown && !linkedDocHook.isActive) ? 'none' : undefined }}>
                 {canUseWideMode && !isPlanDiffActive && !archive.archiveMode && (
                   <div
                     data-print-hide
@@ -1948,52 +2210,70 @@ const App: React.FC = () => {
                     </div>
                   </div>
                 )}
-                <Viewer
-                  key={linkedDocHook.isActive ? `doc:${linkedDocHook.filepath}` : 'plan'}
-                  ref={viewerRef}
-                  blocks={blocks}
-                  markdown={markdown}
-                  frontmatter={frontmatter}
-                  annotations={viewerAnnotations}
-                  onAddAnnotation={handleAddAnnotation}
-                  onSelectAnnotation={handleSelectAnnotation}
-                  selectedAnnotationId={selectedAnnotationId}
-                  mode={editorMode}
-                  inputMethod={inputMethod}
-                  taterMode={taterMode}
-                  globalAttachments={globalAttachments}
-                  onAddGlobalAttachment={handleAddGlobalAttachment}
-                  onRemoveGlobalAttachment={handleRemoveGlobalAttachment}
-                  repoInfo={repoInfo}
-                  stickyActions={uiPrefs.stickyActionsEnabled}
-                  planDiffStats={linkedDocHook.isActive ? null : planDiff.diffStats}
-                  isPlanDiffActive={isPlanDiffActive}
-                  onPlanDiffToggle={() => setIsPlanDiffActive(!isPlanDiffActive)}
-                  hasPreviousVersion={!linkedDocHook.isActive && planDiff.hasPreviousVersion}
-                  showDemoBadge={!isApiMode && !isLoadingShared && !isSharedSession}
-                  maxWidth={annotateReaderMaxWidth}
-                  onOpenLinkedDoc={handleOpenLinkedDoc}
-                  onOpenCodeFile={codeFilePopout.open}
-                  linkedDocInfo={linkedDocHook.isActive ? { filepath: linkedDocHook.filepath!, onBack: handleLinkedDocBack, label: fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath)?.isVault ? 'Vault File' : fileBrowser.activeFile ? 'File' : undefined, backLabel } : null}
-                  imageBaseDir={imageBaseDir}
-                  codePathBaseDir={activeDocBaseDir}
-                  copyLabel={annotateSource === 'message' ? 'Copy message' : annotateSource === 'file' || annotateSource === 'folder' ? 'Copy file' : undefined}
-                  archiveInfo={archive.currentInfo}
-                  sourceInfo={sourceInfo}
-                  onToggleCheckbox={checkbox.toggle}
-                  checkboxOverrides={checkbox.overrides}
-                  actionsLabelMode={actionsLabelMode}
-                />
+                {renderAs === 'html' ? (
+                  <HtmlViewer
+                    ref={viewerRef}
+                    rawHtml={rawHtml}
+                    annotations={viewerAnnotations}
+                    onAddAnnotation={handleAddAnnotation}
+                    onSelectAnnotation={handleSelectAnnotation}
+                    selectedAnnotationId={selectedAnnotationId}
+                    mode={editorMode}
+                    globalAttachments={globalAttachments}
+                    onAddGlobalAttachment={handleAddGlobalAttachment}
+                    onRemoveGlobalAttachment={handleRemoveGlobalAttachment}
+                    maxWidth={annotateReaderMaxWidth}
+                    onAskAI={canUseAI ? handleAskAI : undefined}
+                  />
+                ) : (
+                  <Viewer
+                    key={linkedDocHook.isActive ? `doc:${linkedDocHook.filepath}` : 'plan'}
+                    ref={viewerRef}
+                    blocks={blocks}
+                    markdown={markdown}
+                    frontmatter={frontmatter}
+                    annotations={viewerAnnotations}
+                    onAddAnnotation={handleAddAnnotation}
+                    onSelectAnnotation={handleSelectAnnotation}
+                    selectedAnnotationId={selectedAnnotationId}
+                    mode={editorMode}
+                    inputMethod={inputMethod}
+                    taterMode={taterMode}
+                    globalAttachments={globalAttachments}
+                    onAddGlobalAttachment={handleAddGlobalAttachment}
+                    onRemoveGlobalAttachment={handleRemoveGlobalAttachment}
+                    repoInfo={repoInfo}
+                    stickyActions={uiPrefs.stickyActionsEnabled}
+                    planDiffStats={linkedDocHook.isActive ? null : planDiff.diffStats}
+                    isPlanDiffActive={isPlanDiffActive}
+                    onPlanDiffToggle={() => setIsPlanDiffActive(!isPlanDiffActive)}
+                    hasPreviousVersion={!linkedDocHook.isActive && planDiff.hasPreviousVersion}
+                    showDemoBadge={!isApiMode && !isLoadingShared && !isSharedSession}
+                    maxWidth={annotateReaderMaxWidth}
+                    onOpenLinkedDoc={handleOpenLinkedDoc}
+                    onOpenCodeFile={codeFilePopout.open}
+                    linkedDocInfo={linkedDocHook.isActive ? { filepath: linkedDocHook.filepath!, onBack: handleLinkedDocBack, label: fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath)?.isVault ? 'Vault File' : fileBrowser.activeFile ? 'File' : undefined, backLabel } : null}
+                    imageBaseDir={imageBaseDir}
+                    codePathBaseDir={activeDocBaseDir}
+                    copyLabel={annotateSource === 'message' ? 'Copy message' : annotateSource === 'file' || annotateSource === 'folder' ? 'Copy file' : undefined}
+                    archiveInfo={archive.currentInfo}
+                    sourceInfo={sourceInfo}
+                    onToggleCheckbox={checkbox.toggle}
+                    checkboxOverrides={checkbox.overrides}
+                    actionsLabelMode={actionsLabelMode}
+                    onAskAI={canUseAI ? handleAskAI : undefined}
+                  />
+                )}
               </div>
             </div>
           </OverlayScrollArea>
 
           {/* Resize Handle */}
-          {isPanelOpen && wideModeType === null && <ResizeHandle {...panelResize.handleProps} className="hidden md:block" side="right" />}
+          {isPanelOpen && wideModeType === null && !goalSetupMode && (rightSidebarTab === 'annotations' || canUseAI) && <ResizeHandle {...panelResize.handleProps} className="hidden md:block" side="right" />}
 
           {/* Annotation Panel */}
           <AnnotationPanel
-            isOpen={isPanelOpen && wideModeType === null}
+            isOpen={isPanelOpen && rightSidebarTab === 'annotations' && wideModeType === null && !goalSetupMode}
             blocks={blocks}
             annotations={allAnnotations}
             selectedId={selectedAnnotationId ?? selectedCodeAnnotationId}
@@ -2012,10 +2292,54 @@ const App: React.FC = () => {
             onQuickCopy={async () => {
               await navigator.clipboard.writeText(wrapFeedbackForAgent(annotationsOutput));
             }}
-            onShare={canShareCurrentSession && shareUrl ? () => { setIsPanelOpen(false); setInitialExportTab('share'); setShowExport(true); } : undefined}
+            onShare={canShareCurrentSession && (shareUrl || shortShareUrl) ? () => { setIsPanelOpen(false); setInitialExportTab('share'); setShowExport(true); } : undefined}
             otherFileAnnotations={otherFileAnnotations}
             onOtherFileAnnotationsClick={handleFlashAnnotatedFiles}
           />
+          {isPanelOpen && rightSidebarTab === 'ai' && wideModeType === null && !goalSetupMode && canUseAI && (
+            <aside
+              data-annotation-panel="true"
+              className={`border-l border-border/50 bg-card/30 backdrop-blur-sm flex flex-col flex-shrink-0 ${
+                isMobile ? 'fixed top-12 bottom-0 right-0 z-[60] w-full max-w-sm shadow-2xl bg-card' : ''
+              }`}
+              style={isMobile ? undefined : { width: panelResize.width ?? 288 }}
+            >
+              <div className="px-3 flex items-center border-b border-border/50" style={{ height: 'var(--panel-header-h)' }}>
+                <div className="flex items-center gap-2 w-full min-w-0">
+                  <button
+                    onClick={() => setIsPanelOpen(false)}
+                    className="flex items-center justify-center w-5 h-5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
+                    title="Close sidebar"
+                    aria-label="Close AI sidebar"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                  <SparklesIcon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                  <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground truncate">
+                    AI
+                  </h2>
+                  {aiMessages.length > 0 && (
+                    <span className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
+                      {aiMessages.length}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <DocumentAIChatPanel
+                messages={aiMessages}
+                isCreatingSession={aiIsCreatingSession}
+                isStreaming={aiIsStreaming}
+                onAskGeneral={handleAskGeneralAI}
+                permissionRequests={aiPermissionRequests}
+                onRespondToPermission={respondToAIPermission}
+                aiProviders={aiProviders}
+                aiConfig={aiConfig}
+                onAIConfigChange={handleAIConfigChange}
+              />
+            </aside>
+          )}
         </div>
         </ScrollViewportContext.Provider>
 
@@ -2147,16 +2471,23 @@ const App: React.FC = () => {
           variant="warning"
         />
 
-        {/* Save-to-notes toast */}
-        {noteSaveToast && (
-          <div className={`fixed top-16 right-4 z-50 px-3 py-2 rounded-lg text-xs font-medium shadow-lg transition-opacity ${
-            noteSaveToast.type === 'success'
-              ? 'bg-success/15 text-success border border-success/30'
-              : 'bg-destructive/15 text-destructive border border-destructive/30'
-          }`}>
-            {noteSaveToast.message}
-          </div>
-        )}
+        <Toaster
+          position="top-right"
+          offset={64}
+          toastOptions={{
+            style: {
+              '--normal-bg': 'var(--card)',
+              '--normal-border': 'var(--border)',
+              '--normal-text': 'var(--foreground)',
+              '--success-bg': 'oklch(from var(--success) l c h / 0.15)',
+              '--success-border': 'oklch(from var(--success) l c h / 0.3)',
+              '--success-text': 'var(--success)',
+              '--error-bg': 'oklch(from var(--destructive) l c h / 0.15)',
+              '--error-border': 'oklch(from var(--destructive) l c h / 0.3)',
+              '--error-text': 'var(--destructive)',
+            } as React.CSSProperties,
+          }}
+        />
 
         {/* Completion overlay - shown after approve/deny */}
         <CompletionOverlay
@@ -2164,6 +2495,7 @@ const App: React.FC = () => {
           title={
             archive.archiveMode ? 'Archive Closed'
             : submitted === 'exited' ? 'Session Closed'
+            : goalSetupMode ? 'Answers Submitted'
             : submitted === 'approved'
               ? (annotateMode ? 'Approved' : 'Plan Approved')
               : annotateMode ? 'Annotations Sent'
@@ -2174,6 +2506,8 @@ const App: React.FC = () => {
               ? 'Annotation session closed without feedback.'
               : archive.archiveMode
                 ? 'You can reopen with plannotator archive.'
+                : goalSetupMode
+                  ? `${agentName} will use your answers to continue.`
                 : submitted === 'approved'
                   ? (annotateMode
                       ? `${agentName} will proceed.`
@@ -2187,6 +2521,14 @@ const App: React.FC = () => {
 
         {/* Update notification */}
         <UpdateBanner origin={origin} isWSL={isWSL} />
+
+        <PlanAIAnnouncementDialog
+          isOpen={shouldShowPlanAIAnnouncement}
+          origin={origin}
+          providerName={selectedAIProvider?.name ?? null}
+          onOpenAI={handleOpenAIAnnouncement}
+          onDismiss={dismissPlanAIAnnouncement}
+        />
 
         {/* Image Annotator for pasted images */}
         <ImageAnnotator

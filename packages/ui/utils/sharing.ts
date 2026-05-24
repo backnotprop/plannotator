@@ -27,6 +27,8 @@ export interface SharePayload {
   g?: ShareableImage[];  // global attachments (path strings or [path, name] tuples)
   d?: (string | null)[];  // diffContext per annotation, parallel to `a`
   s?: (string | undefined)[];  // source per annotation (external tool identifier), parallel to `a`
+  h?: string;  // raw HTML content (render-html mode)
+  r?: 'html';  // render mode flag (omitted = markdown)
 }
 
 /**
@@ -161,8 +163,11 @@ export async function generateShareUrl(
   markdown: string,
   annotations: Annotation[],
   globalAttachments?: ImageAttachment[],
-  baseUrl: string = DEFAULT_SHARE_BASE
-): Promise<string> {
+  baseUrl: string = DEFAULT_SHARE_BASE,
+  rawHtml?: string,
+): Promise<string | null> {
+  // HTML content is too large for URL hashes — force paste service path
+  if (rawHtml) return null;
   const diffContexts = buildDiffContextArray(annotations);
   const sources = buildSourceArray(annotations);
   const payload: SharePayload = {
@@ -233,7 +238,8 @@ export async function createShortShareUrl(
     pasteApiUrl?: string;
     /** Override the share site base URL used in the returned short link */
     shareBaseUrl?: string;
-  }
+  },
+  rawHtml?: string,
 ): Promise<{ shortUrl: string; id: string } | null> {
   const pasteApi = options?.pasteApiUrl ?? DEFAULT_PASTE_API;
   const shareBase = options?.shareBaseUrl ?? DEFAULT_SHARE_BASE;
@@ -247,6 +253,7 @@ export async function createShortShareUrl(
       g: globalAttachments?.length ? toShareableImages(globalAttachments) : undefined,
       ...(diffContexts ? { d: diffContexts } : {}),
       ...(sources ? { s: sources } : {}),
+      ...(rawHtml ? { h: rawHtml, r: 'html' as const } : {}),
     };
 
     const compressed = await compress(payload);

@@ -8,7 +8,7 @@
  * - Tracking whether current session is from a shared link
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Annotation, type ImageAttachment } from '../types';
 import {
   type SharePayload,
@@ -98,7 +98,10 @@ export function useSharing(
   setGlobalAttachments: React.Dispatch<React.SetStateAction<ImageAttachment[]>>,
   onSharedLoad?: () => void,
   shareBaseUrl?: string,
-  pasteApiUrl?: string
+  pasteApiUrl?: string,
+  rawHtml?: string,
+  setRawHtml?: (h: string) => void,
+  setRenderAs?: (m: 'markdown' | 'html') => void,
 ): UseSharingResult {
   const [isSharedSession, setIsSharedSession] = useState(false);
   const [isLoadingShared, setIsLoadingShared] = useState(true);
@@ -136,7 +139,15 @@ export function useSharing(
 
         const payload = await loadFromPasteId(pasteId, pasteFromFragment ?? pasteApiUrl, encryptionKey);
         if (payload) {
-          setMarkdown(payload.p);
+          if (payload.h && payload.r === 'html') {
+            setRawHtml?.(payload.h);
+            setRenderAs?.('html');
+            setMarkdown('');
+          } else {
+            setMarkdown(payload.p);
+            setRenderAs?.('markdown');
+            setRawHtml?.('');
+          }
 
           const restoredAnnotations = fromShareable(payload.a, payload.d, payload.s);
           setAnnotations(restoredAnnotations);
@@ -149,6 +160,7 @@ export function useSharing(
 
           setPendingSharedAnnotations(restoredAnnotations);
           setIsSharedSession(true);
+          setShortShareUrl(window.location.href);
           onSharedLoad?.();
 
           // Remove the /p/<id> path from browser history so a refresh doesn't
@@ -174,8 +186,15 @@ export function useSharing(
       const payload = await parseShareHash();
 
       if (payload) {
-        // Set plan content
-        setMarkdown(payload.p);
+        if (payload.h && payload.r === 'html') {
+          setRawHtml?.(payload.h);
+          setRenderAs?.('html');
+          setMarkdown('');
+        } else {
+          setMarkdown(payload.p);
+          setRenderAs?.('markdown');
+          setRawHtml?.('');
+        }
 
         // Convert shareable annotations to full annotations
         const restoredAnnotations = fromShareable(payload.a, payload.d, payload.s);
@@ -217,7 +236,7 @@ export function useSharing(
       setShareLoadError('Failed to load shared plan — an unexpected error occurred.');
       return false;
     }
-  }, [setMarkdown, setAnnotations, setGlobalAttachments, onSharedLoad, pasteApiUrl]);
+  }, [setMarkdown, setAnnotations, setGlobalAttachments, onSharedLoad, pasteApiUrl, setRawHtml, setRenderAs]);
 
   // Load from hash on mount
   useEffect(() => {
@@ -238,15 +257,15 @@ export function useSharing(
   // Generate share URL when markdown or annotations change
   const refreshShareUrl = useCallback(async () => {
     try {
-      const url = await generateShareUrl(markdown, annotations, globalAttachments, shareBaseUrl);
-      setShareUrl(url);
-      setShareUrlSize(formatUrlSize(url));
+      const url = await generateShareUrl(markdown, annotations, globalAttachments, shareBaseUrl, rawHtml);
+      setShareUrl(url ?? '');
+      setShareUrlSize(url ? formatUrlSize(url) : '');
     } catch (e) {
       console.error('Failed to generate share URL:', e);
       setShareUrl('');
       setShareUrlSize('');
     }
-  }, [markdown, annotations, globalAttachments, shareBaseUrl]);
+  }, [markdown, annotations, globalAttachments, shareBaseUrl, rawHtml]);
 
   // Auto-refresh share URL when dependencies change
   useEffect(() => {
@@ -254,11 +273,15 @@ export function useSharing(
   }, [refreshShareUrl]);
 
   // Clear stale short URL when content changes (does NOT auto-regenerate —
-  // the user must explicitly click "Create short link" again)
+  // the user must explicitly click "Create short link" again).
+  // Skip on shared session load — the incoming short URL must survive.
+  const isSharedRef = useRef(false);
   useEffect(() => {
+    if (isSharedSession) { isSharedRef.current = true; return; }
+    if (isSharedRef.current) { isSharedRef.current = false; return; }
     setShortShareUrl('');
     setShortUrlError('');
-  }, [markdown, annotations]);
+  }, [markdown, annotations, rawHtml, isSharedSession]);
 
   /**
    * Generate a short URL via the paste service.
@@ -267,7 +290,7 @@ export function useSharing(
    * hash-based URL remains usable as a fallback.
    */
   const generateShortUrl = useCallback(async () => {
-    if (!markdown) return;
+    if (!markdown && !rawHtml) return;
 
     setIsGeneratingShortUrl(true);
     setShortUrlError('');
@@ -277,7 +300,8 @@ export function useSharing(
         markdown,
         annotations,
         globalAttachments,
-        { pasteApiUrl, shareBaseUrl }
+        { pasteApiUrl, shareBaseUrl },
+        rawHtml,
       );
 
       if (result) {
@@ -292,7 +316,7 @@ export function useSharing(
     } finally {
       setIsGeneratingShortUrl(false);
     }
-  }, [markdown, annotations, globalAttachments, shareBaseUrl, pasteApiUrl]);
+  }, [markdown, annotations, globalAttachments, shareBaseUrl, pasteApiUrl, rawHtml]);
 
   // Import annotations from a teammate's share URL (supports both hash-based and short /p/<id> URLs)
   const importFromShareUrl = useCallback(async (url: string): Promise<ImportResult> => {
@@ -327,10 +351,15 @@ export function useSharing(
         payload = (await decompress(hash)) as SharePayload;
       }
 
-      // Extract plan title from embedded plan text
-      const lines = (payload.p || '').trim().split('\n');
-      const titleLine = lines.find(l => l.startsWith('#'));
-      const planTitle = titleLine ? titleLine.replace(/^#+\s*/, '').trim() : 'Unknown Plan';
+      // Extract plan title from embedded plan text (or HTML <title>)
+      let planTitle = 'Unknown Plan';
+      if (payload.p) {
+        const titleLine = payload.p.trim().split('\n').find(l => l.startsWith('#'));
+        if (titleLine) planTitle = titleLine.replace(/^#+\s*/, '').trim();
+      } else if (payload.h) {
+        const titleMatch = payload.h.match(/<title[^>]*>([^<]+)<\/title>/i);
+        if (titleMatch) planTitle = titleMatch[1].trim();
+      }
 
       // Convert to full annotations
       const importedAnnotations = fromShareable(payload.a, payload.d, payload.s);

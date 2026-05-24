@@ -16,6 +16,7 @@ All Plannotator environment variables and their defaults.
 | `PLANNOTATOR_PORT` | random (local) / `19432` (remote) | Fixed server port. When not set, local sessions use a random port; remote sessions default to `19432`. |
 | `PLANNOTATOR_BROWSER` | system default | Custom browser to open the UI in. macOS: app name or path. Linux/Windows: executable path. Can also be a script. Takes priority over `BROWSER`. Also settable per-invocation with `--browser`. |
 | `BROWSER` | (none) | Standard env var for specifying a browser. VS Code sets this automatically in devcontainers. Used as fallback when `PLANNOTATOR_BROWSER` is not set. |
+| `PLANNOTATOR_ORIGIN` | auto-detect | Explicit agent-origin override. Valid values: `claude-code`, `opencode`, `codex`, `copilot-cli`, `gemini-cli`. Invalid values silently fall through to env-based detection. |
 | `PLANNOTATOR_SHARE` | enabled | Set to `disabled` to turn off sharing. Hides share UI and import options. |
 | `PLANNOTATOR_SHARE_URL` | `https://share.plannotator.ai` | Base URL for share links. Set this when self-hosting the share portal. |
 | `PLANNOTATOR_PLAN_TIMEOUT_SECONDS` | `345600` | OpenCode only. `submit_plan` wait timeout in seconds. Set `0` to disable timeout. |
@@ -49,6 +50,7 @@ When running your own paste service binary, these variables configure it:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `PLANNOTATOR_VERIFY_ATTESTATION` | off | Set to `1` or `true` to have the install script run `gh attestation verify` on the downloaded binary. Requires `gh` CLI installed and authenticated. Can also be set via `~/.plannotator/config.json` (`{ "verifyAttestation": true }`) or per-invocation via `--verify-attestation`. |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | Custom Claude Code config directory. The install script places hooks here instead of the default location. |
 
 ## Remote mode behavior
@@ -72,7 +74,7 @@ If either is present, Plannotator enables remote mode automatically when `PLANNO
 
 ## Port resolution order
 
-1. `PLANNOTATOR_PORT` environment variable (if valid integer 1-65535)
+1. `PLANNOTATOR_PORT` environment variable (if valid integer 0-65535; `0` means random)
 2. `19432` if in remote mode
 3. `0` (random) if in local mode
 

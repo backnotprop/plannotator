@@ -250,8 +250,63 @@ describe("parseMarkdownToBlocks — list continuation lines", () => {
     expect(blocks[1].content).toBe("Not indented");
   });
 
-  test("blank line between list item and indented text prevents merging", () => {
+  test("blank line between list item and indented text merges as loose continuation", () => {
     const md = "- Item\n\n  Indented paragraph";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("list-item");
+    expect(blocks[0].content).toBe("Item\n\nIndented paragraph");
+  });
+
+  test("loose continuation with multiple paragraphs", () => {
+    const md = "- Item\n\n  Para one\n\n  Para two";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("list-item");
+    expect(blocks[0].content).toBe("Item\n\nPara one\n\nPara two");
+  });
+
+  test("loose continuation stops at non-indented line", () => {
+    const md = "- Item\n\n  Indented\n\nNot indented";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("list-item");
+    expect(blocks[0].content).toBe("Item\n\nIndented");
+    expect(blocks[1].type).toBe("paragraph");
+    expect(blocks[1].content).toBe("Not indented");
+  });
+
+  test("loose continuation stops at next list item", () => {
+    const md = "- First\n\n  Body of first\n\n- Second";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("list-item");
+    expect(blocks[0].content).toBe("First\n\nBody of first");
+    expect(blocks[1].type).toBe("list-item");
+    expect(blocks[1].content).toBe("Second");
+  });
+
+  test("loose continuation works with ordered lists", () => {
+    const md = "1. First\n\n   Body of first\n\n2. Second";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("list-item");
+    expect(blocks[0].ordered).toBe(true);
+    expect(blocks[0].content).toBe("First\n\nBody of first");
+    expect(blocks[1].type).toBe("list-item");
+    expect(blocks[1].content).toBe("Second");
+  });
+
+  test("loose continuation with mixed tight and loose lines", () => {
+    const md = "- Item\n\n  Para one\n  still para one\n\n  Para two";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("list-item");
+    expect(blocks[0].content).toBe("Item\n\nPara one\nstill para one\n\nPara two");
+  });
+
+  test("single-space indent after blank line does not merge (insufficient indentation)", () => {
+    const md = "- Item\n\n Barely indented";
     const blocks = parseMarkdownToBlocks(md);
     expect(blocks).toHaveLength(2);
     expect(blocks[0].type).toBe("list-item");

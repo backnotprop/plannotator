@@ -7,6 +7,10 @@ description: Open Plannotator on the latest rendered assistant message and use t
 
 Use this skill when the user wants to annotate the latest assistant response in Plannotator.
 
+Do not send a commentary/status message before running the command. The command
+targets the latest rendered assistant response, so a preamble can mistakenly become the
+thing being annotated.
+
 Run:
 
 ```bash

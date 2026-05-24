@@ -1,12 +1,14 @@
 ---
 title: AI Features
-description: "How to use Plannotator's inline AI chat during code review — provider setup, model selection, and how it works."
+description: "How to use Plannotator's AI chat during plan review, annotate, and code review — provider setup, model selection, and how it works."
 sidebar:
   order: 25
 section: "Guides"
 ---
 
-Plannotator embeds an AI chat sidebar directly in the code review UI. You can select lines in a diff, ask questions, and get streaming responses. The AI sees the full diff context automatically, so you can ask things like "explain this change" or "is this safe?" without copy-pasting code.
+Plannotator embeds an AI chat sidebar directly in live review sessions. In plan review and annotate, you can ask a general question about the current plan or document, or select text, open the comment popover, and choose **Ask AI**. In code review, you can select lines in a diff and ask questions about the code.
+
+The AI sees the relevant review context automatically: the current plan and previous plan version for plan review, the active document and source metadata for annotate, or the full diff for code review. AI chat history stays separate from approve, deny, and send-annotations output unless you manually copy text into normal feedback.
 
 ## Supported providers
 
@@ -49,6 +51,8 @@ OpenCode supports session forking, resuming, and runtime permission approvals �
 
 Provider and model selection is available in **Settings > AI**. These persist via cookies across sessions.
 
+By default, Plannotator prefers the provider that matches the detected agent origin: Claude Code uses Claude, Codex uses Codex, OpenCode uses OpenCode, and Pi uses Pi when those providers are available. GitHub Copilot CLI and Gemini CLI do not have dedicated Ask AI providers yet, so they fall back to your saved provider or the server default.
+
 You can also override the provider and model per-session using the config bar at the bottom of the AI sidebar. Changing the provider or model starts a new session — old messages stay visible but the conversation resets.
 
 ## How it works
@@ -63,7 +67,7 @@ A session is created lazily on your first question. Until then, no resources are
 
 **OpenCode sessions** pass the review context via the `system` field on the prompt API. OpenCode supports forking from a parent session and resuming previous sessions. Permission requests work the same as Claude — approval cards appear inline.
 
-**Diff context handling:** Large diffs are truncated at roughly 40k characters to stay within context limits. However, when you select specific lines and ask a question, the selected code is always sent alongside the question regardless of truncation.
+**Context handling:** Large plans, documents, and diffs are truncated to stay within context limits. When you ask from a selection, the selected text or selected code is always sent alongside the question regardless of truncation. In folder annotation mode, Ask AI is scoped to the currently opened document only.
 
 ## Permission requests
 

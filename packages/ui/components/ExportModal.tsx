@@ -105,6 +105,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
   // Whether the hash URL is large enough to warrant a short URL option
   const urlIsLarge = shareUrl.length > 2048;
+  // Hash-based sharing unavailable (e.g. HTML render mode) — show only short link
+  const hashUnavailable = !shareUrl && !!onGenerateShortUrl;
 
   const handleDownloadAnnotations = () => {
     const blob = new Blob([annotationsOutput], { type: 'text/plain' });
@@ -297,11 +299,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   </svg>
                   Generating short link...
                 </div>
-              ) : urlIsLarge && onGenerateShortUrl ? (
+              ) : (urlIsLarge || hashUnavailable) && onGenerateShortUrl ? (
                 <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
-                  <p className="text-xs text-amber-600 dark:text-amber-400 mb-2">
-                    This URL may be too long for some messaging apps.
-                  </p>
+                  {!hashUnavailable && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400 mb-2">
+                      This URL may be too long for some messaging apps.
+                    </p>
+                  )}
                   <button
                     onClick={onGenerateShortUrl}
                     className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
@@ -314,8 +318,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 </div>
               ) : null}
 
-              {/* Full hash URL — always available */}
-              <div>
+              {/* Full hash URL — hidden when hash-based sharing is unavailable (HTML mode) */}
+              {!hashUnavailable && <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-2">
                   {shortShareUrl ? 'Full URL (backup)' : 'Shareable URL'}
                 </label>
@@ -355,7 +359,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                     Your plan is encoded entirely in the URL — it never touches a server.
                   </p>
                 )}
-              </div>
+              </div>}
 
               <p className="text-xs text-muted-foreground">
                 Only someone with this exact link can view your plan. Short links are end-to-end encrypted — the decryption key is in the URL and never sent to the server.

@@ -40,6 +40,23 @@ function resolveThemeClasses(themeId: string, effectiveMode: 'dark' | 'light'): 
   return `theme-${themeId}${applyLight ? ' light' : ''}`;
 }
 
+/** Sync theme classes on <html> without stripping non-theme classes (e.g. transitions-ready). */
+function applyThemeClasses(themeId: string, effectiveMode: 'dark' | 'light'): void {
+  const el = document.documentElement;
+  const themeClass = `theme-${themeId}`;
+  const wantLight = resolveThemeClasses(themeId, effectiveMode).includes(' light');
+
+  if (el.classList.contains(themeClass) && el.classList.contains('light') === wantLight) return;
+
+  for (const cls of Array.from(el.classList)) {
+    if (cls.startsWith('theme-')) el.classList.remove(cls);
+  }
+  el.classList.remove('light');
+
+  el.classList.add(themeClass);
+  if (wantLight) el.classList.add('light');
+}
+
 /** Read system preference synchronously */
 function getSystemIsLight(): boolean {
   return typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: light)').matches;
@@ -77,16 +94,21 @@ export function ThemeProvider({
   // flash of unstyled content. CSS tokens live under .theme-* selectors, so
   // without this the first frame has no valid --background/--foreground.
   if (typeof window !== 'undefined') {
-    const targetClass = resolveThemeClasses(colorTheme, resolvedMode);
-    if (window.document.documentElement.className !== targetClass) {
-      window.document.documentElement.className = targetClass;
-    }
+    applyThemeClasses(colorTheme, resolvedMode);
   }
 
   // Keep class in sync after state changes
   useEffect(() => {
-    window.document.documentElement.className = resolveThemeClasses(colorTheme, resolvedMode);
+    applyThemeClasses(colorTheme, resolvedMode);
   }, [resolvedMode, colorTheme]);
+
+  // Enable color transitions after mount settles — prevents the global *
+  // transition rule from firing during initial load.
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      document.documentElement.classList.add('transitions-ready');
+    });
+  }, []);
 
   // [P2 fix] Listen for system theme changes AND re-read current value when
   // entering system mode (OS may have changed while pinned to explicit mode)
