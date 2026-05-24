@@ -62,6 +62,8 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   const quickLabels = useMemo(() => getQuickLabels(), []);
   const isTouchDevice = useMemo(() => window.matchMedia('(pointer: coarse)').matches, []);
 
+  useEffect(() => { setCopied(false); }, [element]);
+
   const handleCopy = async () => {
     let textToCopy = copyText;
     if (!textToCopy) {
