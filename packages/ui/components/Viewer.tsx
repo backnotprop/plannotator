@@ -192,6 +192,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // anchor ids stay stable across re-renders and duplicate heading texts get
   // `-1`/`-2`/... suffixes rather than colliding on the same id.
   const headingSlugMap = useMemo(() => buildHeadingSlugMap(blocks), [blocks]);
+  const isTouchDevice = useMemo(() => window.matchMedia('(pointer: coarse)').matches, []);
   const [hoveredCodeBlock, setHoveredCodeBlock] = useState<{ block: Block; element: HTMLElement } | null>(null);
   const [isCodeBlockToolbarExiting, setIsCodeBlockToolbarExiting] = useState(false);
   const [hoveredTable, setHoveredTable] = useState<{ block: Block; element: HTMLElement } | null>(null);
@@ -284,9 +285,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // Suppress native context menu on touch devices (prevents cut/copy/paste overlay on mobile)
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
-    const isTouchPrimary = window.matchMedia('(pointer: coarse)').matches;
-    if (!isTouchPrimary) return;
+    if (!container || !isTouchDevice) return;
 
     const handleContextMenu = (e: Event) => {
       e.preventDefault();
@@ -712,7 +711,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               onRequestComment={handleRequestComment}
               onQuickLabel={handleQuickLabel}
               copyText={toolbarState.selectionText}
-              hideCopyButton={!window.matchMedia('(pointer: coarse)').matches}
+              hideCopyButton={!isTouchDevice}
               closeOnScrollOut
             />
           </ToolbarErrorBoundary>
