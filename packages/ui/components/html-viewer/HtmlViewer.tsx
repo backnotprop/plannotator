@@ -255,6 +255,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             <AnnotationToolbar
               positionMode="center-above"
               element={hook.toolbarState.element}
+              copyText={hook.toolbarState.selectionText}
               onAnnotate={hook.handleAnnotate}
               onRequestComment={hook.handleRequestComment}
               onQuickLabel={hook.handleQuickLabel}
