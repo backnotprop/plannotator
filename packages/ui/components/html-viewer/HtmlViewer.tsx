@@ -146,21 +146,6 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     }, []);
 
     useEffect(() => {
-      const handleCopy = (e: ClipboardEvent) => {
-        const tag = (e.target as HTMLElement)?.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-
-        if (hook.toolbarState?.selectionText) {
-          e.preventDefault();
-          e.clipboardData?.setData('text/plain', hook.toolbarState.selectionText);
-        }
-      };
-
-      document.addEventListener('copy', handleCopy);
-      return () => document.removeEventListener('copy', handleCopy);
-    }, [hook.toolbarState]);
-
-    useEffect(() => {
       if (!iframeReady) return;
       if (annotations.length > 0) {
         hook.applyAnnotations(annotations);
@@ -270,7 +255,6 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             <AnnotationToolbar
               positionMode="center-above"
               element={hook.toolbarState.element}
-              copyText={hook.toolbarState.selectionText}
               onAnnotate={hook.handleAnnotate}
               onRequestComment={hook.handleRequestComment}
               onQuickLabel={hook.handleQuickLabel}
