@@ -367,7 +367,6 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     const handleCopy = (e: ClipboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      if (!containerRef.current?.contains(e.target as Node)) return;
 
       if (toolbarState?.selectionText) {
         e.preventDefault();
