@@ -359,30 +359,23 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     return () => window.clearTimeout(timer);
   }, [blocks, locationHash, scrollToAnchor, stickyScrollViewport]);
 
-  // Cmd+C / Ctrl+C keyboard shortcut for copying selected text
+  // Use the native copy event so clipboard writes are synchronous (Safari
+  // rejects the async navigator.clipboard API outside the user-gesture window).
+  // web-highlighter clears the DOM selection on mouseup, so the browser has
+  // nothing to copy by the time Cmd+C fires — we inject the captured text here.
   useEffect(() => {
-    const handleKeyDown = async (e: KeyboardEvent) => {
-      // Check for Cmd+C (Mac) or Ctrl+C (Windows/Linux)
-      if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
-        // Don't intercept if typing in an input/textarea
-        const tag = (e.target as HTMLElement)?.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    const handleCopy = (e: ClipboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
-        // If we have an active selection with captured text, use that
-        if (toolbarState?.selectionText) {
-          e.preventDefault();
-          try {
-            await navigator.clipboard.writeText(toolbarState.selectionText);
-          } catch (err) {
-            console.error('Failed to copy:', err);
-          }
-        }
-        // Otherwise let the browser handle default copy behavior
+      if (toolbarState?.selectionText) {
+        e.preventDefault();
+        e.clipboardData?.setData('text/plain', toolbarState.selectionText);
       }
     };
 
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    document.addEventListener('copy', handleCopy);
+    return () => document.removeEventListener('copy', handleCopy);
   }, [toolbarState]);
 
   // Imperative handle — delegates to hook, extends removeHighlight for code blocks

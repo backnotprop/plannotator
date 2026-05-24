@@ -67,7 +67,17 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       const codeEl = element.querySelector('code');
       textToCopy = codeEl?.textContent || element.textContent || '';
     }
-    await navigator.clipboard.writeText(textToCopy);
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+    } catch {
+      const textarea = document.createElement('textarea');
+      textarea.value = textToCopy;
+      textarea.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      textarea.remove();
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
