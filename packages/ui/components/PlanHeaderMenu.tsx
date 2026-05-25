@@ -3,6 +3,7 @@ import {
   ActionMenu,
   ActionMenuDivider,
   ActionMenuItem,
+  ActionMenuSectionLabel,
 } from './ActionMenu';
 import { useTheme } from './ThemeProvider';
 import { SunIcon, MoonIcon, SystemIcon } from './icons/themeIcons';

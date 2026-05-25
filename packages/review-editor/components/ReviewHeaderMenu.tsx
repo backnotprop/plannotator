@@ -3,6 +3,7 @@ import {
   ActionMenu,
   ActionMenuDivider,
   ActionMenuItem,
+  ActionMenuSectionLabel,
 } from '@plannotator/ui/components/ActionMenu';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { MenuVersionSection } from '@plannotator/ui/components/MenuVersionSection';
