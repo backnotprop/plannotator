@@ -1040,7 +1040,7 @@ export async function createReviewSession(
           // API: Exit review session without feedback
           if (url.pathname === "/api/exit" && req.method === "POST") {
             deleteDraft(draftKey);
-            decisionCycle.resolve({ approved: false, feedback: "", annotations: [], exit: true });
+            resolveAndCycle(decisionCycle, { approved: false, feedback: "", annotations: [], exit: true }, origin);
             return Response.json({ ok: true });
           }
 
@@ -1057,11 +1057,9 @@ export async function createReviewSession(
               deleteDraft(draftKey);
               const isApproved = body.approved ?? false;
               const result = { approved: isApproved, feedback: body.feedback || "", annotations: body.annotations || [], agentSwitch: body.agentSwitch };
-              const resubmit = isApproved
-                ? (decisionCycle.resolve(result), {})
-                : resolveAndCycle(decisionCycle, result, origin);
+              resolveAndCycle(decisionCycle, result, origin);
 
-              return Response.json({ ok: true, ...resubmit });
+              return Response.json({ ok: true, feedbackDelivered: !isApproved || undefined });
             } catch (err) {
               const message =
                 err instanceof Error ? err.message : "Failed to process feedback";

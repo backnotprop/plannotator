@@ -1,5 +1,5 @@
 interface CompletionBannerProps {
-  submitted: 'approved' | 'denied' | 'feedback' | 'exited' | 'awaiting' | null | false;
+  submitted: 'approved' | 'denied' | 'feedback' | 'exited' | 'awaiting' | 'feedback-sent' | null | false;
   title: string;
   subtitle: string;
   onCancel?: () => void;
@@ -10,13 +10,14 @@ export function CompletionBanner({ submitted, title, subtitle, onCancel }: Compl
 
   const isApproved = submitted === 'approved';
   const isAwaiting = submitted === 'awaiting';
+  const isFeedbackSent = submitted === 'feedback-sent';
 
   return (
     <div
       className={`flex items-center gap-3 px-4 py-2.5 border-b flex-shrink-0 ${
         isAwaiting
           ? 'bg-warning/10 border-warning/20 text-warning'
-          : isApproved
+          : isApproved || isFeedbackSent
             ? 'bg-success/10 border-success/20 text-success'
             : 'bg-accent/10 border-accent/20 text-accent'
       }`}
@@ -27,7 +28,7 @@ export function CompletionBanner({ submitted, title, subtitle, onCancel }: Compl
         </svg>
       ) : (
         <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-          {isApproved ? (
+          {isApproved || isFeedbackSent ? (
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
           ) : (
             <path

@@ -272,9 +272,22 @@ export class DaemonSessionStore {
     return record;
   }
 
+  idle<TResult = unknown>(id: string, result?: TResult): DaemonSessionRecord<TResult> | undefined {
+    const record = this.sessions.get(id) as DaemonSessionRecord<TResult> | undefined;
+    if (!record || TERMINAL_STATUSES.has(record.status) || record.status === "idle") return undefined;
+    record.status = "idle";
+    if (result !== undefined) record.result = result as TResult;
+    const now = this.now();
+    record.updatedAt = iso(now);
+    record.expiresAt = record.ttlMs !== undefined ? iso(now + record.ttlMs) : undefined;
+    this.resolveWaiters(record);
+    this.emit("session-updated", record);
+    return record;
+  }
+
   reactivate(id: string): DaemonSessionRecord | undefined {
     const record = this.sessions.get(id);
-    if (!record || record.status !== "awaiting-resubmission") return record;
+    if (!record || (record.status !== "awaiting-resubmission" && record.status !== "idle")) return record;
     record.status = "active";
     record.result = undefined;
     const now = this.now();

@@ -41,6 +41,7 @@ export type DaemonSessionMode = PluginSessionMode;
 export type DaemonSessionView = (typeof PLANNOTATOR_DAEMON_SESSION_VIEWS)[number];
 export type DaemonSessionStatus =
   | "active"
+  | "idle"
   | "awaiting-resubmission"
   | "completed"
   | "cancelled"

@@ -239,7 +239,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
   const [isApproving, setIsApproving] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
   const [submitted, setSubmitted] = useState<'approved' | 'feedback' | 'exited' | false>(false);
-  const [awaitingResubmission, setAwaitingResubmission] = useState(false);
+  const [feedbackSent, setFeedbackSent] = useState(false);
   const [showApproveWarning, setShowApproveWarning] = useState(false);
   const [showExitWarning, setShowExitWarning] = useState(false);
   const [sharingEnabled, setSharingEnabled] = useState(true);
@@ -310,9 +310,9 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
   const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<CodeAnnotation>({ enabled: !!origin });
   const agentJobs = useAgentJobs({ enabled: !!origin });
 
-  // Listen for session-revision events (diff refresh after feedback)
+  // Listen for session-revision events (agent pushed a new diff)
   useEffect(() => {
-    if (!origin || !awaitingResubmission) return;
+    if (!origin) return;
     const unsubscribe = subscribeToDaemonSessionFamily("session-revision", (msg) => {
       if (msg.type !== "event" || !msg.payload) return;
       const revision = msg.payload as { rawPatch?: string; gitRef?: string };
@@ -324,13 +324,13 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
         storeApi.getState().setLocalAnnotations([]);
         storeApi.getState().selectAnnotation(null);
         storeApi.getState().setPendingSelection(null);
-        setAwaitingResubmission(false);
+        setFeedbackSent(false);
         setSubmitted(false);
         setIsSendingFeedback(false);
       }
     });
     return unsubscribe;
-  }, [origin, awaitingResubmission, storeApi]);
+  }, [origin, storeApi]);
 
   // Tour dialog state — opens as an overlay instead of a dock panel
   const [tourDialogJobId, setTourDialogJobId] = useState<string | null>(null);
@@ -1553,9 +1553,13 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
       });
       if (res.ok) {
         const data = await res.json().catch(() => ({}));
-        if (data.awaitingResubmission) {
-          setAwaitingResubmission(true);
+        if (data.feedbackDelivered) {
+          setFeedbackSent(true);
           setIsSendingFeedback(false);
+          storeApi.getState().setLocalAnnotations([]);
+          storeApi.getState().selectAnnotation(null);
+          storeApi.getState().setPendingSelection(null);
+          setTimeout(() => setFeedbackSent(false), 5000);
         } else {
           setSubmitted('feedback');
         }
@@ -1568,7 +1572,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
       setTimeout(() => setCopyFeedback(null), 2000);
       setIsSendingFeedback(false);
     }
-  }, [totalAnnotationCount, feedbackMarkdown, allAnnotations]);
+  }, [totalAnnotationCount, feedbackMarkdown, allAnnotations, storeApi]);
 
   // Exit review session without sending any feedback
   const handleExit = useCallback(async () => {
@@ -2185,9 +2189,9 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
         {/* Embedded completion banner — inline, non-blocking */}
         {__embedded && !legacyTabMode && (
           <CompletionBanner
-            submitted={awaitingResubmission ? 'awaiting' : submitted}
-            title={awaitingResubmission ? 'Feedback sent' : completionTitle}
-            subtitle={awaitingResubmission ? 'Waiting for agent to revise...' : completionSubtitle}
+            submitted={feedbackSent ? 'feedback-sent' : submitted}
+            title={feedbackSent ? 'Feedback sent' : completionTitle}
+            subtitle={feedbackSent ? 'Your annotations were delivered to the agent.' : completionSubtitle}
           />
         )}
 

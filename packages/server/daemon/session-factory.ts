@@ -165,6 +165,31 @@ function registerPersistentDecision(
   return cleanup;
 }
 
+function registerReviewDecision(
+  context: DaemonFetchContext,
+  id: string,
+  session: { waitForDecision: () => Promise<SessionDecisionResult>; dispose: () => void | Promise<void> },
+): () => void | Promise<void> {
+  const { disposed, cleanup } = createDecisionScope(session.dispose);
+
+  const decisionLoop = async () => {
+    while (true) {
+      const result = await Promise.race([session.waitForDecision(), disposed]);
+      const record = context.store.idle(id, result);
+      if (!record || record.status !== "idle") return;
+    }
+  };
+
+  void decisionLoop().catch((err) => {
+    const record = context.store.get(id);
+    if (record && (record.status === "active" || record.status === "idle")) {
+      context.store.fail(id, err instanceof Error ? err.message : String(err));
+    }
+  });
+
+  return cleanup;
+}
+
 function resolvePlanFilePath(planFilePath: string, cwd: string): string {
   const requestedPath = isAbsolute(planFilePath)
     ? planFilePath
@@ -532,16 +557,17 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
   }
   const sessionRefs = new Map<string, { matchKey: string; session: PersistableSession }>();
 
-  // Search for an awaiting-resubmission session with the given matchKey.
-  // Side effect: prunes terminal sessions from sessionRefs during the scan.
-  function findAwaitingSession(store: DaemonFetchContext["store"], matchKey: string) {
+  const RESUBMIT_STATUSES = new Set(["awaiting-resubmission"]);
+  const RESUBMIT_OR_IDLE_STATUSES = new Set(["awaiting-resubmission", "idle"]);
+
+  function findMatchingSession(store: DaemonFetchContext["store"], matchKey: string, matchStatuses = RESUBMIT_STATUSES) {
     for (const [sessionId, ref] of sessionRefs) {
       const record = store.get(sessionId);
       if (!record || record.status === "completed" || record.status === "expired" || record.status === "failed" || record.status === "cancelled") {
         sessionRefs.delete(sessionId);
         continue;
       }
-      if (record.status !== "awaiting-resubmission") continue;
+      if (!matchStatuses.has(record.status)) continue;
       if (record.matchKey !== matchKey) continue;
       return { record, session: ref.session };
     }
@@ -581,7 +607,7 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
       const plan = await readPlanRequest(request, cwd);
       const matchKey = `plan:${project}:${generateSlug(plan)}`;
 
-      const existing = findAwaitingSession(context.store, matchKey);
+      const existing = findMatchingSession(context.store, matchKey);
       if (existing && existing.session.updateContent) {
         existing.session.updateContent(plan);
         context.store.reactivate(existing.record.id);
@@ -663,7 +689,7 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
       const matchKey = isFileBased ? `annotate:${input.filePath}` : undefined;
 
       if (matchKey) {
-        const existing = findAwaitingSession(context.store, matchKey);
+        const existing = findMatchingSession(context.store, matchKey);
         if (existing && existing.session.updateContent) {
           (existing.session.updateContent as (m: string) => void)(input.markdown);
           context.store.reactivate(existing.record.id);
@@ -715,7 +741,7 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
         ? `review:${input.prMetadata.url}`
         : branch ? `review:${project}:${branch}` : `review:${project}`;
 
-      const existingReview = findAwaitingSession(context.store, reviewMatchKey);
+      const existingReview = findMatchingSession(context.store, reviewMatchKey, RESUBMIT_OR_IDLE_STATUSES);
       if (existingReview && existingReview.session.updateContent) {
         (existingReview.session.updateContent as (rawPatch: string, gitRef: string) => void)(input.rawPatch, input.gitRef);
         context.store.reactivate(existingReview.record.id);
@@ -767,7 +793,7 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
         matchKey: reviewMatchKey,
         ttlMs,
         handleRequest: session.handleRequest,
-        dispose: registerPersistentDecision(context, id, session),
+        dispose: registerReviewDecision(context, id, session),
         remoteShare,
         snapshot: session.getSnapshot ?? (() => ({
           rawPatch: input.rawPatch,
