@@ -20,6 +20,8 @@ import { warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash, deleteDraft } from "./draft";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { saveConfig, detectGitUser, getServerConfig } from "./config";
+import { generateSlug, saveToHistory, getPlanVersion, getVersionCount, listVersions } from "./storage";
+import { detectProjectName } from "./project";
 import { dirname, resolve as resolvePath } from "path";
 import { isWSL } from "./browser";
 import { createDecisionCycle, resolveAndCycle } from "./session-handler";
@@ -144,6 +146,25 @@ export async function createAnnotateSession(
   // Detect repo info (cached for this session)
   const repoInfo = await getRepoInfo(cwd);
 
+  // Version history (file-based modes only)
+  const isFileBased = mode === "annotate" || mode === "annotate-folder";
+  const project = isFileBased ? ((await detectProjectName(cwd)) ?? "_unknown") : "";
+  const slug = isFileBased ? generateSlug(markdown) : "";
+  let previousPlan: string | null = null;
+  let versionInfo: { version: number; totalVersions: number; project: string } | null = null;
+
+  if (isFileBased && markdown.trim()) {
+    const historyResult = saveToHistory(project, slug, markdown);
+    previousPlan = historyResult.version > 1
+      ? getPlanVersion(project, slug, historyResult.version - 1)
+      : null;
+    versionInfo = {
+      version: historyResult.version,
+      totalVersions: getVersionCount(project, slug),
+      project,
+    };
+  }
+
   type AnnotateDecisionResult = { feedback: string; annotations: unknown[]; exit?: boolean; approved?: boolean };
   const decisionCycle = createDecisionCycle<AnnotateDecisionResult>();
 
@@ -165,10 +186,28 @@ export async function createAnnotateSession(
               shareBaseUrl,
               pasteApiUrl,
               repoInfo,
+              previousPlan,
+              versionInfo,
               projectRoot: folderPath || cwd,
               isWSL: wslFlag,
               serverConfig: getServerConfig(gitUser),
             });
+          }
+
+          // API: Get a specific version from history
+          if (url.pathname === "/api/plan/version" && isFileBased) {
+            const vParam = url.searchParams.get("v");
+            if (!vParam) return new Response("Missing v parameter", { status: 400 });
+            const v = parseInt(vParam, 10);
+            if (isNaN(v) || v < 1) return new Response("Invalid version number", { status: 400 });
+            const content = getPlanVersion(project, slug, v);
+            if (content === null) return Response.json({ error: "Version not found" }, { status: 404 });
+            return Response.json({ plan: content, version: v });
+          }
+
+          // API: List all versions
+          if (url.pathname === "/api/plan/versions" && isFileBased) {
+            return Response.json({ project, slug, versions: listVersions(project, slug) });
           }
 
           // API: Update user config (write-back to ~/.plannotator/config.json)
@@ -294,13 +333,20 @@ export async function createAnnotateSession(
           });
   };
 
-  const isFileBased = mode === "annotate" || mode === "annotate-folder";
-
   function handleUpdateContent(newMarkdown: string) {
     markdown = newMarkdown;
+    const historyResult = saveToHistory(project, slug, newMarkdown);
+    previousPlan = historyResult.version > 1
+      ? getPlanVersion(project, slug, historyResult.version - 1)
+      : null;
+    versionInfo = {
+      version: historyResult.version,
+      totalVersions: getVersionCount(project, slug),
+      project,
+    };
     deleteDraft(draftKey);
     draftKey = contentHash(newMarkdown);
-    options.sessionEvents?.publishEvent("session-revision", { plan: newMarkdown });
+    options.sessionEvents?.publishEvent("session-revision", { plan: newMarkdown, previousPlan, versionInfo });
   }
 
   return {
