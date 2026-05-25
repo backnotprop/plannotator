@@ -6,7 +6,7 @@ import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
 import { Settings } from '@plannotator/ui/components/Settings';
 import { FeedbackButton, ApproveButton, ExitButton } from '@plannotator/ui/components/ToolbarButtons';
 import { AgentReviewActions } from './components/AgentReviewActions';
-import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
+import { useUpdateCheck } from '@plannotator/ui/hooks/useUpdateCheck';
 import { storage } from '@plannotator/ui/utils/storage';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { GitHubIcon } from '@plannotator/ui/components/GitHubIcon';
@@ -256,6 +256,7 @@ const ReviewApp: React.FC = () => {
   const mrNumberLabel = prMetadata ? getMRNumberLabel(prMetadata) : '';
   const displayRepo = prMetadata ? getDisplayRepo(prMetadata) : '';
   const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0';
+  const updateInfo = useUpdateCheck();
 
   const identity = useConfigValue('displayName');
 
@@ -2079,6 +2080,9 @@ const ReviewApp: React.FC = () => {
               isFileTreeOpen={isFileTreeOpen}
               isSidebarOpen={reviewSidebar.isOpen}
               appVersion={appVersion}
+              updateInfo={updateInfo}
+              origin={origin}
+              isWSL={isWSL}
             />
 
             <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
@@ -2466,9 +2470,6 @@ const ReviewApp: React.FC = () => {
           }
           agentLabel={getAgentName(origin)}
         />
-
-        {/* Update notification */}
-        <UpdateBanner origin={origin} isWSL={isWSL} />
 
         {/* GitHub general comment dialog */}
         <ReviewSubmissionDialog
