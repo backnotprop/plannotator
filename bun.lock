@@ -237,6 +237,7 @@
         "lucide-react": "^1.14.0",
         "marked": "^17.0.6",
         "mermaid": "^11.12.2",
+        "motion": "^12.38.0",
         "overlayscrollbars": "^2.11.0",
         "overlayscrollbars-react": "^0.5.6",
         "perfect-freehand": "^1.2.2",
