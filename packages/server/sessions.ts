@@ -5,7 +5,6 @@
  * so users can discover and reopen closed browser tabs.
  */
 
-import { homedir } from "os";
 import { join } from "path";
 import {
   mkdirSync,
@@ -15,6 +14,7 @@ import {
   unlinkSync,
   existsSync,
 } from "fs";
+import { getPlannotatorDataDir } from "../shared/data-dir";
 
 export interface SessionInfo {
   pid: number;
@@ -27,7 +27,7 @@ export interface SessionInfo {
 }
 
 function getSessionsDir(): string {
-  const dir = join(homedir(), ".plannotator", "sessions");
+  const dir = join(getPlannotatorDataDir(), "sessions");
   mkdirSync(dir, { recursive: true });
   return dir;
 }

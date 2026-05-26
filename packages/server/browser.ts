@@ -6,8 +6,9 @@ import { $ } from "bun";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
+import { getPlannotatorDataDir } from "../shared/data-dir";
 
-const IPC_REGISTRY = path.join(os.homedir(), ".plannotator", "vscode-ipc.json");
+const IPC_REGISTRY = path.join(getPlannotatorDataDir(), "vscode-ipc.json");
 
 /**
  * Common "no-op" values for $BROWSER used by headless/background environments
