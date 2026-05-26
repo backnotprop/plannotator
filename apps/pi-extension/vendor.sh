@@ -7,7 +7,7 @@ cd "$(dirname "$0")"
 rm -rf generated
 mkdir -p generated generated/ai/providers
 
-for f in feedback-templates prompts review-core jj-core vcs-core review-args storage draft project pr-types pr-provider pr-stack pr-github pr-gitlab checklist integrations-common repo reference-common favicon code-file resolve-file config external-annotation agent-jobs worktree worktree-pool html-to-markdown url-to-markdown tour annotate-args at-reference pfm-reminder improvement-hooks code-nav; do
+for f in feedback-templates prompts review-core jj-core vcs-core review-args storage draft project pr-types pr-provider pr-stack pr-github pr-gitlab checklist integrations-common repo reference-common favicon code-file resolve-file config external-annotation agent-jobs worktree worktree-pool html-to-markdown url-to-markdown tour annotate-args at-reference pfm-reminder improvement-hooks code-nav data-dir; do
   src="../../packages/shared/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/shared/%s.ts\n' "$f" | cat - "$src" > "generated/$f.ts"
 done
@@ -19,6 +19,7 @@ for f in agent-review-message codex-review claude-review path-utils; do
     | sed 's|from "./vcs"|from "./review-core.js"|' \
     | sed 's|from "./pr"|from "./pr-provider.js"|' \
     | sed 's|from "./path-utils"|from "./path-utils.js"|' \
+    | sed 's|from "\.\./shared/data-dir"|from "./data-dir"|' \
     > "generated/$f.ts"
 done
 
@@ -31,6 +32,7 @@ for f in tour-review; do
     | sed 's|from "\.\./pr"|from "./pr-provider.js"|' \
     | sed 's|from "\.\./agent-review-message"|from "./agent-review-message.js"|' \
     | sed 's|from "@plannotator/shared/tour"|from "./tour.js"|' \
+    | sed 's|from "\.\./\.\./shared/data-dir"|from "./data-dir"|' \
     > "generated/$f.ts"
 done
 
