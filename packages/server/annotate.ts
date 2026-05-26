@@ -95,7 +95,7 @@ export interface AnnotateSession {
   handleRequest: SessionRequestHandler;
   waitForDecision: AnnotateServerResult["waitForDecision"];
   dispose: () => void;
-  updateContent?: (newMarkdown: string) => void;
+  updateContent?: (newMarkdown: string, newRawHtml?: string) => void;
   getSnapshot?: () => unknown;
 }
 

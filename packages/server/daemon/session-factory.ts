@@ -182,7 +182,7 @@ function registerPersistentDecision(
 }
 
 // Review sessions stay alive (idle) after every decision — including approve/exit.
-// Cleanup is via TTL expiry, not terminal completion.
+// Sessions persist until daemon restart.
 function registerReviewDecision(
   context: DaemonFetchContext,
   id: string,
@@ -695,7 +695,7 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
       if (matchKey) {
         const existing = findMatchingSession(context.store, matchKey);
         if (existing && existing.session.updateContent) {
-          existing.session.updateContent(input.markdown);
+          existing.session.updateContent(input.markdown, input.rawHtml);
           context.store.reactivate(existing.record.id);
           return existing.record;
         }
