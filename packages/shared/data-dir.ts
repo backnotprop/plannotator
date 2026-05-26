@@ -14,7 +14,7 @@
  */
 
 import { homedir } from "os";
-import { join } from "path";
+import { join, resolve } from "path";
 
 /**
  * Resolve the Plannotator data directory.
@@ -38,5 +38,5 @@ export function getPlannotatorDataDir(): string {
     return join(home, envDir.slice(2));
   }
 
-  return envDir;
+  return resolve(envDir);
 }
