@@ -279,7 +279,7 @@ export class DaemonSessionStore {
     if (result !== undefined) record.result = result as TResult;
     const now = this.now();
     record.updatedAt = iso(now);
-    record.expiresAt = record.ttlMs !== undefined ? iso(now + record.ttlMs) : undefined;
+    record.expiresAt = iso(now + (record.ttlMs ?? AWAITING_RESUBMISSION_TTL_MS));
     this.resolveWaiters(record);
     this.emit("session-updated", record);
     return record;
@@ -292,7 +292,7 @@ export class DaemonSessionStore {
     record.result = undefined;
     const now = this.now();
     record.updatedAt = iso(now);
-    record.expiresAt = record.ttlMs !== undefined ? iso(now + record.ttlMs) : undefined;
+    record.expiresAt = iso(now + (record.ttlMs ?? AWAITING_RESUBMISSION_TTL_MS));
     this.emit("session-updated", record);
     return record;
   }
@@ -314,7 +314,7 @@ export class DaemonSessionStore {
   waitForResult<TResult = unknown>(id: string): Promise<DaemonSessionRecord<TResult>> {
     const record = this.sessions.get(id) as DaemonSessionRecord<TResult> | undefined;
     if (!record) return Promise.reject(new Error(`Session not found: ${id}`));
-    if (TERMINAL_STATUSES.has(record.status)) return Promise.resolve(record);
+    if (TERMINAL_STATUSES.has(record.status) || (record.status === "idle" && record.result !== undefined)) return Promise.resolve(record);
     return new Promise((resolve, reject) => {
       const waiters = this.waiters.get(id) ?? [];
       waiters.push({ resolve: resolve as (record: DaemonSessionRecord<unknown>) => void, reject });

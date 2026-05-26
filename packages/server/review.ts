@@ -131,7 +131,7 @@ export interface ReviewSession {
   waitForDecision: ReviewServerResult["waitForDecision"];
   setServerUrl: (url: string) => void;
   dispose: () => void;
-  updateContent?: (rawPatch: string, gitRef: string) => void;
+  updateContent?: () => Promise<void>;
   getSnapshot?: () => unknown;
 }
 
@@ -1168,12 +1168,17 @@ export async function createReviewSession(
   const exitHandler = () => agentJobs.killAll();
   process.once("exit", exitHandler);
 
-  function handleUpdateContent(rawPatch: string, gitRef: string) {
-    currentPatch = rawPatch;
-    currentGitRef = gitRef;
+  async function handleUpdateContent() {
+    const defaultCwd = gitContext?.cwd;
+    const result = await runVcsDiff(currentDiffType, currentBase, defaultCwd, {
+      hideWhitespace: currentHideWhitespace,
+    });
+    currentPatch = result.patch;
+    currentGitRef = result.label;
+    currentError = result.error;
     deleteDraft(draftKey);
-    draftKey = contentHash(rawPatch);
-    options.sessionEvents?.publishEvent("session-revision", { rawPatch, gitRef });
+    draftKey = contentHash(result.patch);
+    options.sessionEvents?.publishEvent("session-revision", { rawPatch: result.patch, gitRef: result.label });
   }
 
   return {
