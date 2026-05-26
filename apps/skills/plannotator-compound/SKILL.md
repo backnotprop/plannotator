@@ -21,9 +21,10 @@ Research integrity is paramount — every file must be read, no skipping.
 
 Before starting the analysis, determine which data source is available.
 
-1. **Plannotator mode (first-class)** — Check `~/.plannotator/plans/`. If it
-   exists and contains `*-denied.md` files, use this mode. The entire workflow
-   below is written for Plannotator data.
+1. **Plannotator mode (first-class)** — Determine the Plannotator data directory:
+   use `$PLANNOTATOR_DATA_DIR` if set, otherwise `~/.plannotator`. Check the
+   `plans/` subdirectory there. If it exists and contains `*-denied.md` files,
+   use this mode. The entire workflow below is written for Plannotator data.
 
 2. **Claude Code fallback mode** — If the Plannotator archive is absent or
    contains no denied plans, check `~/.claude/projects/`. If present, read
@@ -54,7 +55,7 @@ In either mode, proceed to Previous Report Detection below.
 After locating the plans directory, check for existing reports:
 
 ```
-ls ~/.plannotator/plans/compound-planning-report*.html
+ls ${PLANNOTATOR_DATA_DIR:-~/.plannotator}/plans/compound-planning-report*.html
 ```
 
 Reports follow a versioned naming scheme:
@@ -518,10 +519,10 @@ every future planning session automatically.
 The hook file lives at:
 
 ```
-~/.plannotator/hooks/compound/enterplanmode-improve-hook.txt
+${PLANNOTATOR_DATA_DIR:-~/.plannotator}/hooks/compound/enterplanmode-improve-hook.txt
 ```
 
-Create the `~/.plannotator/hooks/compound/` directory if it doesn't exist.
+Create the `hooks/compound/` directory inside the data directory if it doesn't exist.
 
 The file contents should be the corrective prompt instructions from Phase 3 —
 the same numbered list that appears in section 7 of the HTML report. Write them
