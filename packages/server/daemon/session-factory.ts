@@ -744,7 +744,10 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
       const existingReview = findMatchingSession(context.store, reviewMatchKey, RESUBMIT_OR_IDLE_STATUSES);
       if (existingReview && existingReview.session.updateContent) {
         await Promise.resolve(input.onCleanup?.()).catch(() => {});
-        await existingReview.session.updateContent();
+        await existingReview.session.updateContent(
+          input.prMetadata ? input.rawPatch : undefined,
+          input.prMetadata ? input.gitRef : undefined,
+        );
         context.store.reactivate(existingReview.record.id);
         return existingReview.record;
       }

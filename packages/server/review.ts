@@ -131,7 +131,7 @@ export interface ReviewSession {
   waitForDecision: ReviewServerResult["waitForDecision"];
   setServerUrl: (url: string) => void;
   dispose: () => void;
-  updateContent?: () => Promise<void>;
+  updateContent?: (precomputedPatch?: string, precomputedGitRef?: string) => Promise<void>;
   getSnapshot?: () => unknown;
 }
 
@@ -1168,17 +1168,26 @@ export async function createReviewSession(
   const exitHandler = () => agentJobs.killAll();
   process.once("exit", exitHandler);
 
-  async function handleUpdateContent() {
-    const defaultCwd = gitContext?.cwd;
-    const result = await runVcsDiff(currentDiffType, currentBase, defaultCwd, {
-      hideWhitespace: currentHideWhitespace,
-    });
-    currentPatch = result.patch;
-    currentGitRef = result.label;
-    currentError = result.error;
+  async function handleUpdateContent(precomputedPatch?: string, precomputedGitRef?: string) {
+    let patch: string;
+    let label: string;
+    if (precomputedPatch !== undefined) {
+      patch = precomputedPatch;
+      label = precomputedGitRef ?? currentGitRef;
+      currentError = undefined;
+    } else {
+      const result = await runVcsDiff(currentDiffType, currentBase, gitContext?.cwd, {
+        hideWhitespace: currentHideWhitespace,
+      });
+      patch = result.patch;
+      label = result.label;
+      currentError = result.error;
+    }
+    currentPatch = patch;
+    currentGitRef = label;
     deleteDraft(draftKey);
-    draftKey = contentHash(result.patch);
-    options.sessionEvents?.publishEvent("session-revision", { rawPatch: result.patch, gitRef: result.label });
+    draftKey = contentHash(patch);
+    options.sessionEvents?.publishEvent("session-revision", { rawPatch: patch, gitRef: label });
   }
 
   return {
