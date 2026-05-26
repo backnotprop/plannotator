@@ -1559,7 +1559,6 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
           storeApi.getState().setLocalAnnotations([]);
           storeApi.getState().selectAnnotation(null);
           storeApi.getState().setPendingSelection(null);
-          setTimeout(() => setFeedbackSent(false), 5000);
         } else {
           setSubmitted('feedback');
         }
@@ -1770,7 +1769,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
 
       // If the platform post dialog is open, Cmd+Enter submits it
       if (platformCommentDialog) {
-        if (submitted || isPlatformActioning) return;
+        if (submitted || feedbackSent || isPlatformActioning) return;
         const isApproveAction = platformCommentDialog.action === 'approve';
         const hasTargets = platformCommentDialog.plan.targets.length > 0;
         const canSubmit = isApproveAction || hasTargets || platformGeneralComment.trim();
@@ -1783,7 +1782,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       if (showExportModal || showNoAnnotationsDialog || showApproveWarning || showExitWarning) return;
-      if (submitted || isSendingFeedback || isApproving || isExiting || isPlatformActioning) return;
+      if (submitted || feedbackSent || isSendingFeedback || isApproving || isExiting || isPlatformActioning) return;
       if (!origin) return; // Demo mode
 
       e.preventDefault();
@@ -1811,7 +1810,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
   }, [
     showExportModal, showNoAnnotationsDialog, showApproveWarning, showExitWarning,
     platformCommentDialog, platformGeneralComment,
-    submitted, isSendingFeedback, isApproving, isExiting, isPlatformActioning,
+    submitted, feedbackSent, isSendingFeedback, isApproving, isExiting, isPlatformActioning,
     origin, platformMode, platformLabel, platformUser, prMetadata, totalAnnotationCount, openPlatformDialog,
     handleApprove, handleSendFeedback, handlePlatformAction
   ]);
@@ -1957,7 +1956,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
               </button>
             </div>
 
-            {origin && !submitted ? (
+            {origin && !submitted && !feedbackSent ? (
               <>
                 {/* Destination dropdown (PR mode only) */}
                 {prMetadata && (
