@@ -77,7 +77,7 @@ Key behaviors:
 **Resolved questions:**
 - Notification when diffs change: agent-triggered via `session-revision` event. No file watcher (user can manually switch diff type to refresh).
 - Subsequent feedback without agent: not possible — submit buttons are hidden while idle.
-- Cleanup: normal TTL expiry.
+- Cleanup: sessions persist until daemon restart (no TTL on non-terminal sessions).
 
 ### Decision 2: All annotate sessions are persistent
 
@@ -103,31 +103,23 @@ Folder, annotate-last, and URL annotate are non-revisable: no matchKey, no updat
 - For plan/annotate: actions should be disabled until the revision arrives (the agent already has the feedback and is working — re-submitting before the revision arrives doesn't make sense)
 - For code review: different model, TBD based on Decision 1
 
-### Decision 4: Fix the hot loop for frontend-originated sessions
+### Decision 4: Hot loop prevention for non-agent origins
 
-**Status:** Decided — will fix
+**Status:** Resolved
 
-When a session is created from the Plannotator dashboard (origin: `"plannotator-frontend"`), `resolveAndCycle` resolves the promise but doesn't start a new cycle. The `registerPersistentDecision` loop then spins on the already-resolved promise. Each iteration is a no-op (suspend guard catches it), but it burns CPU.
+The `registerDecisionLoop` spin guard uses promise identity (`currentPromise === lastPromise`) to detect when no new cycle was started. When a non-agent origin calls `resolveAndCycle`, it resolves without calling `startNew()`, so the loop sees the same promise and exits cleanly. No hot loop.
 
-**Fix:** In `registerPersistentDecision`, if `suspend()` returns a record with status !== `"awaiting-resubmission"`, break the loop and complete.
+### Decision 5: Clear external annotations on revision
 
-### Decision 5: Clear external annotations on review resubmission
+**Status:** Implemented
 
-**Status:** Decided — will fix (if any refresh mechanism is kept for reviews)
+All three `handleUpdateContent` functions (plan, annotate, review) call `externalAnnotations.clearAll()` before publishing the `session-revision` event.
 
-`handleUpdateContent` in review.ts swaps the patch but keeps stale external annotations (lint results, agent comments) from the previous diff. Line numbers and file paths may no longer match.
+### Decision 6: Session expiry
 
-**Fix:** Call `externalAnnotations.clear()` inside `handleUpdateContent`.
+**Status:** Resolved — sessions don't expire
 
-*May become moot depending on how Decision 1's refresh mechanism works.*
-
-### Decision 6: Cancel / session expiry handling
-
-**Status:** Deferred — depends on Decision 3
-
-If the feedback-sent state is calm (Decision 3), the user isn't trapped. But we still need to handle session expiry gracefully for plan/annotate — when the 10-minute TTL fires server-side, the frontend should know.
-
-For code review (Decision 1), sessions live indefinitely, so expiry is a different question (idle cleanup, not agent-didn't-resubmit).
+Non-terminal sessions (`awaiting-resubmission`, `idle`, `active` after first decision) have `expiresAt` deleted. `cleanupExpired()` skips them. Sessions live until daemon restart or explicit cancellation.
 
 ---
 
@@ -135,14 +127,15 @@ For code review (Decision 1), sessions live indefinitely, so expiry is a differe
 
 | Item | Severity | Status |
 |------|----------|--------|
-| External annotations not cleared on revision (all surfaces) | P2 | Must fix — stale line numbers |
-| Plan/annotate actions not disabled during awaiting | P2 | Must fix — stale content submission |
-| `waitForResult` missing `awaiting-resubmission` short-circuit | P2 | Must fix — consistency with idle |
-| `session-revision` snapshot provider returns null | P2 | Must fix — tab refresh during awaiting loses content |
-| `registerPersistentDecision` hot loop for non-agent origins | P1 | Must fix — currently unreachable but latent |
-| `--render-html` resubmission shows stale HTML | P2 | Deferred — architectural gap (HTML/markdown pipeline divergence) |
+| External annotations not cleared on revision (all surfaces) | P2 | Fixed |
+| Plan/annotate actions not disabled during awaiting | P2 | Fixed |
+| `waitForResult` missing `awaiting-resubmission` short-circuit | P2 | Fixed |
+| `session-revision` snapshot provider returns null | P2 | Fixed |
+| `--render-html` resubmission shows stale HTML | P2 | Fixed — `handleUpdateContent` now accepts and updates `rawHtml` |
 | PR reviews keep stale metadata on reuse | P1 | Deferred — needs PR metadata updatable in session closure |
-| `onCancel` never wired on awaiting banner | nit | Deferred (Decision 6) |
-| Session collisions across same-repo worktrees | nit | Not a concern — local app, one daemon per machine |
+| Gate flag not updated on resubmission | P2 | Deferred — if session was created ungated and agent resubmits with `--gate`, Approve button won't appear (user still sees Send Annotations + Close). Reverse also true: gated session stays gated even if agent resubmits without `--gate`. Fix: `updateContent` should accept and update the `gate` flag. |
+| Provenance data for stale sessions | P3 | Deferred — collect timestamps (feedback-sent-at, last-agent-contact) so we can show "you submitted feedback but it never came back." Future UI concern. |
+| `onCancel` never wired on awaiting banner | nit | Deferred |
+| Session collisions across same-repo worktrees | nit | Accepted — local app, one daemon per machine |
 | Annotate slug doesn't update on heading change | nit | Accepted — cosmetic, versions work correctly |
 | `sessionRefs` lazy cleanup | nit | Accepted — negligible memory |
