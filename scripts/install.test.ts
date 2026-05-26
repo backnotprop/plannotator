@@ -397,7 +397,7 @@ describe("install.cmd", () => {
     // Layer 3: config file read (verifyAttestation appears inside a
     // findstr pattern with escaped quotes; assert the key + findstr
     // separately rather than the quoted form)
-    expect(script).toContain("%USERPROFILE%\\.plannotator\\config.json");
+    expect(script).toContain("PLANNOTATOR_DATA_DIR");
     expect(script).toContain("verifyAttestation");
     expect(script).toContain("findstr");
     // Layer 2: env var
@@ -424,8 +424,9 @@ describe("install shared behavior", () => {
   const ps = readFileSync(join(scriptsDir, "install.ps1"), "utf-8");
 
   test("install.sh has three-layer opt-in resolution", () => {
-    // Layer 3: config file via grep against the flat JSON boolean
-    expect(sh).toContain("$HOME/.plannotator/config.json");
+    // Layer 3: config file via grep, respecting PLANNOTATOR_DATA_DIR
+    expect(sh).toContain("PLANNOTATOR_DATA_DIR");
+    expect(sh).toContain("_config_dir");
     expect(sh).toContain('"verifyAttestation"');
     // Layer 2: env var parsing
     expect(sh).toContain("PLANNOTATOR_VERIFY_ATTESTATION");
@@ -438,8 +439,8 @@ describe("install shared behavior", () => {
   });
 
   test("install.ps1 has three-layer opt-in resolution", () => {
-    // Layer 3: config file via ConvertFrom-Json
-    expect(ps).toContain("$env:USERPROFILE\\.plannotator\\config.json");
+    // Layer 3: config file via ConvertFrom-Json, respecting PLANNOTATOR_DATA_DIR
+    expect(ps).toContain("PLANNOTATOR_DATA_DIR");
     expect(ps).toContain("ConvertFrom-Json");
     expect(ps).toContain("$cfg.verifyAttestation");
     // Layer 2: env var
