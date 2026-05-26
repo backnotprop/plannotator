@@ -21,7 +21,7 @@ import { join } from "path";
  *
  * If PLANNOTATOR_DATA_DIR is set and non-empty, the value is used
  * as the base directory. Leading ~ is expanded to the user's home
- * directory. Relative paths are resolved from cwd.
+ * directory.
  *
  * Falls back to ~/.plannotator when the env var is absent or empty.
  */
