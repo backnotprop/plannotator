@@ -24,7 +24,7 @@ import type {
   PluginReviewRequest,
 } from "@plannotator/shared/plugin-protocol";
 import { normalizeGoalSetupBundle } from "@plannotator/shared/goal-setup";
-import { createPlannotatorSession, type PlannotatorSession } from "../index";
+import { createPlannotatorSession } from "../index";
 import { generateSlug } from "../storage";
 import { createAnnotateSession } from "../annotate";
 import { createGoalSetupSession } from "../goal-setup";

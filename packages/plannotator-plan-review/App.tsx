@@ -2321,9 +2321,9 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
         {/* Full-screen overlay: standalone mode, or legacy tab mode even when embedded */}
         {(!__embedded || legacyTabMode) && (
           <CompletionOverlay
-            submitted={feedbackSent ? 'feedback-sent' : submitted}
-            title={feedbackSent ? 'Feedback sent' : completionTitle}
-            subtitle={feedbackSent ? 'Your annotations were delivered to the agent.' : completionSubtitle}
+            submitted={feedbackSent ? 'feedback-sent' : awaitingResubmission ? 'denied' : submitted}
+            title={feedbackSent ? 'Feedback sent' : awaitingResubmission ? 'Feedback sent' : completionTitle}
+            subtitle={feedbackSent ? 'Your annotations were delivered to the agent.' : awaitingResubmission ? 'Waiting for agent to revise...' : completionSubtitle}
             agentLabel={agentName}
           />
         )}

@@ -348,7 +348,7 @@ export async function createAnnotateSession(
   function handleUpdateContent(newMarkdown: string, newRawHtml?: string) {
     markdown = newMarkdown;
     lastDecision = null;
-    if (newRawHtml !== undefined) rawHtml = newRawHtml;
+    rawHtml = newRawHtml;
     if (isFileBased && newMarkdown.trim()) {
       const historyResult = saveToHistory(project, slug, newMarkdown);
       previousPlan = historyResult.version > 1
