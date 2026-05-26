@@ -73,7 +73,7 @@ import {
   REVIEW_ALL_FILES_PANEL_ID,
   REVIEW_CODE_NAV_PANEL_ID,
 } from './dock/reviewPanelTypes';
-import type { DiffFile } from './types';
+import { retainUnchangedViewedFiles, type DiffFile } from './types';
 import type { DiffOption, WorktreeInfo, GitContext } from '@plannotator/shared/types';
 import type { PRMetadata } from '@plannotator/shared/pr-types';
 import type { PRDiffScope, PRDiffScopeOption, PRStackInfo, PRStackTree } from '@plannotator/shared/pr-stack';
@@ -317,6 +317,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
       if (msg.type !== "event" || !msg.payload) return;
       const revision = msg.payload as { rawPatch?: string; gitRef?: string };
       if (revision.rawPatch !== undefined) {
+        const oldFiles = storeApi.getState().files;
         const newFiles = parseDiffToFiles(revision.rawPatch);
         setDiffData(prev => prev ? { ...prev, rawPatch: revision.rawPatch!, gitRef: revision.gitRef ?? prev.gitRef } : prev);
         storeApi.getState().setFiles(newFiles);
@@ -324,6 +325,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
         storeApi.getState().setLocalAnnotations([]);
         storeApi.getState().selectAnnotation(null);
         storeApi.getState().setPendingSelection(null);
+        setViewedFiles(prev => retainUnchangedViewedFiles(oldFiles, newFiles, prev));
         setFeedbackSent(false);
         setSubmitted(false);
         setIsSendingFeedback(false);
@@ -2502,9 +2504,9 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
         {/* Full-screen overlay: standalone mode, or legacy tab mode even when embedded */}
         {(!__embedded || legacyTabMode) && (
           <CompletionOverlay
-            submitted={submitted}
-            title={completionTitle}
-            subtitle={completionSubtitle}
+            submitted={feedbackSent ? 'feedback-sent' : submitted}
+            title={feedbackSent ? 'Feedback sent' : completionTitle}
+            subtitle={feedbackSent ? 'Your annotations were delivered to the agent.' : completionSubtitle}
             agentLabel={getAgentName(origin)}
           />
         )}

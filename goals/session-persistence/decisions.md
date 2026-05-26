@@ -32,6 +32,8 @@ Tracking decisions made during PR #770 review and triage (2026-05-23).
 - If an agent session initiates a new code review session from same directory, ideally it would open in the existing session.
 - But I would need to be notified of this.
 - I would need to be notified if diffs change.
+- In legacy tab mode, code review should show the full-screen completion overlay (countdown + close tab) after sending feedback, same as plan review. The inline banner is for embedded mode only.
+- When a new diff arrives, files I've already viewed should stay hidden — unless the file actually changed in the new diff. Only show it again if the content is different.
 
 ### Cross-Cutting
 
