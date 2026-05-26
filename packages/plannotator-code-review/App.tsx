@@ -330,6 +330,8 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
           storeApi.getState().selectAnnotation(null);
           storeApi.getState().setPendingSelection(null);
           setViewedFiles(prev => retainUnchangedViewedFiles(oldFiles, newFiles, prev));
+        }
+        if (contentChanged || msg.type === "event") {
           setFeedbackSent(false);
           setSubmitted(false);
           setIsSendingFeedback(false);

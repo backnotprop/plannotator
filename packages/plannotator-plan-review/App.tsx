@@ -599,7 +599,9 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
     const unsubscribe = subscribeToDaemonSessionFamily("session-revision", (msg) => {
       if (!msg.payload) return;
       const revision = msg.payload as { plan?: string; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; rawHtml?: string };
-      if (revision.plan !== undefined && revision.plan !== markdownRef.current) {
+      if (revision.plan === undefined) return;
+      const contentChanged = revision.plan !== markdownRef.current;
+      if (contentChanged) {
         if (revision.rawHtml !== undefined) {
           setRawHtml(revision.rawHtml);
           setRenderAs('html');
@@ -613,6 +615,8 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
         setSelectedAnnotationId(null);
         setSelectedCodeAnnotationId(null);
         linkedDocHook.clearCache();
+      }
+      if (contentChanged || msg.type === "event") {
         setAwaitingResubmission(false);
         setFeedbackSent(false);
         setSubmitted(null);
