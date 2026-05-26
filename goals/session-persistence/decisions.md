@@ -33,6 +33,17 @@ Tracking decisions made during PR #770 review and triage (2026-05-23).
 - But I would need to be notified of this.
 - I would need to be notified if diffs change.
 
+### Cross-Cutting
+
+- When a revision arrives (plan, annotate, or review), any external annotations (lint results, agent comments) from the previous version must be cleared. They reference old content with wrong positions.
+- `waitForResult` must return immediately if the result is already available — for both `idle` and `awaiting-resubmission` sessions. No consistency gaps.
+- Plan/annotate actions (Approve, Deny, Send Feedback) must be disabled while awaiting resubmission. The agent already has the feedback — submitting again against stale content is wrong. Code review already handles this (buttons hidden when idle).
+- Late WebSocket subscribers (tab refresh during awaiting) should receive the current state. The snapshot provider for `session-revision` must return the latest content, not null.
+- HTML and markdown annotation should go through the same functional pipeline. The `--render-html` path diverges from markdown in a way that `updateContent` can't reach. This is an architectural gap, not a quick fix.
+- PR review sessions that get reactivated need updated PR metadata (head SHA, etc.). The current implementation serves the correct diff but posts platform actions against the stale commit. Needs a bigger fix to make PR metadata updatable inside the session closure.
+- Annotate history slug is computed once from the initial heading and doesn't update if the heading changes. Acceptable — versions stay intact, just filed under the old name on disk.
+- Session collisions across worktrees of the same repo are not a real concern. This is a local app — one daemon per machine.
+
 ---
 
 ## Decisions
@@ -114,14 +125,18 @@ For code review (Decision 1), sessions live indefinitely, so expiry is a differe
 
 ---
 
-## Bugs confirmed from external review (PR #770)
+## Open Items
 
-| # | Finding | Severity | Action |
-|---|---------|----------|--------|
-| 1-2 | Frontend sessions spin in registerPersistentDecision | P1 | Fix (Decision 4) |
-| 3+9 | --render-html resubmission shows stale content | P2 | Skip — narrow edge case |
-| 4 | OpenCode folder annotation mislabeled after persistence | nit | Skip — cosmetic |
-| 5 | Stale external annotations after review resubmission | P2 | Fix (Decision 5), possibly moot after Decision 1 |
-| 6 | waitForResult doesn't short-circuit on awaiting | P2 | Skip — current behavior is correct |
-| 7-8 | Actions not disabled during awaiting | P2 | Redesign per Decision 3 |
-| 10 | onCancel never wired, stuck spinner | nit | Deferred (Decision 6) |
+| Item | Severity | Status |
+|------|----------|--------|
+| External annotations not cleared on revision (all surfaces) | P2 | Must fix — stale line numbers |
+| Plan/annotate actions not disabled during awaiting | P2 | Must fix — stale content submission |
+| `waitForResult` missing `awaiting-resubmission` short-circuit | P2 | Must fix — consistency with idle |
+| `session-revision` snapshot provider returns null | P2 | Must fix — tab refresh during awaiting loses content |
+| `registerPersistentDecision` hot loop for non-agent origins | P1 | Must fix — currently unreachable but latent |
+| `--render-html` resubmission shows stale HTML | P2 | Deferred — architectural gap (HTML/markdown pipeline divergence) |
+| PR reviews keep stale metadata on reuse | P1 | Deferred — needs PR metadata updatable in session closure |
+| `onCancel` never wired on awaiting banner | nit | Deferred (Decision 6) |
+| Session collisions across same-repo worktrees | nit | Not a concern — local app, one daemon per machine |
+| Annotate slug doesn't update on heading change | nit | Accepted — cosmetic, versions work correctly |
+| `sessionRefs` lazy cleanup | nit | Accepted — negligible memory |
