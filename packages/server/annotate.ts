@@ -121,10 +121,11 @@ export async function createAnnotateSession(
     shareBaseUrl,
     pasteApiUrl,
     gate = false,
-    rawHtml,
+    rawHtml: initialRawHtml,
     renderHtml = false,
   } = options;
   let markdown = initialMarkdown;
+  let rawHtml = initialRawHtml;
 
   // Side-channel pre-warm so /api/doc/exists POSTs land on warm cache.
   void warmFileListCache(cwd, "code");
@@ -141,7 +142,10 @@ export async function createAnnotateSession(
     registerSnapshotProvider: (provider) =>
       options.sessionEvents?.registerSnapshotProvider("external-annotations", provider),
   });
-  options.sessionEvents?.registerSnapshotProvider("session-revision", () => ({ plan: markdown, previousPlan, versionInfo }));
+  options.sessionEvents?.registerSnapshotProvider("session-revision", () => ({
+    plan: markdown, previousPlan, versionInfo,
+    ...(rawHtml !== undefined && { rawHtml }),
+  }));
 
   // Detect repo info (cached for this session)
   const repoInfo = await getRepoInfo(cwd);
@@ -314,6 +318,9 @@ export async function createAnnotateSession(
                 annotations: body.annotations || [],
               }, origin);
 
+              if (resubmit.awaitingResubmission && !isFileBased) {
+                return Response.json({ ok: true, feedbackSent: true });
+              }
               return Response.json({ ok: true, ...resubmit });
             } catch (err) {
               const message =
@@ -333,8 +340,9 @@ export async function createAnnotateSession(
           });
   };
 
-  function handleUpdateContent(newMarkdown: string) {
+  function handleUpdateContent(newMarkdown: string, newRawHtml?: string) {
     markdown = newMarkdown;
+    if (newRawHtml !== undefined) rawHtml = newRawHtml;
     const historyResult = saveToHistory(project, slug, newMarkdown);
     previousPlan = historyResult.version > 1
       ? getPlanVersion(project, slug, historyResult.version - 1)
@@ -347,7 +355,10 @@ export async function createAnnotateSession(
     externalAnnotations.clearAll();
     deleteDraft(draftKey);
     draftKey = contentHash(newMarkdown);
-    options.sessionEvents?.publishEvent("session-revision", { plan: newMarkdown, previousPlan, versionInfo });
+    options.sessionEvents?.publishEvent("session-revision", {
+      plan: newMarkdown, previousPlan, versionInfo,
+      ...(rawHtml !== undefined && { rawHtml }),
+    });
   }
 
   return {

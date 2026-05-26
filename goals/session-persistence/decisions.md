@@ -72,22 +72,22 @@ Key behaviors:
 - After feedback: session transitions to `idle` via `store.idle()`. The HTTP handler stays alive, resources stay alive. The user can browse the diff and make annotations, but Send Feedback / Approve buttons are hidden (no agent to receive them).
 - On reactivation: agent triggers `plannotator review` from the same directory/branch. The daemon finds the idle session by matchKey, pushes the new diff via `updateContent`, and calls `store.reactivate()`. The frontend receives a `session-revision` WebSocket event, updates the diff, and re-shows the submit buttons.
 - Infinite cycle: this repeats as many times as needed. No counter, no limit.
-- Cleanup: idle sessions use the original session TTL (hours, not the 10-minute awaiting TTL). They expire via normal TTL cleanup or daemon restart.
+- Cleanup: idle sessions have no expiry. They live until daemon restart.
 
 **Resolved questions:**
 - Notification when diffs change: agent-triggered via `session-revision` event. No file watcher (user can manually switch diff type to refresh).
 - Subsequent feedback without agent: not possible — submit buttons are hidden while idle.
 - Cleanup: normal TTL expiry.
 
-### Decision 2: Annotate sessions keep persistence
+### Decision 2: All annotate sessions are persistent
 
-**Status:** Decided
+**Status:** Implemented
 
-Annotate mode is similar to plan mode. Agent revisions may change the document. The user should be notified and see new versions. Diff mode should show previous versions. The gating process (when used) iterates until approval, same as planning.
+Every annotate session lives forever — single file, folder, URL, last message. No one-shot sessions. All annotate types use `registerPersistentDecision`, which never calls `store.complete()`. The session always suspends and the loop continues.
 
-Persistence stays as-is for annotate. The awaiting-resubmission model fits because the document is an iterative artifact.
+Single-file annotate is revisable: it has a matchKey, updateContent, and version history. The frontend shows "Waiting for agent to revise..." after feedback.
 
-**Open question: folder annotation with multiple file changes.** Currently `updateContent` takes a single markdown string and the matchKey is `annotate:${filePath}` (the folder path). If the agent edits multiple files in the folder, we need a way to push per-file updates or trigger a re-fetch of the file list. Current design doesn't handle this.
+Folder, annotate-last, and URL annotate are non-revisable: no matchKey, no updateContent. The frontend shows "Feedback sent" after feedback. The session stays interactive — the user can keep browsing and send more feedback.
 
 ### Decision 3: "Feedback sent" state should be calm, not loading
 

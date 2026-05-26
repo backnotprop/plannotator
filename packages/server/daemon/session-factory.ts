@@ -176,7 +176,6 @@ function registerPersistentDecision(
   session: { waitForDecision: () => Promise<SessionDecisionResult>; dispose: () => void | Promise<void> },
 ) {
   return registerDecisionLoop(context, id, session, (result) => {
-    if (result.approved || result.exit) { context.store.complete(id, result); return "done"; }
     context.store.suspend(id, result);
     return "continue";
   }, PERSISTENT_ACTIVE);
@@ -728,11 +727,7 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
         matchKey,
         ttlMs,
         handleRequest: session.handleRequest,
-        dispose: isSingleFile
-          ? registerPersistentDecision(context, id, session)
-          : registerSessionDecision(context, id, () => session.waitForDecision(), () => session.dispose(), (result) => ({
-              ...result, filePath: input.filePath, mode: input.mode,
-            })),
+        dispose: registerPersistentDecision(context, id, session),
         remoteShare,
         snapshot: session.getSnapshot ?? (() => ({ plan: input.markdown, filePath: input.filePath, mode: input.mode, sourceInfo: input.sourceInfo })),
       });

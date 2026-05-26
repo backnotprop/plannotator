@@ -186,6 +186,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
   const [isExiting, setIsExiting] = useState(false);
   const [submitted, setSubmitted] = useState<'approved' | 'denied' | 'exited' | null>(null);
   const [awaitingResubmission, setAwaitingResubmission] = useState(false);
+  const [feedbackSent, setFeedbackSent] = useState(false);
   const [pendingPasteImage, setPendingPasteImage] = useState<{ file: File; blobUrl: string; initialName: string } | null>(null);
   const [showPermissionModeSetup, setShowPermissionModeSetup] = useState(false);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
@@ -595,8 +596,12 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
     if (!isApiMode || !awaitingResubmission) return;
     const unsubscribe = subscribeToDaemonSessionFamily("session-revision", (msg) => {
       if (msg.type !== "event" || !msg.payload) return;
-      const revision = msg.payload as { plan?: string; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string } };
+      const revision = msg.payload as { plan?: string; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; rawHtml?: string };
       if (revision.plan !== undefined) {
+        if (revision.rawHtml !== undefined) {
+          setRawHtml(revision.rawHtml);
+          setRenderAs('html');
+        }
         setMarkdown(revision.plan);
         if (revision.previousPlan !== undefined) setPreviousPlan(revision.previousPlan);
         if (revision.versionInfo) setVersionInfo(revision.versionInfo);
@@ -607,6 +612,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
         setSelectedCodeAnnotationId(null);
         linkedDocHook.clearCache();
         setAwaitingResubmission(false);
+        setFeedbackSent(false);
         setSubmitted(null);
         setIsSubmitting(false);
       }
@@ -1143,6 +1149,9 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
       if (data.awaitingResubmission) {
         setAwaitingResubmission(true);
         setIsSubmitting(false);
+      } else if (data.feedbackSent) {
+        setFeedbackSent(true);
+        setIsSubmitting(false);
       } else {
         setSubmitted('denied');
       }
@@ -1214,7 +1223,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
           showExitWarning || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
 
       // Don't intercept if already submitted, submitting, exiting, or awaiting resubmission
-      if (submitted || isSubmitting || isExiting || awaitingResubmission || goalSetupAction.isSubmitting) return;
+      if (submitted || isSubmitting || isExiting || awaitingResubmission || feedbackSent || goalSetupAction.isSubmitting) return;
 
       // Don't intercept in demo/share mode (no API)
       if (!isApiMode) return;
@@ -1843,9 +1852,9 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
         {/* Embedded completion banner — inline, non-blocking (skipped in legacy tab mode) */}
         {__embedded && !legacyTabMode && (
           <CompletionBanner
-            submitted={awaitingResubmission ? 'awaiting' : submitted}
-            title={awaitingResubmission ? 'Feedback sent' : completionTitle}
-            subtitle={awaitingResubmission ? 'Waiting for agent to revise...' : completionSubtitle}
+            submitted={feedbackSent ? 'feedback-sent' : awaitingResubmission ? 'awaiting' : submitted}
+            title={feedbackSent ? 'Feedback sent' : awaitingResubmission ? 'Feedback sent' : completionTitle}
+            subtitle={feedbackSent ? 'Your annotations were delivered to the agent.' : awaitingResubmission ? 'Waiting for agent to revise...' : completionSubtitle}
           />
         )}
 
@@ -2289,9 +2298,9 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
         {/* Full-screen overlay: standalone mode, or legacy tab mode even when embedded */}
         {(!__embedded || legacyTabMode) && (
           <CompletionOverlay
-            submitted={submitted}
-            title={completionTitle}
-            subtitle={completionSubtitle}
+            submitted={feedbackSent ? 'feedback-sent' : submitted}
+            title={feedbackSent ? 'Feedback sent' : completionTitle}
+            subtitle={feedbackSent ? 'Your annotations were delivered to the agent.' : completionSubtitle}
             agentLabel={agentName}
           />
         )}

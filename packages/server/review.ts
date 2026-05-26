@@ -1057,9 +1057,9 @@ export async function createReviewSession(
               deleteDraft(draftKey);
               const isApproved = body.approved ?? false;
               const result = { approved: isApproved, feedback: body.feedback || "", annotations: body.annotations || [], agentSwitch: body.agentSwitch };
-              resolveAndCycle(decisionCycle, result, origin);
+              const resubmit = resolveAndCycle(decisionCycle, result, origin);
 
-              return Response.json({ ok: true, feedbackDelivered: !isApproved || undefined });
+              return Response.json({ ok: true, feedbackDelivered: resubmit.awaitingResubmission || undefined });
             } catch (err) {
               const message =
                 err instanceof Error ? err.message : "Failed to process feedback";

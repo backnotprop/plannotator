@@ -255,9 +255,11 @@ Runtime live updates for daemon lifecycle events, external annotations, agent jo
 
 When a user denies a plan (or sends feedback on a review/annotation), the session enters `awaiting-resubmission` status instead of completing. The session's HTTP handler stays alive. When the agent replans and submits again via `POST /daemon/sessions`, the daemon matches the new submission to the existing session by a match key (`plan:project:slug` for plans, `review:project:branch` for reviews, `annotate:project:filePath` for single-file annotations). The session reactivates in place — the frontend receives a `session-revision` event via WebSocket with the updated content.
 
-**Session statuses (plan/annotate):** `active` → `awaiting-resubmission` (on deny) → `active` (on resubmit) → `completed` (on approve). The `awaiting-resubmission` status is non-terminal — the session stays routable and its handler keeps serving requests.
+**Sessions never die.** No session type calls `store.complete()` from its decision handler. All sessions survive feedback, approve, and exit — the HTTP handler stays alive and the tab keeps working. `registerPersistentDecision` always calls `store.suspend()`. `registerReviewDecision` always calls `store.idle()`. Non-terminal sessions have no expiry timer.
 
-**Session statuses (code review):** `active` → `idle` (on feedback/approve/exit) → `active` (on agent resubmit) → `idle` ... repeating. Review sessions never complete — they stay alive as diff viewers and expire via TTL. The `idle` status is non-terminal — the session is fully interactive but no agent is blocking on it.
+**Session statuses (plan/annotate):** `active` → `awaiting-resubmission` (on any decision) → `active` (on resubmit) → `awaiting-resubmission` ... repeating.
+
+**Session statuses (code review):** `active` → `idle` (on any decision) → `active` (on agent resubmit) → `idle` ... repeating.
 
 **Event families:** `daemon`, `external-annotations`, `agent-jobs`, `session-revision`.
 
