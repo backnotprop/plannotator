@@ -605,6 +605,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
         setGlobalAttachments([]);
         setSelectedAnnotationId(null);
         setSelectedCodeAnnotationId(null);
+        linkedDocHook.clearCache();
         setAwaitingResubmission(false);
         setSubmitted(null);
         setIsSubmitting(false);
