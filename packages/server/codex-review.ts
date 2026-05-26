@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { appendFile, mkdir, unlink, writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { toRelativePath } from "./path-utils";
-import { getPlannotatorDataDir } from "../shared/data-dir";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 
 // ---------------------------------------------------------------------------
 // Debug log — only active when PLANNOTATOR_DEBUG is set

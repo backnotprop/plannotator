@@ -19,7 +19,7 @@ for f in agent-review-message codex-review claude-review path-utils; do
     | sed 's|from "./vcs"|from "./review-core.js"|' \
     | sed 's|from "./pr"|from "./pr-provider.js"|' \
     | sed 's|from "./path-utils"|from "./path-utils.js"|' \
-    | sed 's|from "\.\./shared/data-dir"|from "./data-dir"|' \
+    | sed 's|from "@plannotator/shared/data-dir"|from "./data-dir"|' \
     > "generated/$f.ts"
 done
 
@@ -32,7 +32,7 @@ for f in tour-review; do
     | sed 's|from "\.\./pr"|from "./pr-provider.js"|' \
     | sed 's|from "\.\./agent-review-message"|from "./agent-review-message.js"|' \
     | sed 's|from "@plannotator/shared/tour"|from "./tour.js"|' \
-    | sed 's|from "\.\./\.\./shared/data-dir"|from "./data-dir"|' \
+    | sed 's|from "@plannotator/shared/data-dir"|from "./data-dir"|' \
     > "generated/$f.ts"
 done
 

@@ -6,7 +6,7 @@ import { $ } from "bun";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
-import { getPlannotatorDataDir } from "../shared/data-dir";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 
 const IPC_REGISTRY = path.join(getPlannotatorDataDir(), "vscode-ipc.json");
 

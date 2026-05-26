@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdir, writeFile, readFile, unlink } from "node:fs/promises";
-import { getPlannotatorDataDir } from "../../shared/data-dir";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import type { DiffType } from "../vcs";
 import type { PRMetadata } from "../pr";
 import { getLocalDiffInstruction } from "../agent-review-message";
