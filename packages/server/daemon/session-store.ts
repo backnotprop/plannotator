@@ -314,7 +314,8 @@ export class DaemonSessionStore {
   waitForResult<TResult = unknown>(id: string): Promise<DaemonSessionRecord<TResult>> {
     const record = this.sessions.get(id) as DaemonSessionRecord<TResult> | undefined;
     if (!record) return Promise.reject(new Error(`Session not found: ${id}`));
-    if (TERMINAL_STATUSES.has(record.status) || ((record.status === "idle" || record.status === "awaiting-resubmission") && record.result !== undefined)) return Promise.resolve(record);
+    const hasIntermediateResult = (record.status === "idle" || record.status === "awaiting-resubmission") && record.result !== undefined;
+    if (TERMINAL_STATUSES.has(record.status) || hasIntermediateResult) return Promise.resolve(record);
     return new Promise((resolve, reject) => {
       const waiters = this.waiters.get(id) ?? [];
       waiters.push({ resolve: resolve as (record: DaemonSessionRecord<unknown>) => void, reject });

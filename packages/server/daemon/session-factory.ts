@@ -137,27 +137,29 @@ function registerSessionDecision<TResult, TStored = TResult>(
   return cleanup;
 }
 
-function registerPersistentDecision(
+function registerDecisionLoop(
   context: DaemonFetchContext,
   id: string,
   session: { waitForDecision: () => Promise<SessionDecisionResult>; dispose: () => void | Promise<void> },
+  onResult: (result: SessionDecisionResult) => "continue" | "done",
+  activeStatuses: Set<string>,
 ): () => void | Promise<void> {
   const { disposed, cleanup } = createDecisionScope(session.dispose);
 
-  const decisionLoop = async () => {
+  const loop = async () => {
+    let lastPromise: Promise<SessionDecisionResult> | null = null;
     while (true) {
-      const result = await Promise.race([session.waitForDecision(), disposed]);
-      if (result.approved || result.exit) {
-        context.store.complete(id, result);
-        return;
-      }
-      context.store.suspend(id, result);
+      const currentPromise = session.waitForDecision();
+      if (currentPromise === lastPromise) return;
+      lastPromise = currentPromise;
+      const result = await Promise.race([currentPromise, disposed]);
+      if (onResult(result) === "done") return;
     }
   };
 
-  void decisionLoop().catch((err) => {
+  void loop().catch((err) => {
     const record = context.store.get(id);
-    if (record && (record.status === "active" || record.status === "awaiting-resubmission")) {
+    if (record && activeStatuses.has(record.status)) {
       context.store.fail(id, err instanceof Error ? err.message : String(err));
     }
   });
@@ -165,35 +167,32 @@ function registerPersistentDecision(
   return cleanup;
 }
 
+const PERSISTENT_ACTIVE = new Set(["active", "awaiting-resubmission"]);
+const REVIEW_ACTIVE = new Set(["active", "idle"]);
+
+function registerPersistentDecision(
+  context: DaemonFetchContext,
+  id: string,
+  session: { waitForDecision: () => Promise<SessionDecisionResult>; dispose: () => void | Promise<void> },
+) {
+  return registerDecisionLoop(context, id, session, (result) => {
+    if (result.approved || result.exit) { context.store.complete(id, result); return "done"; }
+    context.store.suspend(id, result);
+    return "continue";
+  }, PERSISTENT_ACTIVE);
+}
+
 // Review sessions stay alive (idle) after every decision — including approve/exit.
-// Cleanup is via TTL expiry, not terminal completion. This is intentional: the user
-// keeps the session as a diff viewer, and the agent can reactivate it later.
+// Cleanup is via TTL expiry, not terminal completion.
 function registerReviewDecision(
   context: DaemonFetchContext,
   id: string,
   session: { waitForDecision: () => Promise<SessionDecisionResult>; dispose: () => void | Promise<void> },
-): () => void | Promise<void> {
-  const { disposed, cleanup } = createDecisionScope(session.dispose);
-
-  const decisionLoop = async () => {
-    let lastPromise: Promise<SessionDecisionResult> | null = null;
-    while (true) {
-      const currentPromise = session.waitForDecision();
-      if (currentPromise === lastPromise) return;
-      lastPromise = currentPromise;
-      const result = await Promise.race([currentPromise, disposed]);
-      context.store.idle(id, result);
-    }
-  };
-
-  void decisionLoop().catch((err) => {
-    const record = context.store.get(id);
-    if (record && (record.status === "active" || record.status === "idle")) {
-      context.store.fail(id, err instanceof Error ? err.message : String(err));
-    }
-  });
-
-  return cleanup;
+) {
+  return registerDecisionLoop(context, id, session, (result) => {
+    context.store.idle(id, result);
+    return "continue";
+  }, REVIEW_ACTIVE);
 }
 
 function resolvePlanFilePath(planFilePath: string, cwd: string): string {
@@ -697,7 +696,7 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
       if (matchKey) {
         const existing = findMatchingSession(context.store, matchKey);
         if (existing && existing.session.updateContent) {
-          (existing.session.updateContent as (m: string) => void)(input.markdown);
+          existing.session.updateContent(input.markdown);
           context.store.reactivate(existing.record.id);
           return existing.record;
         }
