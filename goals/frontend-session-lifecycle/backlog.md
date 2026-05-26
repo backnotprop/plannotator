@@ -34,7 +34,7 @@ Implemented in `feat/session-persistence`. Sessions enter `awaiting-resubmission
 
 ## ~~4. Session persistence after completion~~ DONE
 
-Implemented in `feat/session-persistence`. Denied sessions stay alive (handler not disposed) in `awaiting-resubmission` state with a 10-minute TTL. The session remains routable and serves API requests while waiting.
+Implemented in `feat/session-persistence`. Denied sessions stay alive (handler not disposed) in `awaiting-resubmission` state with no expiry. Sessions persist until daemon restart.
 
 **Required behavior:**
 - Completed sessions stay in the sidebar with a status badge (approved/denied)

@@ -38,6 +38,8 @@ Tracking decisions made during PR #770 review and triage (2026-05-23).
 ### Cross-Cutting
 
 - Every annotate session lives forever once created — single file, folder, last message, URL. No one-shot sessions. The tab stays open and interactive after feedback is sent. There are no exceptions.
+- Folder annotate sessions are reusable. If the user annotates the same folder twice, the daemon should find the existing session and reactivate it — not create a new one. The match key is the folder path. There's no content to update (it's a file browser), but the session is reused as-is.
+- Annotate-last is not reusable — "last message" has no stable identity across invocations. Each annotate-last creates a new session. This is fine; the command is rarely run twice in a row.
 - Legacy tab mode is the only case where the tab closes after feedback — that's the full-screen overlay with countdown, and it's the expected legacy behavior.
 - Sessions do not time out. A session, once created, lives until the daemon restarts. We do not kill sessions on a countdown. If a user submits feedback and the agent never comes back, that's for the user to see and decide — not for us to silently clean up.
 - We should collect the right data (timestamps, feedback-sent-at, last-agent-contact) so we can eventually show the user: "you submitted feedback but it never came back." But that's a future UI concern, not a reason to expire sessions.
@@ -48,6 +50,7 @@ Tracking decisions made during PR #770 review and triage (2026-05-23).
 - HTML and markdown annotation should go through the same functional pipeline. The `--render-html` path diverges from markdown in a way that `updateContent` can't reach — `updateContent` must also update `rawHtml` for HTML sessions.
 - PR review sessions that get reactivated need updated PR metadata (head SHA, etc.). The current implementation serves the correct diff but posts platform actions against the stale commit. Needs a bigger fix to make PR metadata updatable inside the session closure.
 - Annotate history slug is computed once from the initial heading and doesn't update if the heading changes. Acceptable — versions stay intact, just filed under the old name on disk.
+- The decision listener must stay alive after every user action — approve, deny, exit, send feedback. If the listener shuts down after approve/exit, the session looks alive but can't respond to future resubmissions. The agent hangs forever.
 - Session collisions across worktrees of the same repo are not a real concern. This is a local app — one daemon per machine.
 
 ---

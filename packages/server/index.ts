@@ -199,6 +199,7 @@ export async function createPlannotatorSession(
     permissionMode?: string;
   };
   const decisionCycle = createDecisionCycle<DecisionResult>();
+  let lastDecision: 'approved' | 'denied' | null = null;
 
   if (mode !== "archive") {
     repoInfo = await getRepoInfo(cwd);
@@ -289,7 +290,7 @@ export async function createPlannotatorSession(
                 serverConfig: getServerConfig(gitUser),
               });
             }
-            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, projectRoot: cwd, isWSL: wslFlag, serverConfig: getServerConfig(gitUser) });
+            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, projectRoot: cwd, isWSL: wslFlag, serverConfig: getServerConfig(gitUser), lastDecision });
           }
 
           // API: Serve a linked markdown document
@@ -537,7 +538,8 @@ export async function createPlannotatorSession(
 
             // Use permission mode from client request if provided, otherwise fall back to hook input
             const effectivePermissionMode = requestedPermissionMode || permissionMode;
-            decisionCycle.resolve({ approved: true, feedback, savedPath, agentSwitch, permissionMode: effectivePermissionMode });
+            lastDecision = 'approved';
+            resolveAndCycle(decisionCycle, { approved: true, feedback, savedPath, agentSwitch, permissionMode: effectivePermissionMode }, origin);
             return Response.json({ ok: true, savedPath });
           }
 
@@ -574,6 +576,7 @@ export async function createPlannotatorSession(
             }
 
             deleteDraft(draftKey);
+            lastDecision = 'denied';
             const resubmit = resolveAndCycle(decisionCycle, { approved: false, feedback, savedPath }, origin);
             return Response.json({ ok: true, savedPath, ...resubmit });
           }
@@ -589,6 +592,7 @@ export async function createPlannotatorSession(
 
   function handleUpdateContent(newPlan: string) {
     plan = newPlan;
+    lastDecision = null;
     const historyResult = saveToHistory(project, slug, newPlan);
     currentPlanPath = historyResult.path;
     previousPlan = historyResult.version > 1

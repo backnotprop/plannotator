@@ -315,18 +315,22 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
   useEffect(() => {
     if (!origin) return;
     const unsubscribe = subscribeToDaemonSessionFamily("session-revision", (msg) => {
-      if (msg.type !== "event" || !msg.payload) return;
+      if (!msg.payload) return;
       const revision = msg.payload as { rawPatch?: string; gitRef?: string };
       if (revision.rawPatch !== undefined) {
         const oldFiles = storeApi.getState().files;
         const newFiles = parseDiffToFiles(revision.rawPatch);
-        setDiffData(prev => prev ? { ...prev, rawPatch: revision.rawPatch!, gitRef: revision.gitRef ?? prev.gitRef } : prev);
-        storeApi.getState().setFiles(newFiles);
-        storeApi.getState().setFocusedFile(0);
-        storeApi.getState().setLocalAnnotations([]);
-        storeApi.getState().selectAnnotation(null);
-        storeApi.getState().setPendingSelection(null);
-        setViewedFiles(prev => retainUnchangedViewedFiles(oldFiles, newFiles, prev));
+        const contentChanged = newFiles.length !== oldFiles.length ||
+          newFiles.some((f, i) => f.patch !== oldFiles[i]?.patch);
+        if (contentChanged) {
+          setDiffData(prev => prev ? { ...prev, rawPatch: revision.rawPatch!, gitRef: revision.gitRef ?? prev.gitRef } : prev);
+          storeApi.getState().setFiles(newFiles);
+          storeApi.getState().setFocusedFile(0);
+          storeApi.getState().setLocalAnnotations([]);
+          storeApi.getState().selectAnnotation(null);
+          storeApi.getState().setPendingSelection(null);
+          setViewedFiles(prev => retainUnchangedViewedFiles(oldFiles, newFiles, prev));
+        }
         setFeedbackSent(false);
         setSubmitted(false);
         setIsSendingFeedback(false);
@@ -830,6 +834,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
         error?: string;
         isWSL?: boolean;
         serverConfig?: { displayName?: string; gitUser?: string };
+        lastDecision?: 'approved' | 'feedback' | 'exited' | null;
       }) => {
         configStore.init(data.serverConfig);
         setGitUser(data.serverConfig?.gitUser);
@@ -876,6 +881,11 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
         // Mark diff type setup as pending on first run (local mode only)
         if (data.diffType && !data.prMetadata && data.gitContext?.vcsType !== 'p4' && data.gitContext?.vcsType !== 'jj' && needsDiffTypeSetup()) {
           setDiffTypeSetupPending(true);
+        }
+        if (data.lastDecision) {
+          if (data.lastDecision === 'approved') setSubmitted('approved');
+          else if (data.lastDecision === 'feedback') setFeedbackSent(true);
+          else if (data.lastDecision === 'exited') setSubmitted('exited');
         }
       })
       .catch(() => {

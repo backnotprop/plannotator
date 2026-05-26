@@ -124,6 +124,8 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
     return getComputedStyle(rootRef.current).visibility !== 'hidden';
   }, []);
   const [markdown, setMarkdown] = useState(DEMO_PLAN_CONTENT);
+  const markdownRef = useRef(markdown);
+  markdownRef.current = markdown;
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [codeAnnotations, setCodeAnnotations] = useState<CodeAnnotation[]>([]);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
@@ -591,26 +593,29 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
   const { editorAnnotations, deleteEditorAnnotation } = useEditorAnnotations();
   const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<Annotation>({ enabled: isApiMode && !goalSetupMode });
 
-  // Listen for session-revision events (plan resubmission after deny)
+  // Listen for session-revision events (plan/annotate resubmission or reactivation)
   useEffect(() => {
-    if (!isApiMode || !awaitingResubmission) return;
+    if (!isApiMode) return;
     const unsubscribe = subscribeToDaemonSessionFamily("session-revision", (msg) => {
-      if (msg.type !== "event" || !msg.payload) return;
+      if (!msg.payload) return;
       const revision = msg.payload as { plan?: string; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; rawHtml?: string };
       if (revision.plan !== undefined) {
+        const contentChanged = revision.plan !== markdownRef.current;
         if (revision.rawHtml !== undefined) {
           setRawHtml(revision.rawHtml);
           setRenderAs('html');
         }
-        setMarkdown(revision.plan);
-        if (revision.previousPlan !== undefined) setPreviousPlan(revision.previousPlan);
-        if (revision.versionInfo) setVersionInfo(revision.versionInfo);
-        setAnnotations([]);
-        setCodeAnnotations([]);
-        setGlobalAttachments([]);
-        setSelectedAnnotationId(null);
-        setSelectedCodeAnnotationId(null);
-        linkedDocHook.clearCache();
+        if (contentChanged) {
+          setMarkdown(revision.plan);
+          if (revision.previousPlan !== undefined) setPreviousPlan(revision.previousPlan);
+          if (revision.versionInfo) setVersionInfo(revision.versionInfo);
+          setAnnotations([]);
+          setCodeAnnotations([]);
+          setGlobalAttachments([]);
+          setSelectedAnnotationId(null);
+          setSelectedCodeAnnotationId(null);
+          linkedDocHook.clearCache();
+        }
         setAwaitingResubmission(false);
         setFeedbackSent(false);
         setSubmitted(null);
@@ -618,7 +623,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
       }
     });
     return unsubscribe;
-  }, [isApiMode, awaitingResubmission]);
+  }, [isApiMode]);
 
   // Drive DOM highlights for SSE-delivered external annotations. Disabled
   // while a linked doc overlay is open (Viewer DOM is hidden) and while the
@@ -796,7 +801,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; gate?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string } }) => {
+      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; gate?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string }; lastDecision?: 'approved' | 'denied' | 'exited' | 'feedback' | null }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
         setGitUser(data.serverConfig?.gitUser);
@@ -874,6 +879,23 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
         }
         if (data.isWSL) {
           setIsWSL(true);
+        }
+        if (data.lastDecision) {
+          const isAnnotate = data.mode === 'annotate' || data.mode === 'annotate-last' || data.mode === 'annotate-folder';
+          if (data.lastDecision === 'approved') {
+            setSubmitted('approved');
+          } else if (data.lastDecision === 'denied') {
+            setAwaitingResubmission(true);
+          } else if (data.lastDecision === 'exited') {
+            setSubmitted('exited');
+          } else if (data.lastDecision === 'feedback') {
+            const isFileBased = data.mode === 'annotate';
+            if (isAnnotate && !isFileBased) {
+              setFeedbackSent(true);
+            } else {
+              setAwaitingResubmission(true);
+            }
+          }
         }
       })
       .catch(() => {

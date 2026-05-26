@@ -95,7 +95,7 @@ export interface AnnotateSession {
   handleRequest: SessionRequestHandler;
   waitForDecision: AnnotateServerResult["waitForDecision"];
   dispose: () => void;
-  updateContent?: (newMarkdown: string, newRawHtml?: string) => void;
+  updateContent: (newMarkdown: string, newRawHtml?: string) => void;
   getSnapshot?: () => unknown;
 }
 
@@ -171,6 +171,7 @@ export async function createAnnotateSession(
 
   type AnnotateDecisionResult = { feedback: string; annotations: unknown[]; exit?: boolean; approved?: boolean };
   const decisionCycle = createDecisionCycle<AnnotateDecisionResult>();
+  let lastDecision: 'approved' | 'exited' | 'feedback' | null = null;
 
   const handleRequest: SessionRequestHandler = async (req, url, context) => {
 
@@ -195,6 +196,7 @@ export async function createAnnotateSession(
               projectRoot: folderPath || cwd,
               isWSL: wslFlag,
               serverConfig: getServerConfig(gitUser),
+              lastDecision,
             });
           }
 
@@ -293,14 +295,16 @@ export async function createAnnotateSession(
           // API: Exit annotation session without feedback
           if (url.pathname === "/api/exit" && req.method === "POST") {
             deleteDraft(draftKey);
-            decisionCycle.resolve({ feedback: "", annotations: [], exit: true });
+            lastDecision = 'exited';
+            resolveAndCycle(decisionCycle, { feedback: "", annotations: [], exit: true }, origin);
             return Response.json({ ok: true });
           }
 
           // API: Approve the annotation session (review-gate UX, #570)
           if (url.pathname === "/api/approve" && req.method === "POST") {
             deleteDraft(draftKey);
-            decisionCycle.resolve({ feedback: "", annotations: [], approved: true });
+            lastDecision = 'approved';
+            resolveAndCycle(decisionCycle, { feedback: "", annotations: [], approved: true }, origin);
             return Response.json({ ok: true });
           }
 
@@ -313,6 +317,7 @@ export async function createAnnotateSession(
               };
 
               deleteDraft(draftKey);
+              lastDecision = 'feedback';
               const resubmit = resolveAndCycle(decisionCycle, {
                 feedback: body.feedback || "",
                 annotations: body.annotations || [],
@@ -342,16 +347,19 @@ export async function createAnnotateSession(
 
   function handleUpdateContent(newMarkdown: string, newRawHtml?: string) {
     markdown = newMarkdown;
+    lastDecision = null;
     if (newRawHtml !== undefined) rawHtml = newRawHtml;
-    const historyResult = saveToHistory(project, slug, newMarkdown);
-    previousPlan = historyResult.version > 1
-      ? getPlanVersion(project, slug, historyResult.version - 1)
-      : null;
-    versionInfo = {
-      version: historyResult.version,
-      totalVersions: getVersionCount(project, slug),
-      project,
-    };
+    if (isFileBased && newMarkdown.trim()) {
+      const historyResult = saveToHistory(project, slug, newMarkdown);
+      previousPlan = historyResult.version > 1
+        ? getPlanVersion(project, slug, historyResult.version - 1)
+        : null;
+      versionInfo = {
+        version: historyResult.version,
+        totalVersions: getVersionCount(project, slug),
+        project,
+      };
+    }
     externalAnnotations.clearAll();
     deleteDraft(draftKey);
     draftKey = contentHash(newMarkdown);
@@ -369,7 +377,7 @@ export async function createAnnotateSession(
       externalAnnotations.dispose();
     },
     getSnapshot: isFileBased ? () => ({ plan: markdown, filePath, mode, sourceInfo }) : undefined,
-    updateContent: isFileBased ? handleUpdateContent : undefined,
+    updateContent: handleUpdateContent,
   };
 }
 

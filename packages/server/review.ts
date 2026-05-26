@@ -509,6 +509,7 @@ export async function createReviewSession(
   // Decision promise
   type ReviewDecisionResult = { approved: boolean; feedback: string; annotations: unknown[]; agentSwitch?: string; exit?: boolean };
   const decisionCycle = createDecisionCycle<ReviewDecisionResult>();
+  let lastDecision: 'approved' | 'feedback' | 'exited' | null = null;
 
   const handleRequest: SessionRequestHandler = async (req, url, context) => {
 
@@ -562,6 +563,7 @@ export async function createReviewSession(
               ...(isPRMode && initialViewedFiles.length > 0 && { viewedFiles: initialViewedFiles }),
               ...(currentError && { error: currentError }),
               serverConfig: getServerConfig(gitUser),
+              lastDecision,
             });
           }
 
@@ -1040,7 +1042,8 @@ export async function createReviewSession(
           // API: Exit review session without feedback
           if (url.pathname === "/api/exit" && req.method === "POST") {
             deleteDraft(draftKey);
-            decisionCycle.resolve({ approved: false, feedback: "", annotations: [], exit: true });
+            lastDecision = 'exited';
+            resolveAndCycle(decisionCycle, { approved: false, feedback: "", annotations: [], exit: true }, origin);
             return Response.json({ ok: true });
           }
 
@@ -1056,6 +1059,7 @@ export async function createReviewSession(
 
               deleteDraft(draftKey);
               const isApproved = body.approved ?? false;
+              lastDecision = isApproved ? 'approved' : 'feedback';
               const result = { approved: isApproved, feedback: body.feedback || "", annotations: body.annotations || [], agentSwitch: body.agentSwitch };
               const resubmit = resolveAndCycle(decisionCycle, result, origin);
 
@@ -1185,6 +1189,7 @@ export async function createReviewSession(
     }
     currentPatch = patch;
     currentGitRef = label;
+    lastDecision = null;
     externalAnnotations.clearAll();
     deleteDraft(draftKey);
     draftKey = contentHash(patch);
