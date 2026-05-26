@@ -362,7 +362,7 @@ export async function createAnnotateSession(
     }
     externalAnnotations.clearAll();
     deleteDraft(draftKey);
-    draftKey = contentHash(newMarkdown);
+    draftKey = contentHash(renderHtml && rawHtml ? rawHtml : newMarkdown);
     options.sessionEvents?.publishEvent("session-revision", {
       plan: newMarkdown, previousPlan, versionInfo,
       ...(rawHtml !== undefined && { rawHtml }),

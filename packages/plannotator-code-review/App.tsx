@@ -330,10 +330,10 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
           storeApi.getState().selectAnnotation(null);
           storeApi.getState().setPendingSelection(null);
           setViewedFiles(prev => retainUnchangedViewedFiles(oldFiles, newFiles, prev));
+          setFeedbackSent(false);
+          setSubmitted(false);
+          setIsSendingFeedback(false);
         }
-        setFeedbackSent(false);
-        setSubmitted(false);
-        setIsSendingFeedback(false);
       }
     });
     return unsubscribe;

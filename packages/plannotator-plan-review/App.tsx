@@ -599,23 +599,20 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
     const unsubscribe = subscribeToDaemonSessionFamily("session-revision", (msg) => {
       if (!msg.payload) return;
       const revision = msg.payload as { plan?: string; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; rawHtml?: string };
-      if (revision.plan !== undefined) {
-        const contentChanged = revision.plan !== markdownRef.current;
+      if (revision.plan !== undefined && revision.plan !== markdownRef.current) {
         if (revision.rawHtml !== undefined) {
           setRawHtml(revision.rawHtml);
           setRenderAs('html');
         }
-        if (contentChanged) {
-          setMarkdown(revision.plan);
-          if (revision.previousPlan !== undefined) setPreviousPlan(revision.previousPlan);
-          if (revision.versionInfo) setVersionInfo(revision.versionInfo);
-          setAnnotations([]);
-          setCodeAnnotations([]);
-          setGlobalAttachments([]);
-          setSelectedAnnotationId(null);
-          setSelectedCodeAnnotationId(null);
-          linkedDocHook.clearCache();
-        }
+        setMarkdown(revision.plan);
+        if (revision.previousPlan !== undefined) setPreviousPlan(revision.previousPlan);
+        if (revision.versionInfo) setVersionInfo(revision.versionInfo);
+        setAnnotations([]);
+        setCodeAnnotations([]);
+        setGlobalAttachments([]);
+        setSelectedAnnotationId(null);
+        setSelectedCodeAnnotationId(null);
+        linkedDocHook.clearCache();
         setAwaitingResubmission(false);
         setFeedbackSent(false);
         setSubmitted(null);
@@ -1823,7 +1820,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
           gate={gate}
           isSharedSession={isSharedSession}
           origin={origin}
-          submitted={!!submitted || awaitingResubmission}
+          submitted={!!submitted || awaitingResubmission || feedbackSent}
           isSubmitting={isSubmitting}
           isExiting={isExiting}
           isPanelOpen={isPanelOpen}

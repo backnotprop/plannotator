@@ -27,7 +27,7 @@ This works for all three session types:
 - Exit works exactly as before
 - Auto-close works exactly as before
 - Sessions opened without an agent (standalone, demo) behave exactly as before — deny is still final
-- The session expires after 10 minutes if the agent doesn't resubmit
+- Sessions do not expire — they persist until daemon restart
 
 ---
 
@@ -43,12 +43,10 @@ The deny-resubmit cycle is the core feedback loop of plan-driven development. Ma
 
 ### New Session Status: `awaiting-resubmission`
 
-A non-terminal status in the daemon session lifecycle. The session stays alive — its HTTP handler keeps serving requests, the WebSocket connection stays open, and the frontend connection persists. After 10 minutes without resubmission, the session expires normally.
+A non-terminal status in the daemon session lifecycle. The session stays alive — its HTTP handler keeps serving requests, the WebSocket connection stays open, and the frontend connection persists. Sessions do not expire; they persist until daemon restart.
 
 ```
-active → awaiting-resubmission → active → completed
-                ↓
-              expired (10 min TTL)
+active → awaiting-resubmission → active → awaiting-resubmission → ...
 ```
 
 ### Decision Cycle Model
@@ -129,7 +127,7 @@ The CLI binary accepts `awaiting-resubmission` as a valid non-error status. It o
 2. The agent resubmits → same session updates in place
 3. Works for plan, code review, and file-based annotate
 4. Matching is by project+slug (plan), project+branch (review), or filepath (annotate)
-5. 10-minute timeout if the agent doesn't come back
+5. Sessions persist until daemon restart — no timeout
 6. Agent doesn't need to know — matching is server-side
 7. Shared `createDecisionCycle` helper eliminates duplication across three servers
 8. Frontend shows amber "waiting" banner with cancel option
@@ -146,7 +144,7 @@ The CLI binary accepts `awaiting-resubmission` as a valid non-error status. It o
 > It computes a match key (`plan:${project}:${slug}`) and searches for an `awaiting-resubmission` session with the same key.
 
 **3.** What happens if the agent changes the plan's heading when resubmitting?
-> Different heading → different slug → no match → new session. The old session expires after 10 minutes.
+> Different heading → different slug → no match → new session. The old session persists until daemon restart.
 
 **4.** Does the agent need to track session IDs or know about persistence?
 > No. The CLI binary runs fresh each time. Matching is entirely server-side.
@@ -161,4 +159,4 @@ The CLI binary accepts `awaiting-resubmission` as a valid non-error status. It o
 > It completes normally (no persistence). URL sources can't be refreshed, so no match key is set.
 
 **8.** How long does the session wait for the agent to resubmit?
-> 10 minutes. Then it expires via `cleanupExpired()`.
+> Indefinitely. Sessions persist until daemon restart — no timeout.

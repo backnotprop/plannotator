@@ -1191,6 +1191,7 @@ export async function createReviewSession(
     currentGitRef = label;
     lastDecision = null;
     externalAnnotations.clearAll();
+    editorAnnotations.clearAll();
     deleteDraft(draftKey);
     draftKey = contentHash(patch);
     options.sessionEvents?.publishEvent("session-revision", { rawPatch: patch, gitRef: label });

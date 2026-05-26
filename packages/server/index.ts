@@ -604,6 +604,7 @@ export async function createPlannotatorSession(
       project,
     };
     externalAnnotations?.clearAll();
+    editorAnnotations?.clearAll();
     deleteDraft(draftKey);
     draftKey = contentHash(newPlan);
     options.sessionEvents?.publishEvent("session-revision", { plan: newPlan, previousPlan, versionInfo });

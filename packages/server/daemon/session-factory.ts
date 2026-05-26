@@ -614,6 +614,9 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
       const existing = findMatchingSession(context.store, matchKey);
       if (existing && existing.session.updateContent) {
         existing.session.updateContent(plan);
+        if (context.endpoint.isRemote && sharingEnabled) {
+          existing.record.remoteShare = await createRemoteShareNotice(plan, shareBaseUrl, "review the plan", "plan only").catch(() => undefined);
+        }
         context.store.reactivate(existing.record.id);
         return existing.record;
       }
@@ -703,6 +706,9 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
           if (existing.session.updateContent) {
             existing.session.updateContent(input.markdown, input.rawHtml);
           }
+          if (context.endpoint.isRemote && sharingEnabled && input.markdown) {
+            existing.record.remoteShare = await createRemoteShareNotice(input.markdown, shareBaseUrl, "annotate", "document only").catch(() => undefined);
+          }
           context.store.reactivate(existing.record.id);
           return existing.record;
         }
@@ -755,6 +761,9 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
           input.prMetadata ? input.rawPatch : undefined,
           input.prMetadata ? input.gitRef : undefined,
         );
+        if (context.endpoint.isRemote && sharingEnabled) {
+          existingReview.record.remoteShare = await createRemoteShareNotice(input.rawPatch, shareBaseUrl, "review changes", "diff only").catch(() => undefined);
+        }
         context.store.reactivate(existingReview.record.id);
         return existingReview.record;
       }

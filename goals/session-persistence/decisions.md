@@ -141,4 +141,7 @@ Non-terminal sessions (`awaiting-resubmission`, `idle`, `active` after first dec
 | `onCancel` never wired on awaiting banner | nit | Deferred |
 | Session collisions across same-repo worktrees | nit | Accepted — local app, one daemon per machine |
 | Annotate slug doesn't update on heading change | nit | Accepted — cosmetic, versions work correctly |
+| VS Code editor annotations not cleared on revision | P2 | Fixed — `editorAnnotations.clearAll()` added to `handleUpdateContent` in plan and review servers |
+| PR diff scope/baseline not reset on reuse | P2 | Deferred — part of the broader PR metadata staleness issue. `originalPRPatch`, `currentPRDiffScope` not updated in `handleUpdateContent`. |
+| Remote share link stale on session reuse | P2 | Fixed — all three reuse paths regenerate `remoteShare` before returning the record |
 | `sessionRefs` lazy cleanup | nit | Accepted — negligible memory |
