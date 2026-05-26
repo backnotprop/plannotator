@@ -1213,8 +1213,8 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
       if (showExport || showImport || showFeedbackPrompt || showClaudeCodeWarning ||
           showExitWarning || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
 
-      // Don't intercept if already submitted, submitting, or exiting
-      if (submitted || isSubmitting || isExiting || goalSetupAction.isSubmitting) return;
+      // Don't intercept if already submitted, submitting, exiting, or awaiting resubmission
+      if (submitted || isSubmitting || isExiting || awaitingResubmission || goalSetupAction.isSubmitting) return;
 
       // Don't intercept in demo/share mode (no API)
       if (!isApiMode) return;
@@ -1792,7 +1792,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
           gate={gate}
           isSharedSession={isSharedSession}
           origin={origin}
-          submitted={!!submitted}
+          submitted={!!submitted || awaitingResubmission}
           isSubmitting={isSubmitting}
           isExiting={isExiting}
           isPanelOpen={isPanelOpen}

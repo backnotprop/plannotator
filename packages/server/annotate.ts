@@ -141,7 +141,7 @@ export async function createAnnotateSession(
     registerSnapshotProvider: (provider) =>
       options.sessionEvents?.registerSnapshotProvider("external-annotations", provider),
   });
-  options.sessionEvents?.registerSnapshotProvider("session-revision", () => null);
+  options.sessionEvents?.registerSnapshotProvider("session-revision", () => ({ plan: markdown, previousPlan, versionInfo }));
 
   // Detect repo info (cached for this session)
   const repoInfo = await getRepoInfo(cwd);
@@ -344,6 +344,7 @@ export async function createAnnotateSession(
       totalVersions: getVersionCount(project, slug),
       project,
     };
+    externalAnnotations.clearAll();
     deleteDraft(draftKey);
     draftKey = contentHash(newMarkdown);
     options.sessionEvents?.publishEvent("session-revision", { plan: newMarkdown, previousPlan, versionInfo });

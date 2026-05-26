@@ -165,6 +165,9 @@ function registerPersistentDecision(
   return cleanup;
 }
 
+// Review sessions stay alive (idle) after every decision — including approve/exit.
+// Cleanup is via TTL expiry, not terminal completion. This is intentional: the user
+// keeps the session as a diff viewer, and the agent can reactivate it later.
 function registerReviewDecision(
   context: DaemonFetchContext,
   id: string,

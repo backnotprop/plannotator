@@ -178,7 +178,7 @@ export async function createPlannotatorSession(
     registerSnapshotProvider: (provider) =>
       options.sessionEvents?.registerSnapshotProvider("external-annotations", provider),
   }) : null;
-  if (mode !== "archive") options.sessionEvents?.registerSnapshotProvider("session-revision", () => null);
+  if (mode !== "archive") options.sessionEvents?.registerSnapshotProvider("session-revision", () => ({ plan, previousPlan, versionInfo }));
   const slug = mode !== "archive" ? generateSlug(plan) : "";
 
   // Lazy cache for in-session archive browsing (plan review sidebar tab)
@@ -599,6 +599,7 @@ export async function createPlannotatorSession(
       totalVersions: getVersionCount(project, slug),
       project,
     };
+    externalAnnotations?.clearAll();
     deleteDraft(draftKey);
     draftKey = contentHash(newPlan);
     options.sessionEvents?.publishEvent("session-revision", { plan: newPlan, previousPlan, versionInfo });

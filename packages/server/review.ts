@@ -174,7 +174,7 @@ export async function createReviewSession(
     registerSnapshotProvider: (provider) =>
       options.sessionEvents?.registerSnapshotProvider("external-annotations", provider),
   });
-  options.sessionEvents?.registerSnapshotProvider("session-revision", () => null);
+  options.sessionEvents?.registerSnapshotProvider("session-revision", () => ({ rawPatch: currentPatch, gitRef: currentGitRef }));
 
   const tour = createTourSession();
 
@@ -1185,6 +1185,7 @@ export async function createReviewSession(
     }
     currentPatch = patch;
     currentGitRef = label;
+    externalAnnotations.clearAll();
     deleteDraft(draftKey);
     draftKey = contentHash(patch);
     options.sessionEvents?.publishEvent("session-revision", { rawPatch: patch, gitRef: label });
