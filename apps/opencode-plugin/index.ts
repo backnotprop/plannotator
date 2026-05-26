@@ -17,8 +17,8 @@
 
 import { type Plugin, tool } from "@opencode-ai/plugin";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
-import { homedir } from "os";
 import path from "path";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 
 // OpenCode's @hono/node-server patches global.Response with a polyfill that
 // Bun.serve() doesn't accept (it checks native type tags, not instanceof).
@@ -135,7 +135,7 @@ interface PlanEdit {
  * the agent never sees or touches this file directly.
  */
 export function getPlanBackingPath(project: string): string {
-  return path.join(homedir(), ".plannotator", "active", project, "_active-plan.md");
+  return path.join(getPlannotatorDataDir(), "active", project, "_active-plan.md");
 }
 
 /**

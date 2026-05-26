@@ -7,7 +7,17 @@ import { createCookieProxy } from "./cookie-proxy";
 import { PanelManager } from "./panel-manager";
 import { setActiveProxyPort, registerEditorAnnotationCommand } from "./editor-annotations";
 
-const IPC_REGISTRY = path.join(os.homedir(), ".plannotator", "vscode-ipc.json");
+function getPlannotatorDataDir(): string {
+  const envDir = process.env.PLANNOTATOR_DATA_DIR?.trim();
+  if (!envDir) return path.join(os.homedir(), ".plannotator");
+  if (envDir === "~") return os.homedir();
+  if (envDir.startsWith("~/") || envDir.startsWith("~\\")) {
+    return path.join(os.homedir(), envDir.slice(2));
+  }
+  return envDir;
+}
+
+const IPC_REGISTRY = path.join(getPlannotatorDataDir(), "vscode-ipc.json");
 
 function readIpcRegistry(): Record<string, number> {
   try {
