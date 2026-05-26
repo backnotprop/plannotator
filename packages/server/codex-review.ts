@@ -16,13 +16,14 @@ import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 // Debug log — only active when PLANNOTATOR_DEBUG is set
 // ---------------------------------------------------------------------------
 
+const DATA_DIR = getPlannotatorDataDir();
 const DEBUG_ENABLED = !!process.env.PLANNOTATOR_DEBUG;
-const DEBUG_LOG_PATH = join(getPlannotatorDataDir(), "codex-review-debug.log");
+const DEBUG_LOG_PATH = join(DATA_DIR, "codex-review-debug.log");
 
 async function debugLog(label: string, data?: unknown): Promise<void> {
   if (!DEBUG_ENABLED) return;
   try {
-    await mkdir(getPlannotatorDataDir(), { recursive: true });
+    await mkdir(DATA_DIR, { recursive: true });
     const timestamp = new Date().toISOString();
     const line = data !== undefined
       ? `[${timestamp}] ${label}: ${typeof data === "string" ? data : JSON.stringify(data, null, 2)}\n`
@@ -79,7 +80,7 @@ const CODEX_REVIEW_SCHEMA = JSON.stringify({
   additionalProperties: false,
 });
 
-const SCHEMA_DIR = getPlannotatorDataDir();
+const SCHEMA_DIR = DATA_DIR;
 const SCHEMA_FILE = join(SCHEMA_DIR, "codex-review-schema.json");
 let schemaMaterialized = false;
 

@@ -193,8 +193,9 @@ verify_attestation=0
 # Layer 3: config file (lowest precedence of the opt-in sources).
 # Crude grep against a flat boolean — PlannotatorConfig has no nested
 # verifyAttestation, so false positives are not a concern.
-if [ -f "$HOME/.plannotator/config.json" ]; then
-    if grep -q '"verifyAttestation"[[:space:]]*:[[:space:]]*true' "$HOME/.plannotator/config.json" 2>/dev/null; then
+_config_dir="${PLANNOTATOR_DATA_DIR:-$HOME/.plannotator}"
+if [ -f "$_config_dir/config.json" ]; then
+    if grep -q '"verifyAttestation"[[:space:]]*:[[:space:]]*true' "$_config_dir/config.json" 2>/dev/null; then
         verify_attestation=1
     fi
 fi

@@ -1324,7 +1324,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                         <div>
                           <div className="text-sm font-medium">Save Plans</div>
                           <div className="text-xs text-muted-foreground">
-                            Auto-save plans to ~/.plannotator/plans/
+                            Auto-save plans to the default data directory
                           </div>
                         </div>
                         <button
@@ -1350,7 +1350,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                             type="text"
                             value={planSave.customPath || ''}
                             onChange={(e) => handlePlanSaveChange({ customPath: e.target.value || null })}
-                            placeholder="~/.plannotator/plans/"
+                            placeholder="Leave empty for default"
                             className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
                           />
                           <div className="text-[10px] text-muted-foreground/70">

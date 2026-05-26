@@ -93,7 +93,7 @@ Write-Host "Installing plannotator $latestTag..."
 $verifyAttestationResolved = $false
 
 # Layer 3: config file (lowest precedence of the opt-in sources).
-$configPath = "$env:USERPROFILE\.plannotator\config.json"
+$configPath = if ($env:PLANNOTATOR_DATA_DIR) { "$env:PLANNOTATOR_DATA_DIR\config.json" } else { "$env:USERPROFILE\.plannotator\config.json" }
 if (Test-Path $configPath) {
     try {
         $cfg = Get-Content $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop

@@ -175,14 +175,15 @@ describe("formatWithLineNumbers", () => {
 // ── getPlanBackingPath ─────────────────────────────────────────────────────
 
 describe("getPlanBackingPath", () => {
-  test("returns path inside ~/.plannotator/active/{project}/_active-plan.md", () => {
+  test("returns path inside data dir active/{project}/_active-plan.md", () => {
     const result = getPlanBackingPath("myproject");
-    expect(result).toBe(path.join(homedir(), ".plannotator", "active", "myproject", "_active-plan.md"));
+    const dataDir = process.env.PLANNOTATOR_DATA_DIR || path.join(homedir(), ".plannotator");
+    expect(result).toBe(path.join(dataDir, "active", "myproject", "_active-plan.md"));
   });
 
   test("uses the provided project name as the directory segment", () => {
     const result = getPlanBackingPath("some-project");
-    expect(result).toContain(path.join(".plannotator", "active", "some-project"));
+    expect(result).toContain(path.join("active", "some-project"));
     expect(result).toContain("_active-plan.md");
   });
 });
