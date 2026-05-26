@@ -1040,7 +1040,7 @@ export async function createReviewSession(
           // API: Exit review session without feedback
           if (url.pathname === "/api/exit" && req.method === "POST") {
             deleteDraft(draftKey);
-            resolveAndCycle(decisionCycle, { approved: false, feedback: "", annotations: [], exit: true }, origin);
+            decisionCycle.resolve({ approved: false, feedback: "", annotations: [], exit: true });
             return Response.json({ ok: true });
           }
 

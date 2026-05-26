@@ -37,11 +37,15 @@ Tracking decisions made during PR #770 review and triage (2026-05-23).
 
 ### Cross-Cutting
 
+- Every annotate session lives forever once created — single file, folder, last message, URL. No one-shot sessions. The tab stays open and interactive after feedback is sent. There are no exceptions.
+- Legacy tab mode is the only case where the tab closes after feedback — that's the full-screen overlay with countdown, and it's the expected legacy behavior.
+- Sessions do not time out. A session, once created, lives until the daemon restarts. We do not kill sessions on a countdown. If a user submits feedback and the agent never comes back, that's for the user to see and decide — not for us to silently clean up.
+- We should collect the right data (timestamps, feedback-sent-at, last-agent-contact) so we can eventually show the user: "you submitted feedback but it never came back." But that's a future UI concern, not a reason to expire sessions.
 - When a revision arrives (plan, annotate, or review), any external annotations (lint results, agent comments) from the previous version must be cleared. They reference old content with wrong positions.
 - `waitForResult` must return immediately if the result is already available — for both `idle` and `awaiting-resubmission` sessions. No consistency gaps.
 - Plan/annotate actions (Approve, Deny, Send Feedback) must be disabled while awaiting resubmission. The agent already has the feedback — submitting again against stale content is wrong. Code review already handles this (buttons hidden when idle).
 - Late WebSocket subscribers (tab refresh during awaiting) should receive the current state. The snapshot provider for `session-revision` must return the latest content, not null.
-- HTML and markdown annotation should go through the same functional pipeline. The `--render-html` path diverges from markdown in a way that `updateContent` can't reach. This is an architectural gap, not a quick fix.
+- HTML and markdown annotation should go through the same functional pipeline. The `--render-html` path diverges from markdown in a way that `updateContent` can't reach — `updateContent` must also update `rawHtml` for HTML sessions.
 - PR review sessions that get reactivated need updated PR metadata (head SHA, etc.). The current implementation serves the correct diff but posts platform actions against the stale commit. Needs a bigger fix to make PR metadata updatable inside the session closure.
 - Annotate history slug is computed once from the initial heading and doesn't update if the heading changes. Acceptable — versions stay intact, just filed under the old name on disk.
 - Session collisions across worktrees of the same repo are not a real concern. This is a local app — one daemon per machine.

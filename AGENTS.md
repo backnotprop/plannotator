@@ -253,9 +253,11 @@ Runtime live updates for daemon lifecycle events, external annotations, agent jo
 
 ### Session Persistence and Resubmission
 
-When a user denies a plan (or sends feedback on a review/annotation), the session enters `awaiting-resubmission` status instead of completing. The session's HTTP handler stays alive. When the agent replans and submits again via `POST /daemon/sessions`, the daemon matches the new submission to the existing session by a match key (`plan:project:slug` for plans, `review:project:branch` for reviews, `annotate:filepath` for annotations). The session reactivates in place — the frontend receives a `session-revision` event via WebSocket with the updated content.
+When a user denies a plan (or sends feedback on a review/annotation), the session enters `awaiting-resubmission` status instead of completing. The session's HTTP handler stays alive. When the agent replans and submits again via `POST /daemon/sessions`, the daemon matches the new submission to the existing session by a match key (`plan:project:slug` for plans, `review:project:branch` for reviews, `annotate:project:filePath` for single-file annotations). The session reactivates in place — the frontend receives a `session-revision` event via WebSocket with the updated content.
 
-**Session statuses:** `active` → `awaiting-resubmission` (on deny) → `active` (on resubmit) → `completed` (on approve). The `awaiting-resubmission` status is non-terminal — the session stays routable and its handler keeps serving requests. If the agent doesn't resubmit within 10 minutes, the session expires.
+**Session statuses (plan/annotate):** `active` → `awaiting-resubmission` (on deny) → `active` (on resubmit) → `completed` (on approve). The `awaiting-resubmission` status is non-terminal — the session stays routable and its handler keeps serving requests.
+
+**Session statuses (code review):** `active` → `idle` (on feedback/approve/exit) → `active` (on agent resubmit) → `idle` ... repeating. Review sessions never complete — they stay alive as diff viewers and expire via TTL. The `idle` status is non-terminal — the session is fully interactive but no agent is blocking on it.
 
 **Event families:** `daemon`, `external-annotations`, `agent-jobs`, `session-revision`.
 
@@ -328,7 +330,9 @@ When a user denies a plan (or sends feedback on a review/annotation), the sessio
 
 | Endpoint              | Method | Purpose                                    |
 | --------------------- | ------ | ------------------------------------------ |
-| `/api/plan`           | GET    | Returns `{ plan, origin, mode: "annotate", filePath, sourceInfo?, gate, renderAs?, rawHtml? }` |
+| `/api/plan`           | GET    | Returns `{ plan, origin, mode: "annotate", filePath, sourceInfo?, gate, renderAs?, rawHtml?, previousPlan, versionInfo }` |
+| `/api/plan/version`   | GET    | Fetch specific version (`?v=N`) — single-file annotate only |
+| `/api/plan/versions`  | GET    | List all versions — single-file annotate only |
 | `/api/feedback`       | POST   | Submit annotations (body: feedback, annotations) |
 | `/api/approve`        | POST   | Approve without feedback (review-gate UX, `--gate`) |
 | `/api/exit`           | POST   | Close session without feedback |

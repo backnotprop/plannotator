@@ -31,6 +31,10 @@ export type SessionRequestHandler = (
 /**
  * Manages a resolvable decision cycle for session servers.
  * Each deny/feedback starts a new cycle; approve/exit is final.
+ *
+ * Invariant: promise() returns a new Promise object after startNew().
+ * The decision loop in session-factory uses reference identity to detect
+ * when no new cycle was started (same promise === loop should exit).
  */
 export function createDecisionCycle<T>() {
   let current: { promise: Promise<T>; resolve: (result: T) => void };

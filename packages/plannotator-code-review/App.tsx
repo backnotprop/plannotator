@@ -73,7 +73,8 @@ import {
   REVIEW_ALL_FILES_PANEL_ID,
   REVIEW_CODE_NAV_PANEL_ID,
 } from './dock/reviewPanelTypes';
-import { retainUnchangedViewedFiles, type DiffFile } from './types';
+import type { DiffFile } from './types';
+import { retainUnchangedViewedFiles } from './utils/diffFiles';
 import type { DiffOption, WorktreeInfo, GitContext } from '@plannotator/shared/types';
 import type { PRMetadata } from '@plannotator/shared/pr-types';
 import type { PRDiffScope, PRDiffScopeOption, PRStackInfo, PRStackTree } from '@plannotator/shared/pr-stack';
