@@ -39,21 +39,28 @@ Tracking decisions made during PR #770 review and triage (2026-05-23).
 
 ### Decision 1: Code review sessions are long-lived
 
-**Status:** Decided
+**Status:** Implemented
 
-Code review sessions no longer end after feedback. The session stays alive indefinitely. Memory/compute cost is negligible — each session is a JS closure in a Map, a few KB, zero CPU when idle.
+Code review sessions use a new `"idle"` daemon status. The flow:
 
-The "awaiting-resubmission" persistence model (suspend → match → reactivate cycle) is being removed from code review. It doesn't fit — a diff is a moving target, not an iterative document. Instead:
+```
+agent → plannotator review (CLI opens, blocks) → session active
+session → user annotates → sends feedback → submit (CLI closes)
+session → idle (user can browse and annotate, but no submit buttons — nobody is listening)
+agent → plannotator review again (CLI opens) → reactivates the idle session
+(repeats indefinitely)
+```
 
-- Feedback is sent (annotations flush, agent unblocks).
-- Session stays open. User can keep viewing the diff.
-- If diffs change (agent makes code changes, or a new review is triggered from the same directory), the user is notified and the session updates.
-- If an agent initiates a new code review from the same directory, it should open in the existing session rather than creating a new one.
+Key behaviors:
+- After feedback: session transitions to `idle` via `store.idle()`. The HTTP handler stays alive, resources stay alive. The user can browse the diff and make annotations, but Send Feedback / Approve buttons are hidden (no agent to receive them).
+- On reactivation: agent triggers `plannotator review` from the same directory/branch. The daemon finds the idle session by matchKey, pushes the new diff via `updateContent`, and calls `store.reactivate()`. The frontend receives a `session-revision` WebSocket event, updates the diff, and re-shows the submit buttons.
+- Infinite cycle: this repeats as many times as needed. No counter, no limit.
+- Cleanup: idle sessions use the original session TTL (hours, not the 10-minute awaiting TTL). They expire via normal TTL cleanup or daemon restart.
 
-**Open questions:**
-- Notification mechanism when diffs change under the session (file watcher? agent-triggered event? manual refresh?)
-- Where does subsequent feedback go if the agent isn't listening? (Hook-based push? Queued for next agent invocation?)
-- Cleanup strategy for long-lived sessions (daemon restart? idle timeout of hours? explicit close only?)
+**Resolved questions:**
+- Notification when diffs change: agent-triggered via `session-revision` event. No file watcher (user can manually switch diff type to refresh).
+- Subsequent feedback without agent: not possible — submit buttons are hidden while idle.
+- Cleanup: normal TTL expiry.
 
 ### Decision 2: Annotate sessions keep persistence
 
@@ -67,14 +74,15 @@ Persistence stays as-is for annotate. The awaiting-resubmission model fits becau
 
 ### Decision 3: "Feedback sent" state should be calm, not loading
 
-**Status:** Decided
+**Status:** Implemented (code review), pending (plan/annotate)
 
-After sending feedback (plan deny, annotate, or code review), the UI should NOT show a spinner or "waiting" state. The session should feel settled. The user's annotations were sent. The content is still readable. The user can scroll around and review what they wrote.
+**Code review:** After sending feedback, the `CompletionBanner` shows a green checkmark with "Feedback sent / Your annotations were delivered to the agent." The banner persists until the agent reactivates (no auto-dismiss). Submit buttons disappear. The session stays browsable.
 
-If a new version arrives (plan/annotate resubmission, or diff change in code review), the content refreshes and the session comes back to life.
+**Plan/annotate:** Still uses the amber spinner "Waiting for agent to revise..." variant. This should eventually be made calmer, but it's lower priority because plan/annotate persistence works correctly (agent WILL resubmit).
 
 **What this means for the current code:**
-- Replace the amber spinner `CompletionBanner` awaiting variant with a calm confirmation
+- Code review uses `'feedback-sent'` CompletionBanner variant (green checkmark, not spinner)
+- Plan/annotate still uses `'awaiting'` variant (amber spinner) — acceptable for now
 - For plan/annotate: actions should be disabled until the revision arrives (the agent already has the feedback and is working — re-submitting before the revision arrives doesn't make sense)
 - For code review: different model, TBD based on Decision 1
 
