@@ -173,10 +173,13 @@ function registerReviewDecision(
   const { disposed, cleanup } = createDecisionScope(session.dispose);
 
   const decisionLoop = async () => {
+    let lastPromise: Promise<SessionDecisionResult> | null = null;
     while (true) {
-      const result = await Promise.race([session.waitForDecision(), disposed]);
-      const record = context.store.idle(id, result);
-      if (!record || record.status !== "idle") return;
+      const currentPromise = session.waitForDecision();
+      if (currentPromise === lastPromise) return;
+      lastPromise = currentPromise;
+      const result = await Promise.race([currentPromise, disposed]);
+      context.store.idle(id, result);
     }
   };
 
@@ -685,8 +688,8 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
 
     if (request.action === "annotate" || request.action === "annotate-last") {
       const input = await resolveAnnotateInput(request, cwd, request.action);
-      const isFileBased = input.mode === "annotate" || input.mode === "annotate-folder";
-      const matchKey = isFileBased ? `annotate:${input.filePath}` : undefined;
+      const isSingleFile = input.mode === "annotate";
+      const matchKey = isSingleFile ? `annotate:${input.filePath}` : undefined;
 
       if (matchKey) {
         const existing = findMatchingSession(context.store, matchKey);
@@ -723,7 +726,7 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
         matchKey,
         ttlMs,
         handleRequest: session.handleRequest,
-        dispose: isFileBased
+        dispose: isSingleFile
           ? registerPersistentDecision(context, id, session)
           : registerSessionDecision(context, id, () => session.waitForDecision(), () => session.dispose(), (result) => ({
               ...result, filePath: input.filePath, mode: input.mode,

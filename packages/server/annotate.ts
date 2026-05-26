@@ -146,8 +146,8 @@ export async function createAnnotateSession(
   // Detect repo info (cached for this session)
   const repoInfo = await getRepoInfo(cwd);
 
-  // Version history (file-based modes only)
-  const isFileBased = mode === "annotate" || mode === "annotate-folder";
+  // Version history (single-file annotate only — folders have no single document to track)
+  const isFileBased = mode === "annotate";
   const project = isFileBased ? ((await detectProjectName(cwd)) ?? "_unknown") : "";
   const slug = isFileBased ? generateSlug(markdown) : "";
   let previousPlan: string | null = null;
