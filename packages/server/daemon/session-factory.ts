@@ -689,7 +689,7 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
     if (request.action === "annotate" || request.action === "annotate-last") {
       const input = await resolveAnnotateInput(request, cwd, request.action);
       const isSingleFile = input.mode === "annotate";
-      const matchKey = isSingleFile ? `annotate:${input.filePath}` : undefined;
+      const matchKey = isSingleFile ? `annotate:${project}:${input.filePath}` : undefined;
 
       if (matchKey) {
         const existing = findMatchingSession(context.store, matchKey);
