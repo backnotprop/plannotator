@@ -109,8 +109,12 @@ import path from "path";
 
 let daemonShellHtmlContentPromise: Promise<string> | undefined;
 
+const DEV_FALLBACK_HTML = "<html><head><title>Plannotator</title></head><body><p>Frontend not built. Run <code>bun run --cwd apps/frontend build</code> first.</p></body></html>";
+
 function getDaemonShellHtmlContent(): Promise<string> {
-  daemonShellHtmlContentPromise ??= import("./daemon-shell-html").then((mod) => mod.loadDaemonShellHtml());
+  daemonShellHtmlContentPromise ??= import("./daemon-shell-html")
+    .then((mod) => mod.loadDaemonShellHtml())
+    .catch(() => DEV_FALLBACK_HTML);
   return daemonShellHtmlContentPromise;
 }
 

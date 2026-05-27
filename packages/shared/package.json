@@ -19,7 +19,6 @@
     "./project": "./project.ts",
     "./storage": "./storage.ts",
     "./draft": "./draft.ts",
-    "./integrations-common": "./integrations-common.ts",
     "./repo": "./repo.ts",
     "./reference-common": "./reference-common.ts",
     "./favicon": "./favicon.ts",

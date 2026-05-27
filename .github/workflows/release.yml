@@ -68,7 +68,6 @@ jobs:
 
       - name: Build UI
         run: |
-          bun run build:review
           bun run build:hook
 
       - name: Compile binaries (cross-compile all targets)
@@ -524,7 +523,6 @@ jobs:
 
       - name: Build packages
         run: |
-          bun run build:review
           bun run build:hook
           bun run build:opencode
           bun run build:pi

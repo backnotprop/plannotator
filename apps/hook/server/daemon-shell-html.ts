@@ -1,11 +1,6 @@
-import { existsSync, readFileSync } from "fs";
-import { resolve } from "path";
-
-const FRONTEND_DIST = resolve(import.meta.dir, "../../frontend/dist/index.html");
+// @ts-ignore — Bun text import; embedded in compiled binary at build time
+import shellHtml from "../../frontend/dist/index.html" with { type: "text" };
 
 export function loadDaemonShellHtml(): string {
-  if (existsSync(FRONTEND_DIST)) {
-    return readFileSync(FRONTEND_DIST, "utf-8");
-  }
-  return "<html><head><title>Plannotator</title></head><body><p>Frontend not built. Run <code>bun run --cwd apps/frontend build</code> first.</p></body></html>";
+  return shellHtml as unknown as string;
 }
