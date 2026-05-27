@@ -599,16 +599,13 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
         t.push({ id: 'ai', label: 'AI' });
       }
     }
+    t.push({ id: 'files', label: 'Files' });
     t.push({ id: 'shortcuts', label: 'Shortcuts' });
     if (mode === 'plan') {
       t.push({ id: 'hooks', label: 'Hooks' });
     }
     return t;
   }, [mode, aiProviders.length]);
-
-  const integrationTabs: { id: SettingsTab; label: string }[] = [
-    { id: 'files', label: 'Files' },
-  ];
 
   // Sync external open state
   useEffect(() => {
@@ -739,7 +736,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
             <div className="flex flex-col md:flex-row md:min-h-[420px] flex-1 min-h-0 overflow-hidden">
               {/* Mobile: horizontal tab bar */}
               <nav className="md:hidden flex overflow-x-auto border-b border-border px-2 py-1.5 gap-1 flex-shrink-0">
-                {[...mainTabs, ...integrationTabs].map(tab => (
+                {mainTabs.map(tab => (
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
@@ -771,29 +768,6 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                     </button>
                   ))}
                 </div>
-                {integrationTabs.length > 0 && (
-                  <>
-                    <div className="mx-2 my-2 border-t border-border/50" />
-                    <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">
-                      Integrations
-                    </div>
-                    <div className="space-y-0.5">
-                      {integrationTabs.map(tab => (
-                        <button
-                          key={tab.id}
-                          onClick={() => setActiveTab(tab.id)}
-                          className={`w-full text-left px-3 py-1.5 rounded text-sm transition-colors ${
-                            activeTab === tab.id
-                              ? 'bg-primary/10 text-primary font-medium'
-                              : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-                          }`}
-                        >
-                          {tab.label}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
               </nav>
 
               {/* Content — scrollable */}

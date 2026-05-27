@@ -713,7 +713,7 @@ describe("daemon HTTP router", () => {
     expect(html.indexOf("window.__PLANNOTATOR_API_BASE__")).toBeLessThan(html.indexOf("<body>"));
   });
 
-  test.each(["plan", "review", "annotate", "archive", "goal-setup"] as const)(
+  test.each(["plan", "review", "annotate", "goal-setup"] as const)(
     "serves the same frontend shell for %s session pages",
     async (mode) => {
       const store = new DaemonSessionStore({ now: () => 1_000 });

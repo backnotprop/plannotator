@@ -1,7 +1,7 @@
 /**
  * SidebarContainer — Shared sidebar shell
  *
- * Houses the Table of Contents, Version Browser, File Browser, and Archive Browser views.
+ * Houses the Table of Contents, Version Browser, and File Browser views.
  * Tab bar at top switches between them.
  */
 

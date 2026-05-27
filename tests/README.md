@@ -35,15 +35,6 @@ These scripts test integrations, releases, and provide utilities.
 
 Tests the installed `plannotator` binary to verify releases work correctly.
 
-**Bulk plan testing (Obsidian integration):**
-
-```bash
-./tests/manual/local/test-bulk-plans.sh    # Iterate through ~/.claude/plans/
-```
-
-Opens each `.md` file from `~/.claude/plans/` in Plannotator. Great for testing Obsidian integration with multiple
-plans.
-
 **OpenCode integration sandbox:**
 
 ```bash
@@ -75,14 +66,6 @@ Tips:
   instead of auto-opening a browser.
 - The validated workflow is: run the script in one terminal, then point Playwright at the printed session URL from a
   second terminal.
-
-**Obsidian utility:**
-
-```bash
-./tests/manual/local/fix-vault-links.sh /path/to/vault/plannotator
-```
-
-Adds Obsidian backlinks (`[[Plannotator Plans]]`) to existing plan files in your vault.
 
 ## SSH Remote Testing (`manual/ssh/`)
 

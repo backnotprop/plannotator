@@ -157,10 +157,10 @@ describe("DaemonSessionStore", () => {
     const store = new DaemonSessionStore({ idFactory: () => "s1", now: () => 1_000 });
     let disposed = false;
     store.create({
-      mode: "archive",
+      mode: "plan",
       url: "http://x/s/s1",
       project: "repo",
-      label: "archive",
+      label: "plan",
       ttlMs: 100,
       dispose: () => { disposed = true; },
     });

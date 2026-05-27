@@ -1,5 +1,5 @@
 /**
- * DocBadges — repo / branch / plan-diff / demo / archive / linked-doc badge cluster.
+ * DocBadges — repo / branch / plan-diff / demo / linked-doc badge cluster.
  *
  * Extracted from Viewer.tsx so the same markup can render in two places:
  *   - layout="column": original location at the top-left of the plan card (absolute)
