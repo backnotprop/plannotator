@@ -38,6 +38,7 @@ Tracking decisions made during PR #770 review and triage (2026-05-23).
 ### Architecture
 
 - The `plannotator` binary is the only server. There is one server, one frontend, many entry points.
+- The daemon starts on install and is always running. Every CLI command assumes a daemon exists and talks to it. No lazy startup, no fallback to local file reads. If the daemon isn't there, it's a bug in the install — not something the CLI works around.
 - The binary either starts a daemon or connects to one already running. The daemon serves the frontend. That's it.
 - Claude Code calls the binary directly via hooks. OpenCode, Pi, Codex, Copilot, and Gemini CLI call it via thin extension/plugin wrappers that spawn the binary as a subprocess.
 - Extensions and plugins have no server logic of their own. They translate "my host app wants to review a plan" into "shell out to the `plannotator` binary."

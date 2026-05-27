@@ -525,8 +525,10 @@ function resolvePluginCwd(request: Partial<PluginBaseRequest>): string {
   return cwd;
 }
 
-async function ensureDaemonClient(options: { pluginError?: boolean } = {}) {
-  const fail = options.pluginError ? emitPluginError : emitCommandError;
+async function ensureDaemonClient(options: { pluginError?: boolean; bestEffort?: boolean } = {}) {
+  const fail = options.bestEffort
+    ? (code: string, message: string) => { throw new Error(`${code}: ${message}`); }
+    : options.pluginError ? emitPluginError : emitCommandError;
   const existing = await discoverDaemon();
   if (existing.ok) return existing.client;
   if (existing.state && (existing.code === "incompatible" || existing.code === "unhealthy")) {
@@ -1127,13 +1129,11 @@ if (args[0] === "sessions") {
 
   let context: string | null = null;
   try {
-    const daemon = await discoverDaemon({ validateEnvironment: false });
-    if (daemon.ok) {
-      const data = await daemon.client.getJson("/daemon/improve-context") as { ok: boolean; context: string | null };
-      context = data.context;
-    }
+    const client = await ensureDaemonClient({ bestEffort: true });
+    const data = await client.getJson("/daemon/improve-context") as { ok: boolean; context: string | null };
+    context = data.context;
   } catch {
-    // Daemon unavailable or endpoint missing — silently pass through
+    // Daemon unavailable — silently pass through
   }
 
   if (!context) process.exit(0);

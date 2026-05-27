@@ -165,3 +165,19 @@ Scoped in `goals/performance/backlog/configstore-zustand-migration.md`.
 10+ raw `window.addEventListener('keydown', ...)` handlers across both app surfaces bypass the keyboard shortcut registry that was built in PR #652. These should be consolidated into the registry for consistent handling, conflict detection, and the help modal.
 
 Scoped in `goals/performance/backlog/global-keyboard-registry.md`.
+
+---
+
+## 14. Daemon starts on install
+
+**Priority:** High — blocks the "CLI is a dumb pipe" architecture
+**Size:** Medium
+
+The daemon must be running from the moment Plannotator is installed. Every CLI command assumes the daemon exists and talks to it. No lazy startup on first session creation, no local file fallbacks. If the daemon isn't running, it's a bug in the install — not something the CLI works around.
+
+Currently the daemon starts lazily when the first plan/review/annotate command runs. This means hooks that fire before any session (like `improve-context` on `EnterPlanMode`) have no daemon to talk to and silently lose functionality.
+
+**Scope:**
+- Install script (`scripts/install.sh`) runs `plannotator daemon start` after placing the binary
+- Plugin activation ensures daemon is running as a safety net
+- Daemon auto-restarts if it dies (or at minimum, any binary invocation re-starts it)
