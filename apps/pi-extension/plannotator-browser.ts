@@ -356,6 +356,29 @@ export async function startMarkdownAnnotationSession(
 	}, (sessionInfo) => notifySessionReady(ctx, sessionInfo));
 }
 
+export async function startAnnotationSessionFromArgs(
+	ctx: ExtensionContext,
+	rawArgs: string,
+	options: { gate?: boolean; renderHtml?: boolean } = {},
+): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean }>> {
+	if (!ctx.hasUI) {
+		throw new Error("Plannotator annotation browser is unavailable in this session.");
+	}
+
+	const binaryPath = getBinaryPath(["annotate"]);
+	return await startBinarySession(async (onSession, signal) => {
+		const response = await runPluginAnnotate(binaryPath, {
+			origin: "pi",
+			...sharingRequest(ctx),
+			args: rawArgs,
+			gate: options.gate,
+			renderHtml: options.renderHtml,
+		}, undefined, { onSession, signal });
+		if (!response.ok) throw new Error(response.error.message);
+		return response.result;
+	}, (sessionInfo) => notifySessionReady(ctx, sessionInfo));
+}
+
 export async function openLastMessageAnnotation(
 	ctx: ExtensionContext,
 	lastText: string,

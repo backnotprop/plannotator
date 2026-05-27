@@ -10,6 +10,7 @@ import {
 	openCodeReview,
 	openLastMessageAnnotation,
 	openMarkdownAnnotation,
+	startAnnotationSessionFromArgs,
 	startCodeReviewBrowserSession,
 	startLastMessageAnnotationSession,
 	startMarkdownAnnotationSession,
@@ -326,6 +327,7 @@ export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
 
 export {
 	getLastAssistantMessageText,
+	startAnnotationSessionFromArgs,
 	startCodeReviewBrowserSession,
 	startLastMessageAnnotationSession,
 	startMarkdownAnnotationSession,

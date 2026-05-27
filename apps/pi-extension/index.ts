@@ -17,7 +17,7 @@
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { resolve } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { Type } from "@earendil-works/pi-ai";
 import type {
@@ -31,11 +31,7 @@ import {
 	markCompletedSteps,
 	parseChecklist,
 } from "./generated/checklist.js";
-import { hasMarkdownFiles, resolveUserPath } from "./generated/resolve-file.js";
-import { FILE_BROWSER_EXCLUDED } from "./generated/reference-common.js";
-import { htmlToMarkdown } from "./generated/html-to-markdown.js";
-import { urlToMarkdown, isConvertedSource } from "./generated/url-to-markdown.js";
-import { loadConfig, resolveUseJina } from "./generated/config.js";
+import { loadConfig } from "./generated/config.js";
 import { readImprovementHook } from "./generated/improvement-hooks.js";
 import { composeImproveContext } from "./generated/pfm-reminder.js";
 import {
@@ -52,12 +48,11 @@ import {
 } from "./generated/prompts.js";
 import { parseAnnotateArgs } from "./generated/annotate-args.js";
 import { parseReviewArgs } from "./generated/review-args.js";
-import { resolveAtReference } from "./generated/at-reference.js";
 import {
 	getStartupErrorMessage,
+	startAnnotationSessionFromArgs,
 	startCodeReviewBrowserSession,
 	startLastMessageAnnotationSession,
-	startMarkdownAnnotationSession,
 	openPlanReviewBrowser,
 	registerPlannotatorEventListeners,
 } from "./plannotator-events.js";
@@ -471,115 +466,17 @@ export default function plannotator(pi: ExtensionAPI): void {
 	pi.registerCommand("plannotator-annotate", {
 		description: "Open markdown file or folder in annotation UI",
 		handler: async (args, ctx) => {
-			// #570: split --gate / --json from the path. --json is silently
-			// accepted (Pi writes back via sendUserMessage, not stdout).
-			// `rawFilePath` keeps any leading `@` for the literal-@ fallback
-			// (scoped-package-style names).
-			const { filePath, rawFilePath, gate, renderHtml: renderHtmlFlag } = parseAnnotateArgs(args ?? "");
+			const { filePath, gate, renderHtml: renderHtmlFlag } = parseAnnotateArgs(args ?? "");
 			if (!filePath) {
 				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.html | https://... | folder/> [--gate] [--json]", "error");
 				return;
-			}
-
-			let markdown: string;
-			let rawHtml: string | undefined;
-			let absolutePath: string;
-			let folderPath: string | undefined;
-			let mode: "annotate" | "annotate-folder" | undefined;
-			let sourceInfo: string | undefined;
-			let sourceConverted = false;
-			let isFolder = false;
-
-			// --- URL annotation ---
-			const isUrl = /^https?:\/\//i.test(filePath);
-
-			if (isUrl) {
-				const useJina = resolveUseJina(false, loadConfig());
-				ctx.ui.notify(`Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}...`, "info");
-				try {
-					const result = await urlToMarkdown(filePath, {
-						useJina,
-						jinaApiKey: process.env.JINA_API_KEY,
-					});
-					markdown = result.markdown;
-					sourceConverted = isConvertedSource(result.source);
-				} catch (err) {
-					ctx.ui.notify(`Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}`, "error");
-					return;
-				}
-				absolutePath = filePath;
-				sourceInfo = filePath;
-			} else {
-				// Pick the interpretation of the user input that actually exists:
-				// stripped form first (reference-mode primary), literal as fallback
-				// for scoped-package-style names. Falls back to the stripped form
-				// for the error message if neither exists.
-				const resolvedCandidate = resolveAtReference(rawFilePath, (c) => {
-					const abs = resolveUserPath(c, ctx.cwd);
-					return existsSync(abs);
-				});
-				if (resolvedCandidate === null) {
-					absolutePath = resolveUserPath(filePath, ctx.cwd);
-					ctx.ui.notify(`File not found: ${absolutePath}`, "error");
-					return;
-				}
-				absolutePath = resolveUserPath(resolvedCandidate, ctx.cwd);
-
-				try {
-					isFolder = statSync(absolutePath).isDirectory();
-				} catch {
-					ctx.ui.notify(`Cannot access: ${absolutePath}`, "error");
-					return;
-				}
-
-				if (isFolder) {
-					if (!hasMarkdownFiles(absolutePath, FILE_BROWSER_EXCLUDED, /\.(mdx?|html?)$/i)) {
-						ctx.ui.notify(`No markdown or HTML files found in ${absolutePath}`, "error");
-						return;
-					}
-					markdown = "";
-					folderPath = absolutePath;
-					mode = "annotate-folder";
-					ctx.ui.notify(`Opening annotation UI for folder ${filePath}...`, "info");
-				} else if (/\.html?$/i.test(absolutePath)) {
-					// HTML file annotation — convert to markdown via Turndown
-					const fileSize = statSync(absolutePath).size;
-					if (fileSize > 10 * 1024 * 1024) {
-						ctx.ui.notify(`File too large (${Math.round(fileSize / 1024 / 1024)}MB, max 10MB)`, "error");
-						return;
-					}
-					const html = readFileSync(absolutePath, "utf-8");
-					if (renderHtmlFlag) {
-						rawHtml = html;
-						markdown = "";
-					} else {
-						markdown = htmlToMarkdown(html);
-						sourceConverted = true;
-					}
-					sourceInfo = basename(absolutePath);
-					ctx.ui.notify(`Opening annotation UI for ${filePath}...`, "info");
-				} else {
-					markdown = readFileSync(absolutePath, "utf-8");
-					ctx.ui.notify(`Opening annotation UI for ${filePath}...`, "info");
-				}
 			}
 
 			currentPiSession.update(ctx);
 			const origin = getPiSessionIdentity(ctx);
 
 			try {
-				const session = await startMarkdownAnnotationSession(
-					ctx,
-					absolutePath,
-					markdown,
-					mode ?? "annotate",
-					folderPath,
-					sourceInfo,
-					sourceConverted,
-					gate,
-					rawHtml,
-					renderHtmlFlag,
-				);
+				const session = await startAnnotationSessionFromArgs(ctx, filePath, { gate, renderHtml: renderHtmlFlag });
 				ctx.ui.notify("Annotation opened. You can keep chatting while it runs.", "info");
 				void session
 					.waitForDecision()
@@ -600,8 +497,8 @@ export default function plannotator(pi: ExtensionAPI): void {
 							sendUserMessageWithCurrentSessionFallback(
 								pi,
 								getAnnotateFileFeedbackPrompt("pi", loadConfig(), {
-									fileHeader: isFolder ? "Folder" : "File",
-									filePath: absolutePath,
+									fileHeader: "File",
+									filePath,
 									feedback: result.feedback,
 								}),
 								{ deliverAs: "followUp" },
