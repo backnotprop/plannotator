@@ -35,40 +35,33 @@ const teamSizes = [
          everywhere else on the site. -->
     <style>
       /* Dark mode (default — applied when `.light` is NOT on <html>).
-         Lifted a couple of L-points from the original near-black and given a
-         touch of warm hue (chroma 0.01 at hue 55) so the page reads as dark
-         walnut / leather rather than a stark neutral charcoal. Accents
-         (primary, success, warning, destructive) are unchanged. */
+         Uses the Plandromeda palette: Andromeda's soft darkness with
+         Plannotator's blue hue (oklch hue 260). */
       .ws-page-scope {
-        --background: oklch(0.15 0.01 55);
-        --foreground: oklch(0.93 0.005 60);
-        --card: oklch(0.19 0.01 55);
-        --card-foreground: oklch(0.93 0.005 60);
-        --popover: oklch(0.20 0.01 55);
-        --popover-foreground: oklch(0.93 0.005 60);
-        /* Muted violet for the Join button and the OSS contributor card —
-           dialed down from the global primary so it doesn't scream against
-           the warm-gray bg. Hue stays at 280; chroma and lightness drop. */
-        --primary: oklch(0.65 0.10 280);
-        --primary-foreground: oklch(0.15 0.01 55);
-        /* Muted teal for the phase WHEN labels — toned down in dark mode so
-           the Today / Next / Compound row recedes against the warm-gray bg. */
-        --secondary: oklch(0.62 0.08 180);
-        --secondary-foreground: oklch(0.15 0.01 55);
-        --muted: oklch(0.24 0.01 55);
-        --muted-foreground: oklch(0.66 0.005 60);
-        --accent: oklch(0.72 0.18 60);
-        --accent-foreground: oklch(0.15 0.01 55);
-        --destructive: oklch(0.65 0.20 25);
-        --destructive-foreground: oklch(0.95 0.005 60);
-        --border: oklch(0.29 0.012 55);
-        --input: oklch(0.24 0.01 55);
-        --ring: oklch(0.65 0.10 280);
-        --success: oklch(0.72 0.17 150);
-        --success-foreground: oklch(0.15 0.01 55);
-        --warning: oklch(0.78 0.14 85);
-        --warning-foreground: oklch(0.15 0.01 55);
-        --code-bg: oklch(0.24 0.01 55);
+        --background: oklch(0.22 0.02 260);
+        --foreground: #d5ced9;
+        --card: oklch(0.26 0.025 260);
+        --card-foreground: #d5ced9;
+        --popover: oklch(0.27 0.025 260);
+        --popover-foreground: #d5ced9;
+        --primary: oklch(0.75 0.18 280);
+        --primary-foreground: oklch(0.22 0.02 260);
+        --secondary: oklch(0.65 0.15 180);
+        --secondary-foreground: oklch(0.22 0.02 260);
+        --muted: oklch(0.30 0.025 260);
+        --muted-foreground: #7a7686;
+        --accent: #c74ded;
+        --accent-foreground: oklch(0.22 0.02 260);
+        --destructive: #fc644d;
+        --destructive-foreground: oklch(0.22 0.02 260);
+        --border: oklch(0.34 0.025 260);
+        --input: oklch(0.30 0.025 260);
+        --ring: oklch(0.75 0.18 280);
+        --success: #96e072;
+        --success-foreground: oklch(0.22 0.02 260);
+        --warning: #ffe66d;
+        --warning-foreground: oklch(0.22 0.02 260);
+        --code-bg: oklch(0.27 0.025 260);
         color-scheme: dark;
       }
 
