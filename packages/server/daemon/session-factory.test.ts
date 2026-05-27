@@ -100,7 +100,7 @@ describe("createDaemonSessionFactory", () => {
     );
 
     const completed = await store.waitForResult<{ approved: boolean }>(record.id);
-    expect(completed.status).toBe("completed");
+    expect(completed.status).toBe("awaiting-resubmission");
     expect(completed.result?.approved).toBe(true);
   });
 

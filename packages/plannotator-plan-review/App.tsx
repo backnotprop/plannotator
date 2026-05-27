@@ -59,6 +59,7 @@ import { useArchive } from '@plannotator/ui/hooks/useArchive';
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
 import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotations';
 import { useExternalAnnotationHighlights } from '@plannotator/ui/hooks/useExternalAnnotationHighlights';
+import { subscribeToDaemonSessionFamily } from '@plannotator/ui/utils/daemonHub';
 import { buildPlanAgentInstructions } from '@plannotator/ui/utils/planAgentInstructions';
 import { useFileBrowser } from '@plannotator/ui/hooks/useFileBrowser';
 import { isVaultBrowserEnabled } from '@plannotator/ui/utils/obsidian';
@@ -123,6 +124,8 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
     return getComputedStyle(rootRef.current).visibility !== 'hidden';
   }, []);
   const [markdown, setMarkdown] = useState(DEMO_PLAN_CONTENT);
+  const markdownRef = useRef(markdown);
+  markdownRef.current = markdown;
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [codeAnnotations, setCodeAnnotations] = useState<CodeAnnotation[]>([]);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
@@ -184,6 +187,8 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
   const [submitted, setSubmitted] = useState<'approved' | 'denied' | 'exited' | null>(null);
+  const [awaitingResubmission, setAwaitingResubmission] = useState(false);
+  const [feedbackSent, setFeedbackSent] = useState(false);
   const [pendingPasteImage, setPendingPasteImage] = useState<{ file: File; blobUrl: string; initialName: string } | null>(null);
   const [showPermissionModeSetup, setShowPermissionModeSetup] = useState(false);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
@@ -588,6 +593,39 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
   const { editorAnnotations, deleteEditorAnnotation } = useEditorAnnotations();
   const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<Annotation>({ enabled: isApiMode && !goalSetupMode });
 
+  // Listen for session-revision events (plan/annotate resubmission or reactivation)
+  useEffect(() => {
+    if (!isApiMode) return;
+    const unsubscribe = subscribeToDaemonSessionFamily("session-revision", (msg) => {
+      if (!msg.payload) return;
+      const revision = msg.payload as { plan?: string; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; rawHtml?: string };
+      if (revision.plan === undefined) return;
+      const contentChanged = revision.plan !== markdownRef.current;
+      if (contentChanged) {
+        if (revision.rawHtml !== undefined) {
+          setRawHtml(revision.rawHtml);
+          setRenderAs('html');
+        }
+        setMarkdown(revision.plan);
+        if (revision.previousPlan !== undefined) setPreviousPlan(revision.previousPlan);
+        if (revision.versionInfo) setVersionInfo(revision.versionInfo);
+        setAnnotations([]);
+        setCodeAnnotations([]);
+        setGlobalAttachments([]);
+        setSelectedAnnotationId(null);
+        setSelectedCodeAnnotationId(null);
+        linkedDocHook.clearCache();
+      }
+      if (contentChanged || msg.type === "event") {
+        setAwaitingResubmission(false);
+        setFeedbackSent(false);
+        setSubmitted(null);
+        setIsSubmitting(false);
+      }
+    });
+    return unsubscribe;
+  }, [isApiMode]);
+
   // Drive DOM highlights for SSE-delivered external annotations. Disabled
   // while a linked doc overlay is open (Viewer DOM is hidden) and while the
   // plan diff view is active (diff view has its own annotation surface).
@@ -764,7 +802,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; gate?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string } }) => {
+      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; gate?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string }; lastDecision?: 'approved' | 'denied' | 'exited' | 'feedback' | null }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
         setGitUser(data.serverConfig?.gitUser);
@@ -842,6 +880,23 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
         }
         if (data.isWSL) {
           setIsWSL(true);
+        }
+        if (data.lastDecision) {
+          const isAnnotate = data.mode === 'annotate' || data.mode === 'annotate-last' || data.mode === 'annotate-folder';
+          if (data.lastDecision === 'approved') {
+            setSubmitted('approved');
+          } else if (data.lastDecision === 'denied') {
+            setAwaitingResubmission(true);
+          } else if (data.lastDecision === 'exited') {
+            setSubmitted('exited');
+          } else if (data.lastDecision === 'feedback') {
+            const isFileBased = data.mode === 'annotate';
+            if (isAnnotate && !isFileBased) {
+              setFeedbackSent(true);
+            } else {
+              setAwaitingResubmission(true);
+            }
+          }
         }
       })
       .catch(() => {
@@ -1077,7 +1132,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
     setIsSubmitting(true);
     try {
       const planSaveSettings = getPlanSaveSettings();
-      await fetch('/api/deny', {
+      const response = await fetch('/api/deny', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1088,7 +1143,13 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
           },
         })
       });
-      setSubmitted('denied');
+      const data = await response.json().catch(() => ({}));
+      if (data.awaitingResubmission) {
+        setAwaitingResubmission(true);
+        setIsSubmitting(false);
+      } else {
+        setSubmitted('denied');
+      }
     } catch {
       setIsSubmitting(false);
     }
@@ -1098,7 +1159,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
   const handleAnnotateFeedback = async () => {
     setIsSubmitting(true);
     try {
-      await fetch('/api/feedback', {
+      const response = await fetch('/api/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1107,7 +1168,16 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
           codeAnnotations,
         }),
       });
-      setSubmitted('denied'); // reuse 'denied' state for "feedback sent" overlay
+      const data = await response.json().catch(() => ({}));
+      if (data.awaitingResubmission) {
+        setAwaitingResubmission(true);
+        setIsSubmitting(false);
+      } else if (data.feedbackSent) {
+        setFeedbackSent(true);
+        setIsSubmitting(false);
+      } else {
+        setSubmitted('denied');
+      }
     } catch {
       setIsSubmitting(false);
     }
@@ -1175,8 +1245,8 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
       if (showExport || showImport || showFeedbackPrompt || showClaudeCodeWarning ||
           showExitWarning || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
 
-      // Don't intercept if already submitted, submitting, or exiting
-      if (submitted || isSubmitting || isExiting || goalSetupAction.isSubmitting) return;
+      // Don't intercept if already submitted, submitting, exiting, or awaiting resubmission
+      if (submitted || isSubmitting || isExiting || awaitingResubmission || feedbackSent || goalSetupAction.isSubmitting) return;
 
       // Don't intercept in demo/share mode (no API)
       if (!isApiMode) return;
@@ -1754,7 +1824,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
           gate={gate}
           isSharedSession={isSharedSession}
           origin={origin}
-          submitted={!!submitted}
+          submitted={!!submitted || awaitingResubmission || feedbackSent}
           isSubmitting={isSubmitting}
           isExiting={isExiting}
           isPanelOpen={isPanelOpen}
@@ -1803,7 +1873,13 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
         />
 
         {/* Embedded completion banner — inline, non-blocking (skipped in legacy tab mode) */}
-        {__embedded && !legacyTabMode && <CompletionBanner submitted={submitted} title={completionTitle} subtitle={completionSubtitle} />}
+        {__embedded && !legacyTabMode && (
+          <CompletionBanner
+            submitted={feedbackSent ? 'feedback-sent' : awaitingResubmission ? 'awaiting' : submitted}
+            title={feedbackSent ? 'Feedback sent' : awaitingResubmission ? 'Feedback sent' : completionTitle}
+            subtitle={feedbackSent ? 'Your annotations were delivered to the agent.' : awaitingResubmission ? 'Waiting for agent to revise...' : completionSubtitle}
+          />
+        )}
 
         {/* Linked document error banner */}
         {linkedDocHook.error && (
@@ -2245,9 +2321,9 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
         {/* Full-screen overlay: standalone mode, or legacy tab mode even when embedded */}
         {(!__embedded || legacyTabMode) && (
           <CompletionOverlay
-            submitted={submitted}
-            title={completionTitle}
-            subtitle={completionSubtitle}
+            submitted={feedbackSent ? 'feedback-sent' : awaitingResubmission ? 'denied' : submitted}
+            title={feedbackSent ? 'Feedback sent' : awaitingResubmission ? 'Feedback sent' : completionTitle}
+            subtitle={feedbackSent ? 'Your annotations were delivered to the agent.' : awaitingResubmission ? 'Waiting for agent to revise...' : completionSubtitle}
             agentLabel={agentName}
           />
         )}

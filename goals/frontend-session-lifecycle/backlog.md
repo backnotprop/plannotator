@@ -26,34 +26,15 @@ Some users will prefer each session opening in a new browser tab with auto-close
 
 ---
 
-## 3. Live plan updates across deny/replan cycles
+## ~~3. Live plan updates across deny/replan cycles~~ DONE
 
-**Priority:** High — most-requested feature
-**Size:** Large
-
-When the agent resubmits a plan after denial, the existing session should reactivate in-place rather than spawning a new session.
-
-**Desired behavior:**
-- User denies plan, sends feedback, agent replans
-- Agent calls ExitPlanMode again — daemon matches it to the existing session
-- Session status flips from "completed" back to "active"
-- Frontend receives a push notification via WebSocket
-- Plan diff system shows what changed between versions
-- The plan→deny→replan→approve cycle happens in one persistent session
-
-**Open questions:**
-- How does the daemon match a new plan submission to an existing session? By project + plan slug? By a correlation ID from the agent?
-- Does the session status reset to "active" on resubmission, or show "updated"?
-- How does this interact with the version history system already in `~/.plannotator/history/`?
+Implemented in `feat/session-persistence`. Sessions enter `awaiting-resubmission` status on deny. Agent resubmission is matched by `plan:project:slug` and the session reactivates in place. Frontend receives `session-revision` WebSocket event with updated content.
 
 ---
 
-## 4. Session persistence after completion
+## ~~4. Session persistence after completion~~ DONE
 
-**Priority:** High — current behavior is broken
-**Size:** Medium, tied to #3
-
-**Current bug:** When a session is approved/denied, the daemon disposes the session handler. The session disappears from the sidebar even though the route still resolves. API calls fail, so the plan content is gone.
+Implemented in `feat/session-persistence`. Denied sessions stay alive (handler not disposed) in `awaiting-resubmission` state with no expiry. Sessions persist until daemon restart.
 
 **Required behavior:**
 - Completed sessions stay in the sidebar with a status badge (approved/denied)

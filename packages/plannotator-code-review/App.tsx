@@ -36,6 +36,7 @@ import { isTypingTarget, useReviewSearch, type ReviewSearchMatch } from './hooks
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
 import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotations';
 import { useAgentJobs } from '@plannotator/ui/hooks/useAgentJobs';
+import { subscribeToDaemonSessionFamily } from '@plannotator/ui/utils/daemonHub';
 import { exportEditorAnnotations } from '@plannotator/ui/utils/parser';
 import { ResizeHandle } from '@plannotator/ui/components/ResizeHandle';
 import { DockviewReact, type DockviewReadyEvent, type DockviewApi } from 'dockview-react';
@@ -73,6 +74,7 @@ import {
   REVIEW_CODE_NAV_PANEL_ID,
 } from './dock/reviewPanelTypes';
 import type { DiffFile } from './types';
+import { retainUnchangedViewedFiles } from './utils/diffFiles';
 import type { DiffOption, WorktreeInfo, GitContext } from '@plannotator/shared/types';
 import type { PRMetadata } from '@plannotator/shared/pr-types';
 import type { PRDiffScope, PRDiffScopeOption, PRStackInfo, PRStackTree } from '@plannotator/shared/pr-stack';
@@ -238,6 +240,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
   const [isApproving, setIsApproving] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
   const [submitted, setSubmitted] = useState<'approved' | 'feedback' | 'exited' | false>(false);
+  const [feedbackSent, setFeedbackSent] = useState(false);
   const [showApproveWarning, setShowApproveWarning] = useState(false);
   const [showExitWarning, setShowExitWarning] = useState(false);
   const [sharingEnabled, setSharingEnabled] = useState(true);
@@ -307,6 +310,36 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
   // so this should be addressed as a broader refactor.
   const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<CodeAnnotation>({ enabled: !!origin });
   const agentJobs = useAgentJobs({ enabled: !!origin });
+
+  // Listen for session-revision events (agent pushed a new diff)
+  useEffect(() => {
+    if (!origin) return;
+    const unsubscribe = subscribeToDaemonSessionFamily("session-revision", (msg) => {
+      if (!msg.payload) return;
+      const revision = msg.payload as { rawPatch?: string; gitRef?: string };
+      if (revision.rawPatch !== undefined) {
+        const oldFiles = storeApi.getState().files;
+        const newFiles = parseDiffToFiles(revision.rawPatch);
+        const contentChanged = newFiles.length !== oldFiles.length ||
+          newFiles.some((f, i) => f.patch !== oldFiles[i]?.patch);
+        if (contentChanged) {
+          setDiffData(prev => prev ? { ...prev, rawPatch: revision.rawPatch!, gitRef: revision.gitRef ?? prev.gitRef } : prev);
+          storeApi.getState().setFiles(newFiles);
+          storeApi.getState().setFocusedFile(0);
+          storeApi.getState().setLocalAnnotations([]);
+          storeApi.getState().selectAnnotation(null);
+          storeApi.getState().setPendingSelection(null);
+          setViewedFiles(prev => retainUnchangedViewedFiles(oldFiles, newFiles, prev));
+        }
+        if (contentChanged || msg.type === "event") {
+          setFeedbackSent(false);
+          setSubmitted(false);
+          setIsSendingFeedback(false);
+        }
+      }
+    });
+    return unsubscribe;
+  }, [origin, storeApi]);
 
   // Tour dialog state — opens as an overlay instead of a dock panel
   const [tourDialogJobId, setTourDialogJobId] = useState<string | null>(null);
@@ -803,6 +836,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
         error?: string;
         isWSL?: boolean;
         serverConfig?: { displayName?: string; gitUser?: string };
+        lastDecision?: 'approved' | 'feedback' | 'exited' | null;
       }) => {
         configStore.init(data.serverConfig);
         setGitUser(data.serverConfig?.gitUser);
@@ -849,6 +883,11 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
         // Mark diff type setup as pending on first run (local mode only)
         if (data.diffType && !data.prMetadata && data.gitContext?.vcsType !== 'p4' && data.gitContext?.vcsType !== 'jj' && needsDiffTypeSetup()) {
           setDiffTypeSetupPending(true);
+        }
+        if (data.lastDecision) {
+          if (data.lastDecision === 'approved') setSubmitted('approved');
+          else if (data.lastDecision === 'feedback') setFeedbackSent(true);
+          else if (data.lastDecision === 'exited') setSubmitted('exited');
         }
       })
       .catch(() => {
@@ -1528,7 +1567,16 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
         }),
       });
       if (res.ok) {
-        setSubmitted('feedback');
+        const data = await res.json().catch(() => ({}));
+        if (data.feedbackDelivered) {
+          setFeedbackSent(true);
+          setIsSendingFeedback(false);
+          storeApi.getState().setLocalAnnotations([]);
+          storeApi.getState().selectAnnotation(null);
+          storeApi.getState().setPendingSelection(null);
+        } else {
+          setSubmitted('feedback');
+        }
       } else {
         throw new Error('Failed to send');
       }
@@ -1538,7 +1586,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
       setTimeout(() => setCopyFeedback(null), 2000);
       setIsSendingFeedback(false);
     }
-  }, [totalAnnotationCount, feedbackMarkdown, allAnnotations]);
+  }, [totalAnnotationCount, feedbackMarkdown, allAnnotations, storeApi]);
 
   // Exit review session without sending any feedback
   const handleExit = useCallback(async () => {
@@ -1736,7 +1784,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
 
       // If the platform post dialog is open, Cmd+Enter submits it
       if (platformCommentDialog) {
-        if (submitted || isPlatformActioning) return;
+        if (submitted || feedbackSent || isPlatformActioning) return;
         const isApproveAction = platformCommentDialog.action === 'approve';
         const hasTargets = platformCommentDialog.plan.targets.length > 0;
         const canSubmit = isApproveAction || hasTargets || platformGeneralComment.trim();
@@ -1749,7 +1797,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       if (showExportModal || showNoAnnotationsDialog || showApproveWarning || showExitWarning) return;
-      if (submitted || isSendingFeedback || isApproving || isExiting || isPlatformActioning) return;
+      if (submitted || feedbackSent || isSendingFeedback || isApproving || isExiting || isPlatformActioning) return;
       if (!origin) return; // Demo mode
 
       e.preventDefault();
@@ -1777,7 +1825,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
   }, [
     showExportModal, showNoAnnotationsDialog, showApproveWarning, showExitWarning,
     platformCommentDialog, platformGeneralComment,
-    submitted, isSendingFeedback, isApproving, isExiting, isPlatformActioning,
+    submitted, feedbackSent, isSendingFeedback, isApproving, isExiting, isPlatformActioning,
     origin, platformMode, platformLabel, platformUser, prMetadata, totalAnnotationCount, openPlatformDialog,
     handleApprove, handleSendFeedback, handlePlatformAction
   ]);
@@ -1923,7 +1971,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
               </button>
             </div>
 
-            {origin && !submitted ? (
+            {origin && !submitted && !feedbackSent ? (
               <>
                 {/* Destination dropdown (PR mode only) */}
                 {prMetadata && (
@@ -2153,7 +2201,13 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
         </header>
 
         {/* Embedded completion banner — inline, non-blocking */}
-        {__embedded && !legacyTabMode && <CompletionBanner submitted={submitted} title={completionTitle} subtitle={completionSubtitle} />}
+        {__embedded && !legacyTabMode && (
+          <CompletionBanner
+            submitted={feedbackSent ? 'feedback-sent' : submitted}
+            title={feedbackSent ? 'Feedback sent' : completionTitle}
+            subtitle={feedbackSent ? 'Your annotations were delivered to the agent.' : completionSubtitle}
+          />
+        )}
 
         {/* Main content */}
         <div className={`flex-1 flex overflow-hidden ${isResizing ? 'select-none' : ''}`}>
@@ -2463,9 +2517,9 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
         {/* Full-screen overlay: standalone mode, or legacy tab mode even when embedded */}
         {(!__embedded || legacyTabMode) && (
           <CompletionOverlay
-            submitted={submitted}
-            title={completionTitle}
-            subtitle={completionSubtitle}
+            submitted={feedbackSent ? 'feedback-sent' : submitted}
+            title={feedbackSent ? 'Feedback sent' : completionTitle}
+            subtitle={feedbackSent ? 'Your annotations were delivered to the agent.' : completionSubtitle}
             agentLabel={getAgentName(origin)}
           />
         )}

@@ -689,7 +689,7 @@ async function runDaemonSessionRequest(request: PluginRequest, options: { plugin
       await cancelCreatedSession();
       fail(completed.error.code, completed.error.message);
     }
-    if (completed.session.status !== "completed") {
+    if (completed.session.status !== "completed" && completed.session.status !== "awaiting-resubmission" && completed.session.status !== "idle") {
       fail(
         completed.session.status,
         completed.session.error ?? `Plannotator session ${completed.session.id} ended with status ${completed.session.status}.`,

@@ -19,6 +19,8 @@ export interface DaemonSessionRecord<TResult = unknown> {
   cwd?: string;
   label: string;
   origin?: string;
+  matchKey?: string;
+  ttlMs?: number;
   createdAt: string;
   updatedAt: string;
   expiresAt?: string;
@@ -40,6 +42,7 @@ export interface CreateDaemonSessionInput<TResult = unknown> {
   cwd?: string;
   label: string;
   origin?: string;
+  matchKey?: string;
   ttlMs?: number;
   now?: number;
   htmlContent?: string;
@@ -170,6 +173,8 @@ export class DaemonSessionStore {
       label: input.label,
       ...(input.cwd && { cwd: input.cwd }),
       ...(input.origin && { origin: input.origin }),
+      ...(input.matchKey && { matchKey: input.matchKey }),
+      ...(input.ttlMs !== undefined && { ttlMs: input.ttlMs }),
       createdAt: iso(now),
       updatedAt: iso(now),
       ...(input.ttlMs !== undefined && { expiresAt: iso(now + input.ttlMs) }),
@@ -253,6 +258,44 @@ export class DaemonSessionStore {
     return record;
   }
 
+  suspend<TResult = unknown>(id: string, result: TResult): DaemonSessionRecord<TResult> | undefined {
+    const record = this.sessions.get(id) as DaemonSessionRecord<TResult> | undefined;
+    if (!record || record.status !== "active") return record;
+    record.status = "awaiting-resubmission";
+    record.result = result;
+    const now = this.now();
+    record.updatedAt = iso(now);
+    delete record.expiresAt;
+    this.resolveWaiters(record);
+    this.emit("session-updated", record);
+    return record;
+  }
+
+  idle<TResult = unknown>(id: string, result?: TResult): DaemonSessionRecord<TResult> | undefined {
+    const record = this.sessions.get(id) as DaemonSessionRecord<TResult> | undefined;
+    if (!record || TERMINAL_STATUSES.has(record.status) || record.status === "idle") return undefined;
+    record.status = "idle";
+    if (result !== undefined) record.result = result as TResult;
+    const now = this.now();
+    record.updatedAt = iso(now);
+    delete record.expiresAt;
+    this.resolveWaiters(record);
+    this.emit("session-updated", record);
+    return record;
+  }
+
+  reactivate(id: string): DaemonSessionRecord | undefined {
+    const record = this.sessions.get(id);
+    if (!record || (record.status !== "awaiting-resubmission" && record.status !== "idle")) return record;
+    record.status = "active";
+    record.result = undefined;
+    const now = this.now();
+    record.updatedAt = iso(now);
+    delete record.expiresAt;
+    this.emit("session-updated", record);
+    return record;
+  }
+
   async cancel(id: string, reason = "Session cancelled."): Promise<DaemonSessionRecord | undefined> {
     const record = this.sessions.get(id);
     if (!record || TERMINAL_STATUSES.has(record.status)) return record;
@@ -270,7 +313,8 @@ export class DaemonSessionStore {
   waitForResult<TResult = unknown>(id: string): Promise<DaemonSessionRecord<TResult>> {
     const record = this.sessions.get(id) as DaemonSessionRecord<TResult> | undefined;
     if (!record) return Promise.reject(new Error(`Session not found: ${id}`));
-    if (TERMINAL_STATUSES.has(record.status)) return Promise.resolve(record);
+    const hasIntermediateResult = (record.status === "idle" || record.status === "awaiting-resubmission") && record.result !== undefined;
+    if (TERMINAL_STATUSES.has(record.status) || hasIntermediateResult) return Promise.resolve(record);
     return new Promise((resolve, reject) => {
       const waiters = this.waiters.get(id) ?? [];
       waiters.push({ resolve: resolve as (record: DaemonSessionRecord<unknown>) => void, reject });

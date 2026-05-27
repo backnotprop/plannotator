@@ -444,8 +444,10 @@ export function createDaemonFetchHandler(options: DaemonServerOptions): DaemonFe
           requestContext?.disableIdleTimeout?.();
           const completed = await store.waitForResult(id);
           const response = json({ ok: true, session: store.summary(completed), result: completed.result ?? null });
-          const timer = setTimeout(() => void store.delete(id), RESULT_DELETE_GRACE_MS);
-          timer.unref?.();
+          if (completed.status !== "awaiting-resubmission" && completed.status !== "idle") {
+            const timer = setTimeout(() => void store.delete(id), RESULT_DELETE_GRACE_MS);
+            timer.unref?.();
+          }
           return response;
         }
 
