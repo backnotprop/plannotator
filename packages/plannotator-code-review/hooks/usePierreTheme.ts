@@ -155,6 +155,7 @@ export function usePierreTheme(options?: { fontFamily?: string; fontSize?: strin
   const fontSize = options?.fontSize;
   const showFileHeader = options?.showFileHeader ?? false;
   const lineBgIntensity = useConfigValue('diffLineBgIntensity');
+  const tabSize = useConfigValue('diffTabSize');
 
   const [pierreTheme, setPierreTheme] = useState<PierreTheme>(() => {
     const styles = getComputedStyle(document.documentElement);
@@ -190,6 +191,8 @@ export function usePierreTheme(options?: { fontFamily?: string; fontSize?: strin
             ${fontFamily ? `font-family: '${fontFamily}', monospace !important;` : ''}
             ${fontSize ? `font-size: ${fontSize} !important; line-height: 1.5 !important;` : ''}
           }` : '';
+
+      const tabCSS = tabSize != null ? `[data-code] { tab-size: ${tabSize} !important; }` : '';
 
       setPierreTheme({
         type: resolvedMode,
@@ -275,12 +278,13 @@ export function usePierreTheme(options?: { fontFamily?: string; fontSize?: strin
           }
 
           ${fontCSS}
+          ${tabCSS}
 
           ${buildLineBgOverrides(lineBgIntensity, resolvedMode)}
         `,
       });
     });
-  }, [resolvedMode, colorTheme, fontFamily, fontSize, showFileHeader, lineBgIntensity]);
+  }, [resolvedMode, colorTheme, fontFamily, fontSize, showFileHeader, lineBgIntensity, tabSize]);
 
   return pierreTheme;
 }

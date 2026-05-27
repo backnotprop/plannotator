@@ -136,6 +136,7 @@ claude --plugin-dir ./apps/hook
 **Config-only settings (`~/.plannotator/config.json`)**: Some settings have no env-var equivalent and are toggled by editing the config file directly:
 
 - `pfmReminder` (`true` / `false`, default `false`) — when enabled, a Plannotator Flavored Markdown reminder is injected at plan-time describing the renderer's extensions (code-file links, callouts, tables, diagrams, task lists, hex swatches, wiki-links). Lets the planning agent enrich plans with PFM features without having to discover them. Composes cleanly with the compound-skill improvement hook. Supported across all three runtimes: Claude Code (`improve-context` PreToolUse hook in `apps/hook/server/index.ts`), OpenCode (`experimental.chat.system.transform` in `apps/opencode-plugin/index.ts`), and Pi (`before_agent_start` in `apps/pi-extension/index.ts`).
+- `legacyTabMode` (`true` / `false`, default `false`) — when enabled, the daemon opens a new browser tab for every session regardless of whether a frontend is already connected. Sessions use the full-screen `CompletionOverlay` with auto-close instead of the inline `CompletionBanner`. Preserves the pre-frontend tab-per-session behavior for users who prefer it.
 
 **Legacy:** `SSH_TTY` and `SSH_CONNECTION` are still detected when `PLANNOTATOR_REMOTE` is unset. Set `PLANNOTATOR_REMOTE=1` / `true` to force remote mode or `0` / `false` to force local mode.
 
@@ -234,11 +235,33 @@ The daemon is the single long-running Bun server used by normal plan/review/anno
 | `/daemon/sessions/:id/cancel` | POST | Cancel a session and dispose its resources |
 | `/daemon/sessions/:id` | DELETE | Delete a session record |
 | `/daemon/shutdown` | POST | Ask the daemon to stop |
-| `/daemon/ws` | WebSocket | Multiplex daemon lifecycle events, session-scoped external annotation events, agent job events, and correlated session actions |
+| `/daemon/config` | GET | Read global config (`~/.plannotator/config.json`) |
+| `/daemon/config` | POST | Write global config keys (allowlisted: `displayName`, `pfmReminder`, `legacyTabMode`, `diffOptions`, `conventionalComments`, `conventionalLabels`) |
+| `/daemon/git/user` | GET | Return git user name from `git config user.name` |
+| `/daemon/vaults` | GET | Detect available Obsidian vaults |
+| `/daemon/obsidian/vaults` | GET | Alias for `/daemon/vaults` |
+| `/daemon/hooks/status` | GET | Return PFM reminder and improvement hook status |
+| `/daemon/projects` | DELETE | Remove a project by `?cwd=` (optional `?clean=1` to cancel active sessions) |
+| `/daemon/projects/prs` | GET | List open PRs for a project (`?cwd=`) |
+| `/daemon/projects/prs/detailed` | GET | List PRs with review metadata for dashboard (`?cwd=`) |
+| `/daemon/fs/list` | GET | List directory contents (`?path=`) |
+| `/daemon/ws` | WebSocket | Multiplex daemon lifecycle events, session-scoped external annotation events, agent job events, session revision events, and correlated session actions |
 | `/s/:id` | GET | Serve the browser HTML for a session |
 | `/s/:id/api/...` | Any | Route browser API requests to that session's plan/review/annotate handler |
 
-Runtime live updates for daemon lifecycle events, external annotations, and agent jobs are delivered through `/daemon/ws`. Session-scoped updates subscribe by `{ family, sessionId }`. HTTP endpoints below remain for snapshots, mutations, uploads, and large payloads. AI query token streaming remains on `/api/ai/query`.
+Runtime live updates for daemon lifecycle events, external annotations, agent jobs, and session revisions are delivered through `/daemon/ws`. Session-scoped updates subscribe by `{ family, sessionId }`. HTTP endpoints below remain for snapshots, mutations, uploads, and large payloads. AI query token streaming remains on `/api/ai/query`.
+
+### Session Persistence and Resubmission
+
+When a user denies a plan (or sends feedback on a review/annotation), the session enters `awaiting-resubmission` status instead of completing. The session's HTTP handler stays alive. When the agent replans and submits again via `POST /daemon/sessions`, the daemon matches the new submission to the existing session by a match key (`plan:project:slug` for plans, `review:project:branch` for reviews, `annotate:project:filePath` for single-file annotations). The session reactivates in place — the frontend receives a `session-revision` event via WebSocket with the updated content.
+
+**Sessions never die.** No session type calls `store.complete()` from its decision handler. All sessions survive feedback, approve, and exit — the HTTP handler stays alive and the tab keeps working. `registerPersistentDecision` always calls `store.suspend()`. `registerReviewDecision` always calls `store.idle()`. Non-terminal sessions have no expiry timer.
+
+**Session statuses (plan/annotate):** `active` → `awaiting-resubmission` (on any decision) → `active` (on resubmit) → `awaiting-resubmission` ... repeating.
+
+**Session statuses (code review):** `active` → `idle` (on any decision) → `active` (on agent resubmit) → `idle` ... repeating.
+
+**Event families:** `daemon`, `external-annotations`, `agent-jobs`, `session-revision`.
 
 ### Plan Server (`packages/server/index.ts`)
 
@@ -309,7 +332,9 @@ Runtime live updates for daemon lifecycle events, external annotations, and agen
 
 | Endpoint              | Method | Purpose                                    |
 | --------------------- | ------ | ------------------------------------------ |
-| `/api/plan`           | GET    | Returns `{ plan, origin, mode: "annotate", filePath, sourceInfo?, gate, renderAs?, rawHtml? }` |
+| `/api/plan`           | GET    | Returns `{ plan, origin, mode: "annotate", filePath, sourceInfo?, gate, renderAs?, rawHtml?, previousPlan, versionInfo }` |
+| `/api/plan/version`   | GET    | Fetch specific version (`?v=N`) — single-file annotate only |
+| `/api/plan/versions`  | GET    | List all versions — single-file annotate only |
 | `/api/feedback`       | POST   | Submit annotations (body: feedback, annotations) |
 | `/api/approve`        | POST   | Approve without feedback (review-gate UX, `--gate`) |
 | `/api/exit`           | POST   | Close session without feedback |

@@ -35,9 +35,10 @@ import {
   markPRFilesViewed as markPRFilesViewedCore,
   fetchPRStack as fetchPRStackCore,
   fetchPRList as fetchPRListCore,
+  fetchPRDetailedList as fetchPRDetailedListCore,
 } from "@plannotator/shared/pr-provider";
 
-export type { PRRef, PRMetadata, PRContext, PRReviewFileComment, PRStackTree, PRListItem } from "@plannotator/shared/pr-types";
+export type { PRRef, PRMetadata, PRContext, PRReviewFileComment, PRStackTree, PRListItem, PRDetailedListItem } from "@plannotator/shared/pr-types";
 export { prRefFromMetadata, isSameProject, getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo, getCliName, getCliInstallUrl } from "@plannotator/shared/pr-types";
 export type { GithubPRMetadata } from "@plannotator/shared/pr-types";
 
@@ -143,4 +144,10 @@ export function fetchPRList(
   ref: PRRef,
 ): Promise<PRListItem[]> {
   return fetchPRListCore(runtime, ref);
+}
+
+export function fetchPRDetailedList(
+  ref: PRRef,
+): Promise<import("@plannotator/shared/pr-types").PRDetailedListItem[]> {
+  return fetchPRDetailedListCore(runtime, ref);
 }

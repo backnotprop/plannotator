@@ -3,7 +3,10 @@
   "version": "0.0.1",
   "type": "module",
   "exports": {
-    ".": "./App.tsx",
+    ".": {
+      "types": "./App.d.ts",
+      "default": "./App.tsx"
+    },
     "./styles": "./index.css",
     "./shortcuts": "./shortcuts.ts"
   },

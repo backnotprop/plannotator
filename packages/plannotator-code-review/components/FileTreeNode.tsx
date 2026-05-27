@@ -36,7 +36,7 @@ function hasVisibleChildren(
   });
 }
 
-export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
+export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = React.memo(({
   node,
   expandedFolders,
   onToggleFolder,
@@ -186,4 +186,4 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
       </ContextMenu.Portal>
     </ContextMenu.Root>
   );
-};
+});

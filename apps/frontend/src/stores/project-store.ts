@@ -18,7 +18,7 @@ export interface ProjectStoreActions {
     name?: string,
     client?: DaemonApiClient,
   ): Promise<ProjectEntry | undefined>;
-  removeProject(cwd: string, client?: DaemonApiClient): Promise<boolean>;
+  removeProject(cwd: string, clean?: boolean, client?: DaemonApiClient): Promise<boolean>;
 }
 
 export type ProjectStore = ProjectStoreState & ProjectStoreActions;
@@ -59,19 +59,28 @@ export function createProjectStore(initial: Partial<ProjectStoreState> = {}) {
           return undefined;
         }
         const entry = result.data.project;
-        set((state) => {
-          const idx = state.projects.findIndex((p) => p.cwd === entry.cwd);
-          if (idx >= 0) {
-            state.projects[idx] = entry;
-          } else {
-            state.projects.unshift(entry);
+        if (entry.parentCwd) {
+          const listResult = await client.listProjects();
+          if (listResult.ok) {
+            set((state) => {
+              state.projects = listResult.data.projects;
+            });
           }
-        });
+        } else {
+          set((state) => {
+            const idx = state.projects.findIndex((p) => p.cwd === entry.cwd);
+            if (idx >= 0) {
+              state.projects[idx] = entry;
+            } else {
+              state.projects.unshift(entry);
+            }
+          });
+        }
         return entry;
       },
 
-      async removeProject(cwd, client = daemonApiClient) {
-        const result = await client.removeProject(cwd);
+      async removeProject(cwd, clean, client = daemonApiClient) {
+        const result = await client.removeProject(cwd, clean);
         if (!result.ok) {
           set((state) => {
             state.error = result.error.message;
@@ -79,7 +88,7 @@ export function createProjectStore(initial: Partial<ProjectStoreState> = {}) {
           return false;
         }
         set((state) => {
-          state.projects = state.projects.filter((p) => p.cwd !== cwd);
+          state.projects = state.projects.filter((p) => p.cwd !== cwd && p.parentCwd !== cwd);
         });
         return true;
       },

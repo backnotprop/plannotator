@@ -9,6 +9,10 @@ import type { CallbackConfig } from '@plannotator/ui/utils/callback';
 import type { UIPreferences } from '@plannotator/ui/utils/uiPreferences';
 
 interface AppHeaderProps {
+  // Slot for external content (e.g., shell sidebar trigger)
+  headerLeft?: React.ReactNode;
+  // When true, the built-in Settings modal is not mounted (unified dialog handles it)
+  skipBuiltInSettings?: boolean;
   // Mode flags (stable after mount)
   isApiMode: boolean;
   annotateMode: boolean;
@@ -22,6 +26,7 @@ interface AppHeaderProps {
   origin: Origin | null;
 
   // Dynamic state
+  submitted: boolean;
   isSubmitting: boolean;
   isExiting: boolean;
   isPanelOpen: boolean;
@@ -78,6 +83,8 @@ interface AppHeaderProps {
 }
 
 export const AppHeader = React.memo<AppHeaderProps>(({
+  headerLeft,
+  skipBuiltInSettings,
   isApiMode,
   annotateMode,
   archiveMode,
@@ -88,6 +95,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   gate,
   isSharedSession,
   origin,
+  submitted,
   isSubmitting,
   isExiting,
   isPanelOpen,
@@ -136,7 +144,10 @@ export const AppHeader = React.memo<AppHeaderProps>(({
 }) => {
   return (
     <header data-app-header="true" className="h-12 flex items-center justify-between px-2 md:px-4 border-b border-border/50 bg-card/50 backdrop-blur-xl sticky top-0 z-[50]">
-      <AppHeaderLogo />
+      <div className="flex items-center gap-2">
+        {headerLeft}
+        <AppHeaderLogo />
+      </div>
 
       <div className="flex items-center gap-1 md:gap-2">
         {/* Bot callback buttons — only shown when ?cb=&ct= params are present */}
@@ -180,7 +191,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
           </>
         )}
 
-        {isApiMode && !linkedDocIsActive && goalSetupMode && (
+        {isApiMode && !submitted && !linkedDocIsActive && goalSetupMode && (
           <>
             <ExitButton
               onClick={onGoalSetupExit}
@@ -201,7 +212,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
           </>
         )}
 
-        {isApiMode && (!linkedDocIsActive || annotateMode) && !archiveMode && !goalSetupMode && (
+        {isApiMode && !submitted && (!linkedDocIsActive || annotateMode) && !archiveMode && !goalSetupMode && (
           <>
             {annotateMode ? (
               <>
@@ -280,18 +291,20 @@ export const AppHeader = React.memo<AppHeaderProps>(({
         )}
 
         {/* Settings dialog (controlled, button hidden — opened from PlanHeaderMenu) */}
-        <div className="hidden">
-          <Settings
-            taterMode={taterMode}
-            onTaterModeChange={onTaterModeChange}
-            onIdentityChange={onIdentityChange}
-            origin={origin}
-            onUIPreferencesChange={onUIPreferencesChange}
-            externalOpen={mobileSettingsOpen}
-            onExternalClose={onCloseSettings}
-            gitUser={gitUser}
-          />
-        </div>
+        {!skipBuiltInSettings && (
+          <div className="hidden">
+            <Settings
+              taterMode={taterMode}
+              onTaterModeChange={onTaterModeChange}
+              onIdentityChange={onIdentityChange}
+              origin={origin}
+              onUIPreferencesChange={onUIPreferencesChange}
+              externalOpen={mobileSettingsOpen}
+              onExternalClose={onCloseSettings}
+              gitUser={gitUser}
+            />
+          </div>
+        )}
 
         <PlanHeaderMenu
           appVersion={appVersion}

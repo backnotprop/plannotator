@@ -1,8 +1,11 @@
 import { getServerHostname, getServerPort, isRemoteSession } from "../remote";
-import { acquireDaemonLock, createDaemonState, removeDaemonState, writeDaemonState, type DaemonLock, type DaemonState, type DaemonStateOptions } from "./state";
-import { DaemonSessionStore, type DaemonSessionRecord } from "./session-store";
-import { createDaemonFetchHandler, type DaemonFetchContext, type DaemonFetchHandler } from "./server";
+import { openBrowser } from "../browser";
+import { loadConfig } from "@plannotator/shared/config";
+import { acquireDaemonLock, createDaemonState, createDaemonBrowserAuthUrl, removeDaemonState, writeDaemonState, type DaemonLock, type DaemonState, type DaemonStateOptions } from "./state";
+import { DaemonSessionStore, listSnapshots, type DaemonSessionRecord } from "./session-store";
+import { createDaemonFetchHandler, type DaemonFetchContext, type DaemonFetchHandler, type SessionBrowserAction } from "./server";
 import type { DaemonCreateSessionRequest } from "@plannotator/shared/daemon-protocol";
+import type { DaemonEventHub } from "./event-hub";
 
 export interface StartDaemonRuntimeOptions extends DaemonStateOptions {
   shellHtmlContent: string;
@@ -37,6 +40,7 @@ export async function startDaemonRuntime(options: StartDaemonRuntimeOptions): Pr
 
   let lock: DaemonLock | undefined = lockResult.lock;
   const store = new DaemonSessionStore();
+
   const isRemote = isRemoteSession();
   const hostname = options.hostname ?? getServerHostname();
   const requestedPort = options.port ?? getServerPort();
@@ -78,11 +82,43 @@ export async function startDaemonRuntime(options: StartDaemonRuntimeOptions): Pr
       binaryVersion: options.binaryVersion,
       requestedPort,
     });
+
+    for (const snapshot of listSnapshots()) {
+      if (store.get(snapshot.sessionId)) continue;
+      store.create({
+        id: snapshot.sessionId,
+        mode: snapshot.mode,
+        url: `${state.baseUrl}/s/${snapshot.sessionId}`,
+        project: snapshot.meta.project,
+        cwd: snapshot.meta.cwd,
+        label: snapshot.meta.label,
+        origin: snapshot.meta.origin,
+        result: snapshot.result,
+      });
+    }
+
+    async function presentSession(record: DaemonSessionRecord, eventHub: DaemonEventHub): Promise<SessionBrowserAction> {
+      const config = loadConfig();
+      const frontendState = eventHub.getFrontendState();
+      if (!config.legacyTabMode && frontendState.connected && frontendState.anyVisible) {
+        eventHub.publishDaemonEvent({
+          type: "session-notify",
+          at: new Date().toISOString(),
+          session: store.summary(record),
+        });
+        return "notified";
+      }
+      const url = createDaemonBrowserAuthUrl(state, new URL(record.url).pathname);
+      await openBrowser(url, { isRemote });
+      return "opened";
+    }
+
     handler = createDaemonFetchHandler({
       state,
       store,
       shellHtmlContent: options.shellHtmlContent,
       createSession: options.createSession,
+      presentSession,
       onShutdown: async () => {
         await runtime?.stop();
         await options.onShutdown?.();

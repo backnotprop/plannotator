@@ -4,7 +4,7 @@ import { getSingularPatch } from '@pierre/diffs';
 import type { DiffLineBgIntensity } from '@plannotator/shared/config';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { useConfigValue } from '@plannotator/ui/config';
-import { useReviewState } from '../dock/ReviewStateContext';
+import { useReviewStore } from '../store';
 import { resolveSyntaxTheme, buildLineBgOverrides } from '../hooks/usePierreTheme';
 
 interface DiffHunkPreviewProps {
@@ -69,7 +69,8 @@ export const DiffHunkPreview: React.FC<DiffHunkPreviewProps> = ({
   className,
 }) => {
   const { resolvedMode, colorTheme } = useTheme();
-  const state = useReviewState();
+  const fontFamily = useReviewStore(s => s.fontFamily);
+  const fontSize = useReviewStore(s => s.fontSize);
   const lineBgIntensity = useConfigValue('diffLineBgIntensity');
   const [expanded, setExpanded] = useState(false);
 
@@ -95,7 +96,7 @@ export const DiffHunkPreview: React.FC<DiffHunkPreviewProps> = ({
   // The lazy initializer reads computed CSS variables from the document root.
   const [pierreTheme, setPierreTheme] = useState<{ type: 'dark' | 'light'; css: string }>(() => ({
     type: resolvedMode ?? 'dark',
-    css: buildPierreCSS(resolvedMode ?? 'dark', state.fontFamily, state.fontSize, lineBgIntensity),
+    css: buildPierreCSS(resolvedMode ?? 'dark', fontFamily, fontSize, lineBgIntensity),
   }));
 
   // Re-compute on theme / font / intensity changes
@@ -103,11 +104,11 @@ export const DiffHunkPreview: React.FC<DiffHunkPreviewProps> = ({
     const rafId = requestAnimationFrame(() => {
       setPierreTheme({
         type: resolvedMode ?? 'dark',
-        css: buildPierreCSS(resolvedMode ?? 'dark', state.fontFamily, state.fontSize, lineBgIntensity),
+        css: buildPierreCSS(resolvedMode ?? 'dark', fontFamily, fontSize, lineBgIntensity),
       });
     });
     return () => cancelAnimationFrame(rafId);
-  }, [resolvedMode, colorTheme, state.fontFamily, state.fontSize, lineBgIntensity]);
+  }, [resolvedMode, colorTheme, fontFamily, fontSize, lineBgIntensity]);
 
   const syntaxTheme = resolveSyntaxTheme(colorTheme, resolvedMode ?? 'dark');
 

@@ -1,14 +1,14 @@
 /**
- * Auto-save annotation drafts to the server.
+ * Auto-save and auto-restore annotation drafts.
  *
  * Stores full Annotation[] objects directly (preserving all fields
- * including `source`, `id`, offsets, and meta). On mount, checks for
- * an existing draft and exposes banner state for the UI to offer restoration.
+ * including `source`, `id`, offsets, and meta). On mount, if a draft
+ * exists, it is restored silently via the onRestore callback.
  *
  * Backward compatible: loads old tuple-serialized drafts via fromShareable().
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import type { Annotation, CodeAnnotation, ImageAttachment } from '../types';
 import { fromShareable, parseShareableImages } from '../utils/sharing';
 import type { ShareableAnnotation } from '../utils/sharing';
@@ -36,17 +36,6 @@ function isLegacyDraft(data: unknown): data is LegacyDraftData {
   return !!data && typeof data === 'object' && 'a' in data && Array.isArray((data as LegacyDraftData).a);
 }
 
-function formatTimeAgo(ts: number): string {
-  const seconds = Math.floor((Date.now() - ts) / 1000);
-  if (seconds < 60) return 'just now';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} minute${minutes !== 1 ? 's' : ''} ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
-  const days = Math.floor(hours / 24);
-  return `${days} day${days !== 1 ? 's' : ''} ago`;
-}
-
 interface UseAnnotationDraftOptions {
   annotations: Annotation[];
   codeAnnotations?: CodeAnnotation[];
@@ -54,12 +43,7 @@ interface UseAnnotationDraftOptions {
   isApiMode: boolean;
   isSharedSession: boolean;
   submitted: boolean;
-}
-
-interface UseAnnotationDraftResult {
-  draftBanner: { count: number; timeAgo: string } | null;
-  restoreDraft: () => { annotations: Annotation[]; codeAnnotations: CodeAnnotation[]; globalAttachments: ImageAttachment[] };
-  dismissDraft: () => void;
+  onRestore: (annotations: Annotation[], codeAnnotations: CodeAnnotation[], globalAttachments: ImageAttachment[]) => void;
 }
 
 export function useAnnotationDraft({
@@ -69,16 +53,16 @@ export function useAnnotationDraft({
   isApiMode,
   isSharedSession,
   submitted,
-}: UseAnnotationDraftOptions): UseAnnotationDraftResult {
+  onRestore,
+}: UseAnnotationDraftOptions): void {
   const fetch = useSessionFetch();
-  const [draftBanner, setDraftBanner] = useState<{ count: number; timeAgo: string } | null>(null);
-  const draftDataRef = useRef<{ annotations: Annotation[]; codeAnnotations: CodeAnnotation[]; globalAttachments: ImageAttachment[] } | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasMountedRef = useRef(false);
+  const restoredRef = useRef(false);
 
-  // Load draft on mount
+  // Load and auto-restore draft on mount
   useEffect(() => {
-    if (!isApiMode || isSharedSession) return;
+    if (!isApiMode || isSharedSession || restoredRef.current) return;
 
     fetch('/api/draft')
       .then(res => {
@@ -96,11 +80,9 @@ export function useAnnotationDraft({
         let restoredGlobal: ImageAttachment[];
 
         if (isLegacyDraft(data)) {
-          // Old tuple format — deserialize via fromShareable
           restoredAnnotations = data.a.length > 0 ? fromShareable(data.a, data.d) : [];
           restoredGlobal = data.g ? (parseShareableImages(data.g as Parameters<typeof parseShareableImages>[0]) ?? []) : [];
         } else if (Array.isArray(data.annotations)) {
-          // New direct-object format
           restoredAnnotations = data.annotations;
           restoredCodeAnnotations = Array.isArray(data.codeAnnotations) ? data.codeAnnotations : [];
           restoredGlobal = Array.isArray(data.globalAttachments) ? data.globalAttachments : [];
@@ -115,11 +97,8 @@ export function useAnnotationDraft({
 
         const totalCount = restoredAnnotations.length + restoredCodeAnnotations.length + restoredGlobal.length;
         if (totalCount > 0) {
-          draftDataRef.current = { annotations: restoredAnnotations, codeAnnotations: restoredCodeAnnotations, globalAttachments: restoredGlobal };
-          setDraftBanner({
-            count: totalCount,
-            timeAgo: formatTimeAgo(data.ts || 0),
-          });
+          restoredRef.current = true;
+          onRestore(restoredAnnotations, restoredCodeAnnotations, restoredGlobal);
         }
         hasMountedRef.current = true;
       })
@@ -148,34 +127,11 @@ export function useAnnotationDraft({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-      }).catch(() => {
-        // Silent failure — draft is best-effort
-      });
+      }).catch(() => {});
     }, DEBOUNCE_MS);
 
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, [annotations, codeAnnotations, globalAttachments, isApiMode, isSharedSession, submitted]);
-
-  const restoreDraft = useCallback(() => {
-    const data = draftDataRef.current;
-    setDraftBanner(null);
-    draftDataRef.current = null;
-
-    if (!data) return { annotations: [], codeAnnotations: [], globalAttachments: [] };
-
-    return data;
-  }, []);
-
-  const dismissDraft = useCallback(() => {
-    setDraftBanner(null);
-    draftDataRef.current = null;
-
-    fetch('/api/draft', { method: 'DELETE' }).catch(() => {
-      // Silent failure
-    });
-  }, []);
-
-  return { draftBanner, restoreDraft, dismissDraft };
 }

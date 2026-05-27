@@ -1,4 +1,5 @@
 @import "@fontsource-variable/inter";
+@import "@fontsource-variable/instrument-sans";
 @import "@fontsource-variable/geist-mono";
 @import "@plannotator/ui/theme.css";
 @import "tailwindcss";
@@ -7,6 +8,7 @@
 
 @source "../src/**/*.{ts,tsx}";
 @source "../../../packages/plannotator-code-review/**/*.{ts,tsx}";
+@source "../../../packages/plannotator-plan-review/**/*.{ts,tsx}";
 @source "../../../packages/ui/components/**/*.{ts,tsx}";
 @source "../../../packages/ui/hooks/**/*.{ts,tsx}";
 

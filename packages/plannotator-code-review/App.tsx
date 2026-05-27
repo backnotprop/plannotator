@@ -9,6 +9,7 @@ import { AgentReviewActions } from './components/AgentReviewActions';
 import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
 import { storage } from '@plannotator/ui/utils/storage';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
+import { CompletionBanner } from '@plannotator/ui/components/CompletionBanner';
 import { GitHubIcon } from '@plannotator/ui/components/GitHubIcon';
 import { GitLabIcon } from '@plannotator/ui/components/GitLabIcon';
 import { RepoIcon } from '@plannotator/ui/components/RepoIcon';
@@ -35,6 +36,7 @@ import { isTypingTarget, useReviewSearch, type ReviewSearchMatch } from './hooks
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
 import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotations';
 import { useAgentJobs } from '@plannotator/ui/hooks/useAgentJobs';
+import { subscribeToDaemonSessionFamily } from '@plannotator/ui/utils/daemonHub';
 import { exportEditorAnnotations } from '@plannotator/ui/utils/parser';
 import { ResizeHandle } from '@plannotator/ui/components/ResizeHandle';
 import { DockviewReact, type DockviewReadyEvent, type DockviewApi } from 'dockview-react';
@@ -72,6 +74,7 @@ import {
   REVIEW_CODE_NAV_PANEL_ID,
 } from './dock/reviewPanelTypes';
 import type { DiffFile } from './types';
+import { retainUnchangedViewedFiles } from './utils/diffFiles';
 import type { DiffOption, WorktreeInfo, GitContext } from '@plannotator/shared/types';
 import type { PRMetadata } from '@plannotator/shared/pr-types';
 import type { PRDiffScope, PRDiffScopeOption, PRStackInfo, PRStackTree } from '@plannotator/shared/pr-stack';
@@ -79,6 +82,8 @@ import { altKey } from '@plannotator/ui/utils/platform';
 import { TourDialog } from './components/tour/TourDialog';
 import { DEMO_TOUR_ID } from './demoTour';
 import { useSessionFetch } from '@plannotator/ui/hooks/useSessionFetch';
+import { ReviewStoreProvider, useReviewStore, useReviewStoreApi } from './store';
+import { selectAllAnnotations } from './store/selectors';
 
 declare const __APP_VERSION__: string;
 
@@ -132,18 +137,41 @@ function getFileTabTitle(filePath: string): string {
   return filePath.split('/').pop() ?? filePath;
 }
 
-const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }> = ({ __embedded, headerLeft }) => {
+function useSessionVisible(rootRef: React.RefObject<HTMLElement | null>): boolean {
+  const [visible, setVisible] = useState(true);
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const container = el.parentElement;
+    if (!container) return;
+    const check = () => setVisible(getComputedStyle(el).visibility !== 'hidden');
+    check();
+    const observer = new MutationObserver(check);
+    observer.observe(container, { attributes: true, attributeFilter: ['style'] });
+    return () => observer.disconnect();
+  }, []);
+  return visible;
+}
+
+const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpenSettings?: () => void }> = ({ __embedded, headerLeft, onOpenSettings: externalOpenSettings }) => {
   const fetch = useSessionFetch();
   const { resolvedMode } = useTheme();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const sessionVisible = useSessionVisible(rootRef);
+  const isVisible = useCallback(() => {
+    if (!rootRef.current) return true;
+    return getComputedStyle(rootRef.current).visibility !== 'hidden';
+  }, []);
+  const storeApi = useReviewStoreApi();
+  const localAnnotations = useReviewStore(s => s.localAnnotations);
+  const selectedAnnotationId = useReviewStore(s => s.selectedAnnotationId);
+  const pendingSelection = useReviewStore(s => s.pendingSelection);
+  const files = useReviewStore(s => s.files);
+  const activeFileIndex = useReviewStore(s => s.focusedFileIndex);
   const [diffData, setDiffData] = useState<DiffData | null>(null);
-  const [files, setFiles] = useState<DiffFile[]>([]);
-  const [activeFileIndex, setActiveFileIndex] = useState(0);
-  const [annotations, setAnnotations] = useState<CodeAnnotation[]>([]);
-  const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
-  const [isAllFilesActive, setIsAllFilesActive] = useState(false);
+  const isAllFilesActive = useReviewStore(s => s.isAllFilesActive);
   const [isDiffPanelActive, setIsDiffPanelActive] = useState(false);
   const [allFilesVisibleFile, setAllFilesVisibleFile] = useState<string | null>(null);
-  const [pendingSelection, setPendingSelection] = useState<SelectedLineRange | null>(null);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showWorktreeDialog, setShowWorktreeDialog] = useState(false);
   const [openSettingsMenu, setOpenSettingsMenu] = useState(false);
@@ -158,28 +186,29 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
   const diffHideWhitespace = useConfigValue('diffHideWhitespace');
   const diffFontFamily = useConfigValue('diffFontFamily');
   const diffFontSize = useConfigValue('diffFontSize');
-  const diffTabSize = useConfigValue('diffTabSize');
 
-  // Load custom diff font and override --font-mono for surrounding review elements
   useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
     if (diffFontFamily) {
       loadDiffFont(diffFontFamily);
-      document.documentElement.style.setProperty('--diff-font-override', `'${diffFontFamily}', monospace`);
+      el.style.setProperty('--diff-font-override', `'${diffFontFamily}', monospace`);
     } else {
-      document.documentElement.style.removeProperty('--diff-font-override');
+      el.style.removeProperty('--diff-font-override');
     }
     if (diffFontSize) {
-      document.documentElement.style.setProperty('--diff-font-size-override', diffFontSize);
+      el.style.setProperty('--diff-font-size-override', diffFontSize);
+      el.classList.add('has-font-size-override');
     } else {
-      document.documentElement.style.removeProperty('--diff-font-size-override');
+      el.style.removeProperty('--diff-font-size-override');
+      el.classList.remove('has-font-size-override');
     }
-    document.documentElement.style.setProperty('--diffs-tab-size', String(diffTabSize));
     return () => {
-      document.documentElement.style.removeProperty('--diff-font-override');
-      document.documentElement.style.removeProperty('--diff-font-size-override');
-      document.documentElement.style.removeProperty('--diffs-tab-size');
+      el.style.removeProperty('--diff-font-override');
+      el.style.removeProperty('--diff-font-size-override');
+      el.classList.remove('has-font-size-override');
     };
-  }, [diffFontFamily, diffFontSize, diffTabSize]);
+  }, [diffFontFamily, diffFontSize]);
 
   const reviewSidebar = useSidebar<ReviewSidebarTab>(true, 'annotations');
   const [isFileTreeOpen, setIsFileTreeOpen] = useState(true);
@@ -190,6 +219,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
   const [origin, setOrigin] = useState<Origin | null>(null);
   const [gitUser, setGitUser] = useState<string | undefined>();
   const [isWSL, setIsWSL] = useState(false);
+  const [legacyTabMode, setLegacyTabMode] = useState(false);
   const [diffType, setDiffType] = useState<string>('uncommitted');
   const [gitContext, setGitContext] = useState<GitContext | null>(null);
   // Two bases:
@@ -210,16 +240,16 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
   const [isApproving, setIsApproving] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
   const [submitted, setSubmitted] = useState<'approved' | 'feedback' | 'exited' | false>(false);
+  const [feedbackSent, setFeedbackSent] = useState(false);
   const [showApproveWarning, setShowApproveWarning] = useState(false);
   const [showExitWarning, setShowExitWarning] = useState(false);
   const [sharingEnabled, setSharingEnabled] = useState(true);
   const [repoInfo, setRepoInfo] = useState<{ display: string; branch?: string } | null>(null);
 
   useEffect(() => {
-    const prev = document.title;
+    if (!sessionVisible) return;
     document.title = repoInfo ? `${repoInfo.display} · Code Review` : "Code Review";
-    return () => { document.title = prev; };
-  }, [repoInfo]);
+  }, [repoInfo, sessionVisible]);
 
   const { prMetadata, prStackInfo, prStackTree, prDiffScope, prDiffScopeOptions, updatePRSession } = usePRSession();
   const { withPRContext } = useAnnotationFactory(prMetadata, prStackInfo ? prDiffScope : undefined);
@@ -266,8 +296,8 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
   const identity = useConfigValue('displayName');
 
   const clearPendingSelection = useCallback(() => {
-    setPendingSelection(null);
-  }, []);
+    storeApi.getState().setPendingSelection(null);
+  }, [storeApi]);
 
   // VS Code editor annotations (only polls when inside VS Code webview)
   const { editorAnnotations, deleteEditorAnnotation } = useEditorAnnotations();
@@ -281,6 +311,36 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
   const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<CodeAnnotation>({ enabled: !!origin });
   const agentJobs = useAgentJobs({ enabled: !!origin });
 
+  // Listen for session-revision events (agent pushed a new diff)
+  useEffect(() => {
+    if (!origin) return;
+    const unsubscribe = subscribeToDaemonSessionFamily("session-revision", (msg) => {
+      if (!msg.payload) return;
+      const revision = msg.payload as { rawPatch?: string; gitRef?: string };
+      if (revision.rawPatch !== undefined) {
+        const oldFiles = storeApi.getState().files;
+        const newFiles = parseDiffToFiles(revision.rawPatch);
+        const contentChanged = newFiles.length !== oldFiles.length ||
+          newFiles.some((f, i) => f.patch !== oldFiles[i]?.patch);
+        if (contentChanged) {
+          setDiffData(prev => prev ? { ...prev, rawPatch: revision.rawPatch!, gitRef: revision.gitRef ?? prev.gitRef } : prev);
+          storeApi.getState().setFiles(newFiles);
+          storeApi.getState().setFocusedFile(0);
+          storeApi.getState().setLocalAnnotations([]);
+          storeApi.getState().selectAnnotation(null);
+          storeApi.getState().setPendingSelection(null);
+          setViewedFiles(prev => retainUnchangedViewedFiles(oldFiles, newFiles, prev));
+        }
+        if (contentChanged || msg.type === "event") {
+          setFeedbackSent(false);
+          setSubmitted(false);
+          setIsSendingFeedback(false);
+        }
+      }
+    });
+    return unsubscribe;
+  }, [origin, storeApi]);
+
   // Tour dialog state — opens as an overlay instead of a dock panel
   const [tourDialogJobId, setTourDialogJobId] = useState<string | null>(null);
 
@@ -289,6 +349,15 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
   const filesRef = useRef(files);
   filesRef.current = files;
   const needsInitialDiffPanel = useRef(true);
+
+  useEffect(() => { storeApi.getState().setExternalAnnotations(externalAnnotations); }, [storeApi, externalAnnotations]);
+  useEffect(() => {
+    storeApi.getState().setDiffOptions({
+      diffStyle, diffOverflow, diffIndicators, lineDiffType: diffLineDiffType,
+      disableLineNumbers: !diffShowLineNumbers, disableBackground: !diffShowBackground,
+      fontFamily: diffFontFamily || undefined, fontSize: diffFontSize || undefined,
+    });
+  }, [storeApi, diffStyle, diffOverflow, diffIndicators, diffLineDiffType, diffShowLineNumbers, diffShowBackground, diffFontFamily, diffFontSize]);
 
   // PR context (lifted from sidebar so center dock PR panels can access it)
   const { prContext, isLoading: isPRContextLoading, error: prContextError, fetchContext: fetchPRContext } = usePRContext(prMetadata ?? null);
@@ -302,7 +371,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
     if (!dockApi) {
       const fileIndex = files.findIndex(candidate => candidate.path === filePath);
       if (fileIndex !== -1) {
-        setActiveFileIndex(fileIndex);
+        storeApi.getState().setFocusedFile(fileIndex);
       }
       return;
     }
@@ -316,18 +385,18 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
         }
         const fileIndex = files.findIndex(candidate => candidate.path === filePath);
         if (fileIndex !== -1) {
-          setActiveFileIndex(fileIndex);
+          storeApi.getState().setFocusedFile(fileIndex);
         }
         needsInitialDiffPanel.current = false;
         return;
       }
 
-      setPendingSelection(null);
+      storeApi.getState().setPendingSelection(null);
       existing.api.updateParameters({ filePath });
       existing.api.setTitle(getFileTabTitle(file.path));
       existing.api.setActive();
     } else {
-      setPendingSelection(null);
+      storeApi.getState().setPendingSelection(null);
       dockApi.addPanel({
         id: REVIEW_DIFF_PANEL_ID,
         component: REVIEW_PANEL_TYPES.DIFF,
@@ -336,7 +405,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
       });
     }
 
-    setActiveFileIndex(files.findIndex(candidate => candidate.path === filePath));
+    storeApi.getState().setFocusedFile(files.findIndex(candidate => candidate.path === filePath));
     needsInitialDiffPanel.current = false;
   }, [dockApi, files]);
 
@@ -377,37 +446,21 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
   // live WebSocket versions. Prefer the live version when both exist (same source,
   // type, and originalText). This avoids the timing issues of an effect-based
   // cleanup — draft-restored externals persist until live events re-deliver them.
-  const allAnnotations = useMemo(() => {
-    if (externalAnnotations.length === 0) return annotations;
-
-    const local = annotations.filter(a => {
-      if (!a.source) return true;
-      return !externalAnnotations.some(ext =>
-        ext.source === a.source &&
-        ext.type === a.type &&
-        ext.filePath === a.filePath &&
-        ext.lineStart === a.lineStart &&
-        ext.lineEnd === a.lineEnd &&
-        ext.side === a.side
-      );
-    });
-
-    return [...local, ...externalAnnotations];
-  }, [annotations, externalAnnotations]);
-  const allAnnotationsRef = useRef(allAnnotations);
-  allAnnotationsRef.current = allAnnotations;
-
+  const allAnnotations = useMemo(
+    () => selectAllAnnotations({ localAnnotations, externalAnnotations }),
+    [localAnnotations, externalAnnotations],
+  );
   // Auto-save and auto-restore code annotation drafts
   useCodeAnnotationDraft({
     annotations: allAnnotations,
     viewedFiles,
     isApiMode: !!origin,
     submitted: !!submitted,
-    onRestore: useCallback((restoredAnnotations, restoredViewed) => {
-      if (restoredAnnotations.length > 0) setAnnotations(restoredAnnotations);
+    onRestore: useCallback((restoredAnnotations: CodeAnnotation[], restoredViewed: string[]) => {
+      if (restoredAnnotations.length > 0) storeApi.getState().setLocalAnnotations(restoredAnnotations);
       if (restoredViewed.length > 0) setViewedFiles(new Set(restoredViewed));
       toast(`Restored ${restoredAnnotations.length} annotation${restoredAnnotations.length !== 1 ? 's' : ''}${restoredViewed.length > 0 ? ` and ${restoredViewed.length} viewed file${restoredViewed.length !== 1 ? 's' : ''}` : ''}`);
-    }, []),
+    }, [storeApi]),
   });
 
   // AI Chat
@@ -494,21 +547,22 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
   }, [aiChat]);
 
   const handleAskAI = useCallback((question: string) => {
-    if (!pendingSelection || !files[activeFileIndex]) return;
-    const lineStart = Math.min(pendingSelection.start, pendingSelection.end);
-    const lineEnd = Math.max(pendingSelection.start, pendingSelection.end);
-    const side = pendingSelection.side === 'additions' ? 'new' : 'old';
-    const selectedCode = extractLinesFromPatch(files[activeFileIndex].patch, lineStart, lineEnd, side);
+    const { pendingSelection: sel, files: f, focusedFileIndex } = storeApi.getState();
+    if (!sel || !f[focusedFileIndex]) return;
+    const lineStart = Math.min(sel.start, sel.end);
+    const lineEnd = Math.max(sel.start, sel.end);
+    const side = sel.side === 'additions' ? 'new' : 'old';
+    const selectedCode = extractLinesFromPatch(f[focusedFileIndex].patch, lineStart, lineEnd, side);
 
     aiChat.ask({
       prompt: question,
-      filePath: files[activeFileIndex].path,
+      filePath: f[focusedFileIndex].path,
       lineStart,
       lineEnd,
       side,
       selectedCode: selectedCode || undefined,
     });
-  }, [pendingSelection, files, activeFileIndex, aiChat]);
+  }, [storeApi, aiChat]);
 
   const handleViewAIResponse = useCallback((questionId?: string) => {
     reviewSidebar.open('ai');
@@ -521,12 +575,12 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
   const handleScrollToAILines = useCallback((filePath: string, lineStart: number, lineEnd: number, side: 'old' | 'new') => {
     openDiffFile(filePath);
     // Set a selection to highlight the lines
-    setPendingSelection({
+    storeApi.getState().setPendingSelection({
       start: lineStart,
       end: lineEnd,
       side: side === 'new' ? 'additions' : 'deletions',
     });
-  }, [openDiffFile]);
+  }, [storeApi, openDiffFile]);
 
 
   // AI messages overlapping the current selection (for toolbar history)
@@ -573,15 +627,15 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
 
     // Sync activeFileIndex when user switches between dock tabs
     event.api.onDidActivePanelChange((panel) => {
-      if (!panel) { setIsAllFilesActive(false); setIsDiffPanelActive(false); return; }
-      setIsAllFilesActive(panel.id === REVIEW_ALL_FILES_PANEL_ID);
+      if (!panel) { storeApi.getState().setIsAllFilesActive(false); setIsDiffPanelActive(false); return; }
+      storeApi.getState().setIsAllFilesActive(panel.id === REVIEW_ALL_FILES_PANEL_ID);
       setIsDiffPanelActive(isReviewDiffPanelId(panel.id));
       if (!isReviewDiffPanelId(panel.id)) return;
       const filePath = getReviewDiffPanelFilePath(panel.params);
       if (!filePath) return;
       const fileIndex = filesRef.current.findIndex(file => file.path === filePath);
       if (fileIndex !== -1) {
-        setActiveFileIndex(fileIndex);
+        storeApi.getState().setFocusedFile(fileIndex);
       }
     });
 
@@ -635,6 +689,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     const handler = (e: KeyboardEvent) => {
+      if (!isVisible()) return;
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'T' || e.key === 't')) {
         e.preventDefault();
         setTourDialogJobId(prev => (prev === DEMO_TOUR_ID ? null : DEMO_TOUR_ID));
@@ -701,6 +756,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
   // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isVisible()) return;
       // Cmd/Ctrl+F to focus file search when diff files are available.
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f' && !isTypingTarget(e.target)) {
         if (hasSearchableFiles) {
@@ -780,11 +836,11 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
         error?: string;
         isWSL?: boolean;
         serverConfig?: { displayName?: string; gitUser?: string };
+        lastDecision?: 'approved' | 'feedback' | 'exited' | null;
       }) => {
-        // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
-        // gitUser drives the "Use git name" button in Settings; stays undefined (button hidden) when unavailable
         setGitUser(data.serverConfig?.gitUser);
+        if ((data.serverConfig as { legacyTabMode?: boolean } | undefined)?.legacyTabMode) setLegacyTabMode(true);
         const apiFiles = parseDiffToFiles(data.rawPatch);
         setDiffData({
           files: apiFiles,
@@ -795,7 +851,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
           gitContext: data.gitContext,
           sharingEnabled: data.sharingEnabled,
         });
-        setFiles(apiFiles);
+        storeApi.getState().setFiles(apiFiles);
         if (data.origin) setOrigin(data.origin);
         if (data.diffType) setDiffType(data.diffType);
         if (data.gitContext) {
@@ -828,6 +884,11 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
         if (data.diffType && !data.prMetadata && data.gitContext?.vcsType !== 'p4' && data.gitContext?.vcsType !== 'jj' && needsDiffTypeSetup()) {
           setDiffTypeSetupPending(true);
         }
+        if (data.lastDecision) {
+          if (data.lastDecision === 'approved') setSubmitted('approved');
+          else if (data.lastDecision === 'feedback') setFeedbackSent(true);
+          else if (data.lastDecision === 'exited') setSubmitted('exited');
+        }
       })
       .catch(() => {
         // Not in API mode - use demo content
@@ -837,7 +898,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
           rawPatch: DEMO_DIFF,
           gitRef: 'demo',
         });
-        setFiles(demoFiles);
+        storeApi.getState().setFiles(demoFiles);
       })
       .finally(() => setIsLoading(false));
   }, []);
@@ -856,8 +917,8 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
 
   // Handle line selection from diff viewer
   const handleLineSelection = useCallback((range: SelectedLineRange | null) => {
-    setPendingSelection(range);
-  }, []);
+    storeApi.getState().setPendingSelection(range);
+  }, [storeApi]);
 
   const handleAddAnnotationForFile = useCallback((
     filePath: string,
@@ -869,9 +930,10 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
     decorations?: ConventionalDecoration[],
     tokenMeta?: TokenAnnotationMeta
   ) => {
-    if (!pendingSelection) return;
-    const lineStart = Math.min(pendingSelection.start, pendingSelection.end);
-    const lineEnd = Math.max(pendingSelection.start, pendingSelection.end);
+    const sel = storeApi.getState().pendingSelection;
+    if (!sel) return;
+    const lineStart = Math.min(sel.start, sel.end);
+    const lineEnd = Math.max(sel.start, sel.end);
     const newAnnotation: CodeAnnotation = {
       id: generateId(),
       type,
@@ -879,7 +941,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
       filePath,
       lineStart,
       lineEnd,
-      side: pendingSelection.side === 'additions' ? 'new' : 'old',
+      side: sel.side === 'additions' ? 'new' : 'old',
       text,
       suggestedCode,
       originalCode,
@@ -893,9 +955,8 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
       conventionalLabel,
       decorations,
     };
-    setAnnotations(prev => [...prev, withPRContext(newAnnotation)]);
-    setPendingSelection(null);
-  }, [pendingSelection, identity, withPRContext]);
+    storeApi.getState().addAnnotation(withPRContext(newAnnotation));
+  }, [storeApi, identity, withPRContext]);
 
   const handleAddAnnotation = useCallback((
     type: CodeAnnotationType,
@@ -906,12 +967,14 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
     decorations?: ConventionalDecoration[],
     tokenMeta?: TokenAnnotationMeta
   ) => {
-    if (!files[activeFileIndex]) return;
-    handleAddAnnotationForFile(files[activeFileIndex].path, type, text, suggestedCode, originalCode, conventionalLabel, decorations, tokenMeta);
-  }, [files, activeFileIndex, handleAddAnnotationForFile]);
+    const { files: f, focusedFileIndex } = storeApi.getState();
+    if (!f[focusedFileIndex]) return;
+    handleAddAnnotationForFile(f[focusedFileIndex].path, type, text, suggestedCode, originalCode, conventionalLabel, decorations, tokenMeta);
+  }, [storeApi, handleAddAnnotationForFile]);
 
   const handleAddFileComment = useCallback((text: string) => {
-    const activeFile = files[activeFileIndex];
+    const { files: f, focusedFileIndex } = storeApi.getState();
+    const activeFile = f[focusedFileIndex];
     const trimmed = text.trim();
     if (!activeFile || !trimmed) return;
 
@@ -928,8 +991,8 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
       author: identity,
     };
 
-    setAnnotations(prev => [...prev, withPRContext(newAnnotation)]);
-  }, [files, activeFileIndex, identity, withPRContext]);
+    storeApi.getState().addAnnotation(withPRContext(newAnnotation));
+  }, [storeApi, identity, withPRContext]);
 
   const handleAddFileCommentForFile = useCallback((filePath: string, text: string) => {
     const trimmed = text.trim();
@@ -948,8 +1011,8 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
       author: identity,
     };
 
-    setAnnotations(prev => [...prev, withPRContext(newAnnotation)]);
-  }, [identity, withPRContext]);
+    storeApi.getState().addAnnotation(withPRContext(newAnnotation));
+  }, [storeApi, identity, withPRContext]);
 
   // Edit annotation
   const handleEditAnnotation = useCallback((
@@ -960,43 +1023,41 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
     conventionalLabel?: ConventionalLabel | null,
     decorations?: ConventionalDecoration[],
   ) => {
-    const ann = allAnnotationsRef.current.find(a => a.id === id);
     const updates: Partial<CodeAnnotation> = {
       ...(text !== undefined && { text }),
       ...(suggestedCode !== undefined && { suggestedCode }),
       ...(originalCode !== undefined && { originalCode }),
-      // null clears the label; undefined means "not provided, keep existing"
       ...(conventionalLabel !== undefined && { conventionalLabel: conventionalLabel ?? undefined }),
       ...(decorations !== undefined && { decorations }),
     };
-    if (ann?.source && externalAnnotations.some(e => e.id === id)) {
+    const state = storeApi.getState();
+    const ann = selectAllAnnotations(state).find(a => a.id === id);
+    if (ann?.source && state.externalAnnotations.some(e => e.id === id)) {
       updateExternalAnnotation(id, updates);
       return;
     }
-    setAnnotations(prev => prev.map(a =>
-      a.id === id ? { ...a, ...updates } : a
-    ));
-  }, [updateExternalAnnotation, externalAnnotations]);
+    state.editAnnotation(id, updates);
+  }, [storeApi, updateExternalAnnotation]);
 
   const handleDeleteAnnotation = useCallback((id: string) => {
-    const ann = allAnnotationsRef.current.find(a => a.id === id);
-    if (ann?.source && externalAnnotations.some(e => e.id === id)) {
+    const state = storeApi.getState();
+    const ann = selectAllAnnotations(state).find(a => a.id === id);
+    if (ann?.source && state.externalAnnotations.some(e => e.id === id)) {
       deleteExternalAnnotation(id);
-      if (selectedAnnotationId === id) setSelectedAnnotationId(null);
+      if (state.selectedAnnotationId === id) state.selectAnnotation(null);
       return;
     }
-    setAnnotations(prev => prev.filter(a => a.id !== id));
-    if (selectedAnnotationId === id) {
-      setSelectedAnnotationId(null);
-    }
-  }, [selectedAnnotationId, deleteExternalAnnotation, externalAnnotations]);
+    state.deleteAnnotation(id);
+  }, [storeApi, deleteExternalAnnotation]);
 
   // Handle identity change - update author on existing annotations
   const handleIdentityChange = useCallback((oldIdentity: string, newIdentity: string) => {
-    setAnnotations(prev => prev.map(ann =>
-      ann.author === oldIdentity ? { ...ann, author: newIdentity } : ann
-    ));
-  }, []);
+    storeApi.getState().setLocalAnnotations(
+      storeApi.getState().localAnnotations.map(ann =>
+        ann.author === oldIdentity ? { ...ann, author: newIdentity } : ann
+      ),
+    );
+  }, [storeApi]);
 
   // Switch file in the dedicated center diff panel.
   const handleFilePreview = useCallback((index: number) => {
@@ -1074,9 +1135,11 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (!isVisible()) return;
       if (e.metaKey || e.ctrlKey || e.shiftKey || isTypingTarget(e.target)) return;
       if (!isDiffPanelActive) return;
-      const filePath = files[activeFileIndex]?.path;
+      const { files: f, focusedFileIndex } = storeApi.getState();
+      const filePath = f[focusedFileIndex]?.path;
       if (!filePath) return;
 
       if (e.key === 'v') {
@@ -1089,7 +1152,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [files, activeFileIndex, isDiffPanelActive, handleToggleViewed, canStageFiles, stageFile]);
+  }, [storeApi, isDiffPanelActive, handleToggleViewed, canStageFiles, stageFile]);
 
   // Shared function: apply a PR response (used by both initial load and PR switch)
   function applyPRResponse(data: PRSessionUpdate & {
@@ -1102,15 +1165,15 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
     dockApi?.getPanel(REVIEW_DIFF_PANEL_ID)?.api.close();
     needsInitialDiffPanel.current = true;
     setDiffData(prev => prev ? { ...prev, rawPatch: data.rawPatch, gitRef: data.gitRef } : prev);
-    setFiles(nextFiles);
+    const currentPath = files[activeFileIndex]?.path;
+    storeApi.getState().setFiles(nextFiles);
     if (isPRSwitch) {
-      setActiveFileIndex(0);
+      storeApi.getState().setFocusedFile(0);
     } else {
-      const currentFile = files[activeFileIndex];
-      const preserved = currentFile ? nextFiles.findIndex(f => f.path === currentFile.path) : -1;
-      setActiveFileIndex(preserved >= 0 ? preserved : 0);
+      const preserved = currentPath ? nextFiles.findIndex(f => f.path === currentPath) : -1;
+      storeApi.getState().setFocusedFile(preserved >= 0 ? preserved : 0);
     }
-    setPendingSelection(null);
+    storeApi.getState().setPendingSelection(null);
     updatePRSession({
       ...(data.prMetadata && { prMetadata: data.prMetadata }),
       ...(data.prStackInfo !== undefined && { prStackInfo: data.prStackInfo }),
@@ -1167,21 +1230,21 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
         // Whitespace toggle: update patch in-place, keep the active file.
         // If the current file was removed (whitespace-only), retarget the
         // dock panel to the first remaining file.
+        const currentPath = storeApi.getState().files[storeApi.getState().focusedFileIndex]?.path;
         setDiffData(prev => prev ? { ...prev, rawPatch: data.rawPatch, gitRef: data.gitRef } : prev);
-        setFiles(nextFiles);
-        const currentPath = files[activeFileIndex]?.path;
+        storeApi.getState().setFiles(nextFiles);
         const nextIdx = currentPath ? nextFiles.findIndex(f => f.path === currentPath) : -1;
         if (nextIdx !== -1) {
-          setActiveFileIndex(nextIdx);
+          storeApi.getState().setFocusedFile(nextIdx);
         } else if (nextFiles.length > 0) {
-          setActiveFileIndex(0);
+          storeApi.getState().setFocusedFile(0);
           openDiffFile(nextFiles[0].path);
         }
       } else {
         dockApi?.getPanel(REVIEW_DIFF_PANEL_ID)?.api.close();
         needsInitialDiffPanel.current = true;
         setDiffData(prev => prev ? { ...prev, rawPatch: data.rawPatch, gitRef: data.gitRef, diffType: data.diffType } : prev);
-        setFiles(nextFiles);
+        storeApi.getState().setFiles(nextFiles);
         setDiffType(data.diffType);
         if (data.base) {
           setSelectedBase(data.base);
@@ -1214,8 +1277,8 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
             };
           });
         }
-        setActiveFileIndex(0);
-        setPendingSelection(null);
+        storeApi.getState().setFocusedFile(0);
+        storeApi.getState().setPendingSelection(null);
         resetStagedFiles();
       }
       setDiffError(data.error || null);
@@ -1227,7 +1290,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
     } finally {
       setIsLoadingDiff(false);
     }
-  }, [dockApi, resetStagedFiles, selectedBase, diffHideWhitespace, files, activeFileIndex, openDiffFile]);
+  }, [storeApi, dockApi, resetStagedFiles, selectedBase, diffHideWhitespace, openDiffFile]);
 
   // Switch the base branch the current diff compares against.
   // Only triggers a refetch when the active mode actually uses a base.
@@ -1296,28 +1359,26 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
   // Select annotation - switches file if needed and scrolls to it
   const handleSelectAnnotation = useCallback((id: string | null) => {
     if (!id) {
-      setSelectedAnnotationId(null);
+      storeApi.getState().selectAnnotation(null);
       return;
     }
 
-    // Find the annotation
-    const annotation = allAnnotations.find(a => a.id === id);
+    const state = storeApi.getState();
+    const annotation = selectAllAnnotations(state).find(a => a.id === id);
     if (!annotation) {
-      setSelectedAnnotationId(id);
+      state.selectAnnotation(id);
       return;
     }
 
-    // In all-files mode, just set the selection — the panel's scroll-to-annotation
-    // effect handles expanding and scrolling. In single-file mode, switch to the file.
-    if (!isAllFilesActive) {
-      const fileIndex = files.findIndex(f => f.path === annotation.filePath);
+    if (!state.isAllFilesActive) {
+      const fileIndex = state.files.findIndex(f => f.path === annotation.filePath);
       if (fileIndex !== -1) {
         handleFileSwitch(fileIndex);
       }
     }
 
-    setSelectedAnnotationId(id);
-  }, [allAnnotations, files, isAllFilesActive, handleFileSwitch]);
+    state.selectAnnotation(id);
+  }, [storeApi, handleFileSwitch]);
 
   // Diff context bundled into local-mode feedback headers so the receiving
   // agent knows which diff the annotations are anchored to. Uses committedBase
@@ -1506,7 +1567,16 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
         }),
       });
       if (res.ok) {
-        setSubmitted('feedback');
+        const data = await res.json().catch(() => ({}));
+        if (data.feedbackDelivered) {
+          setFeedbackSent(true);
+          setIsSendingFeedback(false);
+          storeApi.getState().setLocalAnnotations([]);
+          storeApi.getState().selectAnnotation(null);
+          storeApi.getState().setPendingSelection(null);
+        } else {
+          setSubmitted('feedback');
+        }
       } else {
         throw new Error('Failed to send');
       }
@@ -1516,7 +1586,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
       setTimeout(() => setCopyFeedback(null), 2000);
       setIsSendingFeedback(false);
     }
-  }, [totalAnnotationCount, feedbackMarkdown, allAnnotations]);
+  }, [totalAnnotationCount, feedbackMarkdown, allAnnotations, storeApi]);
 
   // Exit review session without sending any feedback
   const handleExit = useCallback(async () => {
@@ -1676,6 +1746,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
     const DOUBLE_TAP_WINDOW = 300;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isVisible()) return;
       if (e.key !== 'Alt' || e.repeat) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
@@ -1708,11 +1779,12 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
   // Cmd/Ctrl+Enter keyboard shortcut to approve or send feedback
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isVisible()) return;
       if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
 
       // If the platform post dialog is open, Cmd+Enter submits it
       if (platformCommentDialog) {
-        if (submitted || isPlatformActioning) return;
+        if (submitted || feedbackSent || isPlatformActioning) return;
         const isApproveAction = platformCommentDialog.action === 'approve';
         const hasTargets = platformCommentDialog.plan.targets.length > 0;
         const canSubmit = isApproveAction || hasTargets || platformGeneralComment.trim();
@@ -1725,7 +1797,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       if (showExportModal || showNoAnnotationsDialog || showApproveWarning || showExitWarning) return;
-      if (submitted || isSendingFeedback || isApproving || isExiting || isPlatformActioning) return;
+      if (submitted || feedbackSent || isSendingFeedback || isApproving || isExiting || isPlatformActioning) return;
       if (!origin) return; // Demo mode
 
       e.preventDefault();
@@ -1753,7 +1825,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
   }, [
     showExportModal, showNoAnnotationsDialog, showApproveWarning, showExitWarning,
     platformCommentDialog, platformGeneralComment,
-    submitted, isSendingFeedback, isApproving, isExiting, isPlatformActioning,
+    submitted, feedbackSent, isSendingFeedback, isApproving, isExiting, isPlatformActioning,
     origin, platformMode, platformLabel, platformUser, prMetadata, totalAnnotationCount, openPlatformDialog,
     handleApprove, handleSendFeedback, handlePlatformAction
   ]);
@@ -1768,11 +1840,26 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
     return <ThemeProvider defaultTheme="dark">{skeleton}</ThemeProvider>;
   }
 
+  const completionTitle = !submitted ? '' :
+    submitted === 'approved' ? 'Changes Approved'
+    : submitted === 'exited' ? 'Session Closed'
+    : 'Feedback Sent';
+  const completionSubtitle = !submitted ? '' :
+    submitted === 'exited'
+      ? 'Review session closed without feedback.'
+      : platformMode
+        ? submitted === 'approved'
+          ? `Your approval was submitted to ${platformLabel}.`
+          : `Your feedback was submitted to ${platformLabel}.`
+        : submitted === 'approved'
+          ? `${getAgentName(origin)} will proceed with the changes.`
+          : `${getAgentName(origin)} will address your review feedback.`;
+
   const innerContent = (
       <ReviewStateProvider value={reviewStateValue}>
       <JobLogsProvider value={jobLogsValue}>
       {isSwitchingPRScope && <PRSwitchOverlay />}
-      <div className={`${__embedded ? 'h-full' : 'h-screen'} flex flex-col bg-background overflow-hidden`}>
+      <div ref={rootRef} className={`${__embedded ? 'h-full' : 'h-screen'} flex flex-col bg-background overflow-hidden`}>
         {/* Header */}
         <header className="py-1 flex items-center justify-between px-2 md:px-4 border-b border-border/50 bg-card/50 backdrop-blur-xl z-50">
           <div className={`min-w-0 flex items-center gap-2 md:gap-3 ${headerLeft ? '' : '-ml-1.5 md:-ml-3'}`}>
@@ -1884,7 +1971,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
               </button>
             </div>
 
-            {origin ? (
+            {origin && !submitted && !feedbackSent ? (
               <>
                 {/* Destination dropdown (PR mode only) */}
                 {prMetadata && (
@@ -2048,7 +2135,7 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
             <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
 
             <ReviewHeaderMenu
-              onOpenSettings={() => setOpenSettingsMenu(true)}
+              onOpenSettings={() => { if (externalOpenSettings) { externalOpenSettings(); return; } setOpenSettingsMenu(true); }}
               onOpenExport={() => setShowExportModal(true)}
               onToggleFileTree={() => setIsFileTreeOpen(prev => !prev)}
               onToggleSidebar={() => reviewSidebar.isOpen ? reviewSidebar.close() : reviewSidebar.open()}
@@ -2112,6 +2199,15 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
             )}
           </div>
         </header>
+
+        {/* Embedded completion banner — inline, non-blocking */}
+        {__embedded && !legacyTabMode && (
+          <CompletionBanner
+            submitted={feedbackSent ? 'feedback-sent' : submitted}
+            title={feedbackSent ? 'Feedback sent' : completionTitle}
+            subtitle={feedbackSent ? 'Your annotations were delivered to the agent.' : completionSubtitle}
+          />
+        )}
 
         {/* Main content */}
         <div className={`flex-1 flex overflow-hidden ${isResizing ? 'select-none' : ''}`}>
@@ -2313,19 +2409,21 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
           </div>
         )}
 
-        <div className="hidden" aria-hidden="true">
-          <Settings
-            taterMode={false}
-            onTaterModeChange={() => {}}
-            onIdentityChange={handleIdentityChange}
-            origin={origin}
-            mode="review"
-            aiProviders={aiProviders}
-            gitUser={gitUser}
-            externalOpen={openSettingsMenu}
-            onExternalClose={() => setOpenSettingsMenu(false)}
-          />
-        </div>
+        {!externalOpenSettings && (
+          <div className="hidden" aria-hidden="true">
+            <Settings
+              taterMode={false}
+              onTaterModeChange={() => {}}
+              onIdentityChange={handleIdentityChange}
+              origin={origin}
+              mode="review"
+              aiProviders={aiProviders}
+              gitUser={gitUser}
+              externalOpen={openSettingsMenu}
+              onExternalClose={() => setOpenSettingsMenu(false)}
+            />
+          </div>
+        )}
 
         {/* Worktree info dialog */}
         {(gitContext?.cwd || agentCwd) && prMetadata && (
@@ -2416,27 +2514,15 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
           />
         )}
 
-        {/* Completion overlay - shown after approve/feedback/exit */}
-        <CompletionOverlay
-          submitted={submitted}
-          title={
-            submitted === 'approved' ? 'Changes Approved'
-            : submitted === 'exited' ? 'Session Closed'
-            : 'Feedback Sent'
-          }
-          subtitle={
-            submitted === 'exited'
-              ? 'Review session closed without feedback.'
-              : platformMode
-                ? submitted === 'approved'
-                  ? `Your approval was submitted to ${platformLabel}.`
-                  : `Your feedback was submitted to ${platformLabel}.`
-                : submitted === 'approved'
-                  ? `${getAgentName(origin)} will proceed with the changes.`
-                  : `${getAgentName(origin)} will address your review feedback.`
-          }
-          agentLabel={getAgentName(origin)}
-        />
+        {/* Full-screen overlay: standalone mode, or legacy tab mode even when embedded */}
+        {(!__embedded || legacyTabMode) && (
+          <CompletionOverlay
+            submitted={feedbackSent ? 'feedback-sent' : submitted}
+            title={feedbackSent ? 'Feedback sent' : completionTitle}
+            subtitle={feedbackSent ? 'Your annotations were delivered to the agent.' : completionSubtitle}
+            agentLabel={getAgentName(origin)}
+          />
+        )}
 
         {/* Update notification */}
         <UpdateBanner origin={origin} isWSL={isWSL} />
@@ -2506,9 +2592,15 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode }
   );
 };
 
-export default ReviewApp;
+export default function ReviewAppStandalone(props: { __embedded?: boolean; headerLeft?: React.ReactNode; onOpenSettings?: () => void }) {
+  return <ReviewStoreProvider><ReviewApp {...props} /></ReviewStoreProvider>;
+}
 
-export function ReviewAppEmbedded({ headerLeft }: { headerLeft?: React.ReactNode }) {
-  return <ReviewApp __embedded headerLeft={headerLeft} />;
+export function ReviewAppEmbedded({ headerLeft, onOpenSettings }: { headerLeft?: React.ReactNode; onOpenSettings?: () => void }) {
+  return (
+    <ReviewStoreProvider>
+      <ReviewApp __embedded headerLeft={headerLeft} onOpenSettings={onOpenSettings} />
+    </ReviewStoreProvider>
+  );
 }
 

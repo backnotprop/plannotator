@@ -361,7 +361,7 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
     return () => root.removeEventListener('mouseup', handler, true);
   }, [sortedFiles, activeFilePath]);
 
-  // Scroll to selected annotation — auto-expand collapsed file
+  // Scroll to selected annotation — auto-expand collapsed file, then scroll to the annotation element
   useEffect(() => {
     if (!selectedAnnotationId) return;
     const ann = annotations.find(a => a.id === selectedAnnotationId);
@@ -372,10 +372,21 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
       next.delete(ann.filePath);
       return next;
     });
-    requestAnimationFrame(() => {
-      const header = headerRefs.current.get(ann.filePath);
-      header?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
+    const scrollToAnnotation = (attempt = 0) => {
+      const el = scrollRef.current?.querySelector(`[data-annotation-id="${selectedAnnotationId}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+      // Fall back to file header, or retry if the diff is still lazy-mounting
+      if (attempt < 3) {
+        requestAnimationFrame(() => scrollToAnnotation(attempt + 1));
+      } else {
+        const header = headerRefs.current.get(ann.filePath);
+        header?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    };
+    requestAnimationFrame(() => scrollToAnnotation());
   }, [selectedAnnotationId, annotations]);
 
   return (

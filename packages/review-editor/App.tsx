@@ -156,9 +156,7 @@ const ReviewApp: React.FC = () => {
   const diffHideWhitespace = useConfigValue('diffHideWhitespace');
   const diffFontFamily = useConfigValue('diffFontFamily');
   const diffFontSize = useConfigValue('diffFontSize');
-  const diffTabSize = useConfigValue('diffTabSize');
 
-  // Load custom diff font and override --font-mono for surrounding review elements
   useEffect(() => {
     if (diffFontFamily) {
       loadDiffFont(diffFontFamily);
@@ -171,8 +169,7 @@ const ReviewApp: React.FC = () => {
     } else {
       document.documentElement.style.removeProperty('--diff-font-size-override');
     }
-    document.documentElement.style.setProperty('--diffs-tab-size', String(diffTabSize));
-  }, [diffFontFamily, diffFontSize, diffTabSize]);
+  }, [diffFontFamily, diffFontSize]);
 
   const reviewSidebar = useSidebar<ReviewSidebarTab>(true, 'annotations');
   const [isFileTreeOpen, setIsFileTreeOpen] = useState(true);

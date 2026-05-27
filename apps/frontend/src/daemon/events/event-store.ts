@@ -59,7 +59,7 @@ export function applyDaemonEvent(state: DaemonEventState, event: DaemonLifecycle
   }
 
   const existingIndex = state.sessions.findIndex((session) => session.id === event.session.id);
-  if (event.type === "session-removed" || TERMINAL_STATUSES.has(event.session.status)) {
+  if (event.type === "session-removed") {
     if (existingIndex >= 0) state.sessions.splice(existingIndex, 1);
     return;
   }

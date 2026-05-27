@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
+import { useSessionFetch } from '@plannotator/ui/hooks/useSessionFetch';
 import { toast, Toaster } from 'sonner';
 import { type Origin, getAgentName } from '@plannotator/shared/agents';
 import { parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, exportCodeFileAnnotations, extractFrontmatter, wrapFeedbackForAgent, Frontmatter, type LinkedDocAnnotationEntry } from '@plannotator/ui/utils/parser';
@@ -20,8 +21,9 @@ import { getCallbackConfig, CallbackAction, executeCallback } from '@plannotator
 import { useAgents } from '@plannotator/ui/hooks/useAgents';
 import { useActiveSection } from '@plannotator/ui/hooks/useActiveSection';
 import { storage } from '@plannotator/ui/utils/storage';
-import { configStore } from '@plannotator/ui/config';
+import { configStore, useConfigValue } from '@plannotator/ui/config';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
+import { CompletionBanner } from '@plannotator/ui/components/CompletionBanner';
 import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
 import { getObsidianSettings, getEffectiveVaultPath, isObsidianConfigured, CUSTOM_PATH_SENTINEL } from '@plannotator/ui/utils/obsidian';
 import { getBearSettings } from '@plannotator/ui/utils/bear';
@@ -57,6 +59,7 @@ import { useArchive } from '@plannotator/ui/hooks/useArchive';
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
 import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotations';
 import { useExternalAnnotationHighlights } from '@plannotator/ui/hooks/useExternalAnnotationHighlights';
+import { subscribeToDaemonSessionFamily } from '@plannotator/ui/utils/daemonHub';
 import { buildPlanAgentInstructions } from '@plannotator/ui/utils/planAgentInstructions';
 import { useFileBrowser } from '@plannotator/ui/hooks/useFileBrowser';
 import { isVaultBrowserEnabled } from '@plannotator/ui/utils/obsidian';
@@ -96,8 +99,33 @@ type NoteAutoSaveResults = {
   octarine?: boolean;
 };
 
-const App: React.FC = () => {
+function useSessionVisible(rootRef: React.RefObject<HTMLElement | null>): boolean {
+  const [visible, setVisible] = useState(true);
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const container = el.parentElement;
+    if (!container) return;
+    const check = () => setVisible(getComputedStyle(el).visibility !== 'hidden');
+    check();
+    const observer = new MutationObserver(check);
+    observer.observe(container, { attributes: true, attributeFilter: ['style'] });
+    return () => observer.disconnect();
+  }, []);
+  return visible;
+}
+
+const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpenSettings?: () => void }> = ({ __embedded, headerLeft, onOpenSettings: externalOpenSettings }) => {
+  const fetch = useSessionFetch();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const sessionVisible = useSessionVisible(rootRef);
+  const isVisible = useCallback(() => {
+    if (!rootRef.current) return true;
+    return getComputedStyle(rootRef.current).visibility !== 'hidden';
+  }, []);
   const [markdown, setMarkdown] = useState(DEMO_PLAN_CONTENT);
+  const markdownRef = useRef(markdown);
+  markdownRef.current = markdown;
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [codeAnnotations, setCodeAnnotations] = useState<CodeAnnotation[]>([]);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
@@ -117,10 +145,7 @@ const App: React.FC = () => {
   const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<EditorMode>(getEditorMode);
   const [inputMethod, setInputMethod] = useState<InputMethod>(getInputMethod);
-  const [taterMode, setTaterMode] = useState(() => {
-    const stored = storage.getItem('plannotator-tater-mode');
-    return stored === 'true';
-  });
+  const taterMode = useConfigValue('taterMode');
   const [uiPrefs, setUiPrefs] = useState(() => getUIPreferences());
 
   // Plan-area width (inside the OverlayScrollArea, after sidebar/panel
@@ -139,6 +164,7 @@ const App: React.FC = () => {
   const [origin, setOrigin] = useState<Origin | null>(null);
   const [gitUser, setGitUser] = useState<string | undefined>();
   const [isWSL, setIsWSL] = useState(false);
+  const [legacyTabMode, setLegacyTabMode] = useState(false);
   const [globalAttachments, setGlobalAttachments] = useState<ImageAttachment[]>([]);
   const [annotateMode, setAnnotateMode] = useState(false);
   const [gate, setGate] = useState(false);
@@ -161,6 +187,8 @@ const App: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
   const [submitted, setSubmitted] = useState<'approved' | 'denied' | 'exited' | null>(null);
+  const [awaitingResubmission, setAwaitingResubmission] = useState(false);
+  const [feedbackSent, setFeedbackSent] = useState(false);
   const [pendingPasteImage, setPendingPasteImage] = useState<{ file: File; blobUrl: string; initialName: string } | null>(null);
   const [showPermissionModeSetup, setShowPermissionModeSetup] = useState(false);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
@@ -175,11 +203,14 @@ const App: React.FC = () => {
   const goalSetupMode = goalSetupBundle !== null;
 
   useEffect(() => {
+    if (!sessionVisible) return;
     document.title = repoInfo ? `${repoInfo.display} · Plannotator` : "Plannotator";
-  }, [repoInfo]);
+  }, [repoInfo, sessionVisible]);
 
   const [initialExportTab, setInitialExportTab] = useState<'share' | 'annotations' | 'notes'>();
   const [isPlanDiffActive, setIsPlanDiffActive] = useState(false);
+  const togglePlanDiff = useCallback(() => setIsPlanDiffActive(v => !v), []);
+  const closePlanDiff = useCallback(() => setIsPlanDiffActive(false), []);
   const [planDiffMode, setPlanDiffMode] = useState<PlanDiffMode>('clean');
   const [previousPlan, setPreviousPlan] = useState<string | null>(null);
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
@@ -303,6 +334,7 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!isPlanDiffActive) return;
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isVisible()) return;
       if (e.key === 'Escape') {
         setIsPlanDiffActive(false);
       }
@@ -547,12 +579,52 @@ const App: React.FC = () => {
     : annotateSource === 'message' ? 'message'
     : 'plan';
 
+  const linkedDocInfo = useMemo(() => {
+    if (!linkedDocHook.isActive) return null;
+    const dir = fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath);
+    const label = dir?.isVault ? 'Vault File' : fileBrowser.activeFile ? 'File' : undefined;
+    return { filepath: linkedDocHook.filepath!, onBack: handleLinkedDocBack, label, backLabel };
+  }, [linkedDocHook.isActive, linkedDocHook.filepath, handleLinkedDocBack, fileBrowser.dirs, fileBrowser.activeDirPath, fileBrowser.activeFile, backLabel]);
+
   // Track active section for TOC highlighting
   const headingCount = useMemo(() => blocks.filter(b => b.type === 'heading').length, [blocks]);
   const activeSection = useActiveSection(containerRef, headingCount, scrollViewport);
 
   const { editorAnnotations, deleteEditorAnnotation } = useEditorAnnotations();
   const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<Annotation>({ enabled: isApiMode && !goalSetupMode });
+
+  // Listen for session-revision events (plan/annotate resubmission or reactivation)
+  useEffect(() => {
+    if (!isApiMode) return;
+    const unsubscribe = subscribeToDaemonSessionFamily("session-revision", (msg) => {
+      if (!msg.payload) return;
+      const revision = msg.payload as { plan?: string; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; rawHtml?: string };
+      if (revision.plan === undefined) return;
+      const contentChanged = revision.plan !== markdownRef.current;
+      if (contentChanged) {
+        if (revision.rawHtml !== undefined) {
+          setRawHtml(revision.rawHtml);
+          setRenderAs('html');
+        }
+        setMarkdown(revision.plan);
+        if (revision.previousPlan !== undefined) setPreviousPlan(revision.previousPlan);
+        if (revision.versionInfo) setVersionInfo(revision.versionInfo);
+        setAnnotations([]);
+        setCodeAnnotations([]);
+        setGlobalAttachments([]);
+        setSelectedAnnotationId(null);
+        setSelectedCodeAnnotationId(null);
+        linkedDocHook.clearCache();
+      }
+      if (contentChanged || msg.type === "event") {
+        setAwaitingResubmission(false);
+        setFeedbackSent(false);
+        setSubmitted(null);
+        setIsSubmitting(false);
+      }
+    });
+    return unsubscribe;
+  }, [isApiMode]);
 
   // Drive DOM highlights for SSE-delivered external annotations. Disabled
   // while a linked doc overlay is open (Viewer DOM is hidden) and while the
@@ -660,28 +732,27 @@ const App: React.FC = () => {
     return () => ro.disconnect();
   }, [isLoading, isSharedSession]);
 
-  // Auto-save annotation drafts
-  const { draftBanner, restoreDraft, dismissDraft } = useAnnotationDraft({
+  // Auto-save and auto-restore annotation drafts
+  useAnnotationDraft({
     annotations: allAnnotations,
     codeAnnotations,
     globalAttachments,
     isApiMode: isApiMode && !goalSetupMode,
     isSharedSession,
     submitted: !!submitted,
+    onRestore: useCallback((restored, restoredCode, restoredGlobal) => {
+      if (restored.length > 0 || restoredCode.length > 0 || restoredGlobal.length > 0) {
+        setAnnotations(restored);
+        setCodeAnnotations(restoredCode);
+        if (restoredGlobal.length > 0) setGlobalAttachments(restoredGlobal);
+        const totalCount = restored.length + restoredCode.length + restoredGlobal.length;
+        toast(`Restored ${totalCount} annotation${totalCount !== 1 ? 's' : ''}`);
+        setTimeout(() => {
+          viewerRef.current?.applySharedAnnotations(restored.filter(a => !a.diffContext));
+        }, 100);
+      }
+    }, []),
   });
-
-  const handleRestoreDraft = React.useCallback(() => {
-    const { annotations: restored, codeAnnotations: restoredCode, globalAttachments: restoredGlobal } = restoreDraft();
-    if (restored.length > 0 || restoredCode.length > 0 || restoredGlobal.length > 0) {
-      setAnnotations(restored);
-      setCodeAnnotations(restoredCode);
-      if (restoredGlobal.length > 0) setGlobalAttachments(restoredGlobal);
-      // Apply highlights to DOM after a tick
-      setTimeout(() => {
-        viewerRef.current?.applySharedAnnotations(restored.filter(a => !a.diffContext));
-      }, 100);
-    }
-  }, [restoreDraft]);
 
   // Fetch available agents for OpenCode (for validation on approve)
   const { agents: availableAgents, validateAgent, getAgentWarning } = useAgents(origin);
@@ -704,8 +775,7 @@ const App: React.FC = () => {
   }, [pendingSharedAnnotations, clearPendingSharedAnnotations, resetExternalHighlights]);
 
   const handleTaterModeChange = useCallback((enabled: boolean) => {
-    setTaterMode(enabled);
-    storage.setItem('plannotator-tater-mode', String(enabled));
+    configStore.set('taterMode', enabled);
   }, []);
 
   const handleEditorModeChange = (mode: EditorMode) => {
@@ -732,11 +802,11 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; gate?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string } }) => {
+      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; gate?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string }; lastDecision?: 'approved' | 'denied' | 'exited' | 'feedback' | null }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
-        // gitUser drives the "Use git name" button in Settings; stays undefined (button hidden) when unavailable
         setGitUser(data.serverConfig?.gitUser);
+        if ((data.serverConfig as { legacyTabMode?: boolean } | undefined)?.legacyTabMode) setLegacyTabMode(true);
         if (data.mode === 'goal-setup' && data.goalSetup) {
           setGoalSetupBundle(data.goalSetup);
           setMarkdown('');
@@ -810,6 +880,23 @@ const App: React.FC = () => {
         }
         if (data.isWSL) {
           setIsWSL(true);
+        }
+        if (data.lastDecision) {
+          const isAnnotate = data.mode === 'annotate' || data.mode === 'annotate-last' || data.mode === 'annotate-folder';
+          if (data.lastDecision === 'approved') {
+            setSubmitted('approved');
+          } else if (data.lastDecision === 'denied') {
+            setAwaitingResubmission(true);
+          } else if (data.lastDecision === 'exited') {
+            setSubmitted('exited');
+          } else if (data.lastDecision === 'feedback') {
+            const isFileBased = data.mode === 'annotate';
+            if (isAnnotate && !isFileBased) {
+              setFeedbackSent(true);
+            } else {
+              setAwaitingResubmission(true);
+            }
+          }
         }
       })
       .catch(() => {
@@ -1045,7 +1132,7 @@ const App: React.FC = () => {
     setIsSubmitting(true);
     try {
       const planSaveSettings = getPlanSaveSettings();
-      await fetch('/api/deny', {
+      const response = await fetch('/api/deny', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1056,7 +1143,13 @@ const App: React.FC = () => {
           },
         })
       });
-      setSubmitted('denied');
+      const data = await response.json().catch(() => ({}));
+      if (data.awaitingResubmission) {
+        setAwaitingResubmission(true);
+        setIsSubmitting(false);
+      } else {
+        setSubmitted('denied');
+      }
     } catch {
       setIsSubmitting(false);
     }
@@ -1066,7 +1159,7 @@ const App: React.FC = () => {
   const handleAnnotateFeedback = async () => {
     setIsSubmitting(true);
     try {
-      await fetch('/api/feedback', {
+      const response = await fetch('/api/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1075,7 +1168,16 @@ const App: React.FC = () => {
           codeAnnotations,
         }),
       });
-      setSubmitted('denied'); // reuse 'denied' state for "feedback sent" overlay
+      const data = await response.json().catch(() => ({}));
+      if (data.awaitingResubmission) {
+        setAwaitingResubmission(true);
+        setIsSubmitting(false);
+      } else if (data.feedbackSent) {
+        setFeedbackSent(true);
+        setIsSubmitting(false);
+      } else {
+        setSubmitted('denied');
+      }
     } catch {
       setIsSubmitting(false);
     }
@@ -1128,6 +1230,7 @@ const App: React.FC = () => {
   // Global keyboard shortcuts (Cmd/Ctrl+Enter to submit)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isVisible()) return;
       // Only handle Cmd/Ctrl+Enter
       if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
 
@@ -1142,8 +1245,8 @@ const App: React.FC = () => {
       if (showExport || showImport || showFeedbackPrompt || showClaudeCodeWarning ||
           showExitWarning || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
 
-      // Don't intercept if already submitted, submitting, or exiting
-      if (submitted || isSubmitting || isExiting || goalSetupAction.isSubmitting) return;
+      // Don't intercept if already submitted, submitting, exiting, or awaiting resubmission
+      if (submitted || isSubmitting || isExiting || awaitingResubmission || feedbackSent || goalSetupAction.isSubmitting) return;
 
       // Don't intercept in demo/share mode (no API)
       if (!isApiMode) return;
@@ -1506,6 +1609,7 @@ const App: React.FC = () => {
   // Cmd/Ctrl+S keyboard shortcut — save to default notes app
   useEffect(() => {
     const handleSaveShortcut = (e: KeyboardEvent) => {
+      if (!isVisible()) return;
       if (e.key !== 's' || !(e.metaKey || e.ctrlKey)) return;
 
       const tag = (e.target as HTMLElement)?.tagName;
@@ -1548,6 +1652,7 @@ const App: React.FC = () => {
   // Cmd/Ctrl+P keyboard shortcut — print plan
   useEffect(() => {
     const handlePrintShortcut = (e: KeyboardEvent) => {
+      if (!isVisible()) return;
       if (e.key !== 'p' || !(e.metaKey || e.ctrlKey)) return;
 
       const tag = (e.target as HTMLElement)?.tagName;
@@ -1654,7 +1759,10 @@ const App: React.FC = () => {
   const handleHeaderDownloadAnnotations = useCallback(() => headerHandlersRef.current.handleDownloadAnnotations(), []);
   const handleHeaderCopyAgentInstructions = useCallback(() => headerHandlersRef.current.handleCopyAgentInstructions(), []);
   const handleHeaderCopyShareLink = useCallback(() => headerHandlersRef.current.handleCopyShareLink(), []);
-  const handleOpenSettings = useCallback(() => setMobileSettingsOpen(true), []);
+  const handleOpenSettings = useCallback(() => {
+    if (externalOpenSettings) { externalOpenSettings(); return; }
+    setMobileSettingsOpen(true);
+  }, [externalOpenSettings]);
   const handleCloseSettings = useCallback(() => setMobileSettingsOpen(false), []);
   const handleOpenExport = useCallback(() => { setInitialExportTab(undefined); setShowExport(true); }, []);
   const handlePrint = useCallback(() => window.print(), []);
@@ -1671,18 +1779,41 @@ const App: React.FC = () => {
 
 
   if (isLoading && !isSharedSession) {
-    return (
-      <ThemeProvider defaultTheme="dark">
-        <div className="h-screen bg-background" />
-      </ThemeProvider>
+    const skeleton = (
+      <div className={`${__embedded ? 'h-full' : 'h-screen'} bg-background`} />
     );
+    if (__embedded) return skeleton;
+    return <ThemeProvider defaultTheme="dark">{skeleton}</ThemeProvider>;
   }
 
-  return (
-    <ThemeProvider defaultTheme="dark">
-      <TooltipProvider delayDuration={900} skipDelayDuration={200} disableHoverableContent>
-      <div data-print-region="root" className="h-screen flex flex-col bg-background overflow-hidden">
+  const completionTitle = !submitted ? '' :
+    archive.archiveMode ? 'Archive Closed'
+    : submitted === 'exited' ? 'Session Closed'
+    : goalSetupMode ? 'Answers Submitted'
+    : submitted === 'approved'
+      ? (annotateMode ? 'Approved' : 'Plan Approved')
+      : annotateMode ? 'Annotations Sent'
+    : 'Feedback Sent';
+  const completionSubtitle = !submitted ? '' :
+    submitted === 'exited'
+      ? 'Annotation session closed without feedback.'
+      : archive.archiveMode
+        ? 'You can reopen with plannotator archive.'
+        : goalSetupMode
+          ? `${agentName} will use your answers to continue.`
+        : submitted === 'approved'
+          ? (annotateMode
+              ? `${agentName} will proceed.`
+              : `${agentName} will proceed with the implementation.`)
+          : annotateMode
+            ? `${agentName} will address your annotations on the ${annotateSource === 'message' ? 'message' : annotateSource === 'folder' ? 'files' : 'file'}.`
+            : `${agentName} will revise the plan based on your annotations.`;
+
+  const innerContent = (
+      <div ref={rootRef} data-print-region="root" className={`${__embedded ? 'h-full' : 'h-screen'} flex flex-col bg-background overflow-hidden`}>
         <AppHeader
+          headerLeft={headerLeft}
+          skipBuiltInSettings={!!externalOpenSettings}
           isApiMode={isApiMode}
           annotateMode={annotateMode}
           archiveMode={archive.archiveMode}
@@ -1693,6 +1824,7 @@ const App: React.FC = () => {
           gate={gate}
           isSharedSession={isSharedSession}
           origin={origin}
+          submitted={!!submitted || awaitingResubmission || feedbackSent}
           isSubmitting={isSubmitting}
           isExiting={isExiting}
           isPanelOpen={isPanelOpen}
@@ -1739,6 +1871,15 @@ const App: React.FC = () => {
           bearConfigured={getBearSettings().enabled}
           octarineConfigured={isOctarineConfigured()}
         />
+
+        {/* Embedded completion banner — inline, non-blocking (skipped in legacy tab mode) */}
+        {__embedded && !legacyTabMode && (
+          <CompletionBanner
+            submitted={feedbackSent ? 'feedback-sent' : awaitingResubmission ? 'awaiting' : submitted}
+            title={feedbackSent ? 'Feedback sent' : awaitingResubmission ? 'Feedback sent' : completionTitle}
+            subtitle={feedbackSent ? 'Your annotations were delivered to the agent.' : awaitingResubmission ? 'Waiting for agent to revise...' : completionSubtitle}
+          />
+        )}
 
         {/* Linked document error banner */}
         {linkedDocHook.error && (
@@ -1826,16 +1967,6 @@ const App: React.FC = () => {
             data-print-region="document"
             onViewportReady={handleViewportReady}
           >
-            <ConfirmDialog
-              isOpen={!!draftBanner}
-              onClose={dismissDraft}
-              onConfirm={handleRestoreDraft}
-              title="Draft Recovered"
-              message={draftBanner ? `Found ${draftBanner.count} annotation${draftBanner.count !== 1 ? 's' : ''} from ${draftBanner.timeAgo}. Would you like to restore them?` : ''}
-              confirmText="Restore"
-              cancelText="Dismiss"
-              showCancel
-            />
             <div ref={planAreaRef} className="min-h-full flex flex-col items-center px-2 py-3 md:px-10 md:py-8 xl:px-16 relative z-10">
               {/* Sticky header lane — ghost bar that pins the toolstrip +
                   badges at top: 12px once the user scrolls. Invisible at top
@@ -1854,10 +1985,11 @@ const App: React.FC = () => {
                   planDiffStats={planDiff.diffStats}
                   isPlanDiffActive={isPlanDiffActive}
                   hasPreviousVersion={planDiff.hasPreviousVersion}
-                  onPlanDiffToggle={() => setIsPlanDiffActive(!isPlanDiffActive)}
+                  onPlanDiffToggle={togglePlanDiff}
                   archiveInfo={archive.currentInfo}
                   maxWidth={annotateReaderMaxWidth}
                   remountToken={linkedDocHook.isActive ? `doc:${linkedDocHook.filepath}` : 'plan'}
+                  containerRef={rootRef}
                 />
               )}
 
@@ -1894,7 +2026,7 @@ const App: React.FC = () => {
                     diffStats={planDiff.diffStats}
                     diffMode={planDiffMode}
                     onDiffModeChange={setPlanDiffMode}
-                    onPlanDiffToggle={() => setIsPlanDiffActive(false)}
+                    onPlanDiffToggle={closePlanDiff}
                     repoInfo={repoInfo}
                     baseVersionLabel={planDiff.diffBaseVersion != null ? `v${planDiff.diffBaseVersion}` : undefined}
                     baseVersion={planDiff.diffBaseVersion ?? undefined}
@@ -1986,13 +2118,13 @@ const App: React.FC = () => {
                     stickyActions={uiPrefs.stickyActionsEnabled}
                     planDiffStats={linkedDocHook.isActive ? null : planDiff.diffStats}
                     isPlanDiffActive={isPlanDiffActive}
-                    onPlanDiffToggle={() => setIsPlanDiffActive(!isPlanDiffActive)}
+                    onPlanDiffToggle={togglePlanDiff}
                     hasPreviousVersion={!linkedDocHook.isActive && planDiff.hasPreviousVersion}
                     showDemoBadge={!isApiMode && !isLoadingShared && !isSharedSession}
                     maxWidth={annotateReaderMaxWidth}
                     onOpenLinkedDoc={handleOpenLinkedDoc}
                     onOpenCodeFile={codeFilePopout.open}
-                    linkedDocInfo={linkedDocHook.isActive ? { filepath: linkedDocHook.filepath!, onBack: handleLinkedDocBack, label: fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath)?.isVault ? 'Vault File' : fileBrowser.activeFile ? 'File' : undefined, backLabel } : null}
+                    linkedDocInfo={linkedDocInfo}
                     imageBaseDir={imageBaseDir}
                     codePathBaseDir={activeDocBaseDir}
                     copyLabel={annotateSource === 'message' ? 'Copy message' : annotateSource === 'file' || annotateSource === 'folder' ? 'Copy file' : undefined}
@@ -2166,53 +2298,35 @@ const App: React.FC = () => {
           variant="warning"
         />
 
-        <Toaster
-          position="top-right"
-          offset={64}
-          toastOptions={{
-            style: {
-              '--normal-bg': 'var(--card)',
-              '--normal-border': 'var(--border)',
-              '--normal-text': 'var(--foreground)',
-              '--success-bg': 'oklch(from var(--success) l c h / 0.15)',
-              '--success-border': 'oklch(from var(--success) l c h / 0.3)',
-              '--success-text': 'var(--success)',
-              '--error-bg': 'oklch(from var(--destructive) l c h / 0.15)',
-              '--error-border': 'oklch(from var(--destructive) l c h / 0.3)',
-              '--error-text': 'var(--destructive)',
-            } as React.CSSProperties,
-          }}
-        />
+        {!__embedded && (
+          <Toaster
+            position="top-right"
+            offset={64}
+            toastOptions={{
+              style: {
+                '--normal-bg': 'var(--card)',
+                '--normal-border': 'var(--border)',
+                '--normal-text': 'var(--foreground)',
+                '--success-bg': 'oklch(from var(--success) l c h / 0.15)',
+                '--success-border': 'oklch(from var(--success) l c h / 0.3)',
+                '--success-text': 'var(--success)',
+                '--error-bg': 'oklch(from var(--destructive) l c h / 0.15)',
+                '--error-border': 'oklch(from var(--destructive) l c h / 0.3)',
+                '--error-text': 'var(--destructive)',
+              } as React.CSSProperties,
+            }}
+          />
+        )}
 
-        {/* Completion overlay - shown after approve/deny */}
-        <CompletionOverlay
-          submitted={submitted}
-          title={
-            archive.archiveMode ? 'Archive Closed'
-            : submitted === 'exited' ? 'Session Closed'
-            : goalSetupMode ? 'Answers Submitted'
-            : submitted === 'approved'
-              ? (annotateMode ? 'Approved' : 'Plan Approved')
-              : annotateMode ? 'Annotations Sent'
-            : 'Feedback Sent'
-          }
-          subtitle={
-            submitted === 'exited'
-              ? 'Annotation session closed without feedback.'
-              : archive.archiveMode
-                ? 'You can reopen with plannotator archive.'
-                : goalSetupMode
-                  ? `${agentName} will use your answers to continue.`
-                : submitted === 'approved'
-                  ? (annotateMode
-                      ? `${agentName} will proceed.`
-                      : `${agentName} will proceed with the implementation.`)
-                  : annotateMode
-                    ? `${agentName} will address your annotations on the ${annotateSource === 'message' ? 'message' : annotateSource === 'folder' ? 'files' : 'file'}.`
-                    : `${agentName} will revise the plan based on your annotations.`
-          }
-          agentLabel={agentName}
-        />
+        {/* Full-screen overlay: standalone mode, or legacy tab mode even when embedded */}
+        {(!__embedded || legacyTabMode) && (
+          <CompletionOverlay
+            submitted={feedbackSent ? 'feedback-sent' : awaitingResubmission ? 'denied' : submitted}
+            title={feedbackSent ? 'Feedback sent' : awaitingResubmission ? 'Feedback sent' : completionTitle}
+            subtitle={feedbackSent ? 'Your annotations were delivered to the agent.' : awaitingResubmission ? 'Waiting for agent to revise...' : completionSubtitle}
+            agentLabel={agentName}
+          />
+        )}
 
         {/* Update notification */}
         <UpdateBanner origin={origin} isWSL={isWSL} />
@@ -2235,9 +2349,21 @@ const App: React.FC = () => {
           }}
         />
       </div>
+  );
+
+  if (__embedded) return innerContent;
+
+  return (
+    <ThemeProvider defaultTheme="dark">
+      <TooltipProvider delayDuration={900} skipDelayDuration={200} disableHoverableContent>
+        {innerContent}
       </TooltipProvider>
     </ThemeProvider>
   );
 };
 
 export default App;
+
+export function PlanAppEmbedded({ headerLeft, onOpenSettings }: { headerLeft?: React.ReactNode; onOpenSettings?: () => void }) {
+  return <App __embedded headerLeft={headerLeft} onOpenSettings={onOpenSettings} />;
+}

@@ -1,13 +1,3 @@
-@import "tailwindcss";
-
-/* Tell Tailwind where to scan for classes */
-@source "../ui/components/**/*.tsx";
-@source "../ui/hooks/**/*.ts";
-@source "./*.tsx";
-@source "./components/**/*.tsx";
-
-@import "../ui/theme.css";
-
 /* Code blocks */
 pre code.hljs {
   display: block;

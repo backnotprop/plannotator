@@ -1,4 +1,4 @@
-import { createContext, useContext, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useCallback, useEffect, type ReactNode } from 'react';
 
 type FetchFn = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -28,6 +28,15 @@ export function SessionProvider({
     },
     [sessionId],
   );
+
+  // Also set the window global so non-hook consumers (apiPath, <img src>) work
+  useEffect(() => {
+    const prev = window.__PLANNOTATOR_API_BASE__;
+    window.__PLANNOTATOR_API_BASE__ = `/s/${sessionId}/api`;
+    return () => {
+      window.__PLANNOTATOR_API_BASE__ = prev;
+    };
+  }, [sessionId]);
 
   return (
     <SessionContext.Provider value={{ fetch: sessionFetch }}>
