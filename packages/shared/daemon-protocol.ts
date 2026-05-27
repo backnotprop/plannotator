@@ -31,7 +31,6 @@ export const PLANNOTATOR_DAEMON_SESSION_VIEWS = [
   "plan",
   "review",
   "annotate",
-  "archive",
   "goal-setup",
 ] as const;
 

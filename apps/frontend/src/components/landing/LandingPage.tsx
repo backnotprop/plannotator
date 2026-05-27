@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
   Code2,
-  Archive,
   Folder,
   FolderPlus,
   ChevronRight,
@@ -79,25 +78,14 @@ export function LandingPage({ onAddProject }: LandingPageProps) {
   const selectionCount = selections.size;
 
   const handleAction = useCallback(
-    async (action: "review" | "archive") => {
+    async (action: "review") => {
       if (selectionCount === 0) return;
       setLoading(action);
-      let items = [...selections.values()];
-      if (action === "archive") {
-        const seen = new Set<string>();
-        items = items.filter((sel) => {
-          if (seen.has(sel.cwd)) return false;
-          seen.add(sel.cwd);
-          return true;
-        });
-      }
+      const items = [...selections.values()];
 
       const results = await Promise.allSettled(
         items.map(async (sel) => {
-          const result =
-            action === "review"
-              ? await daemonApiClient.createReviewSession(sel.cwd, sel.prUrl)
-              : await daemonApiClient.createArchiveSession(sel.cwd);
+          const result = await daemonApiClient.createReviewSession(sel.cwd, sel.prUrl);
           return { sel, result };
         }),
       );
@@ -209,19 +197,6 @@ export function LandingPage({ onAddProject }: LandingPageProps) {
                                   : selectionCount > 1
                                     ? `Code Review (${selectionCount})`
                                     : "Code Review"}
-                              </button>
-                              <button
-                                type="button"
-                                disabled={selectionCount === 0 || loading === "archive"}
-                                onClick={() => handleAction("archive")}
-                                className={cn(
-                                  "inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-[12px] font-medium",
-                                  "hover:bg-surface-1 active:scale-[0.97]",
-                                  "disabled:pointer-events-none disabled:opacity-40",
-                                )}
-                              >
-                                <Archive className="size-3.5" />
-                                {loading === "archive" ? "Opening…" : "Browse Archive"}
                               </button>
                               <button
                                 type="button"

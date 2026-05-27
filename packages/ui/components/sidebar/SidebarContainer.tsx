@@ -13,7 +13,6 @@ import type { UseFileBrowserReturn } from "../../hooks/useFileBrowser";
 import { TableOfContents } from "../TableOfContents";
 import { VersionBrowser } from "./VersionBrowser";
 import { FileBrowser } from "./FileBrowser";
-import { ArchiveBrowser, type ArchivedPlan } from "./ArchiveBrowser";
 import { OverlayScrollArea } from "../OverlayScrollArea";
 
 interface SidebarContainerProps {
@@ -52,12 +51,6 @@ interface SidebarContainerProps {
   onFetchVersions: () => void;
   // Annotation indicators
   hasFileAnnotations?: boolean;
-  // Archive Browser props
-  showArchiveTab?: boolean;
-  archivePlans: ArchivedPlan[];
-  selectedArchiveFile: string | null;
-  onArchiveSelect: (filename: string) => void;
-  isLoadingArchive: boolean;
 }
 
 export const SidebarContainer: React.FC<SidebarContainerProps> = ({
@@ -92,11 +85,6 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
   fetchingVersion,
   onFetchVersions,
   hasFileAnnotations,
-  showArchiveTab,
-  archivePlans,
-  selectedArchiveFile,
-  onArchiveSelect,
-  isLoadingArchive,
 }) => {
   return (
     <aside
@@ -170,28 +158,6 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
             badge={hasFileAnnotations}
           />
         )}
-        {showArchiveTab && (
-          <TabButton
-            active={activeTab === "archive"}
-            onClick={() => onTabChange("archive")}
-            icon={
-              <svg
-                className="w-3 h-3"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
-                />
-              </svg>
-            }
-            label="Archive"
-          />
-        )}
         <div className="flex-1 min-w-0" />
         <button
           onClick={onClose}
@@ -256,14 +222,6 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
             onRetryVaultDir={onFilesRetryVaultDir}
             annotationCounts={fileAnnotationCounts}
             highlightedFiles={highlightedFiles}
-          />
-        )}
-        {activeTab === "archive" && showArchiveTab && (
-          <ArchiveBrowser
-            plans={archivePlans}
-            selectedFile={selectedArchiveFile}
-            onSelect={onArchiveSelect}
-            isLoading={isLoadingArchive}
           />
         )}
       </OverlayScrollArea>

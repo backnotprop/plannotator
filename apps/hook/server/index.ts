@@ -1,7 +1,7 @@
 /**
  * Plannotator CLI for Claude Code, Codex, Gemini CLI, and Copilot CLI
  *
- * Supports eight modes:
+ * Supports seven modes:
  *
  * 1. Plan Review (default, no args):
  *    - Spawned by Claude/Gemini/Codex hook entrypoints
@@ -18,12 +18,7 @@
  *    - Opens any markdown file in the annotation UI
  *    - Outputs structured feedback to stdout
  *
- * 4. Archive (`plannotator archive`):
- *    - Opens read-only browser for saved plan decisions
- *    - Lists plans from ~/.plannotator/plans/ with status badges
- *    - Done button closes the browser
- *
- * 5. Sessions (`plannotator sessions`):
+ * 4. Sessions (`plannotator sessions`):
  *    - Lists active Plannotator server sessions
  *    - `--open [N]` reopens a session in the browser
  *    - `--clean` removes stale session files
@@ -85,7 +80,6 @@ import {
   getPluginCapabilities,
   type PluginActionResult,
   type PluginAnnotateRequest,
-  type PluginArchiveRequest,
   type PluginBaseRequest,
   type PluginClientOrigin,
   type PluginPlanRequest,
@@ -708,17 +702,6 @@ async function runPluginPlanCommand(): Promise<void> {
   });
 }
 
-async function runPluginArchiveCommand(): Promise<void> {
-  const request = await readPluginRequest<PluginArchiveRequest>();
-  const origin = getPluginOrigin(request);
-  await runDaemonBackedPluginRequest({
-    ...request,
-    action: "archive",
-    origin,
-    cwd: resolvePluginCwd(request),
-  });
-}
-
 async function runPluginAnnotateCommand(defaultMode: "annotate" | "annotate-last" = "annotate"): Promise<void> {
   const request = await readPluginRequest<PluginAnnotateRequest>();
   const origin = getPluginOrigin(request);
@@ -767,11 +750,6 @@ if (args[0] === "plugin") {
 
   if (command === "annotate" || command === "annotate-last") {
     await runPluginAnnotateCommand(command === "annotate-last" ? "annotate-last" : "annotate");
-    process.exit(0);
-  }
-
-  if (command === "archive") {
-    await runPluginArchiveCommand();
     process.exit(0);
   }
 
@@ -992,21 +970,6 @@ if (args[0] === "sessions") {
   });
 
   emitAnnotateOutcome(outcome.result as { feedback: string; exit?: boolean; approved?: boolean });
-  process.exit(0);
-
-} else if (args[0] === "archive") {
-  // ============================================
-  // ARCHIVE BROWSER MODE
-  // ============================================
-
-  await runDaemonSessionRequest({
-    action: "archive",
-    origin: detectedOrigin,
-    cwd: getInvocationCwd(),
-    sharingEnabled,
-    shareBaseUrl,
-    pasteApiUrl,
-  });
   process.exit(0);
 
 } else if (args[0] === "setup-goal") {

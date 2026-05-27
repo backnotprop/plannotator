@@ -41,7 +41,6 @@ export type SessionAction =
   | "annotate-approve"
   | "annotate-feedback"
   | "annotate-exit"
-  | "archive-done"
   | "goal-setup-submit"
   | "goal-setup-exit";
 
@@ -74,7 +73,6 @@ export interface DaemonApiClient {
   listPRs(cwd: string): Promise<DaemonApiResult<PRListResponse>>;
   listDetailedPRs(cwd: string): Promise<DaemonApiResult<PRDetailedListResponse>>;
   createReviewSession(cwd: string, prUrl?: string): Promise<DaemonApiResult<SessionResponse>>;
-  createArchiveSession(cwd: string): Promise<DaemonApiResult<SessionResponse>>;
 }
 
 type ResponseGuard<T> = (value: unknown) => value is T;
@@ -332,8 +330,6 @@ function requestForAction(action: SessionAction): { path: string; init: RequestI
       return { path: "/api/feedback", init: jsonPost({ feedback: "", annotations: [] }) };
     case "annotate-exit":
       return { path: "/api/exit", init: jsonPost({}) };
-    case "archive-done":
-      return { path: "/api/done", init: jsonPost({}) };
     case "goal-setup-submit":
       return { path: "/api/goal-setup/submit", init: jsonPost({ answers: [], facts: [] }) };
     case "goal-setup-exit":
@@ -525,14 +521,6 @@ export function createDaemonApiClient(options: DaemonApiClientOptions = {}): Dae
       );
     },
 
-    createArchiveSession(cwd) {
-      return requestJson(
-        fetchImpl,
-        joinUrl(options.baseUrl, "/daemon/sessions"),
-        isSessionResponse,
-        jsonPost({ request: { action: "archive", origin: "plannotator-frontend", cwd } }),
-      );
-    },
   };
 }
 

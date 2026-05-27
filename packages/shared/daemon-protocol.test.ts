@@ -41,7 +41,6 @@ describe("daemon protocol", () => {
       "plan",
       "review",
       "annotate",
-      "archive",
       "goal-setup",
     ]);
   });

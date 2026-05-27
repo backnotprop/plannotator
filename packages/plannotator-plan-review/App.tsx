@@ -55,7 +55,6 @@ import { usePlanDiff, type VersionInfo } from '@plannotator/ui/hooks/usePlanDiff
 import { useLinkedDoc } from '@plannotator/ui/hooks/useLinkedDoc';
 import { useCodeFilePopout } from '@plannotator/ui/hooks/useCodeFilePopout';
 import { useAnnotationDraft } from '@plannotator/ui/hooks/useAnnotationDraft';
-import { useArchive } from '@plannotator/ui/hooks/useArchive';
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
 import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotations';
 import { useExternalAnnotationHighlights } from '@plannotator/ui/hooks/useExternalAnnotationHighlights';
@@ -67,7 +66,6 @@ import { isFileBrowserEnabled, getFileBrowserSettings } from '@plannotator/ui/ut
 import { generateId } from '@plannotator/ui/utils/generateId';
 import { SidebarTabs } from '@plannotator/ui/components/sidebar/SidebarTabs';
 import { SidebarContainer } from '@plannotator/ui/components/sidebar/SidebarContainer';
-import type { ArchivedPlan } from '@plannotator/ui/components/sidebar/ArchiveBrowser';
 import { PlanDiffViewer } from '@plannotator/ui/components/plan-diff/PlanDiffViewer';
 import { CodeFilePopout, type CodeFileAnnotationInput } from '@plannotator/ui/components/CodeFilePopout';
 import type { PlanDiffMode } from '@plannotator/ui/components/plan-diff/PlanDiffModeSwitcher';
@@ -384,16 +382,9 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
     }, [activeDocBaseDir]),
   });
 
-  // Archive browser
-  const archive = useArchive({
-    markdown, viewerRef, linkedDocHook,
-    setMarkdown, setAnnotations, setSelectedAnnotationId, setSubmitted,
-  });
-
   const canUseWideMode = useMemo(() => canUseAnnotateWideMode({
-    archiveMode: archive.archiveMode,
     isPlanDiffActive,
-  }), [archive.archiveMode, isPlanDiffActive]);
+  }), [isPlanDiffActive]);
 
   const enterViewMode = useCallback((type: WideModeType) => {
     if (!canUseWideMode) return;
@@ -511,8 +502,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
   const handleLinkedDocBack = React.useCallback(() => {
     linkedDocHook.back();
     fileBrowser.setActiveFile(null);
-    archive.clearSelection();
-  }, [linkedDocHook, fileBrowser, archive]);
+  }, [linkedDocHook, fileBrowser]);
 
   // Derive annotation counts per file from linked doc cache (includes active doc's live state)
   const allAnnotationCounts = useMemo(() => {
@@ -802,7 +792,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; gate?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string }; lastDecision?: 'approved' | 'denied' | 'exited' | 'feedback' | null }) => {
+      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; gate?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string }; lastDecision?: 'approved' | 'denied' | 'exited' | 'feedback' | null }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
         setGitUser(data.serverConfig?.gitUser);
@@ -811,13 +801,6 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
           setGoalSetupBundle(data.goalSetup);
           setMarkdown('');
           setSharingEnabled(false);
-        } else if (data.mode === 'archive') {
-          // Archive mode: show first archived plan or clear demo content
-          setMarkdown(data.plan || '');
-          if (data.archivePlans) archive.init(data.archivePlans);
-          archive.fetchPlans();
-          setSharingEnabled(false);
-          sidebar.open('archive');
         } else if (data.renderAs === 'html' && data.rawHtml) {
           setRenderAs('html');
           setRawHtml(data.rawHtml);
@@ -918,7 +901,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
   }, [markdown]);
 
   useEffect(() => {
-    if (!isApiMode || !markdown || isSharedSession || annotateMode || archive.archiveMode) return;
+    if (!isApiMode || !markdown || isSharedSession || annotateMode) return;
     if (autoSaveAttempted.current) return;
 
     const body: { obsidian?: object; bear?: object; octarine?: object } = {};
@@ -1787,8 +1770,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
   }
 
   const completionTitle = !submitted ? '' :
-    archive.archiveMode ? 'Archive Closed'
-    : submitted === 'exited' ? 'Session Closed'
+    submitted === 'exited' ? 'Session Closed'
     : goalSetupMode ? 'Answers Submitted'
     : submitted === 'approved'
       ? (annotateMode ? 'Approved' : 'Plan Approved')
@@ -1797,9 +1779,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
   const completionSubtitle = !submitted ? '' :
     submitted === 'exited'
       ? 'Annotation session closed without feedback.'
-      : archive.archiveMode
-        ? 'You can reopen with plannotator archive.'
-        : goalSetupMode
+      : goalSetupMode
           ? `${agentName} will use your answers to continue.`
         : submitted === 'approved'
           ? (annotateMode
@@ -1816,7 +1796,6 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
           skipBuiltInSettings={!!externalOpenSettings}
           isApiMode={isApiMode}
           annotateMode={annotateMode}
-          archiveMode={archive.archiveMode}
           goalSetupMode={goalSetupMode}
           goalSetupCanSubmit={goalSetupAction.canSubmit}
           goalSetupIsSubmitting={goalSetupAction.isSubmitting}
@@ -1849,8 +1828,6 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
           onFeedback={handleHeaderFeedback}
           onApprove={handleHeaderApprove}
           onAnnotationPanelToggle={handleAnnotationPanelToggle}
-          onArchiveCopy={archive.copy}
-          onArchiveDone={archive.done}
           onTaterModeChange={handleTaterModeChange}
           onIdentityChange={handleIdentityChange}
           onUIPreferencesChange={setUiPrefs}
@@ -1866,7 +1843,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
           onSaveToBear={handleSaveToBear}
           onSaveToOctarine={handleSaveToOctarine}
           appVersion={typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0'}
-          agentInstructionsEnabled={isApiMode && !archive.archiveMode && !annotateMode && !goalSetupMode}
+          agentInstructionsEnabled={isApiMode && !annotateMode && !goalSetupMode}
           obsidianConfigured={isObsidianConfigured()}
           bearConfigured={getBearSettings().enabled}
           octarineConfigured={isOctarineConfigured()}
@@ -1906,7 +1883,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
               onToggleTab={toggleSidebarTab}
               hasDiff={planDiff.hasPreviousVersion}
               showVersionsTab={versionInfo !== null && versionInfo.totalVersions > 1}
-              showFilesTab={showFilesTab && !archive.archiveMode}
+              showFilesTab={showFilesTab}
               hasFileAnnotations={hasFileAnnotations}
               className="hidden lg:flex absolute left-0 top-0 z-10"
             />
@@ -1917,10 +1894,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
             <>
               <SidebarContainer
                 activeTab={sidebar.activeTab}
-                onTabChange={(tab) => {
-                  toggleSidebarTab(tab);
-                  if (tab === 'archive' && !archive.archiveMode) archive.fetchPlans();
-                }}
+                onTabChange={toggleSidebarTab}
                 onClose={sidebar.close}
                 width={tocResize.width}
                 blocks={blocks}
@@ -1930,7 +1904,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
                 linkedDocFilepath={linkedDocHook.filepath}
                 onLinkedDocBack={linkedDocHook.isActive ? handleLinkedDocBack : undefined}
                 backLabel={backLabel}
-                showFilesTab={showFilesTab && !archive.archiveMode}
+                showFilesTab={showFilesTab}
                 fileAnnotationCounts={fileAnnotationCounts}
                 highlightedFiles={highlightedFiles}
                 fileBrowser={fileBrowser}
@@ -1950,11 +1924,6 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
                 isSelectingVersion={planDiff.isSelectingVersion}
                 fetchingVersion={planDiff.fetchingVersion}
                 onFetchVersions={planDiff.fetchVersions}
-                showArchiveTab={isApiMode && !annotateMode && !goalSetupMode}
-                archivePlans={archive.plans}
-                selectedArchiveFile={archive.selectedFile}
-                onArchiveSelect={archive.select}
-                isLoadingArchive={archive.isLoading}
               />
               <ResizeHandle {...tocResize.handleProps} className="hidden lg:block" side="left" />
             </>
@@ -1971,10 +1940,10 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
               {/* Sticky header lane — ghost bar that pins the toolstrip +
                   badges at top: 12px once the user scrolls. Invisible at top
                   of doc; original toolstrip/badges remain the source of
-                  truth there. Hidden in plan diff or archive mode, or when
+                  truth there. Hidden in plan diff mode, or when
                   sticky actions are disabled. remountToken re-anchors the
                   ResizeObserver when Viewer swaps content (linked docs). */}
-              {!goalSetupMode && !isPlanDiffActive && !archive.archiveMode && uiPrefs.stickyActionsEnabled && (
+              {!goalSetupMode && !isPlanDiffActive && uiPrefs.stickyActionsEnabled && (
                 <StickyHeaderLane
                   inputMethod={inputMethod}
                   onInputMethodChange={handleInputMethodChange}
@@ -1986,15 +1955,14 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
                   isPlanDiffActive={isPlanDiffActive}
                   hasPreviousVersion={planDiff.hasPreviousVersion}
                   onPlanDiffToggle={togglePlanDiff}
-                  archiveInfo={archive.currentInfo}
                   maxWidth={annotateReaderMaxWidth}
                   remountToken={linkedDocHook.isActive ? `doc:${linkedDocHook.filepath}` : 'plan'}
                   containerRef={rootRef}
                 />
               )}
 
-              {/* Annotation Toolstrip (hidden during plan diff and archive mode) */}
-              {!goalSetupMode && !isPlanDiffActive && !archive.archiveMode && (
+              {/* Annotation Toolstrip (hidden during plan diff) */}
+              {!goalSetupMode && !isPlanDiffActive && (
                 <div data-print-hide className="w-full mb-3 md:mb-4 flex items-center justify-start" style={annotateReaderMaxWidth == null ? undefined : { maxWidth: annotateReaderMaxWidth }}>
                   <AnnotationToolstrip
                     inputMethod={inputMethod}
@@ -2050,7 +2018,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
               )}
               {/* Normal Plan View — always mounted, hidden during diff mode */}
               <div className="w-full flex justify-center relative" style={{ display: goalSetupMode || (isPlanDiffActive && planDiff.diffBlocks) || (annotateSource === 'folder' && !markdown && !linkedDocHook.isActive) ? 'none' : undefined }}>
-                {canUseWideMode && !isPlanDiffActive && !archive.archiveMode && (
+                {canUseWideMode && !isPlanDiffActive && (
                   <div
                     data-print-hide
                     className="absolute -top-5 left-0 right-0 mx-auto w-full flex justify-end pointer-events-none"
@@ -2128,7 +2096,6 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
                     imageBaseDir={imageBaseDir}
                     codePathBaseDir={activeDocBaseDir}
                     copyLabel={annotateSource === 'message' ? 'Copy message' : annotateSource === 'file' || annotateSource === 'folder' ? 'Copy file' : undefined}
-                    archiveInfo={archive.currentInfo}
                     sourceInfo={sourceInfo}
                     onToggleCheckbox={checkbox.toggle}
                     checkboxOverrides={checkbox.overrides}

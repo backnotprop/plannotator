@@ -73,7 +73,7 @@ describe("Pi binary client", () => {
       exists: existsFrom(existing),
       platform: "linux",
       pathDelimiter: ":",
-      requiredFeatures: ["archive"],
+      requiredFeatures: ["code-review"],
       run,
     });
 

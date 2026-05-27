@@ -8,7 +8,7 @@
 
 import { useState, useCallback } from "react";
 
-export type SidebarTab = "toc" | "versions" | "files" | "archive";
+export type SidebarTab = "toc" | "versions" | "files";
 
 export interface UseSidebarReturn<T extends string = SidebarTab> {
   isOpen: boolean;

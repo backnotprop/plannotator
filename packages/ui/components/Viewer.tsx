@@ -90,7 +90,6 @@ interface ViewerProps {
    * callers that don't measure plan-area width.
    */
   actionsLabelMode?: ActionsLabelMode;
-  archiveInfo?: { status: 'approved' | 'denied' | 'unknown'; timestamp: string; title: string } | null;
   /** Source attribution for HTML/URL annotations (e.g. URL or filename) */
   sourceInfo?: string;
   // Checkbox toggle props
@@ -166,7 +165,6 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   codePathBaseDir,
   copyLabel,
   actionsLabelMode = 'full',
-  archiveInfo,
   sourceInfo,
   onToggleCheckbox,
   checkboxOverrides,
@@ -530,8 +528,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         className={`w-full bg-card rounded-xl shadow-xl p-5 md:p-8 lg:p-10 xl:p-12 relative border border-border/50 ${inputMethod === 'pinpoint' ? 'cursor-crosshair' : ''}`}
         style={{ WebkitTouchCallout: 'none' } as React.CSSProperties}
       >
-        {/* Repo info + plan diff badge + demo badge + linked doc badge + archive badge - top left */}
-        {(repoInfo || hasPreviousVersion || showDemoBadge || linkedDocInfo || archiveInfo || sourceInfo) && (
+        {/* Repo info + plan diff badge + demo badge + linked doc badge - top left */}
+        {(repoInfo || hasPreviousVersion || showDemoBadge || linkedDocInfo || sourceInfo) && (
           <div data-print-hide className="absolute top-3 left-3 md:top-4 md:left-5">
             <DocBadges
               layout="column"
@@ -541,7 +539,6 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               hasPreviousVersion={hasPreviousVersion}
               onPlanDiffToggle={onPlanDiffToggle}
               showDemoBadge={showDemoBadge}
-              archiveInfo={archiveInfo}
               linkedDocInfo={linkedDocInfo}
               sourceInfo={sourceInfo}
             />

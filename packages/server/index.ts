@@ -34,9 +34,6 @@ import {
   getPlanVersionPath,
   getVersionCount,
   listVersions,
-  listArchivedPlans,
-  readArchivedPlan,
-  type ArchivedPlan,
 } from "./storage";
 import { getRepoInfo } from "./repo";
 import { detectProjectName } from "./project";
@@ -80,10 +77,6 @@ export interface ServerOptions {
   pasteApiUrl?: string;
   /** OpenCode client for querying available agents (OpenCode only) */
   opencodeClient?: OpencodeClient;
-  /** When set to "archive", server runs in read-only archive browser mode */
-  mode?: "archive";
-  /** Custom plan save path — used by archive mode to find saved plans */
-  customPlanPath?: string | null;
   /** Optional daemon event bridge for live session-scoped events. */
   sessionEvents?: SessionEventBridge;
 }
@@ -92,7 +85,6 @@ export interface ServerOptions {
 export interface PlannotatorSession {
   handleRequest: SessionRequestHandler;
   waitForDecision: () => Promise<{ approved: boolean; feedback?: string; savedPath?: string; agentSwitch?: string; permissionMode?: string }>;
-  waitForDone?: () => Promise<void>;
   dispose: () => void;
   slug?: string;
   updateContent?: (newPlan: string) => void;
@@ -114,13 +106,12 @@ export interface PlannotatorSession {
 export async function createPlannotatorSession(
   options: ServerOptions
 ): Promise<PlannotatorSession> {
-  const { cwd = process.cwd(), plan: initialPlan, origin, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, mode, customPlanPath } = options;
+  const { cwd = process.cwd(), plan: initialPlan, origin, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl } = options;
   let plan = initialPlan;
   const resolvePlanStoragePath = (customPath?: string | null): string | undefined => {
     if (!customPath?.trim()) return undefined;
     return resolveUserPath(customPath, cwd);
   };
-  const archiveCustomPath = resolvePlanStoragePath(customPlanPath);
 
   const wslFlag = await isWSL();
   const gitUser = detectGitUser(cwd);
@@ -129,33 +120,16 @@ export async function createPlannotatorSession(
   // renderer's POST /api/doc/exists lands on warm cache.
   void warmFileListCache(cwd, "code");
 
-  // --- Archive mode setup ---
-  let archivePlans: ArchivedPlan[] = [];
-  let initialArchivePlan = "";
-  let resolveDone: (() => void) | undefined;
-  let donePromise: Promise<void> | undefined;
-
-  if (mode === "archive") {
-    archivePlans = listArchivedPlans(archiveCustomPath);
-    initialArchivePlan = archivePlans.length > 0
-      ? readArchivedPlan(archivePlans[0].filename, archiveCustomPath) ?? ""
-      : "";
-    donePromise = new Promise<void>((resolve) => { resolveDone = resolve; });
-  }
-
-  // --- Plan review mode setup (skip in archive mode) ---
-  let draftKey = mode !== "archive" ? contentHash(plan) : "";
-  const editorAnnotations = mode !== "archive" ? createEditorAnnotationHandler() : null;
-  const externalAnnotations = mode !== "archive" ? createExternalAnnotationHandler("plan", {
+  // --- Plan review mode setup ---
+  let draftKey = contentHash(plan);
+  const editorAnnotations = createEditorAnnotationHandler();
+  const externalAnnotations = createExternalAnnotationHandler("plan", {
     publishEvent: (event) => options.sessionEvents?.publishEvent("external-annotations", event),
     registerSnapshotProvider: (provider) =>
       options.sessionEvents?.registerSnapshotProvider("external-annotations", provider),
-  }) : null;
-  if (mode !== "archive") options.sessionEvents?.registerSnapshotProvider("session-revision", () => ({ plan, previousPlan, versionInfo }));
-  const slug = mode !== "archive" ? generateSlug(plan) : "";
-
-  // Lazy cache for in-session archive browsing (plan review sidebar tab)
-  let cachedArchivePlans: ReturnType<typeof listArchivedPlans> | null = null;
+  });
+  options.sessionEvents?.registerSnapshotProvider("session-revision", () => ({ plan, previousPlan, versionInfo }));
+  const slug = generateSlug(plan);
 
   // Plan-specific: repo info, version history, decision promise
   let repoInfo: Awaited<ReturnType<typeof getRepoInfo>> | null = null;
@@ -174,24 +148,19 @@ export async function createPlannotatorSession(
   const decisionCycle = createDecisionCycle<DecisionResult>();
   let lastDecision: 'approved' | 'denied' | null = null;
 
-  if (mode !== "archive") {
-    repoInfo = await getRepoInfo(cwd);
-    project = (await detectProjectName(cwd)) ?? "_unknown";
-    const historyResult = saveToHistory(project, slug, plan);
-    currentPlanPath = historyResult.path;
-    previousPlan =
-      historyResult.version > 1
-        ? getPlanVersion(project, slug, historyResult.version - 1)
-        : null;
-    versionInfo = {
-      version: historyResult.version,
-      totalVersions: getVersionCount(project, slug),
-      project,
-    };
-
-  } else {
-    // Archive mode: decision cycle exists but is never resolved (uses waitForDone instead)
-  }
+  repoInfo = await getRepoInfo(cwd);
+  project = (await detectProjectName(cwd)) ?? "_unknown";
+  const historyResult = saveToHistory(project, slug, plan);
+  currentPlanPath = historyResult.path;
+  previousPlan =
+    historyResult.version > 1
+      ? getPlanVersion(project, slug, historyResult.version - 1)
+      : null;
+  versionInfo = {
+    version: historyResult.version,
+    totalVersions: getVersionCount(project, slug),
+    project,
+  };
 
   const handleRequest: SessionRequestHandler = async (req, url, context) => {
 
@@ -221,48 +190,8 @@ export async function createPlannotatorSession(
             });
           }
 
-          // API: List archived plans (from ~/.plannotator/plans/)
-          // Cached for session lifetime — new plans won't appear during a single review
-          if (url.pathname === "/api/archive/plans" && req.method === "GET") {
-            const customPath = resolvePlanStoragePath(url.searchParams.get("customPath"));
-            if (!cachedArchivePlans) cachedArchivePlans = listArchivedPlans(customPath);
-            return Response.json({ plans: cachedArchivePlans });
-          }
-
-          // API: Get a specific archived plan
-          if (url.pathname === "/api/archive/plan" && req.method === "GET") {
-            const filename = url.searchParams.get("filename");
-            if (!filename) {
-              return Response.json({ error: "Missing filename parameter" }, { status: 400 });
-            }
-            const customPath = resolvePlanStoragePath(url.searchParams.get("customPath"));
-            const content = readArchivedPlan(filename, customPath);
-            if (content === null) {
-              return Response.json({ error: "Plan not found" }, { status: 404 });
-            }
-            return Response.json({ markdown: content, filepath: filename });
-          }
-
-          // API: Close archive browser (archive mode only)
-          if (url.pathname === "/api/done" && req.method === "POST") {
-            resolveDone?.();
-            return Response.json({ ok: true });
-          }
-
           // API: Get plan content
           if (url.pathname === "/api/plan") {
-            if (mode === "archive") {
-              return Response.json({
-                plan: initialArchivePlan,
-                origin,
-                mode: "archive",
-                archivePlans,
-                sharingEnabled,
-                shareBaseUrl,
-                isWSL: wslFlag,
-                serverConfig: getServerConfig(gitUser),
-              });
-            }
             return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, projectRoot: cwd, isWSL: wslFlag, serverConfig: getServerConfig(gitUser), lastDecision });
           }
 
@@ -430,10 +359,6 @@ export async function createPlannotatorSession(
 
           // API: Approve plan
           if (url.pathname === "/api/approve" && req.method === "POST") {
-            if (mode === "archive") {
-              return Response.json({ error: "Archive sessions do not support approval." }, { status: 404 });
-            }
-
             // Check for note integrations and optional feedback
             let feedback: string | undefined;
             let agentSwitch: string | undefined;
@@ -518,10 +443,6 @@ export async function createPlannotatorSession(
 
           // API: Deny with feedback
           if (url.pathname === "/api/deny" && req.method === "POST") {
-            if (mode === "archive") {
-              return Response.json({ error: "Archive sessions do not support denial." }, { status: 404 });
-            }
-
             let feedback = "Plan rejected by user";
             let planSaveEnabled = true; // default to enabled for backwards compat
             let planSaveCustomPath: string | undefined;
@@ -583,12 +504,11 @@ export async function createPlannotatorSession(
   return {
     handleRequest,
     waitForDecision: () => decisionCycle.promise(),
-    ...(donePromise && { waitForDone: () => donePromise }),
     dispose: () => {
       externalAnnotations?.dispose();
     },
-    slug: mode !== "archive" ? slug : undefined,
-    getSnapshot: mode !== "archive" ? () => ({ plan, origin }) : undefined,
-    updateContent: mode !== "archive" ? handleUpdateContent : undefined,
+    slug,
+    getSnapshot: () => ({ plan, origin }),
+    updateContent: handleUpdateContent,
   };
 }

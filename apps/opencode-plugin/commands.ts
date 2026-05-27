@@ -1,9 +1,8 @@
 /**
  * Command Handlers for OpenCode Plugin
  *
- * Handles /plannotator-review, /plannotator-annotate, /plannotator-last,
- * and /plannotator-archive slash commands. Extracted from the event hook
- * for modularity.
+ * Handles /plannotator-review, /plannotator-annotate, and /plannotator-last
+ * slash commands. Extracted from the event hook for modularity.
  */
 
 import {
@@ -22,7 +21,6 @@ import {
   ensurePlannotatorBinary,
   findPlannotatorSourceRoot,
   runPluginAnnotate,
-  runPluginArchive,
   runPluginReview,
 } from "./binary-client";
 
@@ -73,7 +71,6 @@ export interface CommandDeps {
   binaryClient?: {
     ensurePlannotatorBinary?: typeof ensurePlannotatorBinary;
     runPluginAnnotate?: typeof runPluginAnnotate;
-    runPluginArchive?: typeof runPluginArchive;
     runPluginReview?: typeof runPluginReview;
   };
 }
@@ -345,26 +342,3 @@ export async function handleAnnotateLastCommand(
   return result.feedback || null;
 }
 
-export async function handleArchiveCommand(
-  _event: OpenCodeCommandEvent,
-  deps: CommandDeps
-) {
-  const { client, getSharingEnabled, getShareBaseUrl, getPasteApiUrl, directory, binaryClient } = deps;
-
-  client.app.log({ level: "info", message: "Opening plan archive..." });
-
-  const binary = ensureBinaryForCommand(client, binaryClient, ["archive"]);
-  if (!binary.ok) return;
-
-  const response = await (binaryClient?.runPluginArchive ?? runPluginArchive)(binary.path, {
-    origin: "opencode",
-    cwd: directory,
-    sharingEnabled: await getSharingEnabled(),
-    shareBaseUrl: getShareBaseUrl(),
-    pasteApiUrl: getPasteApiUrl(),
-  }, undefined, sessionReadyOptions(client));
-
-  if (!response.ok) {
-    logBinaryError(client, response.error.message);
-  }
-}

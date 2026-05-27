@@ -15,8 +15,6 @@ import {
   type PluginCapabilities,
   type PluginAnnotateRequest,
   type PluginAnnotateResult,
-  type PluginArchiveRequest,
-  type PluginArchiveResult,
   type PluginPlanRequest,
   type PluginPlanResult,
   type PluginResponse,
@@ -404,18 +402,9 @@ export function runPluginAnnotate(
   return runPluginCommand(binaryPath, "annotate", request, run, options);
 }
 
-export function runPluginArchive(
+async function runPluginCommand<TRequest extends { origin: string }, TResult extends PluginPlanResult | PluginReviewResult | PluginAnnotateResult>(
   binaryPath: string,
-  request: PluginArchiveRequest,
-  run: PluginCommandRunner = defaultPluginRunner,
-  options: CommandRunOptions = {},
-): Promise<PluginResponse<PluginArchiveResult>> {
-  return runPluginCommand(binaryPath, "archive", request, run, options);
-}
-
-async function runPluginCommand<TRequest extends { origin: string }, TResult extends PluginPlanResult | PluginReviewResult | PluginAnnotateResult | PluginArchiveResult>(
-  binaryPath: string,
-  command: "plan" | "review" | "annotate" | "archive",
+  command: "plan" | "review" | "annotate",
   request: TRequest,
   run: PluginCommandRunner,
   options: CommandRunOptions,

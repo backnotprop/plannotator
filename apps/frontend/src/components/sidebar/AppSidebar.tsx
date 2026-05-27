@@ -21,7 +21,7 @@ import { useDaemonEventStore } from "../../daemon/events/event-store";
 import type { SessionSummary } from "../../daemon/contracts";
 import { getSessionModeMeta, formatSessionLabel } from "../../shared/session-meta";
 
-const MODE_ORDER = ["plan", "review", "annotate", "goal-setup", "archive"];
+const MODE_ORDER = ["plan", "review", "annotate", "goal-setup"];
 
 export function AppSidebarContent() {
   const sessions = useDaemonEventStore((s) => s.sessions);

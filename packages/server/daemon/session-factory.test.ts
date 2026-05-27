@@ -158,39 +158,6 @@ describe("createDaemonSessionFactory", () => {
     expect(noTimeout.expiresAt).toBeUndefined();
   });
 
-  test("archive sessions reject approve and deny endpoints without throwing", async () => {
-    const home = tempDir("plannotator-daemon-home-");
-    const cwd = tempDir("plannotator-daemon-cwd-");
-    process.env.HOME = home;
-
-    const store = new DaemonSessionStore({ now: () => 1_000 });
-    const factory = createDaemonSessionFactory({
-    });
-    const context = daemonContext(store);
-
-    const record = await factory({
-      request: {
-        action: "archive",
-        origin: "opencode",
-        cwd,
-      },
-    }, context);
-
-    const approve = await record.handleRequest!(
-      new Request("http://127.0.0.1:4321/api/approve", { method: "POST", body: "{}" }),
-      new URL("http://127.0.0.1:4321/api/approve"),
-    );
-    const deny = await record.handleRequest!(
-      new Request("http://127.0.0.1:4321/api/deny", { method: "POST", body: "{}" }),
-      new URL("http://127.0.0.1:4321/api/deny"),
-    );
-
-    expect(approve.status).toBe(404);
-    expect((await approve.json()).error).toContain("Archive sessions");
-    expect(deny.status).toBe(404);
-    expect((await deny.json()).error).toContain("Archive sessions");
-  });
-
   test("rejects daemon session requests without an explicit cwd", async () => {
     const store = new DaemonSessionStore();
     const factory = createDaemonSessionFactory({

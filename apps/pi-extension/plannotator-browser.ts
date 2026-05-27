@@ -8,7 +8,6 @@ import {
 	ensurePlannotatorBinary,
 	findPlannotatorSourceRoot,
 	runPluginAnnotate,
-	runPluginArchive,
 	runPluginPlan,
 	runPluginReview,
 } from "./binary-client.js";
@@ -382,23 +381,3 @@ export async function startLastMessageAnnotationSession(
 	);
 }
 
-export async function openArchiveBrowserAction(
-	ctx: ExtensionContext,
-	customPlanPath?: string,
-): Promise<{ opened: boolean }> {
-	if (!ctx.hasUI) {
-		throw new Error("Plannotator archive browser is unavailable in this session.");
-	}
-
-	const binaryPath = getBinaryPath(["archive"]);
-	const session = await startBinarySession(async (onSession, signal) => {
-		const response = await runPluginArchive(binaryPath, {
-			origin: "pi",
-			...sharingRequest(ctx),
-			customPlanPath,
-		}, undefined, { onSession, signal });
-		if (!response.ok) throw new Error(response.error.message);
-		return response.result;
-	}, (sessionInfo) => notifySessionReady(ctx, sessionInfo));
-	return session.waitForDecision();
-}

@@ -20,10 +20,9 @@ export type WideModeExitLayout = {
 };
 
 export function canUseAnnotateWideMode(options: {
-  archiveMode: boolean;
   isPlanDiffActive: boolean;
 }): boolean {
-  return !options.archiveMode && !options.isPlanDiffActive;
+  return !options.isPlanDiffActive;
 }
 
 export function resolveWideModeExitLayout(

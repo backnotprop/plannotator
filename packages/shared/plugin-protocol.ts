@@ -10,13 +10,12 @@ export const PLANNOTATOR_PLUGIN_FEATURES = [
   "code-review",
   "annotate",
   "annotate-last",
-  "archive",
 ] as const;
 
 export type PluginFeature = (typeof PLANNOTATOR_PLUGIN_FEATURES)[number];
 export type PluginClientOrigin = Extract<Origin, "opencode" | "pi">;
 export type PluginRequestOrigin = Origin;
-export type PluginSessionMode = "plan" | "review" | "annotate" | "archive" | "goal-setup";
+export type PluginSessionMode = "plan" | "review" | "annotate" | "goal-setup";
 
 export interface PluginCapabilities {
   protocol: typeof PLANNOTATOR_PLUGIN_PROTOCOL;
@@ -76,10 +75,6 @@ export interface PluginAnnotateRequest extends PluginBaseRequest {
   renderHtml?: boolean;
 }
 
-export interface PluginArchiveRequest extends PluginBaseRequest {
-  customPlanPath?: string | null;
-}
-
 export interface PluginGoalSetupRequest extends PluginBaseRequest {
   bundle: unknown;
   stage: "interview" | "facts";
@@ -91,7 +86,6 @@ export type PluginRequest =
   | ({ action: "review" } & PluginReviewRequest)
   | ({ action: "annotate" } & PluginAnnotateRequest)
   | ({ action: "annotate-last" } & PluginAnnotateRequest)
-  | ({ action: "archive" } & PluginArchiveRequest)
   | ({ action: "goal-setup" } & PluginGoalSetupRequest);
 
 export interface PluginSessionInfo {
@@ -126,10 +120,6 @@ export interface PluginAnnotateResult {
   mode?: "annotate" | "annotate-folder" | "annotate-last";
 }
 
-export interface PluginArchiveResult {
-  opened: boolean;
-}
-
 export interface PluginGoalSetupResult {
   result?: { stage: "interview" | "facts"; [key: string]: unknown };
   exit?: boolean;
@@ -139,7 +129,6 @@ export type PluginActionResult =
   | PluginPlanResult
   | PluginReviewResult
   | PluginAnnotateResult
-  | PluginArchiveResult
   | PluginGoalSetupResult;
 
 export type PluginSuccessResponse<T extends PluginActionResult = PluginActionResult> = {

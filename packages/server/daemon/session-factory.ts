@@ -654,38 +654,6 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
       return record;
     }
 
-    if (request.action === "archive") {
-      const session = await createPlannotatorSession({
-        cwd,
-        plan: "",
-        origin: request.origin,
-        mode: "archive",
-        customPlanPath: request.customPlanPath,
-        sharingEnabled,
-        shareBaseUrl,
-        pasteApiUrl,
-      });
-      const record = context.store.create({
-        id,
-        mode: "archive",
-        url,
-        project,
-        cwd,
-        label: branch ? `plugin-archive-${request.origin}-${project}-${branch}` : `plugin-archive-${request.origin}-${project}`,
-        origin: request.origin,
-        ttlMs,
-        handleRequest: session.handleRequest,
-        dispose: registerSessionDecision(
-          context,
-          id,
-          () => session.waitForDone?.() ?? Promise.resolve(),
-          () => session.dispose(),
-          () => ({ opened: true }),
-        ),
-      });
-      return record;
-    }
-
     if (request.action === "annotate" || request.action === "annotate-last") {
       const input = await resolveAnnotateInput(request, cwd, request.action);
       const isSingleFile = input.mode === "annotate";

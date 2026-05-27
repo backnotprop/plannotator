@@ -4,7 +4,6 @@ import {
   ListChecks,
   ScrollText,
   Target,
-  Archive,
   type LucideIcon,
 } from "lucide-react";
 import type { SessionMode } from "../daemon/contracts";
@@ -18,7 +17,6 @@ const MODE_META: Record<string, SessionModeMeta> = {
   plan: { icon: ScrollText, label: "Plan" },
   review: { icon: Code2, label: "Review" },
   annotate: { icon: FileText, label: "Annotate" },
-  archive: { icon: Archive, label: "Archive" },
   "goal-setup": { icon: Target, label: "Goal Setup" },
 };
 
@@ -58,16 +56,6 @@ export function formatSessionLabel(label: string, mode: SessionMode): string {
   // Annotate: "plugin-annotate-{origin}-{file}-{branch}" → "file (branch)"
   if (mode === "annotate") {
     const stripped = label.replace(/^plugin-annotate-/, "").replace(ORIGINS, "");
-    const lastDash = stripped.lastIndexOf("-");
-    if (lastDash > 0) {
-      return `${stripped.slice(0, lastDash)} (${stripped.slice(lastDash + 1)})`;
-    }
-    return stripped;
-  }
-
-  // Archive: "plugin-archive-{origin}-{project}-{branch}" → "project (branch)"
-  if (mode === "archive") {
-    const stripped = label.replace(/^plugin-archive-/, "").replace(ORIGINS, "");
     const lastDash = stripped.lastIndexOf("-");
     if (lastDash > 0) {
       return `${stripped.slice(0, lastDash)} (${stripped.slice(lastDash + 1)})`;

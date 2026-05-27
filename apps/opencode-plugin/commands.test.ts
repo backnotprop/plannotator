@@ -18,11 +18,7 @@ const runPluginAnnotateMock = mock(async (_binaryPath: string, _request: unknown
 const runPluginReviewMock = mock(async (_binaryPath: string, _request: unknown) =>
   createPluginSuccessResponse({ approved: false, feedback: "", annotations: [] }),
 );
-const runPluginArchiveMock = mock(async (_binaryPath: string, _request: unknown) =>
-  createPluginSuccessResponse({ opened: true }),
-);
-
-const { handleAnnotateCommand, handleAnnotateLastCommand, handleArchiveCommand, handleReviewCommand } = await import("./commands");
+const { handleAnnotateCommand, handleAnnotateLastCommand, handleReviewCommand } = await import("./commands");
 
 function makeDeps() {
   return {
@@ -46,7 +42,6 @@ function makeDeps() {
       ensurePlannotatorBinary: ensurePlannotatorBinaryMock,
       runPluginAnnotate: runPluginAnnotateMock,
       runPluginReview: runPluginReviewMock,
-      runPluginArchive: runPluginArchiveMock,
     },
   };
 }
@@ -55,7 +50,6 @@ afterEach(() => {
   ensurePlannotatorBinaryMock.mockClear();
   runPluginAnnotateMock.mockClear();
   runPluginReviewMock.mockClear();
-  runPluginArchiveMock.mockClear();
 });
 
 describe("handleAnnotateCommand", () => {
@@ -220,18 +214,3 @@ describe("handleAnnotateLastCommand", () => {
   });
 });
 
-describe("handleArchiveCommand", () => {
-  test("surfaces the archive browser URL through OpenCode logs", async () => {
-    const deps = makeDeps();
-
-    await handleArchiveCommand({}, deps);
-
-    expect(runPluginArchiveMock).toHaveBeenCalledTimes(1);
-    const options = runPluginArchiveMock.mock.calls[0]?.[3] as any;
-    options.onSession({ url: "http://127.0.0.1:1234/s/archive" });
-    expect(deps.client.app.log).toHaveBeenCalledWith({
-      level: "info",
-      message: "[Plannotator] Open in browser: http://127.0.0.1:1234/s/archive",
-    });
-  });
-});

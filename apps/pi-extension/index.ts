@@ -55,7 +55,6 @@ import { parseReviewArgs } from "./generated/review-args.js";
 import { resolveAtReference } from "./generated/at-reference.js";
 import {
 	getStartupErrorMessage,
-	openArchiveBrowserAction,
 	startCodeReviewBrowserSession,
 	startLastMessageAnnotationSession,
 	startMarkdownAnnotationSession,
@@ -683,23 +682,6 @@ export default function plannotator(pi: ExtensionAPI): void {
 			} catch (err) {
 				ctx.ui.notify(
 					`Failed to start annotation UI: ${getStartupErrorMessage(err)}`,
-					"error",
-				);
-			}
-		},
-	});
-
-	pi.registerCommand("plannotator-archive", {
-		description: "Browse saved plan decisions",
-		handler: async (_args, ctx) => {
-			ctx.ui.notify("Opening plan archive...", "info");
-
-			try {
-				await openArchiveBrowserAction(ctx);
-				ctx.ui.notify("Archive browser closed.", "info");
-			} catch (err) {
-				ctx.ui.notify(
-					`Failed to start archive: ${getStartupErrorMessage(err)}`,
 					"error",
 				);
 			}

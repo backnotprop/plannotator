@@ -69,8 +69,6 @@ interface StickyHeaderLaneProps {
   isPlanDiffActive?: boolean;
   hasPreviousVersion?: boolean;
   onPlanDiffToggle?: () => void;
-  archiveInfo?: { status: 'approved' | 'denied' | 'unknown'; timestamp: string; title: string } | null;
-
   // Layout
   maxWidth?: number | null;
 
@@ -97,7 +95,6 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
   isPlanDiffActive,
   hasPreviousVersion,
   onPlanDiffToggle,
-  archiveInfo,
   maxWidth,
   remountToken,
   containerRef,
@@ -256,7 +253,6 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
             isPlanDiffActive={isPlanDiffActive}
             hasPreviousVersion={hasPreviousVersion}
             onPlanDiffToggle={onPlanDiffToggle}
-            archiveInfo={archiveInfo}
           />
         </div>
       </div>

@@ -7,7 +7,6 @@ import type { VcsSelection } from "./generated/vcs-core.js";
 import {
 	getLastAssistantMessageText,
 	getStartupErrorMessage,
-	openArchiveBrowserAction,
 	openCodeReview,
 	openLastMessageAnnotation,
 	openMarkdownAnnotation,
@@ -26,8 +25,7 @@ export type PlannotatorAction =
 	| "review-status"
 	| "code-review"
 	| "annotate"
-	| "annotate-last"
-	| "archive";
+	| "annotate-last";
 
 export interface PlannotatorHandledResponse<T> {
 	status: "handled";
@@ -126,21 +124,12 @@ export interface PlannotatorAnnotationResult {
 	approved?: boolean;
 }
 
-export interface PlannotatorArchivePayload {
-	customPlanPath?: string;
-}
-
-export interface PlannotatorArchiveResult {
-	opened: boolean;
-}
-
 export type PlannotatorRequestMap = {
 	"plan-review": PlannotatorRequestBase<"plan-review", PlannotatorPlanReviewPayload, PlannotatorPlanReviewStartResult>;
 	"review-status": PlannotatorRequestBase<"review-status", PlannotatorReviewStatusPayload, PlannotatorReviewStatusResult>;
 	"code-review": PlannotatorRequestBase<"code-review", PlannotatorCodeReviewPayload, PlannotatorCodeReviewResult>;
 	annotate: PlannotatorRequestBase<"annotate", PlannotatorAnnotatePayload, PlannotatorAnnotationResult>;
 	"annotate-last": PlannotatorRequestBase<"annotate-last", PlannotatorAnnotatePayload, PlannotatorAnnotationResult>;
-	archive: PlannotatorRequestBase<"archive", PlannotatorArchivePayload, PlannotatorArchiveResult>;
 };
 export type PlannotatorRequest = PlannotatorRequestMap[PlannotatorAction];
 export type PlannotatorResponseMap = {
@@ -149,7 +138,6 @@ export type PlannotatorResponseMap = {
 	"code-review": PlannotatorResponse<PlannotatorCodeReviewResult>;
 	annotate: PlannotatorResponse<PlannotatorAnnotationResult>;
 	"annotate-last": PlannotatorResponse<PlannotatorAnnotationResult>;
-	archive: PlannotatorResponse<PlannotatorArchiveResult>;
 };
 function isPlannotatorAction(value: unknown): value is PlannotatorAction {
 	return (
@@ -157,8 +145,7 @@ function isPlannotatorAction(value: unknown): value is PlannotatorAction {
 		value === "review-status" ||
 		value === "code-review" ||
 		value === "annotate" ||
-		value === "annotate-last" ||
-		value === "archive"
+		value === "annotate-last"
 	);
 }
 
@@ -325,11 +312,6 @@ export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
 					request.respond({ status: "handled", result });
 					return;
 				}
-				case "archive": {
-					const result = await openArchiveBrowserAction(ctx, request.payload?.customPlanPath);
-					request.respond({ status: "handled", result });
-					return;
-				}
 			}
 		} catch (err) {
 			const message = getStartupErrorMessage(err);
@@ -348,7 +330,6 @@ export {
 	startLastMessageAnnotationSession,
 	startMarkdownAnnotationSession,
 	getStartupErrorMessage,
-	openArchiveBrowserAction,
 	openCodeReview,
 	openLastMessageAnnotation,
 	openMarkdownAnnotation,

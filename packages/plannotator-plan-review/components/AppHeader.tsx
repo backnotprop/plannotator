@@ -16,7 +16,6 @@ interface AppHeaderProps {
   // Mode flags (stable after mount)
   isApiMode: boolean;
   annotateMode: boolean;
-  archiveMode: boolean;
   goalSetupMode: boolean;
   goalSetupCanSubmit: boolean;
   goalSetupIsSubmitting: boolean;
@@ -57,8 +56,6 @@ interface AppHeaderProps {
   onFeedback: () => void;
   onApprove: () => void;
   onAnnotationPanelToggle: () => void;
-  onArchiveCopy: () => void;
-  onArchiveDone: () => void;
   onTaterModeChange: (enabled: boolean) => void;
   onIdentityChange: (oldId: string, newId: string) => void;
   onUIPreferencesChange: (prefs: UIPreferences) => void;
@@ -87,7 +84,6 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   skipBuiltInSettings,
   isApiMode,
   annotateMode,
-  archiveMode,
   goalSetupMode,
   goalSetupCanSubmit,
   goalSetupIsSubmitting,
@@ -120,8 +116,6 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   onFeedback,
   onApprove,
   onAnnotationPanelToggle,
-  onArchiveCopy,
-  onArchiveDone,
   onTaterModeChange,
   onIdentityChange,
   onUIPreferencesChange,
@@ -169,28 +163,6 @@ export const AppHeader = React.memo<AppHeaderProps>(({
           </>
         )}
 
-        {isApiMode && !linkedDocIsActive && archiveMode && (
-          <>
-            <button
-              onClick={onArchiveCopy}
-              className="px-2.5 py-1 rounded-md text-xs font-medium transition-all bg-muted text-foreground hover:bg-muted/80 border border-border"
-              title="Copy plan content"
-            >
-              <span className="hidden md:inline">Copy</span>
-              <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
-            </button>
-            <button
-              onClick={onArchiveDone}
-              className="px-2.5 py-1 rounded-md text-xs font-medium transition-all bg-success text-success-foreground hover:opacity-90"
-              title="Close archive"
-            >
-              Done
-            </button>
-          </>
-        )}
-
         {isApiMode && !submitted && !linkedDocIsActive && goalSetupMode && (
           <>
             <ExitButton
@@ -212,7 +184,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
           </>
         )}
 
-        {isApiMode && !submitted && (!linkedDocIsActive || annotateMode) && !archiveMode && !goalSetupMode && (
+        {isApiMode && !submitted && (!linkedDocIsActive || annotateMode) && !goalSetupMode && (
           <>
             {annotateMode ? (
               <>
