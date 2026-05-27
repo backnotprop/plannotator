@@ -15,6 +15,7 @@ import {
   type DaemonSessionTransportMessage,
   useDaemonSessionTransport,
 } from './useDaemonSessionTransport';
+import { useSessionFetch } from './useSessionFetch';
 
 const SNAPSHOT_URL = '/api/external-annotations';
 const FALLBACK_POLL_MS = 2_000;
@@ -34,6 +35,7 @@ interface ExternalAnnotationSnapshot<T> {
 export function useExternalAnnotations<T extends { id: string; source?: string }>(
   options?: { enabled?: boolean },
 ): UseExternalAnnotationsReturn<T> {
+  const fetch = useSessionFetch();
   const enabled = options?.enabled ?? true;
   const [annotations, setAnnotations] = useState<T[]>([]);
   const versionRef = useRef<number | null>(null);

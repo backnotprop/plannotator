@@ -40,7 +40,7 @@ export default defineConfig(({ command }) => {
               ws: true,
               headers: { Authorization: `Bearer ${daemon.authToken}` },
             },
-            "/s/": {
+            "^/s/[^/]+/api": {
               target: daemon.baseUrl,
             },
           }
@@ -60,9 +60,30 @@ export default defineConfig(({ command }) => {
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "src"),
+        "@plannotator/code-review/styles": path.resolve(
+          __dirname,
+          "../../packages/plannotator-code-review/index.css",
+        ),
+        "@plannotator/code-review": path.resolve(
+          __dirname,
+          "../../packages/plannotator-code-review",
+        ),
+        "@plannotator/plan-review/styles": path.resolve(
+          __dirname,
+          "../../packages/plannotator-plan-review/index.css",
+        ),
+        "@plannotator/plan-review": path.resolve(
+          __dirname,
+          "../../packages/plannotator-plan-review",
+        ),
         "@plannotator/shared": path.resolve(__dirname, "../../packages/shared"),
         "@plannotator/ui": path.resolve(__dirname, "../../packages/ui"),
       },
+    },
+    define: {
+      __APP_VERSION__: JSON.stringify(
+        JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../package.json"), "utf-8")).version,
+      ),
     },
     build: {
       target: "esnext",

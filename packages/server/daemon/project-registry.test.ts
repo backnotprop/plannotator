@@ -33,24 +33,32 @@ describe("project-registry", () => {
     expect(entries[0].cwd).toBe("/tmp/test");
   });
 
-  it("upserts on same name", () => {
+  it("upserts on same cwd, updating name", () => {
+    registerProject("proj-old", "/path/a", { baseDir });
+    registerProject("proj-new", "/path/a", { baseDir });
+    const entries = readProjectRegistry({ baseDir });
+    expect(entries).toHaveLength(1);
+    expect(entries[0].name).toBe("proj-new");
+    expect(entries[0].cwd).toBe("/path/a");
+  });
+
+  it("creates separate entries for same name, different cwd", () => {
     registerProject("proj", "/path/a", { baseDir });
     registerProject("proj", "/path/b", { baseDir });
     const entries = readProjectRegistry({ baseDir });
-    expect(entries).toHaveLength(1);
-    expect(entries[0].cwd).toBe("/path/b");
+    expect(entries).toHaveLength(2);
   });
 
-  it("removes a project", () => {
+  it("removes a project by cwd", () => {
     registerProject("a", "/a", { baseDir });
     registerProject("b", "/b", { baseDir });
-    expect(removeProject("a", { baseDir })).toBe(true);
+    expect(removeProject("/a", { baseDir })).toBe(true);
     expect(readProjectRegistry({ baseDir })).toHaveLength(1);
     expect(readProjectRegistry({ baseDir })[0].name).toBe("b");
   });
 
-  it("returns false when removing nonexistent project", () => {
-    expect(removeProject("nope", { baseDir })).toBe(false);
+  it("returns false when removing nonexistent cwd", () => {
+    expect(removeProject("/nope", { baseDir })).toBe(false);
   });
 
   it("lists sorted by lastSeen descending", async () => {

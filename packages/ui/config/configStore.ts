@@ -12,6 +12,7 @@
  */
 
 import { SETTINGS, type SettingName, type SettingsMap } from './settings';
+import { apiFetch } from '../utils/api';
 
 type Listener = () => void;
 
@@ -115,7 +116,7 @@ class ConfigStore {
     this.serverSyncTimer = setTimeout(() => {
       const payload = { ...this.pendingServerWrites };
       this.pendingServerWrites = {};
-      fetch('/api/config', {
+      apiFetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

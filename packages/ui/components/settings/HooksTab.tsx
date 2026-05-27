@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { FAVICON_SVG } from '@plannotator/shared/favicon';
+import { useSessionFetch } from '../../hooks/useSessionFetch';
 
 interface HooksStatus {
   pfmReminder: { enabled: boolean };
@@ -48,7 +49,13 @@ const CopyPathButton: React.FC<{ filePath: string }> = ({ filePath }) => {
   );
 };
 
-export const HooksTab: React.FC = () => {
+interface HooksTabProps {
+  fetchFn?: (input: string, init?: RequestInit) => Promise<Response>;
+}
+
+export const HooksTab: React.FC<HooksTabProps> = ({ fetchFn }) => {
+  const sessionFetch = useSessionFetch();
+  const fetch = fetchFn ?? sessionFetch;
   const [status, setStatus] = useState<HooksStatus | null>(null);
   const [pfmEnabled, setPfmEnabled] = useState(false);
   const [hookExpanded, setHookExpanded] = useState(false);

@@ -173,6 +173,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 }, ref) => {
   const [copied, setCopied] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
+  const handleImageClick = useCallback((src: string, alt: string) => setLightbox({ src, alt }), []);
   const [locationHash, setLocationHash] = useState(() => window.location.hash);
   const globalCommentButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -618,7 +619,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   {group.blocks.map((block, i) => (
                     <BlockRenderer
                       imageBaseDir={imageBaseDir}
-                      onImageClick={(src, alt) => setLightbox({ src, alt })}
+                      onImageClick={handleImageClick}
                       key={block.id}
                       block={block}
                       orderedIndex={indices[i]}
@@ -643,7 +644,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               key={group.block.id}
               block={group.block}
               imageBaseDir={imageBaseDir}
-              onImageClick={(src, alt) => setLightbox({ src, alt })}
+              onImageClick={handleImageClick}
               onOpenLinkedDoc={onOpenLinkedDoc}
               onOpenCodeFile={onOpenCodeFile}
               githubRepo={repoInfo?.display}
@@ -699,7 +700,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               isHovered={inputMethod !== 'pinpoint' && hoveredCodeBlock?.block.id === group.block.id}
             />
           ) : (
-            <BlockRenderer imageBaseDir={imageBaseDir} onImageClick={(src, alt) => setLightbox({ src, alt })} key={group.block.id} block={group.block} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} onNavigateAnchor={scrollToAnchor} onToggleCheckbox={onToggleCheckbox} checkboxOverrides={checkboxOverrides} githubRepo={repoInfo?.display} headingAnchorId={headingSlugMap.get(group.block.id)} />
+            <BlockRenderer imageBaseDir={imageBaseDir} onImageClick={handleImageClick} key={group.block.id} block={group.block} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} onNavigateAnchor={scrollToAnchor} onToggleCheckbox={onToggleCheckbox} checkboxOverrides={checkboxOverrides} githubRepo={repoInfo?.display} headingAnchorId={headingSlugMap.get(group.block.id)} />
           )
         )}
 
@@ -793,7 +794,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             onClose={() => setPopoutTable(null)}
             container={containerRef.current}
             imageBaseDir={imageBaseDir}
-            onImageClick={(src, alt) => setLightbox({ src, alt })}
+            onImageClick={handleImageClick}
             onOpenLinkedDoc={onOpenLinkedDoc}
             onOpenCodeFile={onOpenCodeFile}
             githubRepo={repoInfo?.display}

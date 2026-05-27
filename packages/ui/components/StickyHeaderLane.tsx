@@ -81,6 +81,9 @@ interface StickyHeaderLaneProps {
   // node and freeze `actionsWidth`. Pass a string that changes whenever
   // Viewer remounts and the effect re-runs against the fresh DOM.
   remountToken?: string;
+  // Container ref to scope querySelector. Without this, multi-session
+  // apps find elements from the wrong session.
+  containerRef?: React.RefObject<HTMLElement | null>;
 }
 
 export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
@@ -97,6 +100,7 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
   archiveInfo,
   maxWidth,
   remountToken,
+  containerRef,
 }) => {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -145,7 +149,8 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
     // "no maxWidth cap" path for the one frame between Viewer remounting
     // and the new observer firing its first callback.
     setActionsWidth(0);
-    const el = document.querySelector<HTMLElement>('[data-sticky-actions]');
+    const root = containerRef?.current ?? document;
+    const el = root.querySelector<HTMLElement>('[data-sticky-actions]');
     if (!el) return;
     const ro = new ResizeObserver(([entry]) => {
       const next = snap(entry.contentRect.width);

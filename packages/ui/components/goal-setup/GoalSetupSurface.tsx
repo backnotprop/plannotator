@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSessionFetch } from '../../hooks/useSessionFetch';
 import {
   Check,
   ChevronDown,
@@ -47,8 +48,8 @@ function cx(...classes: Array<string | false | null | undefined>): string {
   return classes.filter(Boolean).join(' ');
 }
 
-async function submitGoalSetup(payload: unknown): Promise<void> {
-  const response = await fetch('/api/goal-setup/submit', {
+async function submitGoalSetup(payload: unknown, fetchFn: (input: string, init?: RequestInit) => Promise<Response> = fetch): Promise<void> {
+  const response = await fetchFn('/api/goal-setup/submit', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -132,6 +133,7 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
   onSubmitted?: () => void;
   onActionStateChange?: (state: GoalSetupActionState) => void;
 }>(({ bundle, onSubmitted, onActionStateChange }, ref) => {
+  const fetch = useSessionFetch();
   const [answers, setAnswers] = useState<Record<string, GoalSetupQuestionAnswer>>(() =>
     Object.fromEntries(
       bundle.questions.map((question) => [
@@ -253,7 +255,7 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
         title: bundle.title,
         goalSlug: bundle.goalSlug,
         answers: answerList,
-      });
+      }, fetch);
       setSubmitState('submitted');
       onSubmitted?.();
     } catch (err) {
@@ -814,6 +816,7 @@ const FactsSurface = React.forwardRef<GoalSetupSurfaceHandle, {
   onSubmitted?: () => void;
   onActionStateChange?: (state: GoalSetupActionState) => void;
 }>(({ bundle, onSubmitted, onActionStateChange }, ref) => {
+  const fetch = useSessionFetch();
   // Product choice: facts stay visible after acceptance so later review passes keep context.
   // `showAccepted` is legacy model state and does not hide rows in this surface.
   const [facts, setFacts] = useState<GoalSetupFactResult[]>(() =>
@@ -877,7 +880,7 @@ const FactsSurface = React.forwardRef<GoalSetupSurfaceHandle, {
         title: bundle.title,
         goalSlug: bundle.goalSlug,
         facts: factsToSubmit,
-      });
+      }, fetch);
       setSubmitState('submitted');
       onSubmitted?.();
     } catch (err) {

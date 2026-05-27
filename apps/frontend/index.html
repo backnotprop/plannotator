@@ -1,9 +1,20 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="theme-neutral">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Plannotator</title>
+    <script>
+      // Apply saved theme before React mounts to prevent flash of unstyled content.
+      // ThemeProvider will take over once mounted.
+      try {
+        const ct = document.cookie.match(/(?:^|; )plannotator-color-theme=([^;]*)/);
+        const theme = ct ? decodeURIComponent(ct[1]) : 'neutral';
+        const mt = document.cookie.match(/(?:^|; )plannotator-theme=([^;]*)/);
+        const mode = mt ? decodeURIComponent(mt[1]) : 'dark';
+        document.documentElement.className = 'theme-' + theme + (mode === 'light' ? ' light' : '');
+      } catch(e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

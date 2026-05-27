@@ -5,9 +5,6 @@ import { ThemeProvider } from "@plannotator/ui/components/ThemeProvider";
 import { createAppRouter } from "./app/router";
 import "./styles.css";
 
-document.cookie = "plannotator-color-theme=neutral; path=/; max-age=31536000; SameSite=Lax";
-document.cookie = "plannotator-theme=dark; path=/; max-age=31536000; SameSite=Lax";
-
 const rootElement = document.getElementById("root");
 
 if (!rootElement) {

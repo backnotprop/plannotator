@@ -13,6 +13,8 @@ export function createAppRouter(
     routeTree,
     context,
     defaultPreload: "intent",
+    defaultPendingMs: 0,
+    defaultPendingMinMs: 0,
   });
 }
 

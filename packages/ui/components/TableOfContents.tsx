@@ -172,7 +172,7 @@ export function TableOfContents({
       // OverlayScrollArea's internal viewport — querying for <main> would
       // return the OverlayScrollArea host (not the scrolling element) and
       // silently produce wrong offsets.
-      const target = document.querySelector(`[data-block-id="${blockId}"]`);
+      const target = (scrollViewport ?? document).querySelector(`[data-block-id="${blockId}"]`);
       if (target && scrollViewport) {
         const scrollContainer = scrollViewport;
 

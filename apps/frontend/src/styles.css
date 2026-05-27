@@ -1,4 +1,5 @@
 @import "@fontsource-variable/inter";
+@import "@fontsource-variable/instrument-sans";
 @import "@fontsource-variable/geist-mono";
 @import "@plannotator/ui/theme.css";
 @import "tailwindcss";
@@ -6,6 +7,10 @@
 @plugin "tailwindcss-animate";
 
 @source "../src/**/*.{ts,tsx}";
+@source "../../../packages/plannotator-code-review/**/*.{ts,tsx}";
+@source "../../../packages/plannotator-plan-review/**/*.{ts,tsx}";
+@source "../../../packages/ui/components/**/*.{ts,tsx}";
+@source "../../../packages/ui/hooks/**/*.{ts,tsx}";
 
 /*
  * Theme bridge — Plannotator uses .theme-{name} (dark default) + .light modifier.
@@ -123,7 +128,7 @@
   }
 }
 
-/* Custom scrollbar — thumb only, no track, overlays content */
+/* Custom scrollbar — overrides theme.css with rounder thumbs and ring hover color */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
@@ -242,14 +247,6 @@ body[style*="user-select"] [data-sidebar-panel] {
   main {
     overflow: visible !important;
   }
-}
-
-/* Thin scrollbars — panels and diff scroll areas */
-aside,
-[data-annotation-panel],
-.diff-scroll {
-  scrollbar-color: oklch(0.5 0 0 / 0.12) transparent;
-  scrollbar-width: thin;
 }
 
 /* Tab bar — no visible scrollbar */

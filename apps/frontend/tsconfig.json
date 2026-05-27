@@ -16,8 +16,6 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@plannotator/shared/*": ["../../packages/shared/*"],
-      "@plannotator/ui/*": ["../../packages/ui/*"],
     },
   },
   "include": ["src", "scripts", "vite.config.ts", "vitest.config.ts", "vitest.browser.config.ts"],

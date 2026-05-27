@@ -34,6 +34,14 @@ interface ConnectionState {
   pendingSubscriptions: Map<string, DaemonEventMessage[]>;
   heartbeat: ReturnType<typeof setInterval>;
   daemonAuthenticated: boolean;
+  tabVisible: boolean;
+  activeSessionId: string | null;
+}
+
+export interface FrontendState {
+  connected: boolean;
+  anyVisible: boolean;
+  allActiveSessionIds: Set<string>;
 }
 
 function scopeKey(scope: DaemonWebSocketScope): string {
@@ -97,6 +105,19 @@ export class DaemonEventHub {
     this.publish({ family, sessionId }, event);
   }
 
+  getFrontendState(): FrontendState {
+    let connected = false;
+    let anyVisible = false;
+    const allActiveSessionIds = new Set<string>();
+    for (const conn of this.connections.values()) {
+      if (!conn.daemonAuthenticated) continue;
+      connected = true;
+      if (conn.tabVisible) anyVisible = true;
+      if (conn.activeSessionId) allActiveSessionIds.add(conn.activeSessionId);
+    }
+    return { connected, anyVisible, allActiveSessionIds };
+  }
+
   closeAll(): void {
     for (const socket of Array.from(this.connections.keys())) {
       try {
@@ -119,6 +140,8 @@ export class DaemonEventHub {
       pendingSubscriptions: new Map(),
       heartbeat,
       daemonAuthenticated: socket.data?.daemonAuthenticated === true,
+      tabVisible: true,
+      activeSessionId: null,
     });
   }
 
@@ -142,6 +165,14 @@ export class DaemonEventHub {
       case "ping":
         this.send(socket, { type: "pong", requestId: message.requestId, at: nowIso() });
         return;
+      case "client-state": {
+        const connection = this.connections.get(socket);
+        if (connection) {
+          connection.tabVisible = message.visible;
+          connection.activeSessionId = message.activeSessionId;
+        }
+        return;
+      }
     }
   }
 

@@ -25,7 +25,7 @@ const ChatBubbleIcon = () => (
 // ---------------------------------------------------------------------------
 
 interface CompletionOverlayProps {
-  submitted: 'approved' | 'denied' | 'feedback' | 'exited' | null | false;
+  submitted: 'approved' | 'denied' | 'feedback' | 'feedback-sent' | 'exited' | null | false;
   title: string;
   subtitle: string;
   agentLabel: string;
@@ -36,17 +36,17 @@ export function CompletionOverlay({ submitted, title, subtitle, agentLabel }: Co
 
   if (!submitted) return null;
 
-  const isApproved = submitted === 'approved';
+  const isSuccess = submitted === 'approved' || submitted === 'feedback-sent';
 
   return (
     <div className="fixed inset-0 z-[100] bg-background flex items-center justify-center">
       <div className="text-center space-y-6 max-w-md px-8">
         <div
           className={`mx-auto w-16 h-16 rounded-full flex items-center justify-center ${
-            isApproved ? 'bg-success/20 text-success' : 'bg-accent/20 text-accent'
+            isSuccess ? 'bg-success/20 text-success' : 'bg-accent/20 text-accent'
           }`}
         >
-          {isApproved ? <CheckIcon /> : <ChatBubbleIcon />}
+          {isSuccess ? <CheckIcon /> : <ChatBubbleIcon />}
         </div>
 
         <div className="space-y-2">
