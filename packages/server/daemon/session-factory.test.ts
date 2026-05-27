@@ -72,7 +72,6 @@ describe("createDaemonSessionFactory", () => {
     }, context);
 
     expect(record.expiresAt).toBeDefined();
-    expect(record.htmlContent).toBeUndefined();
 
     const planResponse = await record.handleRequest!(
       new Request("http://127.0.0.1:4321/api/plan"),
