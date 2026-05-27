@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { extractCandidateCodePaths } from "@plannotator/shared/extract-code-paths";
+import { useSessionFetch } from "./useSessionFetch";
 
 export type ValidationEntry =
 	| { status: "found"; resolved: string }
@@ -30,6 +31,7 @@ export function useValidatedCodePaths(
 	markdown: string,
 	baseDir?: string,
 ): { validated: ValidatedMap; ready: boolean } {
+	const fetch = useSessionFetch();
 	const [validated, setValidated] = useState<ValidatedMap>(new Map());
 	const [ready, setReady] = useState<boolean>(false);
 

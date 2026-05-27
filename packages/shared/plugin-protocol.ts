@@ -130,11 +130,17 @@ export interface PluginArchiveResult {
   opened: boolean;
 }
 
+export interface PluginGoalSetupResult {
+  result?: { stage: "interview" | "facts"; [key: string]: unknown };
+  exit?: boolean;
+}
+
 export type PluginActionResult =
   | PluginPlanResult
   | PluginReviewResult
   | PluginAnnotateResult
-  | PluginArchiveResult;
+  | PluginArchiveResult
+  | PluginGoalSetupResult;
 
 export type PluginSuccessResponse<T extends PluginActionResult = PluginActionResult> = {
   ok: true;

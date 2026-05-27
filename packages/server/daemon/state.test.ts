@@ -92,6 +92,28 @@ describe("daemon state", () => {
     expect(result.kind).toBe("incompatible");
   });
 
+  test("does not reject higher daemon state versions solely by version number", () => {
+    const baseDir = tempBase();
+    const paths = getDaemonPaths({ baseDir });
+    const state = {
+      ...createDaemonState({
+        pid: 123,
+        port: 19432,
+        hostname: "127.0.0.1",
+        isRemote: false,
+        remoteSource: "local",
+      }),
+      protocolVersion: 999,
+    };
+    writeFileSync(paths.statePath, JSON.stringify(state), "utf-8");
+
+    expect(readDaemonState({ baseDir, isAlive: (pid) => pid === 123 })).toEqual({
+      kind: "active",
+      path: paths.statePath,
+      state,
+    });
+  });
+
   test("removes state", () => {
     const baseDir = tempBase();
     writeDaemonState(createDaemonState({

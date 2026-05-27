@@ -6,7 +6,7 @@ sidebar:
 section: "Reference"
 ---
 
-Plannotator runs a local Bun HTTP server for each session. The server serves the UI and exposes a REST API for communication between the browser and the CLI.
+Plannotator runs a local Bun HTTP daemon. The daemon serves the UI, exposes REST APIs for snapshots and mutations, and multiplexes live daemon/session events through `/daemon/ws`.
 
 All servers use random ports locally or a fixed port (`19432` by default) in remote mode.
 
@@ -23,7 +23,6 @@ Used during plan review (`ExitPlanMode` hook).
 | `/api/upload` | POST | Upload an image, returns `{ path, originalName }` |
 | `/api/obsidian/vaults` | GET | Detect available Obsidian vaults |
 | `/api/save-notes` | POST | Save plan to Obsidian/Bear on demand |
-| `/api/external-annotations/stream` | GET | SSE stream for real-time external annotations |
 | `/api/external-annotations` | GET | Snapshot of external annotations (`?since=N` for version gating) |
 | `/api/external-annotations` | POST | Add external annotations (single or batch) |
 | `/api/external-annotations` | PATCH | Update annotation fields (`?id=`) |
@@ -79,7 +78,6 @@ Used during code review (`/plannotator-review`).
 | `/api/feedback` | POST | Submit review feedback |
 | `/api/image` | GET | Serve a local image by path |
 | `/api/upload` | POST | Upload an image attachment |
-| `/api/external-annotations/stream` | GET | SSE stream for real-time external annotations |
 | `/api/external-annotations` | GET | Snapshot of external annotations (`?since=N` for version gating) |
 | `/api/external-annotations` | POST | Add external annotations (single or batch) |
 | `/api/external-annotations` | PATCH | Update annotation fields (`?id=`) |
@@ -119,7 +117,6 @@ Used during file annotation (`/plannotator-annotate`).
 | `/api/feedback` | POST | Submit annotation feedback |
 | `/api/image` | GET | Serve a local image by path |
 | `/api/upload` | POST | Upload an image attachment |
-| `/api/external-annotations/stream` | GET | SSE stream for real-time external annotations |
 | `/api/external-annotations` | GET | Snapshot of external annotations (`?since=N` for version gating) |
 | `/api/external-annotations` | POST | Add external annotations (single or batch) |
 | `/api/external-annotations` | PATCH | Update annotation fields (`?id=`) |

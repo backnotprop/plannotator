@@ -11,6 +11,7 @@ import type { UseLinkedDocReturn } from "./useLinkedDoc";
 import type { ViewerHandle } from "../components/Viewer";
 import type { Annotation } from "../types";
 import { getPlanSaveSettings } from "../utils/planSave";
+import { useSessionFetch } from "./useSessionFetch";
 
 export interface UseArchiveOptions {
   markdown: string;
@@ -48,6 +49,7 @@ export interface UseArchiveReturn {
 }
 
 export function useArchive(options: UseArchiveOptions): UseArchiveReturn {
+  const fetch = useSessionFetch();
   const {
     markdown,
     viewerRef,

@@ -209,6 +209,7 @@ export type {
 export type {
   AgentJobInfo,
   AgentJobEvent,
+  AgentJobLogs,
   AgentJobStatus,
   AgentCapability,
   AgentCapabilities,

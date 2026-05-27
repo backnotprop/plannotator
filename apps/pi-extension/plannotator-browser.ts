@@ -41,6 +41,18 @@ export function getStartupErrorMessage(err: unknown): string {
 	return err instanceof Error ? err.message : "Unknown error";
 }
 
+export class PlannotatorBinaryStartupError extends Error {
+	readonly code: string;
+	readonly checked: string[];
+
+	constructor(result: { code: string; message: string; checked?: string[] }) {
+		super(result.message);
+		this.name = "PlannotatorBinaryStartupError";
+		this.code = result.code;
+		this.checked = result.checked ?? [];
+	}
+}
+
 export function shouldUseLocalPrCheckout(options: { useLocal?: boolean }): boolean {
 	return options.useLocal !== false;
 }
@@ -51,19 +63,19 @@ export function normalizeAnnotationMarkdownForBinary(markdown: string | undefine
 
 const SOURCE_ROOT = findPlannotatorSourceRoot(dirname(fileURLToPath(import.meta.url)));
 
-function sharingRequest(ctx: ExtensionContext) {
+function sharingRequest(ctx: ExtensionContext, env: NodeJS.ProcessEnv = process.env) {
 	return {
 		cwd: ctx.cwd,
-		sharingEnabled: process.env.PLANNOTATOR_SHARE !== "disabled",
-		shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
-		pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
+		sharingEnabled: env.PLANNOTATOR_SHARE !== "disabled",
+		shareBaseUrl: env.PLANNOTATOR_SHARE_URL || undefined,
+		pasteApiUrl: env.PLANNOTATOR_PASTE_URL || undefined,
 	};
 }
 
 function getBinaryPath(requiredFeatures?: readonly PluginFeature[]): string {
 	const binary = ensurePlannotatorBinary({ requiredFeatures, sourceRoot: SOURCE_ROOT });
 	if (!binary.ok) {
-		throw new Error(binary.message);
+		throw new PlannotatorBinaryStartupError(binary);
 	}
 	return binary.path;
 }

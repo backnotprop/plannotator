@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Origin } from '@plannotator/shared/agents';
 import { getAgentSwitchSettings } from '../utils/agentSwitch';
+import { useSessionFetch } from './useSessionFetch';
 
 export interface Agent {
   id: string;
@@ -26,6 +27,7 @@ export interface UseAgentsResult {
  * Only fetches when origin is 'opencode'
  */
 export function useAgents(origin: Origin | null): UseAgentsResult {
+  const fetch = useSessionFetch();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 

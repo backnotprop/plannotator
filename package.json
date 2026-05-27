@@ -22,6 +22,8 @@
     "dev:portal": "bun run --cwd apps/portal dev",
     "dev:marketing": "bun run --cwd apps/marketing dev",
     "dev:review": "bun run --cwd apps/review dev",
+    "dev:frontend": "bun run scripts/dev-frontend.ts",
+    "dev:debug-stack": "bun run scripts/dev-debug-stack.ts",
     "build:hook": "bun run --cwd apps/hook build",
     "build:portal": "bun run --cwd apps/portal build",
     "build:marketing": "bun run --cwd apps/marketing build",

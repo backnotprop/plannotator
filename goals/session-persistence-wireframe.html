@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Session Persistence — UI Wireframe</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #0f0f0f; color: #e0e0e0; }
+
+  .page { display: flex; height: 100vh; }
+  .sidebar { width: 240px; background: #161616; border-right: 1px solid #2a2a2a; padding: 12px; flex-shrink: 0; }
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  .sidebar h3 { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #666; margin-bottom: 8px; }
+  .session-item { padding: 8px 10px; border-radius: 6px; margin-bottom: 4px; cursor: pointer; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+  .session-item:hover { background: #1f1f1f; }
+  .session-item.active { background: #1a1a2e; }
+
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .dot.active { background: #4ade80; }
+  .dot.awaiting { background: #f59e0b; animation: pulse 2s ease-in-out infinite; }
+  .dot.completed { background: #6b7280; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.85); }
+  }
+
+  .header { height: 48px; background: #161616; border-bottom: 1px solid #2a2a2a; display: flex; align-items: center; padding: 0 16px; gap: 12px; flex-shrink: 0; }
+  .header .title { font-size: 14px; font-weight: 600; }
+  .header .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+  .badge.v2 { background: #1a1a2e; color: #818cf8; }
+  .badge.diff { background: #14532d; color: #4ade80; font-size: 10px; }
+
+  .banner { padding: 10px 16px; display: flex; align-items: center; gap: 10px; font-size: 13px; flex-shrink: 0; border-bottom: 1px solid; }
+  .banner.awaiting { background: #1c1917; border-color: #78350f; color: #f59e0b; }
+  .banner.revision { background: #0f172a; border-color: #1e3a5f; color: #60a5fa; }
+
+  .banner .spinner { width: 14px; height: 14px; border: 2px solid #f59e0b33; border-top-color: #f59e0b; border-radius: 50%; animation: spin 1s linear infinite; flex-shrink: 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .banner .cancel-btn { margin-left: auto; font-size: 11px; padding: 3px 10px; border-radius: 4px; border: 1px solid #444; background: transparent; color: #999; cursor: pointer; }
+  .banner .cancel-btn:hover { background: #2a2a2a; color: #e0e0e0; }
+
+  .content { flex: 1; overflow-y: auto; padding: 32px; }
+  .plan-card { max-width: 720px; margin: 0 auto; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 24px 28px; }
+
+  .plan-card h1 { font-size: 22px; margin-bottom: 16px; }
+  .plan-card h2 { font-size: 16px; margin: 20px 0 8px; color: #a0a0a0; }
+  .plan-card p { font-size: 14px; line-height: 1.6; color: #b0b0b0; margin-bottom: 12px; }
+  .plan-card .diff-line { padding: 2px 8px; margin: 2px 0; border-radius: 3px; font-size: 13px; }
+  .plan-card .diff-add { background: #0d2818; border-left: 3px solid #4ade80; color: #86efac; }
+  .plan-card .diff-del { background: #2a0a0a; border-left: 3px solid #ef4444; color: #fca5a5; text-decoration: line-through; }
+  .plan-card .diff-mod { background: #1a1a00; border-left: 3px solid #eab308; color: #fde68a; }
+
+  .actions { height: 56px; background: #161616; border-top: 1px solid #2a2a2a; display: flex; align-items: center; justify-content: flex-end; padding: 0 16px; gap: 8px; flex-shrink: 0; }
+  .btn { padding: 7px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; }
+  .btn-approve { background: #166534; color: #dcfce7; }
+  .btn-deny { background: #1f1f1f; color: #e0e0e0; border: 1px solid #333; }
+  .btn-disabled { opacity: 0.3; cursor: not-allowed; }
+
+  .completion-overlay { position: absolute; inset: 0; background: #0f0f0f; display: flex; align-items: center; justify-content: center; z-index: 10; }
+  .completion-overlay .inner { text-align: center; max-width: 360px; }
+  .completion-overlay .icon { width: 56px; height: 56px; border-radius: 50%; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+  .completion-overlay .icon.approve { background: #14532d; color: #4ade80; }
+  .completion-overlay .icon.deny { background: #1e1b4b; color: #818cf8; }
+  .completion-overlay h2 { font-size: 18px; margin-bottom: 8px; }
+  .completion-overlay p { font-size: 13px; color: #888; }
+
+  .section-label { font-size: 11px; font-weight: 600; color: #555; margin: 20px 0 8px; padding-left: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  .screen { display: none; position: relative; flex: 1; flex-direction: column; overflow: hidden; }
+  .screen.visible { display: flex; }
+
+  .tab-bar { display: flex; gap: 0; background: #0f0f0f; border-bottom: 1px solid #2a2a2a; padding: 0 12px; }
+  .tab { padding: 10px 16px; font-size: 12px; color: #777; cursor: pointer; border-bottom: 2px solid transparent; }
+  .tab.active { color: #e0e0e0; border-bottom-color: #818cf8; }
+  .tab:hover { color: #bbb; }
+
+  .dimmed { opacity: 0.4; }
+</style>
+</head>
+<body>
+
+<div class="tab-bar">
+  <div class="tab active" onclick="showScreen('screen-1')">1. User Reviewing</div>
+  <div class="tab" onclick="showScreen('screen-2')">2. Awaiting Revision</div>
+  <div class="tab" onclick="showScreen('screen-3')">3. Revision Arrived</div>
+  <div class="tab" onclick="showScreen('screen-4')">4. Final Approval</div>
+  <div class="tab" onclick="showScreen('screen-5')">5. Sidebar States</div>
+</div>
+
+<!-- SCREEN 1: Normal plan review (current behavior, no change) -->
+<div id="screen-1" class="screen visible">
+  <div class="page">
+    <div class="sidebar">
+      <h3>Sessions</h3>
+      <div class="session-item active"><span class="dot active"></span> plannotator (plan)</div>
+      <div class="session-item"><span class="dot completed"></span> my-repo (review)</div>
+    </div>
+    <div class="main">
+      <div class="header">
+        <span class="title">Implementation Plan</span>
+        <span class="badge v2">v1</span>
+      </div>
+      <div class="content">
+        <div class="plan-card">
+          <h1>Implementation Plan</h1>
+          <h2>Overview</h2>
+          <p>This plan introduces session persistence so denied plans stay alive and can be revised by the agent...</p>
+          <h2>Phase 1: Protocol Changes</h2>
+          <p>Add "awaiting-resubmission" to the session status enum. Add suspend() and reactivate() methods to the session store...</p>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-deny">Deny</button>
+        <button class="btn btn-approve">Approve</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SCREEN 2: Awaiting revision (NEW state) -->
+<div id="screen-2" class="screen">
+  <div class="page">
+    <div class="sidebar">
+      <h3>Sessions</h3>
+      <div class="session-item active"><span class="dot awaiting"></span> plannotator (plan)</div>
+      <div class="session-item"><span class="dot completed"></span> my-repo (review)</div>
+    </div>
+    <div class="main">
+      <div class="header">
+        <span class="title">Implementation Plan</span>
+        <span class="badge v2">v1 · denied</span>
+      </div>
+      <div class="banner awaiting">
+        <span class="spinner"></span>
+        <span>Feedback sent — waiting for agent to revise...</span>
+        <button class="cancel-btn">Cancel</button>
+      </div>
+      <div class="content">
+        <div class="plan-card dimmed">
+          <h1>Implementation Plan</h1>
+          <h2>Overview</h2>
+          <p>This plan introduces session persistence so denied plans stay alive and can be revised by the agent...</p>
+          <h2>Phase 1: Protocol Changes</h2>
+          <p>Add "awaiting-resubmission" to the session status enum. Add suspend() and reactivate() methods to the session store...</p>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-deny btn-disabled">Deny</button>
+        <button class="btn btn-approve btn-disabled">Approve</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SCREEN 3: Revision arrived (plan diff view) -->
+<div id="screen-3" class="screen">
+  <div class="page">
+    <div class="sidebar">
+      <h3>Sessions</h3>
+      <div class="session-item active"><span class="dot active"></span> plannotator (plan)</div>
+      <div class="session-item"><span class="dot completed"></span> my-repo (review)</div>
+    </div>
+    <div class="main">
+      <div class="header">
+        <span class="title">Implementation Plan</span>
+        <span class="badge v2">v2</span>
+        <span class="badge diff">+12 / -3</span>
+      </div>
+      <div class="banner revision">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        <span>Plan revised by agent — review round 2</span>
+      </div>
+      <div class="content">
+        <div class="plan-card">
+          <h1>Implementation Plan</h1>
+          <h2>Overview</h2>
+          <p>This plan introduces session persistence so denied plans stay alive and can be revised by the agent...</p>
+          <h2>Phase 1: Protocol Changes</h2>
+          <div class="diff-del">Add "awaiting-resubmission" to the session status enum.</div>
+          <div class="diff-add">Add "awaiting-resubmission" to DaemonSessionStatus. Bump protocol version to 2.</div>
+          <div class="diff-add">Add suspend() and reactivate() methods to the session store.</div>
+          <p style="margin-top:8px">The session store gets two new methods that manage the non-terminal suspension lifecycle...</p>
+          <h2>Phase 2: Decision Cycles</h2>
+          <div class="diff-add">Replace the one-shot decision promise with a cycle-based model where each deny starts a new cycle.</div>
+          <div class="diff-mod">Update the CLI to handle "awaiting-resubmission" as a valid non-error status (exit 0, not 1).</div>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-deny">Deny</button>
+        <button class="btn btn-approve">Approve</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SCREEN 4: Approved (completion overlay, same as today) -->
+<div id="screen-4" class="screen">
+  <div class="page">
+    <div class="sidebar">
+      <h3>Sessions</h3>
+      <div class="session-item active"><span class="dot completed"></span> plannotator (plan)</div>
+      <div class="session-item"><span class="dot completed"></span> my-repo (review)</div>
+    </div>
+    <div class="main" style="position: relative;">
+      <div class="header">
+        <span class="title">Implementation Plan</span>
+        <span class="badge v2">v2 · approved</span>
+      </div>
+      <div class="content" style="filter: blur(2px); opacity: 0.3;">
+        <div class="plan-card">
+          <h1>Implementation Plan</h1>
+        </div>
+      </div>
+      <div class="completion-overlay">
+        <div class="inner">
+          <div class="icon approve">✓</div>
+          <h2>Plan Approved</h2>
+          <p>Your approval has been sent to the agent.</p>
+          <p style="margin-top: 16px; font-size: 12px; color: #555;">You can close this tab and return to your editor.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SCREEN 5: Sidebar states reference -->
+<div id="screen-5" class="screen">
+  <div class="page">
+    <div class="sidebar" style="width: 100%; max-width: 400px; margin: 40px auto; background: transparent; border: none;">
+      <h3 style="font-size: 14px; color: #e0e0e0; margin-bottom: 20px; text-transform: none; letter-spacing: 0;">Sidebar Session States</h3>
+
+      <div class="section-label">Active — user is reviewing</div>
+      <div class="session-item" style="background: #1a1a2e;"><span class="dot active"></span> plannotator (plan)</div>
+      <div class="session-item" style="background: #1a1a2e;"><span class="dot active"></span> my-repo (review)</div>
+
+      <div class="section-label">Awaiting Resubmission — pulsing amber dot</div>
+      <div class="session-item" style="background: #1a1a1a;"><span class="dot awaiting"></span> plannotator (plan)</div>
+      <div class="session-item" style="background: #1a1a1a;"><span class="dot awaiting"></span> README.md (annotate)</div>
+      <div class="session-item" style="background: #1a1a1a;"><span class="dot awaiting"></span> my-repo (review)</div>
+
+      <div class="section-label">Completed</div>
+      <div class="session-item"><span class="dot completed"></span> plannotator (plan) · approved</div>
+      <div class="session-item"><span class="dot completed"></span> my-repo (review) · feedback sent</div>
+
+      <div class="section-label" style="margin-top: 32px; color: #888;">Legend</div>
+      <div style="display: flex; gap: 20px; padding: 8px 4px; font-size: 12px; color: #888;">
+        <span style="display: flex; align-items: center; gap: 6px;"><span class="dot active"></span> Active</span>
+        <span style="display: flex; align-items: center; gap: 6px;"><span class="dot awaiting"></span> Awaiting</span>
+        <span style="display: flex; align-items: center; gap: 6px;"><span class="dot completed"></span> Completed</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('visible'));
+  document.getElementById(id).classList.add('visible');
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+}
+</script>
+
+</body>
+</html>

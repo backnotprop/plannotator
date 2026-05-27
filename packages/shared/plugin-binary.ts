@@ -45,6 +45,12 @@ export interface PluginBinaryCompatibilityOptions {
   requiredFeatures?: readonly PluginFeature[];
 }
 
+const SOURCE_RUNTIME_ASSETS = [
+  path.join("apps", "hook", "dist", "index.html"),
+  path.join("apps", "hook", "dist", "review.html"),
+  path.join("apps", "debug-frontend", "dist", "index.html"),
+] as const;
+
 function executableNames(platform: NodeJS.Platform): string[] {
   return platform === "win32"
     ? ["plannotator.exe", "plannotator.cmd", "plannotator.bat", "plannotator"]
@@ -90,6 +96,20 @@ export function findPlannotatorSourceRoot(
   return undefined;
 }
 
+export function isRunnablePlannotatorSourceRoot(
+  sourceRoot: string,
+  platform: NodeJS.Platform = process.platform,
+  exists: (candidate: string) => boolean = existsSync,
+): boolean {
+  const sourceEntry = path.join(sourceRoot, "apps", "hook", "server", "index.ts");
+  const sourceShim = path.join(sourceRoot, "bin", platform === "win32" ? "plannotator.cmd" : "plannotator.js");
+  return (
+    exists(sourceEntry) &&
+    exists(sourceShim) &&
+    SOURCE_RUNTIME_ASSETS.every((asset) => exists(path.join(sourceRoot, asset)))
+  );
+}
+
 export function discoverPlannotatorBinary(
   options: PluginBinaryDiscoveryOptions = {},
 ): PluginBinaryDiscoveryResult {
@@ -128,11 +148,9 @@ export function discoverPlannotatorBinaryCandidates(
     addIfExists(explicit, "env");
   }
 
-  if (options.sourceRoot) {
-    addIfExists(
-      path.join(options.sourceRoot, "bin", platform === "win32" ? "plannotator.cmd" : "plannotator.js"),
-      "source",
-    );
+  if (options.sourceRoot && isRunnablePlannotatorSourceRoot(options.sourceRoot, platform, exists)) {
+    const sourceShim = path.join(options.sourceRoot, "bin", platform === "win32" ? "plannotator.cmd" : "plannotator.js");
+    addIfExists(sourceShim, "source");
   }
 
   const pathDirs = (env.PATH || "")

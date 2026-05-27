@@ -1,0 +1,47 @@
+{
+  "stage": "interview",
+  "title": "Global Keyboard Registry",
+  "goalSlug": "global-keyboard-registry",
+  "answers": [
+    {
+      "questionId": "global-dispatcher-location",
+      "answer": "whatever is elegant, industry standard, performant",
+      "completed": true
+    },
+    {
+      "questionId": "element-level-handlers",
+      "answer": "Question: what is the risk if we just colocate everything in the registry. Then it becomes explicit, and clear, and potentially easier to customize. but i dont want to risk complexity?",
+      "completed": true
+    },
+    {
+      "questionId": "modal-escape-handlers",
+      "answer": "I think leave, again for this - elegant, industry standard, performant",
+      "completed": true
+    },
+    {
+      "questionId": "paste-handlers",
+      "answer": "industry standard, elegant, performance - choose with this in mind",
+      "completed": true
+    },
+    {
+      "questionId": "scope-gaps",
+      "answer": "Extend existing scopes with new bindings",
+      "completed": true
+    },
+    {
+      "questionId": "legacy-packages",
+      "answer": "whatever is relevant to new app",
+      "completed": true
+    },
+    {
+      "questionId": "dead-code-cleanup",
+      "answer": "probably a cleanup phase?",
+      "completed": true
+    },
+    {
+      "questionId": "keyboard-shortcuts-component",
+      "answer": "Yes, migrate KeyboardShortcuts.tsx",
+      "completed": true
+    }
+  ]
+}

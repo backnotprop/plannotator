@@ -1,0 +1,114 @@
+{
+  "stage": "interview",
+  "title": "Global Keyboard Registry",
+  "goalSlug": "global-keyboard-registry",
+  "questions": [
+    {
+      "id": "global-dispatcher-location",
+      "prompt": "Where should the single global keyboard listener live?",
+      "description": "The dispatcher needs to know which session is active and route keystrokes to it. Layout.tsx already tracks activeSessionId.",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "In Layout.tsx (the app shell), using activeSessionId to route to the correct surface's handlers.",
+      "options": [
+        { "id": "layout", "label": "Layout.tsx (app shell)" },
+        { "id": "dedicated", "label": "Dedicated KeyboardManager component" },
+        { "id": "context", "label": "React context provider at root" }
+      ],
+      "recommendedOptionIds": ["layout"],
+      "required": true
+    },
+    {
+      "id": "element-level-handlers",
+      "prompt": "How should element-level keyboard handlers be treated?",
+      "description": "Some handlers are on specific DOM elements (e.g., code nav panel Escape, file tree arrow keys). These are already scoped to their element and don't fire globally. Should they stay as-is or also move into the registry?",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Leave element-level handlers as-is. They're already scoped and don't cause the performance problem. Only consolidate window/document-level handlers into the global registry.",
+      "options": [
+        { "id": "leave", "label": "Leave element-level handlers as-is" },
+        { "id": "consolidate-all", "label": "Move everything into the registry" }
+      ],
+      "recommendedOptionIds": ["leave"],
+      "required": true
+    },
+    {
+      "id": "modal-escape-handlers",
+      "prompt": "14 components register their own Escape handler to close modals/popovers. Should these be consolidated?",
+      "description": "Components like ConfirmDialog, MermaidBlock, ImageAnnotator, ActionMenu, AttachmentsButton, etc. each register window.addEventListener('keydown') for Escape. They're not surface-scoped — they're UI-component-scoped. Moving them to the global registry would couple the app shell to every modal's open/close state.",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Leave modal Escape handlers in their components. They only mount when the modal is open, so they don't accumulate on hidden sessions. The performance problem is surface-level handlers that persist for the session's lifetime.",
+      "options": [
+        { "id": "leave-modals", "label": "Leave modal Escape in components" },
+        { "id": "consolidate-modals", "label": "Also move modal Escape to registry" }
+      ],
+      "recommendedOptionIds": ["leave-modals"],
+      "required": true
+    },
+    {
+      "id": "paste-handlers",
+      "prompt": "There are 3 paste handlers (plan image paste, editor image paste, attachments paste). Should these move to the registry?",
+      "description": "Paste is a different event type (ClipboardEvent, not KeyboardEvent). The shortcut engine handles keydown/keyup only.",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Leave paste handlers as-is. They're a different event type. The shortcut registry handles keyboard events only. Paste handlers should get the same visibility guard pattern but stay as addEventListener('paste').",
+      "options": [
+        { "id": "leave-paste", "label": "Leave paste as-is, add visibility guard" },
+        { "id": "extend-engine", "label": "Extend engine to support paste events" }
+      ],
+      "recommendedOptionIds": ["leave-paste"],
+      "required": true
+    },
+    {
+      "id": "scope-gaps",
+      "prompt": "The existing scope definitions (from PR #652) cover 76 bindings across 19 scopes. But 10 raw handlers in the App.tsx files handle keys not yet in any scope. Should we add new scopes or extend existing ones?",
+      "description": "Missing from scopes: Mod+F (search focus), Mod+B (file tree toggle), Mod+. (sidebar toggle), V/A (file viewed/stage), Mod+Shift+T (dev tour), Mod+S (quick save), Mod+P (print), Mod+Shift+F (PR comments search). These are the raw handlers that need to become scope bindings.",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Extend existing scopes. The review-editor scope should get the search/navigation bindings. The plan-editor scope should get save/print. No new scopes needed — just new bindings on existing ones.",
+      "options": [
+        { "id": "extend", "label": "Extend existing scopes with new bindings" },
+        { "id": "new-scopes", "label": "Create new scopes for the missing areas" }
+      ],
+      "recommendedOptionIds": ["extend"],
+      "required": true
+    },
+    {
+      "id": "legacy-packages",
+      "prompt": "packages/editor/ and packages/review-editor/ are legacy duplicates of packages/plannotator-plan-review/ and packages/plannotator-code-review/. They have identical raw handlers. Should we clean them up in this goal?",
+      "description": "The legacy packages are still used by the standalone hook server build. The new plannotator-* packages are used by the frontend app. Both have the same 53 raw handlers.",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Focus on the plannotator-* packages only (the frontend app surfaces). The legacy packages stay untouched — they're standalone mode and will be deprecated separately.",
+      "options": [
+        { "id": "new-only", "label": "plannotator-* packages only (frontend)" },
+        { "id": "both", "label": "Both legacy and new packages" },
+        { "id": "all-plus-cleanup", "label": "Both + delete dead code with knip" }
+      ],
+      "recommendedOptionIds": ["new-only"],
+      "required": true
+    },
+    {
+      "id": "dead-code-cleanup",
+      "prompt": "Should we run knip to find and clean dead shortcut-related code as part of this goal?",
+      "description": "PR #652 landed scope definitions that are only read by the marketing build. The KeyboardShortcuts.tsx component has hardcoded data instead of reading from the registry. There may be other dead code from the incomplete migration.",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Yes — run knip after the migration to identify unused shortcut definitions, orphaned imports, and stale hardcoded data. Also migrate KeyboardShortcuts.tsx to render from the registry (completing the #652 follow-up).",
+      "options": [
+        { "id": "yes-knip", "label": "Yes, run knip + cleanup dead code" },
+        { "id": "manual", "label": "Manual cleanup only, no knip" },
+        { "id": "defer", "label": "Defer cleanup to a separate goal" }
+      ],
+      "recommendedOptionIds": ["yes-knip"],
+      "required": true
+    },
+    {
+      "id": "keyboard-shortcuts-component",
+      "prompt": "KeyboardShortcuts.tsx (the help modal) has hardcoded shortcut data. Should we migrate it to render from the registry as part of this goal?",
+      "description": "This was follow-up #1 from PR #652 and was never done. The registry already has all the data. The marketing site already renders from the registry. The in-app help modal should too.",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Yes — this is the highest UX-visible win from the registry. The data is already there, just not wired to the component.",
+      "options": [
+        { "id": "yes", "label": "Yes, migrate KeyboardShortcuts.tsx" },
+        { "id": "defer", "label": "Defer to a separate goal" }
+      ],
+      "recommendedOptionIds": ["yes"],
+      "required": true
+    }
+  ]
+}

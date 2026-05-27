@@ -2,13 +2,17 @@ import {
   PLANNOTATOR_DAEMON_PROTOCOL,
   PLANNOTATOR_DAEMON_PROTOCOL_VERSION,
 } from "@plannotator/shared/daemon-protocol";
-import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, closeSync, statSync, type Stats } from "fs";
+import { randomBytes } from "crypto";
+import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, closeSync, statSync, type Stats } from "fs";
 import { homedir } from "os";
 import { dirname, join } from "path";
 
+export const DAEMON_AUTH_QUERY_PARAM = "plannotator_auth";
+export const DAEMON_AUTH_COOKIE = "plannotator_daemon_auth";
+
 export interface DaemonState {
   protocol: typeof PLANNOTATOR_DAEMON_PROTOCOL;
-  protocolVersion: typeof PLANNOTATOR_DAEMON_PROTOCOL_VERSION;
+  protocolVersion: number;
   pid: number;
   port: number;
   hostname: string;
@@ -16,6 +20,7 @@ export interface DaemonState {
   startedAt: string;
   isRemote: boolean;
   remoteSource: "env" | "ssh" | "local";
+  authToken: string;
   requestedPort?: number;
   binaryVersion?: string;
 }
@@ -57,6 +62,16 @@ function defaultIsAlive(pid: number): boolean {
   }
 }
 
+export function createDaemonAuthToken(): string {
+  return randomBytes(32).toString("hex");
+}
+
+export function createDaemonBrowserAuthUrl(state: DaemonState, pathname = "/"): string {
+  const url = new URL(pathname, state.baseUrl);
+  url.searchParams.set(DAEMON_AUTH_QUERY_PARAM, state.authToken);
+  return url.toString();
+}
+
 export function getDaemonPaths(options: DaemonStateOptions = {}): DaemonPaths {
   const dir = options.baseDir ?? join(homedir(), ".plannotator");
   return {
@@ -71,7 +86,8 @@ export function isDaemonState(value: unknown): value is DaemonState {
   return (
     !!state &&
     state.protocol === PLANNOTATOR_DAEMON_PROTOCOL &&
-    state.protocolVersion === PLANNOTATOR_DAEMON_PROTOCOL_VERSION &&
+    typeof state.protocolVersion === "number" &&
+    state.protocolVersion >= 1 &&
     typeof state.pid === "number" &&
     Number.isInteger(state.pid) &&
     state.pid > 0 &&
@@ -82,7 +98,9 @@ export function isDaemonState(value: unknown): value is DaemonState {
     typeof state.hostname === "string" &&
     typeof state.baseUrl === "string" &&
     typeof state.startedAt === "string" &&
-    typeof state.isRemote === "boolean"
+    typeof state.isRemote === "boolean" &&
+    typeof state.authToken === "string" &&
+    state.authToken.length >= 32
   );
 }
 
@@ -115,8 +133,16 @@ export function readDaemonState(options: DaemonStateOptions = {}): DaemonStateRe
 
 export function writeDaemonState(state: DaemonState, options: DaemonStateOptions = {}): void {
   const paths = getDaemonPaths(options);
-  mkdirSync(dirname(paths.statePath), { recursive: true });
-  writeFileSync(paths.statePath, JSON.stringify(state, null, 2), "utf-8");
+  mkdirSync(dirname(paths.statePath), { recursive: true, mode: 0o700 });
+  writeFileSync(paths.statePath, JSON.stringify(state, null, 2), {
+    encoding: "utf-8",
+    mode: 0o600,
+  });
+  try {
+    chmodSync(paths.statePath, 0o600);
+  } catch {
+    // Best-effort on platforms/filesystems that do not support POSIX modes.
+  }
 }
 
 export function removeDaemonState(options: DaemonStateOptions = {}): void {
@@ -220,6 +246,7 @@ export function createDaemonState(input: {
   hostname: string;
   isRemote: boolean;
   remoteSource: DaemonState["remoteSource"];
+  authToken?: string;
   startedAt?: string;
   binaryVersion?: string;
   requestedPort?: number;
@@ -237,6 +264,7 @@ export function createDaemonState(input: {
     startedAt: input.startedAt ?? new Date().toISOString(),
     isRemote: input.isRemote,
     remoteSource: input.remoteSource,
+    authToken: input.authToken ?? createDaemonAuthToken(),
     ...(input.binaryVersion && { binaryVersion: input.binaryVersion }),
     ...(input.requestedPort !== undefined && { requestedPort: input.requestedPort }),
   };

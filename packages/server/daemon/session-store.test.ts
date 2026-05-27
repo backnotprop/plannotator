@@ -33,7 +33,53 @@ describe("DaemonSessionStore", () => {
     ]);
   });
 
-  test("waiters resolve when a session completes and routing payloads are retained for result delivery", async () => {
+  test("emits lifecycle events for created, updated, and removed sessions", async () => {
+    let now = 1_000;
+    const store = new DaemonSessionStore({ idFactory: () => "s1", now: () => now });
+    const events: Array<{ type: string; sessionId: string; status: string; at: string }> = [];
+    store.onMutation((event) => {
+      events.push({
+        type: event.type,
+        sessionId: event.session.id,
+        status: event.session.status,
+        at: event.at,
+      });
+    });
+
+    store.create({
+      mode: "plan",
+      url: "http://localhost:1234/s/s1",
+      project: "repo",
+      label: "plan-repo",
+    });
+    now = 2_000;
+    store.complete("s1", { approved: true });
+    now = 3_000;
+    await store.delete("s1");
+
+    expect(events).toEqual([
+      {
+        type: "session-created",
+        sessionId: "s1",
+        status: "active",
+        at: "1970-01-01T00:00:01.000Z",
+      },
+      {
+        type: "session-updated",
+        sessionId: "s1",
+        status: "completed",
+        at: "1970-01-01T00:00:02.000Z",
+      },
+      {
+        type: "session-removed",
+        sessionId: "s1",
+        status: "completed",
+        at: "1970-01-01T00:00:03.000Z",
+      },
+    ]);
+  });
+
+  test("waiters resolve when a session completes and routing payloads are released", async () => {
     let now = 1_000;
     const store = new DaemonSessionStore({ idFactory: () => "s1", now: () => now });
     let disposed = false;
@@ -58,12 +104,12 @@ describe("DaemonSessionStore", () => {
     expect(store.activeCount()).toBe(0);
     expect(store.list()).toEqual([]);
     expect(disposed).toBe(true);
-    expect(store.get("s1")?.htmlContent).toBe("<html></html>");
-    expect(store.get("s1")?.handleRequest).toBeDefined();
+    expect(store.get("s1")?.htmlContent).toBeUndefined();
+    expect(store.get("s1")?.handleRequest).toBeUndefined();
     expect(store.get("s1")?.dispose).toBeUndefined();
   });
 
-  test("failed sessions dispose resources while retaining result delivery payloads", async () => {
+  test("failed sessions dispose resources and release routing payloads", async () => {
     const store = new DaemonSessionStore({ idFactory: () => "s1", now: () => 1_000 });
     let disposed = false;
     store.create({
@@ -82,8 +128,8 @@ describe("DaemonSessionStore", () => {
     expect(result.status).toBe("failed");
     expect(result.error).toBe("Boom.");
     expect(disposed).toBe(true);
-    expect(store.get("s1")?.htmlContent).toBe("<html></html>");
-    expect(store.get("s1")?.handleRequest).toBeDefined();
+    expect(store.get("s1")?.htmlContent).toBeUndefined();
+    expect(store.get("s1")?.handleRequest).toBeUndefined();
   });
 
   test("waiters resolve when a session is cancelled", async () => {

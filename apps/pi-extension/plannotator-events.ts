@@ -68,12 +68,19 @@ export interface PlannotatorPlanReviewStartResult {
 }
 
 export interface PlannotatorReviewResultEvent {
+	status?: "completed";
 	reviewId: string;
 	approved: boolean;
 	feedback?: string;
 	savedPath?: string;
 	agentSwitch?: string;
 	permissionMode?: string;
+}
+
+export interface PlannotatorReviewErrorEvent {
+	status: "error";
+	reviewId: string;
+	error: string;
 }
 
 export interface PlannotatorReviewStatusPayload {
@@ -255,10 +262,16 @@ export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
 						pi.events.emit(PLANNOTATOR_REVIEW_RESULT_CHANNEL, reviewResult);
 					});
 					void session.waitForDecision().catch((err) => {
+						const errorResult = {
+							status: "error",
+							reviewId: session.reviewId,
+							error: getStartupErrorMessage(err),
+						} satisfies PlannotatorReviewErrorEvent;
 						setStoredReviewStatus(session.reviewId, {
 							status: "error",
-							error: getStartupErrorMessage(err),
+							error: errorResult.error,
 						});
+						pi.events.emit(PLANNOTATOR_REVIEW_RESULT_CHANNEL, errorResult);
 					});
 					request.respond({
 						status: "handled",

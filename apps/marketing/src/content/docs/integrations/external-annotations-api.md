@@ -14,11 +14,11 @@ External programs (linters, AI tools, security scanners, custom scripts) can pus
 External tool (eslint, AI agent, etc.)
         ↓ POST /api/external-annotations
 Local Plannotator server (in-memory store)
-        ↓ SSE broadcast
+        ↓ daemon WebSocket broadcast
 Browser UI - annotation appears in real-time
 ```
 
-Annotations are stored in an in-memory store on the local Plannotator server. Connected browsers receive updates instantly via Server-Sent Events. If SSE isn't available (e.g., proxy environments), the client automatically falls back to polling. Annotations persist for the session lifetime.
+Annotations are stored in an in-memory store on the local Plannotator server. Connected browsers receive updates instantly through the daemon WebSocket hub, while the HTTP snapshot endpoint remains available for reconnect/resync. Annotations persist for the session lifetime.
 
 When the user submits feedback (approve, deny, or send), external annotations are included in the exported feedback alongside user-created ones.
 
@@ -60,8 +60,8 @@ The `source` field identifies the tool and appears as a badge in the UI. The ser
 
 | Method | Endpoint | What it does |
 |--------|----------|--------------|
-| GET | `/api/external-annotations/stream` | SSE stream (real-time updates) |
-| GET | `/api/external-annotations` | JSON snapshot (polling fallback, `?since=N` for version gating) |
+| WS | `/daemon/ws` | Real-time updates for subscribed session scopes |
+| GET | `/api/external-annotations` | JSON snapshot (`?since=N` for version gating) |
 | POST | `/api/external-annotations` | Add one or many annotations |
 | PATCH | `/api/external-annotations?id=` | Update an annotation's fields |
 | DELETE | `/api/external-annotations?id=` | Remove by id, `?source=` by tool, or clear all |

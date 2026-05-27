@@ -50,7 +50,8 @@ import { resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-
 import { createEditorAnnotationHandler } from "./editor-annotations";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { isWSL } from "./browser";
-import type { SessionRequestHandler } from "./session-handler";
+import { createDecisionCycle, resolveAndCycle } from "./session-handler";
+import type { SessionEventBridge, SessionRequestHandler } from "./session-handler";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -87,6 +88,8 @@ export interface ServerOptions {
   mode?: "archive";
   /** Custom plan save path — used by archive mode to find saved plans */
   customPlanPath?: string | null;
+  /** Optional daemon event bridge for live session-scoped events. */
+  sessionEvents?: SessionEventBridge;
 }
 
 export interface ServerResult {
@@ -116,6 +119,9 @@ export interface PlannotatorSession {
   waitForDecision: ServerResult["waitForDecision"];
   waitForDone?: () => Promise<void>;
   dispose: () => void;
+  slug?: string;
+  updateContent?: (newPlan: string) => void;
+  getSnapshot?: () => unknown;
 }
 
 // --- Server Implementation ---
@@ -135,7 +141,8 @@ const RETRY_DELAY_MS = 500;
 export async function createPlannotatorSession(
   options: ServerOptions
 ): Promise<PlannotatorSession> {
-  const { cwd = process.cwd(), plan, origin, htmlContent, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, mode, customPlanPath } = options;
+  const { cwd = process.cwd(), plan: initialPlan, origin, htmlContent, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, mode, customPlanPath } = options;
+  let plan = initialPlan;
   const resolvePlanStoragePath = (customPath?: string | null): string | undefined => {
     if (!customPath?.trim()) return undefined;
     return resolveUserPath(customPath, cwd);
@@ -164,9 +171,14 @@ export async function createPlannotatorSession(
   }
 
   // --- Plan review mode setup (skip in archive mode) ---
-  const draftKey = mode !== "archive" ? contentHash(plan) : "";
+  let draftKey = mode !== "archive" ? contentHash(plan) : "";
   const editorAnnotations = mode !== "archive" ? createEditorAnnotationHandler() : null;
-  const externalAnnotations = mode !== "archive" ? createExternalAnnotationHandler("plan") : null;
+  const externalAnnotations = mode !== "archive" ? createExternalAnnotationHandler("plan", {
+    publishEvent: (event) => options.sessionEvents?.publishEvent("external-annotations", event),
+    registerSnapshotProvider: (provider) =>
+      options.sessionEvents?.registerSnapshotProvider("external-annotations", provider),
+  }) : null;
+  if (mode !== "archive") options.sessionEvents?.registerSnapshotProvider("session-revision", () => ({ plan, previousPlan, versionInfo }));
   const slug = mode !== "archive" ? generateSlug(plan) : "";
 
   // Lazy cache for in-session archive browsing (plan review sidebar tab)
@@ -179,20 +191,15 @@ export async function createPlannotatorSession(
   let previousPlan: string | null = null;
   let versionInfo = { version: 0, totalVersions: 0, project: "" };
 
-  let resolveDecision: (result: {
+  type DecisionResult = {
     approved: boolean;
     feedback?: string;
     savedPath?: string;
     agentSwitch?: string;
     permissionMode?: string;
-  }) => void;
-  let decisionPromise: Promise<{
-    approved: boolean;
-    feedback?: string;
-    savedPath?: string;
-    agentSwitch?: string;
-    permissionMode?: string;
-  }>;
+  };
+  const decisionCycle = createDecisionCycle<DecisionResult>();
+  let lastDecision: 'approved' | 'denied' | null = null;
 
   if (mode !== "archive") {
     repoInfo = await getRepoInfo(cwd);
@@ -209,12 +216,8 @@ export async function createPlannotatorSession(
       project,
     };
 
-    decisionPromise = new Promise((resolve) => {
-      resolveDecision = resolve;
-    });
   } else {
-    // Never-resolving promise — archive mode uses waitForDone instead
-    decisionPromise = new Promise(() => {});
+    // Archive mode: decision cycle exists but is never resolved (uses waitForDone instead)
   }
 
   const handleRequest: SessionRequestHandler = async (req, url, context) => {
@@ -287,7 +290,7 @@ export async function createPlannotatorSession(
                 serverConfig: getServerConfig(gitUser),
               });
             }
-            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, projectRoot: cwd, isWSL: wslFlag, serverConfig: getServerConfig(gitUser) });
+            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, projectRoot: cwd, isWSL: wslFlag, serverConfig: getServerConfig(gitUser), lastDecision });
           }
 
           // API: Serve a linked markdown document
@@ -409,7 +412,7 @@ export async function createPlannotatorSession(
           const editorResponse = await editorAnnotations?.handle(req, url);
           if (editorResponse) return editorResponse;
 
-          // API: External annotations (SSE-based, for any external tool)
+          // API: External annotations (HTTP mutations + daemon WebSocket events)
           const externalResponse = await externalAnnotations?.handle(req, url, {
             disableIdleTimeout: () => context?.disableIdleTimeout?.(),
           });
@@ -535,7 +538,8 @@ export async function createPlannotatorSession(
 
             // Use permission mode from client request if provided, otherwise fall back to hook input
             const effectivePermissionMode = requestedPermissionMode || permissionMode;
-            resolveDecision({ approved: true, feedback, savedPath, agentSwitch, permissionMode: effectivePermissionMode });
+            lastDecision = 'approved';
+            resolveAndCycle(decisionCycle, { approved: true, feedback, savedPath, agentSwitch, permissionMode: effectivePermissionMode }, origin);
             return Response.json({ ok: true, savedPath });
           }
 
@@ -572,8 +576,9 @@ export async function createPlannotatorSession(
             }
 
             deleteDraft(draftKey);
-            resolveDecision({ approved: false, feedback, savedPath });
-            return Response.json({ ok: true, savedPath });
+            lastDecision = 'denied';
+            const resubmit = resolveAndCycle(decisionCycle, { approved: false, feedback, savedPath }, origin);
+            return Response.json({ ok: true, savedPath, ...resubmit });
           }
 
           // Favicon
@@ -585,14 +590,37 @@ export async function createPlannotatorSession(
           });
   };
 
+  function handleUpdateContent(newPlan: string) {
+    plan = newPlan;
+    lastDecision = null;
+    const historyResult = saveToHistory(project, slug, newPlan);
+    currentPlanPath = historyResult.path;
+    previousPlan = historyResult.version > 1
+      ? getPlanVersion(project, slug, historyResult.version - 1)
+      : null;
+    versionInfo = {
+      version: historyResult.version,
+      totalVersions: getVersionCount(project, slug),
+      project,
+    };
+    externalAnnotations?.clearAll();
+    editorAnnotations?.clearAll();
+    deleteDraft(draftKey);
+    draftKey = contentHash(newPlan);
+    options.sessionEvents?.publishEvent("session-revision", { plan: newPlan, previousPlan, versionInfo });
+  }
+
   return {
     htmlContent,
     handleRequest,
-    waitForDecision: () => decisionPromise,
+    waitForDecision: () => decisionCycle.promise(),
     ...(donePromise && { waitForDone: () => donePromise }),
     dispose: () => {
       externalAnnotations?.dispose();
     },
+    slug: mode !== "archive" ? slug : undefined,
+    getSnapshot: mode !== "archive" ? () => ({ plan, origin }) : undefined,
+    updateContent: mode !== "archive" ? handleUpdateContent : undefined,
   };
 }
 

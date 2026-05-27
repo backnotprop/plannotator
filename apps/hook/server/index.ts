@@ -52,15 +52,6 @@
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
  */
 
-import {
-  handleServerReady,
-} from "@plannotator/server";
-import {
-  handleReviewServerReady,
-} from "@plannotator/server/review";
-import {
-  handleAnnotateServerReady,
-} from "@plannotator/server/annotate";
 import { loadConfig, resolveUseJina } from "@plannotator/shared/config";
 import { parseReviewArgs } from "@plannotator/shared/review-args";
 import {
@@ -81,6 +72,7 @@ import { cleanupDaemonState, discoverDaemon, waitForDaemonShutdown } from "@plan
 import { startDaemonRuntime } from "@plannotator/server/daemon/runtime";
 import { createDaemonSessionFactory } from "@plannotator/server/daemon/session-factory";
 import { getDaemonStartCommand } from "@plannotator/server/daemon/start-command";
+import { createDaemonBrowserAuthUrl } from "@plannotator/server/daemon/state";
 import { formatRemoteShareNotice } from "@plannotator/server/share-url";
 import { hostnameOrFallback } from "@plannotator/shared/project";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
@@ -123,6 +115,7 @@ import path from "path";
 
 let planHtmlContentPromise: Promise<string> | undefined;
 let reviewHtmlContentPromise: Promise<string> | undefined;
+let daemonShellHtmlContentPromise: Promise<string> | undefined;
 let htmlAssetsPromise: Promise<typeof import("./html-assets")> | undefined;
 
 function getHtmlAssets() {
@@ -140,11 +133,16 @@ function getReviewHtmlContent(): Promise<string> {
   return reviewHtmlContentPromise;
 }
 
+function getDaemonShellHtmlContent(): Promise<string> {
+  daemonShellHtmlContentPromise ??= import("./daemon-shell-html").then((mod) => mod.loadDaemonShellHtml());
+  return daemonShellHtmlContentPromise;
+}
+
 async function loadGoalSetupBundle(stage: GoalSetupStage, bundlePath: string) {
   const raw =
     bundlePath === "-"
       ? await Bun.stdin.text()
-      : await Bun.file(path.resolve(bundlePath)).text();
+      : await Bun.file(path.resolve(getInvocationCwd(), bundlePath)).text();
   return normalizeGoalSetupBundle(JSON.parse(raw), stage);
 }
 
@@ -286,7 +284,11 @@ async function runDaemonCommand(): Promise<void> {
       console.log(JSON.stringify({ ok: false, code: daemon.code, message: daemon.message }));
       process.exit(1);
     }
-    console.log(JSON.stringify({ ok: true, status: daemon.status }));
+    console.log(JSON.stringify({
+      ok: true,
+      status: daemon.status,
+      browserUrl: createDaemonBrowserAuthUrl(daemon.state),
+    }));
     process.exit(0);
   }
 
@@ -320,7 +322,12 @@ async function runDaemonCommand(): Promise<void> {
   if (command === "start") {
     const existing = await discoverDaemon();
     if (existing.ok) {
-      console.log(JSON.stringify({ ok: true, alreadyRunning: true, status: existing.status }));
+      console.log(JSON.stringify({
+        ok: true,
+        alreadyRunning: true,
+        status: existing.status,
+        browserUrl: createDaemonBrowserAuthUrl(existing.state),
+      }));
       process.exit(0);
     }
     if (existing.state && (existing.code === "incompatible" || existing.code === "unhealthy")) {
@@ -331,27 +338,59 @@ async function runDaemonCommand(): Promise<void> {
     }
 
     if (!foreground) {
+      const startLogPath = path.join(tmpdir(), `plannotator-daemon-start-${process.pid}-${Date.now()}.log`);
       const child = Bun.spawn(getDaemonStartCommand(process.argv, process.execPath, launcherCwd), {
         cwd: getInvocationCwd(),
         stdin: "ignore",
         stdout: "ignore",
-        stderr: "ignore",
+        stderr: Bun.file(startLogPath),
+        detached: true,
       });
       child.unref();
+      let startExit: { exitCode?: number; error?: unknown } | undefined;
+      void child.exited
+        .then((exitCode) => {
+          startExit = { exitCode };
+        })
+        .catch((error) => {
+          startExit = { error };
+        });
 
       for (let attempt = 0; attempt < 30; attempt++) {
         await Bun.sleep(100);
         const daemon = await discoverDaemon();
         if (daemon.ok) {
-          console.log(JSON.stringify({ ok: true, started: true, status: daemon.status }));
+          try { rmSync(startLogPath, { force: true }); } catch {}
+          console.log(JSON.stringify({
+            ok: true,
+            started: true,
+            status: daemon.status,
+            browserUrl: createDaemonBrowserAuthUrl(daemon.state),
+          }));
           process.exit(0);
+        }
+        if (startExit) {
+          const log = await readDaemonStartLog(startLogPath);
+          const detail = startExit.error instanceof Error
+            ? startExit.error.message
+            : `exited with code ${startExit.exitCode ?? "unknown"}`;
+          console.log(JSON.stringify({
+            ok: false,
+            code: "daemon-start-failed",
+            message: `Plannotator daemon start ${detail}.${log ? `\n${log}` : ""}`,
+          }));
+          process.exit(1);
         }
       }
 
+      if (!startExit) {
+        await stopDaemonStartChild(child);
+      }
+      const log = await readDaemonStartLog(startLogPath);
       console.log(JSON.stringify({
         ok: false,
         code: "daemon-start-failed",
-        message: "Timed out waiting for the Plannotator daemon to start.",
+        message: `Timed out waiting for the Plannotator daemon to start.${log ? `\n${log}` : ""}`,
       }));
       process.exit(1);
     }
@@ -359,6 +398,7 @@ async function runDaemonCommand(): Promise<void> {
     let runtime: Awaited<ReturnType<typeof startDaemonRuntime>>;
     try {
       runtime = await startDaemonRuntime({
+        shellHtmlContent: await getDaemonShellHtmlContent(),
         createSession: createDaemonSessionFactory({
           planHtmlContent: await getPlanHtmlContent(),
           reviewHtmlContent: await getReviewHtmlContent(),
@@ -371,15 +411,17 @@ async function runDaemonCommand(): Promise<void> {
         },
       });
     } catch (err) {
-      console.log(JSON.stringify({
+      const payload = {
         ok: false,
         code: "daemon-start-failed",
         message: err instanceof Error ? err.message : "Failed to start Plannotator daemon.",
-      }));
+      };
+      console.error(JSON.stringify(payload));
+      console.log(JSON.stringify(payload));
       process.exit(1);
     }
 
-    console.log(JSON.stringify({ ok: true, started: true, status: {
+    console.log(JSON.stringify({ ok: true, started: true, browserUrl: createDaemonBrowserAuthUrl(runtime.state), status: {
       pid: runtime.state.pid,
       endpoint: {
         hostname: runtime.state.hostname,
@@ -580,8 +622,12 @@ async function ensureDaemonClient(options: { pluginError?: boolean } = {}) {
   fail("daemon-start-failed", "Timed out waiting for the Plannotator daemon to start.");
 }
 
-function registerDaemonSessionInterruptCleanup(cancelSession: () => Promise<void>): () => void {
+function registerDaemonSessionInterruptCleanup(
+  cancelSession: () => Promise<void>,
+  options: { cancelOnSigterm?: boolean } = {},
+): () => void {
   let cancelling = false;
+  const cancelOnSigterm = options.cancelOnSigterm ?? true;
   const handleSignal = (exitCode: number) => {
     if (cancelling) return;
     cancelling = true;
@@ -590,24 +636,11 @@ function registerDaemonSessionInterruptCleanup(cancelSession: () => Promise<void
   const onSigint = () => handleSignal(130);
   const onSigterm = () => handleSignal(143);
   process.once("SIGINT", onSigint);
-  process.once("SIGTERM", onSigterm);
+  if (cancelOnSigterm) process.once("SIGTERM", onSigterm);
   return () => {
     process.off("SIGINT", onSigint);
-    process.off("SIGTERM", onSigterm);
+    if (cancelOnSigterm) process.off("SIGTERM", onSigterm);
   };
-}
-
-async function withProcessCwd<T>(cwd: string | undefined, fn: () => Promise<T>): Promise<T> {
-  if (!cwd) return fn();
-  const original = process.cwd();
-  const target = path.resolve(cwd);
-  if (target === original) return fn();
-  process.chdir(target);
-  try {
-    return await fn();
-  } finally {
-    process.chdir(original);
-  }
 }
 
 async function runDaemonSessionRequest(request: PluginRequest, options: { pluginError?: boolean } = {}): Promise<{
@@ -631,14 +664,15 @@ async function runDaemonSessionRequest(request: PluginRequest, options: { plugin
       fail(created.error.code, created.error.message);
     }
     createdSessionId = created.session.id;
-    unregisterInterruptCleanup = registerDaemonSessionInterruptCleanup(cancelCreatedSession);
+    unregisterInterruptCleanup = registerDaemonSessionInterruptCleanup(cancelCreatedSession, {
+      cancelOnSigterm: !options.pluginError,
+    });
 
     const sessionUrl = new URL(created.session.url);
-    const sessionPort = Number(sessionUrl.port);
     const session: PluginSessionInfo = {
       mode: created.session.mode,
       url: created.session.url,
-      port: sessionPort,
+      port: Number(sessionUrl.port),
       isRemote: daemon.state.isRemote,
     };
     if (created.session.remoteShare) {
@@ -650,22 +684,12 @@ async function runDaemonSessionRequest(request: PluginRequest, options: { plugin
       emitPluginSessionReady(session);
     }
 
-    await withProcessCwd(request.cwd, async () => {
-      if (request.action === "review") {
-        await handleReviewServerReady(created.session.url, daemon.state.isRemote, sessionPort);
-      } else if (request.action === "annotate" || request.action === "annotate-last") {
-        await handleAnnotateServerReady(created.session.url, daemon.state.isRemote, sessionPort);
-      } else {
-        await handleServerReady(created.session.url, daemon.state.isRemote, sessionPort);
-      }
-    });
-
     const completed = await daemon.waitForResult<PluginActionResult>(created.session.id);
     if (completed.ok !== true) {
       await cancelCreatedSession();
       fail(completed.error.code, completed.error.message);
     }
-    if (completed.session.status !== "completed") {
+    if (completed.session.status !== "completed" && completed.session.status !== "awaiting-resubmission" && completed.session.status !== "idle") {
       fail(
         completed.session.status,
         completed.session.error ?? `Plannotator session ${completed.session.id} ended with status ${completed.session.status}.`,
@@ -817,7 +841,7 @@ if (args[0] === "sessions") {
       console.error(`Session #${n} not found. ${sessions.length} active session(s).`);
       process.exit(1);
     }
-    await openBrowser(session.url, { isRemote: daemon.status.endpoint.isRemote });
+    await openBrowser(createDaemonBrowserAuthUrl(daemon.state, new URL(session.url).pathname), { isRemote: daemon.status.endpoint.isRemote });
     console.error(`Opened ${session.mode} session in browser: ${session.url}`);
     process.exit(0);
   }
@@ -1040,7 +1064,7 @@ if (args[0] === "sessions") {
   });
 
   if (outcome?.result) {
-    const result = outcome.result as { result?: unknown; exit?: boolean };
+    const result = outcome.result as import("@plannotator/shared/plugin-protocol").PluginGoalSetupResult;
     if (result.exit) {
       console.log(JSON.stringify({ decision: "dismissed", stage }));
     } else if (result.result) {

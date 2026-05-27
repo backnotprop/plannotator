@@ -255,7 +255,18 @@ export const SETTINGS = {
       }
     },
   },
-} satisfies Record<string, SettingDef<unknown>>;
+  taterMode: {
+    defaultValue: false as boolean,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-tater-mode');
+      return v === 'true' ? true : v === 'false' ? false : undefined;
+    },
+    toCookie: (v: boolean) => storage.setItem('plannotator-tater-mode', String(v)),
+    serverKey: undefined,
+    fromServer: undefined,
+    toServer: undefined,
+  },
+} satisfies Record<string, SettingDef<any>>;
 
 export type SettingsMap = typeof SETTINGS;
 export type SettingName = keyof SettingsMap;

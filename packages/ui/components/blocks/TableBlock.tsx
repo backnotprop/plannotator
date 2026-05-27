@@ -77,7 +77,7 @@ export const buildCsv = (markdown: string): string => {
   return buildCsvFromRows(headers, rows);
 };
 
-export const TableBlock: React.FC<TableBlockProps> = ({
+export const TableBlock: React.FC<TableBlockProps> = React.memo(({
   block,
   onHover,
   onLeave,
@@ -143,4 +143,4 @@ export const TableBlock: React.FC<TableBlockProps> = ({
       </table>
     </div>
   );
-};
+});
