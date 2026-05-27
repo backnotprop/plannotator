@@ -127,7 +127,6 @@ describe('shortcuts', () => {
 
     const handled = dispatchShortcutEvent(planReviewSettingsShortcutRegistry[0], {
       submitPlan: () => calls.push('submitPlan'),
-      quickSave: () => calls.push('quickSave'),
     }, event);
 
     expect(handled).toBe(true);

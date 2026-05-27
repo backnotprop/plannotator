@@ -20,7 +20,7 @@ export type AgentJobStatus = "starting" | "running" | "done" | "failed" | "kille
  * the same `**Diff:** ...` header the job was actually run against — if the
  * reviewer switches the UI to a different diff afterwards, the job's snapshot
  * still reflects truth. Structurally compatible with the UI-side
- * `FeedbackDiffContext` in `packages/review-editor/utils/exportFeedback.ts`.
+ * `FeedbackDiffContext` in `packages/plannotator-code-review/utils/exportFeedback.ts`.
  */
 export interface AgentJobDiffContext {
   mode: string;

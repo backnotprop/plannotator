@@ -304,8 +304,8 @@ const ReviewApp: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; 
 
   // External annotations (HTTP mutations + daemon WebSocket events)
   // TODO: Replace !!origin with a dedicated isApiMode boolean (set on /api/diff success/failure).
-  // origin is an identity field, not a connectivity signal — the standalone dev server
-  // (apps/review/) doesn't set it, so external annotations are silently disabled there.
+  // origin is an identity field, not a connectivity signal — the demo/standalone path
+  // doesn't set it, so external annotations are silently disabled there.
   // The same !!origin proxy is used elsewhere in this file (draft hook, feedback guard, conditional UI)
   // so this should be addressed as a broader refactor.
   const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<CodeAnnotation>({ enabled: !!origin });

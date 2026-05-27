@@ -1,12 +1,7 @@
 /**
  * DIFF DEMO PLAN — V3 (diff-engine stress test)
  *
- * Opt-in dev fixture. NOT the default demo — this content is only served
- * when the dev server is launched with `VITE_DIFF_DEMO=1 bun run dev:hook`.
- * Without the flag, the editor renders packages/editor/demoPlan.ts (the
- * project's original Real-time Collaboration plan). The toggle lives in
- * packages/editor/App.tsx and the symmetric V2 toggle lives in
- * apps/hook/dev-mock-api.ts (same env var, same code path).
+ * Opt-in dev fixture for plan diff testing.
  *
  * Purpose: 20 numbered cases covering every code path in the word-level
  * inline diff engine. Full paragraphs, complete code blocks, real lists,

@@ -1343,7 +1343,6 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
   const handleCallbackApprove = React.useCallback(() => callCallback(CallbackAction.Approve), [callCallback]);
   const handleCallbackFeedback = React.useCallback(() => callCallback(CallbackAction.Feedback), [callCallback]);
 
-  // Quick-save handlers for export dropdown and keyboard shortcut
   const handleDownloadAnnotations = () => {
     const blob = new Blob([annotationsOutput], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);

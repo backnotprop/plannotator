@@ -29,13 +29,6 @@ export const planEditorShortcuts = defineShortcutScope({
       section: 'Actions',
       displayOrder: 10,
     },
-    quickSave: {
-      description: 'Save to notes app',
-      bindings: ['Mod+S'],
-      section: 'Actions',
-      hint: 'Opens Export if no default notes app is configured.',
-      displayOrder: 20,
-    },
     exitPlanDiff: {
       description: 'Close diff view',
       bindings: ['Escape'],
@@ -60,7 +53,6 @@ const planReviewEditorSettingsShortcuts = defineShortcutScope({
   title: 'Plan Editor',
   shortcuts: {
     submitPlan: planEditorShortcuts.shortcuts.submitPlan,
-    quickSave: planEditorShortcuts.shortcuts.quickSave,
     exitPlanDiff: planEditorShortcuts.shortcuts.exitPlanDiff,
     printPlan: planEditorShortcuts.shortcuts.printPlan,
   },
@@ -71,7 +63,6 @@ const annotateEditorSettingsShortcuts = defineShortcutScope({
   title: 'Annotate Editor',
   shortcuts: {
     submitAnnotations: planEditorShortcuts.shortcuts.submitAnnotations,
-    quickSave: planEditorShortcuts.shortcuts.quickSave,
     printPlan: planEditorShortcuts.shortcuts.printPlan,
   },
 });
