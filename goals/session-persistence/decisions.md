@@ -41,7 +41,8 @@ Tracking decisions made during PR #770 review and triage (2026-05-23).
 - The binary either starts a daemon or connects to one already running. The daemon serves the frontend. That's it.
 - Claude Code calls the binary directly via hooks. OpenCode, Pi, Codex, Copilot, and Gemini CLI call it via thin extension/plugin wrappers that spawn the binary as a subprocess.
 - Extensions and plugins have no server logic of their own. They translate "my host app wants to review a plan" into "shell out to the `plannotator` binary."
-- The new frontend (`apps/frontend/`) is the only UI going forward. The old standalone HTML packages (`packages/editor/`, `packages/review-editor/`, `apps/review/`) are legacy and will be removed.
+- The daemon server is the single source of truth for feedback prompt generation. When a user submits feedback (annotate, review), the server composes the final agent-ready prompt and returns it as `result.prompt`. Extensions and the CLI pipe it through — they do not rebuild or reformat the prompt. The only exception is plan mode prompts, which are host-specific (each extension has its own planning workflow).
+- The new frontend (`apps/frontend/`) is the only UI going forward.
 
 ### Cross-Cutting
 
