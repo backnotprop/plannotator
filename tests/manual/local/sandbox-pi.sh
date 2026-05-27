@@ -9,7 +9,7 @@
 #   --no-git  Don't initialize git repo
 #
 # What it does:
-#   1. Builds the Pi extension (copies HTML from hook/review)
+#   1. Builds the frontend and Pi extension
 #   2. Creates a temp directory with sample files
 #   3. Installs the local extension via `pi install`
 #   4. Launches Pi in the sandbox
@@ -49,7 +49,7 @@ echo ""
 echo "Building Pi extension..."
 cd "$PROJECT_ROOT"
 bun run build:hook > /dev/null 2>&1
-bun run build:review > /dev/null 2>&1
+bun run build:hook > /dev/null 2>&1
 
 cd "$PI_EXT_DIR"
 bun run build

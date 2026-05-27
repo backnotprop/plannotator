@@ -9,7 +9,7 @@
 #   2. Opens browser for you to review
 #   3. After approve/deny, moves to next plan
 #
-# Great for bulk-testing Obsidian integration.
+# Great for bulk-testing plan review with real plans.
 
 set -e
 

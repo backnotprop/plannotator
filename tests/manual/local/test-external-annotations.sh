@@ -28,7 +28,7 @@ echo ""
 # Build first to ensure latest code
 echo "Building review app..."
 cd "$PROJECT_ROOT"
-bun run --cwd apps/review build 2>&1 | tail -3
+bun run build:hook 2>&1 | tail -3
 
 echo ""
 echo "Building hook (copies review HTML)..."

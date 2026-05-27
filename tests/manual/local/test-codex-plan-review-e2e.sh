@@ -288,7 +288,7 @@ if [[ "$SKIP_BUILD" != "true" ]]; then
   echo "Building hook + review apps..."
   (
     cd "$PROJECT_ROOT"
-    "$BUN_BIN" run build:review >/dev/null
+    "$BUN_BIN" run build:hook >/dev/null
     "$BUN_BIN" run build:hook >/dev/null
   )
 fi

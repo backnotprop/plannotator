@@ -21,7 +21,7 @@ echo ""
 # Build first to ensure latest code
 echo "Building review + hook..."
 cd "$PROJECT_ROOT"
-bun run build:review
+bun run build:hook
 bun run build:hook
 
 echo ""

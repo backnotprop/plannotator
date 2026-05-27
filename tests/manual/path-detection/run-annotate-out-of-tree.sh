@@ -30,7 +30,7 @@ echo ""
 # Build
 echo "Building review + hook..."
 cd "$PROJECT_ROOT"
-bun run build:review > /dev/null 2>&1
+bun run build:hook > /dev/null 2>&1
 bun run build:hook > /dev/null 2>&1
 echo "Build complete."
 echo ""

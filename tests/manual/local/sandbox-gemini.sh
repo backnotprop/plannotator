@@ -25,7 +25,7 @@ echo ""
 # --- Build ---
 echo "Building review + hook..."
 cd "$PROJECT_ROOT"
-bun run build:review 2>&1 | tail -1
+bun run build:hook 2>&1 | tail -1
 bun run build:hook 2>&1 | tail -1
 echo ""
 
