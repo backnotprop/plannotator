@@ -1127,11 +1127,13 @@ if (args[0] === "sessions") {
 
   let context: string | null = null;
   try {
-    const client = await ensureDaemonClient({ pluginError: false });
-    const data = await client.getJson("/daemon/improve-context") as { ok: boolean; context: string | null };
-    context = data.context;
+    const daemon = await discoverDaemon({ validateEnvironment: false });
+    if (daemon.ok) {
+      const data = await daemon.client.getJson("/daemon/improve-context") as { ok: boolean; context: string | null };
+      context = data.context;
+    }
   } catch {
-    // Daemon unavailable — silently pass through
+    // Daemon unavailable or endpoint missing — silently pass through
   }
 
   if (!context) process.exit(0);
