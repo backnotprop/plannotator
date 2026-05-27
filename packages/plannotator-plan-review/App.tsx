@@ -1380,32 +1380,6 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
     }
   };
 
-  // Cmd/Ctrl+S keyboard shortcut — save to default notes app
-  useEffect(() => {
-    const handleSaveShortcut = (e: KeyboardEvent) => {
-      if (!isVisible()) return;
-      if (e.key !== 's' || !(e.metaKey || e.ctrlKey)) return;
-
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-
-      if (showExport || showFeedbackPrompt || showClaudeCodeWarning ||
-          showExitWarning || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
-
-      if (submitted || !isApiMode) return;
-
-      e.preventDefault();
-      handleDownloadAnnotations();
-    };
-
-    window.addEventListener('keydown', handleSaveShortcut);
-    return () => window.removeEventListener('keydown', handleSaveShortcut);
-  }, [
-    showExport, showFeedbackPrompt, showClaudeCodeWarning, showExitWarning, showAgentWarning,
-    showPermissionModeSetup, pendingPasteImage,
-    submitted, isApiMode, markdown, annotationsOutput,
-  ]);
-
   // Cmd/Ctrl+P keyboard shortcut — print plan
   useEffect(() => {
     const handlePrintShortcut = (e: KeyboardEvent) => {
