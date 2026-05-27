@@ -5,6 +5,8 @@ import { join } from "path";
 import { readDaemonState } from "./state";
 import { startDaemonRuntime, type DaemonRuntime } from "./runtime";
 
+process.env.PLANNOTATOR_BROWSER = "/usr/bin/true";
+
 let dirs: string[] = [];
 let runtimes: DaemonRuntime[] = [];
 const shellHtml = "<html><head></head><body>Shell</body></html>";
