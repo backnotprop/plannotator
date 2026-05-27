@@ -23,7 +23,7 @@ import { generateSlug, saveToHistory, getPlanVersion, getVersionCount, listVersi
 import { detectProjectName } from "./project";
 import { dirname, resolve as resolvePath } from "path";
 import { isWSL } from "./browser";
-import { getAnnotateFileFeedbackPrompt, getAnnotateMessageFeedbackPrompt } from "@plannotator/shared/prompts";
+import { getAnnotateFileFeedbackPrompt, getAnnotateMessageFeedbackPrompt, excerptAndBlockquote } from "@plannotator/shared/prompts";
 import { createDecisionCycle, resolveAndCycle } from "./session-handler";
 import type { SessionEventBridge, SessionRequestHandler } from "./session-handler";
 
@@ -285,7 +285,7 @@ export async function createAnnotateSession(
               lastDecision = 'feedback';
               const feedbackText = body.feedback || "";
               const prompt = mode === "annotate-last"
-                ? getAnnotateMessageFeedbackPrompt(origin, loadConfig(), { feedback: feedbackText })
+                ? getAnnotateMessageFeedbackPrompt(origin, loadConfig(), { feedback: feedbackText, originalExcerpt: excerptAndBlockquote(markdown) })
                 : getAnnotateFileFeedbackPrompt(origin, loadConfig(), {
                     fileHeader: mode === "annotate-folder" ? "Folder" : "File",
                     filePath,

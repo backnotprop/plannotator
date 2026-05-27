@@ -12,6 +12,12 @@ export function resolveTemplate(
   });
 }
 
+export function excerptAndBlockquote(text: string, maxChars = 1000): string {
+  const trimmed = text.trim();
+  const truncated = trimmed.length <= maxChars ? trimmed : `${trimmed.slice(0, maxChars).trimEnd()}...`;
+  return truncated.split("\n").map((line) => `> ${line}`).join("\n");
+}
+
 // ─── Tool name map ───────────────────────────────────────────────────────────
 
 export const PLAN_TOOL_NAMES: Record<PromptRuntime, string> = {
@@ -54,7 +60,7 @@ export const DEFAULT_ANNOTATE_FILE_FEEDBACK_PROMPT =
   "# Markdown Annotations\n\n{{fileHeader}}: {{filePath}}\n\n{{feedback}}\n\nPlease address the annotation feedback above.";
 
 export const DEFAULT_ANNOTATE_MESSAGE_FEEDBACK_PROMPT =
-  "# Message Annotations\n\n{{feedback}}\n\nPlease address the annotation feedback above.";
+  "# Message Annotations\n\nThis feedback applies to the following assistant response:\n\n{{originalExcerpt}}\n\n{{feedback}}\n\nPlease address the annotation feedback above.";
 
 export const DEFAULT_ANNOTATE_APPROVED_PROMPT = "The user approved.";
 
