@@ -1,14 +1,13 @@
-# @plannotator/debug-frontend
+# @plannotator/frontend
 
-Debug/development harness UI for the Plannotator daemon runtime. **Not production code** — this is a
-testbed for exercising daemon sessions, verifying event streams, and testing session lifecycle actions.
+Production frontend SPA for the Plannotator daemon runtime. Serves all session types: plan review, code review, annotate, and setup-goal.
 
 ## Shape
 
 - `src/routes` is only TanStack Router wiring.
 - `src/daemon` owns the typed daemon API client and contracts.
 - `src/sessions` owns session ids, session state, the dashboard, and mode dispatch.
-- `src/plan`, `src/review`, `src/annotate`, `src/archive`, and `src/setup-goal` own product views.
+- `src/plan`, `src/review`, `src/annotate`, and `src/setup-goal` own product views.
 - `src/testing` owns contract fixtures and browser helpers.
 
 The shell talks to session APIs through `/s/:sessionId/api`, never root `/api`.
@@ -19,16 +18,16 @@ routes are deferred until the full UI migration needs code splitting or cacheabl
 ## Commands
 
 ```bash
-bun run --cwd apps/debug-frontend dev
-bun run --cwd apps/debug-frontend build
-bun run --cwd apps/debug-frontend check
-bun run --cwd apps/debug-frontend test:browser
+bun run --cwd apps/frontend dev
+bun run --cwd apps/frontend build
+bun run --cwd apps/frontend check
+bun run --cwd apps/frontend test:browser
 ```
 
 Or from the repo root:
 
 ```bash
-bun run dev:debug-frontend
-bun run build:debug-frontend
-bun run check:debug-frontend
+bun run dev:frontend
+bun run build:frontend
+bun run check:frontend
 ```

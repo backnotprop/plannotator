@@ -119,7 +119,7 @@ Five flavors, matching Primer exactly:
 > Useful information that users should know, even when skimming content. Supports **bold**, `code`, and links like [the design doc](https://plannotator.ai/docs/alerts).
 
 > [!TIP]
-> Helpful advice. Try running `bun run dev:hook` with a fixture at `tests/test-fixtures/12-gfm-and-inline-extras.md` to see this whole doc render live.
+> Helpful advice. Try running `bun run dev:frontend` with a fixture at `tests/test-fixtures/12-gfm-and-inline-extras.md` to see this whole doc render live.
 
 > [!IMPORTANT]
 > Key information readers must know. Talk to @backnotprop before cherry-picking this into a point release — there's context in #538 that's not in the PR description.

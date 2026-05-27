@@ -37,7 +37,7 @@ The Pi extension does not package browser HTML or a server implementation. It de
 
 ## Runtime Model
 
-The Pi extension is a client of the installed `plannotator` binary. Pi keeps phase state, tool gating, slash commands, current-session fallback, checklist progress, and the shared event channel. The binary owns plan review, code review, annotation, archive browser sessions, and the HTTP routes behind those UIs.
+The Pi extension is a client of the installed `plannotator` binary. Pi keeps phase state, tool gating, slash commands, current-session fallback, checklist progress, and the shared event channel. The binary owns plan review, code review, annotation sessions, and the HTTP routes behind those UIs.
 
 Binary discovery order:
 
@@ -171,7 +171,6 @@ Supported actions and payloads:
 - `code-review`: `{ cwd?, defaultBranch?, diffType? }`
 - `annotate`: `{ filePath, markdown?, mode?, folderPath? }`
 - `annotate-last`: `{ markdown? }`
-- `archive`: `{ customPlanPath? }`
 
 Plan review is asynchronous:
 
@@ -190,10 +189,6 @@ Run `/plannotator-annotate <file.md>` to open any markdown file in the annotatio
 
 Run `/plannotator-last` to annotate the agent's most recent response. The message opens in the annotation UI where you can highlight text, add comments, and send structured feedback back to the agent.
 
-### Archive browser
-
-Run `/plannotator-archive` to open the saved plan/decision browser. The same browser is available through the shared event API as `archive`.
-
 ### Progress tracking
 
 During execution, the agent marks completed steps with `[DONE:n]` markers. Progress is shown in the status line and as a checklist widget in the terminal.
@@ -207,7 +202,6 @@ During execution, the agent marks completed steps with `[DONE:n]` markers. Progr
 | `/plannotator-review` | Open code review UI for current changes |
 | `/plannotator-annotate <file>` | Open markdown file in annotation UI |
 | `/plannotator-last` | Annotate the last assistant message |
-| `/plannotator-archive` | Browse saved plan decisions |
 
 ## Flags
 
@@ -256,7 +250,7 @@ State persists across session restarts via Pi's `appendEntry` API.
 
 ## Daemon Runtime
 
-Pi continues to call the installed `plannotator` binary through the plugin command protocol. Inside the binary, plan/review/annotate/archive sessions are created through one long-running daemon. The first UI request auto-starts the daemon; compatible later requests reuse it.
+Pi continues to call the installed `plannotator` binary through the plugin command protocol. Inside the binary, plan/review/annotate sessions are created through one long-running daemon. The first UI request auto-starts the daemon; compatible later requests reuse it.
 
 ```bash
 plannotator daemon status

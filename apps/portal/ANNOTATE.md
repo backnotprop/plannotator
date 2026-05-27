@@ -24,7 +24,7 @@ This starts a local server, opens the browser, and blocks until you submit feedb
 
 ### 1. CLI reads the file
 
-The `annotate` subcommand in `apps/hook/server/index.ts` resolves the file path, reads its contents as text, and passes the markdown string to `startAnnotateServer()`.
+The `annotate` subcommand in `apps/hook/server/index.ts` resolves the file path, reads its contents as text, and passes the markdown string to `createAnnotateSession()`.
 
 ```
 plannotator annotate README.md
@@ -33,7 +33,7 @@ plannotator annotate README.md
 reads file -> markdown string
         |
         v
-startAnnotateServer({ markdown, filePath, ... })
+createAnnotateSession({ markdown, filePath, ... })
 ```
 
 ### 2. Server starts
@@ -133,7 +133,7 @@ User runs /plannotator-annotate README.md
 CLI reads README.md as text
         |
         v
-startAnnotateServer() — Bun server on random port
+createAnnotateSession() — Bun server on random port
         |
         v
 Browser opens, loads single-file HTML app

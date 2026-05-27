@@ -34,14 +34,12 @@ The project uses a monorepo structure:
 
 - **`packages/`** - Shared code
   - `ui/` - Reusable React components, hooks, utilities
-  - `server/` - Server implementation (plan/review servers)
-  - `editor/` - Plan review application logic
-  - `review-editor/` - Code review application logic
+  - `server/` - Server implementation (plan/review/annotate servers)
 
 - **`apps/`** - Deployable applications
   - `hook/` - Claude Code plugin (plan review)
+  - `frontend/` - Production frontend SPA (plan review, code review, annotate)
   - `opencode-plugin/` - OpenCode plugin
-  - `review/` - Standalone review app
   - `portal/` - Share portal (share.plannotator.ai)
   - `marketing/` - Marketing site (plannotator.ai)
 
@@ -66,15 +64,10 @@ If successful, you'll see `apps/hook/dist/index.html` created.
 - Location: `packages/ui/components/`
 - Examples: `TableOfContents.tsx`, `AnnotationToolbar.tsx`, `Viewer.tsx`
 
-**Plan editor** (plan review UI):
+**Frontend SPA** (plan review, code review, annotate):
 
-- Location: `packages/editor/App.tsx`
-- Main application logic for plan review
-
-**Code review editor** (code review UI):
-
-- Location: `packages/review-editor/App.tsx`
-- Main application logic for code review
+- Location: `apps/frontend/src/`
+- Main application for all session types
 
 **Utilities and hooks**:
 
@@ -86,13 +79,9 @@ If successful, you'll see `apps/hook/dist/index.html` created.
 For rapid iteration, use development servers with hot reload:
 
 ```bash
-# Plan review UI (most common)
-bun run dev:hook
+# Frontend SPA (plan review, code review, annotate)
+bun run dev:frontend
 # Opens http://localhost:5173
-
-# Code review UI
-bun run dev:review
-# Opens http://localhost:5174
 
 # Portal (share.plannotator.ai)
 bun run dev:portal
@@ -108,17 +97,13 @@ bun run dev:marketing
 When you're ready to test with actual plugin integration:
 
 ```bash
-# Build plan review UI
+# Build hook plugin (includes frontend HTML)
 bun run build:hook
 # Output: apps/hook/dist/index.html
 
-# Build code review UI
-bun run build:review
-# Output: apps/review/dist/index.html
-
 # Build OpenCode plugin
 bun run build:opencode
-# Copies HTML from hook/review dist folders
+# Copies HTML from hook dist folder
 
 # Build everything
 bun run build
@@ -127,7 +112,7 @@ bun run build
 
 ### Important Build Note
 
-**The OpenCode plugin copies pre-built HTML files from hook and review dist folders.**
+**The OpenCode plugin copies pre-built HTML files from the hook dist folder.**
 
 When making UI changes:
 
@@ -143,7 +128,7 @@ bun run build:hook && bun run build:opencode
 bun run build:opencode  # Uses stale HTML from previous build!
 ```
 
-Always rebuild hook/review apps BEFORE building OpenCode if you changed UI code.
+Always rebuild the hook app BEFORE building OpenCode if you changed UI code.
 
 ---
 
@@ -182,7 +167,7 @@ UI test scripts simulate plugin behavior locally:
 
 **`test-opencode-review.sh`**
 
-1. Builds review app (`bun run build:review`)
+1. Builds hook app (`bun run build:hook`)
 2. Starts review server with sample git diff
 3. Opens browser with code review UI
 4. Verifies "OpenCode" badge + "Send Feedback" button (not "Copy Feedback")
@@ -205,12 +190,12 @@ See [tests/README.md](../tests/README.md) for additional integration and utility
 
 ### Manual Testing Workflow
 
-1. **Make your changes** in `packages/ui/` or `packages/editor/`
+1. **Make your changes** in `packages/ui/` or `apps/frontend/`
 
 2. **Choose testing method:**
    - **Option A:** Dev server (fast iteration)
      ```bash
-     bun run dev:hook
+     bun run dev:frontend
      ```
    - **Option B:** Build and test with script (integration test)
      ```bash
@@ -303,7 +288,7 @@ bun install
 **Solutions:**
 
 1. Hard refresh browser: Cmd+Shift+R (Mac) or Ctrl+Shift+R (Windows/Linux)
-2. Restart dev server: Ctrl+C then `bun run dev:hook`
+2. Restart dev server: Ctrl+C then `bun run dev:frontend`
 3. Clear browser cache
 4. Check terminal for errors
 

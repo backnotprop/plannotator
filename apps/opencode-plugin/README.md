@@ -51,7 +51,7 @@ If the binary is missing or too old for the plugin protocol, the plugin runs the
 Plannotator supports four OpenCode workflows:
 
 - **`plan-agent`** (default): `submit_plan` is available to OpenCode's built-in `plan` agent plus any extra agents listed in `planningAgents`. This keeps Plannotator integrated with OpenCode plan mode without nudging `build` to call it.
-- **`manual`**: `submit_plan` is not registered. Use `/plannotator-last`, `/plannotator-annotate`, `/plannotator-review`, and `/plannotator-archive` when you want Plannotator.
+- **`manual`**: `submit_plan` is not registered. Use `/plannotator-last`, `/plannotator-annotate`, and `/plannotator-review` when you want Plannotator.
 - **`user-managed`**: `submit_plan` is registered but no prompts or agent permissions are modified. You manage which agents can call `submit_plan` via OpenCode's native agent configuration.
 - **`all-agents`**: legacy broad behavior. Primary agents can see and call `submit_plan`.
 
@@ -158,7 +158,7 @@ Register the tool but manage prompts and permissions yourself:
 
 ## Daemon Runtime
 
-OpenCode still calls the installed `plannotator` binary through the same plugin command surface, but plan/review/annotate/archive sessions are daemon-backed inside the binary. The first request auto-starts the daemon; compatible later requests reuse it.
+OpenCode still calls the installed `plannotator` binary through the same plugin command surface, but plan/review/annotate sessions are daemon-backed inside the binary. The first request auto-starts the daemon; compatible later requests reuse it.
 
 ```bash
 plannotator daemon status

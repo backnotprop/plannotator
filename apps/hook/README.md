@@ -27,7 +27,7 @@ The released binary owns Plannotator's browser server runtime for Claude Code, O
 
 ---
 
-[Plugin Installation](#plugin-installation) · [Manual Installation (Hooks)](#manual-installation-hooks) · [Obsidian Integration](#obsidian-integration)  
+[Plugin Installation](#plugin-installation) · [Manual Installation (Hooks)](#manual-installation-hooks)  
 
 ---
 
@@ -86,7 +86,7 @@ When Claude Code calls `ExitPlanMode`, this hook intercepts and:
 
 ## Daemon Runtime
 
-Plan, review, annotate, and archive sessions are created through one long-running `plannotator` daemon. Normal commands auto-start a compatible daemon when needed.
+Plan, review, and annotate sessions are created through one long-running `plannotator` daemon. Normal commands auto-start a compatible daemon when needed.
 
 ```bash
 plannotator daemon status
@@ -129,34 +129,3 @@ The plugin registers three slash commands:
 | `/plannotator-annotate <file.md>` | Annotate any markdown file |
 | `/plannotator-last` | Annotate the agent's last message |
 
-## Obsidian Integration
-
-Approved plans can be automatically saved to your Obsidian vault.
-
-**Setup:**
-1. Open Settings (gear icon) in Plannotator
-2. Enable "Obsidian Integration"
-3. Select your vault from the dropdown (auto-detected) or enter the path manually
-4. Set folder name (default: `plannotator`)
-
-**What gets saved:**
-- Plans saved with human-readable filenames: `Title - Jan 2, 2026 2-30pm.md`
-- YAML frontmatter with `created`, `source`, and `tags`
-- Tags extracted automatically from the plan title and code languages
-- Backlink to `[[Plannotator Plans]]` for graph connectivity
-
-**Example saved file:**
-```markdown
----
-created: 2026-01-02T14:30:00.000Z
-source: plannotator
-tags: [plan, authentication, typescript, sql]
----
-
-[[Plannotator Plans]]
-
-# Implementation Plan: User Authentication
-...
-```
-
-<img width="1190" height="730" alt="image" src="https://github.com/user-attachments/assets/1f0876a0-8ace-4bcf-b0d6-4bbb07613b25" />
