@@ -101,6 +101,7 @@ export interface PluginPlanResult {
   savedPath?: string;
   agentSwitch?: string;
   permissionMode?: string;
+  prompt?: string;
 }
 
 export interface PluginReviewResult {

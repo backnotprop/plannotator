@@ -47,7 +47,7 @@
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
  */
 
-import { loadConfig, resolveUseJina } from "@plannotator/shared/config";
+import { loadConfig } from "@plannotator/shared/config";
 import { parseReviewArgs } from "@plannotator/shared/review-args";
 import {
   normalizeGoalSetupBundle,
@@ -55,11 +55,7 @@ import {
 } from "@plannotator/shared/goal-setup";
 import { statSync, existsSync, rmSync } from "fs";
 import { tmpdir } from "os";
-import {
-  getPlanDeniedPrompt,
-  getPlanToolName,
-  buildPlanFileRule,
-} from "@plannotator/shared/prompts";
+
 import { openBrowser } from "@plannotator/server/browser";
 import { cleanupDaemonState, discoverDaemon, waitForDaemonShutdown } from "@plannotator/server/daemon/client";
 import { startDaemonRuntime } from "@plannotator/server/daemon/runtime";
@@ -707,13 +703,12 @@ async function runPluginPlanCommand(): Promise<void> {
 async function runPluginAnnotateCommand(defaultMode: "annotate" | "annotate-last" = "annotate"): Promise<void> {
   const request = await readPluginRequest<PluginAnnotateRequest>();
   const origin = getPluginOrigin(request);
-  const useJina = resolveUseJina(request.noJina === true, loadConfig());
   await runDaemonBackedPluginRequest({
     ...request,
     action: defaultMode,
     origin,
     cwd: resolvePluginCwd(request),
-    useJina,
+    noJina: request.noJina,
     jinaApiKey: process.env.JINA_API_KEY,
   });
 }
@@ -857,7 +852,6 @@ if (args[0] === "sessions") {
     cwd: getInvocationCwd(),
     args: rawFilePath,
     noJina: cliNoJina,
-    useJina: resolveUseJina(cliNoJina, loadConfig()),
     jinaApiKey: process.env.JINA_API_KEY,
     gate: gateFlag,
     renderHtml: renderHtmlFlag,
@@ -1059,7 +1053,7 @@ if (args[0] === "sessions") {
     shareBaseUrl,
     pasteApiUrl,
   });
-  const result = outcome.result as { approved?: boolean; feedback?: string };
+  const result = outcome.result as { approved?: boolean; feedback?: string; prompt?: string };
 
   // Output Copilot CLI permission decision format
   if (result.approved) {
@@ -1067,14 +1061,9 @@ if (args[0] === "sessions") {
       permissionDecision: "allow",
     }));
   } else {
-    const feedback = getPlanDeniedPrompt("copilot-cli", undefined, {
-      toolName: getPlanToolName("copilot-cli"),
-      planFileRule: "",
-      feedback: result.feedback || "Plan changes requested",
-    });
     console.log(JSON.stringify({
       permissionDecision: "deny",
-      permissionDecisionReason: feedback,
+      permissionDecisionReason: result.prompt ?? result.feedback ?? "Plan changes requested",
     }));
   }
 
@@ -1207,7 +1196,7 @@ if (args[0] === "sessions") {
       shareBaseUrl,
       pasteApiUrl,
     });
-    const result = outcome.result as { approved?: boolean; feedback?: string };
+    const result = outcome.result as { approved?: boolean; feedback?: string; prompt?: string };
 
     if (result.approved) {
       console.log("{}");
@@ -1215,11 +1204,7 @@ if (args[0] === "sessions") {
       console.log(
         JSON.stringify({
           decision: "block",
-          reason: getPlanDeniedPrompt("codex", undefined, {
-            toolName: getPlanToolName("codex"),
-            planFileRule: "",
-            feedback: result.feedback || "Plan changes requested",
-          }),
+          reason: result.prompt ?? result.feedback ?? "Plan changes requested",
         })
       );
     }
@@ -1267,6 +1252,7 @@ if (args[0] === "sessions") {
   const result = outcome.result as {
     approved?: boolean;
     feedback?: string;
+    prompt?: string;
     permissionMode?: string;
   };
 
@@ -1278,11 +1264,7 @@ if (args[0] === "sessions") {
       console.log(
         JSON.stringify({
           decision: "deny",
-          reason: getPlanDeniedPrompt("gemini-cli", undefined, {
-            toolName: getPlanToolName("gemini-cli"),
-            planFileRule: buildPlanFileRule(getPlanToolName("gemini-cli"), planFilename),
-            feedback: result.feedback || "Plan changes requested",
-          }),
+          reason: result.prompt ?? result.feedback ?? "Plan changes requested",
         })
       );
     }
@@ -1316,11 +1298,7 @@ if (args[0] === "sessions") {
             hookEventName: "PermissionRequest",
             decision: {
               behavior: "deny",
-              message: getPlanDeniedPrompt(detectedOrigin, undefined, {
-                toolName: getPlanToolName(detectedOrigin),
-                planFileRule: "",
-                feedback: result.feedback || "Plan changes requested",
-              }),
+              message: result.prompt ?? result.feedback ?? "Plan changes requested",
             },
           },
         })

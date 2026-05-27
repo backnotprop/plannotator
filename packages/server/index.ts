@@ -38,6 +38,7 @@ import { resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-
 import { createEditorAnnotationHandler } from "./editor-annotations";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { isWSL } from "./browser";
+import { getPlanDeniedPrompt, getPlanToolName, buildPlanFileRule } from "@plannotator/shared/prompts";
 import { createDecisionCycle, resolveAndCycle } from "./session-handler";
 import type { SessionEventBridge, SessionRequestHandler } from "./session-handler";
 
@@ -133,6 +134,7 @@ export async function createPlannotatorSession(
     savedPath?: string;
     agentSwitch?: string;
     permissionMode?: string;
+    prompt?: string;
   };
   const decisionCycle = createDecisionCycle<DecisionResult>();
   let lastDecision: 'approved' | 'denied' | null = null;
@@ -383,7 +385,12 @@ export async function createPlannotatorSession(
 
             deleteDraft(draftKey);
             lastDecision = 'denied';
-            const resubmit = resolveAndCycle(decisionCycle, { approved: false, feedback, savedPath }, origin);
+            const prompt = getPlanDeniedPrompt(origin, loadConfig(), {
+              toolName: getPlanToolName(origin),
+              planFileRule: buildPlanFileRule(getPlanToolName(origin), slug),
+              feedback: feedback || "Plan changes requested",
+            });
+            const resubmit = resolveAndCycle(decisionCycle, { approved: false, feedback, savedPath, prompt }, origin);
             return Response.json({ ok: true, savedPath, ...resubmit });
           }
 
