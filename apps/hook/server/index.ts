@@ -171,13 +171,15 @@ const APPROVED_PLAINTEXT_MARKER = "The user approved.";
 
 function emitAnnotateOutcome(result: {
   feedback: string;
+  prompt?: string;
   exit?: boolean;
   approved?: boolean;
 }): void {
+  const output = result.prompt ?? result.feedback;
   if (hookFlag) {
     if (result.approved || result.exit) return;
-    if (result.feedback) {
-      console.log(JSON.stringify({ decision: "block", reason: result.feedback }));
+    if (output) {
+      console.log(JSON.stringify({ decision: "block", reason: output }));
     }
     return;
   }
@@ -187,7 +189,7 @@ function emitAnnotateOutcome(result: {
     } else if (result.exit) {
       console.log(JSON.stringify({ decision: "dismissed" }));
     } else {
-      console.log(JSON.stringify({ decision: "annotated", feedback: result.feedback || "" }));
+      console.log(JSON.stringify({ decision: "annotated", feedback: output || "" }));
     }
     return;
   }
@@ -196,7 +198,7 @@ function emitAnnotateOutcome(result: {
     console.log(APPROVED_PLAINTEXT_MARKER);
     return;
   }
-  if (result.feedback) console.log(result.feedback);
+  if (output) console.log(output);
 }
 
 if (isVersionInvocation(args)) {
@@ -853,7 +855,7 @@ if (args[0] === "sessions") {
     shareBaseUrl,
     pasteApiUrl,
   });
-  emitAnnotateOutcome(outcome.result as { feedback: string; exit?: boolean; approved?: boolean });
+  emitAnnotateOutcome(outcome.result as { feedback: string; prompt?: string; exit?: boolean; approved?: boolean });
   process.exit(0);
 
 } else if (args[0] === "annotate-last" || args[0] === "last") {
@@ -954,7 +956,7 @@ if (args[0] === "sessions") {
     pasteApiUrl,
   });
 
-  emitAnnotateOutcome(outcome.result as { feedback: string; exit?: boolean; approved?: boolean });
+  emitAnnotateOutcome(outcome.result as { feedback: string; prompt?: string; exit?: boolean; approved?: boolean });
   process.exit(0);
 
 } else if (args[0] === "setup-goal") {
@@ -1108,7 +1110,7 @@ if (args[0] === "sessions") {
     pasteApiUrl,
   });
 
-  emitAnnotateOutcome(outcome.result as { feedback: string; exit?: boolean; approved?: boolean });
+  emitAnnotateOutcome(outcome.result as { feedback: string; prompt?: string; exit?: boolean; approved?: boolean });
   process.exit(0);
 
 } else if (args[0] === "improve-context") {
@@ -1123,16 +1125,21 @@ if (args[0] === "sessions") {
 
   await Bun.stdin.text();
 
-  const daemon = await ensureDaemonClient({ pluginError: false });
-  const res = await daemon.client.fetch("/daemon/improve-context");
-  const data = await res.json() as { ok: boolean; context: string | null };
+  let context: string | null = null;
+  try {
+    const client = await ensureDaemonClient({ pluginError: false });
+    const data = await client.getJson("/daemon/improve-context") as { ok: boolean; context: string | null };
+    context = data.context;
+  } catch {
+    // Daemon unavailable — silently pass through
+  }
 
-  if (!data.context) process.exit(0);
+  if (!context) process.exit(0);
 
   console.log(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
-      additionalContext: data.context,
+      additionalContext: context,
     },
   }));
 

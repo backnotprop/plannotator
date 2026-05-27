@@ -68,7 +68,7 @@ export class DaemonClient {
     }) as Promise<DaemonShutdownResponse | DaemonErrorResponse>;
   }
 
-  private async getJson(path: string): Promise<unknown> {
+  async getJson(path: string): Promise<unknown> {
     return this.requestJson(path, { method: "GET" });
   }
 

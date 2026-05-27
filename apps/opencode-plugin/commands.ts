@@ -218,7 +218,7 @@ export async function handleAnnotateCommand(
     return;
   }
 
-  if (result.feedback) {
+  if (result.prompt || result.feedback) {
     const sessionId = event.properties?.sessionID;
 
     if (sessionId) {

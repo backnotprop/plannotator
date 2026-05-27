@@ -38,7 +38,7 @@ import { resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-
 import { createEditorAnnotationHandler } from "./editor-annotations";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { isWSL } from "./browser";
-import { getPlanDeniedPrompt, getPlanToolName, buildPlanFileRule } from "@plannotator/shared/prompts";
+import { getPlanDeniedPrompt, getPlanToolName } from "@plannotator/shared/prompts";
 import { createDecisionCycle, resolveAndCycle } from "./session-handler";
 import type { SessionEventBridge, SessionRequestHandler } from "./session-handler";
 
@@ -387,7 +387,7 @@ export async function createPlannotatorSession(
             lastDecision = 'denied';
             const prompt = getPlanDeniedPrompt(origin, loadConfig(), {
               toolName: getPlanToolName(origin),
-              planFileRule: buildPlanFileRule(getPlanToolName(origin), slug),
+              planFileRule: "",
               feedback: feedback || "Plan changes requested",
             });
             const resubmit = resolveAndCycle(decisionCycle, { approved: false, feedback, savedPath, prompt }, origin);
