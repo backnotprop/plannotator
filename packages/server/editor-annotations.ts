@@ -12,12 +12,14 @@ export type { EditorAnnotation };
 
 export interface EditorAnnotationHandler {
   handle: (req: Request, url: URL) => Promise<Response | null>;
+  clearAll: () => void;
 }
 
 export function createEditorAnnotationHandler(): EditorAnnotationHandler {
   const annotations: EditorAnnotation[] = [];
 
   return {
+    clearAll() { annotations.length = 0; },
     async handle(req: Request, url: URL): Promise<Response | null> {
       // GET /api/editor-annotations — return all
       if (url.pathname === "/api/editor-annotations" && req.method === "GET") {

@@ -64,6 +64,8 @@ export interface UseLinkedDocReturn {
   getDocAnnotations: () => Map<string, CachedDocState>;
   /** Reactive count of annotations on non-active documents (updates on open() and back()) */
   docAnnotationCount: number;
+  /** Clear all cached linked-doc annotations (used on session revision) */
+  clearCache: () => void;
 }
 
 const HIGHLIGHT_REAPPLY_DELAY = 100;
@@ -297,5 +299,6 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     dismissError,
     getDocAnnotations,
     docAnnotationCount,
+    clearCache: () => { docCache.current.clear(); setDocAnnotationCount(0); },
   };
 }

@@ -233,6 +233,11 @@ export class DaemonHubClient {
     }
   }
 
+  sendClientState(visible: boolean, activeSessionId: string | null): void {
+    if (this.socket?.readyState !== OPEN) return;
+    this.send({ type: "client-state", visible, activeSessionId });
+  }
+
   private send(message: DaemonWebSocketClientMessage): void {
     if (this.socket?.readyState !== OPEN) {
       throw new DaemonHubOpenError("Daemon WebSocket is not open.");

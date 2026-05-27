@@ -25,12 +25,13 @@ import type {
 } from "@plannotator/shared/plugin-protocol";
 import { normalizeGoalSetupBundle } from "@plannotator/shared/goal-setup";
 import { createPlannotatorSession } from "../index";
+import { generateSlug } from "../storage";
 import { createAnnotateSession } from "../annotate";
 import { createGoalSetupSession } from "../goal-setup";
 import { createReviewSession } from "../review";
 import { detectProjectName } from "../project";
 import { createRemoteShareNotice } from "../share-url";
-import { registerProject } from "./project-registry";
+import { addProject } from "./project-registry";
 import {
   gitRuntime,
   prepareLocalReviewDiff,
@@ -96,6 +97,26 @@ function createSessionEventBridge(context: DaemonFetchContext, id: string): Sess
   };
 }
 
+interface SessionDecisionResult {
+  approved?: boolean;
+  feedback?: string;
+  [key: string]: unknown;
+}
+
+function createDecisionScope(dispose: () => void | Promise<void>) {
+  let releaseDecisionWait: (() => void) | undefined;
+  const disposed = new Promise<never>((_, reject) => {
+    releaseDecisionWait = () => reject(new Error("Session disposed."));
+  });
+  disposed.catch(() => {});
+  const cleanup = () => {
+    releaseDecisionWait?.();
+    releaseDecisionWait = undefined;
+    return dispose();
+  };
+  return { disposed, cleanup };
+}
+
 function registerSessionDecision<TResult, TStored = TResult>(
   context: DaemonFetchContext,
   id: string,
@@ -103,10 +124,7 @@ function registerSessionDecision<TResult, TStored = TResult>(
   dispose: () => void | Promise<void>,
   mapResult: (result: TResult) => TStored = (result) => result as unknown as TStored,
 ): () => void | Promise<void> {
-  let releaseDecisionWait: (() => void) | undefined;
-  const disposed = new Promise<never>((_, reject) => {
-    releaseDecisionWait = () => reject(new Error("Session disposed."));
-  });
+  const { disposed, cleanup } = createDecisionScope(dispose);
 
   void Promise.race([waitForDecision(), disposed])
     .then((result) => context.store.complete(id, mapResult(result)))
@@ -116,11 +134,64 @@ function registerSessionDecision<TResult, TStored = TResult>(
       }
     });
 
-  return () => {
-    releaseDecisionWait?.();
-    releaseDecisionWait = undefined;
-    return dispose();
+  return cleanup;
+}
+
+function registerDecisionLoop(
+  context: DaemonFetchContext,
+  id: string,
+  session: { waitForDecision: () => Promise<SessionDecisionResult>; dispose: () => void | Promise<void> },
+  onResult: (result: SessionDecisionResult) => "continue" | "done",
+  activeStatuses: Set<string>,
+): () => void | Promise<void> {
+  const { disposed, cleanup } = createDecisionScope(session.dispose);
+
+  const loop = async () => {
+    let lastPromise: Promise<SessionDecisionResult> | null = null;
+    while (true) {
+      const currentPromise = session.waitForDecision();
+      if (currentPromise === lastPromise) return;
+      lastPromise = currentPromise;
+      const result = await Promise.race([currentPromise, disposed]);
+      if (onResult(result) === "done") return;
+    }
   };
+
+  void loop().catch((err) => {
+    const record = context.store.get(id);
+    if (record && activeStatuses.has(record.status)) {
+      context.store.fail(id, err instanceof Error ? err.message : String(err));
+    }
+  });
+
+  return cleanup;
+}
+
+const PERSISTENT_ACTIVE = new Set(["active", "awaiting-resubmission"]);
+const REVIEW_ACTIVE = new Set(["active", "idle"]);
+
+function registerPersistentDecision(
+  context: DaemonFetchContext,
+  id: string,
+  session: { waitForDecision: () => Promise<SessionDecisionResult>; dispose: () => void | Promise<void> },
+) {
+  return registerDecisionLoop(context, id, session, (result) => {
+    context.store.suspend(id, result);
+    return "continue";
+  }, PERSISTENT_ACTIVE);
+}
+
+// Review sessions stay alive (idle) after every decision — including approve/exit.
+// Sessions persist until daemon restart.
+function registerReviewDecision(
+  context: DaemonFetchContext,
+  id: string,
+  session: { waitForDecision: () => Promise<SessionDecisionResult>; dispose: () => void | Promise<void> },
+) {
+  return registerDecisionLoop(context, id, session, (result) => {
+    context.store.idle(id, result);
+    return "continue";
+  }, REVIEW_ACTIVE);
 }
 
 function resolvePlanFilePath(planFilePath: string, cwd: string): string {
@@ -482,6 +553,31 @@ async function prepareReviewInput(request: PluginReviewRequest, cwd: string) {
 }
 
 export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions) {
+  interface PersistableSession {
+    waitForDecision: () => Promise<SessionDecisionResult>;
+    dispose: () => void | Promise<void>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    updateContent?: (...args: any[]) => void | Promise<void>;
+  }
+  const sessionRefs = new Map<string, { matchKey: string; session: PersistableSession }>();
+
+  const RESUBMIT_STATUSES = new Set(["awaiting-resubmission"]);
+  const RESUBMIT_OR_IDLE_STATUSES = new Set(["awaiting-resubmission", "idle"]);
+
+  function findMatchingSession(store: DaemonFetchContext["store"], matchKey: string, matchStatuses = RESUBMIT_STATUSES) {
+    for (const [sessionId, ref] of sessionRefs) {
+      const record = store.get(sessionId);
+      if (!record || record.status === "completed" || record.status === "expired" || record.status === "failed" || record.status === "cancelled") {
+        sessionRefs.delete(sessionId);
+        continue;
+      }
+      if (!matchStatuses.has(record.status)) continue;
+      if (record.matchKey !== matchKey) continue;
+      return { record, session: ref.session };
+    }
+    return null;
+  }
+
   return async function createSession(
     createRequest: DaemonCreateSessionRequest,
     context: DaemonFetchContext,
@@ -489,9 +585,15 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
     const request = createRequest.request;
     const cwd = getRequestCwd(request);
     const project = (await detectProjectName(cwd)) ?? "_unknown";
+    let branch: string | undefined;
+    try {
+      const { execSync } = await import("child_process");
+      const b = execSync("git rev-parse --abbrev-ref HEAD", { cwd, encoding: "utf-8" }).trim();
+      if (b && b !== "HEAD") branch = b;
+    } catch {}
     try {
       const tmp = tmpdir();
-      if (!cwd.startsWith(tmp)) registerProject(project, cwd);
+      if (!cwd.startsWith(tmp)) addProject(cwd, project);
     } catch {}
     const id = createDaemonSessionId();
     const url = makeSessionUrl(context.endpoint.baseUrl, id);
@@ -507,6 +609,18 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
 
     if (request.action === "plan") {
       const plan = await readPlanRequest(request, cwd);
+      const matchKey = `plan:${project}:${generateSlug(plan)}`;
+
+      const existing = findMatchingSession(context.store, matchKey);
+      if (existing && existing.session.updateContent) {
+        existing.session.updateContent(plan);
+        if (context.endpoint.isRemote && sharingEnabled) {
+          existing.record.remoteShare = await createRemoteShareNotice(plan, shareBaseUrl, "review the plan", "plan only").catch(() => undefined);
+        }
+        context.store.reactivate(existing.record.id);
+        return existing.record;
+      }
+
       const remoteShare = context.endpoint.isRemote && sharingEnabled
         ? await createRemoteShareNotice(plan, shareBaseUrl, "review the plan", "plan only").catch(() => undefined)
         : undefined;
@@ -530,13 +644,16 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
         url,
         project,
         cwd,
-        label: `plugin-plan-${request.origin}-${project}`,
+        label: branch ? `plugin-plan-${request.origin}-${project}-${branch}` : `plugin-plan-${request.origin}-${project}`,
         origin: request.origin,
+        matchKey,
         ttlMs,
         handleRequest: session.handleRequest,
-        dispose: registerSessionDecision(context, id, () => session.waitForDecision(), () => session.dispose()),
+        dispose: registerPersistentDecision(context, id, session),
         remoteShare,
+        snapshot: session.getSnapshot ?? (() => ({ plan, origin: request.origin })),
       });
+      sessionRefs.set(id, { matchKey, session });
       return record;
     }
 
@@ -558,7 +675,7 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
         url,
         project,
         cwd,
-        label: `plugin-archive-${request.origin}-${project}`,
+        label: branch ? `plugin-archive-${request.origin}-${project}-${branch}` : `plugin-archive-${request.origin}-${project}`,
         origin: request.origin,
         ttlMs,
         handleRequest: session.handleRequest,
@@ -575,6 +692,28 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
 
     if (request.action === "annotate" || request.action === "annotate-last") {
       const input = await resolveAnnotateInput(request, cwd, request.action);
+      const isSingleFile = input.mode === "annotate";
+      const isFolder = input.mode === "annotate-folder";
+      const matchKey = isSingleFile
+        ? `annotate:${project}:${input.filePath}`
+        : isFolder && input.folderPath
+          ? `annotate:${project}:folder:${input.folderPath}`
+          : undefined;
+
+      if (matchKey) {
+        const existing = findMatchingSession(context.store, matchKey);
+        if (existing) {
+          if (existing.session.updateContent) {
+            existing.session.updateContent(input.markdown, input.rawHtml);
+          }
+          if (context.endpoint.isRemote && sharingEnabled && input.markdown) {
+            existing.record.remoteShare = await createRemoteShareNotice(input.markdown, shareBaseUrl, "annotate", "document only").catch(() => undefined);
+          }
+          context.store.reactivate(existing.record.id);
+          return existing.record;
+        }
+      }
+
       const remoteShare = context.endpoint.isRemote && sharingEnabled && input.markdown
         ? await createRemoteShareNotice(input.markdown, shareBaseUrl, "annotate", "document only").catch(() => undefined)
         : undefined;
@@ -595,23 +734,40 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
         project,
         cwd,
         label: input.folderPath
-          ? `plugin-annotate-${request.origin}-${basename(input.folderPath)}`
-          : `plugin-annotate-${request.origin}-${input.mode === "annotate-last" ? "last" : basename(input.filePath)}`,
+          ? `plugin-annotate-${request.origin}-${basename(input.folderPath)}${branch ? `-${branch}` : ""}`
+          : `plugin-annotate-${request.origin}-${input.mode === "annotate-last" ? "last" : basename(input.filePath)}${branch ? `-${branch}` : ""}`,
         origin: request.origin,
+        matchKey,
         ttlMs,
         handleRequest: session.handleRequest,
-        dispose: registerSessionDecision(context, id, () => session.waitForDecision(), () => session.dispose(), (result) => ({
-          ...result,
-          filePath: input.filePath,
-          mode: input.mode,
-        })),
+        dispose: registerPersistentDecision(context, id, session),
         remoteShare,
+        snapshot: session.getSnapshot ?? (() => ({ plan: input.markdown, filePath: input.filePath, mode: input.mode, sourceInfo: input.sourceInfo })),
       });
+      if (matchKey) sessionRefs.set(id, { matchKey, session });
       return record;
     }
 
     if (request.action === "review") {
       const input = await prepareReviewInput(request, cwd);
+      const reviewMatchKey = input.prMetadata
+        ? `review:${input.prMetadata.url}`
+        : branch ? `review:${project}:${branch}` : `review:${project}`;
+
+      const existingReview = findMatchingSession(context.store, reviewMatchKey, RESUBMIT_OR_IDLE_STATUSES);
+      if (existingReview && existingReview.session.updateContent) {
+        await Promise.resolve(input.onCleanup?.()).catch(() => {});
+        await existingReview.session.updateContent(
+          input.prMetadata ? input.rawPatch : undefined,
+          input.prMetadata ? input.gitRef : undefined,
+        );
+        if (context.endpoint.isRemote && sharingEnabled) {
+          existingReview.record.remoteShare = await createRemoteShareNotice(input.rawPatch, shareBaseUrl, "review changes", "diff only").catch(() => undefined);
+        }
+        context.store.reactivate(existingReview.record.id);
+        return existingReview.record;
+      }
+
       const sessionError = [input.error, input.localWarning].filter(Boolean).join("\n\n") || undefined;
       const remoteShare = context.endpoint.isRemote && sharingEnabled
         ? await createRemoteShareNotice(input.rawPatch, shareBaseUrl, "review changes", "diff only").catch(() => undefined)
@@ -652,13 +808,22 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
         cwd,
         label: input.prMetadata
           ? `plugin-${getMRLabel(input.prMetadata).toLowerCase()}-review-${getDisplayRepo(input.prMetadata)}${getMRNumberLabel(input.prMetadata)}`
-          : `plugin-review-${request.origin}-${project}`,
+          : branch ? `plugin-review-${request.origin}-${project}-${branch}` : `plugin-review-${request.origin}-${project}`,
         origin: request.origin,
+        matchKey: reviewMatchKey,
         ttlMs,
         handleRequest: session.handleRequest,
-        dispose: registerSessionDecision(context, id, () => session.waitForDecision(), () => session.dispose()),
+        dispose: registerReviewDecision(context, id, session),
         remoteShare,
+        snapshot: session.getSnapshot ?? (() => ({
+          rawPatch: input.rawPatch,
+          gitRef: input.gitRef,
+          origin: request.origin,
+          diffType: input.gitContext ? (input.diffType ?? "unstaged") : undefined,
+          gitContext: input.gitContext ? { currentBranch: input.gitContext.currentBranch, base: input.base } : undefined,
+        })),
       });
+      sessionRefs.set(id, { matchKey: reviewMatchKey, session });
       return record;
     }
 
@@ -676,12 +841,13 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
         url,
         project,
         cwd,
-        label: `goal-setup-${bundle.stage}-${request.goalSlug || project}`,
+        label: branch ? `goal-setup-${bundle.stage}-${request.goalSlug || project}-${branch}` : `goal-setup-${bundle.stage}-${request.goalSlug || project}`,
         origin: request.origin,
         ttlMs,
         htmlContent: session.htmlContent,
         handleRequest: session.handleRequest,
         dispose: registerSessionDecision(context, id, () => session.waitForDecision(), () => session.dispose()),
+        snapshot: () => ({ stage: bundle.stage, goalSlug: request.goalSlug }),
       });
       return record;
     }

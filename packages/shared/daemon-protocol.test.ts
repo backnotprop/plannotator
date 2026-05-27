@@ -35,6 +35,7 @@ describe("daemon protocol", () => {
       "daemon",
       "external-annotations",
       "agent-jobs",
+      "session-revision",
     ]);
     expect(PLANNOTATOR_DAEMON_SESSION_VIEWS).toEqual([
       "plan",

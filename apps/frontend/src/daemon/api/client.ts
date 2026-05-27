@@ -11,6 +11,10 @@ import type {
   SessionListResponse,
   SessionResponse,
   SessionSummary,
+  WorktreeListResponse,
+  DirectoryListResponse,
+  PRListResponse,
+  PRDetailedListResponse,
 } from "../contracts";
 import {
   DaemonHubActionError,
@@ -64,8 +68,12 @@ export interface DaemonApiClient {
     cwd: string,
     name?: string,
   ): Promise<DaemonApiResult<{ ok: true; project: ProjectEntry }>>;
-  removeProject(name: string): Promise<DaemonApiResult<{ ok: true }>>;
-  createReviewSession(cwd: string): Promise<DaemonApiResult<SessionResponse>>;
+  removeProject(cwd: string, clean?: boolean): Promise<DaemonApiResult<{ ok: true }>>;
+  listWorktrees(cwd: string): Promise<DaemonApiResult<WorktreeListResponse>>;
+  listDirectories(path?: string): Promise<DaemonApiResult<DirectoryListResponse>>;
+  listPRs(cwd: string): Promise<DaemonApiResult<PRListResponse>>;
+  listDetailedPRs(cwd: string): Promise<DaemonApiResult<PRDetailedListResponse>>;
+  createReviewSession(cwd: string, prUrl?: string): Promise<DaemonApiResult<SessionResponse>>;
   createArchiveSession(cwd: string): Promise<DaemonApiResult<SessionResponse>>;
 }
 
@@ -176,6 +184,22 @@ function isProjectList(value: unknown): value is ProjectListResponse {
 
 function isProjectResponse(value: unknown): value is { ok: true; project: ProjectEntry } {
   return hasOkTrue(value) && isProjectEntry((value as { project?: unknown }).project);
+}
+
+function isWorktreeList(value: unknown): value is WorktreeListResponse {
+  return hasOkTrue(value) && Array.isArray((value as { worktrees?: unknown }).worktrees);
+}
+
+function isDirectoryList(value: unknown): value is DirectoryListResponse {
+  return hasOkTrue(value) && Array.isArray((value as { dirs?: unknown }).dirs);
+}
+
+function isPRList(value: unknown): value is PRListResponse {
+  return hasOkTrue(value) && Array.isArray((value as { prs?: unknown }).prs);
+}
+
+function isPRDetailedList(value: unknown): value is PRDetailedListResponse {
+  return hasOkTrue(value) && Array.isArray((value as { prs?: unknown }).prs);
 }
 
 function isSessionBootstrap(value: unknown): value is SessionBootstrap {
@@ -442,21 +466,62 @@ export function createDaemonApiClient(options: DaemonApiClientOptions = {}): Dae
       );
     },
 
-    removeProject(name) {
+    removeProject(cwd, clean) {
+      const params = new URLSearchParams({ cwd });
+      if (clean) params.set("clean", "1");
       return requestJson(
         fetchImpl,
-        joinUrl(options.baseUrl, `/daemon/projects/${encodeURIComponent(name)}`),
+        joinUrl(options.baseUrl, `/daemon/projects?${params}`),
         isDeleteSessionResponse,
         { method: "DELETE" },
       );
     },
 
-    createReviewSession(cwd) {
+    listDirectories(path = "~") {
+      return requestJson(
+        fetchImpl,
+        joinUrl(options.baseUrl, `/daemon/fs/list?path=${encodeURIComponent(path)}`),
+        isDirectoryList,
+      );
+    },
+
+    listWorktrees(cwd) {
+      return requestJson(
+        fetchImpl,
+        joinUrl(options.baseUrl, `/daemon/projects/worktrees?cwd=${encodeURIComponent(cwd)}`),
+        isWorktreeList,
+      );
+    },
+
+    listPRs(cwd) {
+      return requestJson(
+        fetchImpl,
+        joinUrl(options.baseUrl, `/daemon/projects/prs?cwd=${encodeURIComponent(cwd)}`),
+        isPRList,
+      );
+    },
+
+    listDetailedPRs(cwd) {
+      return requestJson(
+        fetchImpl,
+        joinUrl(options.baseUrl, `/daemon/projects/prs/detailed?cwd=${encodeURIComponent(cwd)}`),
+        isPRDetailedList,
+      );
+    },
+
+    createReviewSession(cwd, prUrl) {
       return requestJson(
         fetchImpl,
         joinUrl(options.baseUrl, "/daemon/sessions"),
         isSessionResponse,
-        jsonPost({ request: { action: "review", origin: "plannotator-frontend", cwd } }),
+        jsonPost({
+          request: {
+            action: "review",
+            origin: "plannotator-frontend",
+            cwd,
+            ...(prUrl && { prUrl }),
+          },
+        }),
       );
     },
 

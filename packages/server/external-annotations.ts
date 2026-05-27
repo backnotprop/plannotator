@@ -32,6 +32,8 @@ export interface ExternalAnnotationHandler {
   ) => Promise<Response | null>;
   /** Push annotations directly into the store (bypasses HTTP, reuses same validation). */
   addAnnotations: (body: unknown) => { ids: string[] } | { error: string };
+  /** Remove all annotations from the store. */
+  clearAll: () => void;
   dispose: () => void;
 }
 
@@ -220,6 +222,10 @@ export function createExternalAnnotationHandler(
 
       // Not handled — pass through
       return null;
+    },
+
+    clearAll(): void {
+      store.clearAll();
     },
 
     dispose(): void {

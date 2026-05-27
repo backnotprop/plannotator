@@ -11,6 +11,8 @@ import type { UIPreferences } from '@plannotator/ui/utils/uiPreferences';
 interface AppHeaderProps {
   // Slot for external content (e.g., shell sidebar trigger)
   headerLeft?: React.ReactNode;
+  // When true, the built-in Settings modal is not mounted (unified dialog handles it)
+  skipBuiltInSettings?: boolean;
   // Mode flags (stable after mount)
   isApiMode: boolean;
   annotateMode: boolean;
@@ -82,6 +84,7 @@ interface AppHeaderProps {
 
 export const AppHeader = React.memo<AppHeaderProps>(({
   headerLeft,
+  skipBuiltInSettings,
   isApiMode,
   annotateMode,
   archiveMode,
@@ -288,18 +291,20 @@ export const AppHeader = React.memo<AppHeaderProps>(({
         )}
 
         {/* Settings dialog (controlled, button hidden — opened from PlanHeaderMenu) */}
-        <div className="hidden">
-          <Settings
-            taterMode={taterMode}
-            onTaterModeChange={onTaterModeChange}
-            onIdentityChange={onIdentityChange}
-            origin={origin}
-            onUIPreferencesChange={onUIPreferencesChange}
-            externalOpen={mobileSettingsOpen}
-            onExternalClose={onCloseSettings}
-            gitUser={gitUser}
-          />
-        </div>
+        {!skipBuiltInSettings && (
+          <div className="hidden">
+            <Settings
+              taterMode={taterMode}
+              onTaterModeChange={onTaterModeChange}
+              onIdentityChange={onIdentityChange}
+              origin={origin}
+              onUIPreferencesChange={onUIPreferencesChange}
+              externalOpen={mobileSettingsOpen}
+              onExternalClose={onCloseSettings}
+              gitUser={gitUser}
+            />
+          </div>
+        )}
 
         <PlanHeaderMenu
           appVersion={appVersion}
