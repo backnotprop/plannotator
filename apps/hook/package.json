@@ -4,25 +4,16 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "bun run --cwd ../debug-frontend build && vite build && cp dist/index.html dist/redline.html && cp ../review/dist/index.html dist/review.html",
+    "build": "bun run --cwd ../frontend build",
     "serve": "bun run server/index.ts"
   },
   "dependencies": {
-    "@plannotator/editor": "workspace:*",
     "@plannotator/server": "workspace:*",
     "@plannotator/shared": "workspace:*",
-    "@plannotator/ui": "workspace:*",
-    "react": "^19.2.3",
-    "react-dom": "^19.2.3",
-    "tailwindcss": "^4.1.18",
-    "@tailwindcss/vite": "^4.1.18"
+    "@plannotator/ui": "workspace:*"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.0",
-    "vite-plugin-singlefile": "^2.0.3",
     "@types/node": "^22.14.0"
   }
 }
