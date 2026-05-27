@@ -11,23 +11,19 @@ plannotator/
 │   │   ├── .claude-plugin/plugin.json
 │   │   ├── commands/             # Slash commands (plannotator-review.md, plannotator-annotate.md)
 │   │   ├── hooks/hooks.json      # PermissionRequest hook config
-│   │   ├── server/index.ts       # Entry point (plan + review + annotate + archive subcommands)
-│   │   └── dist/                 # Built single-file apps (index.html, review.html)
-│   ├── opencode-plugin/          # OpenCode plugin
+│   │   └── server/index.ts       # CLI entry point (daemon client, session orchestration)
+│   ├── frontend/                  # Production frontend SPA (daemon shell)
+│   │   ├── src/                   # React app with TanStack Router
+│   │   └── vite.config.ts         # Single-file HTML build
+│   ├── opencode-plugin/          # OpenCode plugin (binary client wrapper)
 │   │   ├── commands/             # Slash commands (plannotator-review.md, plannotator-annotate.md)
-│   │   ├── index.ts              # Plugin entry with submit_plan tool + review/annotate event handlers
-│   │   ├── plannotator.html      # Built plan review app
-│   │   └── review-editor.html    # Built code review app
+│   │   └── index.ts              # Plugin entry — spawns plannotator binary
 │   ├── marketing/                # Marketing site, docs, and blog (plannotator.ai)
 │   │   └── astro.config.mjs      # Astro 5 static site with content collections
 │   ├── paste-service/            # Paste service for short URL sharing
 │   │   ├── core/                 # Platform-agnostic logic (handler, storage interface, cors)
 │   │   ├── stores/               # Storage backends (fs, kv, s3)
 │   │   └── targets/              # Deployment entries (bun.ts, cloudflare.ts)
-│   ├── review/                   # Standalone review server (for development)
-│   │   ├── index.html
-│   │   ├── index.tsx
-│   │   └── vite.config.ts
 │   ├── vscode-extension/         # VS Code extension — opens plans in editor tabs
 │   │   ├── bin/                   # Router scripts (open-in-vscode, xdg-open)
 │   │   ├── src/                   # extension.ts, cookie-proxy.ts, ipc-server.ts, panel-manager.ts, editor-annotations.ts, vscode-theme.ts
@@ -41,9 +37,9 @@ plannotator/
 │       └── plannotator-visual-explainer/ # Visual HTML generator (plans, diagrams, PR explainers) with Plannotator theming
 ├── packages/
 │   ├── server/                   # Shared server implementation
-│   │   ├── index.ts              # startPlannotatorServer(), handleServerReady()
-│   │   ├── review.ts             # startReviewServer(), handleReviewServerReady()
-│   │   ├── annotate.ts           # startAnnotateServer(), handleAnnotateServerReady()
+│   │   ├── index.ts              # createPlannotatorSession(), handleServerReady()
+│   │   ├── review.ts             # createReviewSession(), handleReviewServerReady()
+│   │   ├── annotate.ts           # createAnnotateSession(), handleAnnotateServerReady()
 │   │   ├── daemon/               # Long-running daemon runtime, state, client, and session store
 │   │   ├── storage.ts            # Re-exports from @plannotator/shared/storage
 │   │   ├── share-url.ts          # Server-side share URL generation for remote sessions
@@ -78,16 +74,15 @@ plannotator/
 │   │   ├── plugin-protocol.ts    # JSON protocol for binary-owned plugin commands
 │   │   ├── plugin-client.ts      # Shared OpenCode/Pi subprocess client for plannotator plugin commands
 │   │   └── plugin-binary.ts      # Binary discovery, compatibility checks, and installer bridge
-│   ├── editor/                   # Plan review app
+│   ├── plannotator-plan-review/   # Plan review app (embedded in frontend)
 │   │   ├── App.tsx               # Main plan review app
-│   │   └── shortcuts.ts          # planReviewSurface + annotateSurface — composes plan-review scopes into per-surface registries
-│   └── review-editor/            # Code review UI
+│   │   └── shortcuts.ts          # planReviewSurface + annotateSurface
+│   └── plannotator-code-review/  # Code review UI (embedded in frontend)
 │       ├── App.tsx               # Main review app
-│       ├── shortcuts.ts          # codeReviewSurface — composes code-review scopes into the review registry
+│       ├── shortcuts.ts          # codeReviewSurface
 │       ├── components/           # DiffViewer, FileTree, ReviewSidebar
 │       ├── dock/                 # Dockview center panel infrastructure
-│       ├── demoData.ts           # Demo diff for standalone mode
-│       └── index.css             # Review-specific styles
+│       └── store/                # Zustand review store (annotations, files, diff options)
 ├── .claude-plugin/marketplace.json  # For marketplace install
 └── legacy/                       # Old pre-monorepo code (reference only)
 ```
@@ -546,8 +541,7 @@ Code blocks use bundled `highlight.js`. Language is extracted from fence (```rus
 bun install
 
 # Run any app
-bun run dev:hook       # Hook server (plan review)
-bun run dev:review     # Review editor (code review)
+bun run dev:frontend   # Frontend + daemon dev server
 bun run dev:portal     # Portal editor
 bun run dev:marketing  # Marketing site
 bun run dev:vscode     # VS Code extension (watch mode)
