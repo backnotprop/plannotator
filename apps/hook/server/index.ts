@@ -113,25 +113,7 @@ import {
 } from "./cli";
 import path from "path";
 
-let planHtmlContentPromise: Promise<string> | undefined;
-let reviewHtmlContentPromise: Promise<string> | undefined;
 let daemonShellHtmlContentPromise: Promise<string> | undefined;
-let htmlAssetsPromise: Promise<typeof import("./html-assets")> | undefined;
-
-function getHtmlAssets() {
-  htmlAssetsPromise ??= import("./html-assets");
-  return htmlAssetsPromise;
-}
-
-function getPlanHtmlContent(): Promise<string> {
-  planHtmlContentPromise ??= getHtmlAssets().then((mod) => mod.planHtmlContent);
-  return planHtmlContentPromise;
-}
-
-function getReviewHtmlContent(): Promise<string> {
-  reviewHtmlContentPromise ??= getHtmlAssets().then((mod) => mod.reviewHtmlContent);
-  return reviewHtmlContentPromise;
-}
 
 function getDaemonShellHtmlContent(): Promise<string> {
   daemonShellHtmlContentPromise ??= import("./daemon-shell-html").then((mod) => mod.loadDaemonShellHtml());
@@ -400,8 +382,6 @@ async function runDaemonCommand(): Promise<void> {
       runtime = await startDaemonRuntime({
         shellHtmlContent: await getDaemonShellHtmlContent(),
         createSession: createDaemonSessionFactory({
-          planHtmlContent: await getPlanHtmlContent(),
-          reviewHtmlContent: await getReviewHtmlContent(),
           sharingEnabled,
           shareBaseUrl,
           pasteApiUrl,
