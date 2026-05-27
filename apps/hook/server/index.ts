@@ -56,8 +56,6 @@ import {
 import { statSync, existsSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import {
-  getReviewApprovedPrompt,
-  getReviewDeniedSuffix,
   getPlanDeniedPrompt,
   getPlanToolName,
   buildPlanFileRule,
@@ -833,17 +831,12 @@ if (args[0] === "sessions") {
     sharingEnabled,
     shareBaseUrl,
   });
-  const result = outcome.result as { approved?: boolean; feedback?: string; exit?: boolean };
+  const result = outcome.result as { approved?: boolean; feedback?: string; prompt?: string; exit?: boolean };
 
   if (result.exit) {
     console.log("Review session closed without feedback.");
-  } else if (result.approved) {
-    console.log(getReviewApprovedPrompt(detectedOrigin));
   } else {
-    console.log(result.feedback || "");
-    if (!reviewArgs.prUrl) {
-      console.log(getReviewDeniedSuffix(detectedOrigin));
-    }
+    console.log(result.prompt ?? result.feedback ?? "");
   }
   process.exit(0);
 

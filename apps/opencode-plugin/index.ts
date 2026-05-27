@@ -47,7 +47,6 @@ import {
   getPlanApprovedPrompt,
   getPlanApprovedWithNotesPrompt,
   getPlanToolName,
-  getAnnotateMessageFeedbackPrompt,
 } from "@plannotator/shared/prompts";
 import { loadConfig } from "@plannotator/shared/config";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
@@ -469,7 +468,7 @@ Do NOT proceed with implementation until your plan is approved.`);
               body: {
                 parts: [{
                   type: "text",
-                  text: getAnnotateMessageFeedbackPrompt("opencode", undefined, { feedback }),
+                  text: feedback,
                 }],
               },
             });
