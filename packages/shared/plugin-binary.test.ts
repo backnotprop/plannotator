@@ -293,6 +293,6 @@ describe("plugin binary install and capabilities", () => {
     };
 
     expect(isCompatiblePluginBinary(capabilities, { requiredFeatures: ["plan-review"] })).toBe(true);
-    expect(isCompatiblePluginBinary(capabilities, { requiredFeatures: ["archive"] })).toBe(false);
+    expect(isCompatiblePluginBinary(capabilities, { requiredFeatures: ["code-review"] })).toBe(false);
   });
 });
