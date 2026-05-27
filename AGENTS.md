@@ -107,7 +107,7 @@ Host app (Claude Code / OpenCode / Pi / Codex / Copilot / Gemini CLI)
 - The binary either starts a daemon or connects to one already running. The daemon serves the frontend.
 - Claude Code calls the binary directly via hooks. OpenCode, Pi, Codex, Copilot, and Gemini CLI call it via thin extension/plugin wrappers that spawn the binary as a subprocess.
 - Extensions and plugins have no server logic of their own. They translate "my host app wants to do X" into "shell out to `plannotator`."
-- The frontend (`apps/frontend/`) is the only UI. The old standalone HTML packages (`packages/editor/`, `packages/review-editor/`) are legacy and being removed.
+- The frontend (`apps/frontend/`) is the only UI.
 
 ## Server Implementation
 
@@ -470,13 +470,13 @@ Text highlighting uses `web-highlighter` library. Code blocks use manual `<mark>
 
 ## Keyboard Shortcuts
 
-**Location:** `packages/ui/shortcuts/` (engine + scope data), `packages/editor/shortcuts.ts` and `packages/review-editor/shortcuts.ts` (per-app surfaces).
+**Location:** `packages/ui/shortcuts/` (engine + scope data), `packages/plannotator-plan-review/shortcuts.ts` and `packages/plannotator-code-review/shortcuts.ts` (per-app surfaces).
 
 The shortcut system has three layers:
 
 1. **Engine** (`packages/ui/shortcuts/{core,runtime}.ts`) — parser for declarative bindings (`Mod+Enter`, `Alt Alt` double-tap, `Alt hold`), dispatcher, platform-aware formatter (mac glyphs vs. `Ctrl`), validator, and the `useShortcutScope` / `useDoubleTapShortcuts` React hooks. Truly shared — both apps use it as-is.
 2. **Scopes** — `defineShortcutScope({ id, title, shortcuts: { actionId: { bindings, description, section, ... } } })`. One scope per UI surface (annotation toolbar, comment popover, file tree, etc.). Lives in `packages/ui/shortcuts/{plan-review,code-review}/` — **the subfolder names which app's UI the scope serves**. Components/Apps wire handlers to a scope via `useShortcutScope({ scope, handlers: { actionId: () => ... } })`.
-3. **Surfaces** (`packages/editor/shortcuts.ts`, `packages/review-editor/shortcuts.ts`) — each app composes its scopes into a `ShortcutSurface` (`planReviewSurface`, `annotateSurface`, `codeReviewSurface`). Surfaces feed both the in-app help modal and the marketing site's auto-generated docs page.
+3. **Surfaces** (`packages/plannotator-plan-review/shortcuts.ts`, `packages/plannotator-code-review/shortcuts.ts`) — each app composes its scopes into a `ShortcutSurface` (`planReviewSurface`, `annotateSurface`, `codeReviewSurface`). Surfaces feed both the in-app help modal and the marketing site's auto-generated docs page.
 
 **Convention for adding new shortcuts:** define the action in the relevant scope file under the right subfolder (`plan-review/` or `code-review/`), declare the binding(s) and description, then wire a handler at the call site with `useShortcutScope`. The marketing docs page picks it up automatically at next build. Unit tests in `packages/ui/shortcuts.test.ts` enforce normalized binding tokens (`Mod`, `Shift`, `Alt`, `A-Z`, `1-0`, named keys, `F1`–`F12`) and unique scope ids.
 
@@ -556,9 +556,8 @@ bun run dev:vscode     # VS Code extension (watch mode)
 ## Build
 
 ```bash
-bun run build:hook       # Single-file HTML for hook server
-bun run build:review     # Code review editor
-bun run build:opencode   # OpenCode plugin (copies HTML from hook + review)
+bun run build:hook       # Builds the frontend, then the binary embeds it
+bun run build:opencode   # OpenCode plugin
 bun run build:portal     # Static build for share.plannotator.ai
 bun run build:marketing  # Static build for plannotator.ai
 bun run build:vscode     # VS Code extension bundle
@@ -568,22 +567,12 @@ bun run build            # Build hook + opencode (main targets)
 
 **Important: Tailwind `@source` paths.** When creating new directories that contain `.tsx` files with Tailwind classes, add a matching `@source` entry to the app's `index.css`. Tailwind only generates CSS for classes it finds in scanned files — missing paths means classes appear in the DOM but have no effect.
 
-**Important: Build order matters.** The hook build (`build:hook`) copies pre-built HTML from `apps/review/dist/`. If you change UI code in `packages/ui/`, `packages/editor/`, or `packages/review-editor/`, you **must** rebuild the review app first, then the hook:
+The hook build (`build:hook`) builds the frontend app (`apps/frontend/`) into a single-file HTML, which the daemon embeds and serves. When testing locally with a compiled binary:
 
 ```bash
-bun run --cwd apps/review build && bun run build:hook   # For review UI changes
-bun run build:hook                                       # For plan UI changes only
-bun run build:hook && bun run build:opencode             # For OpenCode plugin
-```
-
-Running only `build:hook` after review-editor changes will copy stale HTML files. When testing locally with a compiled binary, the full sequence is:
-
-```bash
-bun run --cwd apps/review build && bun run build:hook && \
+bun run build:hook && \
   bun build apps/hook/server/index.ts --compile --outfile ~/.local/bin/plannotator
 ```
-
-Running only `build:opencode` will copy stale HTML files.
 
 ## Marketing Site
 
