@@ -1,5 +1,5 @@
-import { planReviewSurface, annotateSurface, goalSetupSurface } from '../../../../packages/editor/shortcuts';
-import { codeReviewSurface } from '../../../../packages/review-editor/shortcuts';
+import { planReviewSurface, annotateSurface, goalSetupSurface } from '../../../../packages/plannotator-plan-review/shortcuts';
+import { codeReviewSurface } from '../../../../packages/plannotator-code-review/shortcuts';
 import { listRegistryShortcutSections } from '../../../../packages/ui/shortcuts';
 import type { ShortcutSurface } from '../../../../packages/ui/shortcuts';
 

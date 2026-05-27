@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@plannotator/editor": "workspace:*",
+    "@plannotator/plan-review": "workspace:*",
     "@plannotator/ui": "workspace:*",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",

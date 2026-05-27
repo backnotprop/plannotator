@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { annotateSettingsShortcutRegistry, planEditorShortcuts, planReviewSettingsShortcutRegistry } from '../editor/shortcuts';
-import { reviewSettingsShortcutRegistry } from '../review-editor/shortcuts';
+import { annotateSettingsShortcutRegistry, planEditorShortcuts, planReviewSettingsShortcutRegistry } from '../plannotator-plan-review/shortcuts';
+import { reviewSettingsShortcutRegistry } from '../plannotator-code-review/shortcuts';
 import {
   createShortcutRegistry,
   defineShortcutScope,

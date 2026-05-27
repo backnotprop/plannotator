@@ -17,8 +17,8 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, '.'),
       '@plannotator/ui': path.resolve(__dirname, '../../packages/ui'),
-      '@plannotator/editor/styles': path.resolve(__dirname, '../../packages/editor/index.css'),
-      '@plannotator/editor': path.resolve(__dirname, '../../packages/editor/App.tsx'),
+      '@plannotator/plan-review/styles': path.resolve(__dirname, '../../packages/plannotator-plan-review/index.css'),
+      '@plannotator/plan-review': path.resolve(__dirname, '../../packages/plannotator-plan-review/App.tsx'),
     }
   },
   build: {

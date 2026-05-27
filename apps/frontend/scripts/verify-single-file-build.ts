@@ -20,7 +20,7 @@ function listFiles(dir: string): string[] {
 }
 
 if (!existsSync(indexPath)) {
-  throw new Error("Expected apps/debug-frontend/dist/index.html to exist after build.");
+  throw new Error("Expected apps/frontend/dist/index.html to exist after build.");
 }
 
 const html = readFileSync(indexPath, "utf-8");
