@@ -90,7 +90,9 @@ Every annotate session lives forever — single file, folder, URL, last message.
 
 Single-file annotate is revisable: it has a matchKey, updateContent, and version history. The frontend shows "Waiting for agent to revise..." after feedback.
 
-Folder, annotate-last, and URL annotate are non-revisable: no matchKey, no updateContent. The frontend shows "Feedback sent" after feedback. The session stays interactive — the user can keep browsing and send more feedback.
+Folder annotate is reusable: it has a matchKey (`annotate:project:folder:path`) and updateContent. Running the same folder command reactivates the existing session. No content to push (it's a file browser), but the session reactivates and the frontend clears the "Feedback sent" state.
+
+Annotate-last and URL annotate are non-reusable: no matchKey (no stable identity). The frontend shows "Feedback sent" after feedback. The session stays interactive — the user can keep browsing and send more feedback.
 
 ### Decision 3: "Feedback sent" state should be calm, not loading
 

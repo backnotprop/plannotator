@@ -51,7 +51,7 @@ active → awaiting-resubmission → active → awaiting-resubmission → ...
 
 ### Decision Cycle Model
 
-Each server (plan, annotate, review) previously used a one-shot promise for the user's decision. Now they use a **cycle model**: each deny resolves the current cycle and starts a new one. The approve/exit path resolves the cycle as final.
+Each server (plan, annotate, review) previously used a one-shot promise for the user's decision. Now they use a **cycle model**: every action (deny, approve, exit, send feedback) resolves the current cycle and starts a new one for agent-originated sessions. The decision loop stays alive after all actions.
 
 Shared helper in `packages/server/session-handler.ts`:
 - `createDecisionCycle<T>()` — creates a resolvable cycle with `promise()`, `resolve()`, `startNew()`
@@ -65,7 +65,8 @@ When the agent resubmits, the daemon matches the new request to the existing sus
 |-------------|-----------|---------|
 | Plan | `plan:${project}:${slug}` | `plan:plannotator:implementation-plan-2026-05-22` |
 | Code Review | `review:${project}:${branch}` or `review:${prUrl}` | `review:plannotator:feat/session-persistence` |
-| Annotate | `annotate:${filePath}` | `annotate:/path/to/README.md` |
+| Annotate (file) | `annotate:${project}:${filePath}` | `annotate:plannotator:/path/to/README.md` |
+| Annotate (folder) | `annotate:${project}:folder:${folderPath}` | `annotate:plannotator:folder:/path/to/docs` |
 
 If a match is found: the session's `updateContent` method pushes new content, the store reactivates the session, and a `session-revision` WebSocket event notifies the frontend.
 
@@ -113,8 +114,8 @@ The CLI binary accepts `awaiting-resubmission` as a valid non-error status. It o
 
 ## What Does NOT Persist
 
-- **URL-based annotations** — the source URL might change, can't refresh
-- **"Annotate last message" sessions** — ephemeral, no persistent source
+- **URL-based annotations** — session stays alive but can't be matched for reuse (source URL might change)
+- **"Annotate last message" sessions** — session stays alive but can't be matched for reuse (no stable identity)
 - **Archive sessions** — read-only, no feedback cycle
 - **Goal setup sessions** — one-shot Q&A, not a review cycle
 - **Standalone/demo sessions** — no agent to resubmit
@@ -153,7 +154,7 @@ The CLI binary accepts `awaiting-resubmission` as a valid non-error status. It o
 > `complete()` sets terminal status, disposes resources, clears the HTTP handler. `suspend()` sets `awaiting-resubmission`, resolves waiters (so the CLI gets feedback), but keeps everything alive.
 
 **6.** How does the frontend know the content changed?
-> A `session-revision` WebSocket event carrying the new content. The frontend subscribes when `awaitingResubmission` is true.
+> A `session-revision` WebSocket event carrying the new content. The frontend always subscribes in API mode. State resets only fire for live events or when content actually changed (snapshots with unchanged content are ignored to prevent wiping restored state on tab refresh).
 
 **7.** What happens to a URL annotation session when denied?
 > It completes normally (no persistence). URL sources can't be refreshed, so no match key is set.
