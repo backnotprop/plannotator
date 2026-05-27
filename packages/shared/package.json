@@ -43,10 +43,7 @@
     "./annotate-args": "./annotate-args.ts",
     "./at-reference": "./at-reference.ts",
     "./code-nav": "./code-nav.ts",
-    "./goal-setup": "./goal-setup.ts",
-    "./plugin-protocol": "./plugin-protocol.ts",
-    "./plugin-binary": "./plugin-binary.ts",
-    "./plugin-client": "./plugin-client.ts"
+    "./goal-setup": "./goal-setup.ts"
   },
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.64",
