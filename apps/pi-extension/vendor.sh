@@ -50,5 +50,5 @@ STUB
 
 cat > generated/vcs-core.ts << 'STUB'
 // @generated — stub. Only the types review-args.ts needs.
-export type VcsSelection = "git" | "jj" | "p4" | string;
+export type VcsSelection = "auto" | "git" | "jj" | "p4";
 STUB
