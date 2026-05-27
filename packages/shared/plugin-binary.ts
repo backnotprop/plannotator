@@ -46,9 +46,7 @@ export interface PluginBinaryCompatibilityOptions {
 }
 
 const SOURCE_RUNTIME_ASSETS = [
-  path.join("apps", "hook", "dist", "index.html"),
-  path.join("apps", "hook", "dist", "review.html"),
-  path.join("apps", "debug-frontend", "dist", "index.html"),
+  path.join("apps", "frontend", "dist", "index.html"),
 ] as const;
 
 function executableNames(platform: NodeJS.Platform): string[] {
