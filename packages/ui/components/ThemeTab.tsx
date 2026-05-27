@@ -11,7 +11,7 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
   const { mode, setMode, colorTheme, setColorTheme, availableThemes, resolvedMode } = useTheme();
 
   return (
-    <>
+    <div className={compact ? '' : 'space-y-5'}>
       {/* Mode */}
       <div className={compact ? 'flex items-center gap-3 mb-2' : 'space-y-2'}>
         {!compact && <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Mode</label>}
@@ -61,26 +61,26 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
       </div>
 
       {/* Theme */}
-      <div className={compact ? '' : 'space-y-2'}>
+      <div className={compact ? '' : 'space-y-3'}>
         {!compact && (
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Theme</label>
+          <div className="flex items-center justify-between border-t border-border pt-5">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Theme</label>
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] text-muted-foreground/70 flex items-center gap-1">
+                <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h7" />
+                </svg>
+                = matched syntax colors
+              </span>
               {onPreview && (
                 <button
                   onClick={onPreview}
                   className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 hover:border-primary/40 transition-colors"
                 >
-                  Launch Preview Mode
+                  Preview Mode
                 </button>
               )}
             </div>
-            <span className="text-[10px] text-muted-foreground/70 flex items-center gap-1">
-              <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h7" />
-              </svg>
-              = matched syntax colors in diffs
-            </span>
           </div>
         )}
         <div className={`grid gap-2 overflow-y-auto pr-1 ${compact ? 'grid-cols-4' : 'grid-cols-3'}`}>
@@ -134,6 +134,6 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
           })}
         </div>
       </div>
-    </>
+    </div>
   );
 };

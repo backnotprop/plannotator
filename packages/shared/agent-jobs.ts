@@ -1,5 +1,5 @@
 /**
- * Agent Jobs — shared types, state machine, and SSE helpers.
+ * Agent Jobs — shared types and state machine helpers.
  *
  * Runtime-agnostic: no node:fs, no node:http, no Bun APIs.
  * Both the Bun server handler and (future) Node handler import
@@ -90,32 +90,19 @@ export interface AgentCapabilities {
   available: boolean;
 }
 
+export type AgentJobLogs = Record<string, string>;
+
 // ---------------------------------------------------------------------------
-// SSE event types
+// Live event types
 // ---------------------------------------------------------------------------
 
 export type AgentJobEvent =
-  | { type: "snapshot"; jobs: AgentJobInfo[] }
+  | { type: "snapshot"; jobs: AgentJobInfo[]; logs?: AgentJobLogs; version?: number }
   | { type: "job:started"; job: AgentJobInfo }
   | { type: "job:updated"; job: AgentJobInfo }
   | { type: "job:completed"; job: AgentJobInfo }
   | { type: "job:log"; jobId: string; delta: string }
   | { type: "jobs:cleared" };
-
-// ---------------------------------------------------------------------------
-// SSE helpers
-// ---------------------------------------------------------------------------
-
-/** Heartbeat comment to keep SSE connections alive (sent every 30s). */
-export const AGENT_HEARTBEAT_COMMENT = ":\n\n";
-
-/** Interval in ms between heartbeat comments. */
-export const AGENT_HEARTBEAT_INTERVAL_MS = 30_000;
-
-/** Encode an event as an SSE `data:` line. */
-export function serializeAgentSSEEvent(event: AgentJobEvent): string {
-  return `data: ${JSON.stringify(event)}\n\n`;
-}
 
 // ---------------------------------------------------------------------------
 // Helpers

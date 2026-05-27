@@ -2,7 +2,7 @@
  * Agent Jobs — Bun server handler.
  *
  * Manages background agent processes (spawn, monitor, kill) and exposes
- * HTTP routes + SSE broadcasting for job status updates.
+ * HTTP routes + daemon event publication for job status updates.
  *
  * Mirrors packages/server/external-annotations.ts in structure.
  * Server-agnostic: takes a mode, server URL getter, and cwd getter.
@@ -12,14 +12,13 @@ import { formatClaudeLogEvent } from "./claude-review";
 import {
   type AgentJobInfo,
   type AgentJobEvent,
+  type AgentJobLogs,
   type AgentCapability,
   type AgentCapabilities,
   isTerminalStatus,
   jobSource,
-  serializeAgentSSEEvent,
-  AGENT_HEARTBEAT_COMMENT,
-  AGENT_HEARTBEAT_INTERVAL_MS,
 } from "@plannotator/shared/agent-jobs";
+import type { SessionSnapshotProvider } from "./session-handler";
 
 export type { AgentJobInfo, AgentJobEvent, AgentCapabilities } from "@plannotator/shared/agent-jobs";
 
@@ -35,6 +34,7 @@ export interface AgentJobHandler {
   ) => Promise<Response | null>;
   /** Kill all running jobs — call on server shutdown. */
   killAll: () => void;
+  dispose: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -45,6 +45,7 @@ const BASE = "/api/agents";
 const JOBS = `${BASE}/jobs`;
 const JOBS_STREAM = `${JOBS}/stream`;
 const CAPABILITIES = `${BASE}/capabilities`;
+const MAX_JOB_LOG_CHARS = 256_000;
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -93,6 +94,8 @@ export interface AgentJobHandlerOptions {
    * Use for result ingestion (e.g., reading an output file and pushing annotations).
    */
   onJobComplete?: (job: AgentJobInfo, meta: { outputPath?: string; stdout?: string; cwd?: string }) => void | Promise<void>;
+  publishEvent?: (event: AgentJobEvent) => void;
+  registerSnapshotProvider?: (provider: SessionSnapshotProvider) => (() => void) | undefined;
 }
 
 export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJobHandler {
@@ -101,9 +104,9 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
   // --- State ---
   const jobs = new Map<string, { info: AgentJobInfo; proc: ReturnType<typeof Bun.spawn> | null }>();
   const jobOutputPaths = new Map<string, string>();
-  const subscribers = new Set<ReadableStreamDefaultController>();
-  const encoder = new TextEncoder();
+  const jobLogs = new Map<string, string>();
   let version = 0;
+  let disposed = false;
 
   // --- Capability detection (run once) ---
   const capabilities: AgentCapability[] = [
@@ -117,17 +120,17 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
     available: capabilities.some((c) => c.available),
   };
 
-  // --- SSE broadcasting ---
+  // --- Event publication ---
   function broadcast(event: AgentJobEvent): void {
+    if (disposed) return;
     version++;
-    const data = encoder.encode(serializeAgentSSEEvent(event));
-    for (const controller of subscribers) {
-      try {
-        controller.enqueue(data);
-      } catch {
-        subscribers.delete(controller);
-      }
-    }
+    options.publishEvent?.(event);
+  }
+
+  function appendJobLog(jobId: string, delta: string): void {
+    if (disposed || delta.length === 0) return;
+    jobLogs.set(jobId, ((jobLogs.get(jobId) ?? "") + delta).slice(-MAX_JOB_LOG_CHARS));
+    broadcast({ type: "job:log", jobId, delta });
   }
 
   // --- Process lifecycle ---
@@ -212,7 +215,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
               if (!logFlushTimer) {
                 logFlushTimer = setTimeout(() => {
                   if (logPending) {
-                    broadcast({ type: "job:log", jobId: id, delta: logPending });
+                    appendJobLog(id, logPending);
                     logPending = "";
                   }
                   logFlushTimer = null;
@@ -222,7 +225,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
             // Flush remaining on stream close
             if (logFlushTimer) { clearTimeout(logFlushTimer); logFlushTimer = null; }
             if (logPending) {
-              broadcast({ type: "job:log", jobId: id, delta: logPending });
+              appendJobLog(id, logPending);
               logPending = "";
             }
           } catch {
@@ -250,7 +253,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
                   if (provider === "claude" || spawnOptions?.engine === "claude") {
                     const formatted = formatClaudeLogEvent(line);
                     if (formatted !== null) {
-                      broadcast({ type: "job:log", jobId: id, delta: formatted + '\n' });
+                      appendJobLog(id, formatted + '\n');
                     }
                     continue;
                   }
@@ -258,7 +261,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
                     const event = JSON.parse(line);
                     if (event.type === 'result') continue; // handled in onJobComplete
                   } catch { /* not JSON — forward as raw log */ }
-                  broadcast({ type: "job:log", jobId: id, delta: line + '\n' });
+                  appendJobLog(id, line + '\n');
                 }
               }
             } catch {
@@ -354,66 +357,42 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
     return Array.from(jobs.values()).map((e) => ({ ...e.info }));
   }
 
+  function getJobLogs(): AgentJobLogs {
+    return Object.fromEntries(jobLogs);
+  }
+
+  const unregisterSnapshotProvider = options.registerSnapshotProvider?.(() => ({
+    type: "snapshot",
+    jobs: getAllJobs(),
+    logs: getJobLogs(),
+    version,
+  } satisfies AgentJobEvent));
+
   // --- HTTP handler ---
   return {
     killAll,
+    dispose() {
+      disposed = true;
+      unregisterSnapshotProvider?.();
+      killAll();
+    },
 
     async handle(
       req: Request,
       url: URL,
-      handlerOptions?: { disableIdleTimeout?: () => void },
+      _handlerOptions?: { disableIdleTimeout?: () => void },
     ): Promise<Response | null> {
       // --- GET /api/agents/capabilities ---
       if (url.pathname === CAPABILITIES && req.method === "GET") {
         return Response.json(capabilitiesResponse);
       }
 
-      // --- SSE stream ---
+      // --- Legacy persistent stream route ---
       if (url.pathname === JOBS_STREAM && req.method === "GET") {
-        handlerOptions?.disableIdleTimeout?.();
-
-        let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-        let ctrl: ReadableStreamDefaultController;
-
-        const stream = new ReadableStream({
-          start(controller) {
-            ctrl = controller;
-
-            // Send current state as snapshot
-            const snapshot: AgentJobEvent = {
-              type: "snapshot",
-              jobs: getAllJobs(),
-            };
-            controller.enqueue(encoder.encode(serializeAgentSSEEvent(snapshot)));
-
-            subscribers.add(controller);
-
-            // Heartbeat to keep connection alive
-            heartbeatTimer = setInterval(() => {
-              try {
-                controller.enqueue(encoder.encode(AGENT_HEARTBEAT_COMMENT));
-              } catch {
-                if (heartbeatTimer) clearInterval(heartbeatTimer);
-                subscribers.delete(controller);
-              }
-            }, AGENT_HEARTBEAT_INTERVAL_MS);
-          },
-          cancel() {
-            if (heartbeatTimer) clearInterval(heartbeatTimer);
-            subscribers.delete(ctrl);
-          },
-        });
-
-        return new Response(stream, {
-          headers: {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            Connection: "keep-alive",
-          },
-        });
+        return Response.json({ error: "Agent job events moved to the daemon WebSocket hub." }, { status: 410 });
       }
 
-      // --- GET /api/agents/jobs (snapshot / polling fallback) ---
+      // --- GET /api/agents/jobs (snapshot / reconnect resync) ---
       if (url.pathname === JOBS && req.method === "GET") {
         const since = url.searchParams.get("since");
         if (since !== null) {
@@ -422,7 +401,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
             return new Response(null, { status: 304 });
           }
         }
-        return Response.json({ jobs: getAllJobs(), version });
+        return Response.json({ jobs: getAllJobs(), logs: getJobLogs(), version });
       }
 
       // --- POST /api/agents/jobs (launch) ---

@@ -11,6 +11,7 @@ import {
   type PlanDiffBlock,
   type PlanDiffStats,
 } from "../utils/planDiffEngine";
+import { useSessionFetch } from "./useSessionFetch";
 
 export interface VersionInfo {
   version: number;
@@ -53,6 +54,7 @@ export function usePlanDiff(
   initialPreviousPlan: string | null,
   versionInfo: VersionInfo | null
 ): UsePlanDiffReturn {
+  const fetch = useSessionFetch();
   const [diffBasePlan, setDiffBasePlan] = useState<string | null>(
     initialPreviousPlan
   );
@@ -64,16 +66,15 @@ export function usePlanDiff(
   const [isSelectingVersion, setIsSelectingVersion] = useState(false);
   const [fetchingVersion, setFetchingVersion] = useState<number | null>(null);
 
-  // Sync diffBasePlan when initialPreviousPlan arrives after mount (API response)
+  // Sync diff base when previousPlan or versionInfo changes (initial load + resubmissions)
   useEffect(() => {
-    if (initialPreviousPlan && !diffBasePlan) {
+    if (initialPreviousPlan) {
       setDiffBasePlan(initialPreviousPlan);
     }
   }, [initialPreviousPlan]);
 
-  // Sync diffBaseVersion when versionInfo arrives after mount
   useEffect(() => {
-    if (versionInfo && versionInfo.version > 1 && diffBaseVersion === null) {
+    if (versionInfo && versionInfo.version > 1) {
       setDiffBaseVersion(versionInfo.version - 1);
     }
   }, [versionInfo]);

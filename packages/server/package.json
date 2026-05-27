@@ -20,7 +20,12 @@
     "./share-url": "./share-url.ts",
     "./sessions": "./sessions.ts",
     "./project": "./project.ts",
-    "./pr": "./pr.ts"
+    "./pr": "./pr.ts",
+    "./daemon/client": "./daemon/client.ts",
+    "./daemon/runtime": "./daemon/runtime.ts",
+    "./daemon/session-factory": "./daemon/session-factory.ts",
+    "./daemon/start-command": "./daemon/start-command.ts",
+    "./daemon/state": "./daemon/state.ts"
   },
   "files": [
     "*.ts"

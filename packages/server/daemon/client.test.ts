@@ -2,7 +2,10 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { getDaemonCapabilities } from "@plannotator/shared/daemon-protocol";
+import {
+  PLANNOTATOR_DAEMON_PROTOCOL_VERSION,
+  getDaemonCapabilities,
+} from "@plannotator/shared/daemon-protocol";
 import { createDaemonState, getDaemonPaths, writeDaemonState } from "./state";
 import { cleanupDaemonState, DaemonClient, discoverDaemon } from "./client";
 
@@ -292,7 +295,7 @@ describe("discoverDaemon", () => {
           return Response.json({
             ok: true,
             protocol: "plannotator-daemon",
-            protocolVersion: 1,
+            protocolVersion: PLANNOTATOR_DAEMON_PROTOCOL_VERSION,
             pid: 123,
             endpoint: {
               hostname: "127.0.0.1",
@@ -344,7 +347,7 @@ describe("discoverDaemon", () => {
           return Response.json({
             ok: true,
             protocol: "plannotator-daemon",
-            protocolVersion: 1,
+            protocolVersion: PLANNOTATOR_DAEMON_PROTOCOL_VERSION,
             pid: 123,
             endpoint: {
               hostname: "127.0.0.1",
@@ -382,7 +385,7 @@ describe("discoverDaemon", () => {
           return Response.json({
             ok: true,
             protocol: "plannotator-daemon",
-            protocolVersion: 1,
+            protocolVersion: PLANNOTATOR_DAEMON_PROTOCOL_VERSION,
             pid: 123,
             endpoint: {
               hostname: "127.0.0.1",
@@ -419,7 +422,7 @@ describe("discoverDaemon", () => {
           return Response.json({
             ok: true,
             protocol: "plannotator-daemon",
-            protocolVersion: 1,
+            protocolVersion: PLANNOTATOR_DAEMON_PROTOCOL_VERSION,
             pid: 123,
             endpoint: {
               hostname: "127.0.0.1",

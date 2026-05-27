@@ -14,24 +14,18 @@ function authHeaders(headers?: HeadersInit): Headers {
   return next;
 }
 
-async function readSseMessage(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
-): Promise<string> {
-  const decoder = new TextDecoder();
-  let text = "";
-  while (!text.includes("\n\n")) {
-    const chunk = await reader.read();
-    if (chunk.done) break;
-    text += decoder.decode(chunk.value, { stream: true });
-  }
-  const [message] = text.split("\n\n");
-  return `${message}\n\n`;
-}
+class FakeSocket {
+  data?: { daemonAuthenticated?: boolean } = { daemonAuthenticated: true };
+  sent: Record<string, unknown>[] = [];
+  closed = false;
 
-function parseSseMessage(message: string): { event: string; data: Record<string, unknown> } {
-  const event = message.match(/^event: (.+)$/m)?.[1] ?? "";
-  const data = message.match(/^data: (.+)$/m)?.[1] ?? "{}";
-  return { event, data: JSON.parse(data) as Record<string, unknown> };
+  send(message: string): void {
+    this.sent.push(JSON.parse(message) as Record<string, unknown>);
+  }
+
+  close(): void {
+    this.closed = true;
+  }
 }
 
 function makeHandler() {
@@ -107,6 +101,10 @@ describe("daemon HTTP router", () => {
       headers: { cookie: `plannotator_daemon_auth=${AUTH_TOKEN}` },
     }));
     expect(status.status).toBe(200);
+
+    const apiWithQueryToken = await handler(new Request(`http://127.0.0.1:4321/daemon/status?plannotator_auth=${AUTH_TOKEN}`));
+    expect(apiWithQueryToken.status).toBe(401);
+    expect(apiWithQueryToken.headers.get("set-cookie")).toBeNull();
   });
 
   test("rejects unauthenticated daemon control requests", async () => {
@@ -122,6 +120,67 @@ describe("daemon HTTP router", () => {
     expect((await status.json()).error.code).toBe("unauthorized");
     expect(create.status).toBe(401);
     expect((await create.json()).error.code).toBe("unauthorized");
+  });
+
+  test("authenticates daemon WebSocket upgrades", async () => {
+    const { handler } = makeHandler();
+    const upgradeData: unknown[] = [];
+
+    const unauthenticated = await handler(
+      new Request("http://127.0.0.1:4321/daemon/ws"),
+      {
+        upgradeWebSocket: (data) => {
+          upgradeData.push(data);
+          return undefined;
+        },
+      },
+    );
+    expect(unauthenticated).toBeUndefined();
+
+    const authenticated = await handler(
+      new Request("http://127.0.0.1:4321/daemon/ws", {
+        headers: authHeaders({ origin: "http://127.0.0.1:4321" }),
+      }),
+      {
+        upgradeWebSocket: (data) => {
+          upgradeData.push(data);
+          return undefined;
+        },
+      },
+    );
+    expect(authenticated).toBeUndefined();
+
+    const queryAuthenticated = await handler(
+      new Request(`http://127.0.0.1:4321/daemon/ws?plannotator_auth=${AUTH_TOKEN}`, {
+        headers: { origin: "http://127.0.0.1:4321" },
+      }),
+      {
+        upgradeWebSocket: (data) => {
+          upgradeData.push(data);
+          return undefined;
+        },
+      },
+    );
+    expect(queryAuthenticated).toBeUndefined();
+
+    const crossOrigin = await handler(
+      new Request("http://127.0.0.1:4321/daemon/ws", {
+        headers: { origin: "http://evil.example" },
+      }),
+      {
+        upgradeWebSocket: (data) => {
+          upgradeData.push(data);
+          return undefined;
+        },
+      },
+    );
+    expect(crossOrigin?.status).toBe(403);
+
+    expect(upgradeData).toEqual([
+      { daemonAuthenticated: false },
+      { daemonAuthenticated: true },
+      { daemonAuthenticated: true },
+    ]);
   });
 
   test("reports daemon status with active session count", async () => {
@@ -144,55 +203,52 @@ describe("daemon HTTP router", () => {
     expect(afterCompleteBody.sessionCount).toBe(1);
   });
 
-  test("streams daemon snapshot and session lifecycle events", async () => {
+  test("publishes daemon snapshot and session lifecycle events over WebSocket", async () => {
     const { handler, store } = makeHandler();
-    let timeoutDisabled = 0;
-    const streamResponse = await handler(
-      new Request("http://127.0.0.1:4321/daemon/events", { headers: authHeaders() }),
-      { disableIdleTimeout: () => { timeoutDisabled += 1; } },
-    );
-    expect(timeoutDisabled).toBe(1);
-    expect(streamResponse.headers.get("content-type")).toContain("text/event-stream");
-    const reader = streamResponse.body!.getReader();
+    const socket = new FakeSocket();
+    handler.websocket.open?.(socket as never);
+    await handler.websocket.message?.(socket as never, JSON.stringify({
+      type: "subscribe",
+      scopes: [{ family: "daemon" }],
+    }));
 
-    const snapshot = parseSseMessage(await readSseMessage(reader));
-    expect(snapshot.event).toBe("snapshot");
-    expect(snapshot.data.type).toBe("snapshot");
-    expect((snapshot.data.sessions as unknown[])).toHaveLength(0);
-
-    const status = parseSseMessage(await readSseMessage(reader));
-    expect(status.event).toBe("daemon-status");
-    expect((status.data.status as { activeSessionCount: number }).activeSessionCount).toBe(0);
+    const snapshot = socket.sent[0];
+    expect(snapshot.type).toBe("snapshot");
+    expect((snapshot.scope as { family: string }).family).toBe("daemon");
+    expect(((snapshot.payload as { sessions: unknown[] }).sessions)).toHaveLength(0);
 
     await handler(new Request("http://127.0.0.1:4321/daemon/sessions", {
       method: "POST",
       headers: authHeaders({ "content-type": "application/json" }),
       body: JSON.stringify({ request: { action: "plan", origin: "opencode", plan: "x" } }),
     }));
-    const created = parseSseMessage(await readSseMessage(reader));
-    expect(created.event).toBe("session-created");
-    expect((created.data.session as { id: string; status: string }).id).toBe("s1");
-    expect((created.data.session as { id: string; status: string }).status).toBe("active");
+    const created = socket.sent[1];
+    expect(created.type).toBe("event");
+    expect((created.payload as { type: string }).type).toBe("session-created");
+    expect(((created.payload as { session: { id: string; status: string } }).session).id).toBe("s1");
+    expect(((created.payload as { session: { id: string; status: string } }).session).status).toBe("active");
 
     store.complete("s1", { approved: true });
-    const updated = parseSseMessage(await readSseMessage(reader));
-    expect(updated.event).toBe("session-updated");
-    expect((updated.data.session as { status: string }).status).toBe("completed");
+    const updated = socket.sent[2];
+    expect((updated.payload as { type: string }).type).toBe("session-updated");
+    expect(((updated.payload as { session: { status: string } }).session).status).toBe("completed");
 
     await store.delete("s1");
-    const removed = parseSseMessage(await readSseMessage(reader));
-    expect(removed.event).toBe("session-removed");
-    expect((removed.data.session as { id: string }).id).toBe("s1");
-
-    await reader.cancel();
+    const removed = socket.sent[3];
+    expect((removed.payload as { type: string }).type).toBe("session-removed");
+    expect(((removed.payload as { session: { id: string } }).session).id).toBe("s1");
+    handler.websocket.close?.(socket as never, 1000, "");
+    expect(socket.closed).toBe(false);
   });
 
   test("broadcasts posted debug log events", async () => {
     const { handler } = makeHandler();
-    const streamResponse = await handler(new Request("http://127.0.0.1:4321/daemon/events", { headers: authHeaders() }));
-    const reader = streamResponse.body!.getReader();
-    await readSseMessage(reader);
-    await readSseMessage(reader);
+    const socket = new FakeSocket();
+    handler.websocket.open?.(socket as never);
+    await handler.websocket.message?.(socket as never, JSON.stringify({
+      type: "subscribe",
+      scopes: [{ family: "daemon" }],
+    }));
 
     const post = await handler(new Request("http://127.0.0.1:4321/daemon/events/debug", {
       method: "POST",
@@ -205,13 +261,365 @@ describe("daemon HTTP router", () => {
     }));
     expect(post.status).toBe(200);
 
-    const debug = parseSseMessage(await readSseMessage(reader));
-    expect(debug.event).toBe("debug-log");
-    expect(debug.data.type).toBe("debug-log");
-    expect(debug.data.source).toBe("agent-simulator");
-    expect(debug.data.message).toBe("queued claude-plan-hook");
+    const debug = socket.sent[1];
+    expect(debug.type).toBe("event");
+    expect((debug.payload as { type: string }).type).toBe("debug-log");
+    expect((debug.payload as { source: string }).source).toBe("agent-simulator");
+    expect((debug.payload as { message: string }).message).toBe("queued claude-plan-hook");
+  });
 
-    await reader.cancel();
+  test("filters session-scoped WebSocket events by family and session", async () => {
+    let sessionIndex = 0;
+    const store = new DaemonSessionStore({ now: () => 1_000 });
+    const state = createDaemonState({
+      pid: 123,
+      port: 4321,
+      hostname: "127.0.0.1",
+      isRemote: false,
+      remoteSource: "local",
+      authToken: AUTH_TOKEN,
+      startedAt: "2026-01-01T00:00:00.000Z",
+    });
+    const handler = createDaemonFetchHandler({
+      state,
+      shellHtmlContent: shellHtml,
+      store,
+      createSession: (_request, context) => {
+        sessionIndex += 1;
+        const id = `s${sessionIndex}`;
+        const record = store.create({
+          id,
+          mode: "review",
+          url: `${state.baseUrl}/s/${id}`,
+          project: "repo",
+          label: `review-${id}`,
+        });
+        context.registerSessionSnapshotProvider(id, "external-annotations", () => ({
+          type: "snapshot",
+          annotations: [{ id: `${id}-annotation` }],
+        }));
+        return record;
+      },
+    });
+
+    await handler(new Request("http://127.0.0.1:4321/daemon/sessions", {
+      method: "POST",
+      headers: authHeaders({ "content-type": "application/json" }),
+      body: JSON.stringify({ request: { action: "review", origin: "opencode", rawPatch: "diff" } }),
+    }));
+    await handler(new Request("http://127.0.0.1:4321/daemon/sessions", {
+      method: "POST",
+      headers: authHeaders({ "content-type": "application/json" }),
+      body: JSON.stringify({ request: { action: "review", origin: "opencode", rawPatch: "diff" } }),
+    }));
+
+    const s1Socket = new FakeSocket();
+    const s2Socket = new FakeSocket();
+    handler.websocket.open?.(s1Socket as never);
+    handler.websocket.open?.(s2Socket as never);
+
+    await handler.websocket.message?.(s1Socket as never, JSON.stringify({
+      type: "subscribe",
+      scopes: [{ family: "external-annotations", sessionId: "s1" }],
+    }));
+    await handler.websocket.message?.(s2Socket as never, JSON.stringify({
+      type: "subscribe",
+      scopes: [{ family: "external-annotations", sessionId: "s2" }],
+    }));
+
+    expect(s1Socket.sent[0].type).toBe("snapshot");
+    expect((s1Socket.sent[0].scope as { sessionId: string }).sessionId).toBe("s1");
+    expect((((s1Socket.sent[0].payload as { annotations: { id: string }[] }).annotations)[0]).id).toBe("s1-annotation");
+    expect((s2Socket.sent[0].scope as { sessionId: string }).sessionId).toBe("s2");
+
+    handler.eventHub.publishSessionEvent("s1", "external-annotations", {
+      type: "added",
+      annotation: { id: "s1-live" },
+    });
+    handler.eventHub.publishSessionEvent("s1", "agent-jobs", {
+      type: "job-started",
+      job: { id: "ignored" },
+    });
+
+    expect(s1Socket.sent).toHaveLength(2);
+    expect((s1Socket.sent[1].payload as { type: string }).type).toBe("added");
+    expect(s2Socket.sent).toHaveLength(1);
+
+    await handler.websocket.message?.(s1Socket as never, JSON.stringify({
+      type: "unsubscribe",
+      scopes: [{ family: "external-annotations", sessionId: "s1" }],
+    }));
+    handler.eventHub.publishSessionEvent("s1", "external-annotations", {
+      type: "added",
+      annotation: { id: "after-unsubscribe" },
+    });
+    expect(s1Socket.sent).toHaveLength(2);
+  });
+
+  test("allows unauthenticated WebSocket clients to subscribe only to session scopes", async () => {
+    const { handler } = makeHandler();
+    await handler(new Request("http://127.0.0.1:4321/daemon/sessions", {
+      method: "POST",
+      headers: authHeaders({ "content-type": "application/json" }),
+      body: JSON.stringify({ request: { action: "plan", origin: "opencode", plan: "x" } }),
+    }));
+
+    const socket = new FakeSocket();
+    socket.data = { daemonAuthenticated: false };
+    handler.websocket.open?.(socket as never);
+
+    await handler.websocket.message?.(socket as never, JSON.stringify({
+      type: "subscribe",
+      requestId: "daemon-sub",
+      scopes: [{ family: "daemon" }],
+    }));
+    expect(socket.sent[0]).toMatchObject({
+      type: "error",
+      requestId: "daemon-sub",
+      code: "unauthorized",
+    });
+
+    await handler.websocket.message?.(socket as never, JSON.stringify({
+      type: "subscribe",
+      requestId: "session-sub",
+      scopes: [{ family: "external-annotations", sessionId: "s1" }],
+    }));
+    expect(socket.sent[1]).toMatchObject({
+      type: "error",
+      requestId: "session-sub",
+      code: "session-not-found",
+    });
+  });
+
+  test("treats missing WebSocket auth metadata as unauthenticated", async () => {
+    const { handler } = makeHandler();
+    const socket = new FakeSocket();
+    socket.data = undefined;
+    handler.websocket.open?.(socket as never);
+
+    await handler.websocket.message?.(socket as never, JSON.stringify({
+      type: "subscribe",
+      requestId: "daemon-sub",
+      scopes: [{ family: "daemon" }],
+    }));
+
+    expect(socket.sent[0]).toMatchObject({
+      type: "error",
+      requestId: "daemon-sub",
+      code: "unauthorized",
+    });
+  });
+
+  test("removes failed subscriptions when a session snapshot cannot be created", async () => {
+    const { handler } = makeHandler();
+    const socket = new FakeSocket();
+    handler.websocket.open?.(socket as never);
+
+    await handler.websocket.message?.(socket as never, JSON.stringify({
+      type: "subscribe",
+      requestId: "sub-1",
+      scopes: [{ family: "external-annotations", sessionId: "missing-session" }],
+    }));
+
+    expect(socket.sent[0]).toMatchObject({
+      type: "error",
+      requestId: "sub-1",
+      code: "session-not-found",
+    });
+
+    handler.eventHub.publishSessionEvent("missing-session", "external-annotations", {
+      type: "add",
+      annotations: [{ id: "late-event" }],
+    });
+    expect(socket.sent).toHaveLength(1);
+  });
+
+  test("sends subscription snapshots before events published during snapshot creation", async () => {
+    let resolveSnapshot: ((payload: unknown) => void) | undefined;
+    let publishAgentEvent: ((event: unknown) => void) | undefined;
+    const store = new DaemonSessionStore({ now: () => 1_000 });
+    const state = createDaemonState({
+      pid: 123,
+      port: 4321,
+      hostname: "127.0.0.1",
+      isRemote: false,
+      remoteSource: "local",
+      authToken: AUTH_TOKEN,
+      startedAt: "2026-01-01T00:00:00.000Z",
+    });
+    const handler = createDaemonFetchHandler({
+      state,
+      shellHtmlContent: shellHtml,
+      store,
+      createSession: (_request, context) => {
+        const record = store.create({
+          id: "s1",
+          mode: "review",
+          url: `${state.baseUrl}/s/s1`,
+          project: "repo",
+          label: "review-s1",
+        });
+        context.registerSessionSnapshotProvider("s1", "agent-jobs", () =>
+          new Promise((resolve) => {
+            resolveSnapshot = resolve;
+          }));
+        publishAgentEvent = (event) => {
+          context.publishSessionEvent("s1", "agent-jobs", event);
+        };
+        return record;
+      },
+    });
+
+    await handler(new Request("http://127.0.0.1:4321/daemon/sessions", {
+      method: "POST",
+      headers: authHeaders({ "content-type": "application/json" }),
+      body: JSON.stringify({ request: { action: "review", origin: "opencode", rawPatch: "diff" } }),
+    }));
+
+    const socket = new FakeSocket();
+    handler.websocket.open?.(socket as never);
+    const subscribe = handler.websocket.message?.(socket as never, JSON.stringify({
+      type: "subscribe",
+      scopes: [{ family: "agent-jobs", sessionId: "s1" }],
+    }));
+
+    expect(socket.sent).toHaveLength(0);
+    publishAgentEvent?.({
+      type: "job:completed",
+      job: { id: "job-1", status: "done" },
+    });
+    expect(socket.sent).toHaveLength(0);
+
+    resolveSnapshot?.({ type: "snapshot", jobs: [], logs: {} });
+    await subscribe;
+
+    expect(socket.sent).toHaveLength(2);
+    expect(socket.sent[0].type).toBe("snapshot");
+    expect(socket.sent[1].type).toBe("event");
+    expect(socket.sent[1].payload).toEqual({
+      type: "job:completed",
+      job: { id: "job-1", status: "done" },
+    });
+  });
+
+  test("returns correlated WebSocket action replies for session API commands", async () => {
+    const { handler, store } = makeHandler();
+    await handler(new Request("http://127.0.0.1:4321/daemon/sessions", {
+      method: "POST",
+      headers: authHeaders({ "content-type": "application/json" }),
+      body: JSON.stringify({ request: { action: "plan", origin: "opencode", plan: "x" } }),
+    }));
+    const record = store.get("s1");
+    if (record) {
+      record.handleRequest = async (req, url) => {
+        return Response.json({
+          method: req.method,
+          path: url.pathname,
+          body: await req.json(),
+        }, { status: 202 });
+      };
+    }
+
+    const socket = new FakeSocket();
+    handler.websocket.open?.(socket as never);
+    await handler.websocket.message?.(socket as never, JSON.stringify({
+      type: "action",
+      requestId: "req-1",
+      sessionId: "s1",
+      method: "POST",
+      path: "/api/approve",
+      body: { approved: true },
+    }));
+
+    expect(socket.sent[0]).toMatchObject({
+      type: "action-result",
+      requestId: "req-1",
+      ok: true,
+      status: 202,
+    });
+    expect(socket.sent[0].payload).toEqual({
+      method: "POST",
+      path: "/api/approve",
+      body: { approved: true },
+    });
+  });
+
+  test("rejects WebSocket session actions after URL path normalization", async () => {
+    const { handler, store } = makeHandler();
+    await handler(new Request("http://127.0.0.1:4321/daemon/sessions", {
+      method: "POST",
+      headers: authHeaders({ "content-type": "application/json" }),
+      body: JSON.stringify({ request: { action: "plan", origin: "opencode", plan: "x" } }),
+    }));
+    let handled = false;
+    const record = store.get("s1");
+    if (record) {
+      record.handleRequest = async () => {
+        handled = true;
+        return Response.json({ ok: true });
+      };
+    }
+
+    const socket = new FakeSocket();
+    handler.websocket.open?.(socket as never);
+    await handler.websocket.message?.(socket as never, JSON.stringify({
+      type: "action",
+      requestId: "req-traversal",
+      sessionId: "s1",
+      method: "POST",
+      path: "/api/../daemon/shutdown",
+    }));
+
+    expect(handled).toBe(false);
+    expect(socket.sent[0]).toMatchObject({
+      type: "error",
+      requestId: "req-traversal",
+      code: "internal-error",
+    });
+  });
+
+  test("cleans WebSocket subscriptions when a connection closes", async () => {
+    const { handler } = makeHandler();
+    const socket = new FakeSocket();
+    handler.websocket.open?.(socket as never);
+    await handler.websocket.message?.(socket as never, JSON.stringify({
+      type: "subscribe",
+      scopes: [{ family: "daemon" }],
+    }));
+
+    expect(handler.eventHub.connectionCount).toBe(1);
+    handler.websocket.close?.(socket as never, 1000, "");
+    expect(handler.eventHub.connectionCount).toBe(0);
+
+    handler.eventHub.publishDaemonEvent({
+      type: "debug-log",
+      at: "2026-01-01T00:00:00.000Z",
+      source: "test",
+      message: "after close",
+    });
+    expect(socket.sent).toHaveLength(1);
+  });
+
+  test("responds to WebSocket pings", async () => {
+    const { handler } = makeHandler();
+    const socket = new FakeSocket();
+    handler.websocket.open?.(socket as never);
+    await handler.websocket.message?.(socket as never, JSON.stringify({
+      type: "ping",
+      requestId: "ping-1",
+    }));
+
+    expect(socket.sent[0]).toMatchObject({
+      type: "pong",
+      requestId: "ping-1",
+    });
+  });
+
+  test("rejects old daemon SSE route", async () => {
+    const { handler } = makeHandler();
+    const res = await handler(new Request("http://127.0.0.1:4321/daemon/events", { headers: authHeaders() }));
+    expect(res.status).toBe(410);
+    expect(res.headers.get("content-type")).not.toContain("text/event-stream");
   });
 
   test("creates and lists sessions", async () => {
@@ -301,14 +709,13 @@ describe("daemon HTTP router", () => {
     expect(html).toContain("Shell");
     expect(html).not.toContain("Plan");
     expect(html).toContain("window.fetch");
-    expect(html).toContain("window.EventSource");
     expect(html).toContain("input instanceof Request");
-    expect(html).toContain("window.EventSource.OPEN = OriginalEventSource.OPEN");
+    expect(html).not.toContain("window.EventSource");
     expect(html.indexOf("window.__PLANNOTATOR_API_BASE__")).toBeGreaterThan(html.indexOf("shellLiteral"));
     expect(html.indexOf("window.__PLANNOTATOR_API_BASE__")).toBeLessThan(html.indexOf("<body>"));
   });
 
-  test.each(["plan", "review", "annotate", "archive", "setup-goal"] as const)(
+  test.each(["plan", "review", "annotate", "archive", "goal-setup"] as const)(
     "serves the same frontend shell for %s session pages",
     async (mode) => {
       const store = new DaemonSessionStore({ now: () => 1_000 });
@@ -385,7 +792,7 @@ describe("daemon HTTP router", () => {
     expect(body.apiBase).toBe("/s/s1/api");
     expect(body.capabilities.protocol).toBe(PLANNOTATOR_DAEMON_PROTOCOL);
     expect(body.supportedSessionViews).toContain("plan");
-    expect(body.supportedSessionViews).toContain("setup-goal");
+    expect(body.supportedSessionViews).toContain("goal-setup");
   });
 
   test("returns a daemon error for missing session bootstrap", async () => {

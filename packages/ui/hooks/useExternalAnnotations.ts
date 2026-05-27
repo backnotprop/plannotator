@@ -1,23 +1,24 @@
 /**
- * Real-time external annotations via SSE with polling fallback.
- *
- * Primary transport: EventSource on /api/external-annotations/stream.
- * Fallback: version-gated GET polling if SSE fails (e.g., proxy environments).
+ * Real-time external annotations via the daemon WebSocket hub.
  *
  * Generic over the annotation type — plan editor uses Annotation,
  * review editor uses CodeAnnotation. The hook is shape-agnostic;
  * it just serializes/deserializes JSON.
  *
  * Gated by an `enabled` option — callers pass their API-mode signal
- * to avoid SSE/polling in static or demo contexts where there is no server.
+ * to avoid WebSocket/HTTP polling in static or demo contexts where there is no server.
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import type { ExternalAnnotationEvent } from '../types';
+import {
+  type DaemonSessionTransportMessage,
+  useDaemonSessionTransport,
+} from './useDaemonSessionTransport';
+import { useSessionFetch } from './useSessionFetch';
 
-const POLL_INTERVAL_MS = 500;
-const STREAM_URL = '/api/external-annotations/stream';
 const SNAPSHOT_URL = '/api/external-annotations';
+const FALLBACK_POLL_MS = 2_000;
 
 interface UseExternalAnnotationsReturn<T> {
   externalAnnotations: T[];
@@ -26,116 +27,78 @@ interface UseExternalAnnotationsReturn<T> {
   clearExternalAnnotations: (source?: string) => void;
 }
 
+interface ExternalAnnotationSnapshot<T> {
+  annotations: T[];
+  version?: number;
+}
+
 export function useExternalAnnotations<T extends { id: string; source?: string }>(
   options?: { enabled?: boolean },
 ): UseExternalAnnotationsReturn<T> {
+  const fetch = useSessionFetch();
   const enabled = options?.enabled ?? true;
   const [annotations, setAnnotations] = useState<T[]>([]);
-  const versionRef = useRef(0);
-  const fallbackRef = useRef(false);
-  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const receivedSnapshotRef = useRef(false);
+  const versionRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    if (!enabled) return;
-    let cancelled = false;
-
-    // --- SSE primary transport ---
-    const es = new EventSource(STREAM_URL);
-
-    es.onmessage = (event) => {
-      if (cancelled) return;
-
-      try {
-        const parsed: ExternalAnnotationEvent<T> = JSON.parse(event.data);
-
-        switch (parsed.type) {
-          case 'snapshot':
-            receivedSnapshotRef.current = true;
-            setAnnotations(parsed.annotations);
-            break;
-          case 'add':
-            setAnnotations((prev) => [...prev, ...parsed.annotations]);
-            break;
-          case 'remove':
-            setAnnotations((prev) =>
-              prev.filter((a) => !parsed.ids.includes(a.id)),
-            );
-            break;
-          case 'clear':
-            setAnnotations((prev) =>
-              parsed.source
-                ? prev.filter((a) => a.source !== parsed.source)
-                : [],
-            );
-            break;
-          case 'update':
-            setAnnotations((prev) =>
-              prev.map((a) => a.id === parsed.id ? (parsed.annotation as T) : a),
-            );
-            break;
-        }
-      } catch {
-        // Ignore malformed events (e.g., heartbeat comments)
-      }
-    };
-
-    es.onerror = () => {
-      // If we never received a snapshot, SSE isn't working — fall back to polling
-      if (!receivedSnapshotRef.current && !fallbackRef.current) {
-        fallbackRef.current = true;
-        es.close();
-        startPolling();
-      }
-      // Otherwise, EventSource will auto-reconnect and we'll get a fresh snapshot
-    };
-
-    // --- Polling fallback ---
-    function startPolling() {
-      if (cancelled) return;
-
-      // Initial fetch
-      fetchSnapshot();
-
-      pollTimerRef.current = setInterval(() => {
-        if (cancelled) return;
-        fetchSnapshot();
-      }, POLL_INTERVAL_MS);
+  const applyEvent = useCallback((parsed: ExternalAnnotationEvent<T>) => {
+    switch (parsed.type) {
+      case 'snapshot':
+        setAnnotations(parsed.annotations);
+        break;
+      case 'add':
+        setAnnotations((prev) => [...prev, ...parsed.annotations]);
+        break;
+      case 'remove':
+        setAnnotations((prev) =>
+          prev.filter((a) => !parsed.ids.includes(a.id)),
+        );
+        break;
+      case 'clear':
+        setAnnotations((prev) =>
+          parsed.source
+            ? prev.filter((a) => a.source !== parsed.source)
+            : [],
+        );
+        break;
+      case 'update':
+        setAnnotations((prev) =>
+          prev.map((a) => a.id === parsed.id ? (parsed.annotation as T) : a),
+        );
+        break;
     }
+  }, []);
 
-    async function fetchSnapshot() {
-      try {
-        const url =
-          versionRef.current > 0
-            ? `${SNAPSHOT_URL}?since=${versionRef.current}`
-            : SNAPSHOT_URL;
+  const fetchSnapshot = useCallback(async (): Promise<ExternalAnnotationSnapshot<T> | null> => {
+    const version = versionRef.current;
+    const url = version === null ? SNAPSHOT_URL : `${SNAPSHOT_URL}?since=${version}`;
+    const res = await fetch(url);
+    if (res.status === 304 || !res.ok) return null;
+    const data = await res.json();
+    if (!data || !Array.isArray(data.annotations)) return null;
+    return data as ExternalAnnotationSnapshot<T>;
+  }, []);
 
-        const res = await fetch(url);
+  const applySnapshot = useCallback((snapshot: ExternalAnnotationSnapshot<T>) => {
+    setAnnotations(snapshot.annotations);
+    if (typeof snapshot.version === 'number') versionRef.current = snapshot.version;
+  }, []);
 
-        if (res.status === 304) return; // No changes
-        if (!res.ok) return;
-
-        const data = await res.json();
-        if (Array.isArray(data.annotations)) {
-          setAnnotations(data.annotations);
-        }
-        if (typeof data.version === 'number') {
-          versionRef.current = data.version;
-        }
-      } catch {
-        // Silent — next poll will retry
-      }
+  const applyMessage = useCallback((message: DaemonSessionTransportMessage) => {
+    const event = message.payload as ExternalAnnotationEvent<T>;
+    if (event.type === 'snapshot' && typeof event.version === 'number') {
+      versionRef.current = event.version;
     }
+    applyEvent(event);
+  }, [applyEvent]);
 
-    return () => {
-      cancelled = true;
-      es.close();
-      if (pollTimerRef.current) {
-        clearInterval(pollTimerRef.current);
-        pollTimerRef.current = null;
-      }
-    };
-  }, [enabled]);
+  useDaemonSessionTransport({
+    enabled,
+    family: 'external-annotations',
+    pollMs: FALLBACK_POLL_MS,
+    fetchSnapshot,
+    applySnapshot,
+    applyMessage,
+  });
 
   const deleteExternalAnnotation = useCallback(async (id: string) => {
     // Optimistic update
@@ -146,7 +109,7 @@ export function useExternalAnnotations<T extends { id: string; source?: string }
         { method: 'DELETE' },
       );
     } catch {
-      // SSE will reconcile on next event
+      // Live updates or fallback snapshots will reconcile on next update
     }
   }, []);
 
@@ -159,7 +122,7 @@ export function useExternalAnnotations<T extends { id: string; source?: string }
       const qs = source ? `?source=${encodeURIComponent(source)}` : '';
       await fetch(`${SNAPSHOT_URL}${qs}`, { method: 'DELETE' });
     } catch {
-      // SSE will reconcile on next event
+      // Live updates or fallback snapshots will reconcile on next update
     }
   }, []);
 
@@ -172,7 +135,7 @@ export function useExternalAnnotations<T extends { id: string; source?: string }
         body: JSON.stringify(updates),
       });
     } catch {
-      // SSE will reconcile on next event
+      // Live updates or fallback snapshots will reconcile on next update
     }
   }, []);
 

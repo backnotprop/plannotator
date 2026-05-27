@@ -1,22 +1,23 @@
 /**
- * Real-time agent job state via SSE with polling fallback.
+ * Real-time agent job state via the daemon WebSocket hub.
  *
- * Primary transport: EventSource on /api/agents/jobs/stream.
- * Fallback: version-gated GET polling if SSE fails.
- *
- * Mirrors packages/ui/hooks/useExternalAnnotations.ts in structure.
+ * Uses the same daemon WebSocket + HTTP polling transport as external annotations.
  *
  * Gated by an `enabled` option — callers pass their API-mode signal
- * to avoid SSE/polling in static or demo contexts where there is no server.
+ * to avoid WebSocket/HTTP polling in static or demo contexts where there is no server.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { AgentJobInfo, AgentJobEvent, AgentCapabilities } from '../types';
+import type { AgentJobInfo, AgentJobEvent, AgentCapabilities, AgentJobLogs } from '../types';
+import {
+  type DaemonSessionTransportMessage,
+  useDaemonSessionTransport,
+} from './useDaemonSessionTransport';
+import { useSessionFetch } from './useSessionFetch';
 
-const POLL_INTERVAL_MS = 500;
-const STREAM_URL = '/api/agents/jobs/stream';
 const JOBS_URL = '/api/agents/jobs';
 const CAPABILITIES_URL = '/api/agents/capabilities';
+const FALLBACK_POLL_MS = 2_000;
 
 interface UseAgentJobsReturn {
   jobs: AgentJobInfo[];
@@ -27,136 +28,110 @@ interface UseAgentJobsReturn {
   killAll: () => Promise<void>;
 }
 
+interface AgentJobsSnapshot {
+  jobs: AgentJobInfo[];
+  logs?: AgentJobLogs;
+  version?: number;
+}
+
+function logsToMap(logs: AgentJobLogs | undefined): Map<string, string> {
+  if (!logs) return new Map();
+  return new Map(
+    Object.entries(logs).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+  );
+}
+
 export function useAgentJobs(
   options?: { enabled?: boolean },
 ): UseAgentJobsReturn {
+  const fetch = useSessionFetch();
   const enabled = options?.enabled ?? true;
   const [jobs, setJobs] = useState<AgentJobInfo[]>([]);
   const [jobLogs, setJobLogs] = useState<Map<string, string>>(new Map());
   const [capabilities, setCapabilities] = useState<AgentCapabilities | null>(null);
-  const versionRef = useRef(0);
-  const fallbackRef = useRef(false);
-  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const receivedSnapshotRef = useRef(false);
+  const versionRef = useRef<number | null>(null);
 
   // Fetch capabilities once on mount
   useEffect(() => {
     if (!enabled) return;
+    let cancelled = false;
 
     fetch(CAPABILITIES_URL)
       .then((res) => res.json())
       .then((data) => {
-        if (data && Array.isArray(data.providers)) {
+        if (!cancelled && data && Array.isArray(data.providers)) {
           setCapabilities(data as AgentCapabilities);
         }
       })
       .catch(() => {
         // Silent — capabilities unavailable
       });
-  }, [enabled]);
-
-  // SSE + polling for job state
-  useEffect(() => {
-    if (!enabled) return;
-    let cancelled = false;
-    receivedSnapshotRef.current = false;
-    fallbackRef.current = false;
-
-    // --- SSE primary transport ---
-    const es = new EventSource(STREAM_URL);
-
-    es.onmessage = (event) => {
-      if (cancelled) return;
-
-      try {
-        const parsed: AgentJobEvent = JSON.parse(event.data);
-
-        switch (parsed.type) {
-          case 'snapshot':
-            receivedSnapshotRef.current = true;
-            setJobs(parsed.jobs);
-            break;
-          case 'job:started':
-            setJobs((prev) => [...prev, parsed.job]);
-            break;
-          case 'job:updated':
-          case 'job:completed':
-            setJobs((prev) =>
-              prev.map((j) => (j.id === parsed.job.id ? parsed.job : j)),
-            );
-            break;
-          case 'job:log':
-            setJobLogs((prev) => {
-              const next = new Map(prev);
-              next.set(parsed.jobId, (prev.get(parsed.jobId) ?? '') + parsed.delta);
-              return next;
-            });
-            break;
-          case 'jobs:cleared':
-            // No-op: killAll() already broadcasts individual job:completed events
-            // for each killed job, so the UI updates incrementally.
-            break;
-        }
-      } catch {
-        // Ignore malformed events (e.g., heartbeat comments)
-      }
-    };
-
-    es.onerror = () => {
-      // If we never received a snapshot, SSE isn't working — fall back to polling
-      if (!receivedSnapshotRef.current && !fallbackRef.current) {
-        fallbackRef.current = true;
-        es.close();
-        startPolling();
-      }
-      // Otherwise, EventSource will auto-reconnect and we'll get a fresh snapshot
-    };
-
-    // --- Polling fallback ---
-    function startPolling() {
-      if (cancelled) return;
-
-      fetchSnapshot();
-
-      pollTimerRef.current = setInterval(() => {
-        if (cancelled) return;
-        fetchSnapshot();
-      }, POLL_INTERVAL_MS);
-    }
-
-    async function fetchSnapshot() {
-      try {
-        const url =
-          versionRef.current > 0
-            ? `${JOBS_URL}?since=${versionRef.current}`
-            : JOBS_URL;
-
-        const res = await fetch(url);
-
-        if (res.status === 304) return;
-        if (!res.ok) return;
-
-        const data = await res.json();
-        if (Array.isArray(data.jobs)) {
-          setJobs(data.jobs);
-        }
-        if (typeof data.version === 'number') {
-          versionRef.current = data.version;
-        }
-      } catch {
-        // Silent — next poll will retry
-      }
-    }
-
     return () => {
       cancelled = true;
-      es.close();
-      if (pollTimerRef.current) {
-        clearInterval(pollTimerRef.current);
-        pollTimerRef.current = null;
-      }
     };
   }, [enabled]);
+
+  const applyEvent = useCallback((parsed: AgentJobEvent) => {
+    switch (parsed.type) {
+      case 'snapshot':
+        setJobs(parsed.jobs);
+        setJobLogs(logsToMap(parsed.logs));
+        break;
+      case 'job:started':
+        setJobs((prev) => [...prev, parsed.job]);
+        break;
+      case 'job:updated':
+      case 'job:completed':
+        setJobs((prev) =>
+          prev.map((j) => (j.id === parsed.job.id ? parsed.job : j)),
+        );
+        break;
+      case 'job:log':
+        setJobLogs((prev) => {
+          const next = new Map(prev);
+          next.set(parsed.jobId, (prev.get(parsed.jobId) ?? '') + parsed.delta);
+          return next;
+        });
+        break;
+      case 'jobs:cleared':
+        // No-op: killAll() already broadcasts individual job:completed events
+        // for each killed job, so the UI updates incrementally.
+        break;
+    }
+  }, []);
+
+  const fetchSnapshot = useCallback(async (): Promise<AgentJobsSnapshot | null> => {
+    const version = versionRef.current;
+    const url = version === null ? JOBS_URL : `${JOBS_URL}?since=${version}`;
+    const res = await fetch(url);
+    if (res.status === 304 || !res.ok) return null;
+    const data = await res.json();
+    if (!data || !Array.isArray(data.jobs)) return null;
+    return data as AgentJobsSnapshot;
+  }, []);
+
+  const applySnapshot = useCallback((snapshot: AgentJobsSnapshot) => {
+    setJobs(snapshot.jobs);
+    setJobLogs(logsToMap(snapshot.logs));
+    if (typeof snapshot.version === 'number') versionRef.current = snapshot.version;
+  }, []);
+
+  const applyMessage = useCallback((message: DaemonSessionTransportMessage) => {
+    const event = message.payload as AgentJobEvent;
+    if (event.type === 'snapshot' && typeof event.version === 'number') {
+      versionRef.current = event.version;
+    }
+    applyEvent(event);
+  }, [applyEvent]);
+
+  useDaemonSessionTransport({
+    enabled,
+    family: 'agent-jobs',
+    pollMs: FALLBACK_POLL_MS,
+    fetchSnapshot,
+    applySnapshot,
+    applyMessage,
+  });
 
   const launchJob = useCallback(
     async (params: {
@@ -191,7 +166,7 @@ export function useAgentJobs(
         method: 'DELETE',
       });
     } catch {
-      // SSE will reconcile
+      // Live updates or fallback snapshots will reconcile
     }
   }, []);
 
@@ -199,7 +174,7 @@ export function useAgentJobs(
     try {
       await fetch(JOBS_URL, { method: 'DELETE' });
     } catch {
-      // SSE will reconcile
+      // Live updates or fallback snapshots will reconcile
     }
   }, []);
 

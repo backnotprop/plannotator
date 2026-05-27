@@ -1,3 +1,6 @@
+import { mkdirSync, writeFileSync, readdirSync, readFileSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
 import type {
   DaemonRemoteShareNotice,
   DaemonSessionEvent,
@@ -13,8 +16,11 @@ export interface DaemonSessionRecord<TResult = unknown> {
   status: DaemonSessionStatus;
   url: string;
   project: string;
+  cwd?: string;
   label: string;
   origin?: string;
+  matchKey?: string;
+  ttlMs?: number;
   createdAt: string;
   updatedAt: string;
   expiresAt?: string;
@@ -25,6 +31,7 @@ export interface DaemonSessionRecord<TResult = unknown> {
   handleRequest?: SessionRequestHandler;
   dispose?: () => void | Promise<void>;
   disposed?: boolean;
+  snapshot?: () => unknown;
 }
 
 export interface CreateDaemonSessionInput<TResult = unknown> {
@@ -32,8 +39,10 @@ export interface CreateDaemonSessionInput<TResult = unknown> {
   mode: DaemonSessionMode;
   url: string;
   project: string;
+  cwd?: string;
   label: string;
   origin?: string;
+  matchKey?: string;
   ttlMs?: number;
   now?: number;
   htmlContent?: string;
@@ -41,6 +50,68 @@ export interface CreateDaemonSessionInput<TResult = unknown> {
   dispose?: () => void | Promise<void>;
   result?: TResult;
   remoteShare?: DaemonRemoteShareNotice;
+  snapshot?: () => unknown;
+}
+
+export interface SessionSnapshot {
+  version: 1;
+  mode: DaemonSessionMode;
+  sessionId: string;
+  status: string;
+  result: unknown;
+  capturedAt: string;
+  meta: { project: string; origin?: string; cwd?: string; label: string };
+  content: unknown;
+}
+
+const SNAPSHOT_DIR = join(homedir(), ".plannotator", "sessions");
+const MAX_SNAPSHOT_BYTES = 5 * 1024 * 1024;
+
+function writeSnapshot(record: DaemonSessionRecord): void {
+  if (!record.snapshot) return;
+  try {
+    const content = record.snapshot();
+    const snapshot: SessionSnapshot = {
+      version: 1,
+      mode: record.mode,
+      sessionId: record.id,
+      status: record.status,
+      result: record.result,
+      capturedAt: new Date().toISOString(),
+      meta: { project: record.project, origin: record.origin, cwd: record.cwd, label: record.label },
+      content,
+    };
+    const json = JSON.stringify(snapshot);
+    if (json.length > MAX_SNAPSHOT_BYTES) return;
+    mkdirSync(SNAPSHOT_DIR, { recursive: true });
+    writeFileSync(join(SNAPSHOT_DIR, `${record.id}.json`), json, "utf-8");
+  } catch {}
+}
+
+export function readSnapshot(sessionId: string): SessionSnapshot | null {
+  try {
+    const raw = readFileSync(join(SNAPSHOT_DIR, `${sessionId}.json`), "utf-8");
+    const parsed = JSON.parse(raw);
+    if (parsed?.version === 1 && parsed?.sessionId === sessionId) return parsed as SessionSnapshot;
+  } catch {}
+  return null;
+}
+
+export function listSnapshots(): SessionSnapshot[] {
+  try {
+    const files = readdirSync(SNAPSHOT_DIR).filter((f) => f.endsWith(".json"));
+    const snapshots: SessionSnapshot[] = [];
+    for (const file of files) {
+      try {
+        const raw = readFileSync(join(SNAPSHOT_DIR, file), "utf-8");
+        const parsed = JSON.parse(raw);
+        if (parsed?.version === 1) snapshots.push(parsed as SessionSnapshot);
+      } catch {}
+    }
+    return snapshots;
+  } catch {
+    return [];
+  }
 }
 
 export interface DaemonSessionStoreOptions {
@@ -100,7 +171,10 @@ export class DaemonSessionStore {
       url: input.url,
       project: input.project,
       label: input.label,
+      ...(input.cwd && { cwd: input.cwd }),
       ...(input.origin && { origin: input.origin }),
+      ...(input.matchKey && { matchKey: input.matchKey }),
+      ...(input.ttlMs !== undefined && { ttlMs: input.ttlMs }),
       createdAt: iso(now),
       updatedAt: iso(now),
       ...(input.ttlMs !== undefined && { expiresAt: iso(now + input.ttlMs) }),
@@ -142,6 +216,7 @@ export class DaemonSessionStore {
       status: record.status,
       url: record.url,
       project: record.project,
+      ...(record.cwd && { cwd: record.cwd }),
       label: record.label,
       ...(record.origin && { origin: record.origin }),
       createdAt: record.createdAt,
@@ -162,6 +237,7 @@ export class DaemonSessionStore {
     record.expiresAt = iso(now + TERMINAL_SESSION_TTL_MS);
     this.resolveWaiters(record);
     this.emit("session-updated", record);
+    writeSnapshot(record);
     void this.disposeResources(record);
     this.releaseRoutingPayloads(record);
     return record;
@@ -182,6 +258,44 @@ export class DaemonSessionStore {
     return record;
   }
 
+  suspend<TResult = unknown>(id: string, result: TResult): DaemonSessionRecord<TResult> | undefined {
+    const record = this.sessions.get(id) as DaemonSessionRecord<TResult> | undefined;
+    if (!record || record.status !== "active") return record;
+    record.status = "awaiting-resubmission";
+    record.result = result;
+    const now = this.now();
+    record.updatedAt = iso(now);
+    delete record.expiresAt;
+    this.resolveWaiters(record);
+    this.emit("session-updated", record);
+    return record;
+  }
+
+  idle<TResult = unknown>(id: string, result?: TResult): DaemonSessionRecord<TResult> | undefined {
+    const record = this.sessions.get(id) as DaemonSessionRecord<TResult> | undefined;
+    if (!record || TERMINAL_STATUSES.has(record.status) || record.status === "idle") return undefined;
+    record.status = "idle";
+    if (result !== undefined) record.result = result as TResult;
+    const now = this.now();
+    record.updatedAt = iso(now);
+    delete record.expiresAt;
+    this.resolveWaiters(record);
+    this.emit("session-updated", record);
+    return record;
+  }
+
+  reactivate(id: string): DaemonSessionRecord | undefined {
+    const record = this.sessions.get(id);
+    if (!record || (record.status !== "awaiting-resubmission" && record.status !== "idle")) return record;
+    record.status = "active";
+    record.result = undefined;
+    const now = this.now();
+    record.updatedAt = iso(now);
+    delete record.expiresAt;
+    this.emit("session-updated", record);
+    return record;
+  }
+
   async cancel(id: string, reason = "Session cancelled."): Promise<DaemonSessionRecord | undefined> {
     const record = this.sessions.get(id);
     if (!record || TERMINAL_STATUSES.has(record.status)) return record;
@@ -199,7 +313,8 @@ export class DaemonSessionStore {
   waitForResult<TResult = unknown>(id: string): Promise<DaemonSessionRecord<TResult>> {
     const record = this.sessions.get(id) as DaemonSessionRecord<TResult> | undefined;
     if (!record) return Promise.reject(new Error(`Session not found: ${id}`));
-    if (TERMINAL_STATUSES.has(record.status)) return Promise.resolve(record);
+    const hasIntermediateResult = (record.status === "idle" || record.status === "awaiting-resubmission") && record.result !== undefined;
+    if (TERMINAL_STATUSES.has(record.status) || hasIntermediateResult) return Promise.resolve(record);
     return new Promise((resolve, reject) => {
       const waiters = this.waiters.get(id) ?? [];
       waiters.push({ resolve: resolve as (record: DaemonSessionRecord<unknown>) => void, reject });

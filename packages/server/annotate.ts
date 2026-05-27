@@ -20,9 +20,12 @@ import { warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash, deleteDraft } from "./draft";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { saveConfig, detectGitUser, getServerConfig } from "./config";
+import { generateSlug, saveToHistory, getPlanVersion, getVersionCount, listVersions } from "./storage";
+import { detectProjectName } from "./project";
 import { dirname, resolve as resolvePath } from "path";
 import { isWSL } from "./browser";
-import type { SessionRequestHandler } from "./session-handler";
+import { createDecisionCycle, resolveAndCycle } from "./session-handler";
+import type { SessionEventBridge, SessionRequestHandler } from "./session-handler";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -65,6 +68,8 @@ export interface AnnotateServerOptions {
   renderHtml?: boolean;
   /** Called when server starts with the URL, remote status, and port */
   onReady?: (url: string, isRemote: boolean, port: number) => void;
+  /** Optional daemon event bridge for live session-scoped events. */
+  sessionEvents?: SessionEventBridge;
 }
 
 export interface AnnotateServerResult {
@@ -90,6 +95,8 @@ export interface AnnotateSession {
   handleRequest: SessionRequestHandler;
   waitForDecision: AnnotateServerResult["waitForDecision"];
   dispose: () => void;
+  updateContent: (newMarkdown: string, newRawHtml?: string) => void;
+  getSnapshot?: () => unknown;
 }
 
 // --- Server Implementation ---
@@ -102,7 +109,7 @@ export async function createAnnotateSession(
 ): Promise<AnnotateSession> {
   const {
     cwd = process.cwd(),
-    markdown,
+    markdown: initialMarkdown,
     filePath,
     htmlContent,
     origin,
@@ -114,9 +121,11 @@ export async function createAnnotateSession(
     shareBaseUrl,
     pasteApiUrl,
     gate = false,
-    rawHtml,
+    rawHtml: initialRawHtml,
     renderHtml = false,
   } = options;
+  let markdown = initialMarkdown;
+  let rawHtml = initialRawHtml;
 
   // Side-channel pre-warm so /api/doc/exists POSTs land on warm cache.
   void warmFileListCache(cwd, "code");
@@ -127,27 +136,42 @@ export async function createAnnotateSession(
     mode === "annotate-folder" && folderPath
       ? `folder:${resolvePath(folderPath)}`
       : renderHtml && rawHtml ? rawHtml : markdown;
-  const draftKey = contentHash(draftSource);
-  const externalAnnotations = createExternalAnnotationHandler("plan");
+  let draftKey = contentHash(draftSource);
+  const externalAnnotations = createExternalAnnotationHandler("plan", {
+    publishEvent: (event) => options.sessionEvents?.publishEvent("external-annotations", event),
+    registerSnapshotProvider: (provider) =>
+      options.sessionEvents?.registerSnapshotProvider("external-annotations", provider),
+  });
+  options.sessionEvents?.registerSnapshotProvider("session-revision", () => ({
+    plan: markdown, previousPlan, versionInfo,
+    ...(rawHtml !== undefined && { rawHtml }),
+  }));
 
   // Detect repo info (cached for this session)
   const repoInfo = await getRepoInfo(cwd);
 
-  // Decision promise
-  let resolveDecision: (result: {
-    feedback: string;
-    annotations: unknown[];
-    exit?: boolean;
-    approved?: boolean;
-  }) => void;
-  const decisionPromise = new Promise<{
-    feedback: string;
-    annotations: unknown[];
-    exit?: boolean;
-    approved?: boolean;
-  }>((resolve) => {
-    resolveDecision = resolve;
-  });
+  // Version history (single-file annotate only — folders have no single document to track)
+  const isFileBased = mode === "annotate";
+  const project = isFileBased ? ((await detectProjectName(cwd)) ?? "_unknown") : "";
+  const slug = isFileBased ? generateSlug(markdown) : "";
+  let previousPlan: string | null = null;
+  let versionInfo: { version: number; totalVersions: number; project: string } | null = null;
+
+  if (isFileBased && markdown.trim()) {
+    const historyResult = saveToHistory(project, slug, markdown);
+    previousPlan = historyResult.version > 1
+      ? getPlanVersion(project, slug, historyResult.version - 1)
+      : null;
+    versionInfo = {
+      version: historyResult.version,
+      totalVersions: getVersionCount(project, slug),
+      project,
+    };
+  }
+
+  type AnnotateDecisionResult = { feedback: string; annotations: unknown[]; exit?: boolean; approved?: boolean };
+  const decisionCycle = createDecisionCycle<AnnotateDecisionResult>();
+  let lastDecision: 'approved' | 'exited' | 'feedback' | null = null;
 
   const handleRequest: SessionRequestHandler = async (req, url, context) => {
 
@@ -167,10 +191,29 @@ export async function createAnnotateSession(
               shareBaseUrl,
               pasteApiUrl,
               repoInfo,
+              previousPlan,
+              versionInfo,
               projectRoot: folderPath || cwd,
               isWSL: wslFlag,
               serverConfig: getServerConfig(gitUser),
+              lastDecision,
             });
+          }
+
+          // API: Get a specific version from history
+          if (url.pathname === "/api/plan/version" && isFileBased) {
+            const vParam = url.searchParams.get("v");
+            if (!vParam) return new Response("Missing v parameter", { status: 400 });
+            const v = parseInt(vParam, 10);
+            if (isNaN(v) || v < 1) return new Response("Invalid version number", { status: 400 });
+            const content = getPlanVersion(project, slug, v);
+            if (content === null) return Response.json({ error: "Version not found" }, { status: 404 });
+            return Response.json({ plan: content, version: v });
+          }
+
+          // API: List all versions
+          if (url.pathname === "/api/plan/versions" && isFileBased) {
+            return Response.json({ project, slug, versions: listVersions(project, slug) });
           }
 
           // API: Update user config (write-back to ~/.plannotator/config.json)
@@ -243,7 +286,7 @@ export async function createAnnotateSession(
             return handleDraftLoad(draftKey);
           }
 
-          // API: External annotations (SSE-based, for any external tool)
+          // API: External annotations (HTTP mutations + daemon WebSocket events)
           const externalResponse = await externalAnnotations.handle(req, url, {
             disableIdleTimeout: () => context?.disableIdleTimeout?.(),
           });
@@ -252,14 +295,16 @@ export async function createAnnotateSession(
           // API: Exit annotation session without feedback
           if (url.pathname === "/api/exit" && req.method === "POST") {
             deleteDraft(draftKey);
-            resolveDecision({ feedback: "", annotations: [], exit: true });
+            lastDecision = 'exited';
+            resolveAndCycle(decisionCycle, { feedback: "", annotations: [], exit: true }, origin);
             return Response.json({ ok: true });
           }
 
           // API: Approve the annotation session (review-gate UX, #570)
           if (url.pathname === "/api/approve" && req.method === "POST") {
             deleteDraft(draftKey);
-            resolveDecision({ feedback: "", annotations: [], approved: true });
+            lastDecision = 'approved';
+            resolveAndCycle(decisionCycle, { feedback: "", annotations: [], approved: true }, origin);
             return Response.json({ ok: true });
           }
 
@@ -272,12 +317,16 @@ export async function createAnnotateSession(
               };
 
               deleteDraft(draftKey);
-              resolveDecision({
+              lastDecision = 'feedback';
+              const resubmit = resolveAndCycle(decisionCycle, {
                 feedback: body.feedback || "",
                 annotations: body.annotations || [],
-              });
+              }, origin);
 
-              return Response.json({ ok: true });
+              if (resubmit.awaitingResubmission && !isFileBased) {
+                return Response.json({ ok: true, feedbackSent: true });
+              }
+              return Response.json({ ok: true, ...resubmit });
             } catch (err) {
               const message =
                 err instanceof Error
@@ -296,13 +345,39 @@ export async function createAnnotateSession(
           });
   };
 
+  function handleUpdateContent(newMarkdown: string, newRawHtml?: string) {
+    markdown = newMarkdown;
+    lastDecision = null;
+    rawHtml = newRawHtml;
+    if (isFileBased && newMarkdown.trim()) {
+      const historyResult = saveToHistory(project, slug, newMarkdown);
+      previousPlan = historyResult.version > 1
+        ? getPlanVersion(project, slug, historyResult.version - 1)
+        : null;
+      versionInfo = {
+        version: historyResult.version,
+        totalVersions: getVersionCount(project, slug),
+        project,
+      };
+    }
+    externalAnnotations.clearAll();
+    deleteDraft(draftKey);
+    draftKey = contentHash(renderHtml && rawHtml ? rawHtml : newMarkdown);
+    options.sessionEvents?.publishEvent("session-revision", {
+      plan: newMarkdown, previousPlan, versionInfo,
+      ...(rawHtml !== undefined && { rawHtml }),
+    });
+  }
+
   return {
     htmlContent,
     handleRequest,
-    waitForDecision: () => decisionPromise,
+    waitForDecision: () => decisionCycle.promise(),
     dispose: () => {
       externalAnnotations.dispose();
     },
+    getSnapshot: isFileBased ? () => ({ plan: markdown, filePath, mode, sourceInfo }) : undefined,
+    updateContent: handleUpdateContent,
   };
 }
 

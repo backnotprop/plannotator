@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session Persistence — What You Need To Know</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: {
+      extend: {
+        colors: {
+          ivory:    '#FAF9F5',
+          paper:    '#FFFFFF',
+          slate:    '#141413',
+          clay:     { DEFAULT: '#D97757', dark: '#B85C3E', light: '#E48A6E' },
+          oat:      { DEFAULT: '#E3DACC', dark: '#2A2622' },
+          olive:    { DEFAULT: '#788C5D', light: '#9DB07C' },
+          ink: {
+            100: '#F0EEE6', 200: '#E6E3DA', 300: '#D1CFC5',
+            500: '#87867F', 700: '#3D3D3A',
+            900: '#1F1F1D',
+          },
+          amber:    { DEFAULT: '#F59E0B', light: '#FDE68A', dark: '#78350F' },
+        },
+        fontFamily: {
+          serif: ['ui-serif', 'Georgia', '"Times New Roman"', 'serif'],
+          sans:  ['system-ui', '-apple-system', '"Segoe UI"', 'Roboto', 'sans-serif'],
+          mono:  ['ui-monospace', '"SF Mono"', 'Menlo', 'Consolas', 'monospace'],
+        },
+      },
+    },
+  };
+</script>
+<script>
+  (function () {
+    const saved = localStorage.getItem('theme');
+    const dark = saved ? saved === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.classList.toggle('dark', dark);
+  })();
+</script>
+<style>
+  html { scroll-behavior: smooth; }
+  h1 em { font-style: italic; color: theme('colors.clay.DEFAULT'); }
+  @keyframes pulse-amber {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.85); }
+  }
+  .dot-pulse { animation: pulse-amber 2s ease-in-out infinite; }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::marker { display: none; }
+  .quiz-answer { max-height: 0; overflow: hidden; transition: max-height 0.3s ease; }
+  details[open] .quiz-answer { max-height: 200px; }
+</style>
+</head>
+<body class="bg-ivory text-ink-700 dark:bg-slate dark:text-ink-300 font-sans antialiased">
+
+<div class="max-w-5xl mx-auto px-6 pt-6 flex items-center justify-between">
+  <p class="font-mono text-[11px] tracking-[0.12em] uppercase text-ink-500">
+    feat/session-persistence
+  </p>
+  <button id="themeToggle" aria-label="Toggle theme"
+          class="font-mono text-[11px] tracking-[0.08em] uppercase px-2.5 py-1 rounded border border-ink-300 dark:border-ink-700 text-ink-500 hover:text-slate dark:hover:text-ivory hover:border-slate dark:hover:border-ivory transition">
+    <span class="hidden dark:inline">Light</span>
+    <span class="dark:hidden">Dark</span>
+  </button>
+</div>
+
+<main class="max-w-5xl mx-auto px-6 pt-8 pb-32">
+
+  <header class="border-b border-ink-300 dark:border-ink-700 pb-10 mb-12">
+    <h1 class="font-serif font-medium text-[clamp(34px,5vw,52px)] leading-[1.06] tracking-[-0.018em] text-slate dark:text-ivory">
+      Session <em>Persistence</em>
+    </h1>
+    <p class="mt-5 max-w-[60ch] text-[16.5px] text-ink-700 dark:text-ink-300">
+      Denied sessions stay alive. The agent revises. The same session updates in place. No more starting over.
+    </p>
+  </header>
+
+  <!-- ─── UX: Before / After ─── -->
+  <section class="mb-14">
+    <p class="font-mono text-[11px] tracking-[0.12em] uppercase text-ink-500 mb-6">User Experience</p>
+
+    <div class="grid md:grid-cols-2 gap-6">
+      <div class="rounded-xl border-[1.5px] border-ink-300 dark:border-ink-700 bg-paper dark:bg-ink-900 p-6">
+        <div class="flex items-center gap-2 mb-4">
+          <span class="w-2.5 h-2.5 rounded-full bg-red-400"></span>
+          <h3 class="font-mono text-[12px] tracking-[0.08em] uppercase text-ink-500">Before</h3>
+        </div>
+        <ol class="space-y-3 text-[14.5px]">
+          <li class="flex gap-3"><span class="text-ink-500 font-mono text-[13px] mt-0.5">1</span> You review a plan, leave annotations, deny</li>
+          <li class="flex gap-3"><span class="text-ink-500 font-mono text-[13px] mt-0.5">2</span> Session dies — completion screen, done</li>
+          <li class="flex gap-3"><span class="text-ink-500 font-mono text-[13px] mt-0.5">3</span> Agent revises and resubmits</li>
+          <li class="flex gap-3"><span class="text-ink-500 font-mono text-[13px] mt-0.5">4</span> <strong>Brand new session</strong> — new tab, no context, no diff</li>
+          <li class="flex gap-3"><span class="text-ink-500 font-mono text-[13px] mt-0.5">5</span> Start over from scratch</li>
+        </ol>
+      </div>
+      <div class="rounded-xl border-[1.5px] border-clay/40 dark:border-clay-dark/40 bg-paper dark:bg-ink-900 p-6">
+        <div class="flex items-center gap-2 mb-4">
+          <span class="w-2.5 h-2.5 rounded-full bg-olive dot-pulse"></span>
+          <h3 class="font-mono text-[12px] tracking-[0.08em] uppercase text-clay dark:text-clay-light">After</h3>
+        </div>
+        <ol class="space-y-3 text-[14.5px]">
+          <li class="flex gap-3"><span class="text-clay font-mono text-[13px] mt-0.5">1</span> You review a plan, leave annotations, deny</li>
+          <li class="flex gap-3"><span class="text-clay font-mono text-[13px] mt-0.5">2</span> Banner: <span class="text-amber font-medium">"Waiting for agent to revise..."</span></li>
+          <li class="flex gap-3"><span class="text-clay font-mono text-[13px] mt-0.5">3</span> Agent revises and resubmits</li>
+          <li class="flex gap-3"><span class="text-clay font-mono text-[13px] mt-0.5">4</span> <strong>Same session updates</strong> — diff shows what changed</li>
+          <li class="flex gap-3"><span class="text-clay font-mono text-[13px] mt-0.5">5</span> Review again — approve or deny with more feedback</li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Applies to all three ─── -->
+  <section class="mb-14">
+    <p class="font-mono text-[11px] tracking-[0.12em] uppercase text-ink-500 mb-4">Works across all modes</p>
+    <div class="grid sm:grid-cols-3 gap-4">
+      <div class="rounded-lg border border-ink-300 dark:border-ink-700 p-4 text-center">
+        <div class="text-2xl mb-2">📋</div>
+        <p class="font-medium text-slate dark:text-ivory text-[14px]">Plan Review</p>
+        <p class="text-[13px] text-ink-500 mt-1">Agent revises the plan, session shows plan diff</p>
+      </div>
+      <div class="rounded-lg border border-ink-300 dark:border-ink-700 p-4 text-center">
+        <div class="text-2xl mb-2">🔍</div>
+        <p class="font-medium text-slate dark:text-ivory text-[14px]">Code Review</p>
+        <p class="text-[13px] text-ink-500 mt-1">Agent makes changes, session refreshes with new diff</p>
+      </div>
+      <div class="rounded-lg border border-ink-300 dark:border-ink-700 p-4 text-center">
+        <div class="text-2xl mb-2">✏️</div>
+        <p class="font-medium text-slate dark:text-ivory text-[14px]">Annotate</p>
+        <p class="text-[13px] text-ink-500 mt-1">Agent edits the file, session refreshes with updated content</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── What stays the same ─── -->
+  <aside class="rounded-xl border-[1.5px] border-ink-300 dark:border-ink-700 border-l-[3px] border-l-olive bg-paper dark:bg-ink-900 p-5 mb-14">
+    <p><b class="text-slate dark:text-ivory">What stays the same</b> — Approve, exit, auto-close, and standalone sessions all work exactly as before. Only the deny→resubmit path changes. Sessions expire after 10 minutes if the agent doesn't come back.</p>
+  </aside>
+
+  <!-- ─── State Diagram ─── -->
+  <section class="mb-14">
+    <p class="font-mono text-[11px] tracking-[0.12em] uppercase text-ink-500 mb-4">Session lifecycle</p>
+    <div class="rounded-xl border border-ink-300 dark:border-ink-700 bg-paper dark:bg-ink-900 p-6 overflow-x-auto">
+      <svg viewBox="0 0 720 180" class="w-full h-auto max-w-[680px] mx-auto" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Session state diagram">
+        <!-- Active -->
+        <rect x="20" y="60" width="120" height="50" rx="10" fill="#788C5D" fill-opacity="0.15" stroke="#788C5D" stroke-width="1.5"/>
+        <text x="80" y="90" text-anchor="middle" font-family="ui-monospace" font-size="13" fill="#788C5D" font-weight="600">active</text>
+        <!-- Arrow 1 -->
+        <line x1="140" y1="85" x2="210" y2="85" stroke="#D1CFC5" stroke-width="1.5" marker-end="url(#arr)"/>
+        <text x="175" y="75" text-anchor="middle" font-family="ui-sans-serif" font-size="10" fill="#87867F">deny</text>
+        <!-- Awaiting -->
+        <rect x="210" y="60" width="180" height="50" rx="10" fill="#F59E0B" fill-opacity="0.12" stroke="#F59E0B" stroke-width="1.5"/>
+        <text x="300" y="90" text-anchor="middle" font-family="ui-monospace" font-size="12" fill="#F59E0B" font-weight="600">awaiting-resubmission</text>
+        <!-- Arrow 2 (back to active) -->
+        <path d="M 300 60 Q 300 30, 80 30 Q 40 30, 40 60" fill="none" stroke="#788C5D" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arr-g)"/>
+        <text x="190" y="24" text-anchor="middle" font-family="ui-sans-serif" font-size="10" fill="#788C5D">agent resubmits</text>
+        <!-- Arrow to expired -->
+        <line x1="300" y1="110" x2="300" y2="150" stroke="#D1CFC5" stroke-width="1.5" marker-end="url(#arr)"/>
+        <text x="330" y="137" font-family="ui-sans-serif" font-size="10" fill="#87867F">10 min TTL</text>
+        <rect x="250" y="150" width="100" height="30" rx="6" fill="#D1CFC5" fill-opacity="0.2" stroke="#D1CFC5" stroke-width="1"/>
+        <text x="300" y="170" text-anchor="middle" font-family="ui-monospace" font-size="11" fill="#87867F">expired</text>
+        <!-- Arrow 3 (active to completed) -->
+        <line x1="80" y1="110" x2="80" y2="150" stroke="#788C5D" stroke-width="1.5" marker-end="url(#arr-g)"/>
+        <text x="100" y="137" font-family="ui-sans-serif" font-size="10" fill="#788C5D">approve</text>
+        <rect x="30" y="150" width="100" height="30" rx="6" fill="#788C5D" fill-opacity="0.15" stroke="#788C5D" stroke-width="1"/>
+        <text x="80" y="170" text-anchor="middle" font-family="ui-monospace" font-size="11" fill="#788C5D">completed</text>
+        <!-- Arrowhead defs -->
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#D1CFC5"/></marker>
+          <marker id="arr-g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#788C5D"/></marker>
+        </defs>
+      </svg>
+    </div>
+  </section>
+
+  <!-- ─── Matching ─── -->
+  <section class="mb-14">
+    <p class="font-mono text-[11px] tracking-[0.12em] uppercase text-ink-500 mb-4">How sessions are matched</p>
+    <div class="rounded-xl border border-ink-300 dark:border-ink-700 bg-paper dark:bg-ink-900 overflow-hidden">
+      <table class="w-full text-[14px]">
+        <thead>
+          <tr class="border-b border-ink-300 dark:border-ink-700 bg-ink-100 dark:bg-ink-900">
+            <th class="text-left px-5 py-3 font-mono text-[11px] tracking-[0.08em] uppercase text-ink-500">Mode</th>
+            <th class="text-left px-5 py-3 font-mono text-[11px] tracking-[0.08em] uppercase text-ink-500">Match Key</th>
+            <th class="text-left px-5 py-3 font-mono text-[11px] tracking-[0.08em] uppercase text-ink-500 hidden sm:table-cell">Example</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-ink-200 dark:divide-ink-700">
+          <tr>
+            <td class="px-5 py-3 font-medium text-slate dark:text-ivory">Plan</td>
+            <td class="px-5 py-3 font-mono text-[13px]">plan:project:slug</td>
+            <td class="px-5 py-3 text-ink-500 text-[13px] hidden sm:table-cell">plan:plannotator:impl-plan-2026-05-22</td>
+          </tr>
+          <tr>
+            <td class="px-5 py-3 font-medium text-slate dark:text-ivory">Review</td>
+            <td class="px-5 py-3 font-mono text-[13px]">review:project:branch</td>
+            <td class="px-5 py-3 text-ink-500 text-[13px] hidden sm:table-cell">review:plannotator:feat/persistence</td>
+          </tr>
+          <tr>
+            <td class="px-5 py-3 font-medium text-slate dark:text-ivory">Annotate</td>
+            <td class="px-5 py-3 font-mono text-[13px]">annotate:filepath</td>
+            <td class="px-5 py-3 text-ink-500 text-[13px] hidden sm:table-cell">annotate:/path/to/README.md</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="text-[13px] text-ink-500 mt-3">No match (heading changed, different branch, different file) → new session as before.</p>
+  </section>
+
+  <!-- ─── Files Changed ─── -->
+  <section class="mb-14">
+    <p class="font-mono text-[11px] tracking-[0.12em] uppercase text-ink-500 mb-4">Files changed — 14 files, +423 / -143</p>
+    <details class="rounded-xl border-[1.5px] border-ink-300 dark:border-ink-700 bg-paper dark:bg-ink-900 group">
+      <summary class="cursor-pointer list-none px-5 py-3 font-mono text-[12px] tracking-[0.08em] uppercase text-ink-500 group-open:text-slate dark:group-open:text-ivory">
+        Show file list →
+      </summary>
+      <div class="px-5 pb-5 pt-1">
+        <table class="w-full text-[13px]">
+          <tbody class="divide-y divide-ink-200 dark:divide-ink-700">
+            <tr><td class="py-1.5 font-mono text-[12px]">daemon-protocol.ts</td><td class="py-1.5 text-ink-500">New status, event family, protocol v2</td></tr>
+            <tr><td class="py-1.5 font-mono text-[12px]">session-handler.ts</td><td class="py-1.5 text-ink-500">createDecisionCycle, resolveAndCycle helpers</td></tr>
+            <tr><td class="py-1.5 font-mono text-[12px]">session-store.ts</td><td class="py-1.5 text-ink-500">suspend(), reactivate(), matchKey field</td></tr>
+            <tr><td class="py-1.5 font-mono text-[12px]">session-factory.ts</td><td class="py-1.5 text-ink-500">Matching, persistent loop, all three types wired</td></tr>
+            <tr><td class="py-1.5 font-mono text-[12px]">server.ts (daemon)</td><td class="py-1.5 text-ink-500">Skip deletion timer for awaiting sessions</td></tr>
+            <tr><td class="py-1.5 font-mono text-[12px]">index.ts (plan)</td><td class="py-1.5 text-ink-500">Cycle model, updateContent, slug</td></tr>
+            <tr><td class="py-1.5 font-mono text-[12px]">annotate.ts</td><td class="py-1.5 text-ink-500">Cycle model, updateContent for files</td></tr>
+            <tr><td class="py-1.5 font-mono text-[12px]">review.ts</td><td class="py-1.5 text-ink-500">Cycle model, updateContent for diffs</td></tr>
+            <tr><td class="py-1.5 font-mono text-[12px]">hook/index.ts (CLI)</td><td class="py-1.5 text-ink-500">Accept awaiting-resubmission status</td></tr>
+            <tr><td class="py-1.5 font-mono text-[12px]">plan-review App.tsx</td><td class="py-1.5 text-ink-500">Awaiting state + revision subscription</td></tr>
+            <tr><td class="py-1.5 font-mono text-[12px]">code-review App.tsx</td><td class="py-1.5 text-ink-500">Awaiting state + revision subscription</td></tr>
+            <tr><td class="py-1.5 font-mono text-[12px]">CompletionBanner.tsx</td><td class="py-1.5 text-ink-500">Awaiting variant with spinner</td></tr>
+            <tr><td class="py-1.5 font-mono text-[12px]">AGENTS.md</td><td class="py-1.5 text-ink-500">Documentation</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </details>
+  </section>
+
+  <!-- ─── Does NOT persist ─── -->
+  <section class="mb-14">
+    <p class="font-mono text-[11px] tracking-[0.12em] uppercase text-ink-500 mb-4">What does NOT persist</p>
+    <div class="grid sm:grid-cols-2 gap-3">
+      <div class="rounded-lg border border-ink-300 dark:border-ink-700 px-4 py-3 flex items-center gap-3">
+        <span class="text-red-400">✗</span>
+        <span class="text-[14px]">URL-based annotations</span>
+      </div>
+      <div class="rounded-lg border border-ink-300 dark:border-ink-700 px-4 py-3 flex items-center gap-3">
+        <span class="text-red-400">✗</span>
+        <span class="text-[14px]">"Annotate last message" sessions</span>
+      </div>
+      <div class="rounded-lg border border-ink-300 dark:border-ink-700 px-4 py-3 flex items-center gap-3">
+        <span class="text-red-400">✗</span>
+        <span class="text-[14px]">Archive sessions (read-only)</span>
+      </div>
+      <div class="rounded-lg border border-ink-300 dark:border-ink-700 px-4 py-3 flex items-center gap-3">
+        <span class="text-red-400">✗</span>
+        <span class="text-[14px]">Standalone / demo sessions</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Recap ─── -->
+  <section class="mb-14">
+    <p class="font-mono text-[11px] tracking-[0.12em] uppercase text-ink-500 mb-4">Recap</p>
+    <div class="rounded-xl border border-ink-300 dark:border-ink-700 bg-paper dark:bg-ink-900 p-6">
+      <ol class="space-y-2.5 text-[14.5px] list-decimal list-inside marker:text-clay marker:font-mono">
+        <li>Denied sessions stay alive instead of dying</li>
+        <li>Agent resubmits → same session updates in place</li>
+        <li>Works for plan, code review, and file-based annotate</li>
+        <li>Matching by project+slug, project+branch, or filepath</li>
+        <li>10-minute timeout if the agent doesn't come back</li>
+        <li>Agent doesn't need to know — matching is server-side</li>
+        <li>Shared <code class="font-mono text-[13px] bg-ink-100 dark:bg-ink-900 px-1.5 py-0.5 rounded">createDecisionCycle</code> eliminates duplication</li>
+        <li>Frontend shows amber "waiting" banner with cancel</li>
+        <li>No changes to approve, exit, or standalone flows</li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- ─── Quiz ─── -->
+  <section class="mb-14">
+    <p class="font-mono text-[11px] tracking-[0.12em] uppercase text-ink-500 mb-4">Knowledge check</p>
+    <div class="space-y-3" id="quiz">
+    </div>
+  </section>
+
+</main>
+
+<script>
+  document.getElementById('themeToggle').addEventListener('click', () => {
+    const dark = !document.documentElement.classList.contains('dark');
+    document.documentElement.classList.toggle('dark', dark);
+    localStorage.setItem('theme', dark ? 'dark' : 'light');
+  });
+
+  const quizData = [
+    { q: "What happens to a denied session's HTTP handler?", a: "It stays alive. suspend() does NOT call disposeResources() or clear handleRequest." },
+    { q: "How does the daemon know a new submission is a revision?", a: "It computes a match key (e.g. plan:project:slug) and searches for an awaiting-resubmission session with the same key." },
+    { q: "What if the agent changes the plan heading?", a: "Different heading → different slug → no match → new session. The old one expires after 10 minutes." },
+    { q: "Does the agent need to know about persistence?", a: "No. The CLI runs fresh each time. Matching is entirely server-side." },
+    { q: "What's the difference between suspend() and complete()?", a: "complete() disposes everything. suspend() resolves waiters but keeps the session alive." },
+    { q: "How does the frontend know content changed?", a: "A session-revision WebSocket event. The frontend subscribes when awaitingResubmission is true." },
+    { q: "What happens to a URL annotation when denied?", a: "It completes normally. URL sources can't be refreshed, so no match key is set." },
+    { q: "How long does the session wait?", a: "10 minutes. Then cleanupExpired() transitions it to expired." },
+  ];
+
+  const quizContainer = document.getElementById('quiz');
+  quizData.forEach((item, i) => {
+    const d = document.createElement('details');
+    d.className = 'rounded-xl border-[1.5px] border-ink-300 dark:border-ink-700 bg-paper dark:bg-ink-900 group';
+    d.innerHTML = `
+      <summary class="cursor-pointer list-none px-5 py-3 text-[14.5px] font-medium text-slate dark:text-ivory flex items-center gap-3">
+        <span class="font-mono text-[12px] text-ink-500 w-5">${i + 1}.</span>
+        ${item.q}
+      </summary>
+      <div class="quiz-answer px-5 pb-4 pt-1 ml-8 text-[14px] text-ink-500 border-t border-ink-200 dark:border-ink-700 mt-1 pt-3">
+        ${item.a}
+      </div>
+    `;
+    quizContainer.appendChild(d);
+  });
+</script>
+
+</body>
+</html>

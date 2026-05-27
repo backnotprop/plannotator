@@ -4,7 +4,7 @@ import { AnnotationType } from '../types';
 import type { ViewerHandle } from '../components/Viewer';
 
 /**
- * Bridges SSE-delivered external annotations into the Viewer's imperative
+ * Bridges live external annotations into the Viewer's imperative
  * highlight API so tools can POST annotations with `originalText` and have
  * them highlight real spans of the rendered plan.
  *
@@ -21,7 +21,7 @@ import type { ViewerHandle } from '../components/Viewer';
  *   which would otherwise leave our bookkeeping stale against a wiped DOM.
  * - Disabled state no-ops WITHOUT clearing the applied set. This preserves the
  *   bookkeeping while the Viewer DOM is hidden (diff view / linked doc) so that
- *   any SSE removals that arrive while hidden are correctly reconciled when the
+ *   any live removals that arrive while hidden are correctly reconciled when the
  *   hook re-enables.
  */
 export function useExternalAnnotationHighlights(params: {

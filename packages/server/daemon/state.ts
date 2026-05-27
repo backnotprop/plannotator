@@ -12,7 +12,7 @@ export const DAEMON_AUTH_COOKIE = "plannotator_daemon_auth";
 
 export interface DaemonState {
   protocol: typeof PLANNOTATOR_DAEMON_PROTOCOL;
-  protocolVersion: typeof PLANNOTATOR_DAEMON_PROTOCOL_VERSION;
+  protocolVersion: number;
   pid: number;
   port: number;
   hostname: string;
@@ -86,7 +86,8 @@ export function isDaemonState(value: unknown): value is DaemonState {
   return (
     !!state &&
     state.protocol === PLANNOTATOR_DAEMON_PROTOCOL &&
-    state.protocolVersion === PLANNOTATOR_DAEMON_PROTOCOL_VERSION &&
+    typeof state.protocolVersion === "number" &&
+    state.protocolVersion >= 1 &&
     typeof state.pid === "number" &&
     Number.isInteger(state.pid) &&
     state.pid > 0 &&

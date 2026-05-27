@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useSessionFetch } from '../hooks/useSessionFetch';
 import { ImageThumbnail, getImageSrc } from './ImageThumbnail';
 import { ImageAnnotator } from './ImageAnnotator';
 import type { ImageAttachment } from '../types';
@@ -58,6 +59,7 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
   variant = 'toolbar',
   hideLabel = false,
 }) => {
+  const fetch = useSessionFetch();
   const [isOpen, setIsOpen] = useState(false);
   const [manualPath, setManualPath] = useState('');
   const [uploading, setUploading] = useState(false);

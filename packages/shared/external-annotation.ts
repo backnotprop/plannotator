@@ -1,5 +1,5 @@
 /**
- * External Annotations — shared types, store logic, and SSE helpers.
+ * External Annotations — shared types, store logic, and input helpers.
  *
  * Runtime-agnostic: no node:fs, no node:http, no Bun APIs.
  * Both the Bun server handler and Pi server handler import this module
@@ -18,26 +18,11 @@
 export type StorableAnnotation = { id: string; source?: string };
 
 export type ExternalAnnotationEvent<T = unknown> =
-  | { type: "snapshot"; annotations: T[] }
+  | { type: "snapshot"; annotations: T[]; version?: number }
   | { type: "add"; annotations: T[] }
   | { type: "remove"; ids: string[] }
   | { type: "clear"; source?: string }
   | { type: "update"; id: string; annotation: T };
-
-// ---------------------------------------------------------------------------
-// SSE helpers
-// ---------------------------------------------------------------------------
-
-/** Heartbeat comment to keep SSE connections alive (sent every 30s). */
-export const HEARTBEAT_COMMENT = ":\n\n";
-
-/** Interval in ms between heartbeat comments. */
-export const HEARTBEAT_INTERVAL_MS = 30_000;
-
-/** Encode an event as an SSE `data:` line. */
-export function serializeSSEEvent<T>(event: ExternalAnnotationEvent<T>): string {
-  return `data: ${JSON.stringify(event)}\n\n`;
-}
 
 // ---------------------------------------------------------------------------
 // Input validation — shared helpers
@@ -305,7 +290,7 @@ export interface AnnotationStore<T extends StorableAnnotation> {
  * Create an in-memory annotation store.
  *
  * The store is runtime-agnostic — it holds data and emits events.
- * HTTP transport (SSE broadcasting, request parsing) is handled by
+ * HTTP transport and daemon WebSocket publication are handled by
  * the server-specific adapter (Bun or Pi).
  */
 export function createAnnotationStore<T extends StorableAnnotation>(): AnnotationStore<T> {

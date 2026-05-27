@@ -9,6 +9,7 @@
 
 import { useState, useCallback } from "react";
 import type { VaultNode } from "../types";
+import { useSessionFetch } from "./useSessionFetch";
 
 export interface DirState {
   path: string;
@@ -36,6 +37,7 @@ export interface UseFileBrowserReturn {
 }
 
 export function useFileBrowser(): UseFileBrowserReturn {
+  const fetch = useSessionFetch();
   const [dirs, setDirs] = useState<DirState[]>([]);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [activeFile, setActiveFile] = useState<string | null>(null);

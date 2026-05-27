@@ -4,7 +4,7 @@
  * All functions use the `gh` CLI via the PRRuntime abstraction.
  */
 
-import type { PRRuntime, PRMetadata, PRContext, PRReviewThread, PRThreadComment, PRReviewFileComment, CommandResult, PRStackTree, PRStackNode, PRListItem } from "./pr-types";
+import type { PRRuntime, PRMetadata, PRContext, PRReviewThread, PRThreadComment, PRReviewFileComment, CommandResult, PRStackTree, PRStackNode, PRListItem, PRDetailedListItem } from "./pr-types";
 import { encodeApiFilePath } from "./pr-types";
 
 // GitHub-specific PRRef shape (used internally)
@@ -633,7 +633,7 @@ export async function fetchGhPRList(
   const result = await runtime.runCommand("gh", [
     "pr", "list",
     "--repo", repoFlag(ref),
-    "--json", "number,title,author,url,baseRefName,state",
+    "--json", "number,title,author,url,baseRefName,headRefName,state",
     "--limit", "30",
     "--state", "all",
   ]);
@@ -646,6 +646,7 @@ export async function fetchGhPRList(
     author: { login: string };
     url: string;
     baseRefName: string;
+    headRefName: string;
     state: string;
   }>;
 
@@ -656,6 +657,55 @@ export async function fetchGhPRList(
     author: pr.author.login,
     url: pr.url,
     baseBranch: pr.baseRefName,
+    headBranch: pr.headRefName,
     state: (pr.state === "OPEN" ? "open" : pr.state === "MERGED" ? "merged" : "closed") as PRListItem["state"],
+  }));
+}
+
+export async function fetchGhPRDetailedList(
+  runtime: PRRuntime,
+  ref: GhPRRef,
+): Promise<PRDetailedListItem[]> {
+  const result = await runtime.runCommand("gh", [
+    "pr", "list",
+    "--repo", repoFlag(ref),
+    "--json", "number,title,author,url,baseRefName,headRefName,state,additions,deletions,comments,updatedAt,isDraft,reviewDecision",
+    "--limit", "30",
+    "--state", "all",
+  ]);
+
+  if (result.exitCode !== 0) return [];
+
+  const raw = JSON.parse(result.stdout) as Array<{
+    number: number;
+    title: string;
+    author: { login: string };
+    url: string;
+    baseRefName: string;
+    headRefName: string;
+    state: string;
+    additions: number;
+    deletions: number;
+    comments: unknown[];
+    updatedAt: string;
+    isDraft: boolean;
+    reviewDecision: string;
+  }>;
+
+  return raw.map((pr) => ({
+    id: String(pr.number),
+    number: pr.number,
+    title: pr.title,
+    author: pr.author.login,
+    url: pr.url,
+    baseBranch: pr.baseRefName,
+    headBranch: pr.headRefName,
+    state: (pr.state === "OPEN" ? "open" : pr.state === "MERGED" ? "merged" : "closed") as PRListItem["state"],
+    additions: pr.additions ?? 0,
+    deletions: pr.deletions ?? 0,
+    commentCount: Array.isArray(pr.comments) ? pr.comments.length : 0,
+    updatedAt: pr.updatedAt ?? "",
+    isDraft: pr.isDraft ?? false,
+    reviewDecision: pr.reviewDecision ?? "",
   }));
 }

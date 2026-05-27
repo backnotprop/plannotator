@@ -9,6 +9,7 @@ let dirs: string[] = [];
 let runtimes: DaemonRuntime[] = [];
 const shellHtml = "<html><head></head><body>Shell</body></html>";
 
+
 function daemonAuthHeaders(runtime: DaemonRuntime, headers?: HeadersInit): Headers {
   const next = new Headers(headers);
   next.set("authorization", `Bearer ${runtime.state.authToken}`);

@@ -22,6 +22,24 @@ function run(command: string[], cwd: string): void {
   }
 }
 
+function daemonContext(
+  store: DaemonSessionStore,
+  endpoint: Partial<DaemonFetchContext["endpoint"]> = {},
+): DaemonFetchContext {
+  return {
+    endpoint: {
+      hostname: "127.0.0.1",
+      port: 4321,
+      baseUrl: "http://127.0.0.1:4321",
+      isRemote: false,
+      ...endpoint,
+    },
+    store,
+    publishSessionEvent: () => {},
+    registerSessionSnapshotProvider: () => () => {},
+  };
+}
+
 afterEach(() => {
   process.env.HOME = originalHome;
   for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
@@ -39,15 +57,7 @@ describe("createDaemonSessionFactory", () => {
       planHtmlContent: "<html><head></head><body>Plan</body></html>",
       reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
-    const context: DaemonFetchContext = {
-      endpoint: {
-        hostname: "127.0.0.1",
-        port: 4321,
-        baseUrl: "http://127.0.0.1:4321",
-        isRemote: false,
-      },
-      store,
-    };
+    const context = daemonContext(store);
 
     const record = await factory({
       request: {
@@ -90,7 +100,7 @@ describe("createDaemonSessionFactory", () => {
     );
 
     const completed = await store.waitForResult<{ approved: boolean }>(record.id);
-    expect(completed.status).toBe("completed");
+    expect(completed.status).toBe("awaiting-resubmission");
     expect(completed.result?.approved).toBe(true);
   });
 
@@ -104,15 +114,7 @@ describe("createDaemonSessionFactory", () => {
       planHtmlContent: "<html><head></head><body>Plan</body></html>",
       reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
-    const context: DaemonFetchContext = {
-      endpoint: {
-        hostname: "127.0.0.1",
-        port: 4321,
-        baseUrl: "http://127.0.0.1:4321",
-        isRemote: false,
-      },
-      store,
-    };
+    const context = daemonContext(store);
 
     const record = await factory({
       request: {
@@ -137,15 +139,7 @@ describe("createDaemonSessionFactory", () => {
       planHtmlContent: "<html><head></head><body>Plan</body></html>",
       reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
-    const context: DaemonFetchContext = {
-      endpoint: {
-        hostname: "127.0.0.1",
-        port: 4321,
-        baseUrl: "http://127.0.0.1:4321",
-        isRemote: false,
-      },
-      store,
-    };
+    const context = daemonContext(store);
 
     const timed = await factory({
       request: {
@@ -180,15 +174,7 @@ describe("createDaemonSessionFactory", () => {
       planHtmlContent: "<html><head></head><body>Archive</body></html>",
       reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
-    const context: DaemonFetchContext = {
-      endpoint: {
-        hostname: "127.0.0.1",
-        port: 4321,
-        baseUrl: "http://127.0.0.1:4321",
-        isRemote: false,
-      },
-      store,
-    };
+    const context = daemonContext(store);
 
     const record = await factory({
       request: {
@@ -219,15 +205,7 @@ describe("createDaemonSessionFactory", () => {
       planHtmlContent: "<html><head></head><body>Plan</body></html>",
       reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
-    const context: DaemonFetchContext = {
-      endpoint: {
-        hostname: "127.0.0.1",
-        port: 4321,
-        baseUrl: "http://127.0.0.1:4321",
-        isRemote: false,
-      },
-      store,
-    };
+    const context = daemonContext(store);
 
     await expect(factory({
       request: {
@@ -247,15 +225,7 @@ describe("createDaemonSessionFactory", () => {
       planHtmlContent: "<html><head></head><body>Plan</body></html>",
       reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
-    const context: DaemonFetchContext = {
-      endpoint: {
-        hostname: "127.0.0.1",
-        port: 4321,
-        baseUrl: "http://127.0.0.1:4321",
-        isRemote: false,
-      },
-      store,
-    };
+    const context = daemonContext(store);
 
     await expect(factory({
       request: {
@@ -275,15 +245,7 @@ describe("createDaemonSessionFactory", () => {
       planHtmlContent: "<html><head></head><body>Plan</body></html>",
       reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
-    const context: DaemonFetchContext = {
-      endpoint: {
-        hostname: "127.0.0.1",
-        port: 4321,
-        baseUrl: "http://127.0.0.1:4321",
-        isRemote: false,
-      },
-      store,
-    };
+    const context = daemonContext(store);
 
     await expect(factory({
       request: {
@@ -305,15 +267,7 @@ describe("createDaemonSessionFactory", () => {
       planHtmlContent: "<html><head></head><body>Plan</body></html>",
       reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
-    const context: DaemonFetchContext = {
-      endpoint: {
-        hostname: "127.0.0.1",
-        port: 4321,
-        baseUrl: "http://127.0.0.1:4321",
-        isRemote: false,
-      },
-      store,
-    };
+    const context = daemonContext(store);
 
     const record = await factory({
       request: {
@@ -351,15 +305,11 @@ describe("createDaemonSessionFactory", () => {
       reviewHtmlContent: "<html><head></head><body>Review</body></html>",
       shareBaseUrl: "https://share.example.test",
     });
-    const context: DaemonFetchContext = {
-      endpoint: {
-        hostname: "0.0.0.0",
-        port: 4321,
-        baseUrl: "http://localhost:4321",
-        isRemote: true,
-      },
-      store,
-    };
+    const context = daemonContext(store, {
+      hostname: "0.0.0.0",
+      baseUrl: "http://localhost:4321",
+      isRemote: true,
+    });
 
     const record = await factory({
       request: {
@@ -396,15 +346,11 @@ describe("createDaemonSessionFactory", () => {
       reviewHtmlContent: "<html><head></head><body>Review</body></html>",
       shareBaseUrl: "https://share.example.test",
     });
-    const context: DaemonFetchContext = {
-      endpoint: {
-        hostname: "0.0.0.0",
-        port: 4321,
-        baseUrl: "http://localhost:4321",
-        isRemote: true,
-      },
-      store,
-    };
+    const context = daemonContext(store, {
+      hostname: "0.0.0.0",
+      baseUrl: "http://localhost:4321",
+      isRemote: true,
+    });
 
     const record = await factory({
       request: {
@@ -431,15 +377,7 @@ describe("createDaemonSessionFactory", () => {
       planHtmlContent: "<html><head></head><body>Plan</body></html>",
       reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
-    const context: DaemonFetchContext = {
-      endpoint: {
-        hostname: "127.0.0.1",
-        port: 4321,
-        baseUrl: "http://127.0.0.1:4321",
-        isRemote: false,
-      },
-      store,
-    };
+    const context = daemonContext(store);
 
     const record = await factory({
       request: {
@@ -472,15 +410,7 @@ describe("createDaemonSessionFactory", () => {
       planHtmlContent: "<html><head></head><body>Plan</body></html>",
       reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
-    const context: DaemonFetchContext = {
-      endpoint: {
-        hostname: "127.0.0.1",
-        port: 4321,
-        baseUrl: "http://127.0.0.1:4321",
-        isRemote: false,
-      },
-      store,
-    };
+    const context = daemonContext(store);
 
     const record = await factory({
       request: {
@@ -508,15 +438,7 @@ describe("createDaemonSessionFactory", () => {
       planHtmlContent: "<html><head></head><body>Plan</body></html>",
       reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
-    const context: DaemonFetchContext = {
-      endpoint: {
-        hostname: "127.0.0.1",
-        port: 4321,
-        baseUrl: "http://127.0.0.1:4321",
-        isRemote: false,
-      },
-      store,
-    };
+    const context = daemonContext(store);
 
     const record = await factory({
       request: {
@@ -537,5 +459,94 @@ describe("createDaemonSessionFactory", () => {
     expect(planBody.renderAs).toBe("html");
     expect(planBody.rawHtml).toContain("Inline HTML");
     expect(planBody.plan).toBe("");
+  });
+
+  test("creates a goal-setup interview session and completes through submit", async () => {
+    const cwd = tempDir("plannotator-daemon-cwd-");
+    const store = new DaemonSessionStore({ now: () => 1_000 });
+    const factory = createDaemonSessionFactory({
+      planHtmlContent: "<html><head></head><body>Plan</body></html>",
+      reviewHtmlContent: "<html><head></head><body>Review</body></html>",
+    });
+    const context = daemonContext(store);
+
+    const record = await factory({
+      request: {
+        action: "goal-setup",
+        origin: "claude-code",
+        cwd,
+        bundle: {
+          stage: "interview",
+          title: "Test goal",
+          goalSlug: "test-goal",
+          questions: [{ id: "q1", prompt: "Scope?" }],
+        },
+        stage: "interview",
+        goalSlug: "test-goal",
+      },
+    }, context);
+
+    expect(record.mode).toBe("goal-setup");
+    expect(record.label).toContain("goal-setup-interview");
+
+    const planResponse = await record.handleRequest!(
+      new Request("http://127.0.0.1:4321/api/goal-setup"),
+      new URL("http://127.0.0.1:4321/api/goal-setup"),
+    );
+    const planBody = await planResponse.json();
+    expect(planBody.mode).toBe("goal-setup");
+    expect(planBody.goalSetup.questions[0].id).toBe("q1");
+
+    await record.handleRequest!(
+      new Request("http://127.0.0.1:4321/api/goal-setup/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          answers: [{ questionId: "q1", answer: "Everything.", completed: true, selectedOptionIds: [] }],
+        }),
+      }),
+      new URL("http://127.0.0.1:4321/api/goal-setup/submit"),
+    );
+
+    const completed = await store.waitForResult(record.id);
+    expect(completed.status).toBe("completed");
+    const result = completed.result as { result?: { stage: string }; exit?: boolean };
+    expect(result.result?.stage).toBe("interview");
+  });
+
+  test("creates a goal-setup facts session and resolves exit", async () => {
+    const cwd = tempDir("plannotator-daemon-cwd-");
+    const store = new DaemonSessionStore({ now: () => 1_000 });
+    const factory = createDaemonSessionFactory({
+      planHtmlContent: "<html><head></head><body>Plan</body></html>",
+      reviewHtmlContent: "<html><head></head><body>Review</body></html>",
+    });
+    const context = daemonContext(store);
+
+    const record = await factory({
+      request: {
+        action: "goal-setup",
+        origin: "claude-code",
+        cwd,
+        bundle: {
+          stage: "facts",
+          title: "Test facts",
+          facts: [{ id: "f1", text: "Fact one.", accepted: false, removed: false, automatedVerification: false }],
+        },
+        stage: "facts",
+      },
+    }, context);
+
+    expect(record.mode).toBe("goal-setup");
+
+    await record.handleRequest!(
+      new Request("http://127.0.0.1:4321/api/exit", { method: "POST" }),
+      new URL("http://127.0.0.1:4321/api/exit"),
+    );
+
+    const completed = await store.waitForResult(record.id);
+    expect(completed.status).toBe("completed");
+    const result = completed.result as { exit?: boolean };
+    expect(result.exit).toBe(true);
   });
 });
