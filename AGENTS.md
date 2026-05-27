@@ -92,13 +92,26 @@ plannotator/
 └── legacy/                       # Old pre-monorepo code (reference only)
 ```
 
-## Server Runtimes
+## Architecture
 
-Plannotator has one server implementation:
+The `plannotator` binary is the only server. One server, one frontend, many entry points.
 
-- **Bun server** (`packages/server/`) — owns plan review, code review, annotate, archive, and shared browser APIs.
+```
+Host app (Claude Code / OpenCode / Pi / Codex / Copilot / Gemini CLI)
+  → thin wrapper (hook, extension, plugin)
+    → plannotator binary (CLI)
+      → daemon (one per machine)
+        → frontend (browser)
+```
 
-Claude Code runs this server through the released `plannotator` binary entrypoint. OpenCode and Pi do not package their own server implementations; they call the same binary through the plugin protocol in `packages/shared/plugin-protocol.ts`. Runtime-agnostic logic (store, validation, types) lives in `packages/shared/`.
+- The binary either starts a daemon or connects to one already running. The daemon serves the frontend.
+- Claude Code calls the binary directly via hooks. OpenCode, Pi, Codex, Copilot, and Gemini CLI call it via thin extension/plugin wrappers that spawn the binary as a subprocess.
+- Extensions and plugins have no server logic of their own. They translate "my host app wants to do X" into "shell out to `plannotator`."
+- The frontend (`apps/frontend/`) is the only UI. The old standalone HTML packages (`packages/editor/`, `packages/review-editor/`) are legacy and being removed.
+
+## Server Implementation
+
+Server logic lives in `packages/server/`. Runtime-agnostic logic (store, validation, types) lives in `packages/shared/`. The plugin protocol for extensions is in `packages/shared/plugin-protocol.ts` and `plugin-client.ts`.
 
 Daemon-backed commands run through one long-running `plannotator` process per user/machine environment. `plannotator daemon start|status|stop` manage that lifecycle, while normal plan/review/annotate/archive commands auto-start a compatible daemon and create session-scoped browser URLs at `/s/<sessionId>`. Browser API calls must use `/s/<sessionId>/api/...`; root `/api/...` routes are not a daemon session boundary.
 

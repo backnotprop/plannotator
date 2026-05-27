@@ -35,6 +35,14 @@ Tracking decisions made during PR #770 review and triage (2026-05-23).
 - In legacy tab mode, code review should show the full-screen completion overlay (countdown + close tab) after sending feedback, same as plan review. The inline banner is for embedded mode only.
 - When a new diff arrives, files I've already viewed should stay hidden — unless the file actually changed in the new diff. Only show it again if the content is different.
 
+### Architecture
+
+- The `plannotator` binary is the only server. There is one server, one frontend, many entry points.
+- The binary either starts a daemon or connects to one already running. The daemon serves the frontend. That's it.
+- Claude Code calls the binary directly via hooks. OpenCode, Pi, Codex, Copilot, and Gemini CLI call it via thin extension/plugin wrappers that spawn the binary as a subprocess.
+- Extensions and plugins have no server logic of their own. They translate "my host app wants to review a plan" into "shell out to the `plannotator` binary."
+- The new frontend (`apps/frontend/`) is the only UI going forward. The old standalone HTML packages (`packages/editor/`, `packages/review-editor/`, `apps/review/`) are legacy and will be removed.
+
 ### Cross-Cutting
 
 - Every annotate session lives forever once created — single file, folder, last message, URL. No one-shot sessions. The tab stays open and interactive after feedback is sent. There are no exceptions.
