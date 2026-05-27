@@ -52,9 +52,9 @@ export function registerProject(
 ): DaemonProjectEntry {
   const entries = readProjectRegistry(options);
   const now = new Date().toISOString();
-  const existing = entries.find((e) => e.name === name);
+  const existing = entries.find((e) => e.cwd === cwd);
   if (existing) {
-    existing.cwd = cwd;
+    existing.name = name;
     existing.lastSeen = now;
     writeProjectRegistry(entries, options);
     return existing;
@@ -66,11 +66,11 @@ export function registerProject(
 }
 
 export function removeProject(
-  name: string,
+  cwd: string,
   options: ProjectRegistryOptions = {},
 ): boolean {
   const entries = readProjectRegistry(options);
-  const filtered = entries.filter((e) => e.name !== name);
+  const filtered = entries.filter((e) => e.cwd !== cwd);
   if (filtered.length === entries.length) return false;
   writeProjectRegistry(filtered, options);
   return true;

@@ -221,6 +221,7 @@ export class DaemonHubClient {
       this.socket = undefined;
       this.daemonSubscribed = false;
       socket?.close();
+      this.scheduleReconnect();
       return;
     }
     if (
