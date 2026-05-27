@@ -2,8 +2,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { DiffType } from "./generated/review-core.js";
-import type { VcsSelection } from "./generated/vcs-core.js";
+type DiffType = string;
+type VcsSelection = "auto" | "git" | "jj" | "p4";
 import {
 	getLastAssistantMessageText,
 	getStartupErrorMessage,

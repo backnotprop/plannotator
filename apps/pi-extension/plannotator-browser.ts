@@ -1,8 +1,8 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { DiffType } from "./generated/review-core.js";
-import type { VcsSelection } from "./generated/vcs-core.js";
+type DiffType = string;
+type VcsSelection = "auto" | "git" | "jj" | "p4";
 import type { PluginFeature, PluginSessionInfo } from "./generated/plugin-protocol.js";
 import {
 	ensurePlannotatorBinary,

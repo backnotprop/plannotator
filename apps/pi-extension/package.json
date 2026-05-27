@@ -37,11 +37,7 @@
     "build": "rm -rf skills && cp -r ../skills skills && bash vendor.sh",
     "prepublishOnly": "cd ../.. && bun run build:pi"
   },
-  "dependencies": {
-    "@pierre/diffs": "^1.1.12",
-    "turndown": "^7.2.4",
-    "@joplin/turndown-plugin-gfm": "^1.0.64"
-  },
+  "dependencies": {},
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.74.0"
   },

@@ -402,7 +402,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				const isPRReview = reviewArgs.prUrl !== undefined;
 				const session = await startCodeReviewBrowserSession(ctx, {
 					prUrl: reviewArgs.prUrl,
-					vcsType: reviewArgs.vcsType,
+					vcsType: reviewArgs.vcsType as "auto" | "git" | "jj" | "p4" | undefined,
 					useLocal: reviewArgs.useLocal,
 				});
 				ctx.ui.notify("Code review opened. You can keep chatting while it runs.", "info");
