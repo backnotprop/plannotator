@@ -44,9 +44,6 @@ const REVIEW_TABS: TabDef[] = [
   { id: "review-ai", label: "AI" },
 ];
 
-const INTEGRATION_TABS: TabDef[] = [
-  { id: "int-files", label: "Files" },
-];
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
@@ -200,12 +197,9 @@ export function AppSettingsDialog() {
                     </TabsTrigger>
                   ))}
 
-                  <SectionLabel>Integrations</SectionLabel>
-                  {INTEGRATION_TABS.map((tab) => (
-                    <TabsTrigger key={tab.id} value={tab.id} className="w-full justify-start h-8">
-                      {tab.label}
-                    </TabsTrigger>
-                  ))}
+                  <TabsTrigger value="int-files" className="w-full justify-start h-8">
+                    Files
+                  </TabsTrigger>
                 </TabsList>
               </div>
             </div>
@@ -296,7 +290,6 @@ export function AppSettingsDialog() {
                   />
                 </TabsContent>
 
-                {/* Integrations */}
                 <TabsContent value="int-files">
                   <FilesTab />
                 </TabsContent>

@@ -71,9 +71,8 @@ import {
 } from '@plannotator/ui/components/goal-setup/GoalSetupSurface';
 import type { GoalSetupBundle } from '@plannotator/shared/goal-setup';
 // Demo content toggle. Default: the original Real-time Collaboration plan.
-// Opt-in diff-engine stress test: `VITE_DIFF_DEMO=1 bun run dev:hook` swaps
-// in the 20-case Auth Service Refactor test plan. dev-mock-api.ts reads the
-// same env var on the server side so V2/V3 stay paired.
+// Opt-in diff-engine stress test: set VITE_DIFF_DEMO=1 to swap in the
+// 20-case Auth Service Refactor test plan.
 import { DEMO_PLAN_CONTENT as DEFAULT_DEMO_PLAN_CONTENT } from './demoPlan';
 import { DIFF_DEMO_PLAN_CONTENT } from './demoPlanDiffDemo';
 import { canUseAnnotateWideMode, resolveWideModeExitLayout, type WideModeLayoutSnapshot, type WideModeType } from './wideMode';
@@ -480,7 +479,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
     return counts;
   }, [linkedDocHook.getDocAnnotations, annotations, globalAttachments]);
 
-  // FileBrowser counts: all files under any loaded dir (regular + vault)
+  // FileBrowser counts: all files under any loaded dir
   const fileAnnotationCounts = useMemo(() => {
     const allDirPaths = fileBrowser.dirs.map(d => d.path);
     if (allDirPaths.length === 0) return allAnnotationCounts;
