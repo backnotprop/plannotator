@@ -20,7 +20,6 @@ The binary-owned plugin surface is:
 - `plannotator plugin plan --origin opencode|pi`
 - `plannotator plugin review --origin opencode|pi`
 - `plannotator plugin annotate --origin opencode|pi`
-- `plannotator plugin archive --origin opencode|pi`
 
 Requests and responses are JSON over stdin/stdout at the plugin boundary. Inside the binary, daemon-backed commands create sessions through a localhost HTTP daemon using the same stable request/result shapes.
 
@@ -34,7 +33,7 @@ Neither plugin owns browser HTML assets, starts Plannotator HTTP servers, or shi
 
 ## Daemon Runtime
 
-The daemon is one long-running binary-owned service per user/machine environment. CLI and plugin commands auto-start it when no compatible daemon is running, then create session-scoped plan, review, annotate, and archive sessions through the shared endpoint.
+The daemon is one long-running binary-owned service per user/machine environment. CLI and plugin commands auto-start it when no compatible daemon is running, then create session-scoped plan, review, and annotate sessions through the shared endpoint.
 
 Lifecycle commands:
 
@@ -47,7 +46,7 @@ plannotator sessions
 
 The daemon provides:
 
-- session creation for plan, review, annotate, and archive requests
+- session creation for plan, review, and annotate requests
 - stable session IDs and session-scoped URLs such as `/s/<sessionId>`
 - session-scoped API routing such as `/s/<sessionId>/api/...`
 - decision delivery back to blocking callers such as Claude hooks
@@ -94,7 +93,7 @@ This phase should shrink or remove Pi's `vendor.sh` by eliminating most generate
 
 Status: implemented in the stacked daemon-runtime branch.
 
-`plannotator` runs as one long-running service that can host concurrent plan, review, annotate, and archive sessions. It owns stable session IDs, session-scoped browser URLs and API routing, result delivery back to the requesting client, cancellation, cleanup, and collision-free state management across multiple agent runtimes.
+`plannotator` runs as one long-running service that can host concurrent plan, review, and annotate sessions. It owns stable session IDs, session-scoped browser URLs and API routing, result delivery back to the requesting client, cancellation, cleanup, and collision-free state management across multiple agent runtimes.
 
 ### 4. Transport Swap
 

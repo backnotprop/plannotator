@@ -60,14 +60,14 @@ plannotator/
 │   │   │   ├── runtime.ts        # Engine: useShortcutScope, useDoubleTapShortcuts hooks
 │   │   │   ├── index.ts          # Barrel — re-exports engine + scopes from both subfolders
 │   │   │   ├── plan-review/      # Scopes for plan-editor surfaces (annotationToolbar, annotationPanel, commentPopover, imageAnnotator, inputMethod, viewer)
-│   │   │   └── code-review/      # Scopes for review-editor surfaces (ai, allFilesDiff, annotationToolbar, fileTree, prComments, suggestionModal, tourDialog)
+│   │   │   └── code-review/      # Scopes for code-review surfaces (ai, allFilesDiff, annotationToolbar, fileTree, prComments, suggestionModal, tourDialog)
 │   │   ├── shortcuts.test.ts     # Registry unit tests (parser, dispatcher, validator)
 │   │   ├── utils/                # parser.ts, sharing.ts, storage.ts, planSave.ts, agentSwitch.ts, planDiffEngine.ts, planAgentInstructions.ts
-│   │   ├── hooks/                # useAnnotationHighlighter.ts, useSharing.ts, usePlanDiff.ts, useSidebar.ts, useLinkedDoc.ts, useAnnotationDraft.ts, useCodeAnnotationDraft.ts, useArchive.ts
+│   │   ├── hooks/                # useAnnotationHighlighter.ts, useSharing.ts, usePlanDiff.ts, useSidebar.ts, useLinkedDoc.ts, useAnnotationDraft.ts, useCodeAnnotationDraft.ts
 │   │   └── types.ts
 │   ├── ai/                       # Provider-agnostic AI backbone (providers, sessions, endpoints)
 │   ├── shared/                   # Shared types, utilities, and cross-runtime logic
-│   │   ├── storage.ts            # Plan saving, version history, archive listing (node:fs only)
+│   │   ├── storage.ts            # Plan saving, version history (node:fs only)
 │   │   ├── draft.ts              # Annotation draft persistence (node:fs only)
 │   │   ├── project.ts            # Pure string helpers (sanitizeTag, extractRepoName, extractDirName)
 │   │   ├── plugin-protocol.ts    # JSON protocol for binary-owned plugin commands
@@ -107,7 +107,7 @@ Host app (Claude Code / OpenCode / Pi / Codex / Copilot / Gemini CLI)
 
 Server logic lives in `packages/server/`. Runtime-agnostic logic (store, validation, types) lives in `packages/shared/`. The plugin protocol for extensions is in `packages/shared/plugin-protocol.ts` and `plugin-client.ts`.
 
-Daemon-backed commands run through one long-running `plannotator` process per user/machine environment. `plannotator daemon start|status|stop` manage that lifecycle, while normal plan/review/annotate/archive commands auto-start a compatible daemon and create session-scoped browser URLs at `/s/<sessionId>`. Browser API calls must use `/s/<sessionId>/api/...`; root `/api/...` routes are not a daemon session boundary.
+Daemon-backed commands run through one long-running `plannotator` process per user/machine environment. `plannotator daemon start|status|stop` manage that lifecycle, while normal plan/review/annotate commands auto-start a compatible daemon and create session-scoped browser URLs at `/s/<sessionId>`. Browser API calls must use `/s/<sessionId>/api/...`; root `/api/...` routes are not a daemon session boundary.
 
 ## Installation
 
@@ -209,34 +209,18 @@ User annotates content, provides feedback
 Send Annotations → feedback sent to agent session
 ```
 
-## Archive Flow
-
-```
-User runs plannotator archive (CLI) or /plannotator-archive (Pi)
-        ↓
-Server starts in mode:"archive", reads ~/.plannotator/plans/
-        ↓
-Browser opens read-only archive viewer (sharing disabled)
-        ↓
-User browses saved plan decisions with approved/denied badges
-        ↓
-Done → POST /api/done closes the browser
-```
-
-During normal plan review, an Archive sidebar tab provides the same browsing via linked doc overlay without leaving the current session.
-
 ## Server API
 
 ### Daemon Runtime (`packages/server/daemon/`)
 
-The daemon is the single long-running Bun server used by normal plan/review/annotate/archive commands. It owns a session store and exposes browser sessions at `/s/<sessionId>`. Session browser APIs are scoped under `/s/<sessionId>/api/...`; root `/api/...` is not a valid daemon session API boundary.
+The daemon is the single long-running Bun server used by normal plan/review/annotate commands. It owns a session store and exposes browser sessions at `/s/<sessionId>`. Session browser APIs are scoped under `/s/<sessionId>/api/...`; root `/api/...` is not a valid daemon session API boundary.
 
 | Endpoint              | Method | Purpose                                    |
 | --------------------- | ------ | ------------------------------------------ |
 | `/daemon/capabilities` | GET | Return daemon protocol/capability metadata |
 | `/daemon/status` | GET | Return daemon process, endpoint, and session counts |
 | `/daemon/sessions` | GET | List active sessions (`?clean=1` also reaps expired sessions before listing) |
-| `/daemon/sessions` | POST | Create a plan/review/annotate/archive session from a plugin-protocol request |
+| `/daemon/sessions` | POST | Create a plan/review/annotate session from a plugin-protocol request |
 | `/daemon/sessions/:id` | GET | Fetch a session summary |
 | `/daemon/sessions/:id/result` | GET | Wait for a session decision/result |
 | `/daemon/sessions/:id/cancel` | POST | Cancel a session and dispose its resources |
@@ -272,12 +256,9 @@ When a user denies a plan (or sends feedback on a review/annotation), the sessio
 
 | Endpoint              | Method | Purpose                                    |
 | --------------------- | ------ | ------------------------------------------ |
-| `/api/plan`           | GET    | Returns `{ plan, origin, previousPlan, versionInfo }` (plan mode) or `{ plan, origin, mode: "archive", archivePlans }` (archive mode) |
+| `/api/plan`           | GET    | Returns `{ plan, origin, previousPlan, versionInfo }` |
 | `/api/plan/version`   | GET    | Fetch specific version (`?v=N`)            |
 | `/api/plan/versions`  | GET    | List all versions of current plan          |
-| `/api/archive/plans`  | GET    | List archived plan decisions (`?customPath=`) |
-| `/api/archive/plan`   | GET    | Fetch archived plan content (`?filename=&customPath=`) |
-| `/api/done`           | POST   | Close archive browser (archive mode only)  |
 | `/api/approve`        | POST   | Approve plan (body: planSave, agentSwitch, feedback) |
 | `/api/deny`           | POST   | Deny plan (body: feedback, planSave)       |
 | `/api/image`          | GET    | Serve image by path query param            |
@@ -385,7 +366,7 @@ When a user denies a plan and Claude resubmits, the UI shows what changed betwee
 
 **Annotation hook** (`packages/ui/hooks/useAnnotationHighlighter.ts`): Annotation infrastructure used by `Viewer.tsx`. Manages web-highlighter lifecycle, toolbar/popover state, annotation creation, text-based restoration, and scroll-to-selected. The diff view uses its own block-level hover system instead.
 
-**Sidebar** (`packages/ui/hooks/useSidebar.ts`): Shared left sidebar with three tabs — Table of Contents, Version Browser, and Archive. The "Auto-open Sidebar" setting controls whether it opens on load (TOC tab only). In archive mode, the sidebar opens to the Archive tab automatically.
+**Sidebar** (`packages/ui/hooks/useSidebar.ts`): Shared left sidebar with tabs — Table of Contents, Version Browser, and File Browser. The "Auto-open Sidebar" setting controls whether it opens on load (TOC tab only).
 
 ## Data Types
 

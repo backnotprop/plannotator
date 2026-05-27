@@ -288,8 +288,8 @@ bun install
 bun link
 ```
 
-After linking, commands like `plannotator review` use `apps/hook/server/index.ts` from your local repo. Rebuild the bundled HTML when changing UI code:
+After linking, commands like `plannotator review` use `apps/hook/server/index.ts` from your local repo. Rebuild the frontend when changing UI code:
 
 ```bash
-bun run --cwd apps/review build && bun run build:hook
+bun run build:hook
 ```
