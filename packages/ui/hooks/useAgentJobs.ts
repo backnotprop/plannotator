@@ -13,6 +13,7 @@ import {
   type DaemonSessionTransportMessage,
   useDaemonSessionTransport,
 } from './useDaemonSessionTransport';
+import { useSessionFetch } from './useSessionFetch';
 
 const JOBS_URL = '/api/agents/jobs';
 const CAPABILITIES_URL = '/api/agents/capabilities';
@@ -43,6 +44,7 @@ function logsToMap(logs: AgentJobLogs | undefined): Map<string, string> {
 export function useAgentJobs(
   options?: { enabled?: boolean },
 ): UseAgentJobsReturn {
+  const fetch = useSessionFetch();
   const enabled = options?.enabled ?? true;
   const [jobs, setJobs] = useState<AgentJobInfo[]>([]);
   const [jobLogs, setJobLogs] = useState<Map<string, string>>(new Map());

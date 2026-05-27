@@ -49,6 +49,7 @@ import { type PRMetadata, type PRReviewFileComment, type PRStackTree, type PRLis
 import { createAIEndpoints, ProviderRegistry, SessionManager, createProvider, type AIEndpoints, type PiSDKConfig } from "@plannotator/ai";
 import { isWSL } from "./browser";
 import { handleCodeNavResolve, extractChangedFiles } from "./code-nav";
+import { createDecisionCycle, resolveAndCycle } from "./session-handler";
 import type { SessionEventBridge, SessionRequestHandler } from "./session-handler";
 
 // Re-export utilities
@@ -130,6 +131,8 @@ export interface ReviewSession {
   waitForDecision: ReviewServerResult["waitForDecision"];
   setServerUrl: (url: string) => void;
   dispose: () => void;
+  updateContent?: (precomputedPatch?: string, precomputedGitRef?: string) => Promise<void>;
+  getSnapshot?: () => unknown;
 }
 
 export interface ResolveReviewScopedAgentCwdOptions {
@@ -171,6 +174,7 @@ export async function createReviewSession(
     registerSnapshotProvider: (provider) =>
       options.sessionEvents?.registerSnapshotProvider("external-annotations", provider),
   });
+  options.sessionEvents?.registerSnapshotProvider("session-revision", () => ({ rawPatch: currentPatch, gitRef: currentGitRef }));
 
   const tour = createTourSession();
 
@@ -503,22 +507,9 @@ export async function createReviewSession(
   }
 
   // Decision promise
-  let resolveDecision: (result: {
-    approved: boolean;
-    feedback: string;
-    annotations: unknown[];
-    agentSwitch?: string;
-    exit?: boolean;
-  }) => void;
-  const decisionPromise = new Promise<{
-    approved: boolean;
-    feedback: string;
-    annotations: unknown[];
-    agentSwitch?: string;
-    exit?: boolean;
-  }>((resolve) => {
-    resolveDecision = resolve;
-  });
+  type ReviewDecisionResult = { approved: boolean; feedback: string; annotations: unknown[]; agentSwitch?: string; exit?: boolean };
+  const decisionCycle = createDecisionCycle<ReviewDecisionResult>();
+  let lastDecision: 'approved' | 'feedback' | 'exited' | null = null;
 
   const handleRequest: SessionRequestHandler = async (req, url, context) => {
 
@@ -572,6 +563,7 @@ export async function createReviewSession(
               ...(isPRMode && initialViewedFiles.length > 0 && { viewedFiles: initialViewedFiles }),
               ...(currentError && { error: currentError }),
               serverConfig: getServerConfig(gitUser),
+              lastDecision,
             });
           }
 
@@ -1050,7 +1042,8 @@ export async function createReviewSession(
           // API: Exit review session without feedback
           if (url.pathname === "/api/exit" && req.method === "POST") {
             deleteDraft(draftKey);
-            resolveDecision({ approved: false, feedback: "", annotations: [], exit: true });
+            lastDecision = 'exited';
+            resolveAndCycle(decisionCycle, { approved: false, feedback: "", annotations: [], exit: true }, origin);
             return Response.json({ ok: true });
           }
 
@@ -1065,14 +1058,12 @@ export async function createReviewSession(
               };
 
               deleteDraft(draftKey);
-              resolveDecision({
-                approved: body.approved ?? false,
-                feedback: body.feedback || "",
-                annotations: body.annotations || [],
-                agentSwitch: body.agentSwitch,
-              });
+              const isApproved = body.approved ?? false;
+              lastDecision = isApproved ? 'approved' : 'feedback';
+              const result = { approved: isApproved, feedback: body.feedback || "", annotations: body.annotations || [], agentSwitch: body.agentSwitch };
+              const resubmit = resolveAndCycle(decisionCycle, result, origin);
 
-              return Response.json({ ok: true });
+              return Response.json({ ok: true, feedbackDelivered: resubmit.awaitingResubmission || undefined });
             } catch (err) {
               const message =
                 err instanceof Error ? err.message : "Failed to process feedback";
@@ -1181,10 +1172,35 @@ export async function createReviewSession(
   const exitHandler = () => agentJobs.killAll();
   process.once("exit", exitHandler);
 
+  async function handleUpdateContent(precomputedPatch?: string, precomputedGitRef?: string) {
+    let patch: string;
+    let label: string;
+    if (precomputedPatch !== undefined) {
+      patch = precomputedPatch;
+      label = precomputedGitRef ?? currentGitRef;
+      currentError = undefined;
+    } else {
+      const result = await runVcsDiff(currentDiffType, currentBase, gitContext?.cwd, {
+        hideWhitespace: currentHideWhitespace,
+      });
+      patch = result.patch;
+      label = result.label;
+      currentError = result.error;
+    }
+    currentPatch = patch;
+    currentGitRef = label;
+    lastDecision = null;
+    externalAnnotations.clearAll();
+    editorAnnotations.clearAll();
+    deleteDraft(draftKey);
+    draftKey = contentHash(patch);
+    options.sessionEvents?.publishEvent("session-revision", { rawPatch: patch, gitRef: label });
+  }
+
   return {
     htmlContent,
     handleRequest,
-    waitForDecision: () => decisionPromise,
+    waitForDecision: () => decisionCycle.promise(),
     setServerUrl: (url) => {
       serverUrl = url;
     },
@@ -1194,7 +1210,6 @@ export async function createReviewSession(
       agentJobs.dispose();
       aiSessionManager.disposeAll();
       aiRegistry.disposeAll();
-      // Invoke cleanup callback (e.g., remove temp worktree)
       if (options.onCleanup) {
         try {
           const result = options.onCleanup();
@@ -1202,6 +1217,14 @@ export async function createReviewSession(
         } catch { /* best effort */ }
       }
     },
+    getSnapshot: () => ({
+      rawPatch: currentPatch,
+      gitRef: currentGitRef,
+      origin,
+      diffType: currentDiffType,
+      gitContext: gitContext ? { currentBranch: gitContext.currentBranch, base: currentBase } : undefined,
+    }),
+    updateContent: handleUpdateContent,
   };
 }
 

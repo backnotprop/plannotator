@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useSessionFetch } from '../hooks/useSessionFetch';
 import { createPortal } from 'react-dom';
 import type { Origin } from '@plannotator/shared/agents';
 import type { DiffLineBgIntensity } from '@plannotator/shared/config';
@@ -142,12 +143,12 @@ function SegmentedControl<T extends string>({ options, value, onChange }: {
   onChange: (v: T) => void;
 }) {
   return (
-    <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-0.5">
+    <div className="inline-flex items-center gap-0.5 bg-muted/50 rounded-lg p-0.5">
       {options.map((opt) => (
         <button
           key={opt.value}
           onClick={() => onChange(opt.value)}
-          className={`flex-1 px-3 py-1.5 text-xs rounded-md transition-colors ${
+          className={`px-2.5 py-1 text-xs rounded-md whitespace-nowrap transition-colors ${
             value === opt.value
               ? 'bg-background text-foreground shadow-sm font-medium'
               : 'text-muted-foreground hover:text-foreground'
@@ -190,7 +191,7 @@ function ToggleSwitch({ checked, onChange, label, description }: {
   );
 }
 
-const GitTab: React.FC = () => {
+export const GitTab: React.FC = () => {
   const defaultDiffType = useConfigValue('defaultDiffType');
   return (
     <div className="space-y-2">
@@ -228,7 +229,7 @@ const GitTab: React.FC = () => {
   );
 };
 
-const ReviewDisplayTab: React.FC = () => {
+export const ReviewDisplayTab: React.FC = () => {
   const diffStyle = useConfigValue('diffStyle');
   const diffOverflow = useConfigValue('diffOverflow');
   const diffIndicators = useConfigValue('diffIndicators');
@@ -239,159 +240,137 @@ const ReviewDisplayTab: React.FC = () => {
   const diffHideWhitespace = useConfigValue('diffHideWhitespace');
   const diffFontFamily = useConfigValue('diffFontFamily');
   const diffFontSize = useConfigValue('diffFontSize');
+  const diffTabSize = useConfigValue('diffTabSize');
 
-  // Load font for the preview swatch
   useEffect(() => {
     if (diffFontFamily) loadDiffFont(diffFontFamily);
   }, [diffFontFamily]);
 
+  const fontSizeNum = diffFontSize ? parseInt(diffFontSize) : 13;
+
   return (
-    <>
-      {/* Font Family */}
-      <div className="space-y-2">
-        <div>
-          <div className="text-sm font-medium">Code Font</div>
-          <div className="text-xs text-muted-foreground">Font family for diff code lines</div>
+    <div className="space-y-6">
+      {/* Typography */}
+      <section className="space-y-3">
+        <h3 className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Typography</h3>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium">Code Font</div>
+            <select
+              value={diffFontFamily}
+              onChange={(e) => configStore.set('diffFontFamily', e.target.value)}
+              className="px-2 py-1 text-xs rounded-md bg-muted/50 border border-border text-foreground"
+              style={diffFontFamily ? { fontFamily: `'${diffFontFamily}', monospace` } : undefined}
+            >
+              {DIFF_FONT_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium">Font Size</div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => configStore.set('diffFontSize', `${Math.max(8, fontSizeNum - 1)}px`)}
+                disabled={fontSizeNum <= 8}
+                className="h-7 w-7 rounded-md bg-muted text-foreground flex items-center justify-center text-xs font-medium disabled:opacity-30"
+              >
+                −
+              </button>
+              <span className="w-8 text-center text-xs font-mono tabular-nums">{fontSizeNum}px</span>
+              <button
+                type="button"
+                onClick={() => configStore.set('diffFontSize', `${Math.min(24, fontSizeNum + 1)}px`)}
+                disabled={fontSizeNum >= 24}
+                className="h-7 w-7 rounded-md bg-muted text-foreground flex items-center justify-center text-xs font-medium disabled:opacity-30"
+              >
+                +
+              </button>
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium">Tab Size</div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => configStore.set('diffTabSize', Math.max(1, diffTabSize - 1))}
+                disabled={diffTabSize <= 1}
+                className="h-7 w-7 rounded-md bg-muted text-foreground flex items-center justify-center text-xs font-medium disabled:opacity-30"
+              >
+                −
+              </button>
+              <span className="w-8 text-center text-xs font-mono tabular-nums">{diffTabSize}</span>
+              <button
+                type="button"
+                onClick={() => configStore.set('diffTabSize', Math.min(8, diffTabSize + 1))}
+                disabled={diffTabSize >= 8}
+                className="h-7 w-7 rounded-md bg-muted text-foreground flex items-center justify-center text-xs font-medium disabled:opacity-30"
+              >
+                +
+              </button>
+            </div>
+          </div>
         </div>
-        <select
-          value={diffFontFamily}
-          onChange={(e) => configStore.set('diffFontFamily', e.target.value)}
-          className="w-full px-3 py-1.5 text-sm rounded-md bg-muted/50 border border-border text-foreground"
-          style={diffFontFamily ? { fontFamily: `'${diffFontFamily}', monospace` } : undefined}
+        <div
+          className="text-xs text-muted-foreground px-2 py-1.5 rounded-md bg-muted/30 font-mono"
+          style={{ fontFamily: diffFontFamily ? `'${diffFontFamily}', monospace` : undefined, fontSize: `${fontSizeNum}px` }}
         >
-          {DIFF_FONT_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-          ))}
-        </select>
-        {diffFontFamily && (
-          <div
-            className="text-xs text-muted-foreground px-1 py-1 rounded bg-muted/30 font-mono"
-            style={{ fontFamily: `'${diffFontFamily}', monospace` }}
-          >
-            Preview: const x = fn(42);
+          const x = fn(42);
+        </div>
+      </section>
+
+      <div className="border-t border-border" />
+
+      {/* Diff Layout */}
+      <section className="space-y-3">
+        <h3 className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Layout</h3>
+        <div className="flex items-center justify-between gap-4">
+          <div className="text-sm font-medium shrink-0">Diff Style</div>
+          <SegmentedControl options={DIFF_STYLE_OPTIONS} value={diffStyle} onChange={(v) => configStore.set('diffStyle', v)} />
+        </div>
+        <div className="flex items-center justify-between gap-4">
+          <div className="text-sm font-medium shrink-0">Line Overflow</div>
+          <SegmentedControl options={OVERFLOW_OPTIONS} value={diffOverflow} onChange={(v) => configStore.set('diffOverflow', v)} />
+        </div>
+        <div className="flex items-center justify-between gap-4">
+          <div className="text-sm font-medium shrink-0">Change Indicators</div>
+          <SegmentedControl options={INDICATOR_OPTIONS} value={diffIndicators} onChange={(v) => configStore.set('diffIndicators', v)} />
+        </div>
+        <div className="flex items-center justify-between gap-4">
+          <div className="text-sm font-medium shrink-0">Inline Diff</div>
+          <SegmentedControl options={LINE_DIFF_OPTIONS} value={diffLineDiffType} onChange={(v) => configStore.set('diffLineDiffType', v)} />
+        </div>
+      </section>
+
+      <div className="border-t border-border" />
+
+      {/* Toggles */}
+      <section className="space-y-3">
+        <h3 className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Options</h3>
+        <ToggleSwitch
+          checked={diffShowLineNumbers}
+          onChange={(v) => configStore.set('diffShowLineNumbers', v)}
+          label="Line Numbers"
+        />
+        <ToggleSwitch
+          checked={diffHideWhitespace}
+          onChange={(v) => configStore.set('diffHideWhitespace', v)}
+          label="Hide Whitespace"
+        />
+        <ToggleSwitch
+          checked={diffShowBackground}
+          onChange={(v) => configStore.set('diffShowBackground', v)}
+          label="Line Backgrounds"
+        />
+        {diffShowBackground && (
+          <div className="flex items-center justify-between gap-4 pl-4">
+            <div className="text-sm font-medium shrink-0">Intensity</div>
+            <SegmentedControl options={LINE_BG_INTENSITY_OPTIONS} value={diffLineBgIntensity} onChange={(v) => configStore.set('diffLineBgIntensity', v)} />
           </div>
         )}
-      </div>
-
-      <div className="border-t border-border" />
-
-      {/* Font Size */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm font-medium">Code Font Size</div>
-            <div className="text-xs text-muted-foreground">Font size for diff code lines</div>
-          </div>
-          <div className="text-xs tabular-nums text-muted-foreground min-w-[4ch] text-right">
-            {diffFontSize || 'Auto'}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <input
-            type="range"
-            min={8}
-            max={24}
-            step={1}
-            value={diffFontSize ? parseInt(diffFontSize) : 13}
-            onChange={(e) => configStore.set('diffFontSize', `${e.target.value}px`)}
-            className="flex-1 h-1.5 accent-primary cursor-pointer"
-          />
-          {diffFontSize && (
-            <button
-              onClick={() => configStore.set('diffFontSize', '')}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Reset
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="border-t border-border" />
-
-      {/* Diff Style */}
-      <div className="space-y-2">
-        <div>
-          <div className="text-sm font-medium">Diff Style</div>
-          <div className="text-xs text-muted-foreground">Side-by-side or inline diff view</div>
-        </div>
-        <SegmentedControl options={DIFF_STYLE_OPTIONS} value={diffStyle} onChange={(v) => configStore.set('diffStyle', v)} />
-      </div>
-
-      <div className="border-t border-border" />
-
-      {/* Line Overflow */}
-      <div className="space-y-2">
-        <div>
-          <div className="text-sm font-medium">Line Overflow</div>
-          <div className="text-xs text-muted-foreground">How to handle long lines in diffs</div>
-        </div>
-        <SegmentedControl options={OVERFLOW_OPTIONS} value={diffOverflow} onChange={(v) => configStore.set('diffOverflow', v)} />
-      </div>
-
-      <div className="border-t border-border" />
-
-      {/* Change Indicators */}
-      <div className="space-y-2">
-        <div>
-          <div className="text-sm font-medium">Change Indicators</div>
-          <div className="text-xs text-muted-foreground">Style of +/- markers in the gutter</div>
-        </div>
-        <SegmentedControl options={INDICATOR_OPTIONS} value={diffIndicators} onChange={(v) => configStore.set('diffIndicators', v)} />
-      </div>
-
-      <div className="border-t border-border" />
-
-      {/* Inline Diff Granularity */}
-      <div className="space-y-2">
-        <div>
-          <div className="text-sm font-medium">Inline Diff Granularity</div>
-          <div className="text-xs text-muted-foreground">Highlight granularity for inline changes</div>
-        </div>
-        <SegmentedControl options={LINE_DIFF_OPTIONS} value={diffLineDiffType} onChange={(v) => configStore.set('diffLineDiffType', v)} />
-      </div>
-
-      <div className="border-t border-border" />
-
-      {/* Show Line Numbers */}
-      <ToggleSwitch
-        checked={diffShowLineNumbers}
-        onChange={(v) => configStore.set('diffShowLineNumbers', v)}
-        label="Show Line Numbers"
-      />
-
-      <div className="border-t border-border" />
-
-      {/* Show Diff Background */}
-      <ToggleSwitch
-        checked={diffShowBackground}
-        onChange={(v) => configStore.set('diffShowBackground', v)}
-        label="Show Diff Background"
-        description="Colored backgrounds on added/deleted lines"
-      />
-
-      {/* Line Background Intensity */}
-      {diffShowBackground && (
-        <div className="space-y-2 pl-4">
-          <div>
-            <div className="text-sm font-medium">Line Background Intensity</div>
-            <div className="text-xs text-muted-foreground">How prominent the colored line backgrounds appear</div>
-          </div>
-          <SegmentedControl options={LINE_BG_INTENSITY_OPTIONS} value={diffLineBgIntensity} onChange={(v) => configStore.set('diffLineBgIntensity', v)} />
-        </div>
-      )}
-
-      <div className="border-t border-border" />
-
-      {/* Hide Whitespace */}
-      <ToggleSwitch
-        checked={diffHideWhitespace}
-        onChange={(v) => configStore.set('diffHideWhitespace', v)}
-        label="Hide Whitespace"
-        description="Ignore whitespace-only changes in diffs"
-      />
-
-    </>
+      </section>
+    </div>
   );
 };
 
@@ -433,7 +412,7 @@ function parseCCLabels(json: string | null): CCLabelConfig[] {
   }
 }
 
-const CommentsTab: React.FC = () => {
+export const CommentsTab: React.FC = () => {
   const conventionalComments = useConfigValue('conventionalComments');
   const labelsJson = useConfigValue('conventionalLabels');
   const [labels, setLabels] = useState(() => parseCCLabels(labelsJson));
@@ -600,6 +579,7 @@ const CommentsTab: React.FC = () => {
 };
 
 export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', onUIPreferencesChange, externalOpen, onExternalClose, aiProviders = [], gitUser }) => {
+  const fetch = useSessionFetch();
   const [showDialog, setShowDialog] = useState(false);
   const [themePreview, setThemePreview] = useState(false);
 

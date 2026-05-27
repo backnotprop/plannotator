@@ -7,6 +7,7 @@
  */
 
 import React, { useState } from "react";
+import { useSessionFetch } from '../../hooks/useSessionFetch';
 import type { PlanDiffBlock, PlanDiffStats } from "../../utils/planDiffEngine";
 import type { Annotation, EditorMode } from "../../types";
 import {
@@ -52,6 +53,7 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
   selectedAnnotationId,
   mode,
 }) => {
+  const fetch = useSessionFetch();
   const [vscodeDiffLoading, setVscodeDiffLoading] = useState(false);
   const [vscodeDiffError, setVscodeDiffError] = useState<string | null>(null);
 

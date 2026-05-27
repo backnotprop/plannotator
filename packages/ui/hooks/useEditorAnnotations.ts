@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { EditorAnnotation } from '../types';
+import { useSessionFetch } from './useSessionFetch';
 
 const POLL_INTERVAL = 500;
 const IS_VSCODE = typeof window !== 'undefined' && (window as any).__PLANNOTATOR_VSCODE === true;
@@ -17,6 +18,7 @@ interface UseEditorAnnotationsReturn {
  * contexts, returns an empty array with zero network cost.
  */
 export function useEditorAnnotations(): UseEditorAnnotationsReturn {
+  const fetch = useSessionFetch();
   const [annotations, setAnnotations] = useState<EditorAnnotation[]>([]);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 

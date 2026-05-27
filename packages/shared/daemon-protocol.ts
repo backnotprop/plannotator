@@ -1,7 +1,7 @@
 import type { PluginRequest, PluginSessionMode } from "./plugin-protocol";
 
 export const PLANNOTATOR_DAEMON_PROTOCOL = "plannotator-daemon";
-export const PLANNOTATOR_DAEMON_PROTOCOL_VERSION = 1;
+export const PLANNOTATOR_DAEMON_PROTOCOL_VERSION = 2;
 export const PLANNOTATOR_DAEMON_MIN_CLIENT_VERSION = 1;
 
 export const PLANNOTATOR_DAEMON_FEATURES = [
@@ -17,12 +17,14 @@ export const PLANNOTATOR_DAEMON_FEATURES = [
   "session-events",
   "session-actions",
   "debug-events",
+  "project-registry",
 ] as const;
 
 export const PLANNOTATOR_DAEMON_EVENT_FAMILIES = [
   "daemon",
   "external-annotations",
   "agent-jobs",
+  "session-revision",
 ] as const;
 
 export const PLANNOTATOR_DAEMON_SESSION_VIEWS = [
@@ -39,6 +41,8 @@ export type DaemonSessionMode = PluginSessionMode;
 export type DaemonSessionView = (typeof PLANNOTATOR_DAEMON_SESSION_VIEWS)[number];
 export type DaemonSessionStatus =
   | "active"
+  | "idle"
+  | "awaiting-resubmission"
   | "completed"
   | "cancelled"
   | "expired"
@@ -77,6 +81,7 @@ export interface DaemonSessionSummary {
   status: DaemonSessionStatus;
   url: string;
   project: string;
+  cwd?: string;
   label: string;
   origin?: string;
   createdAt: string;
@@ -126,6 +131,19 @@ export interface DaemonShutdownResponse {
   shuttingDown: true;
 }
 
+export interface DaemonProjectEntry {
+  name: string;
+  cwd: string;
+  lastSeen: string;
+  parentCwd?: string;
+  branch?: string;
+}
+
+export interface DaemonProjectListResponse {
+  ok: true;
+  projects: DaemonProjectEntry[];
+}
+
 export type DaemonErrorCode =
   | "daemon-unreachable"
   | "daemon-stale"
@@ -157,6 +175,7 @@ export type DaemonEventType =
   | "session-created"
   | "session-updated"
   | "session-removed"
+  | "session-notify"
   | "daemon-error"
   | "debug-log";
 
@@ -174,6 +193,11 @@ export type DaemonEvent =
     }
   | {
       type: "session-created" | "session-updated" | "session-removed";
+      at: string;
+      session: DaemonSessionSummary;
+    }
+  | {
+      type: "session-notify";
       at: string;
       session: DaemonSessionSummary;
     }
@@ -243,6 +267,11 @@ export type DaemonWebSocketClientMessage =
   | {
       type: "ping";
       requestId?: string;
+    }
+  | {
+      type: "client-state";
+      visible: boolean;
+      activeSessionId: string | null;
     };
 
 export type DaemonWebSocketServerMessage =
@@ -357,6 +386,11 @@ export function parseDaemonWebSocketClientMessage(
     };
   }
   if (value.type === "ping") return { type: "ping", ...(requestId && { requestId }) };
+  if (value.type === "client-state") {
+    if (typeof value.visible !== "boolean") return null;
+    const activeSessionId = isString(value.activeSessionId) ? value.activeSessionId : null;
+    return { type: "client-state", visible: value.visible, activeSessionId };
+  }
   return null;
 }
 

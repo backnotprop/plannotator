@@ -6,6 +6,8 @@ import {
   type DaemonEndpoint,
   type DaemonEvent,
   type DaemonSessionBootstrapResponse,
+  type DaemonSessionStatus,
+  type DaemonSessionSummary,
   type DaemonStatus,
   type DaemonWebSocketClientMessage,
 } from "@plannotator/shared/daemon-protocol";
@@ -15,9 +17,20 @@ import { DaemonSessionStore, type DaemonSessionRecord } from "./session-store";
 import { DaemonEventHub } from "./event-hub";
 import type { SessionEventFamily, SessionRequestContext, SessionSnapshotProvider } from "../session-handler";
 import { handleFavicon } from "../shared-handlers";
+import { addProject, listProjects, readProjectRegistry, writeProjectRegistry } from "./project-registry";
+import { loadConfig, saveConfig, getServerConfig, detectGitUser } from "@plannotator/shared/config";
+import { detectObsidianVaults } from "../integrations";
+import { readImprovementHook, getImprovementHookExpectedPath } from "@plannotator/shared/improvement-hooks";
+import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
+import { readSnapshot } from "./session-store";
+import { parseRemoteUrl, parseRemoteHost } from "@plannotator/shared/repo";
+import { checkPRAuth, fetchPRList, fetchPRDetailedList } from "../pr";
+import type { PRRef, PRListItem, PRDetailedListItem } from "@plannotator/shared/pr-types";
 
 const RESULT_DELETE_GRACE_MS = 2_000;
 const DAEMON_AUTH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
+
+export type SessionBrowserAction = "opened" | "notified";
 
 export interface DaemonServerOptions {
   state: DaemonState;
@@ -27,6 +40,10 @@ export interface DaemonServerOptions {
     request: DaemonCreateSessionRequest,
     context: DaemonFetchContext,
   ) => DaemonSessionRecord | Promise<DaemonSessionRecord>;
+  presentSession?: (
+    record: DaemonSessionRecord,
+    eventHub: DaemonEventHub,
+  ) => Promise<SessionBrowserAction>;
   onShutdown?: () => void | Promise<void>;
 }
 
@@ -203,6 +220,8 @@ function sessionShellHtml(shellHtmlContent: string, sessionId: string): string {
 
 export function createDaemonFetchHandler(options: DaemonServerOptions): DaemonFetchHandler {
   const store = options.store ?? new DaemonSessionStore();
+  const prListCache = new Map<string, { prs: PRListItem[]; platform: string; defaultBranch: string; time: number }>();
+  const prDetailedListCache = new Map<string, { prs: PRDetailedListItem[]; platform: string; time: number }>();
   const endpoint: DaemonEndpoint = {
     hostname: options.state.hostname,
     port: options.state.port,
@@ -384,7 +403,15 @@ export function createDaemonFetchHandler(options: DaemonServerOptions): DaemonFe
         try {
           requestContext?.disableIdleTimeout?.();
           const record = await options.createSession(body, context);
-          return json({ ok: true, session: store.summary(record, { includeRemoteShare: true }) }, { status: 201 });
+          const isFrontendInitiated = record.origin === "plannotator-frontend";
+          const browserAction = options.presentSession && !isFrontendInitiated
+            ? await options.presentSession(record, eventHub).catch((): SessionBrowserAction => "opened")
+            : undefined;
+          return json({
+            ok: true,
+            session: store.summary(record, { includeRemoteShare: true }),
+            ...(browserAction && { browserAction }),
+          }, { status: 201 });
         } catch (err) {
           const message = err instanceof Error ? err.message : "Failed to create session.";
           eventHub.publishDaemonEvent({
@@ -417,8 +444,10 @@ export function createDaemonFetchHandler(options: DaemonServerOptions): DaemonFe
           requestContext?.disableIdleTimeout?.();
           const completed = await store.waitForResult(id);
           const response = json({ ok: true, session: store.summary(completed), result: completed.result ?? null });
-          const timer = setTimeout(() => void store.delete(id), RESULT_DELETE_GRACE_MS);
-          timer.unref?.();
+          if (completed.status !== "awaiting-resubmission" && completed.status !== "idle") {
+            const timer = setTimeout(() => void store.delete(id), RESULT_DELETE_GRACE_MS);
+            timer.unref?.();
+          }
           return response;
         }
 
@@ -453,11 +482,331 @@ export function createDaemonFetchHandler(options: DaemonServerOptions): DaemonFe
         return json({ ok: true, shuttingDown: true });
       }
 
+      if (url.pathname === "/daemon/fs/list" && req.method === "GET") {
+        const rawPath = url.searchParams.get("path") ?? "~";
+        try {
+          const { readdirSync, statSync, existsSync } = await import("fs");
+          const { homedir } = await import("os");
+          const { join, dirname, basename, resolve: resolvePath } = await import("path");
+          const resolved = rawPath === "~" || rawPath === "~/"
+            ? homedir()
+            : rawPath.startsWith("~/")
+              ? join(homedir(), rawPath.slice(2))
+              : resolvePath(rawPath);
+          let listDir = resolved;
+          let prefix = "";
+          const isDir = existsSync(resolved) && statSync(resolved).isDirectory();
+          if (!isDir) {
+            listDir = dirname(resolved);
+            prefix = basename(resolved).toLowerCase();
+          }
+          const entries = readdirSync(listDir, { withFileTypes: true });
+          const dirs = entries
+            .filter((e) => e.isDirectory() && !e.name.startsWith(".") && (!prefix || e.name.toLowerCase().startsWith(prefix)))
+            .map((e) => ({ name: e.name, path: join(listDir, e.name) }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+          return json({ ok: true, path: isDir ? resolved : listDir, dirs });
+        } catch {
+          return json({ ok: true, path: rawPath, dirs: [] });
+        }
+      }
+
+      if (url.pathname === "/daemon/projects" && req.method === "GET") {
+        return json({ ok: true, projects: listProjects() });
+      }
+
+      if (url.pathname === "/daemon/projects" && req.method === "POST") {
+        if (!isJsonRequest(req)) {
+          return json(createDaemonErrorResponse("invalid-request", "Project requests must use application/json."), { status: 415 });
+        }
+        let body: { name?: unknown; cwd?: unknown };
+        try {
+          body = await req.json() as { name?: unknown; cwd?: unknown };
+        } catch {
+          return json(createDaemonErrorResponse("invalid-request", "Invalid project request JSON."), { status: 400 });
+        }
+        if (typeof body.cwd !== "string" || body.cwd.length === 0) {
+          return json(createDaemonErrorResponse("invalid-request", "Project requires a cwd path."), { status: 400 });
+        }
+        const name = typeof body.name === "string" && body.name.length > 0 ? body.name : undefined;
+        try {
+          const entry = addProject(body.cwd, name);
+          return json({ ok: true, project: entry }, { status: 201 });
+        } catch (err) {
+          return json(
+            createDaemonErrorResponse("invalid-request", err instanceof Error ? err.message : "Failed to add project."),
+            { status: 400 },
+          );
+        }
+      }
+
+      if (url.pathname === "/daemon/projects" && req.method === "DELETE") {
+        const cwd = url.searchParams.get("cwd");
+        if (!cwd) {
+          return json(createDaemonErrorResponse("invalid-request", "Project deletion requires a cwd query parameter."), { status: 400 });
+        }
+        const clean = url.searchParams.get("clean") === "1";
+        const entries = readProjectRegistry();
+        const project = entries.find((e) => e.cwd === cwd);
+        if (!project) {
+          return json(createDaemonErrorResponse("invalid-request", `Project not found: ${cwd}`), { status: 404 });
+        }
+        const childCwds = entries.filter((e) => e.parentCwd === project.cwd).map((e) => e.cwd);
+        const projectCwds = new Set([project.cwd, ...childCwds]);
+        const remaining = entries.filter((e) => !projectCwds.has(e.cwd));
+        writeProjectRegistry(remaining);
+
+        if (clean) {
+          for (const record of store.list()) {
+            if (record.project === project.name || projectCwds.has(record.cwd ?? "")) {
+              void store.cancel(record.id, "Project removed.");
+            }
+          }
+          const safeName = project.name.replace(/[/\\]/g, "");
+          if (safeName && safeName.length > 0 && !/^\.+$/.test(safeName)) {
+            try {
+              const { join, resolve, sep } = await import("path");
+              const { homedir } = await import("os");
+              const { rmSync } = await import("fs");
+              const historyRoot = resolve(homedir(), ".plannotator", "history");
+              const historyDir = resolve(join(historyRoot, safeName));
+              if (historyDir.startsWith(historyRoot + sep)) {
+                rmSync(historyDir, { recursive: true, force: true });
+              }
+            } catch {}
+          }
+        }
+
+        return json({ ok: true });
+      }
+
+      if (url.pathname === "/daemon/projects/worktrees" && req.method === "GET") {
+        const cwd = url.searchParams.get("cwd");
+        if (!cwd) {
+          return json(createDaemonErrorResponse("invalid-request", "Worktree listing requires a cwd query parameter."), { status: 400 });
+        }
+        try {
+          const { execSync } = await import("child_process");
+          const raw = execSync("git worktree list --porcelain", { cwd, encoding: "utf-8" });
+          const worktrees: { path: string; branch: string | null; head: string }[] = [];
+          let current: { path?: string; branch?: string | null; head?: string } = {};
+          for (const line of raw.split("\n")) {
+            if (line.startsWith("worktree ")) {
+              if (current.path) worktrees.push({ path: current.path, branch: current.branch ?? null, head: current.head ?? "" });
+              current = { path: line.slice(9) };
+            } else if (line.startsWith("HEAD ")) {
+              current.head = line.slice(5);
+            } else if (line.startsWith("branch ")) {
+              current.branch = line.slice(7).replace(/^refs\/heads\//, "");
+            } else if (line === "detached") {
+              current.branch = null;
+            }
+          }
+          if (current.path) worktrees.push({ path: current.path, branch: current.branch ?? null, head: current.head ?? "" });
+          const { tmpdir } = await import("os");
+          const { statSync, existsSync } = await import("fs");
+          const { join, resolve: resolvePath } = await import("path");
+          const tmp = tmpdir();
+          const filtered = worktrees.filter((wt) => !wt.path.startsWith(tmp) && !wt.path.startsWith("/private" + tmp));
+
+          const withActivity = filtered.map((wt) => {
+            let lastActive = 0;
+            try {
+              const gitDir = execSync("git rev-parse --git-dir", { cwd: wt.path, encoding: "utf-8" }).trim();
+              const indexPath = join(resolvePath(wt.path, gitDir), "index");
+              if (existsSync(indexPath)) {
+                lastActive = statSync(indexPath).mtimeMs;
+              }
+            } catch {}
+            if (!lastActive) {
+              try {
+                const commitTime = execSync("git log -1 --format=%ct", { cwd: wt.path, encoding: "utf-8" }).trim();
+                if (commitTime) lastActive = Number(commitTime) * 1000;
+              } catch {}
+            }
+            if (!lastActive) {
+              try {
+                lastActive = statSync(wt.path).mtimeMs;
+              } catch {}
+            }
+            return { ...wt, lastActive };
+          });
+
+          withActivity.sort((a, b) => b.lastActive - a.lastActive);
+          return json({ ok: true, worktrees: withActivity });
+        } catch (err) {
+          return json({ ok: true, worktrees: [] });
+        }
+      }
+
+      if ((url.pathname === "/daemon/projects/prs" || url.pathname === "/daemon/projects/prs/detailed") && req.method === "GET") {
+        const isDetailed = url.pathname.endsWith("/detailed");
+        const cwd = url.searchParams.get("cwd");
+        if (!cwd) {
+          return json(createDaemonErrorResponse("invalid-request", "PR listing requires a cwd query parameter."), { status: 400 });
+        }
+        const now = Date.now();
+        if (!isDetailed) {
+          const cached = prListCache.get(cwd);
+          if (cached && now - cached.time < 30_000) {
+            return json({ ok: true, prs: cached.prs, platform: cached.platform, defaultBranch: cached.defaultBranch });
+          }
+        } else {
+          const cached = prDetailedListCache.get(cwd);
+          if (cached && now - cached.time < 30_000) {
+            return json({ ok: true, prs: cached.prs, platform: cached.platform });
+          }
+        }
+        try {
+          const { execSync } = await import("child_process");
+          let remoteUrl: string;
+          try {
+            remoteUrl = execSync("git remote get-url origin", { cwd, encoding: "utf-8" }).trim();
+          } catch {
+            return json({ ok: true, prs: [], platform: null, error: "no-remote" });
+          }
+          const host = parseRemoteHost(remoteUrl);
+          const repoPath = parseRemoteUrl(remoteUrl);
+          if (!host || !repoPath) {
+            return json({ ok: true, prs: [], platform: null, error: "no-remote" });
+          }
+          const isGitLab = host.toLowerCase().includes("gitlab");
+          const platform = isGitLab ? "gitlab" : "github";
+          let ref: PRRef;
+          if (isGitLab) {
+            ref = { platform: "gitlab", host, projectPath: repoPath, iid: 0 };
+          } else {
+            const parts = repoPath.split("/");
+            const owner = parts.slice(0, -1).join("/");
+            const repo = parts[parts.length - 1];
+            ref = { platform: "github", host, owner, repo, number: 0 };
+          }
+          try {
+            await checkPRAuth(ref);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            const isNotFound = message.includes("not found") || message.includes("ENOENT");
+            return json({ ok: true, prs: [], platform, error: isNotFound ? "no-cli" : "auth-failed", message });
+          }
+          if (isDetailed) {
+            let prs: PRDetailedListItem[];
+            try { prs = await fetchPRDetailedList(ref); } catch { return json({ ok: true, prs: [], platform }); }
+            prDetailedListCache.set(cwd, { prs, platform, time: now });
+            return json({ ok: true, prs, platform });
+          } else {
+            let prs: PRListItem[];
+            try { prs = await fetchPRList(ref); } catch { return json({ ok: true, prs: [], platform }); }
+            let defaultBranch = "main";
+            try {
+              const symRef = execSync("git symbolic-ref refs/remotes/origin/HEAD", { cwd, encoding: "utf-8" }).trim();
+              const branch = symRef.replace(/^refs\/remotes\/origin\//, "");
+              if (branch) defaultBranch = branch;
+            } catch {}
+            prListCache.set(cwd, { prs, platform, defaultBranch, time: now });
+            return json({ ok: true, prs, platform, defaultBranch });
+          }
+        } catch {
+          return json({ ok: true, prs: [], platform: null });
+        }
+      }
+
+      // --- Global settings endpoints (no session context needed) ---
+
+      if (url.pathname === "/daemon/config" && req.method === "GET") {
+        const cwd = url.searchParams.get("cwd") ?? undefined;
+        const gitUser = detectGitUser(cwd);
+        return json({ ok: true, config: getServerConfig(gitUser) });
+      }
+
+      if (url.pathname === "/daemon/config" && req.method === "POST") {
+        if (!isJsonRequest(req)) {
+          return json(createDaemonErrorResponse("invalid-request", "Config requests must use application/json."), { status: 415 });
+        }
+        try {
+          const body = (await req.json()) as Record<string, unknown>;
+          const toSave: Record<string, unknown> = {};
+          if (body.displayName !== undefined) toSave.displayName = body.displayName;
+          if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
+          if (body.conventionalComments !== undefined) toSave.conventionalComments = body.conventionalComments;
+          if (body.conventionalLabels !== undefined) toSave.conventionalLabels = body.conventionalLabels;
+          if (body.pfmReminder !== undefined) toSave.pfmReminder = body.pfmReminder;
+          if (body.legacyTabMode !== undefined) toSave.legacyTabMode = body.legacyTabMode;
+          if (Object.keys(toSave).length > 0) saveConfig(toSave as Parameters<typeof saveConfig>[0]);
+          return json({ ok: true });
+        } catch {
+          return json(createDaemonErrorResponse("invalid-request", "Invalid config request."), { status: 400 });
+        }
+      }
+
+      if (url.pathname === "/daemon/git/user" && req.method === "GET") {
+        const cwd = url.searchParams.get("cwd") ?? undefined;
+        const gitUser = detectGitUser(cwd);
+        return json({ ok: true, gitUser });
+      }
+
+      if ((url.pathname === "/daemon/vaults" || url.pathname === "/daemon/obsidian/vaults") && req.method === "GET") {
+        const vaults = detectObsidianVaults();
+        return json({ ok: true, vaults });
+      }
+
+      if (url.pathname === "/daemon/hooks/status" && req.method === "GET") {
+        const config = loadConfig();
+        const hook = readImprovementHook("enterplanmode-improve");
+        const pfmEnabled = config.pfmReminder === true;
+        const composed = composeImproveContext({
+          pfmEnabled,
+          improvementHookContent: hook?.content ?? null,
+        });
+        return json({
+          ok: true,
+          pfmReminder: { enabled: pfmEnabled },
+          improvementHook: {
+            present: !!hook,
+            filePath: hook?.filePath ?? getImprovementHookExpectedPath("enterplanmode-improve"),
+            fileSize: hook?.content?.length ?? null,
+            content: hook?.content ?? null,
+          },
+          composedLength: composed?.length ?? null,
+        });
+      }
+
       const browserSession = sessionFromPath(url.pathname);
       if (browserSession) {
-        const record = store.get(browserSession.id);
+        let record = store.get(browserSession.id);
         const sessionApiPath = `/s/${browserSession.id}/api`;
         if (!record) {
+          const snapshot = readSnapshot(browserSession.id);
+          if (snapshot && isPageRequest(req)) {
+            return html(sessionShellHtml(options.shellHtmlContent, browserSession.id));
+          }
+          if (snapshot && req.method === "GET") {
+            if (url.pathname === `${sessionApiPath}/session`) {
+              const summary: DaemonSessionSummary = {
+                id: snapshot.sessionId,
+                mode: snapshot.mode,
+                status: snapshot.status as DaemonSessionStatus,
+                url: `${endpoint.baseUrl}/s/${snapshot.sessionId}`,
+                project: snapshot.meta.project,
+                label: snapshot.meta.label,
+                ...(snapshot.meta.origin && { origin: snapshot.meta.origin }),
+                ...(snapshot.meta.cwd && { cwd: snapshot.meta.cwd }),
+                createdAt: snapshot.capturedAt,
+                updatedAt: snapshot.capturedAt,
+              };
+              const bootstrap: DaemonSessionBootstrapResponse = {
+                ok: true,
+                session: summary,
+                apiBase: sessionApiPath,
+                capabilities: getDaemonCapabilities(),
+                supportedSessionViews: [...PLANNOTATOR_DAEMON_SESSION_VIEWS],
+              };
+              return json(bootstrap);
+            }
+            const apiPath = url.pathname.slice(sessionApiPath.length);
+            if (apiPath === "/plan" || apiPath === "/diff") {
+              return json({ ...snapshot.content as object, _snapshot: true, _status: snapshot.status, _result: snapshot.result });
+            }
+          }
           if (url.pathname === `${sessionApiPath}/session` && req.method === "GET") {
             return json(createDaemonErrorResponse("session-not-found", `Session not found: ${browserSession.id}`), { status: 404 });
           }
@@ -481,6 +830,13 @@ export function createDaemonFetchHandler(options: DaemonServerOptions): DaemonFe
         }
         if (url.pathname === sessionApiPath || url.pathname.startsWith(`${sessionApiPath}/`)) {
           if (!record.handleRequest) {
+            const snapshot = readSnapshot(browserSession.id);
+            if (snapshot && req.method === "GET") {
+              const apiPath = url.pathname.slice(sessionApiPath.length);
+              if (apiPath === "/plan" || apiPath === "/diff") {
+                return json({ ...snapshot.content as object, _snapshot: true, _status: snapshot.status, _result: snapshot.result });
+              }
+            }
             return new Response("Session has no API handler", { status: 404 });
           }
           const scopedUrl = stripSessionApiPath(url, browserSession.id);
