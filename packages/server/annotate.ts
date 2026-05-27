@@ -11,10 +11,9 @@
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
  */
 
-import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
 import { getRepoInfo } from "./repo";
 import type { Origin } from "@plannotator/shared/agents";
-import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon } from "./shared-handlers";
+import { handleImage, handleUpload, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon } from "./shared-handlers";
 import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc } from "./reference-handlers";
 import { warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash, deleteDraft } from "./draft";
@@ -41,8 +40,6 @@ export interface AnnotateServerOptions {
   markdown: string;
   /** Original file path (for display purposes) */
   filePath: string;
-  /** HTML content to serve for the UI */
-  htmlContent: string;
   /** Origin identifier for UI customization */
   origin?: Origin;
   /** UI mode: "annotate" for files, "annotate-last" for last agent message, "annotate-folder" for folders */
@@ -72,37 +69,20 @@ export interface AnnotateServerOptions {
   sessionEvents?: SessionEventBridge;
 }
 
-export interface AnnotateServerResult {
-  /** The port the server is running on */
-  port: number;
-  /** The full URL to access the server */
-  url: string;
-  /** Whether running in remote mode */
-  isRemote: boolean;
-  /** Wait for user feedback submission */
+export interface AnnotateSession {
+  handleRequest: SessionRequestHandler;
   waitForDecision: () => Promise<{
     feedback: string;
     annotations: unknown[];
     exit?: boolean;
     approved?: boolean;
   }>;
-  /** Stop the server */
-  stop: () => void;
-}
-
-export interface AnnotateSession {
-  htmlContent: string;
-  handleRequest: SessionRequestHandler;
-  waitForDecision: AnnotateServerResult["waitForDecision"];
   dispose: () => void;
   updateContent: (newMarkdown: string, newRawHtml?: string) => void;
   getSnapshot?: () => unknown;
 }
 
 // --- Server Implementation ---
-
-const MAX_RETRIES = 5;
-const RETRY_DELAY_MS = 500;
 
 export async function createAnnotateSession(
   options: AnnotateServerOptions
@@ -111,7 +91,6 @@ export async function createAnnotateSession(
     cwd = process.cwd(),
     markdown: initialMarkdown,
     filePath,
-    htmlContent,
     origin,
     mode = "annotate",
     folderPath,
@@ -339,10 +318,7 @@ export async function createAnnotateSession(
           // Favicon
           if (url.pathname === "/favicon.svg") return handleFavicon();
 
-          // Serve embedded HTML for all other routes (SPA)
-          return new Response(htmlContent, {
-            headers: { "Content-Type": "text/html" },
-          });
+          return new Response("Not found", { status: 404 });
   };
 
   function handleUpdateContent(newMarkdown: string, newRawHtml?: string) {
@@ -370,7 +346,6 @@ export async function createAnnotateSession(
   }
 
   return {
-    htmlContent,
     handleRequest,
     waitForDecision: () => decisionCycle.promise(),
     dispose: () => {
@@ -378,93 +353,5 @@ export async function createAnnotateSession(
     },
     getSnapshot: isFileBased ? () => ({ plan: markdown, filePath, mode, sourceInfo }) : undefined,
     updateContent: handleUpdateContent,
-  };
-}
-
-/**
- * Start the Annotate server
- *
- * Handles:
- * - Remote detection and port configuration
- * - API routes (/api/plan with mode:"annotate", /api/feedback)
- * - Port conflict retries
- */
-export async function startAnnotateServer(
-  options: AnnotateServerOptions
-): Promise<AnnotateServerResult> {
-  const { onReady } = options;
-  const session = await createAnnotateSession(options);
-  const isRemote = isRemoteSession();
-  const configuredPort = getServerPort();
-
-  // Start server with retry logic
-  let server: ReturnType<typeof Bun.serve> | null = null;
-
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      server = Bun.serve({
-        hostname: getServerHostname(),
-        port: configuredPort,
-
-        async fetch(req, server) {
-          const url = new URL(req.url);
-          return session.handleRequest(req, url, {
-            disableIdleTimeout: () => server.timeout(req, 0),
-          });
-        },
-
-        error(err) {
-          console.error("[plannotator] Server error:", err);
-          return new Response(
-            `Internal Server Error: ${err instanceof Error ? err.message : String(err)}`,
-            { status: 500, headers: { "Content-Type": "text/plain" } },
-          );
-        },
-      });
-
-      break; // Success, exit retry loop
-    } catch (err: unknown) {
-      const isAddressInUse =
-        err instanceof Error && err.message.includes("EADDRINUSE");
-
-      if (isAddressInUse && attempt < MAX_RETRIES) {
-        await Bun.sleep(RETRY_DELAY_MS);
-        continue;
-      }
-
-      if (isAddressInUse) {
-        const hint = isRemote
-          ? " (set PLANNOTATOR_PORT to use different port)"
-          : "";
-        throw new Error(
-          `Port ${configuredPort} in use after ${MAX_RETRIES} retries${hint}`
-        );
-      }
-
-      throw err;
-    }
-  }
-
-  if (!server) {
-    throw new Error("Failed to start server");
-  }
-
-  const port = server.port!;
-  const serverUrl = `http://localhost:${port}`;
-
-  // Notify caller that server is ready
-  if (onReady) {
-    onReady(serverUrl, isRemote, port);
-  }
-
-  return {
-    port,
-    url: serverUrl,
-    isRemote,
-    waitForDecision: session.waitForDecision,
-    stop: () => {
-      server.stop();
-      session.dispose();
-    },
   };
 }

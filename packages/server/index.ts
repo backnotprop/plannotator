@@ -13,7 +13,7 @@
  */
 
 import type { Origin } from "@plannotator/shared/agents";
-import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
+import { isRemoteSession, getServerPort } from "./remote";
 import { openEditorDiff } from "./ide";
 import {
   saveToObsidian,
@@ -70,8 +70,6 @@ export interface ServerOptions {
   plan: string;
   /** Origin identifier (e.g., "claude-code", "opencode") */
   origin: Origin;
-  /** HTML content to serve for the UI */
-  htmlContent: string;
   /** Current permission mode to preserve (Claude Code only) */
   permissionMode?: string;
   /** Whether URL sharing is enabled (default: true) */
@@ -80,8 +78,6 @@ export interface ServerOptions {
   shareBaseUrl?: string;
   /** Base URL of the paste service API for short URL sharing */
   pasteApiUrl?: string;
-  /** Called when server starts with the URL, remote status, and port */
-  onReady?: (url: string, isRemote: boolean, port: number) => void;
   /** OpenCode client for querying available agents (OpenCode only) */
   opencodeClient?: OpencodeClient;
   /** When set to "archive", server runs in read-only archive browser mode */
@@ -92,31 +88,10 @@ export interface ServerOptions {
   sessionEvents?: SessionEventBridge;
 }
 
-export interface ServerResult {
-  /** The port the server is running on */
-  port: number;
-  /** The full URL to access the server */
-  url: string;
-  /** Whether running in remote mode */
-  isRemote: boolean;
-  /** Wait for user decision (approve/deny) */
-  waitForDecision: () => Promise<{
-    approved: boolean;
-    feedback?: string;
-    savedPath?: string;
-    agentSwitch?: string;
-    permissionMode?: string;
-  }>;
-  /** Wait for user to close (archive mode only) */
-  waitForDone?: () => Promise<void>;
-  /** Stop the server */
-  stop: () => void;
-}
 
 export interface PlannotatorSession {
-  htmlContent: string;
   handleRequest: SessionRequestHandler;
-  waitForDecision: ServerResult["waitForDecision"];
+  waitForDecision: () => Promise<{ approved: boolean; feedback?: string; savedPath?: string; agentSwitch?: string; permissionMode?: string }>;
   waitForDone?: () => Promise<void>;
   dispose: () => void;
   slug?: string;
@@ -126,8 +101,6 @@ export interface PlannotatorSession {
 
 // --- Server Implementation ---
 
-const MAX_RETRIES = 5;
-const RETRY_DELAY_MS = 500;
 
 /**
  * Start the Plannotator server
@@ -141,7 +114,7 @@ const RETRY_DELAY_MS = 500;
 export async function createPlannotatorSession(
   options: ServerOptions
 ): Promise<PlannotatorSession> {
-  const { cwd = process.cwd(), plan: initialPlan, origin, htmlContent, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, mode, customPlanPath } = options;
+  const { cwd = process.cwd(), plan: initialPlan, origin, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, mode, customPlanPath } = options;
   let plan = initialPlan;
   const resolvePlanStoragePath = (customPath?: string | null): string | undefined => {
     if (!customPath?.trim()) return undefined;
@@ -584,10 +557,7 @@ export async function createPlannotatorSession(
           // Favicon
           if (url.pathname === "/favicon.svg") return handleFavicon();
 
-          // Serve embedded HTML for all other routes (SPA)
-          return new Response(htmlContent, {
-            headers: { "Content-Type": "text/html" },
-          });
+          return new Response("Not found", { status: 404 });
   };
 
   function handleUpdateContent(newPlan: string) {
@@ -611,7 +581,6 @@ export async function createPlannotatorSession(
   }
 
   return {
-    htmlContent,
     handleRequest,
     waitForDecision: () => decisionCycle.promise(),
     ...(donePromise && { waitForDone: () => donePromise }),
@@ -621,82 +590,5 @@ export async function createPlannotatorSession(
     slug: mode !== "archive" ? slug : undefined,
     getSnapshot: mode !== "archive" ? () => ({ plan, origin }) : undefined,
     updateContent: mode !== "archive" ? handleUpdateContent : undefined,
-  };
-}
-
-export async function startPlannotatorServer(
-  options: ServerOptions
-): Promise<ServerResult> {
-  const { onReady } = options;
-  const session = await createPlannotatorSession(options);
-  const isRemote = isRemoteSession();
-  const configuredPort = getServerPort();
-
-  // Start server with retry logic
-  let server: ReturnType<typeof Bun.serve> | null = null;
-
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      server = Bun.serve({
-        hostname: getServerHostname(),
-        port: configuredPort,
-
-        async fetch(req, server) {
-          const url = new URL(req.url);
-          return session.handleRequest(req, url, {
-            disableIdleTimeout: () => server.timeout(req, 0),
-          });
-        },
-
-        error(err) {
-          console.error("[plannotator] Server error:", err);
-          return new Response(
-            `Internal Server Error: ${err instanceof Error ? err.message : String(err)}`,
-            { status: 500, headers: { "Content-Type": "text/plain" } },
-          );
-        },
-      });
-
-      break; // Success, exit retry loop
-    } catch (err: unknown) {
-      const isAddressInUse =
-        err instanceof Error && err.message.includes("EADDRINUSE");
-
-      if (isAddressInUse && attempt < MAX_RETRIES) {
-        await Bun.sleep(RETRY_DELAY_MS);
-        continue;
-      }
-
-      if (isAddressInUse) {
-        const hint = isRemote ? " (set PLANNOTATOR_PORT to use different port)" : "";
-        throw new Error(`Port ${configuredPort} in use after ${MAX_RETRIES} retries${hint}`);
-      }
-
-      throw err;
-    }
-  }
-
-  if (!server) {
-    throw new Error("Failed to start server");
-  }
-
-  const port = server.port!;
-  const serverUrl = `http://localhost:${port}`;
-
-  // Notify caller that server is ready
-  if (onReady) {
-    onReady(serverUrl, isRemote, port);
-  }
-
-  return {
-    port,
-    url: serverUrl,
-    isRemote,
-    waitForDecision: session.waitForDecision,
-    ...(session.waitForDone && { waitForDone: session.waitForDone }),
-    stop: () => {
-      server.stop();
-      session.dispose();
-    },
   };
 }

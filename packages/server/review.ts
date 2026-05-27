@@ -9,7 +9,6 @@
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
  */
 
-import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
 import type { Origin } from "@plannotator/shared/agents";
 import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath, getVcsContext, detectRemoteDefaultCompareTarget, gitRuntime } from "./vcs";
 import { parseWorktreeDiffType, resolveBaseBranch } from "@plannotator/shared/review-core";
@@ -24,7 +23,7 @@ import {
 } from "@plannotator/shared/pr-stack";
 import type { AgentJobInfo } from "@plannotator/shared/agent-jobs";
 import { getRepoInfo } from "./repo";
-import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, type OpencodeClient } from "./shared-handlers";
+import { handleImage, handleUpload, handleAgents, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft } from "./draft";
 import { createEditorAnnotationHandler } from "./editor-annotations";
 import { createExternalAnnotationHandler } from "./external-annotations";
@@ -70,8 +69,6 @@ export interface ReviewServerOptions {
   gitRef: string;
   /** Error message if git diff failed */
   error?: string;
-  /** HTML content to serve for the UI */
-  htmlContent: string;
   /** Origin identifier for UI customization */
   origin?: Origin;
   /** Current diff type being displayed */
@@ -106,14 +103,8 @@ export interface ReviewServerOptions {
   sessionEvents?: SessionEventBridge;
 }
 
-export interface ReviewServerResult {
-  /** The port the server is running on */
-  port: number;
-  /** The full URL to access the server */
-  url: string;
-  /** Whether running in remote mode */
-  isRemote: boolean;
-  /** Wait for user review decision */
+export interface ReviewSession {
+  handleRequest: SessionRequestHandler;
   waitForDecision: () => Promise<{
     approved: boolean;
     feedback: string;
@@ -121,14 +112,6 @@ export interface ReviewServerResult {
     agentSwitch?: string;
     exit?: boolean;
   }>;
-  /** Stop the server */
-  stop: () => void;
-}
-
-export interface ReviewSession {
-  htmlContent: string;
-  handleRequest: SessionRequestHandler;
-  waitForDecision: ReviewServerResult["waitForDecision"];
   setServerUrl: (url: string) => void;
   dispose: () => void;
   updateContent?: (precomputedPatch?: string, precomputedGitRef?: string) => Promise<void>;
@@ -155,13 +138,10 @@ export function resolveReviewScopedAgentCwd(
 
 // --- Server Implementation ---
 
-const MAX_RETRIES = 5;
-const RETRY_DELAY_MS = 500;
-
 export async function createReviewSession(
   options: ReviewServerOptions
 ): Promise<ReviewSession> {
-  const { cwd = process.cwd(), htmlContent, origin, gitContext, sharingEnabled = true, shareBaseUrl } = options;
+  const { cwd = process.cwd(), origin, gitContext, sharingEnabled = true, shareBaseUrl } = options;
 
   let prMetadata = options.prMetadata;
   const isPRMode = !!prMetadata;
@@ -1163,10 +1143,7 @@ export async function createReviewSession(
           // Favicon
           if (url.pathname === "/favicon.svg") return handleFavicon();
 
-          // Serve embedded HTML for all other routes (SPA)
-          return new Response(htmlContent, {
-            headers: { "Content-Type": "text/html" },
-          });
+          return new Response("Not found", { status: 404 });
   };
 
   const exitHandler = () => agentJobs.killAll();
@@ -1198,7 +1175,6 @@ export async function createReviewSession(
   }
 
   return {
-    htmlContent,
     handleRequest,
     waitForDecision: () => decisionCycle.promise(),
     setServerUrl: (url) => {
@@ -1225,92 +1201,5 @@ export async function createReviewSession(
       gitContext: gitContext ? { currentBranch: gitContext.currentBranch, base: currentBase } : undefined,
     }),
     updateContent: handleUpdateContent,
-  };
-}
-
-/**
- * Start the Code Review server
- *
- * Handles:
- * - Remote detection and port configuration
- * - API routes (/api/diff, /api/feedback)
- * - Port conflict retries
- */
-export async function startReviewServer(
-  options: ReviewServerOptions
-): Promise<ReviewServerResult> {
-  const { onReady } = options;
-  const session = await createReviewSession(options);
-  const isRemote = isRemoteSession();
-  const configuredPort = getServerPort();
-
-  // Start server with retry logic
-  let server: ReturnType<typeof Bun.serve> | null = null;
-
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      server = Bun.serve({
-        hostname: getServerHostname(),
-        port: configuredPort,
-
-        async fetch(req, server) {
-          const url = new URL(req.url);
-          return session.handleRequest(req, url, {
-            disableIdleTimeout: () => server.timeout(req, 0),
-          });
-        },
-
-        error(err) {
-          console.error("[plannotator] Server error:", err);
-          return new Response(
-            `Internal Server Error: ${err instanceof Error ? err.message : String(err)}`,
-            { status: 500, headers: { "Content-Type": "text/plain" } },
-          );
-        },
-      });
-
-      break; // Success, exit retry loop
-    } catch (err: unknown) {
-      const isAddressInUse =
-        err instanceof Error && err.message.includes("EADDRINUSE");
-
-      if (isAddressInUse && attempt < MAX_RETRIES) {
-        await Bun.sleep(RETRY_DELAY_MS);
-        continue;
-      }
-
-      session.dispose();
-
-      if (isAddressInUse) {
-        const hint = isRemote ? " (set PLANNOTATOR_PORT to use different port)" : "";
-        throw new Error(`Port ${configuredPort} in use after ${MAX_RETRIES} retries${hint}`);
-      }
-
-      throw err;
-    }
-  }
-
-  if (!server) {
-    throw new Error("Failed to start server");
-  }
-
-  const port = server.port!;
-  const serverUrl = `http://localhost:${port}`;
-  session.setServerUrl(serverUrl);
-
-  // Notify caller that server is ready
-  if (onReady) {
-    onReady(serverUrl, isRemote, port);
-  }
-
-  return {
-    port,
-    url: serverUrl,
-    isRemote,
-    waitForDecision: session.waitForDecision,
-    stop: () => {
-      session.dispose();
-      server.stop();
-    },
   };
 }

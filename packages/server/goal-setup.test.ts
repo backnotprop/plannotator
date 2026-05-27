@@ -1,17 +1,6 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { normalizeGoalSetupBundle } from "@plannotator/shared/goal-setup";
-import {
-  startGoalSetupServer,
-  createGoalSetupSession,
-  type GoalSetupServerResult,
-} from "./goal-setup";
-
-let server: GoalSetupServerResult | null = null;
-
-afterEach(() => {
-  server?.stop();
-  server = null;
-});
+import { createGoalSetupSession } from "./goal-setup";
 
 const interviewBundle = () =>
   normalizeGoalSetupBundle({
@@ -32,37 +21,9 @@ function makeRequest(path: string, init?: RequestInit): { req: Request; url: URL
   return { req: new Request(fullUrl, init), url: new URL(fullUrl) };
 }
 
-describe("goal setup standalone server", () => {
-  test("serves interview bundle and resolves submitted answers", async () => {
-    const bundle = interviewBundle();
-    server = await startGoalSetupServer({
-      bundle,
-      htmlContent: "<html></html>",
-      origin: "claude-code",
-    });
-
-    const plan = await fetch(`${server.url}/api/goal-setup`).then((res) => res.json());
-    expect(plan.mode).toBe("goal-setup");
-    expect(plan.goalSetup.questions[0].id).toBe("scope");
-
-    const decision = server.waitForDecision();
-    const submitted = await fetch(`${server.url}/api/goal-setup/submit`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        answers: [{ questionId: "scope", selectedOptionIds: [], customAnswer: "", answer: "Everything.", completed: true }],
-      }),
-    }).then((res) => res.json());
-
-    expect(submitted.ok).toBe(true);
-    const result = await decision;
-    expect(result.result?.stage).toBe("interview");
-  });
-});
-
 describe("goal setup daemon session", () => {
   test("serves interview bundle via handleRequest", async () => {
-    const session = await createGoalSetupSession({ bundle: interviewBundle(), htmlContent: "<html></html>" });
+    const session = await createGoalSetupSession({ bundle: interviewBundle() });
 
     const { req, url } = makeRequest("/api/goal-setup");
     const response = await session.handleRequest(req, url);
@@ -74,7 +35,7 @@ describe("goal setup daemon session", () => {
   });
 
   test("resolves submitted interview answers", async () => {
-    const session = await createGoalSetupSession({ bundle: interviewBundle(), htmlContent: "<html></html>" });
+    const session = await createGoalSetupSession({ bundle: interviewBundle() });
 
     const decision = session.waitForDecision();
     const { req, url } = makeRequest("/api/goal-setup/submit", {
@@ -95,7 +56,7 @@ describe("goal setup daemon session", () => {
   });
 
   test("resolves submitted facts", async () => {
-    const session = await createGoalSetupSession({ bundle: factsBundle(), htmlContent: "<html></html>" });
+    const session = await createGoalSetupSession({ bundle: factsBundle() });
 
     const decision = session.waitForDecision();
     const { req, url } = makeRequest("/api/goal-setup/submit", {
@@ -114,7 +75,7 @@ describe("goal setup daemon session", () => {
   });
 
   test("resolves exit on /api/exit", async () => {
-    const session = await createGoalSetupSession({ bundle: interviewBundle(), htmlContent: "<html></html>" });
+    const session = await createGoalSetupSession({ bundle: interviewBundle() });
 
     const decision = session.waitForDecision();
     const { req, url } = makeRequest("/api/exit", { method: "POST" });
@@ -126,7 +87,7 @@ describe("goal setup daemon session", () => {
   });
 
   test("dispose resolves as exit", async () => {
-    const session = await createGoalSetupSession({ bundle: interviewBundle(), htmlContent: "<html></html>" });
+    const session = await createGoalSetupSession({ bundle: interviewBundle() });
 
     const decision = session.waitForDecision();
     session.dispose();
@@ -136,7 +97,7 @@ describe("goal setup daemon session", () => {
   });
 
   test("returns 404 for unknown routes", async () => {
-    const session = await createGoalSetupSession({ bundle: interviewBundle(), htmlContent: "<html></html>" });
+    const session = await createGoalSetupSession({ bundle: interviewBundle() });
     const { req, url } = makeRequest("/api/unknown");
     const response = await session.handleRequest(req, url);
     expect(response.status).toBe(404);

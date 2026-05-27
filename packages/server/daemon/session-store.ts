@@ -27,7 +27,6 @@ export interface DaemonSessionRecord<TResult = unknown> {
   result?: TResult;
   error?: string;
   remoteShare?: DaemonRemoteShareNotice;
-  htmlContent?: string;
   handleRequest?: SessionRequestHandler;
   dispose?: () => void | Promise<void>;
   disposed?: boolean;
@@ -45,7 +44,6 @@ export interface CreateDaemonSessionInput<TResult = unknown> {
   matchKey?: string;
   ttlMs?: number;
   now?: number;
-  htmlContent?: string;
   handleRequest?: SessionRequestHandler;
   dispose?: () => void | Promise<void>;
   result?: TResult;
@@ -178,7 +176,6 @@ export class DaemonSessionStore {
       createdAt: iso(now),
       updatedAt: iso(now),
       ...(input.ttlMs !== undefined && { expiresAt: iso(now + input.ttlMs) }),
-      ...(input.htmlContent && { htmlContent: input.htmlContent }),
       ...(input.handleRequest && { handleRequest: input.handleRequest }),
       ...(input.dispose && { dispose: input.dispose }),
       ...(input.result !== undefined && { result: input.result }),
@@ -415,7 +412,6 @@ export class DaemonSessionStore {
   }
 
   private releaseRoutingPayloads(record: DaemonSessionRecord): void {
-    record.htmlContent = undefined;
     record.handleRequest = undefined;
   }
 }

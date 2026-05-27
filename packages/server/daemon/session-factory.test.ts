@@ -54,8 +54,6 @@ describe("createDaemonSessionFactory", () => {
 
     const store = new DaemonSessionStore({ now: () => 1_000 });
     const factory = createDaemonSessionFactory({
-      planHtmlContent: "<html><head></head><body>Plan</body></html>",
-      reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
     const context = daemonContext(store);
 
@@ -111,8 +109,6 @@ describe("createDaemonSessionFactory", () => {
 
     const store = new DaemonSessionStore({ now: () => 1_000 });
     const factory = createDaemonSessionFactory({
-      planHtmlContent: "<html><head></head><body>Plan</body></html>",
-      reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
     const context = daemonContext(store);
 
@@ -136,8 +132,6 @@ describe("createDaemonSessionFactory", () => {
     const cwd = tempDir("plannotator-daemon-cwd-");
     const store = new DaemonSessionStore({ now: () => 1_000 });
     const factory = createDaemonSessionFactory({
-      planHtmlContent: "<html><head></head><body>Plan</body></html>",
-      reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
     const context = daemonContext(store);
 
@@ -171,8 +165,6 @@ describe("createDaemonSessionFactory", () => {
 
     const store = new DaemonSessionStore({ now: () => 1_000 });
     const factory = createDaemonSessionFactory({
-      planHtmlContent: "<html><head></head><body>Archive</body></html>",
-      reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
     const context = daemonContext(store);
 
@@ -202,8 +194,6 @@ describe("createDaemonSessionFactory", () => {
   test("rejects daemon session requests without an explicit cwd", async () => {
     const store = new DaemonSessionStore();
     const factory = createDaemonSessionFactory({
-      planHtmlContent: "<html><head></head><body>Plan</body></html>",
-      reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
     const context = daemonContext(store);
 
@@ -222,8 +212,6 @@ describe("createDaemonSessionFactory", () => {
     writeFileSync(join(outside, "secret.md"), "# Secret", "utf-8");
     const store = new DaemonSessionStore();
     const factory = createDaemonSessionFactory({
-      planHtmlContent: "<html><head></head><body>Plan</body></html>",
-      reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
     const context = daemonContext(store);
 
@@ -242,8 +230,6 @@ describe("createDaemonSessionFactory", () => {
     writeFileSync(join(cwd, "PLAN.txt"), "# Plan", "utf-8");
     const store = new DaemonSessionStore();
     const factory = createDaemonSessionFactory({
-      planHtmlContent: "<html><head></head><body>Plan</body></html>",
-      reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
     const context = daemonContext(store);
 
@@ -264,8 +250,6 @@ describe("createDaemonSessionFactory", () => {
 
     const store = new DaemonSessionStore({ now: () => 1_000 });
     const factory = createDaemonSessionFactory({
-      planHtmlContent: "<html><head></head><body>Plan</body></html>",
-      reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
     const context = daemonContext(store);
 
@@ -301,8 +285,6 @@ describe("createDaemonSessionFactory", () => {
 
     const store = new DaemonSessionStore({ now: () => 1_000 });
     const factory = createDaemonSessionFactory({
-      planHtmlContent: "<html><head></head><body>Plan</body></html>",
-      reviewHtmlContent: "<html><head></head><body>Review</body></html>",
       shareBaseUrl: "https://share.example.test",
     });
     const context = daemonContext(store, {
@@ -342,8 +324,6 @@ describe("createDaemonSessionFactory", () => {
 
     const store = new DaemonSessionStore({ now: () => 1_000 });
     const factory = createDaemonSessionFactory({
-      planHtmlContent: "<html><head></head><body>Plan</body></html>",
-      reviewHtmlContent: "<html><head></head><body>Review</body></html>",
       shareBaseUrl: "https://share.example.test",
     });
     const context = daemonContext(store, {
@@ -374,8 +354,6 @@ describe("createDaemonSessionFactory", () => {
 
     const store = new DaemonSessionStore({ now: () => 1_000 });
     const factory = createDaemonSessionFactory({
-      planHtmlContent: "<html><head></head><body>Plan</body></html>",
-      reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
     const context = daemonContext(store);
 
@@ -407,8 +385,6 @@ describe("createDaemonSessionFactory", () => {
 
     const store = new DaemonSessionStore({ now: () => 1_000 });
     const factory = createDaemonSessionFactory({
-      planHtmlContent: "<html><head></head><body>Plan</body></html>",
-      reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
     const context = daemonContext(store);
 
@@ -435,8 +411,6 @@ describe("createDaemonSessionFactory", () => {
     const cwd = tempDir("plannotator-daemon-cwd-");
     const store = new DaemonSessionStore({ now: () => 1_000 });
     const factory = createDaemonSessionFactory({
-      planHtmlContent: "<html><head></head><body>Plan</body></html>",
-      reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
     const context = daemonContext(store);
 
@@ -465,8 +439,6 @@ describe("createDaemonSessionFactory", () => {
     const cwd = tempDir("plannotator-daemon-cwd-");
     const store = new DaemonSessionStore({ now: () => 1_000 });
     const factory = createDaemonSessionFactory({
-      planHtmlContent: "<html><head></head><body>Plan</body></html>",
-      reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
     const context = daemonContext(store);
 
@@ -518,8 +490,6 @@ describe("createDaemonSessionFactory", () => {
     const cwd = tempDir("plannotator-daemon-cwd-");
     const store = new DaemonSessionStore({ now: () => 1_000 });
     const factory = createDaemonSessionFactory({
-      planHtmlContent: "<html><head></head><body>Plan</body></html>",
-      reviewHtmlContent: "<html><head></head><body>Review</body></html>",
     });
     const context = daemonContext(store);
 

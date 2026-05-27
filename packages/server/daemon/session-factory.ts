@@ -55,8 +55,6 @@ import type { DaemonFetchContext } from "./server";
 import type { SessionEventBridge } from "../session-handler";
 
 export interface DaemonSessionFactoryOptions {
-  planHtmlContent: string;
-  reviewHtmlContent: string;
   sharingEnabled?: boolean;
   shareBaseUrl?: string;
   pasteApiUrl?: string;
@@ -632,7 +630,6 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
         sharingEnabled,
         shareBaseUrl,
         pasteApiUrl,
-        htmlContent: options.planHtmlContent,
         sessionEvents,
         opencodeClient: request.availableAgents
           ? { app: { agents: async () => ({ data: request.availableAgents }) } }
@@ -667,7 +664,6 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
         sharingEnabled,
         shareBaseUrl,
         pasteApiUrl,
-        htmlContent: options.planHtmlContent,
       });
       const record = context.store.create({
         id,
@@ -724,7 +720,6 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
         sharingEnabled,
         shareBaseUrl,
         pasteApiUrl,
-        htmlContent: options.planHtmlContent,
         sessionEvents,
       });
       const record = context.store.create({
@@ -788,7 +783,6 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
           worktreePool: input.worktreePool,
           sharingEnabled,
           shareBaseUrl,
-          htmlContent: options.reviewHtmlContent,
           sessionEvents,
           opencodeClient: request.availableAgents
             ? { app: { agents: async () => ({ data: request.availableAgents }) } }
@@ -833,7 +827,6 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
         cwd,
         bundle,
         origin: request.origin,
-        htmlContent: options.planHtmlContent,
       });
       const record = context.store.create({
         id,
@@ -844,7 +837,6 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
         label: branch ? `goal-setup-${bundle.stage}-${request.goalSlug || project}-${branch}` : `goal-setup-${bundle.stage}-${request.goalSlug || project}`,
         origin: request.origin,
         ttlMs,
-        htmlContent: session.htmlContent,
         handleRequest: session.handleRequest,
         dispose: registerSessionDecision(context, id, () => session.waitForDecision(), () => session.dispose()),
         snapshot: () => ({ stage: bundle.stage, goalSlug: request.goalSlug }),
