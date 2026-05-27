@@ -466,7 +466,8 @@ export default function plannotator(pi: ExtensionAPI): void {
 	pi.registerCommand("plannotator-annotate", {
 		description: "Open markdown file or folder in annotation UI",
 		handler: async (args, ctx) => {
-			const { filePath, gate, renderHtml: renderHtmlFlag } = parseAnnotateArgs(args ?? "");
+			const rawAnnotateArgs = args ?? "";
+			const { filePath, gate, renderHtml: renderHtmlFlag } = parseAnnotateArgs(rawAnnotateArgs);
 			if (!filePath) {
 				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.html | https://... | folder/> [--gate] [--json]", "error");
 				return;
@@ -476,7 +477,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			const origin = getPiSessionIdentity(ctx);
 
 			try {
-				const session = await startAnnotationSessionFromArgs(ctx, filePath, { gate, renderHtml: renderHtmlFlag });
+				const session = await startAnnotationSessionFromArgs(ctx, rawAnnotateArgs, { gate, renderHtml: renderHtmlFlag });
 				ctx.ui.notify("Annotation opened. You can keep chatting while it runs.", "info");
 				void session
 					.waitForDecision()
@@ -497,8 +498,8 @@ export default function plannotator(pi: ExtensionAPI): void {
 							sendUserMessageWithCurrentSessionFallback(
 								pi,
 								getAnnotateFileFeedbackPrompt("pi", loadConfig(), {
-									fileHeader: "File",
-									filePath,
+									fileHeader: result.mode === "annotate-folder" ? "Folder" : "File",
+									filePath: result.filePath ?? filePath,
 									feedback: result.feedback,
 								}),
 								{ deliverAs: "followUp" },

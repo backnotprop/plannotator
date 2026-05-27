@@ -360,7 +360,7 @@ export async function startAnnotationSessionFromArgs(
 	ctx: ExtensionContext,
 	rawArgs: string,
 	options: { gate?: boolean; renderHtml?: boolean } = {},
-): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean }>> {
+): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; filePath?: string; mode?: string }>> {
 	if (!ctx.hasUI) {
 		throw new Error("Plannotator annotation browser is unavailable in this session.");
 	}
