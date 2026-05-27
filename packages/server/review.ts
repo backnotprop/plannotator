@@ -48,6 +48,7 @@ import { type PRMetadata, type PRReviewFileComment, type PRStackTree, type PRLis
 import { createAIEndpoints, ProviderRegistry, SessionManager, createProvider, type AIEndpoints, type PiSDKConfig } from "@plannotator/ai";
 import { isWSL } from "./browser";
 import { handleCodeNavResolve, extractChangedFiles } from "./code-nav";
+import { getReviewApprovedPrompt, getReviewDeniedSuffix } from "@plannotator/shared/prompts";
 import { createDecisionCycle, resolveAndCycle } from "./session-handler";
 import type { SessionEventBridge, SessionRequestHandler } from "./session-handler";
 
@@ -487,7 +488,7 @@ export async function createReviewSession(
   }
 
   // Decision promise
-  type ReviewDecisionResult = { approved: boolean; feedback: string; annotations: unknown[]; agentSwitch?: string; exit?: boolean };
+  type ReviewDecisionResult = { approved: boolean; feedback: string; annotations: unknown[]; agentSwitch?: string; exit?: boolean; prompt?: string };
   const decisionCycle = createDecisionCycle<ReviewDecisionResult>();
   let lastDecision: 'approved' | 'feedback' | 'exited' | null = null;
 
@@ -1040,7 +1041,13 @@ export async function createReviewSession(
               deleteDraft(draftKey);
               const isApproved = body.approved ?? false;
               lastDecision = isApproved ? 'approved' : 'feedback';
-              const result = { approved: isApproved, feedback: body.feedback || "", annotations: body.annotations || [], agentSwitch: body.agentSwitch };
+              const feedbackText = body.feedback || "";
+              const prompt = isApproved
+                ? getReviewApprovedPrompt(origin, loadConfig())
+                : isPRMode
+                  ? feedbackText
+                  : `${feedbackText}${getReviewDeniedSuffix(origin, loadConfig())}`;
+              const result = { approved: isApproved, feedback: feedbackText, annotations: body.annotations || [], agentSwitch: body.agentSwitch, prompt };
               const resubmit = resolveAndCycle(decisionCycle, result, origin);
 
               return Response.json({ ok: true, feedbackDelivered: resubmit.awaitingResubmission || undefined });

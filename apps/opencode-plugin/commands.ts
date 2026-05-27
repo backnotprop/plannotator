@@ -5,11 +5,6 @@
  * slash commands. Extracted from the event hook for modularity.
  */
 
-import {
-  getReviewApprovedPrompt,
-  getReviewDeniedSuffix,
-  getAnnotateFileFeedbackPrompt,
-} from "@plannotator/shared/prompts";
 import { parseAnnotateArgs } from "@plannotator/shared/annotate-args";
 import { parseReviewArgs } from "@plannotator/shared/review-args";
 import type { PluginAgentInfo, PluginFeature } from "@plannotator/shared/plugin-protocol";
@@ -159,18 +154,14 @@ export async function handleReviewCommand(
     return;
   }
 
-  if (result.feedback) {
+  if (result.prompt || result.feedback) {
     const sessionId = event.properties?.sessionID;
 
     if (sessionId) {
       const shouldSwitchAgent = result.agentSwitch && result.agentSwitch !== "disabled";
       const targetAgent = result.agentSwitch || "build";
 
-      const message = result.approved
-        ? getReviewApprovedPrompt("opencode")
-        : isPRMode
-          ? result.feedback
-          : `${result.feedback}${getReviewDeniedSuffix("opencode")}`;
+      const message = result.prompt ?? result.feedback ?? "";
 
       try {
         await client.session.prompt({
@@ -237,11 +228,7 @@ export async function handleAnnotateCommand(
           body: {
             parts: [{
               type: "text",
-              text: getAnnotateFileFeedbackPrompt("opencode", undefined, {
-                fileHeader: result.mode === "annotate-folder" ? "Folder" : "File",
-                filePath: result.filePath ?? filePath,
-                feedback: result.feedback,
-              }),
+              text: result.prompt ?? result.feedback,
             }],
           },
         });
@@ -339,6 +326,6 @@ export async function handleAnnotateLastCommand(
     return null;
   }
 
-  return result.feedback || null;
+  return result.prompt ?? (result.feedback || null);
 }
 

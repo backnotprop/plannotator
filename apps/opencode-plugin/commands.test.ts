@@ -79,12 +79,14 @@ describe("handleAnnotateCommand", () => {
     });
   });
 
-  test("injects folder feedback using file metadata returned by the binary", async () => {
+  test("pipes server-composed prompt through to the agent session", async () => {
+    const serverPrompt = "# Markdown Annotations\n\nFolder: /repo/docs/Specs Folder\n\nPlease revise this section.\n\nPlease address the annotation feedback above.";
     runPluginAnnotateMock.mockImplementationOnce(async (_binaryPath: string, _request: unknown) =>
       createPluginSuccessResponse({
         feedback: "Please revise this section.",
         filePath: "/repo/docs/Specs Folder",
         mode: "annotate-folder",
+        prompt: serverPrompt,
       }),
     );
     const deps = makeDeps();
@@ -96,8 +98,7 @@ describe("handleAnnotateCommand", () => {
 
     expect(deps.client.session.prompt).toHaveBeenCalledTimes(1);
     const prompt = deps.client.session.prompt.mock.calls[0]?.[0] as any;
-    expect(prompt.body.parts[0].text).toContain("Folder: /repo/docs/Specs Folder");
-    expect(prompt.body.parts[0].text).toContain("Please revise this section.");
+    expect(prompt.body.parts[0].text).toBe(serverPrompt);
   });
 });
 

@@ -18,11 +18,12 @@ import { handleDoc, handleDocExists, handleFileBrowserFiles } from "./reference-
 import { warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash, deleteDraft } from "./draft";
 import { createExternalAnnotationHandler } from "./external-annotations";
-import { saveConfig, detectGitUser, getServerConfig } from "./config";
+import { loadConfig, saveConfig, detectGitUser, getServerConfig } from "./config";
 import { generateSlug, saveToHistory, getPlanVersion, getVersionCount, listVersions } from "./storage";
 import { detectProjectName } from "./project";
 import { dirname, resolve as resolvePath } from "path";
 import { isWSL } from "./browser";
+import { getAnnotateFileFeedbackPrompt, getAnnotateMessageFeedbackPrompt } from "@plannotator/shared/prompts";
 import { createDecisionCycle, resolveAndCycle } from "./session-handler";
 import type { SessionEventBridge, SessionRequestHandler } from "./session-handler";
 
@@ -148,7 +149,7 @@ export async function createAnnotateSession(
     };
   }
 
-  type AnnotateDecisionResult = { feedback: string; annotations: unknown[]; exit?: boolean; approved?: boolean };
+  type AnnotateDecisionResult = { feedback: string; annotations: unknown[]; exit?: boolean; approved?: boolean; prompt?: string; filePath?: string; mode?: string };
   const decisionCycle = createDecisionCycle<AnnotateDecisionResult>();
   let lastDecision: 'approved' | 'exited' | 'feedback' | null = null;
 
@@ -282,9 +283,20 @@ export async function createAnnotateSession(
 
               deleteDraft(draftKey);
               lastDecision = 'feedback';
+              const feedbackText = body.feedback || "";
+              const prompt = mode === "annotate-last"
+                ? getAnnotateMessageFeedbackPrompt(origin, loadConfig(), { feedback: feedbackText })
+                : getAnnotateFileFeedbackPrompt(origin, loadConfig(), {
+                    fileHeader: mode === "annotate-folder" ? "Folder" : "File",
+                    filePath,
+                    feedback: feedbackText,
+                  });
               const resubmit = resolveAndCycle(decisionCycle, {
-                feedback: body.feedback || "",
+                feedback: feedbackText,
                 annotations: body.annotations || [],
+                prompt,
+                filePath,
+                mode,
               }, origin);
 
               if (resubmit.awaitingResubmission && !isFileBased) {

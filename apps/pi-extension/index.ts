@@ -35,16 +35,12 @@ import { loadConfig } from "./generated/config.js";
 import { readImprovementHook } from "./generated/improvement-hooks.js";
 import { composeImproveContext } from "./generated/pfm-reminder.js";
 import {
-	getReviewApprovedPrompt,
-	getReviewDeniedSuffix,
 	getPlanDeniedPrompt,
 	getPlanApprovedPrompt,
 	getPlanApprovedWithNotesPrompt,
 	getPlanAutoApprovedPrompt,
 	getPlanToolName,
 	buildPlanFileRule,
-	getAnnotateFileFeedbackPrompt,
-	getAnnotateMessageFeedbackPrompt,
 } from "./generated/prompts.js";
 import { parseAnnotateArgs } from "./generated/annotate-args.js";
 import { parseReviewArgs } from "./generated/review-args.js";
@@ -59,11 +55,9 @@ import {
 import {
 	getAssistantMessageText,
 	getLastAssistantMessageSnapshot,
-	hasSessionMovedPastEntry,
 } from "./assistant-message.js";
 import {
 	getPiSessionIdentity,
-	isCurrentPiSessionDifferentFrom,
 	notifyCurrentPiSession,
 	type PiSessionIdentity,
 	registerCurrentPiSession,
@@ -116,37 +110,6 @@ function reportBackgroundError(ctx: ExtensionContext, message: string, err: unkn
 	const detail = getStartupErrorMessage(err);
 	console.error(`${message}: ${detail}`);
 	safeNotify(ctx, `${message}: ${detail}`, "error", origin);
-}
-
-function excerptText(text: string, maxChars = 1000): string {
-	const trimmed = text.trim();
-	if (trimmed.length <= maxChars) return trimmed;
-	return `${trimmed.slice(0, maxChars).trimEnd()}...`;
-}
-
-function blockquote(text: string): string {
-	return text
-		.split("\n")
-		.map((line) => `> ${line}`)
-		.join("\n");
-}
-
-function anchorMessageFeedback(feedback: string, originalMessage: string): string {
-	return `This feedback applies to the earlier assistant response excerpted below:
-
-${blockquote(excerptText(originalMessage))}
-
-User feedback:
-${feedback}`;
-}
-
-function shouldAnchorLastMessageFeedback(ctx: ExtensionContext, entryId: string, origin: PiSessionIdentity): boolean {
-	if (isCurrentPiSessionDifferentFrom(origin)) return true;
-	try {
-		return hasSessionMovedPastEntry(ctx, entryId);
-	} catch {
-		return true;
-	}
 }
 
 function reportCurrentSessionSendFailure(errorMessage: string, err: unknown, origin: PiSessionIdentity): void {
@@ -399,7 +362,6 @@ export default function plannotator(pi: ExtensionAPI): void {
 
 			try {
 				const reviewArgs = parseReviewArgs(args ?? "");
-				const isPRReview = reviewArgs.prUrl !== undefined;
 				const session = await startCodeReviewBrowserSession(ctx, {
 					prUrl: reviewArgs.prUrl,
 					vcsType: reviewArgs.vcsType as "auto" | "git" | "jj" | "p4" | undefined,
@@ -417,7 +379,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 							if (result.approved) {
 								sendUserMessageWithCurrentSessionFallback(
 									pi,
-									getReviewApprovedPrompt("pi", loadConfig()),
+									result.prompt ?? result.feedback ?? "",
 									{ deliverAs: "followUp" },
 									"Plannotator code review feedback could not be sent",
 									origin,
@@ -428,21 +390,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 								safeNotify(ctx, "Code review closed (no feedback).", "info", origin);
 								return;
 							}
-							if (isPRReview) {
-								// Platform PR actions (approve/comment) return approved:false with a
-								// status message — don't tell the agent to "address" a platform action.
-								sendUserMessageWithCurrentSessionFallback(
-									pi,
-									result.feedback,
-									{ deliverAs: "followUp" },
-									"Plannotator code review feedback could not be sent",
-									origin,
-								);
-								return;
-							}
 							sendUserMessageWithCurrentSessionFallback(
 								pi,
-								`${result.feedback}${getReviewDeniedSuffix("pi", loadConfig())}`,
+								result.prompt ?? result.feedback,
 								{ deliverAs: "followUp" },
 								"Plannotator code review feedback could not be sent",
 								origin,
@@ -497,11 +447,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 							}
 							sendUserMessageWithCurrentSessionFallback(
 								pi,
-								getAnnotateFileFeedbackPrompt("pi", loadConfig(), {
-									fileHeader: result.mode === "annotate-folder" ? "Folder" : "File",
-									filePath: result.filePath ?? filePath,
-									feedback: result.feedback,
-								}),
+								result.prompt ?? result.feedback,
 								{ deliverAs: "followUp" },
 								"Plannotator annotation feedback could not be sent",
 								origin,
@@ -558,14 +504,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 								safeNotify(ctx, "Annotation closed (no feedback).", "info", origin);
 								return;
 							}
-							const feedback = shouldAnchorLastMessageFeedback(ctx, snapshot.entryId, origin)
-								? anchorMessageFeedback(result.feedback, snapshot.text)
-								: result.feedback;
 							sendUserMessageWithCurrentSessionFallback(
 								pi,
-								getAnnotateMessageFeedbackPrompt("pi", loadConfig(), {
-									feedback,
-								}),
+								result.prompt ?? result.feedback,
 								{ deliverAs: "followUp" },
 								"Plannotator message annotation feedback could not be sent",
 								origin,

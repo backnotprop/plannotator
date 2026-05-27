@@ -109,6 +109,7 @@ export interface PluginReviewResult {
   annotations?: unknown[];
   agentSwitch?: string;
   exit?: boolean;
+  prompt?: string;
 }
 
 export interface PluginAnnotateResult {
@@ -118,6 +119,7 @@ export interface PluginAnnotateResult {
   approved?: boolean;
   filePath?: string;
   mode?: "annotate" | "annotate-folder" | "annotate-last";
+  prompt?: string;
 }
 
 export interface PluginGoalSetupResult {
