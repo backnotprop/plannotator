@@ -47,8 +47,6 @@
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
  */
 
-import { loadConfig } from "@plannotator/shared/config";
-import { parseReviewArgs } from "@plannotator/shared/review-args";
 import {
   normalizeGoalSetupBundle,
   type GoalSetupStage,
@@ -63,9 +61,6 @@ import { createDaemonSessionFactory } from "@plannotator/server/daemon/session-f
 import { getDaemonStartCommand } from "@plannotator/server/daemon/start-command";
 import { createDaemonBrowserAuthUrl } from "@plannotator/server/daemon/state";
 import { formatRemoteShareNotice } from "@plannotator/server/share-url";
-import { hostnameOrFallback } from "@plannotator/shared/project";
-import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
-import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import { AGENT_CONFIG, type Origin } from "@plannotator/shared/agents";
 import type { DaemonSessionSummary } from "@plannotator/shared/daemon-protocol";
 import {
@@ -817,7 +812,6 @@ if (args[0] === "sessions") {
   // CODE REVIEW MODE
   // ============================================
 
-  const reviewArgs = parseReviewArgs(args.slice(1));
   const outcome = await runDaemonSessionRequest({
     action: "review",
     origin: detectedOrigin,
@@ -1123,26 +1117,22 @@ if (args[0] === "sessions") {
   // ============================================
   //
   // Called by PreToolUse hook on EnterPlanMode.
-  // Composes any enabled context sources (compound improvement hook,
+  // Daemon composes any enabled context sources (compound improvement hook,
   // PFM reminder) into a single additionalContext payload.
   // Nothing enabled = exit 0 silently (passthrough).
 
   await Bun.stdin.text();
 
-  const hook = readImprovementHook("enterplanmode-improve");
-  const pfmEnabled = loadConfig().pfmReminder === true;
+  const daemon = await ensureDaemonClient({ pluginError: false });
+  const res = await daemon.client.fetch("/daemon/improve-context");
+  const data = await res.json() as { ok: boolean; context: string | null };
 
-  const context = composeImproveContext({
-    pfmEnabled,
-    improvementHookContent: hook?.content ?? null,
-  });
-
-  if (context === null) process.exit(0);
+  if (!data.context) process.exit(0);
 
   console.log(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
-      additionalContext: context,
+      additionalContext: data.context,
     },
   }));
 

@@ -743,6 +743,16 @@ export function createDaemonFetchHandler(options: DaemonServerOptions): DaemonFe
         return json({ ok: true, gitUser });
       }
 
+      if (url.pathname === "/daemon/improve-context" && req.method === "GET") {
+        const config = loadConfig();
+        const hook = readImprovementHook("enterplanmode-improve");
+        const composed = composeImproveContext({
+          pfmEnabled: config.pfmReminder === true,
+          improvementHookContent: hook?.content ?? null,
+        });
+        return json({ ok: true, context: composed });
+      }
+
       if (url.pathname === "/daemon/hooks/status" && req.method === "GET") {
         const config = loadConfig();
         const hook = readImprovementHook("enterplanmode-improve");
