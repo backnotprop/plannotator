@@ -16,15 +16,6 @@ import type { Origin } from "@plannotator/shared/agents";
 import { isRemoteSession, getServerPort } from "./remote";
 import { openEditorDiff } from "./ide";
 import {
-  saveToObsidian,
-  saveToBear,
-  saveToOctarine,
-  type ObsidianConfig,
-  type BearConfig,
-  type OctarineConfig,
-  type IntegrationResult,
-} from "./integrations";
-import {
   generateSlug,
   savePlan,
   saveAnnotations,
@@ -42,7 +33,7 @@ import { readImprovementHook, getImprovementHookExpectedPath } from "@plannotato
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft } from "./draft";
-import { handleDoc, handleDocExists, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, handleFileBrowserFiles } from "./reference-handlers";
+import { handleDoc, handleDocExists, handleFileBrowserFiles } from "./reference-handlers";
 import { resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
 import { createEditorAnnotationHandler } from "./editor-annotations";
 import { createExternalAnnotationHandler } from "./external-annotations";
@@ -53,7 +44,6 @@ import type { SessionEventBridge, SessionRequestHandler } from "./session-handle
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
 export { openBrowser } from "./browser";
-export * from "./integrations";
 export * from "./storage";
 export { handleServerReady } from "./shared-handlers";
 export { type VaultNode, buildFileTree } from "@plannotator/shared/reference-common";
@@ -100,7 +90,6 @@ export interface PlannotatorSession {
  * Handles:
  * - Remote detection and port configuration
  * - All API routes (/api/plan, /api/approve, /api/deny, etc.)
- * - Obsidian/Bear integrations
  * - Port conflict retries
  */
 export async function createPlannotatorSession(
@@ -278,21 +267,6 @@ export async function createPlannotatorSession(
             }
           }
 
-          // API: Detect Obsidian vaults
-          if (url.pathname === "/api/obsidian/vaults") {
-            return handleObsidianVaults();
-          }
-
-          // API: List Obsidian vault files as a tree
-          if (url.pathname === "/api/reference/obsidian/files" && req.method === "GET") {
-            return handleObsidianFiles(req);
-          }
-
-          // API: Read an Obsidian vault document
-          if (url.pathname === "/api/reference/obsidian/doc" && req.method === "GET") {
-            return handleObsidianDoc(req);
-          }
-
           // API: List markdown files in a directory as a tree
           if (url.pathname === "/api/reference/files" && req.method === "GET") {
             return handleFileBrowserFiles(req, cwd);
@@ -320,46 +294,8 @@ export async function createPlannotatorSession(
           });
           if (externalResponse) return externalResponse;
 
-          // API: Save to notes (decoupled from approve/deny)
-          if (url.pathname === "/api/save-notes" && req.method === "POST") {
-            const results: { obsidian?: IntegrationResult; bear?: IntegrationResult; octarine?: IntegrationResult } = {};
-
-            try {
-              const body = (await req.json()) as {
-                obsidian?: ObsidianConfig;
-                bear?: BearConfig;
-                octarine?: OctarineConfig;
-              };
-
-              // Run integrations in parallel — they're independent
-              const promises: Promise<void>[] = [];
-              if (body.obsidian?.vaultPath && body.obsidian?.plan) {
-                promises.push(saveToObsidian(body.obsidian, { cwd }).then(r => { results.obsidian = r; }));
-              }
-              if (body.bear?.plan) {
-                promises.push(saveToBear(body.bear, { cwd }).then(r => { results.bear = r; }));
-              }
-              if (body.octarine?.plan && body.octarine?.workspace) {
-                promises.push(saveToOctarine(body.octarine, { cwd }).then(r => { results.octarine = r; }));
-              }
-              await Promise.allSettled(promises);
-
-              for (const [name, result] of Object.entries(results)) {
-                if (!result?.success && result) {
-                  console.error(`[${name}] Save failed: ${result.error}`);
-                }
-              }
-            } catch (err) {
-              console.error(`[Save Notes] Error:`, err);
-              return Response.json({ error: "Save failed" }, { status: 500 });
-            }
-
-            return Response.json({ ok: true, results });
-          }
-
           // API: Approve plan
           if (url.pathname === "/api/approve" && req.method === "POST") {
-            // Check for note integrations and optional feedback
             let feedback: string | undefined;
             let agentSwitch: string | undefined;
             let requestedPermissionMode: string | undefined;
@@ -367,9 +303,6 @@ export async function createPlannotatorSession(
             let planSaveCustomPath: string | undefined;
             try {
               const body = (await req.json().catch(() => ({}))) as {
-                obsidian?: ObsidianConfig;
-                bear?: BearConfig;
-                octarine?: OctarineConfig;
                 feedback?: string;
                 agentSwitch?: string;
                 planSave?: { enabled: boolean; customPath?: string };
@@ -396,29 +329,8 @@ export async function createPlannotatorSession(
                 planSaveEnabled = body.planSave.enabled;
                 planSaveCustomPath = resolvePlanStoragePath(body.planSave.customPath);
               }
-
-              // Run integrations in parallel — they're independent
-              const integrationResults: Record<string, IntegrationResult> = {};
-              const integrationPromises: Promise<void>[] = [];
-              if (body.obsidian?.vaultPath && body.obsidian?.plan) {
-                integrationPromises.push(saveToObsidian(body.obsidian, { cwd }).then(r => { integrationResults.obsidian = r; }));
-              }
-              if (body.bear?.plan) {
-                integrationPromises.push(saveToBear(body.bear, { cwd }).then(r => { integrationResults.bear = r; }));
-              }
-              if (body.octarine?.plan && body.octarine?.workspace) {
-                integrationPromises.push(saveToOctarine(body.octarine, { cwd }).then(r => { integrationResults.octarine = r; }));
-              }
-              await Promise.allSettled(integrationPromises);
-
-              for (const [name, result] of Object.entries(integrationResults)) {
-                if (!result?.success && result) {
-                  console.error(`[${name}] Save failed: ${result.error}`);
-                }
-              }
             } catch (err) {
-              // Don't block approval on integration errors
-              console.error(`[Integration] Error:`, err);
+              console.error(`[Approve] Error parsing body:`, err);
             }
 
             // Save annotations and final snapshot (if enabled)

@@ -46,7 +46,6 @@ plannotator/
 │   │   ├── remote.ts             # isRemoteSession(), getServerPort()
 │   │   ├── browser.ts            # openBrowser()
 │   │   ├── draft.ts              # Re-exports from @plannotator/shared/draft
-│   │   ├── integrations.ts       # Obsidian, Bear integrations
 │   │   ├── ide.ts                # VS Code diff integration (openEditorDiff)
 │   │   ├── editor-annotations.ts  # VS Code editor annotation endpoints
 │   │   └── project.ts            # Project name detection for tags
@@ -55,7 +54,7 @@ plannotator/
 │   │   ├── components/           # Viewer, Toolbar, Settings, etc.
 │   │   │   ├── icons/            # Shared SVG icon components (themeIcons, etc.)
 │   │   │   ├── plan-diff/        # PlanDiffBadge, PlanDiffViewer, clean/raw diff views
-│   │   │   └── sidebar/          # SidebarContainer, SidebarTabs, VersionBrowser, ArchiveBrowser
+│   │   │   └── sidebar/          # SidebarContainer, SidebarTabs, VersionBrowser
 │   │   ├── shortcuts/            # Keyboard shortcut registry (see Keyboard Shortcuts section below)
 │   │   │   ├── core.ts           # Engine: parser, formatter, dispatcher, validator
 │   │   │   ├── runtime.ts        # Engine: useShortcutScope, useDoubleTapShortcuts hooks
@@ -246,8 +245,6 @@ The daemon is the single long-running Bun server used by normal plan/review/anno
 | `/daemon/config` | GET | Read global config (`~/.plannotator/config.json`) |
 | `/daemon/config` | POST | Write global config keys (allowlisted: `displayName`, `pfmReminder`, `legacyTabMode`, `diffOptions`, `conventionalComments`, `conventionalLabels`) |
 | `/daemon/git/user` | GET | Return git user name from `git config user.name` |
-| `/daemon/vaults` | GET | Detect available Obsidian vaults |
-| `/daemon/obsidian/vaults` | GET | Alias for `/daemon/vaults` |
 | `/daemon/hooks/status` | GET | Return PFM reminder and improvement hook status |
 | `/daemon/projects` | DELETE | Remove a project by `?cwd=` (optional `?clean=1` to cancel active sessions) |
 | `/daemon/projects/prs` | GET | List open PRs for a project (`?cwd=`) |
@@ -281,13 +278,10 @@ When a user denies a plan (or sends feedback on a review/annotation), the sessio
 | `/api/archive/plans`  | GET    | List archived plan decisions (`?customPath=`) |
 | `/api/archive/plan`   | GET    | Fetch archived plan content (`?filename=&customPath=`) |
 | `/api/done`           | POST   | Close archive browser (archive mode only)  |
-| `/api/approve`        | POST   | Approve plan (body: planSave, agentSwitch, obsidian, bear, feedback) |
+| `/api/approve`        | POST   | Approve plan (body: planSave, agentSwitch, feedback) |
 | `/api/deny`           | POST   | Deny plan (body: feedback, planSave)       |
 | `/api/image`          | GET    | Serve image by path query param            |
 | `/api/upload`         | POST   | Upload image, returns `{ path, originalName }` |
-| `/api/obsidian/vaults`| GET    | Detect available Obsidian vaults           |
-| `/api/reference/obsidian/files` | GET | List vault markdown files as nested tree (`?vaultPath=<path>`) |
-| `/api/reference/obsidian/doc`   | GET | Read a vault markdown file (`?vaultPath=<path>&path=<file>`) |
 | `/api/plan/vscode-diff` | POST   | Open diff in VS Code (body: baseVersion)   |
 | `/api/doc`              | GET    | Serve linked .md/.mdx file (`?path=<path>`) |
 | `/api/doc/exists`       | POST   | Batch-validate code-file paths (body: `{ paths: string[], base?: string }`) returns `{ results: { [path]: { status: "found"\|"ambiguous"\|"missing"\|"unavailable", … } } }` |

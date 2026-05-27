@@ -252,11 +252,10 @@ export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
                 </svg>
               </div>
               <div>
-                <h3 className="font-semibold mb-1">Save to Obsidian.</h3>
+                <h3 className="font-semibold mb-1">Plan History.</h3>
                 <p className="text-muted-foreground text-sm">
-                  Approved plans auto-save to your vault with frontmatter and
-                  auto-extracted tags. Build a searchable archive of every plan
-                  your agents create.
+                  Every plan is saved with version history. Browse past decisions,
+                  compare revisions, and track how plans evolve across sessions.
                 </p>
               </div>
             </div>

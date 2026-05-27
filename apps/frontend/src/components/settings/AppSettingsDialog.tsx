@@ -10,9 +10,6 @@ import { PlanDisplayTab } from "@plannotator/ui/components/settings/PlanDisplayT
 import { SavingTab } from "@plannotator/ui/components/settings/SavingTab";
 import { LabelsTab } from "@plannotator/ui/components/settings/LabelsTab";
 import { FilesTab } from "@plannotator/ui/components/settings/FilesTab";
-import { ObsidianTab } from "@plannotator/ui/components/settings/ObsidianTab";
-import { BearTab } from "@plannotator/ui/components/settings/BearTab";
-import { OctarineTab } from "@plannotator/ui/components/settings/OctarineTab";
 import { GitTab, ReviewDisplayTab, CommentsTab } from "@plannotator/ui/components/Settings";
 import { ThemeTab } from "@plannotator/ui/components/ThemeTab";
 import { KeyboardShortcuts } from "@plannotator/ui/components/KeyboardShortcuts";
@@ -49,9 +46,6 @@ const REVIEW_TABS: TabDef[] = [
 
 const INTEGRATION_TABS: TabDef[] = [
   { id: "int-files", label: "Files" },
-  { id: "int-obsidian", label: "Obsidian" },
-  { id: "int-bear", label: "Bear" },
-  { id: "int-octarine", label: "Octarine" },
 ];
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
@@ -275,7 +269,7 @@ export function AppSettingsDialog() {
                   <PlanDisplayTab />
                 </TabsContent>
                 <TabsContent value="plan-saving">
-                  <SavingTab onNavigateTab={setActiveTab} />
+                  <SavingTab />
                 </TabsContent>
                 <TabsContent value="plan-labels">
                   <LabelsTab />
@@ -305,15 +299,6 @@ export function AppSettingsDialog() {
                 {/* Integrations */}
                 <TabsContent value="int-files">
                   <FilesTab />
-                </TabsContent>
-                <TabsContent value="int-obsidian">
-                  <ObsidianTab fetchFn={daemonFetch} />
-                </TabsContent>
-                <TabsContent value="int-bear">
-                  <BearTab />
-                </TabsContent>
-                <TabsContent value="int-octarine">
-                  <OctarineTab />
                 </TabsContent>
               </div>
             </div>

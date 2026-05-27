@@ -1,16 +1,11 @@
 /**
- * Export Modal with tabs for Share, Annotations, and Notes
+ * Export Modal with tabs for Share and Annotations
  *
  * Share tab (default): Shows shareable URL with copy button
  * Annotations tab: Shows human-readable annotations output with copy/download
- * Notes tab: Save plan to Obsidian/Bear without approving
  */
 
 import React, { useState, useEffect } from 'react';
-import { useSessionFetch } from '../hooks/useSessionFetch';
-import { getObsidianSettings, getEffectiveVaultPath } from '../utils/obsidian';
-import { getBearSettings } from '../utils/bear';
-import { getOctarineSettings } from '../utils/octarine';
 import { wrapFeedbackForAgent } from '../utils/parser';
 import { OverlayScrollArea } from './OverlayScrollArea';
 
@@ -36,10 +31,7 @@ interface ExportModalProps {
   initialTab?: Tab;
 }
 
-type Tab = 'share' | 'annotations' | 'notes';
-
-type SaveTarget = 'obsidian' | 'bear' | 'octarine';
-type SaveStatus = 'idle' | 'saving' | 'success' | 'error';
+type Tab = 'share' | 'annotations';
 
 export const ExportModal: React.FC<ExportModalProps> = ({
   isOpen,
@@ -54,16 +46,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   annotationCount,
   taterSprite,
   sharingEnabled = true,
-  markdown,
-  isApiMode = false,
   initialTab,
 }) => {
-  const fetch = useSessionFetch();
   const defaultTab = initialTab || (sharingEnabled ? 'share' : 'annotations');
   const [activeTab, setActiveTab] = useState<Tab>(defaultTab);
   const [copied, setCopied] = useState<'short' | 'full' | 'annotations' | false>(false);
-  const [saveStatus, setSaveStatus] = useState<Record<SaveTarget, SaveStatus>>({ obsidian: 'idle', bear: 'idle', octarine: 'idle' });
-  const [saveErrors, setSaveErrors] = useState<Record<string, string>>({});
 
   // Reset tab when modal opens
   useEffect(() => {
@@ -72,24 +59,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     }
   }, [isOpen, initialTab, sharingEnabled]);
 
-  // Reset save status when modal opens
-  useEffect(() => {
-    if (isOpen) {
-      setSaveStatus({ obsidian: 'idle', bear: 'idle', octarine: 'idle' });
-      setSaveErrors({});
-    }
-  }, [isOpen]);
-
   if (!isOpen) return null;
-
-  const showNotesTab = isApiMode && !!markdown;
-  const obsidianSettings = getObsidianSettings();
-  const bearSettings = getBearSettings();
-  const octarineSettings = getOctarineSettings();
-  const effectiveVaultPath = getEffectiveVaultPath(obsidianSettings);
-  const isObsidianReady = obsidianSettings.enabled && effectiveVaultPath.trim().length > 0;
-  const isBearReady = bearSettings.enabled;
-  const isOctarineReady = octarineSettings.enabled && octarineSettings.workspace.trim().length > 0;
 
   const handleCopy = async (text: string, which: 'short' | 'full' | 'annotations') => {
     try {
@@ -120,67 +90,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  const handleSaveToNotes = async (target: SaveTarget) => {
-    if (!markdown) return;
-
-    setSaveStatus(prev => ({ ...prev, [target]: 'saving' }));
-    setSaveErrors(prev => { const next = { ...prev }; delete next[target]; return next; });
-
-    const body: { obsidian?: object; bear?: object; octarine?: object } = {};
-
-    if (target === 'obsidian') {
-      body.obsidian = {
-        vaultPath: effectiveVaultPath,
-        folder: obsidianSettings.folder || 'plannotator',
-        plan: markdown,
-        ...(obsidianSettings.filenameFormat && { filenameFormat: obsidianSettings.filenameFormat }),
-        ...(obsidianSettings.filenameSeparator && obsidianSettings.filenameSeparator !== 'space' && { filenameSeparator: obsidianSettings.filenameSeparator }),
-      };
-    }
-    if (target === 'bear') {
-      body.bear = { plan: markdown };
-    }
-    if (target === 'octarine') {
-      body.octarine = {
-        plan: markdown,
-        workspace: octarineSettings.workspace,
-        folder: octarineSettings.folder || 'plannotator',
-      };
-    }
-
-    try {
-      const res = await fetch('/api/save-notes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      const result = data.results?.[target];
-
-      if (result?.success) {
-        setSaveStatus(prev => ({ ...prev, [target]: 'success' }));
-      } else {
-        setSaveStatus(prev => ({ ...prev, [target]: 'error' }));
-        setSaveErrors(prev => ({ ...prev, [target]: result?.error || 'Save failed' }));
-      }
-    } catch {
-      setSaveStatus(prev => ({ ...prev, [target]: 'error' }));
-      setSaveErrors(prev => ({ ...prev, [target]: 'Save failed' }));
-    }
-  };
-
-  const handleSaveAll = async () => {
-    const targets: SaveTarget[] = [];
-    if (isObsidianReady) targets.push('obsidian');
-    if (isBearReady) targets.push('bear');
-    if (isOctarineReady) targets.push('octarine');
-    await Promise.all(targets.map(t => handleSaveToNotes(t)));
-  };
-
-  const readyCount = [isObsidianReady, isBearReady, isOctarineReady].filter(Boolean).length;
-
   // Determine which tabs to show
-  const showTabs = sharingEnabled || showNotesTab;
+  const showTabs = sharingEnabled;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
@@ -238,18 +149,6 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               >
                 Annotations
               </button>
-              {showNotesTab && (
-                <button
-                  onClick={() => setActiveTab('notes')}
-                  className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                    activeTab === 'notes'
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  Notes
-                </button>
-              )}
             </div>
           )}
 
@@ -366,155 +265,6 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               <p className="text-xs text-muted-foreground">
                 Only someone with this exact link can view your plan. Short links are end-to-end encrypted — the decryption key is in the URL and never sent to the server.
               </p>
-            </div>
-          ) : activeTab === 'notes' && showNotesTab ? (
-            <div className="space-y-4">
-              <p className="text-xs text-muted-foreground">
-                Save this plan to your notes app without approving or denying.
-              </p>
-
-              {/* Obsidian */}
-              <div className="border border-border rounded-lg p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${isObsidianReady ? 'bg-success' : 'bg-muted-foreground/30'}`} />
-                    <span className="text-sm font-medium">Obsidian</span>
-                  </div>
-                  {isObsidianReady ? (
-                    <button
-                      onClick={() => handleSaveToNotes('obsidian')}
-                      disabled={saveStatus.obsidian === 'saving'}
-                      className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
-                        saveStatus.obsidian === 'success'
-                          ? 'bg-success/15 text-success'
-                          : saveStatus.obsidian === 'error'
-                            ? 'bg-destructive/15 text-destructive'
-                            : saveStatus.obsidian === 'saving'
-                              ? 'bg-muted text-muted-foreground opacity-50'
-                              : 'bg-primary text-primary-foreground hover:opacity-90'
-                      }`}
-                    >
-                      {saveStatus.obsidian === 'saving' ? 'Saving...'
-                        : saveStatus.obsidian === 'success' ? 'Saved'
-                        : saveStatus.obsidian === 'error' ? 'Failed'
-                        : 'Save'}
-                    </button>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">Not configured</span>
-                  )}
-                </div>
-                {isObsidianReady && (
-                  <div className="text-[10px] text-muted-foreground/70">
-                    {effectiveVaultPath}/{obsidianSettings.folder || 'plannotator'}/
-                  </div>
-                )}
-                {!isObsidianReady && (
-                  <div className="text-[10px] text-muted-foreground/70">
-                    Enable in Settings &gt; Saving &gt; Obsidian
-                  </div>
-                )}
-                {saveErrors.obsidian && (
-                  <div className="text-[10px] text-destructive">{saveErrors.obsidian}</div>
-                )}
-              </div>
-
-              {/* Bear */}
-              <div className="border border-border rounded-lg p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${isBearReady ? 'bg-success' : 'bg-muted-foreground/30'}`} />
-                    <span className="text-sm font-medium">Bear</span>
-                  </div>
-                  {isBearReady ? (
-                    <button
-                      onClick={() => handleSaveToNotes('bear')}
-                      disabled={saveStatus.bear === 'saving'}
-                      className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
-                        saveStatus.bear === 'success'
-                          ? 'bg-success/15 text-success'
-                          : saveStatus.bear === 'error'
-                            ? 'bg-destructive/15 text-destructive'
-                            : saveStatus.bear === 'saving'
-                              ? 'bg-muted text-muted-foreground opacity-50'
-                              : 'bg-primary text-primary-foreground hover:opacity-90'
-                      }`}
-                    >
-                      {saveStatus.bear === 'saving' ? 'Saving...'
-                        : saveStatus.bear === 'success' ? 'Saved'
-                        : saveStatus.bear === 'error' ? 'Failed'
-                        : 'Save'}
-                    </button>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">Not configured</span>
-                  )}
-                </div>
-                {!isBearReady && (
-                  <div className="text-[10px] text-muted-foreground/70">
-                    Enable in Settings &gt; Saving &gt; Bear
-                  </div>
-                )}
-                {saveErrors.bear && (
-                  <div className="text-[10px] text-destructive">{saveErrors.bear}</div>
-                )}
-              </div>
-
-              {/* Octarine */}
-              <div className="border border-border rounded-lg p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${isOctarineReady ? 'bg-success' : 'bg-muted-foreground/30'}`} />
-                    <span className="text-sm font-medium">Octarine</span>
-                  </div>
-                  {isOctarineReady ? (
-                    <button
-                      onClick={() => handleSaveToNotes('octarine')}
-                      disabled={saveStatus.octarine === 'saving'}
-                      className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
-                        saveStatus.octarine === 'success'
-                          ? 'bg-success/15 text-success'
-                          : saveStatus.octarine === 'error'
-                            ? 'bg-destructive/15 text-destructive'
-                            : saveStatus.octarine === 'saving'
-                              ? 'bg-muted text-muted-foreground opacity-50'
-                              : 'bg-primary text-primary-foreground hover:opacity-90'
-                      }`}
-                    >
-                      {saveStatus.octarine === 'saving' ? 'Saving...'
-                        : saveStatus.octarine === 'success' ? 'Saved'
-                        : saveStatus.octarine === 'error' ? 'Failed'
-                        : 'Save'}
-                    </button>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">Not configured</span>
-                  )}
-                </div>
-                {isOctarineReady && (
-                  <div className="text-[10px] text-muted-foreground/70">
-                    {octarineSettings.workspace} / {octarineSettings.folder || 'plannotator'}/
-                  </div>
-                )}
-                {!isOctarineReady && (
-                  <div className="text-[10px] text-muted-foreground/70">
-                    Enable in Settings &gt; Saving &gt; Octarine
-                  </div>
-                )}
-                {saveErrors.octarine && (
-                  <div className="text-[10px] text-destructive">{saveErrors.octarine}</div>
-                )}
-              </div>
-
-              {/* Save All button */}
-              {readyCount >= 2 && (
-                <div className="flex justify-end">
-                  <button
-                    onClick={handleSaveAll}
-                    disabled={saveStatus.obsidian === 'saving' || saveStatus.bear === 'saving' || saveStatus.octarine === 'saving'}
-                    className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
-                  >
-                    Save All
-                  </button>
-                </div>
-              )}
             </div>
           ) : (
             <pre className="bg-muted rounded-lg p-4 text-xs font-mono leading-relaxed overflow-x-auto whitespace-pre-wrap">

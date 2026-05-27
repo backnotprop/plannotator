@@ -9,7 +9,6 @@ import React from "react";
 import type { VaultNode } from "../../types";
 import type { DirState } from "../../hooks/useFileBrowser";
 import { CountBadge } from "./CountBadge";
-import { ObsidianIconRaw } from "../icons/ObsidianIcons";
 
 interface FileBrowserProps {
   dirs: DirState[];
@@ -20,7 +19,6 @@ interface FileBrowserProps {
   onSelectFile: (absolutePath: string, dirPath: string) => void;
   activeFile: string | null;
   onFetchAll: () => void;
-  onRetryVaultDir?: (vaultPath: string) => void;
   annotationCounts?: Map<string, number>;
   highlightedFiles?: Set<string>;
 }
@@ -192,7 +190,6 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
   onSelectFile,
   activeFile,
   onFetchAll,
-  onRetryVaultDir,
   annotationCounts,
   highlightedFiles,
 }) => {
@@ -233,7 +230,6 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
               >
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
               </svg>
-              {dir.isVault && <ObsidianIconRaw className="w-[11px] h-[13px] flex-shrink-0 opacity-70" />}
               <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider truncate">
                 {dir.name}
               </div>
@@ -245,7 +241,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                 onToggleFolder={onToggleFolder}
                 onSelectFile={onSelectFile}
                 activeFile={activeFile}
-                onRetry={dir.isVault && onRetryVaultDir ? () => onRetryVaultDir(dir.path) : onFetchAll}
+                onRetry={onFetchAll}
                 annotationCounts={annotationCounts}
                 highlightedFiles={highlightedFiles}
               />

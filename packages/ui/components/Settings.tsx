@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useSessionFetch } from '../hooks/useSessionFetch';
 import { createPortal } from 'react-dom';
 import type { Origin } from '@plannotator/shared/agents';
 import type { DiffLineBgIntensity } from '@plannotator/shared/config';
@@ -8,25 +7,6 @@ import { loadDiffFont } from '../utils/diffFonts';
 import { TaterSpritePullup } from './TaterSpritePullup';
 import { getIdentity, regenerateIdentity, setCustomIdentity } from '../utils/identity';
 import { GitUser } from '../icons/GitUser';
-import {
-  getObsidianSettings,
-  saveObsidianSettings,
-  getEffectiveVaultPath,
-  CUSTOM_PATH_SENTINEL,
-  DEFAULT_FILENAME_FORMAT,
-  type ObsidianSettings,
-} from '../utils/obsidian';
-import {
-  getBearSettings,
-  saveBearSettings,
-  normalizeTags,
-  type BearSettings,
-} from '../utils/bear';
-import {
-  getOctarineSettings,
-  saveOctarineSettings,
-  type OctarineSettings,
-} from '../utils/octarine';
 import {
   getAgentSwitchSettings,
   saveAgentSwitchSettings,
@@ -52,16 +32,11 @@ import {
   type PermissionMode,
 } from '../utils/permissionMode';
 import { getAutoCloseDelay, setAutoCloseDelay, AUTO_CLOSE_OPTIONS, type AutoCloseDelay } from '../utils/storage';
-import {
-  getDefaultNotesApp,
-  saveDefaultNotesApp,
-  type DefaultNotesApp,
-} from '../utils/defaultNotesApp';
 import { useAgents } from '../hooks/useAgents';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
 import { type QuickLabel, getQuickLabels, saveQuickLabels, resetQuickLabels, DEFAULT_QUICK_LABELS, getLabelColors, LABEL_COLOR_MAP } from '../utils/quickLabels';
 import { ThemeTab } from './ThemeTab';
-import { isMac, modKey, altKey } from '../utils/platform';
+import { isMac, altKey } from '../utils/platform';
 import { getAIProviderSettings } from '../utils/aiProvider';
 import { AISettingsTab } from './AISettingsTab';
 import { HooksTab } from './settings/HooksTab';
@@ -72,7 +47,7 @@ import {
   type FileBrowserSettings,
 } from '../utils/fileBrowser';
 
-type SettingsTab = 'general' | 'theme' | 'git' | 'display' | 'saving' | 'labels' | 'shortcuts' | 'ai' | 'files' | 'obsidian' | 'bear' | 'octarine' | 'comments' | 'hooks';
+type SettingsTab = 'general' | 'theme' | 'git' | 'display' | 'saving' | 'labels' | 'shortcuts' | 'ai' | 'files' | 'comments' | 'hooks';
 
 interface SettingsProps {
   taterMode: boolean;
@@ -579,7 +554,6 @@ export const CommentsTab: React.FC = () => {
 };
 
 export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', onUIPreferencesChange, externalOpen, onExternalClose, aiProviders = [], gitUser }) => {
-  const fetch = useSessionFetch();
   const [showDialog, setShowDialog] = useState(false);
   const [themePreview, setThemePreview] = useState(false);
 
@@ -593,25 +567,12 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   }, [themePreview]);
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [identity, setIdentity] = useState('');
-  const [obsidian, setObsidian] = useState<ObsidianSettings>({
-    enabled: false,
-    vaultPath: '',
-    folder: 'plannotator',
-    filenameSeparator: 'space',
-    autoSave: false,
-    vaultBrowserEnabled: false,
-  });
-  const [detectedVaults, setDetectedVaults] = useState<string[]>([]);
-  const [vaultsLoading, setVaultsLoading] = useState(false);
-  const [bear, setBear] = useState<BearSettings>({ enabled: false, customTags: '', tagPosition: 'append', autoSave: false });
-  const [octarine, setOctarine] = useState<OctarineSettings>({ enabled: false, workspace: '', folder: 'plannotator', autoSave: false });
   const [agent, setAgent] = useState<AgentSwitchSettings>({ switchTo: 'build' });
   const [planSave, setPlanSave] = useState<PlanSaveSettings>({ enabled: true, customPath: null });
   const [uiPrefs, setUiPrefs] = useState<UIPreferences>({ tocEnabled: true, stickyActionsEnabled: true, planWidth: 'compact' });
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
   const [agentWarning, setAgentWarning] = useState<string | null>(null);
   const [autoCloseDelay, setAutoCloseDelayState] = useState<AutoCloseDelay>('off');
-  const [defaultNotesApp, setDefaultNotesApp] = useState<DefaultNotesApp>('ask');
   const [quickLabelsState, setQuickLabelsState] = useState<QuickLabel[]>([]);
   const [editingTipIndex, setEditingTipIndex] = useState<number | null>(null);
   const [editingTipValue, setEditingTipValue] = useState('');
@@ -647,13 +608,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
 
   const integrationTabs: { id: SettingsTab; label: string }[] = [
     { id: 'files', label: 'Files' },
-    ...(mode === 'plan'
-      ? [{ id: 'obsidian' as SettingsTab, label: 'Obsidian' }, { id: 'bear' as SettingsTab, label: 'Bear' }, { id: 'octarine' as SettingsTab, label: 'Octarine' }]
-      : []),
   ];
-  const obsidianDefaultSaveAvailable = obsidian.enabled && getEffectiveVaultPath(obsidian).trim().length > 0;
-  const bearDefaultSaveAvailable = bear.enabled;
-  const octarineDefaultSaveAvailable = octarine.enabled && octarine.workspace.trim().length > 0;
 
   // Sync external open state
   useEffect(() => {
@@ -666,15 +621,11 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   useEffect(() => {
     if (showDialog) {
       setIdentity(getIdentity())
-      setObsidian(getObsidianSettings());
-      setBear(getBearSettings());
-      setOctarine(getOctarineSettings());
       setAgent(getAgentSwitchSettings());
       setPlanSave(getPlanSaveSettings());
       setUiPrefs(getUIPreferences());
       setPermissionMode(getPermissionModeSettings().mode);
       setAutoCloseDelayState(getAutoCloseDelay());
-      setDefaultNotesApp(getDefaultNotesApp());
       setQuickLabelsState(getQuickLabels());
       setAiProvider(getAIProviderSettings().providerId);
       setFileBrowserSettings(getFileBrowserSettings());
@@ -685,46 +636,6 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       }
     }
   }, [showDialog, availableAgents, origin, getAgentWarning]);
-
-  useEffect(() => {
-    if (!showDialog) return;
-
-    const defaultSaveAvailable =
-      defaultNotesApp === 'ask' ||
-      defaultNotesApp === 'download' ||
-      (defaultNotesApp === 'obsidian' && obsidianDefaultSaveAvailable) ||
-      (defaultNotesApp === 'bear' && bearDefaultSaveAvailable) ||
-      (defaultNotesApp === 'octarine' && octarineDefaultSaveAvailable);
-
-    if (!defaultSaveAvailable) {
-      setDefaultNotesApp('ask');
-      saveDefaultNotesApp('ask');
-    }
-  }, [
-    showDialog,
-    defaultNotesApp,
-    obsidianDefaultSaveAvailable,
-    bearDefaultSaveAvailable,
-    octarineDefaultSaveAvailable,
-  ]);
-
-  // Fetch detected vaults when Obsidian is enabled
-  useEffect(() => {
-    if (obsidian.enabled && detectedVaults.length === 0 && !vaultsLoading) {
-      setVaultsLoading(true);
-      fetch('/api/obsidian/vaults')
-        .then(res => res.json())
-        .then((data: { vaults: string[] }) => {
-          setDetectedVaults(data.vaults || []);
-          // Auto-select first vault if none set
-          if (data.vaults?.length > 0 && !obsidian.vaultPath) {
-            handleObsidianChange({ vaultPath: data.vaults[0] });
-          }
-        })
-        .catch(() => setDetectedVaults([]))
-        .finally(() => setVaultsLoading(false));
-    }
-  }, [obsidian.enabled]);
 
   const handleFileBrowserChange = (updates: Partial<FileBrowserSettings>) => {
     const newSettings = { ...fileBrowserSettings, ...updates };
@@ -741,24 +652,6 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       });
     }
     setNewDirPath('');
-  };
-
-  const handleObsidianChange = (updates: Partial<ObsidianSettings>) => {
-    const newSettings = { ...obsidian, ...updates };
-    setObsidian(newSettings);
-    saveObsidianSettings(newSettings);
-  };
-
-  const handleBearChange = (updates: Partial<BearSettings>) => {
-    const newSettings = { ...bear, ...updates };
-    setBear(newSettings);
-    saveBearSettings(newSettings);
-  };
-
-  const handleOctarineChange = (updates: Partial<OctarineSettings>) => {
-    const newSettings = { ...octarine, ...updates };
-    setOctarine(newSettings);
-    saveOctarineSettings(newSettings);
   };
 
   const handleAgentChange = (switchTo: AgentSwitchSettings['switchTo'], customName?: string) => {
@@ -783,11 +676,6 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const handlePermissionModeChange = (mode: PermissionMode) => {
     setPermissionMode(mode);
     savePermissionModeSettings(mode);
-  };
-
-  const handleDefaultNotesAppChange = (app: DefaultNotesApp) => {
-    setDefaultNotesApp(app);
-    saveDefaultNotesApp(app);
   };
 
   // Server write-back is handled automatically by configStore.set() (debounced POST /api/config)
@@ -1339,86 +1227,6 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                       )}
                     </div>
 
-                    <div className="border-t border-border" />
-
-                    {/* Default Notes App */}
-                    <div className="space-y-2">
-                      <div>
-                        <div className="text-sm font-medium">Default Save Action</div>
-                        <div className="text-xs text-muted-foreground">
-                          Used for keyboard shortcut ({modKey}+S)
-                        </div>
-                      </div>
-                      <select
-                        value={defaultNotesApp}
-                        onChange={(e) => handleDefaultNotesAppChange(e.target.value as DefaultNotesApp)}
-                        className="w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer"
-                      >
-                        <option value="ask">Ask each time</option>
-                        <option value="download">Download Annotations</option>
-                        {obsidianDefaultSaveAvailable && <option value="obsidian">Obsidian</option>}
-                        {bearDefaultSaveAvailable && <option value="bear">Bear</option>}
-                        {octarineDefaultSaveAvailable && <option value="octarine">Octarine</option>}
-                      </select>
-                      <div className="text-[10px] text-muted-foreground/70">
-                        {defaultNotesApp === 'ask'
-                          ? 'Opens Export dialog with Notes tab'
-                          : defaultNotesApp === 'download'
-                            ? `${modKey}+S downloads the annotations file`
-                            : `${modKey}+S saves directly to ${{ obsidian: 'Obsidian', bear: 'Bear', octarine: 'Octarine' }[defaultNotesApp] ?? defaultNotesApp}`}
-                      </div>
-                    </div>
-
-                    <div className="border-t border-border" />
-
-                    {/* Integration links */}
-                    <div className="space-y-2">
-                      <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">
-                        Integrations
-                      </div>
-                      <button
-                        onClick={() => setActiveTab('obsidian')}
-                        className="w-full flex items-center justify-between px-3 py-2.5 bg-muted/50 hover:bg-muted rounded-lg text-sm transition-colors group"
-                      >
-                        <span className="text-foreground">Obsidian</span>
-                        <span className="flex items-center gap-2">
-                          <span className={`text-[10px] font-medium ${obsidian.enabled ? 'text-primary' : 'text-muted-foreground/50'}`}>
-                            {obsidian.enabled ? 'Enabled' : 'Off'}
-                          </span>
-                          <svg className="w-3.5 h-3.5 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                          </svg>
-                        </span>
-                      </button>
-                      <button
-                        onClick={() => setActiveTab('bear')}
-                        className="w-full flex items-center justify-between px-3 py-2.5 bg-muted/50 hover:bg-muted rounded-lg text-sm transition-colors group"
-                      >
-                        <span className="text-foreground">Bear Notes</span>
-                        <span className="flex items-center gap-2">
-                          <span className={`text-[10px] font-medium ${bear.enabled ? 'text-primary' : 'text-muted-foreground/50'}`}>
-                            {bear.enabled ? 'Enabled' : 'Off'}
-                          </span>
-                          <svg className="w-3.5 h-3.5 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                          </svg>
-                        </span>
-                      </button>
-                      <button
-                        onClick={() => setActiveTab('octarine')}
-                        className="w-full flex items-center justify-between px-3 py-2.5 bg-muted/50 hover:bg-muted rounded-lg text-sm transition-colors group"
-                      >
-                        <span className="text-foreground">Octarine</span>
-                        <span className="flex items-center gap-2">
-                          <span className={`text-[10px] font-medium ${octarine.enabled ? 'text-primary' : 'text-muted-foreground/50'}`}>
-                            {octarine.enabled ? 'Enabled' : 'Off'}
-                          </span>
-                          <svg className="w-3.5 h-3.5 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                          </svg>
-                        </span>
-                      </button>
-                    </div>
                   </>
                 )}
 
@@ -1712,372 +1520,6 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
 
                 {/* === HOOKS TAB === */}
                 {activeTab === 'hooks' && <HooksTab />}
-
-                {/* === OBSIDIAN TAB === */}
-                {activeTab === 'obsidian' && (
-                  <>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="text-sm font-medium">Obsidian Integration</div>
-                        <div className="text-xs text-muted-foreground">
-                          Auto-save approved plans to your vault
-                        </div>
-                      </div>
-                      <button
-                        role="switch"
-                        aria-checked={obsidian.enabled}
-                        onClick={() => handleObsidianChange({ enabled: !obsidian.enabled })}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                          obsidian.enabled ? 'bg-primary' : 'bg-muted'
-                        }`}
-                      >
-                        <span
-                          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
-                            obsidian.enabled ? 'translate-x-6' : 'translate-x-1'
-                          }`}
-                        />
-                      </button>
-                    </div>
-
-                    {obsidian.enabled && (
-                      <>
-                        <div className="border-t border-border" />
-
-                        <div className="space-y-3">
-                          <div className="flex gap-3">
-                            <div className="flex-1 space-y-1.5">
-                              <label className="text-xs text-muted-foreground">Vault</label>
-                              {vaultsLoading ? (
-                                <div className="w-full px-3 py-2 bg-muted rounded-lg text-xs text-muted-foreground">
-                                  Detecting...
-                                </div>
-                              ) : detectedVaults.length > 0 ? (
-                                <>
-                                  <select
-                                    value={obsidian.vaultPath}
-                                    onChange={(e) => handleObsidianChange({ vaultPath: e.target.value })}
-                                    className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer"
-                                  >
-                                    {detectedVaults.map((vault) => (
-                                      <option key={vault} value={vault}>
-                                        {vault.split('/').pop() || vault}
-                                      </option>
-                                    ))}
-                                    <option value={CUSTOM_PATH_SENTINEL}>Custom path...</option>
-                                  </select>
-                                  {obsidian.vaultPath === CUSTOM_PATH_SENTINEL && (
-                                    <input
-                                      type="text"
-                                      value={obsidian.customPath || ''}
-                                      onChange={(e) => handleObsidianChange({ customPath: e.target.value })}
-                                      placeholder="/path/to/vault"
-                                      className="w-full mt-2 px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
-                                    />
-                                  )}
-                                </>
-                              ) : (
-                                <input
-                                  type="text"
-                                  value={obsidian.vaultPath}
-                                  onChange={(e) => handleObsidianChange({ vaultPath: e.target.value })}
-                                  placeholder="/path/to/vault"
-                                  className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
-                                />
-                              )}
-                            </div>
-
-                            <div className="w-44 space-y-1.5">
-                              <label className="text-xs text-muted-foreground">Folder</label>
-                              <input
-                                type="text"
-                                value={obsidian.folder}
-                                onChange={(e) => handleObsidianChange({ folder: e.target.value })}
-                                placeholder="plannotator"
-                                className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="space-y-1.5">
-                            <label className="text-xs text-muted-foreground">Filename Format</label>
-                            <input
-                              type="text"
-                              value={obsidian.filenameFormat || ''}
-                              onChange={(e) => handleObsidianChange({ filenameFormat: e.target.value || undefined })}
-                              placeholder={DEFAULT_FILENAME_FORMAT}
-                              className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
-                            />
-                            <div className="text-[10px] text-muted-foreground/70">
-                              Variables: <code className="text-[10px]">{'{title}'}</code> <code className="text-[10px]">{'{YYYY}'}</code> <code className="text-[10px]">{'{MM}'}</code> <code className="text-[10px]">{'{DD}'}</code> <code className="text-[10px]">{'{Mon}'}</code> <code className="text-[10px]">{'{D}'}</code> <code className="text-[10px]">{'{HH}'}</code> <code className="text-[10px]">{'{h}'}</code> <code className="text-[10px]">{'{hh}'}</code> <code className="text-[10px]">{'{mm}'}</code> <code className="text-[10px]">{'{ss}'}</code> <code className="text-[10px]">{'{ampm}'}</code>
-                            </div>
-                            <div className="text-[10px] text-muted-foreground/70">
-                              Preview: {(() => {
-                                const fmt = obsidian.filenameFormat?.trim() || DEFAULT_FILENAME_FORMAT;
-                                const now = new Date();
-                                const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-                                const h24 = now.getHours(); const h12 = h24 % 12 || 12;
-                                const vars: Record<string, string> = {
-                                  title: 'My Plan Title', YYYY: String(now.getFullYear()),
-                                  MM: String(now.getMonth()+1).padStart(2,'0'), DD: String(now.getDate()).padStart(2,'0'),
-                                  Mon: months[now.getMonth()], D: String(now.getDate()),
-                                  HH: String(h24).padStart(2,'0'), h: String(h12), hh: String(h12).padStart(2,'0'),
-                                  mm: String(now.getMinutes()).padStart(2,'0'), ss: String(now.getSeconds()).padStart(2,'0'),
-                                  ampm: h24 >= 12 ? 'pm' : 'am',
-                                };
-                                let preview = fmt.replace(/\{(\w+)\}/g, (m, k) => vars[k] ?? m) + '.md';
-                                if (obsidian.filenameSeparator === 'dash') preview = preview.replace(/ /g, '-');
-                                else if (obsidian.filenameSeparator === 'underscore') preview = preview.replace(/ /g, '_');
-                                return preview;
-                              })()}
-                            </div>
-                          </div>
-
-                          <div className="space-y-1.5">
-                            <label className="text-xs text-muted-foreground">Filename Separator</label>
-                            <select
-                              value={obsidian.filenameSeparator || 'space'}
-                              onChange={(e) => handleObsidianChange({ filenameSeparator: e.target.value as 'space' | 'dash' | 'underscore' })}
-                              className="w-full px-3 py-2 bg-muted rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
-                            >
-                              <option value="space">Spaces (default)</option>
-                              <option value="dash">Dashes (-)</option>
-                              <option value="underscore">Underscores (_)</option>
-                            </select>
-                            <div className="text-[10px] text-muted-foreground/70">
-                              Replaces spaces in the generated filename. Useful when working with CLI tools in your vault.
-                            </div>
-                          </div>
-
-                          <div className="text-[10px] text-muted-foreground/70">
-                            Plans saved to: {obsidian.vaultPath === CUSTOM_PATH_SENTINEL
-                              ? (obsidian.customPath || '...')
-                              : (obsidian.vaultPath || '...')}/{obsidian.folder || 'plannotator'}/
-                          </div>
-
-                          <div className="space-y-1.5">
-                            <label className="text-xs text-muted-foreground">Frontmatter (auto-generated)</label>
-                            <pre className="px-3 py-2 bg-muted/50 rounded-lg text-[10px] font-mono text-muted-foreground overflow-x-auto">
-{`---
-created: ${new Date().toISOString().slice(0, 19)}Z
-source: plannotator
-tags: [plan, ...]
----`}
-                            </pre>
-                          </div>
-
-                          <div className="border-t border-border/30" />
-
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <div className="text-xs font-medium">Auto-save on Plan Arrival</div>
-                              <div className="text-[10px] text-muted-foreground">
-                                Automatically save to Obsidian when a plan loads, before you approve or deny
-                              </div>
-                            </div>
-                            <button
-                              role="switch"
-                              aria-checked={obsidian.autoSave}
-                              onClick={() => handleObsidianChange({ autoSave: !obsidian.autoSave })}
-                              className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
-                                obsidian.autoSave ? 'bg-primary' : 'bg-muted'
-                              }`}
-                            >
-                              <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
-                                obsidian.autoSave ? 'translate-x-6' : 'translate-x-1'
-                              }`} />
-                            </button>
-                          </div>
-
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <div className="text-xs font-medium">Vault Browser</div>
-                              <div className="text-[10px] text-muted-foreground">
-                                Browse and annotate vault files from the sidebar
-                              </div>
-                            </div>
-                            <button
-                              role="switch"
-                              aria-checked={obsidian.vaultBrowserEnabled}
-                              onClick={() => handleObsidianChange({ vaultBrowserEnabled: !obsidian.vaultBrowserEnabled })}
-                              className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
-                                obsidian.vaultBrowserEnabled ? 'bg-primary' : 'bg-muted'
-                              }`}
-                            >
-                              <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
-                                obsidian.vaultBrowserEnabled ? 'translate-x-6' : 'translate-x-1'
-                              }`} />
-                            </button>
-                          </div>
-                        </div>
-                      </>
-                    )}
-                  </>
-                )}
-
-                {/* === BEAR TAB === */}
-                {activeTab === 'bear' && (
-                  <>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="text-sm font-medium">Bear Notes</div>
-                        <div className="text-xs text-muted-foreground">
-                          Auto-save approved plans to Bear
-                        </div>
-                      </div>
-                      <button
-                        role="switch"
-                        aria-checked={bear.enabled}
-                        onClick={() => handleBearChange({ enabled: !bear.enabled })}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                          bear.enabled ? 'bg-primary' : 'bg-muted'
-                        }`}
-                      >
-                        <span
-                          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
-                            bear.enabled ? 'translate-x-6' : 'translate-x-1'
-                          }`}
-                        />
-                      </button>
-                    </div>
-                    {bear.enabled && (
-                      <div className="mt-3 space-y-3">
-                        <div className="space-y-1.5 pl-0.5">
-                          <label className="text-xs text-muted-foreground">Custom Tags</label>
-                          <input
-                            type="text"
-                            value={bear.customTags}
-                            onChange={(e) => handleBearChange({ customTags: e.target.value })}
-                            onBlur={(e) => handleBearChange({ customTags: normalizeTags(e.target.value) })}
-                            placeholder="plan, work"
-                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
-                          />
-                          <div className="text-[10px] text-muted-foreground">
-                            Comma-separated, kebab-case. Leave empty for auto-generated tags.
-                          </div>
-                        </div>
-                        <div className="space-y-1.5 pl-0.5">
-                          <label className="text-xs text-muted-foreground">Tag Position</label>
-                          <select
-                            value={bear.tagPosition}
-                            onChange={(e) => handleBearChange({ tagPosition: e.target.value as 'prepend' | 'append' })}
-                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
-                          >
-                            <option value="append">Append (end of note)</option>
-                            <option value="prepend">Prepend (after title)</option>
-                          </select>
-                        </div>
-
-                        <div className="border-t border-border/30" />
-
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <div className="text-xs font-medium">Auto-save on Plan Arrival</div>
-                            <div className="text-[10px] text-muted-foreground">
-                              Automatically save to Bear when a plan loads, before you approve or deny
-                            </div>
-                          </div>
-                          <button
-                            role="switch"
-                            aria-checked={bear.autoSave}
-                            onClick={() => handleBearChange({ autoSave: !bear.autoSave })}
-                            className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
-                              bear.autoSave ? 'bg-primary' : 'bg-muted'
-                            }`}
-                          >
-                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
-                              bear.autoSave ? 'translate-x-6' : 'translate-x-1'
-                            }`} />
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
-
-                {/* === OCTARINE TAB === */}
-                {activeTab === 'octarine' && (
-                  <>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="text-sm font-medium">Octarine</div>
-                        <div className="text-xs text-muted-foreground">
-                          Auto-save approved plans to Octarine
-                        </div>
-                      </div>
-                      <button
-                        role="switch"
-                        aria-checked={octarine.enabled}
-                        onClick={() => handleOctarineChange({ enabled: !octarine.enabled })}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                          octarine.enabled ? 'bg-primary' : 'bg-muted'
-                        }`}
-                      >
-                        <span
-                          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
-                            octarine.enabled ? 'translate-x-6' : 'translate-x-1'
-                          }`}
-                        />
-                      </button>
-                    </div>
-                    {octarine.enabled && (
-                      <div className="mt-3 space-y-3">
-                        <div className="space-y-1.5 pl-0.5">
-                          <label className="text-xs text-muted-foreground">Workspace Name</label>
-                          <input
-                            type="text"
-                            value={octarine.workspace}
-                            onChange={(e) => handleOctarineChange({ workspace: e.target.value })}
-                            placeholder="My Workspace"
-                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
-                          />
-                          <div className="text-[10px] text-muted-foreground">
-                            The Octarine workspace name to save plans into.
-                          </div>
-                        </div>
-                        <div className="space-y-1.5 pl-0.5">
-                          <label className="text-xs text-muted-foreground">Folder</label>
-                          <input
-                            type="text"
-                            value={octarine.folder}
-                            onChange={(e) => handleOctarineChange({ folder: e.target.value })}
-                            placeholder="plannotator"
-                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
-                          />
-                          <div className="text-[10px] text-muted-foreground">
-                            Subfolder within the workspace for saved plans.
-                          </div>
-                        </div>
-
-                        <div className="text-[10px] text-muted-foreground/70">
-                          Plans saved to: {octarine.workspace || '...'} / {octarine.folder || 'plannotator'}/
-                        </div>
-
-                        <div className="border-t border-border/30" />
-
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <div className="text-xs font-medium">Auto-save on Plan Arrival</div>
-                            <div className="text-[10px] text-muted-foreground">
-                              Automatically save to Octarine when a plan loads, before you approve or deny
-                            </div>
-                          </div>
-                          <button
-                            role="switch"
-                            aria-checked={octarine.autoSave}
-                            onClick={() => handleOctarineChange({ autoSave: !octarine.autoSave })}
-                            className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
-                              octarine.autoSave ? 'bg-primary' : 'bg-muted'
-                            }`}
-                          >
-                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
-                              octarine.autoSave ? 'translate-x-6' : 'translate-x-1'
-                            }`} />
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
 
               </div>
               </OverlayScrollArea>

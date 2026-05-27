@@ -25,10 +25,6 @@ import { configStore, useConfigValue } from '@plannotator/ui/config';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { CompletionBanner } from '@plannotator/ui/components/CompletionBanner';
 import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
-import { getObsidianSettings, getEffectiveVaultPath, isObsidianConfigured, CUSTOM_PATH_SENTINEL } from '@plannotator/ui/utils/obsidian';
-import { getBearSettings } from '@plannotator/ui/utils/bear';
-import { getOctarineSettings, isOctarineConfigured } from '@plannotator/ui/utils/octarine';
-import { getDefaultNotesApp } from '@plannotator/ui/utils/defaultNotesApp';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { getPlanSaveSettings } from '@plannotator/ui/utils/planSave';
 import { getUIPreferences, type UIPreferences, type PlanWidth } from '@plannotator/ui/utils/uiPreferences';
@@ -61,7 +57,6 @@ import { useExternalAnnotationHighlights } from '@plannotator/ui/hooks/useExtern
 import { subscribeToDaemonSessionFamily } from '@plannotator/ui/utils/daemonHub';
 import { buildPlanAgentInstructions } from '@plannotator/ui/utils/planAgentInstructions';
 import { useFileBrowser } from '@plannotator/ui/hooks/useFileBrowser';
-import { isVaultBrowserEnabled } from '@plannotator/ui/utils/obsidian';
 import { isFileBrowserEnabled, getFileBrowserSettings } from '@plannotator/ui/utils/fileBrowser';
 import { generateId } from '@plannotator/ui/utils/generateId';
 import { SidebarTabs } from '@plannotator/ui/components/sidebar/SidebarTabs';
@@ -90,12 +85,6 @@ const DEMO_PLAN_CONTENT = USE_DIFF_DEMO
   : DEFAULT_DEMO_PLAN_CONTENT;
 import { useCheckboxOverrides } from './hooks/useCheckboxOverrides';
 import { AppHeader } from './components/AppHeader';
-
-type NoteAutoSaveResults = {
-  obsidian?: boolean;
-  bear?: boolean;
-  octarine?: boolean;
-};
 
 function useSessionVisible(rootRef: React.RefObject<HTMLElement | null>): boolean {
   const [visible, setVisible] = useState(true);
@@ -205,7 +194,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
     document.title = repoInfo ? `${repoInfo.display} · Plannotator` : "Plannotator";
   }, [repoInfo, sessionVisible]);
 
-  const [initialExportTab, setInitialExportTab] = useState<'share' | 'annotations' | 'notes'>();
+  const [initialExportTab, setInitialExportTab] = useState<'share' | 'annotations'>();
   const [isPlanDiffActive, setIsPlanDiffActive] = useState(false);
   const togglePlanDiff = useCallback(() => setIsPlanDiffActive(v => !v), []);
   const closePlanDiff = useCallback(() => setIsPlanDiffActive(false), []);
@@ -414,14 +403,10 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
     }
   }, [canUseWideMode, exitWideMode, wideModeType]);
 
-  // Markdown file browser (also handles vault dirs via isVault flag)
+  // Markdown file browser
   const fileBrowser = useFileBrowser();
-  const vaultPath = useMemo(() => {
-    if (!isVaultBrowserEnabled()) return '';
-    return getEffectiveVaultPath(getObsidianSettings());
-  }, [uiPrefs]);
   const showFilesTab = useMemo(
-    () => !!projectRoot || isFileBrowserEnabled() || isVaultBrowserEnabled(),
+    () => !!projectRoot || isFileBrowserEnabled(),
     [projectRoot, uiPrefs]
   );
   const fileBrowserDirs = useMemo(() => {
@@ -437,47 +422,28 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
     if (!showFilesTab) fileBrowser.setActiveFile(null);
   }, [showFilesTab]);
 
-  // When vault is disabled, prune any stale vault dirs immediately
-  useEffect(() => {
-    if (!vaultPath) fileBrowser.clearVaultDirs();
-  }, [vaultPath]);
-
   useEffect(() => {
     if (sidebar.activeTab === 'files' && showFilesTab) {
       // Load regular dirs
       if (fileBrowserDirs.length > 0) {
-        const regularLoaded = fileBrowser.dirs.filter(d => !d.isVault).map(d => d.path);
+        const regularLoaded = fileBrowser.dirs.map(d => d.path);
         const needsRegular = fileBrowserDirs.some(d => !regularLoaded.includes(d))
           || regularLoaded.some(d => !fileBrowserDirs.includes(d));
         if (needsRegular) fileBrowser.fetchAll(fileBrowserDirs);
       }
-      // Load vault dir; addVaultDir atomically replaces any existing vault entry so
-      // switching vault paths never accumulates stale sections
-      if (vaultPath && !fileBrowser.dirs.find(d => d.isVault && d.path === vaultPath && !d.error)) {
-        fileBrowser.addVaultDir(vaultPath);
-      }
     }
-  }, [sidebar.activeTab, showFilesTab, fileBrowserDirs, vaultPath]);
+  }, [sidebar.activeTab, showFilesTab, fileBrowserDirs]);
 
   // File browser file selection: open via linked doc system
-  // For vault dirs (isVault), use the Obsidian doc endpoint; otherwise use generic /api/doc
   const handleFileBrowserSelect = React.useCallback((absolutePath: string, dirPath: string) => {
-    const dirState = fileBrowser.dirs.find(d => d.path === dirPath);
-    const buildUrl = dirState?.isVault
-      ? (path: string) => `/api/reference/obsidian/doc?vaultPath=${encodeURIComponent(dirPath)}&path=${encodeURIComponent(path)}`
-      : (path: string) => `/api/doc?path=${encodeURIComponent(path)}&base=${encodeURIComponent(dirPath)}`;
+    const buildUrl = (path: string) => `/api/doc?path=${encodeURIComponent(path)}&base=${encodeURIComponent(dirPath)}`;
     linkedDocHook.open(absolutePath, buildUrl, 'files');
     fileBrowser.setActiveFile(absolutePath);
   }, [linkedDocHook, fileBrowser]);
 
   // Route linked doc opens through the correct endpoint based on current context
   const handleOpenLinkedDoc = React.useCallback((docPath: string) => {
-    const activeDirState = fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath);
-    if (activeDirState?.isVault && fileBrowser.activeDirPath) {
-      linkedDocHook.open(docPath, (path) =>
-        `/api/reference/obsidian/doc?vaultPath=${encodeURIComponent(fileBrowser.activeDirPath!)}&path=${encodeURIComponent(path)}`
-      );
-    } else if (fileBrowser.activeFile && fileBrowser.activeDirPath) {
+    if (fileBrowser.activeFile && fileBrowser.activeDirPath) {
       // When viewing a file browser doc, resolve links relative to current file's directory
       const baseDir = linkedDocHook.filepath?.replace(/\/[^/]+$/, '') || fileBrowser.activeDirPath;
       linkedDocHook.open(docPath, (path) =>
@@ -496,7 +462,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
         linkedDocHook.open(docPath);
       }
     }
-  }, [fileBrowser.dirs, fileBrowser.activeDirPath, fileBrowser.activeFile, linkedDocHook, imageBaseDir]);
+  }, [fileBrowser.activeDirPath, fileBrowser.activeFile, linkedDocHook, imageBaseDir]);
 
   // Wrap linked doc back to also clear file browser active file
   const handleLinkedDocBack = React.useCallback(() => {
@@ -571,10 +537,9 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
 
   const linkedDocInfo = useMemo(() => {
     if (!linkedDocHook.isActive) return null;
-    const dir = fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath);
-    const label = dir?.isVault ? 'Vault File' : fileBrowser.activeFile ? 'File' : undefined;
+    const label = fileBrowser.activeFile ? 'File' : undefined;
     return { filepath: linkedDocHook.filepath!, onBack: handleLinkedDocBack, label, backLabel };
-  }, [linkedDocHook.isActive, linkedDocHook.filepath, handleLinkedDocBack, fileBrowser.dirs, fileBrowser.activeDirPath, fileBrowser.activeFile, backLabel]);
+  }, [linkedDocHook.isActive, linkedDocHook.filepath, handleLinkedDocBack, fileBrowser.activeFile, backLabel]);
 
   // Track active section for TOC highlighting
   const headingCount = useMemo(() => blocks.filter(b => b.type === 'heading').length, [blocks]);
@@ -889,93 +854,6 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
       .finally(() => setIsLoading(false));
   }, [isLoadingShared, isSharedSession]);
 
-  // Auto-save to notes apps on plan arrival (each gated by its autoSave toggle)
-  const autoSaveAttempted = useRef(false);
-  const autoSaveResultsRef = useRef<NoteAutoSaveResults>({});
-  const autoSavePromiseRef = useRef<Promise<NoteAutoSaveResults> | null>(null);
-
-  useEffect(() => {
-    autoSaveAttempted.current = false;
-    autoSaveResultsRef.current = {};
-    autoSavePromiseRef.current = null;
-  }, [markdown]);
-
-  useEffect(() => {
-    if (!isApiMode || !markdown || isSharedSession || annotateMode) return;
-    if (autoSaveAttempted.current) return;
-
-    const body: { obsidian?: object; bear?: object; octarine?: object } = {};
-    const targets: string[] = [];
-
-    const obsSettings = getObsidianSettings();
-    if (obsSettings.autoSave && obsSettings.enabled) {
-      const vaultPath = getEffectiveVaultPath(obsSettings);
-      if (vaultPath) {
-        body.obsidian = {
-          vaultPath,
-          folder: obsSettings.folder || 'plannotator',
-          plan: markdown,
-          ...(obsSettings.filenameFormat && { filenameFormat: obsSettings.filenameFormat }),
-          ...(obsSettings.filenameSeparator && obsSettings.filenameSeparator !== 'space' && { filenameSeparator: obsSettings.filenameSeparator }),
-        };
-        targets.push('Obsidian');
-      }
-    }
-
-    const bearSettings = getBearSettings();
-    if (bearSettings.autoSave && bearSettings.enabled) {
-      body.bear = {
-        plan: markdown,
-        customTags: bearSettings.customTags,
-        tagPosition: bearSettings.tagPosition,
-      };
-      targets.push('Bear');
-    }
-
-    const octSettings = getOctarineSettings();
-    if (octSettings.autoSave && isOctarineConfigured()) {
-      body.octarine = {
-        plan: markdown,
-        workspace: octSettings.workspace,
-        folder: octSettings.folder || 'plannotator',
-      };
-      targets.push('Octarine');
-    }
-
-    if (targets.length === 0) return;
-    autoSaveAttempted.current = true;
-
-    const autoSavePromise = fetch('/api/save-notes', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-      .then(res => res.json())
-      .then(data => {
-        const results: NoteAutoSaveResults = {
-          ...(body.obsidian ? { obsidian: Boolean(data.results?.obsidian?.success) } : {}),
-          ...(body.bear ? { bear: Boolean(data.results?.bear?.success) } : {}),
-          ...(body.octarine ? { octarine: Boolean(data.results?.octarine?.success) } : {}),
-        };
-        autoSaveResultsRef.current = results;
-
-        const failed = targets.filter(t => !data.results?.[t.toLowerCase()]?.success);
-        if (failed.length === 0) {
-          toast.success(`Auto-saved to ${targets.join(' & ')}`);
-        } else {
-          toast.error(`Auto-save failed for ${failed.join(' & ')}`);
-        }
-
-        return results;
-      })
-      .catch(() => {
-        autoSaveResultsRef.current = {};
-        toast.error('Auto-save failed');
-        return {};
-      });
-    autoSavePromiseRef.current = autoSavePromise;
-  }, [isApiMode, markdown, isSharedSession, annotateMode]);
-
   // Global paste listener for image attachments
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
@@ -1036,16 +914,10 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
   const handleApprove = async () => {
     setIsSubmitting(true);
     try {
-      const obsidianSettings = getObsidianSettings();
-      const bearSettings = getBearSettings();
-      const octarineSettings = getOctarineSettings();
       const planSaveSettings = getPlanSaveSettings();
-      const autoSaveResults = bearSettings.autoSave && autoSavePromiseRef.current
-        ? await autoSavePromiseRef.current
-        : autoSaveResultsRef.current;
 
-      // Build request body - include integrations if enabled
-      const body: { obsidian?: object; bear?: object; octarine?: object; feedback?: string; agentSwitch?: string; planSave?: { enabled: boolean; customPath?: string }; permissionMode?: string } = {};
+      // Build request body
+      const body: { feedback?: string; agentSwitch?: string; planSave?: { enabled: boolean; customPath?: string }; permissionMode?: string } = {};
 
       // Include permission mode for Claude Code
       if (origin === 'claude-code') {
@@ -1062,35 +934,6 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
         enabled: planSaveSettings.enabled,
         ...(planSaveSettings.customPath && { customPath: planSaveSettings.customPath }),
       };
-
-      const effectiveVaultPath = getEffectiveVaultPath(obsidianSettings);
-      if (obsidianSettings.enabled && effectiveVaultPath) {
-        body.obsidian = {
-          vaultPath: effectiveVaultPath,
-          folder: obsidianSettings.folder || 'plannotator',
-          plan: markdown,
-          ...(obsidianSettings.filenameFormat && { filenameFormat: obsidianSettings.filenameFormat }),
-          ...(obsidianSettings.filenameSeparator && obsidianSettings.filenameSeparator !== 'space' && { filenameSeparator: obsidianSettings.filenameSeparator }),
-        };
-      }
-
-      // Bear creates a new note each time, so don't send it again on approve
-      // if the arrival auto-save already succeeded.
-      if (bearSettings.enabled && !(bearSettings.autoSave && autoSaveResults.bear)) {
-        body.bear = {
-          plan: markdown,
-          customTags: bearSettings.customTags,
-          tagPosition: bearSettings.tagPosition,
-        };
-      }
-
-      if (isOctarineConfigured()) {
-        body.octarine = {
-          plan: markdown,
-          workspace: octarineSettings.workspace,
-          folder: octarineSettings.folder || 'plannotator',
-        };
-      }
 
       // Include annotations as feedback if any exist (for OpenCode "approve with notes")
       const hasDocAnnotations = Array.from(linkedDocHook.getDocAnnotations().values()).some(
@@ -1512,58 +1355,6 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
     toast.success('Downloaded annotations');
   };
 
-  const handleQuickSaveToNotes = async (target: 'obsidian' | 'bear' | 'octarine') => {
-    const body: { obsidian?: object; bear?: object; octarine?: object } = {};
-
-    if (target === 'obsidian') {
-      const s = getObsidianSettings();
-      const vaultPath = getEffectiveVaultPath(s);
-      if (vaultPath) {
-        body.obsidian = {
-          vaultPath,
-          folder: s.folder || 'plannotator',
-          plan: markdown,
-          ...(s.filenameFormat && { filenameFormat: s.filenameFormat }),
-          ...(s.filenameSeparator && s.filenameSeparator !== 'space' && { filenameSeparator: s.filenameSeparator }),
-        };
-      }
-    }
-    if (target === 'bear') {
-      const bs = getBearSettings();
-      body.bear = {
-        plan: markdown,
-        customTags: bs.customTags,
-        tagPosition: bs.tagPosition,
-      };
-    }
-    if (target === 'octarine') {
-      const os = getOctarineSettings();
-      body.octarine = {
-        plan: markdown,
-        workspace: os.workspace,
-        folder: os.folder || 'plannotator',
-      };
-    }
-
-    const targetName = target === 'obsidian' ? 'Obsidian' : target === 'bear' ? 'Bear' : 'Octarine';
-    try {
-      const res = await fetch('/api/save-notes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      const result = data.results?.[target];
-      if (result?.success) {
-        toast.success(`Saved to ${targetName}`);
-      } else {
-        toast.error(result?.error || 'Save failed');
-      }
-    } catch {
-      toast.error('Save failed');
-    }
-  };
-
   // Agent Instructions — copy a clipboard payload teaching external agents
   // (Claude Code, Codex, etc.) how to POST annotations into this session via
   // /api/external-annotations. The instruction body lives in a separate module
@@ -1604,24 +1395,7 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
       if (submitted || !isApiMode) return;
 
       e.preventDefault();
-
-      const defaultApp = getDefaultNotesApp();
-      const obsOk = isObsidianConfigured();
-      const bearOk = getBearSettings().enabled;
-      const octOk = isOctarineConfigured();
-
-      if (defaultApp === 'download') {
-        handleDownloadAnnotations();
-      } else if (defaultApp === 'obsidian' && obsOk) {
-        handleQuickSaveToNotes('obsidian');
-      } else if (defaultApp === 'bear' && bearOk) {
-        handleQuickSaveToNotes('bear');
-      } else if (defaultApp === 'octarine' && octOk) {
-        handleQuickSaveToNotes('octarine');
-      } else {
-        setInitialExportTab('notes');
-        setShowExport(true);
-      }
+      handleDownloadAnnotations();
     };
 
     window.addEventListener('keydown', handleSaveShortcut);
@@ -1668,7 +1442,6 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
     handleAnnotateApprove,
     handleAnnotateFeedback,
     handleAnnotateExit,
-    handleQuickSaveToNotes,
     handleDownloadAnnotations,
     handleCopyAgentInstructions,
     handleCopyShareLink,
@@ -1681,7 +1454,6 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
     handleAnnotateApprove,
     handleAnnotateFeedback,
     handleAnnotateExit,
-    handleQuickSaveToNotes,
     handleDownloadAnnotations,
     handleCopyAgentInstructions,
     handleCopyShareLink,
@@ -1750,9 +1522,6 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
   const handleOpenExport = useCallback(() => { setInitialExportTab(undefined); setShowExport(true); }, []);
   const handlePrint = useCallback(() => window.print(), []);
   const handleOpenImport = useCallback(() => setShowImport(true), []);
-  const handleSaveToObsidian = useCallback(() => headerHandlersRef.current.handleQuickSaveToNotes('obsidian'), []);
-  const handleSaveToOctarine = useCallback(() => headerHandlersRef.current.handleQuickSaveToNotes('octarine'), []);
-  const handleSaveToBear = useCallback(() => headerHandlersRef.current.handleQuickSaveToNotes('bear'), []);
 
   const planMaxWidth = useMemo(() => {
     const widths: Record<PlanWidth, number> = { compact: 832, default: 1040, wide: 1280 };
@@ -1839,14 +1608,8 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
           onPrint={handlePrint}
           onCopyShareLink={handleHeaderCopyShareLink}
           onOpenImport={handleOpenImport}
-          onSaveToObsidian={handleSaveToObsidian}
-          onSaveToBear={handleSaveToBear}
-          onSaveToOctarine={handleSaveToOctarine}
           appVersion={typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0'}
           agentInstructionsEnabled={isApiMode && !annotateMode && !goalSetupMode}
-          obsidianConfigured={isObsidianConfigured()}
-          bearConfigured={getBearSettings().enabled}
-          octarineConfigured={isOctarineConfigured()}
         />
 
         {/* Embedded completion banner — inline, non-blocking (skipped in legacy tab mode) */}
@@ -1910,7 +1673,6 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
                 fileBrowser={fileBrowser}
                 onFilesSelectFile={handleFileBrowserSelect}
                 onFilesFetchAll={() => fileBrowser.fetchAll(fileBrowserDirs)}
-                onFilesRetryVaultDir={(vaultPath) => fileBrowser.addVaultDir(vaultPath)}
                 hasFileAnnotations={hasFileAnnotations}
                 showVersionsTab={versionInfo !== null && versionInfo.totalVersions > 1}
                 versionInfo={versionInfo}
@@ -2167,8 +1929,6 @@ const App: React.FC<{ __embedded?: boolean; headerLeft?: React.ReactNode; onOpen
           annotationCount={allAnnotations.length + codeAnnotations.length}
           taterSprite={taterMode ? <TaterSpritePullup /> : undefined}
           sharingEnabled={canShareCurrentSession}
-          markdown={markdown}
-          isApiMode={isApiMode}
           initialTab={initialExportTab}
         />
 

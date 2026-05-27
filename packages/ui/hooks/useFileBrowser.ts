@@ -3,8 +3,6 @@
  *
  * Manages multiple directory file trees for the sidebar Files tab.
  * Each directory gets its own tree, loading, and error state.
- * Vault directories are supported via the isVault flag — they fetch
- * from the Obsidian vault endpoint instead of the generic files endpoint.
  */
 
 import { useState, useCallback } from "react";
@@ -17,8 +15,6 @@ export interface DirState {
   tree: VaultNode[];
   isLoading: boolean;
   error: string | null;
-  /** When true, fetches via /api/reference/obsidian/files and opens docs via /api/reference/obsidian/doc */
-  isVault?: boolean;
 }
 
 export interface UseFileBrowserReturn {
@@ -29,8 +25,6 @@ export interface UseFileBrowserReturn {
   toggleCollapse: (dirPath: string) => void;
   fetchTree: (dirPath: string) => void;
   fetchAll: (directories: string[]) => void;
-  addVaultDir: (vaultPath: string) => void;
-  clearVaultDirs: () => void;
   activeFile: string | null;
   activeDirPath: string | null;
   setActiveFile: (path: string | null) => void;
@@ -105,73 +99,17 @@ export function useFileBrowser(): UseFileBrowserReturn {
 
   const fetchAll = useCallback(
     (directories: string[]) => {
-      setDirs((prev) => {
-        // Preserve any vault dirs that were already loaded
-        const vaultDirs = prev.filter((d) => d.isVault);
-        const regularDirs = directories.map((path) => ({
-          path,
-          name: path.split("/").pop() || path,
-          tree: [],
-          isLoading: false,
-          error: null,
-        }));
-        return [...regularDirs, ...vaultDirs];
-      });
+      setDirs(directories.map((path) => ({
+        path,
+        name: path.split("/").pop() || path,
+        tree: [],
+        isLoading: false,
+        error: null,
+      })));
       directories.forEach((d) => fetchTree(d));
     },
     [fetchTree]
   );
-
-  const clearVaultDirs = useCallback(() => {
-    setDirs((prev) => prev.filter((d) => !d.isVault));
-  }, []);
-
-  const addVaultDir = useCallback(async (vaultPath: string) => {
-    const name = vaultPath.split("/").pop() || vaultPath;
-
-    // Atomically replace any existing vault dirs (handles vault path change without accumulating stale entries)
-    setDirs((prev) => {
-      const nonVaultDirs = prev.filter((d) => !d.isVault);
-      return [...nonVaultDirs, { path: vaultPath, name, tree: [], isLoading: true, error: null, isVault: true }];
-    });
-
-    try {
-      const res = await fetch(
-        `/api/reference/obsidian/files?vaultPath=${encodeURIComponent(vaultPath)}`
-      );
-      const data = await res.json();
-
-      if (!res.ok || data.error) {
-        setDirs((prev) =>
-          prev.map((d) =>
-            d.path === vaultPath ? { ...d, isLoading: false, error: data.error || "Failed to load" } : d
-          )
-        );
-        return;
-      }
-
-      setDirs((prev) =>
-        prev.map((d) =>
-          d.path === vaultPath ? { ...d, tree: data.tree, isLoading: false, isVault: true } : d
-        )
-      );
-
-      const rootFolders = (data.tree as VaultNode[])
-        .filter((n) => n.type === "folder")
-        .map((n) => `${vaultPath}:${n.path}`);
-      setExpandedFolders((prev) => {
-        const next = new Set(prev);
-        rootFolders.forEach((f) => next.add(f));
-        return next;
-      });
-    } catch {
-      setDirs((prev) =>
-        prev.map((d) =>
-          d.path === vaultPath ? { ...d, isLoading: false, error: "Failed to connect to server" } : d
-        )
-      );
-    }
-  }, []);
 
   const toggleFolder = useCallback((key: string) => {
     setExpandedFolders((prev) => {
@@ -193,8 +131,6 @@ export function useFileBrowser(): UseFileBrowserReturn {
     toggleCollapse,
     fetchTree,
     fetchAll,
-    addVaultDir,
-    clearVaultDirs,
     activeFile,
     activeDirPath: activeFile ? (dirs.find((d) => activeFile.startsWith(d.path + "/"))?.path ?? null) : null,
     setActiveFile,

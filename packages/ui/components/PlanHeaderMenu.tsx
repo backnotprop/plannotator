@@ -18,15 +18,9 @@ interface PlanHeaderMenuProps {
   onPrint: () => void;
   onCopyShareLink: () => void;
   onOpenImport: () => void;
-  onSaveToObsidian: () => void;
-  onSaveToBear: () => void;
-  onSaveToOctarine: () => void;
   sharingEnabled: boolean;
   isApiMode: boolean;
   agentInstructionsEnabled: boolean;
-  obsidianConfigured: boolean;
-  bearConfigured: boolean;
-  octarineConfigured: boolean;
 }
 
 export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
@@ -38,20 +32,11 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
   onPrint,
   onCopyShareLink,
   onOpenImport,
-  onSaveToObsidian,
-  onSaveToBear,
-  onSaveToOctarine,
   sharingEnabled,
   isApiMode,
   agentInstructionsEnabled,
-  obsidianConfigured,
-  bearConfigured,
-  octarineConfigured,
 }) => {
   const { theme, setTheme } = useTheme();
-
-  const anyNotesAppConfigured =
-    isApiMode && (obsidianConfigured || bearConfigured || octarineConfigured);
 
   return (
     <ActionMenu
@@ -167,42 +152,6 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
             />
           )}
 
-          {anyNotesAppConfigured && (
-            <>
-              <ActionMenuDivider />
-              {obsidianConfigured && (
-                <ActionMenuItem
-                  onClick={() => {
-                    closeMenu();
-                    onSaveToObsidian();
-                  }}
-                  icon={<NoteIcon />}
-                  label="Save to Obsidian"
-                />
-              )}
-              {bearConfigured && (
-                <ActionMenuItem
-                  onClick={() => {
-                    closeMenu();
-                    onSaveToBear();
-                  }}
-                  icon={<NoteIcon />}
-                  label="Save to Bear"
-                />
-              )}
-              {octarineConfigured && (
-                <ActionMenuItem
-                  onClick={() => {
-                    closeMenu();
-                    onSaveToOctarine();
-                  }}
-                  icon={<NoteIcon />}
-                  label="Save to Octarine"
-                />
-              )}
-            </>
-          )}
-
           <ActionMenuDivider />
 
           <div className="px-3 py-2 space-y-2">
@@ -288,9 +237,4 @@ const ImportIcon = () => (
   </svg>
 );
 
-const NoteIcon = () => (
-  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-  </svg>
-);
 

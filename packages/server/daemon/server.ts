@@ -19,7 +19,6 @@ import type { SessionEventFamily, SessionRequestContext, SessionSnapshotProvider
 import { handleFavicon } from "../shared-handlers";
 import { addProject, listProjects, readProjectRegistry, writeProjectRegistry } from "./project-registry";
 import { loadConfig, saveConfig, getServerConfig, detectGitUser } from "@plannotator/shared/config";
-import { detectObsidianVaults } from "../integrations";
 import { readImprovementHook, getImprovementHookExpectedPath } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import { readSnapshot } from "./session-store";
@@ -742,11 +741,6 @@ export function createDaemonFetchHandler(options: DaemonServerOptions): DaemonFe
         const cwd = url.searchParams.get("cwd") ?? undefined;
         const gitUser = detectGitUser(cwd);
         return json({ ok: true, gitUser });
-      }
-
-      if ((url.pathname === "/daemon/vaults" || url.pathname === "/daemon/obsidian/vaults") && req.method === "GET") {
-        const vaults = detectObsidianVaults();
-        return json({ ok: true, vaults });
       }
 
       if (url.pathname === "/daemon/hooks/status" && req.method === "GET") {
