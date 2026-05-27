@@ -296,6 +296,26 @@ export async function startCodeReviewBrowserSession(
 	}, (sessionInfo) => notifySessionReady(ctx, sessionInfo));
 }
 
+export async function startCodeReviewSessionFromArgs(
+	ctx: ExtensionContext,
+	rawArgs: string,
+): Promise<BrowserDecisionSession<{ approved: boolean; feedback?: string; annotations?: unknown[]; agentSwitch?: string; exit?: boolean; prompt?: string }>> {
+	if (!ctx.hasUI) {
+		throw new Error("Plannotator code review browser is unavailable in this session.");
+	}
+
+	const binaryPath = getBinaryPath(["code-review"]);
+	return await startBinarySession(async (onSession, signal) => {
+		const response = await runPluginReview(binaryPath, {
+			origin: "pi",
+			...sharingRequest(ctx),
+			args: rawArgs,
+		}, undefined, { onSession, signal });
+		if (!response.ok) throw new Error(response.error.message);
+		return response.result;
+	}, (sessionInfo) => notifySessionReady(ctx, sessionInfo));
+}
+
 export async function openMarkdownAnnotation(
 	ctx: ExtensionContext,
 	filePath: string,

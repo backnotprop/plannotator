@@ -42,12 +42,10 @@ import {
 	getPlanToolName,
 	buildPlanFileRule,
 } from "./generated/prompts.js";
-import { parseAnnotateArgs } from "./generated/annotate-args.js";
-import { parseReviewArgs } from "./generated/review-args.js";
 import {
 	getStartupErrorMessage,
 	startAnnotationSessionFromArgs,
-	startCodeReviewBrowserSession,
+	startCodeReviewSessionFromArgs,
 	startLastMessageAnnotationSession,
 	openPlanReviewBrowser,
 	registerPlannotatorEventListeners,
@@ -361,12 +359,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			const origin = getPiSessionIdentity(ctx);
 
 			try {
-				const reviewArgs = parseReviewArgs(args ?? "");
-				const session = await startCodeReviewBrowserSession(ctx, {
-					prUrl: reviewArgs.prUrl,
-					vcsType: reviewArgs.vcsType as "auto" | "git" | "jj" | "p4" | undefined,
-					useLocal: reviewArgs.useLocal,
-				});
+				const session = await startCodeReviewSessionFromArgs(ctx, args ?? "");
 				ctx.ui.notify("Code review opened. You can keep chatting while it runs.", "info");
 				void session
 					.waitForDecision()
@@ -417,8 +410,10 @@ export default function plannotator(pi: ExtensionAPI): void {
 		description: "Open markdown file or folder in annotation UI",
 		handler: async (args, ctx) => {
 			const rawAnnotateArgs = args ?? "";
-			const { filePath, gate, renderHtml: renderHtmlFlag } = parseAnnotateArgs(rawAnnotateArgs);
-			if (!filePath) {
+			const hasTarget = rawAnnotateArgs.replace(/--gate|--render-html|--json|--hook/g, "").trim().length > 0;
+			const gate = rawAnnotateArgs.includes("--gate") || rawAnnotateArgs.includes("--hook");
+			const renderHtmlFlag = rawAnnotateArgs.includes("--render-html");
+			if (!hasTarget) {
 				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.html | https://... | folder/> [--gate] [--json]", "error");
 				return;
 			}
@@ -472,7 +467,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 		description: "Annotate the last assistant message",
 		handler: async (args, ctx) => {
 			// #570: support --gate on /plannotator-last for Stop-hook review gate.
-			const { gate } = parseAnnotateArgs(args ?? "");
+			const gate = (args ?? "").includes("--gate") || (args ?? "").includes("--hook");
 
 			currentPiSession.update(ctx);
 			const origin = getPiSessionIdentity(ctx);
