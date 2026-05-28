@@ -38,7 +38,7 @@ import { resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-
 import { createEditorAnnotationHandler } from "./editor-annotations";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { isWSL } from "./browser";
-import { getPlanDeniedPrompt, getPlanToolName } from "@plannotator/shared/prompts";
+import { getPlanDeniedPrompt, getPlanToolName, buildPlanFileRule } from "@plannotator/shared/prompts";
 import { createDecisionCycle, resolveAndCycle } from "./session-handler";
 import type { SessionEventBridge, SessionRequestHandler } from "./session-handler";
 
@@ -66,6 +66,8 @@ export interface ServerOptions {
   shareBaseUrl?: string;
   /** Base URL of the paste service API for short URL sharing */
   pasteApiUrl?: string;
+  /** Original plan file path for file-backed plan flows (e.g. Gemini CLI) */
+  planFilePath?: string;
   /** OpenCode client for querying available agents (OpenCode only) */
   opencodeClient?: OpencodeClient;
   /** Optional daemon event bridge for live session-scoped events. */
@@ -96,7 +98,7 @@ export interface PlannotatorSession {
 export async function createPlannotatorSession(
   options: ServerOptions
 ): Promise<PlannotatorSession> {
-  const { cwd = process.cwd(), plan: initialPlan, origin, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl } = options;
+  const { cwd = process.cwd(), plan: initialPlan, origin, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, planFilePath } = options;
   let plan = initialPlan;
   const resolvePlanStoragePath = (customPath?: string | null): string | undefined => {
     if (!customPath?.trim()) return undefined;
@@ -387,7 +389,7 @@ export async function createPlannotatorSession(
             lastDecision = 'denied';
             const prompt = getPlanDeniedPrompt(origin, loadConfig(), {
               toolName: getPlanToolName(origin),
-              planFileRule: "",
+              planFileRule: buildPlanFileRule(getPlanToolName(origin), planFilePath),
               feedback: feedback || "Plan changes requested",
             });
             const resubmit = resolveAndCycle(decisionCycle, { approved: false, feedback, savedPath, prompt }, origin);

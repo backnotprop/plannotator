@@ -1244,6 +1244,7 @@ if (args[0] === "sessions") {
     origin: isGemini ? "gemini-cli" : detectedOrigin,
     cwd: getInvocationCwd(),
     plan: planContent,
+    planFilePath: planFilename || undefined,
     permissionMode,
     sharingEnabled,
     shareBaseUrl,

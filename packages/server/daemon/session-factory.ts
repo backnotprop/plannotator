@@ -627,6 +627,7 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
         plan,
         origin: request.origin,
         permissionMode: request.permissionMode,
+        planFilePath: request.planFilePath,
         sharingEnabled,
         shareBaseUrl,
         pasteApiUrl,
