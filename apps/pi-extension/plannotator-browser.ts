@@ -1,9 +1,10 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-type DiffType = "uncommitted" | "staged" | "unstaged" | "last-commit" | "jj-current" | "jj-last" | "jj-line" | "jj-all" | "jj-evolog" | "branch";
-type VcsSelection = "auto" | "git" | "jj" | "p4";
 import type { PluginFeature, PluginSessionInfo } from "./generated/plugin-protocol.js";
+
+export type DiffType = "uncommitted" | "staged" | "unstaged" | "last-commit" | "jj-current" | "jj-last" | "jj-line" | "jj-all" | "jj-evolog" | "branch";
+export type VcsSelection = "auto" | "git" | "jj" | "p4";
 import {
 	ensurePlannotatorBinary,
 	findPlannotatorSourceRoot,

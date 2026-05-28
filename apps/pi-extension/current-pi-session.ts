@@ -109,10 +109,6 @@ export function notifyCurrentPiSession(
 	}
 }
 
-export function isCurrentPiSessionDifferentFrom(origin: PiSessionIdentity): boolean {
-	return isDifferentSession(origin, getStore().current?.identity);
-}
-
 function getCurrentPiSessionLabel(): string {
 	const identity = getStore().current?.identity;
 	if (!identity) return "unknown";

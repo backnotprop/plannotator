@@ -2,9 +2,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-type DiffType = "uncommitted" | "staged" | "unstaged" | "last-commit" | "jj-current" | "jj-last" | "jj-line" | "jj-all" | "jj-evolog" | "branch";
-type VcsSelection = "auto" | "git" | "jj" | "p4";
 import {
+	type DiffType,
+	type VcsSelection,
 	getLastAssistantMessageText,
 	getStartupErrorMessage,
 	openCodeReview,

@@ -63,12 +63,4 @@ export function getLastAssistantMessageText(ctx: ExtensionContext): string | nul
 	return getLastAssistantMessageSnapshot(ctx)?.text ?? null;
 }
 
-export function hasSessionMovedPastEntry(ctx: ExtensionContext, entryId: string): boolean {
-	if (!ctx.isIdle()) return true;
 
-	const branch = getCurrentBranch(ctx);
-	const index = branch.findIndex((entry) => entry.id === entryId);
-	if (index === -1) return true;
-
-	return branch.slice(index + 1).some((entry) => entry.type === "message");
-}
