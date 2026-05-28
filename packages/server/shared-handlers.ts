@@ -6,8 +6,7 @@
  * for plan + review.
  */
 
-import { mkdirSync } from "fs";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { openBrowser as openBrowserImpl } from "./browser";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
@@ -143,18 +142,28 @@ interface ServerReadyOptions {
   openBrowser?: typeof openBrowserImpl;
 }
 
+export interface ServerReadyMetadata {
+  url: string;
+  isRemote: boolean;
+  port: number;
+}
+
+export function writeServerReadyMetadata(readyFile: string, metadata: ServerReadyMetadata): void {
+  mkdirSync(dirname(readyFile), { recursive: true });
+  appendFileSync(readyFile, `${JSON.stringify(metadata)}\n`, "utf8");
+}
+
 /** Attempt to open the browser for the session URL. */
 export async function handleServerReady(
   url: string,
   isRemote: boolean,
-  _port: number,
+  port: number,
   options: ServerReadyOptions = {},
 ): Promise<void> {
   const readyFile = options.readyFile ?? process.env.PLANNOTATOR_READY_FILE;
   if (readyFile) {
     try {
-      mkdirSync(dirname(readyFile), { recursive: true });
-      appendFileSync(readyFile, `${JSON.stringify({ url, isRemote, port: _port })}\n`, "utf8");
+      writeServerReadyMetadata(readyFile, { url, isRemote, port });
     } catch (error) {
       if (options.readyFile) throw error;
       // Best effort: host plugins use this side channel to open the browser.
