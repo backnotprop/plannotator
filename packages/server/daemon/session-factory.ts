@@ -724,6 +724,7 @@ export function createDaemonSessionFactory(options: DaemonSessionFactoryOptions)
         await existingReview.session.updateContent(
           input.prMetadata ? input.rawPatch : undefined,
           input.prMetadata ? input.gitRef : undefined,
+          input.prMetadata,
         );
         if (context.endpoint.isRemote && sharingEnabled) {
           existingReview.record.remoteShare = await createRemoteShareNotice(input.rawPatch, shareBaseUrl, "review changes", "diff only").catch(() => undefined);

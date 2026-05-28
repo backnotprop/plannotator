@@ -115,7 +115,7 @@ export interface ReviewSession {
   }>;
   setServerUrl: (url: string) => void;
   dispose: () => void;
-  updateContent?: (precomputedPatch?: string, precomputedGitRef?: string) => Promise<void>;
+  updateContent?: (precomputedPatch?: string, precomputedGitRef?: string, newPrMetadata?: PRMetadata) => Promise<void>;
   getSnapshot?: () => unknown;
 }
 
@@ -1156,7 +1156,7 @@ export async function createReviewSession(
   const exitHandler = () => agentJobs.killAll();
   process.once("exit", exitHandler);
 
-  async function handleUpdateContent(precomputedPatch?: string, precomputedGitRef?: string) {
+  async function handleUpdateContent(precomputedPatch?: string, precomputedGitRef?: string, newPrMetadata?: PRMetadata) {
     let patch: string;
     let label: string;
     if (precomputedPatch !== undefined) {
@@ -1173,6 +1173,31 @@ export async function createReviewSession(
     }
     currentPatch = patch;
     currentGitRef = label;
+    // When the agent resubmits a PR review (same PR, new commits pushed), the
+    // session is reactivated in place. Refresh the PR metadata so platform
+    // actions (approve / comment) target the CURRENT head commit instead of the
+    // SHA captured when the session was first created — otherwise we'd approve a
+    // stale commit (GitHub) or 409 on a SHA mismatch (GitLab). Mirrors the
+    // refresh in /api/pr-switch. Only fires in PR mode with fresh metadata.
+    if (newPrMetadata && isPRMode) {
+      prMetadata = newPrMetadata;
+      prRef = prRefFromMetadata(newPrMetadata);
+      // The submit path (/api/pr-action) resolves the target head SHA from
+      // prSwitchCache (keyed by PR url) — even for the current PR, since the
+      // client always sends `targetPrUrl`. Refresh that entry too, or approve/
+      // comment would still post against the stale creation-time SHA.
+      prSwitchCache.set(newPrMetadata.url, { metadata: newPrMetadata, rawPatch: patch });
+      originalPRPatch = patch;
+      originalPRGitRef = label;
+      originalPRError = currentError;
+      currentPRDiffScope = "layer";
+      prListCache = null;
+      prStackInfo = getPRStackInfo(newPrMetadata);
+      repoInfo = {
+        display: getDisplayRepo(newPrMetadata),
+        branch: `${getMRLabel(newPrMetadata)} ${getMRNumberLabel(newPrMetadata)}`,
+      };
+    }
     lastDecision = null;
     externalAnnotations.clearAll();
     editorAnnotations.clearAll();
