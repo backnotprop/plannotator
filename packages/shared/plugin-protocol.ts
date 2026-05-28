@@ -1,7 +1,7 @@
 import type { Origin } from "./agents";
 
 export const PLANNOTATOR_PLUGIN_PROTOCOL = "plannotator-plugin";
-export const PLANNOTATOR_PLUGIN_PROTOCOL_VERSION = 1;
+export const PLANNOTATOR_PLUGIN_PROTOCOL_VERSION = 2;
 export const PLANNOTATOR_PLUGIN_MIN_CLIENT_VERSION = 1;
 
 export const PLANNOTATOR_PLUGIN_FEATURES = [
