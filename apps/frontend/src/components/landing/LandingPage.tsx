@@ -562,10 +562,7 @@ function PRList({
     [prs, showAll],
   );
   const hiddenCount = prs.length - visible.length;
-  const { stacks, loose } = useMemo(
-    () => buildStacks(visible, defaultBranch),
-    [visible, defaultBranch],
-  );
+  const { stacks, loose } = useMemo(() => buildStacks(visible), [visible]);
 
   if (loading) {
     return <div className="py-1 text-[11px] text-muted-foreground">Loading PRs…</div>;

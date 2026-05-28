@@ -130,7 +130,11 @@ Needs a more robust detection strategy — either try `glab auth status` first, 
 **Priority:** Low
 **Size:** Medium
 
-Fixed by extracting `buildStacks` into a pure module (`apps/frontend/src/components/landing/buildStacks.ts`) and rooting every chain from a leaf (a PR whose head branch is not any other PR's base branch), then walking down toward its base. A leaf-rooted walk captures the full chain in one pass regardless of input order, so multi-PR stacks no longer split into loose PRs depending on API return order. Pinned by a table-driven vitest suite (`buildStacks.test.ts`) asserting that every permutation of the same stack yields identical grouping, plus cycle and fork edge cases.
+Fixed by extracting `buildStacks` into a pure module (`apps/frontend/src/components/landing/buildStacks.ts`) and rooting every chain from a leaf (a PR whose head branch is not any other PR's base branch), then walking down toward its base. A leaf-rooted walk captures the full chain in one pass regardless of input order, so multi-PR stacks no longer split into loose PRs depending on API return order.
+
+The grouping is now fully order-independent — every tiebreak is deterministic rather than left to input order: candidate leaves are visited in ascending PR-number order, `byHead` collisions (two PRs on the same head branch, e.g. a merged + open pair from `state=all`) resolve to the open PR then the lower number, and the returned `stacks`/`loose` arrays are sorted (by base PR number and PR number respectively) so independent stacks never swap positions between 30s polls. Forks (two PRs sharing a base) are handled by a deterministic "one child wins" policy rather than full fork collapse: the shared ancestor joins the chain rooted at the lowest-numbered leaf and the sibling leaf falls through to `loose` — the *choice* of which child wins is order-independent, but it is not a merged fork view.
+
+Pinned by a table-driven vitest suite (`buildStacks.test.ts`) asserting that every permutation of the same input yields identical grouping *and* identical output ordering, including 2-cycle, leaf-into-cycle, fork, and duplicate-head edge cases.
 
 The original bug: `buildStacks` walked only downward and marked PRs consumed as it went, so a descendant discovered after its parent chain was built could not attach and was dumped into `loose`. Multi-PR stacks (3+) displayed as loose PRs depending on the order PRs arrived in.
 
