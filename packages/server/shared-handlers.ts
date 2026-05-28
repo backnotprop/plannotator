@@ -7,6 +7,7 @@
  */
 
 import { mkdirSync } from "fs";
+import { appendFileSync } from "node:fs";
 import { openBrowser } from "./browser";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
 import { saveDraft, loadDraft, deleteDraft } from "./draft";
@@ -141,5 +142,16 @@ export async function handleServerReady(
   isRemote: boolean,
   _port: number,
 ): Promise<void> {
+  const readyFile = process.env.PLANNOTATOR_READY_FILE;
+  if (readyFile) {
+    try {
+      appendFileSync(readyFile, `${JSON.stringify({ url, isRemote, port: _port })}\n`, "utf8");
+    } catch {
+      // Best effort: host plugins use this side channel to open the browser.
+    }
+  }
+
+  if (process.env.PLANNOTATOR_SKIP_BROWSER_OPEN === "1") return;
+
   await openBrowser(url, { isRemote });
 }

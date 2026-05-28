@@ -4,7 +4,7 @@
 
 # Plannotator
 
-Interactive Plan & Code Review for AI Coding Agents. Mark up and refine your plans or code diffs using a visual UI, share for team collaboration, and seamlessly integrate with **Claude Code**, **Copilot CLI**, **Gemini CLI**, **OpenCode**, **Pi**, **Codex**, and **Droid**.
+Review AI-agent plans and code diffs in a browser. Add inline annotations, send structured feedback back to your agent, and share encrypted review links with teammates. Works with **Claude Code**, **Copilot CLI**, **Gemini CLI**, **OpenCode**, **Pi**, **Codex**, **Droid**, and **Amp**.
 
 **Plan Mode Demos:**
 <table>

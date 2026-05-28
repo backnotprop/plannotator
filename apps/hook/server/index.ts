@@ -261,6 +261,7 @@ const pasteApiUrl = process.env.PLANNOTATOR_PASTE_URL || undefined;
 // Detect calling agent from environment variables set by agent runtimes.
 // Priority:
 //   PLANNOTATOR_ORIGIN (explicit override, validated against AGENT_CONFIG)
+//   > Amp plugin wrappers (PLANNOTATOR_ORIGIN=amp)
 //   > Droid command wrappers (PLANNOTATOR_ORIGIN=droid)
 //   > Codex (CODEX_THREAD_ID)
 //   > Copilot CLI (COPILOT_CLI)
@@ -845,13 +846,21 @@ if (args[0] === "sessions") {
   // ============================================
 
   const projectRoot = process.env.PLANNOTATOR_CWD || process.cwd();
+  const stdinIdx = args.indexOf("--stdin");
+  const stdinFlag = stdinIdx !== -1;
+  if (stdinFlag) args.splice(stdinIdx, 1);
   const codexThreadId = process.env.CODEX_THREAD_ID;
   const isCodex = !!codexThreadId;
   const isDroid = detectedOrigin === "droid";
 
   let lastMessage: RenderedMessage | null = null;
 
-  if (codexThreadId) {
+  if (stdinFlag) {
+    const text = (await Bun.stdin.text()).trim();
+    if (text) {
+      lastMessage = { messageId: "stdin", text, lineNumbers: [] };
+    }
+  } else if (codexThreadId) {
     // Codex path: find rollout by thread ID
     if (process.env.PLANNOTATOR_DEBUG) {
       console.error(`[DEBUG] Codex detected, thread ID: ${codexThreadId}`);
@@ -947,7 +956,9 @@ if (args[0] === "sessions") {
   }
 
   if (!lastMessage) {
-    console.error("No rendered assistant message found in session logs.");
+    console.error(stdinFlag
+      ? "No message content received on stdin."
+      : "No rendered assistant message found in session logs.");
     process.exit(1);
   }
 
