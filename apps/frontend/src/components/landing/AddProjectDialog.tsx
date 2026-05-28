@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Folder, ChevronRight, X, CornerDownLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useProjectStore } from "../../stores/project-store";
 import { daemonApiClient } from "../../daemon/api/client";
 import type { DirectoryEntry, ProjectEntry } from "../../daemon/contracts";
@@ -119,7 +119,7 @@ export function AddProjectDialog({ open, onOpenChange }: AddProjectDialogProps) 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="top-[15vh] max-w-lg translate-y-0 max-h-none"
+        className="top-[15vh] max-w-lg translate-y-0"
         hideClose
         onOpenAutoFocus={(e) => {
           e.preventDefault();
@@ -127,6 +127,9 @@ export function AddProjectDialog({ open, onOpenChange }: AddProjectDialogProps) 
         }}
       >
         <DialogTitle className="sr-only">Add a project</DialogTitle>
+        <DialogDescription className="sr-only">
+          Search for a directory to add as a project
+        </DialogDescription>
         <div className="flex items-center gap-2 border-b border-border px-4 py-3">
           <Folder className="size-4 shrink-0 text-muted-foreground" />
           <input
