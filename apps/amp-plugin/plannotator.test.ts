@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import {
   buildPlannotatorEnv,
   extractTextFromThreadMessage,
   findFirstPositionalArg,
   formatAnnotationFeedback,
+  getPlannotatorDataDir,
   isNoActionFeedback,
   parseAnnotateDecision,
   parseReviewTargetInput,
@@ -60,7 +61,7 @@ describe("Amp Plannotator plugin helpers", () => {
 
   test("detects non-action outputs", () => {
     expect(isNoActionFeedback("Review session closed without feedback.")).toBe(true);
-    expect(isNoActionFeedback("Code review completed — no changes requested.")).toBe(true);
+    expect(isNoActionFeedback("Code review completed — no changes requested.")).toBe(false);
     expect(isNoActionFeedback("Please fix this bug.")).toBe(false);
   });
 
@@ -71,6 +72,16 @@ describe("Amp Plannotator plugin helpers", () => {
     ]);
     expect(splitCommandArgs('"https://example.com/a path"')).toEqual([
       "https://example.com/a path",
+    ]);
+    expect(splitCommandArgs(String.raw`docs/My\ File.md --gate`)).toEqual([
+      "docs/My File.md",
+      "--gate",
+    ]);
+    expect(splitCommandArgs(String.raw`C:\Users\alice\plan.md`)).toEqual([
+      String.raw`C:\Users\alice\plan.md`,
+    ]);
+    expect(splitCommandArgs(String.raw`"C:\Users\alice\My Plan.md"`)).toEqual([
+      String.raw`C:\Users\alice\My Plan.md`,
     ]);
   });
 
@@ -133,6 +144,20 @@ describe("Amp Plannotator plugin helpers", () => {
       PLANNOTATOR_CWD: "/repo",
       PLANNOTATOR_READY_FILE: "/tmp/ready.jsonl",
     });
+  });
+
+  test("matches shared Plannotator data directory semantics", () => {
+    const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
+
+    try {
+      process.env.PLANNOTATOR_DATA_DIR = String.raw`~\plannotator-data`;
+      expect(getPlannotatorDataDir()).toBe(join(homedir(), "plannotator-data"));
+
+      process.env.PLANNOTATOR_DATA_DIR = "relative-plannotator-data";
+      expect(getPlannotatorDataDir()).toBe(resolve("relative-plannotator-data"));
+    } finally {
+      restoreEnv("PLANNOTATOR_DATA_DIR", originalDataDir);
+    }
   });
 });
 

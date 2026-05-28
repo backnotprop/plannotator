@@ -224,7 +224,6 @@ export function isNoActionFeedback(output: string): boolean {
     normalized === "annotation session closed." ||
     normalized === "approved." ||
     normalized === "the user approved." ||
-    normalized.includes("no changes requested") ||
     normalized.includes("has no feedback")
   );
 }
@@ -233,17 +232,26 @@ export function splitCommandArgs(input: string): string[] {
   const args: string[] = [];
   let current = "";
   let quote: "'" | '"' | null = null;
-  let escaped = false;
 
-  for (const char of input.trim()) {
-    if (escaped) {
-      current += char;
-      escaped = false;
-      continue;
-    }
+  const text = input.trim();
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
 
     if (char === "\\" && quote !== "'") {
-      escaped = true;
+      const next = text[i + 1];
+      const escapesNext =
+        next !== undefined &&
+        (next === "\\" ||
+          /\s/.test(next) ||
+          next === quote ||
+          (!quote && (next === "'" || next === '"')));
+
+      if (escapesNext) {
+        current += next;
+        i += 1;
+      } else {
+        current += char;
+      }
       continue;
     }
 
@@ -272,7 +280,6 @@ export function splitCommandArgs(input: string): string[] {
     current += char;
   }
 
-  if (escaped) current += "\\";
   if (current) args.push(current);
   return args;
 }
@@ -720,16 +727,17 @@ function loadPlannotatorConfig(): PromptConfig {
   }
 }
 
-function getPlannotatorDataDir(): string {
-  const override = process.env.PLANNOTATOR_DATA_DIR;
-  if (override?.trim()) {
-    const value = override.trim();
-    return value === "~" || value.startsWith("~/")
-      ? join(homedir(), value.slice(2))
-      : value;
+export function getPlannotatorDataDir(): string {
+  const value = process.env.PLANNOTATOR_DATA_DIR?.trim();
+  if (!value) return join(homedir(), ".plannotator");
+
+  const home = homedir();
+  if (value === "~") return home;
+  if (value.startsWith("~/") || value.startsWith("~\\")) {
+    return join(home, value.slice(2));
   }
 
-  return join(homedir(), ".plannotator");
+  return resolve(value);
 }
 
 function getConfiguredPrompt(
