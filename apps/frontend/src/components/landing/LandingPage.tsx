@@ -20,6 +20,7 @@ import { GitDashboard } from "./git-dashboard/GitDashboard";
 import { useDaemonEventStore } from "../../daemon/events/event-store";
 import { daemonApiClient } from "../../daemon/api/client";
 import { getSessionModeMeta, formatSessionLabel } from "../../shared/session-meta";
+import { buildStacks, type PRStack } from "./buildStacks";
 import type {
   ProjectEntry,
   PRListItem,
@@ -429,47 +430,6 @@ function ProjectNode({
       </ContextMenu.Portal>
     </ContextMenu.Root>
   );
-}
-
-interface PRStack {
-  prs: PRListItem[];
-  label: string;
-}
-
-function buildStacks(
-  prs: PRListItem[],
-  defaultBranch: string,
-): { stacks: PRStack[]; loose: PRListItem[] } {
-  const byHead = new Map<string, PRListItem>();
-  for (const pr of prs) byHead.set(pr.headBranch, pr);
-
-  const stacked = new Set<string>();
-  const chains: PRListItem[][] = [];
-
-  for (const pr of prs) {
-    if (stacked.has(pr.id)) continue;
-    if (pr.baseBranch === defaultBranch) continue;
-
-    const chain: PRListItem[] = [];
-    let current: PRListItem | undefined = pr;
-    while (current && !stacked.has(current.id)) {
-      chain.unshift(current);
-      stacked.add(current.id);
-      current = byHead.get(current.baseBranch);
-    }
-    if (chain.length > 1) {
-      chains.push(chain);
-    } else {
-      stacked.delete(pr.id);
-    }
-  }
-
-  const stacks = chains.map((chain) => ({
-    prs: chain,
-    label: `#${chain[0].number} → #${chain[chain.length - 1].number}`,
-  }));
-  const loose = prs.filter((pr) => !stacked.has(pr.id));
-  return { stacks, loose };
 }
 
 function PRRow({

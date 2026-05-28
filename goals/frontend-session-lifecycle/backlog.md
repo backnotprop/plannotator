@@ -125,14 +125,14 @@ Needs a more robust detection strategy — either try `glab auth status` first, 
 
 ---
 
-## PR stack splitting is order-dependent
+## ~~PR stack splitting is order-dependent~~ DONE
 
 **Priority:** Low
 **Size:** Medium
 
-The `buildStacks` function in `LandingPage.tsx` walks PR chains by following `baseBranch` links. The algorithm processes PRs in API return order, which means if a middle PR is encountered before its descendants, the chain can be split incorrectly. Multi-PR stacks (3+) may display as loose PRs depending on timing.
+Fixed by extracting `buildStacks` into a pure module (`apps/frontend/src/components/landing/buildStacks.ts`) and rooting every chain from a leaf (a PR whose head branch is not any other PR's base branch), then walking down toward its base. A leaf-rooted walk captures the full chain in one pass regardless of input order, so multi-PR stacks no longer split into loose PRs depending on API return order. Pinned by a table-driven vitest suite (`buildStacks.test.ts`) asserting that every permutation of the same stack yields identical grouping, plus cycle and fork edge cases.
 
-Fix: build chains from leaves upward (start with PRs whose head branch isn't anyone else's base), or use a proper topological sort.
+The original bug: `buildStacks` walked only downward and marked PRs consumed as it went, so a descendant discovered after its parent chain was built could not attach and was dumped into `loose`. Multi-PR stacks (3+) displayed as loose PRs depending on the order PRs arrived in.
 
 ---
 
