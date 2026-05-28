@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  buildPlannotatorEnv,
   extractTextFromThreadMessage,
   findFirstPositionalArg,
   formatAnnotationFeedback,
@@ -124,6 +125,14 @@ describe("Amp Plannotator plugin helpers", () => {
       rmSync(explicitCwd, { recursive: true, force: true });
       rmSync(commandCwd, { recursive: true, force: true });
     }
+  });
+
+  test("ready-file mode preserves Plannotator browser opening", () => {
+    expect(buildPlannotatorEnv("/repo", "/tmp/ready.jsonl")).toEqual({
+      PLANNOTATOR_ORIGIN: "amp",
+      PLANNOTATOR_CWD: "/repo",
+      PLANNOTATOR_READY_FILE: "/tmp/ready.jsonl",
+    });
   });
 });
 

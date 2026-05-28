@@ -17,7 +17,7 @@ const DEFAULT_ANNOTATE_MESSAGE_FEEDBACK_PROMPT =
   "# Message Annotations\n\n{{feedback}}\n\nPlease address the annotation feedback above.";
 
 type CommandContext = PluginCommandContext;
-type ReadyResult = "opened" | "exited" | "timeout";
+type ReadyResult = "ready" | "exited" | "timeout";
 
 interface RunResult {
   status: number;
@@ -396,15 +396,7 @@ async function runPlannotator(
     ? join(tmpdir(), `plannotator-amp-${process.pid}-${Date.now()}-${randomUUID()}.jsonl`)
     : null;
   const command = [...runtime.command, ...args];
-  const envExtra: Record<string, string> = {
-    PLANNOTATOR_ORIGIN: RUNTIME,
-    PLANNOTATOR_CWD: cwd,
-  };
-  if (readyFile) {
-    envExtra.PLANNOTATOR_READY_FILE = readyFile;
-    envExtra.PLANNOTATOR_SKIP_BROWSER_OPEN = "1";
-  }
-  const env = buildEnv(envExtra);
+  const env = buildEnv(buildPlannotatorEnv(cwd, readyFile));
 
   let proc: Bun.Subprocess<"ignore" | "pipe", "pipe", "pipe">;
   try {
@@ -438,7 +430,7 @@ async function runPlannotator(
 
   let readyPromise: Promise<ReadyResult> | null = null;
   if (readyFile) {
-    readyPromise = openWhenReady(ctx, readyFile, exitState);
+    readyPromise = waitForReadyFile(readyFile, exitState);
     const readyResult = await readyPromise;
     if (readyResult === "timeout") {
       try {
@@ -483,6 +475,14 @@ export async function resolveCwd(ctx: CommandContext): Promise<string> {
   if (shellPwd) return shellPwd;
 
   return normalizeDirectory(process.cwd()) ?? process.cwd();
+}
+
+export function buildPlannotatorEnv(cwd: string, readyFile: string | null): Record<string, string> {
+  return {
+    PLANNOTATOR_ORIGIN: RUNTIME,
+    PLANNOTATOR_CWD: cwd,
+    ...(readyFile ? { PLANNOTATOR_READY_FILE: readyFile } : {}),
+  };
 }
 
 function normalizeDirectory(value: string | undefined): string | null {
@@ -553,13 +553,12 @@ async function notifyUrls(
   }
 }
 
-async function openWhenReady(
-  ctx: CommandContext,
+async function waitForReadyFile(
   readyFile: string,
   exitState: ExitState,
 ): Promise<ReadyResult> {
   const deadline = Date.now() + READY_TIMEOUT_MS;
-  const opened = new Set<string>();
+  const seen = new Set<string>();
 
   while (Date.now() < deadline) {
     if (existsSync(readyFile)) {
@@ -573,16 +572,9 @@ async function openWhenReady(
           continue;
         }
 
-        if (typeof payload.url !== "string" || opened.has(payload.url)) continue;
-        opened.add(payload.url);
-
-        try {
-          await ctx.system.open(payload.url);
-          return "opened";
-        } catch {
-          await ctx.ui.notify(`Open Plannotator:\n${payload.url}`);
-          return "opened";
-        }
+        if (typeof payload.url !== "string" || seen.has(payload.url)) continue;
+        seen.add(payload.url);
+        return "ready";
       }
     }
 
