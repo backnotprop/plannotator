@@ -45,6 +45,13 @@ export interface AnnotateServerOptions {
   mode?: "annotate" | "annotate-last" | "annotate-folder";
   /** Folder path when annotating a directory (used as projectRoot for file browser) */
   folderPath?: string;
+  /**
+   * Picker UI (#800): list of recent assistant messages for `annotate-last`
+   * mode. Newest-first. Presence implies more than one entry — the editor
+   * renders a picker so users can choose which message to annotate. The
+   * default (index 0) matches today's "last message" behavior.
+   */
+  recentMessages?: { messageId: string; text: string; timestamp?: string }[];
   /** Whether URL sharing is enabled (default: true) */
   sharingEnabled?: boolean;
   /** Custom base URL for share links */
@@ -110,6 +117,7 @@ export async function startAnnotateServer(
     origin,
     mode = "annotate",
     folderPath,
+    recentMessages,
     sourceInfo,
     sourceConverted,
     sharingEnabled = true,
@@ -183,6 +191,7 @@ export async function startAnnotateServer(
               projectRoot: folderPath || process.cwd(),
               isWSL: wslFlag,
               serverConfig: getServerConfig(gitUser),
+              ...(recentMessages ? { recentMessages } : {}),
             });
           }
 

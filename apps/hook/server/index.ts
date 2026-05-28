@@ -109,13 +109,13 @@ import {
   findDroidSessionLogsForCwd,
   findSessionLogsByAncestorWalk,
   findSessionLogsForCwd,
-  getLastRenderedMessage,
+  getRecentRenderedMessages,
   resolveDroidSessionLogForCwd,
   resolveSessionLogByAncestorPids,
   resolveSessionLogByCwdScan,
   type RenderedMessage,
 } from "./session-log";
-import { findCodexRolloutByThreadId, getLastCodexMessage, getLatestCodexPlan } from "./codex-session";
+import { findCodexRolloutByThreadId, getLatestCodexPlan, getRecentCodexMessages } from "./codex-session";
 import { findCopilotPlanContent, findCopilotSessionForCwd, getLastCopilotMessage } from "./copilot-session";
 import {
   formatInteractiveNoArgClarification,
@@ -849,7 +849,15 @@ if (args[0] === "sessions") {
   const isCodex = !!codexThreadId;
   const isDroid = detectedOrigin === "droid";
 
+  // Picker UI (#800): collect up to N recent assistant messages so the user
+  // can pick the right one — defaults to the same selection as the legacy
+  // "last message" behavior (index 0). Necessary because the newest
+  // transcript entry isn't always the message the user intended to annotate
+  // (e.g., after /rewind). 25 covers even long conversations worth of rewinds
+  // without flooding the picker; the list scrolls past this if more are shown.
+  const RECENT_MESSAGES_LIMIT = 25;
   let lastMessage: RenderedMessage | null = null;
+  let recentMessages: RenderedMessage[] = [];
 
   if (codexThreadId) {
     // Codex path: find rollout by thread ID
@@ -861,10 +869,9 @@ if (args[0] === "sessions") {
       if (process.env.PLANNOTATOR_DEBUG) {
         console.error(`[DEBUG] Rollout: ${rolloutPath}`);
       }
-      const msg = getLastCodexMessage(rolloutPath, { beforeActiveTurn: true });
-      if (msg) {
-        lastMessage = { messageId: codexThreadId, text: msg.text, lineNumbers: [] };
-      }
+      recentMessages = getRecentCodexMessages(rolloutPath, RECENT_MESSAGES_LIMIT, { beforeActiveTurn: true })
+        .map((m) => ({ messageId: m.messageId, text: m.text, lineNumbers: [], timestamp: m.timestamp }));
+      lastMessage = recentMessages[0] ?? null;
     }
   } else if (isDroid) {
     // Droid/Factory path: resolve the current repo's session log from
@@ -894,7 +901,8 @@ if (args[0] === "sessions") {
       console.error(`[DEBUG] Droid selected log: ${droidLog ?? "(none)"}`);
     }
     if (droidLog) {
-      lastMessage = getLastRenderedMessage(droidLog);
+      recentMessages = getRecentRenderedMessages(droidLog, RECENT_MESSAGES_LIMIT);
+      lastMessage = recentMessages[0] ?? null;
     }
   } else {
     // Claude Code path: resolve session log
@@ -926,8 +934,12 @@ if (args[0] === "sessions") {
         console.error(`[DEBUG] ${label}: ${paths.length ? paths.join(", ") : "(none)"}`);
       }
       for (const logPath of paths) {
-        lastMessage = getLastRenderedMessage(logPath);
-        if (lastMessage) return;
+        const recent = getRecentRenderedMessages(logPath, RECENT_MESSAGES_LIMIT);
+        if (recent.length > 0) {
+          recentMessages = recent;
+          lastMessage = recent[0];
+          return;
+        }
       }
     }
 
@@ -958,6 +970,12 @@ if (args[0] === "sessions") {
   const annotatedMessage = lastMessage;
   const annotateProject = (await detectProjectName()) ?? "_unknown";
 
+  // Only ship the picker list when there's a choice to make. The client uses
+  // its presence (length > 1) as the signal to render the picker UI.
+  const pickerMessages = recentMessages.length > 1
+    ? recentMessages.map((m) => ({ messageId: m.messageId, text: m.text, timestamp: m.timestamp }))
+    : undefined;
+
   const server = await startAnnotateServer({
     markdown: annotatedMessage.text,
     filePath: "last-message",
@@ -968,6 +986,7 @@ if (args[0] === "sessions") {
     pasteApiUrl,
     gate: gateFlag,
     htmlContent: planHtmlContent,
+    recentMessages: pickerMessages,
     onReady: async (url, isRemote, port) => {
       handleAnnotateServerReady(url, isRemote, port);
 

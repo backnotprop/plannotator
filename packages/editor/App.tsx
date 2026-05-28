@@ -76,6 +76,7 @@ import { generateId } from '@plannotator/ui/utils/generateId';
 import { SidebarTabs } from '@plannotator/ui/components/sidebar/SidebarTabs';
 import { SidebarContainer } from '@plannotator/ui/components/sidebar/SidebarContainer';
 import type { ArchivedPlan } from '@plannotator/ui/components/sidebar/ArchiveBrowser';
+import type { PickerMessage } from '@plannotator/ui/components/sidebar/MessagesBrowser';
 import { PlanDiffViewer } from '@plannotator/ui/components/plan-diff/PlanDiffViewer';
 import { CodeFilePopout, type CodeFileAnnotationInput } from '@plannotator/ui/components/CodeFilePopout';
 import type { PlanDiffMode } from '@plannotator/ui/components/plan-diff/PlanDiffModeSwitcher';
@@ -158,6 +159,8 @@ const App: React.FC = () => {
   const [annotateMode, setAnnotateMode] = useState(false);
   const [gate, setGate] = useState(false);
   const [annotateSource, setAnnotateSource] = useState<'file' | 'message' | 'folder' | null>(null);
+  const [recentMessages, setRecentMessages] = useState<PickerMessage[]>([]);
+  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
   const [goalSetupBundle, setGoalSetupBundle] = useState<GoalSetupBundle | null>(null);
   const goalSetupSurfaceRef = useRef<GoalSetupSurfaceHandle>(null);
   const [goalSetupAction, setGoalSetupAction] = useState<GoalSetupActionState>({
@@ -484,6 +487,18 @@ const App: React.FC = () => {
 
   // File browser file selection: open via linked doc system
   // For vault dirs (isVault), use the Obsidian doc endpoint; otherwise use generic /api/doc
+  // Annotate-last picker (#800): switching messages replaces the editor
+  // content. Annotations are anchored to text spans, so they're invalidated
+  // when the underlying message changes — we clear them.
+  const handleSelectMessage = React.useCallback((messageId: string) => {
+    const msg = recentMessages.find((m) => m.messageId === messageId);
+    if (!msg || messageId === selectedMessageId) return;
+    setSelectedMessageId(messageId);
+    setMarkdown(msg.text);
+    setAnnotations([]);
+    setSelectedAnnotationId(null);
+  }, [recentMessages, selectedMessageId]);
+
   const handleFileBrowserSelect = React.useCallback((absolutePath: string, dirPath: string) => {
     const dirState = fileBrowser.dirs.find(d => d.path === dirPath);
     const buildUrl = dirState?.isVault
@@ -778,7 +793,7 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; gate?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string } }) => {
+      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; gate?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string }; recentMessages?: PickerMessage[] }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
         setAISessionEnabled(data.mode !== 'archive' && data.mode !== 'goal-setup');
@@ -815,6 +830,10 @@ const App: React.FC = () => {
         }
         if (data.mode === 'annotate' || data.mode === 'annotate-last' || data.mode === 'annotate-folder') {
           setAnnotateSource(data.mode === 'annotate-last' ? 'message' : data.mode === 'annotate-folder' ? 'folder' : 'file');
+        }
+        if (data.mode === 'annotate-last' && data.recentMessages && data.recentMessages.length > 0) {
+          setRecentMessages(data.recentMessages);
+          setSelectedMessageId(data.recentMessages[0].messageId);
         }
         setSourceInfo(data.sourceInfo ?? undefined);
         setSourceConverted(!!data.sourceConverted);
@@ -2028,6 +2047,7 @@ const App: React.FC = () => {
               hasDiff={planDiff.hasPreviousVersion}
               showVersionsTab={versionInfo !== null && versionInfo.totalVersions > 1}
               showFilesTab={showFilesTab && !archive.archiveMode}
+              showMessagesTab={annotateSource === 'message' && recentMessages.length > 1}
               hasFileAnnotations={hasFileAnnotations}
               className="hidden lg:flex absolute left-0 top-0 z-10"
             />
@@ -2076,6 +2096,10 @@ const App: React.FC = () => {
                 selectedArchiveFile={archive.selectedFile}
                 onArchiveSelect={archive.select}
                 isLoadingArchive={archive.isLoading}
+                showMessagesTab={annotateSource === 'message' && recentMessages.length > 1}
+                messages={recentMessages}
+                selectedMessageId={selectedMessageId}
+                onSelectMessage={handleSelectMessage}
               />
               <ResizeHandle {...tocResize.handleProps} className="hidden lg:block" side="left" />
             </>
@@ -2261,6 +2285,17 @@ const App: React.FC = () => {
                     copyLabel={annotateSource === 'message' ? 'Copy message' : annotateSource === 'file' || annotateSource === 'folder' ? 'Copy file' : undefined}
                     archiveInfo={archive.currentInfo}
                     sourceInfo={sourceInfo}
+                    messagePickerInfo={
+                      annotateSource === 'message' && recentMessages.length > 1
+                        ? {
+                            // selectedMessageId is always one of recentMessages (set on init,
+                            // only changed via handleSelectMessage), so findIndex is >= 0.
+                            current: recentMessages.findIndex((m) => m.messageId === selectedMessageId) + 1,
+                            total: recentMessages.length,
+                            onOpen: () => sidebar.open('messages'),
+                          }
+                        : undefined
+                    }
                     onToggleCheckbox={checkbox.toggle}
                     checkboxOverrides={checkbox.overrides}
                     actionsLabelMode={actionsLabelMode}

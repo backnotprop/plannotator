@@ -14,6 +14,8 @@ import { TableOfContents } from "../TableOfContents";
 import { VersionBrowser } from "./VersionBrowser";
 import { FileBrowser } from "./FileBrowser";
 import { ArchiveBrowser, type ArchivedPlan } from "./ArchiveBrowser";
+import { MessagesBrowser, type PickerMessage } from "./MessagesBrowser";
+import { MessagesIcon } from "../icons/MessagesIcon";
 import { OverlayScrollArea } from "../OverlayScrollArea";
 
 interface SidebarContainerProps {
@@ -58,6 +60,11 @@ interface SidebarContainerProps {
   selectedArchiveFile: string | null;
   onArchiveSelect: (filename: string) => void;
   isLoadingArchive: boolean;
+  // Messages Browser props (annotate-last picker, #800)
+  showMessagesTab?: boolean;
+  messages?: PickerMessage[];
+  selectedMessageId?: string | null;
+  onSelectMessage?: (messageId: string) => void;
 }
 
 export const SidebarContainer: React.FC<SidebarContainerProps> = ({
@@ -97,6 +104,10 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
   selectedArchiveFile,
   onArchiveSelect,
   isLoadingArchive,
+  showMessagesTab,
+  messages,
+  selectedMessageId,
+  onSelectMessage,
 }) => {
   return (
     <aside
@@ -145,6 +156,14 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
               </svg>
             }
             label="Versions"
+          />
+        )}
+        {showMessagesTab && (
+          <TabButton
+            active={activeTab === "messages"}
+            onClick={() => onTabChange("messages")}
+            icon={<MessagesIcon className="w-3 h-3" />}
+            label="Messages"
           />
         )}
         {showFilesTab && (
@@ -264,6 +283,13 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
             selectedFile={selectedArchiveFile}
             onSelect={onArchiveSelect}
             isLoading={isLoadingArchive}
+          />
+        )}
+        {activeTab === "messages" && showMessagesTab && messages && onSelectMessage && (
+          <MessagesBrowser
+            messages={messages}
+            selectedMessageId={selectedMessageId ?? null}
+            onSelect={onSelectMessage}
           />
         )}
       </OverlayScrollArea>

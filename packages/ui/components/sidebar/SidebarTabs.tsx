@@ -7,6 +7,7 @@
 
 import React from "react";
 import type { SidebarTab } from "../../hooks/useSidebar";
+import { MessagesIcon } from "../icons/MessagesIcon";
 
 interface SidebarTabsProps {
   activeTab: SidebarTab;
@@ -14,6 +15,7 @@ interface SidebarTabsProps {
   hasDiff: boolean;
   showVersionsTab?: boolean;
   showFilesTab?: boolean;
+  showMessagesTab?: boolean;
   hasFileAnnotations?: boolean;
   className?: string;
 }
@@ -24,6 +26,7 @@ export const SidebarTabs: React.FC<SidebarTabsProps> = ({
   hasDiff,
   showVersionsTab,
   showFilesTab,
+  showMessagesTab,
   hasFileAnnotations,
   className,
 }) => {
@@ -77,6 +80,16 @@ export const SidebarTabs: React.FC<SidebarTabsProps> = ({
           {hasDiff && (
             <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-primary" />
           )}
+        </button>
+      )}
+
+      {showMessagesTab && (
+        <button
+          onClick={() => onToggleTab("messages")}
+          className="sidebar-tab-flag group relative flex items-center justify-center w-7 h-9 rounded-r-md border border-l-0 border-border/50 bg-card/80 backdrop-blur-sm text-muted-foreground hover:text-foreground hover:bg-card transition-colors"
+          title="Pick a different message"
+        >
+          <MessagesIcon />
         </button>
       )}
 
