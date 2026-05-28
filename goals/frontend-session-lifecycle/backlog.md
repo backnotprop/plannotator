@@ -114,10 +114,12 @@ The `AddProjectDialog` hand-rolls its own modal with `fixed inset-0 z-50`, manua
 
 ---
 
-## GitLab custom domain detection
+## GitLab custom domain detection — DONE
 
 **Priority:** Medium
 **Size:** Medium
+
+DONE: Added `detectPlatformCore(runtime, host)` (`packages/shared/pr-provider.ts`), bound as `detectPlatform(host)` in `packages/server/pr.ts`, mirroring the `checkAuthCore`→`checkPRAuth` pattern. Layered cheap→expensive: host-name fast path (`gitlab`/`github` substrings, no I/O), then for ambiguous custom domains a single `glab auth status --hostname <host>` probe whose success means GitLab. `glab`-absent (ENOENT) and `glab`-unauthed both fall through to the historical github default (no regression). The daemon endpoint (`server.ts`) now calls `await detectPlatform(host)` instead of `host.includes("gitlab")`; the probe runs at most once per 30s per project thanks to the existing per-cwd cache.
 
 The daemon's PR listing endpoint (`packages/server/daemon/server.ts:671`) determines GitHub vs GitLab by checking `host.toLowerCase().includes("gitlab")`. Self-hosted GitLab instances on custom domains (e.g. `code.company.com`) are misidentified as GitHub, so `gh` is invoked instead of `glab`, and PR listing fails silently.
 
@@ -136,10 +138,12 @@ Fix: build chains from leaves upward (start with PRs whose head branch isn't any
 
 ---
 
-## GitLab detailed PRs returns empty
+## GitLab detailed PRs returns empty — DONE
 
 **Priority:** Medium
 **Size:** Medium
+
+DONE: Implemented `fetchGlMRList` and `fetchGlMRDetailedList` (`packages/shared/pr-gitlab.ts`) against the GitLab MR-list API (`projects/:id/merge_requests?per_page=30&state=all`) via the existing `apiArgs`/`parsePaginatedArray` helpers, with exported pure mappers `mapGlMrToListItem`/`mapGlMrToDetailedItem` (unit-tested). `pr-provider.ts` now dispatches GitLab to these instead of returning `[]`. Limitation: GitLab's MR-list endpoint does not return per-MR `additions`/`deletions` (would require ~30 extra API calls), so detailed items set `additions: 0, deletions: 0` and `reviewDecision: ""` (approvals are a separate endpoint, out of scope for v1); everything else (commentCount via `user_notes_count`, updatedAt, isDraft via `draft`/`work_in_progress`, branches, state) is populated.
 
 `packages/shared/pr-provider.ts:129` returns an empty array for GitLab in `fetchPRDetailedList()`. The git dashboard shows "No pull requests found" for GitLab repos even when they have open MRs. The `glab mr list --json` command supports the same fields we need — someone just needs to implement `fetchGlMRDetailedList` following the GitHub pattern.
 

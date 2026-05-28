@@ -13,6 +13,7 @@ import type {
   PRReviewFileComment,
   PRStackTree,
   PRListItem,
+  Platform,
 } from "@plannotator/shared/pr-types";
 import {
   parsePRUrl as parsePRUrlCore,
@@ -25,6 +26,7 @@ import {
   getCliInstallUrl,
 } from "@plannotator/shared/pr-types";
 import {
+  detectPlatformCore,
   checkAuth as checkAuthCore,
   getUser as getUserCore,
   fetchPR as fetchPRCore,
@@ -79,6 +81,10 @@ const runtime: PRRuntime = {
 };
 
 export const parsePRUrl = parsePRUrlCore;
+
+export function detectPlatform(host: string): Promise<Platform> {
+  return detectPlatformCore(runtime, host);
+}
 
 export function checkPRAuth(ref: PRRef): Promise<void> {
   return checkAuthCore(runtime, ref);

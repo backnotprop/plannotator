@@ -23,7 +23,7 @@ import { readImprovementHook, getImprovementHookExpectedPath } from "@plannotato
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import { readSnapshot } from "./session-store";
 import { parseRemoteUrl, parseRemoteHost } from "@plannotator/shared/repo";
-import { checkPRAuth, fetchPRList, fetchPRDetailedList } from "../pr";
+import { detectPlatform, checkPRAuth, fetchPRList, fetchPRDetailedList } from "../pr";
 import type { PRRef, PRListItem, PRDetailedListItem } from "@plannotator/shared/pr-types";
 
 const RESULT_DELETE_GRACE_MS = 2_000;
@@ -669,8 +669,8 @@ export function createDaemonFetchHandler(options: DaemonServerOptions): DaemonFe
           if (!host || !repoPath) {
             return json({ ok: true, prs: [], platform: null, error: "no-remote" });
           }
-          const isGitLab = host.toLowerCase().includes("gitlab");
-          const platform = isGitLab ? "gitlab" : "github";
+          const platform = await detectPlatform(host);
+          const isGitLab = platform === "gitlab";
           let ref: PRRef;
           if (isGitLab) {
             ref = { platform: "gitlab", host, projectPath: repoPath, iid: 0 };

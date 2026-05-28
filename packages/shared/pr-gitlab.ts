@@ -8,7 +8,7 @@
 import { homedir } from "os";
 import { join } from "path";
 import { mkdirSync, writeFileSync } from "fs";
-import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, CommandResult } from "./pr-types";
+import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, CommandResult, PRListItem, PRDetailedListItem } from "./pr-types";
 import { encodeApiFilePath } from "./pr-types";
 
 // GitLab-specific MRRef shape (used internally)
@@ -601,4 +601,101 @@ export async function submitGlMRReview(
       throw new Error(`Failed to approve MR: ${msg}`);
     }
   }
+}
+
+// --- MR List ---
+
+/** Raw shape of a GitLab MR as returned by the `merge_requests` list API. */
+interface GlMRListEntry {
+  iid: number;
+  title: string;
+  author?: { username?: string } | null;
+  web_url: string;
+  source_branch: string;
+  target_branch: string;
+  state: string;
+  // Detailed-only fields
+  user_notes_count?: number;
+  updated_at?: string;
+  draft?: boolean;
+  work_in_progress?: boolean;
+}
+
+/**
+ * Map a GitLab MR `state` to our normalized list state.
+ * GitLab uses: "opened" | "closed" | "merged" | "locked".
+ */
+function mapGlMrState(state: string): PRListItem["state"] {
+  if (state === "opened") return "open";
+  if (state === "merged") return "merged";
+  // "closed", "locked", and anything unexpected collapse to closed.
+  return "closed";
+}
+
+/** Pure JSON → PRListItem mapping (exported for unit testing without spawning glab). */
+export function mapGlMrToListItem(raw: GlMRListEntry): PRListItem {
+  return {
+    id: String(raw.iid),
+    number: raw.iid,
+    title: raw.title,
+    author: raw.author?.username ?? "",
+    url: raw.web_url,
+    baseBranch: raw.target_branch,
+    headBranch: raw.source_branch,
+    state: mapGlMrState(raw.state),
+  };
+}
+
+/**
+ * Pure JSON → PRDetailedListItem mapping (exported for unit testing).
+ *
+ * GitLab's MR-list endpoint does NOT return per-MR additions/deletions —
+ * obtaining them requires one extra API call per MR (~30 for the dashboard),
+ * which is unacceptable for a list view. We deliberately degrade gracefully:
+ * additions/deletions are 0, and reviewDecision is "" (GitLab approvals live
+ * on a separate endpoint, out of scope for v1). Everything else is populated
+ * from the single list response.
+ */
+export function mapGlMrToDetailedItem(raw: GlMRListEntry): PRDetailedListItem {
+  return {
+    ...mapGlMrToListItem(raw),
+    additions: 0,
+    deletions: 0,
+    commentCount: typeof raw.user_notes_count === "number" ? raw.user_notes_count : 0,
+    updatedAt: raw.updated_at ?? "",
+    isDraft: raw.draft === true || raw.work_in_progress === true,
+    reviewDecision: "",
+  };
+}
+
+export async function fetchGlMRList(
+  runtime: PRRuntime,
+  ref: GlMRRef,
+): Promise<PRListItem[]> {
+  const encoded = encodeProject(ref.projectPath);
+  const result = await runtime.runCommand(
+    "glab",
+    apiArgs(ref.host, `projects/${encoded}/merge_requests?per_page=30&state=all`),
+  );
+
+  if (result.exitCode !== 0) return [];
+
+  const raw = parsePaginatedArray<GlMRListEntry>(result.stdout);
+  return raw.map(mapGlMrToListItem);
+}
+
+export async function fetchGlMRDetailedList(
+  runtime: PRRuntime,
+  ref: GlMRRef,
+): Promise<PRDetailedListItem[]> {
+  const encoded = encodeProject(ref.projectPath);
+  const result = await runtime.runCommand(
+    "glab",
+    apiArgs(ref.host, `projects/${encoded}/merge_requests?per_page=30&state=all`),
+  );
+
+  if (result.exitCode !== 0) return [];
+
+  const raw = parsePaginatedArray<GlMRListEntry>(result.stdout);
+  return raw.map(mapGlMrToDetailedItem);
 }

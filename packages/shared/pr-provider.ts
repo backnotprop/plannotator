@@ -12,13 +12,45 @@
  */
 
 import { checkGhAuth, getGhUser, fetchGhPR, fetchGhPRContext, fetchGhPRFileContent, submitGhPRReview, fetchGhPRViewedFiles, markGhFilesViewed, fetchGhPRStack, fetchGhPRList, fetchGhPRDetailedList } from "./pr-github";
-import { checkGlAuth, getGlUser, fetchGlMR, fetchGlMRContext, fetchGlFileContent, submitGlMRReview } from "./pr-gitlab";
-import type { PRRuntime, PRRef, PRMetadata, PRContext, PRReviewFileComment, PRStackTree, PRListItem, PRDetailedListItem } from "./pr-types";
+import { checkGlAuth, getGlUser, fetchGlMR, fetchGlMRContext, fetchGlFileContent, submitGlMRReview, fetchGlMRList, fetchGlMRDetailedList } from "./pr-gitlab";
+import type { PRRuntime, PRRef, PRMetadata, PRContext, PRReviewFileComment, PRStackTree, PRListItem, PRDetailedListItem, Platform } from "./pr-types";
 
 // Re-export the browser-safe surface so server callers can keep using
 // pr-provider as a single facade. Browser code imports from pr-types
 // directly to avoid pulling pr-github / pr-gitlab into the client bundle.
 export * from "./pr-types";
+
+// --- Platform Detection ---
+
+/**
+ * Detect whether a git host is GitHub or GitLab.
+ *
+ * Layered cheap → expensive:
+ *  1. Host name fast path (no I/O): contains "gitlab" → gitlab;
+ *     github.com or contains "github" → github.
+ *  2. Ambiguous custom domain (e.g. code.company.com): probe
+ *     `glab auth status --hostname <host>`. Success → gitlab.
+ *  3. Otherwise → github (preserves the historical default).
+ *
+ * The probe falls through to github on any failure — including
+ * `glab` not being installed (ENOENT) or not being authenticated —
+ * so hosts that work today keep working unchanged.
+ */
+export async function detectPlatformCore(runtime: PRRuntime, host: string): Promise<Platform> {
+  const lower = host.toLowerCase();
+  if (lower.includes("gitlab")) return "gitlab";
+  if (lower === "github.com" || lower.includes("github")) return "github";
+
+  // Ambiguous custom domain — probe the GitLab CLI. checkGlAuth throws on
+  // auth failure and Bun.spawn throws ENOENT when glab isn't installed; both
+  // mean "not a usable GitLab host", so fall through to the github default.
+  try {
+    await checkGlAuth(runtime, host);
+    return "gitlab";
+  } catch {
+    return "github";
+  }
+}
 
 // --- Dispatch Functions ---
 
@@ -119,7 +151,7 @@ export async function fetchPRList(
   ref: PRRef,
 ): Promise<PRListItem[]> {
   if (ref.platform === "github") return fetchGhPRList(runtime, ref);
-  return []; // GitLab: not yet implemented
+  return fetchGlMRList(runtime, ref);
 }
 
 export async function fetchPRDetailedList(
@@ -127,5 +159,5 @@ export async function fetchPRDetailedList(
   ref: PRRef,
 ): Promise<PRDetailedListItem[]> {
   if (ref.platform === "github") return fetchGhPRDetailedList(runtime, ref);
-  return [];
+  return fetchGlMRDetailedList(runtime, ref);
 }
