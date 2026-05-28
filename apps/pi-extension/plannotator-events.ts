@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { DiffType, VcsSelection } from "./server.js";
+import { getRecentAssistantMessages } from "./assistant-message.js";
 import {
 	getLastAssistantMessageText,
 	getStartupErrorMessage,
@@ -295,12 +296,15 @@ export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
 				}
 				case "annotate-last": {
 					const payload = request.payload;
-					const lastText = payload?.markdown?.trim() ? payload.markdown : getLastAssistantMessageText(ctx);
+					const usePayloadText = !!payload?.markdown?.trim();
+					const lastText = usePayloadText ? payload!.markdown! : getLastAssistantMessageText(ctx);
 					if (!lastText) {
 						request.respond({ status: "unavailable", error: "No assistant message found in session." });
 						return;
 					}
-					const result = await openLastMessageAnnotation(ctx, lastText, payload?.gate);
+					const recent = usePayloadText ? [] : getRecentAssistantMessages(ctx, 25);
+					const pickerMessages = recent.length > 1 ? recent : undefined;
+					const result = await openLastMessageAnnotation(ctx, lastText, payload?.gate, pickerMessages);
 					request.respond({ status: "handled", result });
 					return;
 				}

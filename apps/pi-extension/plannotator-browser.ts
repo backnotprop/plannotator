@@ -448,7 +448,7 @@ export async function openMarkdownAnnotation(
 	sourceInfo?: string,
 	sourceConverted?: boolean,
 	gate?: boolean,
-): Promise<{ feedback: string; exit?: boolean; approved?: boolean }> {
+): Promise<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string }> {
 	const session = await startMarkdownAnnotationSession(
 		ctx,
 		filePath,
@@ -473,7 +473,8 @@ export async function startMarkdownAnnotationSession(
 	gate?: boolean,
 	rawHtml?: string,
 	renderHtml?: boolean,
-): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean }>> {
+	recentMessages?: { messageId: string; text: string; timestamp?: string }[],
+): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string }>> {
 	if (!ctx.hasUI || !planHtmlContent) {
 		throw new Error("Plannotator annotation browser is unavailable in this session.");
 	}
@@ -496,6 +497,7 @@ export async function startMarkdownAnnotationSession(
 		origin: "pi",
 		mode,
 		folderPath,
+		recentMessages,
 		sourceInfo,
 		sourceConverted,
 		gate,
@@ -514,15 +516,18 @@ export async function openLastMessageAnnotation(
 	ctx: ExtensionContext,
 	lastText: string,
 	gate?: boolean,
-): Promise<{ feedback: string; exit?: boolean; approved?: boolean }> {
-	return openMarkdownAnnotation(ctx, "last-message", lastText, "annotate-last", undefined, undefined, undefined, gate);
+	recentMessages?: { messageId: string; text: string; timestamp?: string }[],
+): Promise<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string }> {
+	const session = await startLastMessageAnnotationSession(ctx, lastText, gate, recentMessages);
+	return session.waitForDecision();
 }
 
 export async function startLastMessageAnnotationSession(
 	ctx: ExtensionContext,
 	lastText: string,
 	gate?: boolean,
-): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean }>> {
+	recentMessages?: { messageId: string; text: string; timestamp?: string }[],
+): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string }>> {
 	return startMarkdownAnnotationSession(
 		ctx,
 		"last-message",
@@ -532,6 +537,9 @@ export async function startLastMessageAnnotationSession(
 		undefined,
 		undefined,
 		gate,
+		undefined,
+		undefined,
+		recentMessages,
 	);
 }
 

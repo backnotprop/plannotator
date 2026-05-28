@@ -1184,6 +1184,7 @@ const App: React.FC = () => {
           feedback: annotationsOutput,
           annotations: allAnnotations,
           codeAnnotations,
+          ...(selectedMessageId ? { selectedMessageId } : {}),
         }),
       });
       setSubmitted('denied'); // reuse 'denied' state for "feedback sent" overlay

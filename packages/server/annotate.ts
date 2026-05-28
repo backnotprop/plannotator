@@ -86,6 +86,7 @@ export interface AnnotateServerResult {
     annotations: unknown[];
     exit?: boolean;
     approved?: boolean;
+    selectedMessageId?: string;
   }>;
   /** Stop the server */
   stop: () => void;
@@ -150,12 +151,14 @@ export async function startAnnotateServer(
     annotations: unknown[];
     exit?: boolean;
     approved?: boolean;
+    selectedMessageId?: string;
   }) => void;
   const decisionPromise = new Promise<{
     feedback: string;
     annotations: unknown[];
     exit?: boolean;
     approved?: boolean;
+    selectedMessageId?: string;
   }>((resolve) => {
     resolveDecision = resolve;
   });
@@ -302,12 +305,14 @@ export async function startAnnotateServer(
               const body = (await req.json()) as {
                 feedback: string;
                 annotations: unknown[];
+                selectedMessageId?: string;
               };
 
               deleteDraft(draftKey);
               resolveDecision({
                 feedback: body.feedback || "",
                 annotations: body.annotations || [],
+                selectedMessageId: body.selectedMessageId,
               });
 
               return Response.json({ ok: true });
