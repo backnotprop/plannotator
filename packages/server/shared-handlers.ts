@@ -8,7 +8,7 @@
 
 import { mkdirSync } from "fs";
 import { appendFileSync } from "node:fs";
-import { openBrowser } from "./browser";
+import { openBrowser as openBrowserImpl } from "./browser";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
 import { saveDraft, loadDraft, deleteDraft } from "./draft";
 import { FAVICON_SVG } from "@plannotator/shared/favicon";
@@ -136,13 +136,20 @@ export function handleFavicon(): Response {
   });
 }
 
+interface ServerReadyOptions {
+  readyFile?: string;
+  skipBrowserOpen?: boolean;
+  openBrowser?: typeof openBrowserImpl;
+}
+
 /** Attempt to open the browser for the session URL. */
 export async function handleServerReady(
   url: string,
   isRemote: boolean,
   _port: number,
+  options: ServerReadyOptions = {},
 ): Promise<void> {
-  const readyFile = process.env.PLANNOTATOR_READY_FILE;
+  const readyFile = options.readyFile ?? process.env.PLANNOTATOR_READY_FILE;
   if (readyFile) {
     try {
       appendFileSync(readyFile, `${JSON.stringify({ url, isRemote, port: _port })}\n`, "utf8");
@@ -151,7 +158,8 @@ export async function handleServerReady(
     }
   }
 
-  if (process.env.PLANNOTATOR_SKIP_BROWSER_OPEN === "1") return;
+  const skipBrowserOpen = options.skipBrowserOpen ?? process.env.PLANNOTATOR_SKIP_BROWSER_OPEN === "1";
+  if (skipBrowserOpen) return;
 
-  await openBrowser(url, { isRemote });
+  await (options.openBrowser ?? openBrowserImpl)(url, { isRemote });
 }

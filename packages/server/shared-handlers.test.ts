@@ -8,31 +8,24 @@ describe("handleServerReady", () => {
   test("writes host-plugin ready metadata without opening a browser", async () => {
     const dir = mkdtempSync(join(tmpdir(), "plannotator-ready-"));
     const readyFile = join(dir, "ready.jsonl");
-    const previousReadyFile = process.env.PLANNOTATOR_READY_FILE;
-    const previousSkipOpen = process.env.PLANNOTATOR_SKIP_BROWSER_OPEN;
-
-    process.env.PLANNOTATOR_READY_FILE = readyFile;
-    process.env.PLANNOTATOR_SKIP_BROWSER_OPEN = "1";
+    let opened = false;
 
     try {
-      await handleServerReady("http://localhost:12345", false, 12345);
+      await handleServerReady("http://localhost:12345", false, 12345, {
+        readyFile,
+        skipBrowserOpen: true,
+        openBrowser: async () => {
+          opened = true;
+        },
+      });
       const [line] = readFileSync(readyFile, "utf8").trim().split(/\r?\n/);
       expect(JSON.parse(line)).toEqual({
         url: "http://localhost:12345",
         isRemote: false,
         port: 12345,
       });
+      expect(opened).toBe(false);
     } finally {
-      if (previousReadyFile === undefined) {
-        delete process.env.PLANNOTATOR_READY_FILE;
-      } else {
-        process.env.PLANNOTATOR_READY_FILE = previousReadyFile;
-      }
-      if (previousSkipOpen === undefined) {
-        delete process.env.PLANNOTATOR_SKIP_BROWSER_OPEN;
-      } else {
-        process.env.PLANNOTATOR_SKIP_BROWSER_OPEN = previousSkipOpen;
-      }
       rmSync(dir, { recursive: true, force: true });
     }
   });
