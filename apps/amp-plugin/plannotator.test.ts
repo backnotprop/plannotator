@@ -1,10 +1,15 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   extractTextFromThreadMessage,
   findFirstPositionalArg,
   formatAnnotationFeedback,
   isNoActionFeedback,
   parseAnnotateDecision,
+  parseReviewTargetInput,
+  resolveCwd,
   splitCommandArgs,
 } from "./plannotator";
 
@@ -72,4 +77,66 @@ describe("Amp Plannotator plugin helpers", () => {
     expect(findFirstPositionalArg(["--no-jina", "https://example.com"])).toBe("https://example.com");
     expect(findFirstPositionalArg(["--browser", "Google Chrome", "docs/plan.md"])).toBe("docs/plan.md");
   });
+
+  test("distinguishes canceled review target prompts from blank local reviews", () => {
+    expect(parseReviewTargetInput(undefined)).toBeNull();
+    expect(parseReviewTargetInput("   ")).toEqual([]);
+    expect(parseReviewTargetInput("--git https://github.com/org/repo/pull/1")).toEqual([
+      "--git",
+      "https://github.com/org/repo/pull/1",
+    ]);
+  });
+
+  test("prefers Amp command cwd over process PWD", async () => {
+    const processPwd = mkdtempSync(join(tmpdir(), "plannotator-amp-process-"));
+    const commandCwd = mkdtempSync(join(tmpdir(), "plannotator-amp-command-"));
+    const originalPwd = process.env.PWD;
+    const originalOverride = process.env.PLANNOTATOR_CWD;
+
+    try {
+      process.env.PWD = processPwd;
+      delete process.env.PLANNOTATOR_CWD;
+
+      const cwd = await resolveCwd(commandContextWithCwd(commandCwd));
+
+      expect(cwd).toBe(commandCwd);
+    } finally {
+      restoreEnv("PWD", originalPwd);
+      restoreEnv("PLANNOTATOR_CWD", originalOverride);
+      rmSync(processPwd, { recursive: true, force: true });
+      rmSync(commandCwd, { recursive: true, force: true });
+    }
+  });
+
+  test("lets PLANNOTATOR_CWD override Amp command cwd", async () => {
+    const explicitCwd = mkdtempSync(join(tmpdir(), "plannotator-amp-explicit-"));
+    const commandCwd = mkdtempSync(join(tmpdir(), "plannotator-amp-command-"));
+    const originalOverride = process.env.PLANNOTATOR_CWD;
+
+    try {
+      process.env.PLANNOTATOR_CWD = explicitCwd;
+
+      const cwd = await resolveCwd(commandContextWithCwd(commandCwd));
+
+      expect(cwd).toBe(explicitCwd);
+    } finally {
+      restoreEnv("PLANNOTATOR_CWD", originalOverride);
+      rmSync(explicitCwd, { recursive: true, force: true });
+      rmSync(commandCwd, { recursive: true, force: true });
+    }
+  });
 });
+
+function restoreEnv(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = value;
+  }
+}
+
+function commandContextWithCwd(cwd: string): Parameters<typeof resolveCwd>[0] {
+  return {
+    $: async () => ({ exitCode: 0, stdout: `${cwd}\n`, stderr: "" }),
+  } as Parameters<typeof resolveCwd>[0];
+}

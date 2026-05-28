@@ -77,7 +77,9 @@ export default function plannotatorAmpPlugin(amp: PluginAPI) {
         submitButtonText: "Review",
       });
 
-      const reviewArgs = target?.trim() ? splitCommandArgs(target) : [];
+      const reviewArgs = parseReviewTargetInput(target);
+      if (!reviewArgs) return;
+
       const result = await runPlannotator(amp, ctx, ["review", ...reviewArgs]);
       await handleReviewResult(ctx, result);
     },
@@ -289,6 +291,11 @@ export function findFirstPositionalArg(args: string[]): string | null {
   return null;
 }
 
+export function parseReviewTargetInput(target: string | undefined): string[] | null {
+  if (target === undefined) return null;
+  return target.trim() ? splitCommandArgs(target) : [];
+}
+
 async function getLatestAssistantText(ctx: CommandContext): Promise<string | null> {
   if (!ctx.thread) return null;
 
@@ -460,20 +467,20 @@ async function runPlannotator(
   };
 }
 
-async function resolveCwd(ctx: CommandContext): Promise<string> {
+export async function resolveCwd(ctx: CommandContext): Promise<string> {
   const explicitCwd = normalizeDirectory(process.env.PLANNOTATOR_CWD);
   if (explicitCwd) return explicitCwd;
-
-  const shellPwd = normalizeDirectory(process.env.PWD);
-  if (shellPwd) return shellPwd;
 
   try {
     const result = await ctx.$`pwd`;
     const cwd = normalizeDirectory(result.stdout);
     if (cwd) return cwd;
   } catch {
-    // Fall through to process cwd.
+    // Fall through to process-level cwd fallbacks.
   }
+
+  const shellPwd = normalizeDirectory(process.env.PWD);
+  if (shellPwd) return shellPwd;
 
   return normalizeDirectory(process.cwd()) ?? process.cwd();
 }
