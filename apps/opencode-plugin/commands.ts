@@ -365,23 +365,25 @@ export async function handleAnnotateLastCommand(
   });
   const messages = messagesResponse.data;
 
-  // Walk backward, find last assistant message with text
-  let lastText: string | null = null;
+  const RECENT_LIMIT = 25;
+  const recentMessages: { messageId: string; text: string; timestamp?: string }[] = [];
   if (messages) {
-    for (let i = messages.length - 1; i >= 0; i--) {
+    for (let i = messages.length - 1; i >= 0 && recentMessages.length < RECENT_LIMIT; i--) {
       const msg = messages[i];
-      if (msg.info.role === "assistant") {
-        const textParts = msg.parts
-          .filter((p: any) => p.type === "text" && p.text?.trim())
-          .map((p: any) => p.text);
-        if (textParts.length > 0) {
-          lastText = textParts.join("\n");
-          break;
-        }
-      }
+      if (msg.info.role !== "assistant") continue;
+      const textParts = msg.parts
+        .filter((p: any) => p.type === "text" && p.text?.trim())
+        .map((p: any) => p.text);
+      if (textParts.length === 0) continue;
+      recentMessages.push({
+        messageId: msg.info.id ?? `opencode-${i}`,
+        text: textParts.join("\n"),
+        timestamp: msg.info.time?.created ? new Date(msg.info.time.created).toISOString() : undefined,
+      });
     }
   }
 
+  const lastText = recentMessages[0]?.text ?? null;
   if (!lastText) {
     client.app.log({ level: "error", message: "No assistant message found in session." });
     return null;
@@ -389,11 +391,14 @@ export async function handleAnnotateLastCommand(
 
   client.app.log({ level: "info", message: "Opening annotation UI for last message..." });
 
+  const pickerMessages = recentMessages.length > 1 ? recentMessages : undefined;
+
   const server = await startAnnotateServer({
     markdown: lastText,
     filePath: "last-message",
     origin: "opencode",
     mode: "annotate-last",
+    recentMessages: pickerMessages,
     sharingEnabled: await getSharingEnabled(),
     shareBaseUrl: getShareBaseUrl(),
     pasteApiUrl: getPasteApiUrl(),

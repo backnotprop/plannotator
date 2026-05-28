@@ -1,8 +1,8 @@
 /**
  * MessagesBrowser — Sidebar list of recent assistant messages.
  *
- * Used by `annotate-last` (#800). Lets the user pick which assistant message
- * to annotate when the newest transcript entry isn't the one they intended
+ * Used by annotate-last. Lets the user pick which assistant message to
+ * annotate when the newest transcript entry isn't the one they intended
  * (e.g., after `/rewind`).
  */
 
@@ -70,8 +70,6 @@ export const MessagesBrowser: React.FC<MessagesBrowserProps> = ({
                 {isDefault ? " ★" : ""}
               </span>
               <span className="flex-1 min-w-0">
-                {/* whitespace-collapse so newlines render as spaces;
-                    `line-clamp-2` handles visual truncation with ellipsis */}
                 <span className="block line-clamp-2 leading-snug">
                   {msg.text.replace(/\s+/g, " ").trim()}
                 </span>
