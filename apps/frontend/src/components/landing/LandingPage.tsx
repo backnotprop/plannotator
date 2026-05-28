@@ -630,9 +630,11 @@ function PRList({
       </div>
     );
   }
-  if (platform === "gitlab" && prs.length === 0) {
+  if (error === "fetch-failed") {
     return (
-      <div className="py-1 text-[11px] text-muted-foreground">GitLab MR listing coming soon</div>
+      <div className="py-1 text-[11px] text-muted-foreground">
+        Failed to load {platform === "gitlab" ? "merge requests" : "pull requests"}
+      </div>
     );
   }
   if (visible.length === 0 && !showAll) {

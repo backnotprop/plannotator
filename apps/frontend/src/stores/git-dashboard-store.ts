@@ -9,6 +9,8 @@ export interface GitDashboardPR extends PRDetailedListItem {
   projectCwd: string;
   projectName: string;
   repoSlug: string;
+  /** Platform the MR/PR came from. GitLab's list endpoint omits additions/deletions. */
+  platform: "github" | "gitlab" | null;
 }
 
 export interface GitDashboardState {
@@ -75,6 +77,7 @@ export const gitDashboardStore = createStore<GitDashboardStore>()(
           const e = result.data.error;
           if (e === "no-cli") errors.push(`${project.name}: GitHub/GitLab CLI not installed`);
           else if (e === "auth-failed") errors.push(`${project.name}: CLI not authenticated`);
+          else if (e === "fetch-failed") errors.push(`${project.name}: Failed to load pull requests`);
           continue;
         }
         for (const pr of result.data.prs) {
@@ -83,6 +86,7 @@ export const gitDashboardStore = createStore<GitDashboardStore>()(
             projectCwd: project.cwd,
             projectName: project.name,
             repoSlug: extractRepoSlug(pr.url),
+            platform: result.data.platform,
           });
         }
       }

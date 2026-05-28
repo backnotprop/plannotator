@@ -689,12 +689,22 @@ export function createDaemonFetchHandler(options: DaemonServerOptions): DaemonFe
           }
           if (isDetailed) {
             let prs: PRDetailedListItem[];
-            try { prs = await fetchPRDetailedList(ref); } catch { return json({ ok: true, prs: [], platform }); }
+            try {
+              prs = await fetchPRDetailedList(ref);
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              return json({ ok: true, prs: [], platform, error: "fetch-failed", message });
+            }
             prDetailedListCache.set(cwd, { prs, platform, time: now });
             return json({ ok: true, prs, platform });
           } else {
             let prs: PRListItem[];
-            try { prs = await fetchPRList(ref); } catch { return json({ ok: true, prs: [], platform }); }
+            try {
+              prs = await fetchPRList(ref);
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              return json({ ok: true, prs: [], platform, error: "fetch-failed", message });
+            }
             let defaultBranch = "main";
             try {
               const symRef = execSync("git symbolic-ref refs/remotes/origin/HEAD", { cwd, encoding: "utf-8" }).trim();

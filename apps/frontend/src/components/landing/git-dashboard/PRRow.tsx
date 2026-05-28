@@ -68,10 +68,16 @@ export function PRRow({ pr, loading, onSelect }: PRRowProps) {
             {reviewBadge.label}
           </span>
         )}
-        <span className="flex items-center gap-1.5 font-mono text-[10px]">
-          <span className="tabular-nums text-green-600 dark:text-green-400">+{pr.additions}</span>
-          <span className="tabular-nums text-red-600 dark:text-red-400">-{pr.deletions}</span>
-        </span>
+        {pr.platform === "gitlab" ? (
+          // GitLab's MR-list endpoint omits per-MR additions/deletions, so render
+          // an em dash ("unknown") rather than a misleading +0/-0.
+          <span className="font-mono text-[10px] text-muted-foreground/50">—</span>
+        ) : (
+          <span className="flex items-center gap-1.5 font-mono text-[10px]">
+            <span className="tabular-nums text-green-600 dark:text-green-400">+{pr.additions}</span>
+            <span className="tabular-nums text-red-600 dark:text-red-400">-{pr.deletions}</span>
+          </span>
+        )}
         {pr.commentCount > 0 && (
           <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground/60">
             <svg

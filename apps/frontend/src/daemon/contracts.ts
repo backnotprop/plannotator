@@ -93,7 +93,7 @@ export interface PRDetailedListResponse {
   ok: true;
   prs: PRDetailedListItem[];
   platform: "github" | "gitlab" | null;
-  error?: "no-remote" | "no-cli" | "auth-failed";
+  error?: "no-remote" | "no-cli" | "auth-failed" | "fetch-failed";
   message?: string;
 }
 
@@ -102,7 +102,7 @@ export interface PRListResponse {
   prs: PRListItem[];
   platform: "github" | "gitlab" | null;
   defaultBranch?: string;
-  error?: "no-remote" | "no-cli" | "auth-failed";
+  error?: "no-remote" | "no-cli" | "auth-failed" | "fetch-failed";
   message?: string;
 }
 

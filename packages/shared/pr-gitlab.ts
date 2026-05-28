@@ -668,19 +668,41 @@ export function mapGlMrToDetailedItem(raw: GlMRListEntry): PRDetailedListItem {
   };
 }
 
-export async function fetchGlMRList(
+/**
+ * Run the shared `glab api` MR-list call and return the parsed entries.
+ *
+ * On a non-zero exit (auth/permission, network, rate-limit) we log stderr and
+ * THROW rather than returning `[]`: a failed fetch must stay distinguishable
+ * from "this project genuinely has zero MRs", otherwise the dashboard silently
+ * shows an empty list — the exact opaque failure GitLab support set out to fix.
+ * The daemon handler catches this and surfaces a `fetch-failed` error.
+ */
+async function fetchGlMRRaw(
   runtime: PRRuntime,
   ref: GlMRRef,
-): Promise<PRListItem[]> {
+): Promise<GlMRListEntry[]> {
   const encoded = encodeProject(ref.projectPath);
   const result = await runtime.runCommand(
     "glab",
     apiArgs(ref.host, `projects/${encoded}/merge_requests?per_page=30&state=all`),
   );
 
-  if (result.exitCode !== 0) return [];
+  if (result.exitCode !== 0) {
+    const stderr = result.stderr.trim();
+    console.error(stderr);
+    throw new Error(
+      `Failed to fetch GitLab MR list: ${stderr || `exit code ${result.exitCode}`}`,
+    );
+  }
 
-  const raw = parsePaginatedArray<GlMRListEntry>(result.stdout);
+  return parsePaginatedArray<GlMRListEntry>(result.stdout);
+}
+
+export async function fetchGlMRList(
+  runtime: PRRuntime,
+  ref: GlMRRef,
+): Promise<PRListItem[]> {
+  const raw = await fetchGlMRRaw(runtime, ref);
   return raw.map(mapGlMrToListItem);
 }
 
@@ -688,14 +710,6 @@ export async function fetchGlMRDetailedList(
   runtime: PRRuntime,
   ref: GlMRRef,
 ): Promise<PRDetailedListItem[]> {
-  const encoded = encodeProject(ref.projectPath);
-  const result = await runtime.runCommand(
-    "glab",
-    apiArgs(ref.host, `projects/${encoded}/merge_requests?per_page=30&state=all`),
-  );
-
-  if (result.exitCode !== 0) return [];
-
-  const raw = parsePaginatedArray<GlMRListEntry>(result.stdout);
+  const raw = await fetchGlMRRaw(runtime, ref);
   return raw.map(mapGlMrToDetailedItem);
 }

@@ -82,8 +82,36 @@ const runtime: PRRuntime = {
 
 export const parsePRUrl = parsePRUrlCore;
 
-export function detectPlatform(host: string): Promise<Platform> {
-  return detectPlatformCore(runtime, host);
+/**
+ * host → platform is stable for the lifetime of a daemon, but the two PR
+ * endpoints keep separate 30s caches and `checkPRAuth` probes again, so an
+ * ambiguous self-hosted host could shell out to `glab auth status` several
+ * times on a cold dashboard load. Cache the resolved platform per host so the
+ * probe runs at most once per host, and bound the probe with a timeout so a
+ * slow/unreachable self-hosted host can't hang the dashboard.
+ */
+const platformCache = new Map<string, Platform>();
+const PROBE_TIMEOUT_MS = 5_000;
+
+export async function detectPlatform(host: string): Promise<Platform> {
+  const cached = platformCache.get(host);
+  if (cached) return cached;
+
+  // PRRuntime.runCommand has no timeout option, so race the whole detection
+  // (the only slow path is the `glab auth status` probe inside it) against a
+  // timer that resolves to the historical github default. Host-name fast paths
+  // resolve synchronously and win the race long before the timer fires.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<Platform>((resolve) => {
+    timer = setTimeout(() => resolve("github"), PROBE_TIMEOUT_MS);
+  });
+  try {
+    const platform = await Promise.race([detectPlatformCore(runtime, host), timeout]);
+    platformCache.set(host, platform);
+    return platform;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export function checkPRAuth(ref: PRRef): Promise<void> {

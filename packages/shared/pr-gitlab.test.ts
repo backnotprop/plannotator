@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { parsePaginatedArray, mapGlMrToListItem, mapGlMrToDetailedItem } from "./pr-gitlab";
+import {
+  parsePaginatedArray,
+  mapGlMrToListItem,
+  mapGlMrToDetailedItem,
+  fetchGlMRList,
+  fetchGlMRDetailedList,
+} from "./pr-gitlab";
 import { detectPlatformCore } from "./pr-provider";
-import type { PRRuntime, CommandResult } from "./pr-types";
+import type { PRRuntime, CommandResult, GitlabMRRef } from "./pr-types";
 
 describe("parsePaginatedArray", () => {
   test("parses a single-page array", () => {
@@ -293,5 +299,91 @@ describe("detectPlatformCore", () => {
   test("ambiguous custom domain + glab not installed (ENOENT) → github (no regression)", async () => {
     const { runtime } = makeRuntime("missing");
     expect(await detectPlatformCore(runtime, "code.company.com")).toBe("github");
+  });
+});
+
+describe("fetchGlMRList / fetchGlMRDetailedList", () => {
+  // A runtime that records its calls and returns a canned result, so we can
+  // assert the exact `glab` args and the throw-on-failure contract without
+  // spawning glab.
+  function makeRuntime(result: CommandResult): {
+    runtime: PRRuntime;
+    calls: Array<{ cmd: string; args: string[] }>;
+  } {
+    const calls: Array<{ cmd: string; args: string[] }> = [];
+    const runtime: PRRuntime = {
+      async runCommand(cmd, args): Promise<CommandResult> {
+        calls.push({ cmd, args });
+        return result;
+      },
+    };
+    return { runtime, calls };
+  }
+
+  const REF: GitlabMRRef = {
+    platform: "gitlab",
+    host: "gitlab.com",
+    projectPath: "group/project",
+    iid: 0,
+  };
+
+  test("fetchGlMRList issues the exact glab args and maps entries", async () => {
+    const { runtime, calls } = makeRuntime({
+      stdout: JSON.stringify(MR_LIST_FIXTURE),
+      stderr: "",
+      exitCode: 0,
+    });
+
+    const items = await fetchGlMRList(runtime, REF);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].cmd).toBe("glab");
+    // group/project → group%2Fproject, gitlab.com host omits --hostname.
+    expect(calls[0].args).toEqual([
+      "api",
+      "projects/group%2Fproject/merge_requests?per_page=30&state=all",
+    ]);
+    expect(items.map((i) => i.number)).toEqual([42, 41, 40, 39]);
+  });
+
+  test("fetchGlMRDetailedList issues the exact glab args and maps entries", async () => {
+    const { runtime, calls } = makeRuntime({
+      stdout: JSON.stringify(MR_LIST_FIXTURE),
+      stderr: "",
+      exitCode: 0,
+    });
+
+    const items = await fetchGlMRDetailedList(runtime, REF);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].cmd).toBe("glab");
+    expect(calls[0].args).toEqual([
+      "api",
+      "projects/group%2Fproject/merge_requests?per_page=30&state=all",
+    ]);
+    expect(items[0].commentCount).toBe(3);
+    expect(items[0].additions).toBe(0);
+  });
+
+  test("self-hosted host appends --hostname", async () => {
+    const { runtime, calls } = makeRuntime({ stdout: "[]", stderr: "", exitCode: 0 });
+    await fetchGlMRList(runtime, { ...REF, host: "gitlab.example.com" });
+    expect(calls[0].args).toEqual([
+      "api",
+      "projects/group%2Fproject/merge_requests?per_page=30&state=all",
+      "--hostname",
+      "gitlab.example.com",
+    ]);
+  });
+
+  test("non-zero exit THROWS instead of returning [] (no silent-empty)", async () => {
+    const { runtime } = makeRuntime({ stdout: "", stderr: "403 Forbidden", exitCode: 1 });
+    await expect(fetchGlMRList(runtime, REF)).rejects.toThrow(/403 Forbidden/);
+    await expect(fetchGlMRDetailedList(runtime, REF)).rejects.toThrow(/403 Forbidden/);
+  });
+
+  test("non-zero exit with empty stderr still throws with exit-code detail", async () => {
+    const { runtime } = makeRuntime({ stdout: "", stderr: "", exitCode: 22 });
+    await expect(fetchGlMRList(runtime, REF)).rejects.toThrow(/exit code 22/);
   });
 });
