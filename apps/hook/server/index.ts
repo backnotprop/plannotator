@@ -443,10 +443,11 @@ async function cleanupDaemonStateForDaemonCommand(state: unknown): Promise<void>
   }
 }
 
-async function cleanupDaemonStateForSessionCommand(state: unknown, options: { pluginError?: boolean }): Promise<void> {
+async function cleanupDaemonStateForSessionCommand(state: unknown, options: { pluginError?: boolean; bestEffort?: boolean }): Promise<void> {
   try {
     await cleanupDaemonState(state);
   } catch (err) {
+    if (options.bestEffort) throw err;
     const fail = options.pluginError ? emitPluginError : emitCommandError;
     fail("daemon-cleanup-failed", errorMessage(err));
   }
