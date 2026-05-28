@@ -447,6 +447,7 @@ describe("install shared behavior", () => {
     expect(ps).toContain('$configDir -eq "~"');
     expect(ps).toContain('$configDir.StartsWith("~/")');
     expect(ps).toContain("$configDir.StartsWith('~\\')");
+    expect(ps).toContain("Join-Path $env:USERPROFILE ($configDir.Substring(2))");
     expect(ps).toContain('Join-Path $configDir "config.json"');
     expect(ps).toContain("ConvertFrom-Json");
     expect(ps).toContain("$cfg.verifyAttestation");

@@ -97,7 +97,7 @@ $configDir = if ($env:PLANNOTATOR_DATA_DIR) { $env:PLANNOTATOR_DATA_DIR.Trim() }
 if ($configDir -eq "~") {
     $configDir = $env:USERPROFILE
 } elseif ($configDir.StartsWith("~/") -or $configDir.StartsWith('~\')) {
-    $configDir = Join-Path $env:USERPROFILE $configDir.Substring(2)
+    $configDir = Join-Path $env:USERPROFILE ($configDir.Substring(2))
 }
 $configPath = Join-Path $configDir "config.json"
 if (Test-Path $configPath) {
