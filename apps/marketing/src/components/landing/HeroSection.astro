@@ -36,7 +36,7 @@ import AnnoReplace from './AnnoReplace.astro';
       <!-- Agent selector buttons -->
       <div class="flex flex-wrap items-center gap-1.5 mb-4" id="agent-selector">
         <button
-          class="agent-btn active"
+          class="agent-btn"
           data-agent="amp"
           data-command="curl -fsSL https://plannotator.ai/install.sh | bash"
           data-video=""
@@ -45,7 +45,7 @@ import AnnoReplace from './AnnoReplace.astro';
           <span>Amp</span>
         </button>
         <button
-          class="agent-btn"
+          class="agent-btn active"
           data-agent="claude"
           data-command="curl -fsSL https://plannotator.ai/install.sh | bash"
           data-video="https://www.youtube.com/watch?v=a_AT7cEN_9I"
@@ -370,8 +370,8 @@ import AnnoReplace from './AnnoReplace.astro';
       btn.addEventListener('click', function() { setAgent(btn); });
     });
 
-    // Init default (first button)
-    setAgent(buttons[0]);
+    // Init default
+    setAgent(document.querySelector('.agent-btn[data-agent="claude"]') || buttons[0]);
 
     if (copyBtn) {
       copyBtn.addEventListener('click', function() {
