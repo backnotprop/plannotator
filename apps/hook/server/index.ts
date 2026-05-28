@@ -175,11 +175,10 @@ function emitAnnotateOutcome(result: {
   exit?: boolean;
   approved?: boolean;
 }): void {
-  const output = result.prompt ?? result.feedback;
   if (hookFlag) {
     if (result.approved || result.exit) return;
-    if (output) {
-      console.log(JSON.stringify({ decision: "block", reason: output }));
+    if (result.feedback) {
+      console.log(JSON.stringify({ decision: "block", reason: result.feedback }));
     }
     return;
   }
@@ -189,10 +188,11 @@ function emitAnnotateOutcome(result: {
     } else if (result.exit) {
       console.log(JSON.stringify({ decision: "dismissed" }));
     } else {
-      console.log(JSON.stringify({ decision: "annotated", feedback: output || "" }));
+      console.log(JSON.stringify({ decision: "annotated", feedback: result.feedback || "" }));
     }
     return;
   }
+  const output = result.prompt ?? result.feedback;
   if (result.exit) return;
   if (result.approved) {
     console.log(APPROVED_PLAINTEXT_MARKER);
