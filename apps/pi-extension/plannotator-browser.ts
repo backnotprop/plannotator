@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PluginFeature, PluginSessionInfo } from "./generated/plugin-protocol.js";
 
-export type DiffType = "uncommitted" | "staged" | "unstaged" | "last-commit" | "jj-current" | "jj-last" | "jj-line" | "jj-all" | "jj-evolog" | "branch";
+export type DiffType = "uncommitted" | "staged" | "unstaged" | "last-commit" | "jj-current" | "jj-last" | "jj-line" | "jj-all" | "jj-evolog" | "branch" | "merge-base" | "all" | `worktree:${string}` | "p4-default" | `p4-changelist:${string}`;
 export type VcsSelection = "auto" | "git" | "jj" | "p4";
 import {
 	ensurePlannotatorBinary,
