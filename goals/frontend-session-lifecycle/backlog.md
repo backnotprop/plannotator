@@ -105,7 +105,7 @@ The sidebar session hierarchy needs rethinking. Currently grouped by mode (plan,
 
 ---
 
-## Migrate AddProjectDialog to Radix Dialog primitive
+## ~~Migrate AddProjectDialog to Radix Dialog primitive~~ DONE
 
 **Priority:** Low — cosmetic consistency
 **Size:** Small

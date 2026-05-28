@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Folder, ChevronRight, X, CornerDownLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useProjectStore } from "../../stores/project-store";
 import { daemonApiClient } from "../../daemon/api/client";
 import type { DirectoryEntry, ProjectEntry } from "../../daemon/contracts";
@@ -44,7 +45,7 @@ export function AddProjectDialog({ open, onOpenChange }: AddProjectDialogProps) 
     setResolvedPath("");
     setActiveIndex(0);
     fetchDirs("~");
-    requestAnimationFrame(() => inputRef.current?.focus());
+    // Input focus is handled by DialogContent's onOpenAutoFocus.
   }, [open, fetchDirs]);
 
   useEffect(() => {
@@ -104,11 +105,10 @@ export function AddProjectDialog({ open, onOpenChange }: AddProjectDialogProps) 
             handleSelect(resolvedPath);
           }
         }
-      } else if (e.key === "Escape") {
-        onOpenChange(false);
       }
+      // Escape is handled by Radix Dialog (onEscapeKeyDown → onOpenChange(false)).
     },
-    [activeIndex, dirs, recentProjects, resolvedPath, handleNavigate, handleSelect, onOpenChange],
+    [activeIndex, dirs, recentProjects, resolvedPath, handleNavigate, handleSelect],
   );
 
   useEffect(() => {
@@ -116,17 +116,17 @@ export function AddProjectDialog({ open, onOpenChange }: AddProjectDialogProps) 
     el?.scrollIntoView({ block: "nearest" });
   }, [activeIndex]);
 
-  if (!open) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/55 pt-[15vh] backdrop-blur-[2px]"
-      onClick={() => onOpenChange(false)}
-    >
-      <div
-        className="flex w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-[0_24px_80px_-36px_rgba(15,23,42,0.5)]"
-        onClick={(e) => e.stopPropagation()}
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="top-[15vh] max-w-lg translate-y-0 max-h-none"
+        hideClose
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          inputRef.current?.focus();
+        }}
       >
+        <DialogTitle className="sr-only">Add a project</DialogTitle>
         <div className="flex items-center gap-2 border-b border-border px-4 py-3">
           <Folder className="size-4 shrink-0 text-muted-foreground" />
           <input
@@ -145,7 +145,7 @@ export function AddProjectDialog({ open, onOpenChange }: AddProjectDialogProps) 
             type="button"
             aria-label="Close"
             onClick={() => onOpenChange(false)}
-            className="rounded-md p-1 text-muted-foreground hover:text-foreground"
+            className="rounded-md p-1 text-muted-foreground hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           >
             <X className="size-3.5" />
           </button>
@@ -209,8 +209,8 @@ export function AddProjectDialog({ open, onOpenChange }: AddProjectDialogProps) 
             <kbd className="rounded border border-border px-1 text-[10px]">Esc</kbd> close
           </span>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
