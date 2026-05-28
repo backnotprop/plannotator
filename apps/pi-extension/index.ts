@@ -1165,9 +1165,9 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 	pi.on("agent_end", async (_event, ctx) => {
 		if (phase === "executing" && justApprovedPlan) {
 			justApprovedPlan = false;
-			setTimeout(() => {
-				pi.sendUserMessage("Continue with the approved plan.");
-			}, 0);
+			pi.sendUserMessage("Continue with the approved plan.", {
+				deliverAs: "followUp",
+			});
 			return;
 		}
 
