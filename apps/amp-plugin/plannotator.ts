@@ -1,7 +1,7 @@
 import type { PluginAPI, PluginCommandContext, ThreadMessage } from "@ampcode/plugin";
 import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
 const CATEGORY = "Plannotator";
@@ -470,6 +470,9 @@ export async function resolveCwd(ctx: CommandContext): Promise<string> {
   const explicitCwd = normalizeDirectory(process.env.PLANNOTATOR_CWD);
   if (explicitCwd) return explicitCwd;
 
+  const ampWorkspaceRoot = resolveAmpWorkspaceRoot();
+  if (ampWorkspaceRoot) return ampWorkspaceRoot;
+
   try {
     const result = await ctx.$`pwd`;
     const cwd = normalizeDirectory(result.stdout);
@@ -482,6 +485,55 @@ export async function resolveCwd(ctx: CommandContext): Promise<string> {
   if (shellPwd) return shellPwd;
 
   return normalizeDirectory(process.cwd()) ?? process.cwd();
+}
+
+export function resolveAmpWorkspaceRoot(
+  options: { logPath?: string; parentPid?: number } = {},
+): string | null {
+  const logPath = options.logPath ?? process.env.AMP_LOG_FILE ?? join(getAmpCacheDir(), "logs", "cli.log");
+  if (!existsSync(logPath)) return null;
+
+  const parentPid = options.parentPid ?? process.ppid;
+  const lines = readFileSync(logPath, "utf8").split(/\r?\n/).filter(Boolean);
+  let latestWorkspace: string | null = null;
+
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    let entry: { pid?: unknown; workspaceRoot?: unknown };
+    try {
+      entry = JSON.parse(lines[i]) as { pid?: unknown; workspaceRoot?: unknown };
+    } catch {
+      continue;
+    }
+
+    const workspace = normalizeWorkspaceRoot(entry.workspaceRoot);
+    if (!workspace) continue;
+
+    latestWorkspace ??= workspace;
+    if (entry.pid === parentPid) return workspace;
+  }
+
+  return latestWorkspace;
+}
+
+function normalizeWorkspaceRoot(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+
+  try {
+    const path = value.startsWith("file://") ? fileUrlToPath(value) : value;
+    return normalizeDirectory(path);
+  } catch {
+    return null;
+  }
+}
+
+function fileUrlToPath(value: string): string {
+  const url = new URL(value);
+  if (url.protocol !== "file:") throw new Error(`Unsupported URL protocol: ${url.protocol}`);
+
+  const pathname = decodeURIComponent(url.pathname);
+  return process.platform === "win32" && /^\/[A-Za-z]:/.test(pathname)
+    ? pathname.slice(1)
+    : pathname;
 }
 
 export function buildPlannotatorEnv(cwd: string, readyFile: string | null): Record<string, string> {
@@ -652,11 +704,12 @@ export function getPlannotatorCommandCandidates(
   options: {
     env?: Record<string, string | undefined>;
     home?: string;
+    pluginDir?: string;
     platform?: string;
   } = {},
 ): string[][] {
   const env = options.env ?? process.env;
-  const home = options.home ?? homedir();
+  const homes = getHomeDirectoryCandidates(env, options.home, options.pluginDir ?? import.meta.dir);
   const platform = options.platform ?? process.platform;
   const candidates: string[][] = [];
 
@@ -667,10 +720,13 @@ export function getPlannotatorCommandCandidates(
     const localAppData = normalizeExecutablePath(env.LOCALAPPDATA);
     if (localAppData) candidates.push([join(localAppData, "plannotator", "plannotator.exe")]);
 
-    const userProfile = normalizeExecutablePath(env.USERPROFILE) ?? home;
-    candidates.push([join(userProfile, ".local", "bin", "plannotator.exe")]);
+    for (const home of homes) {
+      candidates.push([join(home, ".local", "bin", "plannotator.exe")]);
+    }
   } else {
-    candidates.push([join(home, ".local", "bin", "plannotator")]);
+    for (const home of homes) {
+      candidates.push([join(home, ".local", "bin", "plannotator")]);
+    }
   }
 
   candidates.push(["plannotator"]);
@@ -683,6 +739,41 @@ function normalizeExecutablePath(value: string | undefined): string | null {
   return candidate;
 }
 
+function getHomeDirectoryCandidates(
+  env: Record<string, string | undefined>,
+  explicitHome: string | undefined,
+  pluginDir: string,
+): string[] {
+  return dedupeStrings([
+    normalizeExecutablePath(explicitHome),
+    normalizeExecutablePath(env.HOME),
+    normalizeExecutablePath(env.USERPROFILE),
+    deriveHomeFromAmpPluginDir(pluginDir),
+    explicitHome === undefined ? normalizeExecutablePath(homedir()) : null,
+  ]);
+}
+
+function deriveHomeFromAmpPluginDir(pluginDir: string): string | null {
+  const pluginsDir = resolve(pluginDir);
+  const ampDir = dirname(pluginsDir);
+  const configDir = dirname(ampDir);
+
+  if (
+    basename(pluginsDir) === "plugins" &&
+    basename(ampDir) === "amp" &&
+    basename(configDir) === ".config"
+  ) {
+    return dirname(configDir);
+  }
+
+  return null;
+}
+
+function getAmpCacheDir(): string {
+  const cacheHome = normalizeExecutablePath(process.env.XDG_CACHE_HOME);
+  return cacheHome ? join(cacheHome, "amp") : join(homedir(), ".cache", "amp");
+}
+
 function dedupeCommands(commands: string[][]): string[][] {
   const seen = new Set<string>();
   const deduped: string[][] = [];
@@ -691,6 +782,17 @@ function dedupeCommands(commands: string[][]): string[][] {
     if (seen.has(key)) continue;
     seen.add(key);
     deduped.push(command);
+  }
+  return deduped;
+}
+
+function dedupeStrings(values: Array<string | null>): string[] {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const value of values) {
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    deduped.push(value);
   }
   return deduped;
 }

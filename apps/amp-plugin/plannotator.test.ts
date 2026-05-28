@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   buildPlannotatorEnv,
   extractTextFromThreadMessage,
@@ -12,6 +13,7 @@ import {
   isNoActionFeedback,
   parseAnnotateDecision,
   parseReviewTargetInput,
+  resolveAmpWorkspaceRoot,
   resolveCwd,
   splitCommandArgs,
 } from "./plannotator";
@@ -105,10 +107,12 @@ describe("Amp Plannotator plugin helpers", () => {
     const commandCwd = mkdtempSync(join(tmpdir(), "plannotator-amp-command-"));
     const originalPwd = process.env.PWD;
     const originalOverride = process.env.PLANNOTATOR_CWD;
+    const originalLogFile = process.env.AMP_LOG_FILE;
 
     try {
       process.env.PWD = processPwd;
       delete process.env.PLANNOTATOR_CWD;
+      process.env.AMP_LOG_FILE = join(processPwd, "missing-amp.log");
 
       const cwd = await resolveCwd(commandContextWithCwd(commandCwd));
 
@@ -116,8 +120,68 @@ describe("Amp Plannotator plugin helpers", () => {
     } finally {
       restoreEnv("PWD", originalPwd);
       restoreEnv("PLANNOTATOR_CWD", originalOverride);
+      restoreEnv("AMP_LOG_FILE", originalLogFile);
       rmSync(processPwd, { recursive: true, force: true });
       rmSync(commandCwd, { recursive: true, force: true });
+    }
+  });
+
+  test("resolves Amp workspace root from the parent CLI log", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "plannotator-amp-log-"));
+    const oldWorkspace = mkdtempSync(join(tempDir, "old-workspace-"));
+    const currentWorkspace = mkdtempSync(join(tempDir, "current-workspace-"));
+    const logPath = join(tempDir, "cli.log");
+
+    try {
+      writeFileSync(
+        logPath,
+        [
+          JSON.stringify({
+            pid: 123,
+            workspaceRoot: pathToFileURL(oldWorkspace).href,
+          }),
+          JSON.stringify({
+            pid: 456,
+            workspaceRoot: pathToFileURL(currentWorkspace).href,
+          }),
+        ].join("\n"),
+        "utf8",
+      );
+
+      expect(resolveAmpWorkspaceRoot({ logPath, parentPid: 456 })).toBe(currentWorkspace);
+      expect(resolveAmpWorkspaceRoot({ logPath, parentPid: 999 })).toBe(currentWorkspace);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("uses Amp workspace log before plugin runtime cwd", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "plannotator-amp-cwd-"));
+    const workspace = mkdtempSync(join(tempDir, "workspace-"));
+    const pluginCwd = mkdtempSync(join(tempDir, "plugins-"));
+    const logPath = join(tempDir, "cli.log");
+    const originalLogFile = process.env.AMP_LOG_FILE;
+    const originalOverride = process.env.PLANNOTATOR_CWD;
+
+    try {
+      process.env.AMP_LOG_FILE = logPath;
+      delete process.env.PLANNOTATOR_CWD;
+      writeFileSync(
+        logPath,
+        JSON.stringify({
+          pid: process.ppid,
+          workspaceRoot: pathToFileURL(workspace).href,
+        }),
+        "utf8",
+      );
+
+      const cwd = await resolveCwd(commandContextWithCwd(pluginCwd));
+
+      expect(cwd).toBe(workspace);
+    } finally {
+      restoreEnv("AMP_LOG_FILE", originalLogFile);
+      restoreEnv("PLANNOTATOR_CWD", originalOverride);
+      rmSync(tempDir, { recursive: true, force: true });
     }
   });
 
@@ -165,6 +229,7 @@ describe("Amp Plannotator plugin helpers", () => {
     expect(
       getPlannotatorCommandCandidates({
         home: "/Users/alice",
+        pluginDir: "/Users/alice/.config/amp/plugins",
         platform: "darwin",
         env: {},
       }),
@@ -176,6 +241,7 @@ describe("Amp Plannotator plugin helpers", () => {
     expect(
       getPlannotatorCommandCandidates({
         home: String.raw`C:\Users\alice`,
+        pluginDir: String.raw`C:\Users\alice\.config\amp\plugins`,
         platform: "win32",
         env: {
           LOCALAPPDATA: String.raw`C:\Users\alice\AppData\Local`,
@@ -193,6 +259,7 @@ describe("Amp Plannotator plugin helpers", () => {
     expect(
       getPlannotatorCommandCandidates({
         home: "/Users/alice",
+        pluginDir: "/Users/alice/.config/amp/plugins",
         platform: "darwin",
         env: { PLANNOTATOR_BIN: "/opt/plannotator/bin/plannotator" },
       }),
