@@ -14,7 +14,9 @@ Three paths depending on content type. Each has its own references and structure
 
 ## Route by content type
 
-**Implementation plan, design doc, or proposal** → Follow the [Plan path](#plan-path). Read `references/design-system.md` and `references/svg-patterns.md`. Prescriptive structure.
+**Structured layouts in markdown** (stat strips, milestones, risk grids, columns, diagrams) → Use [rich directives](#directive-path) directly in your markdown. No HTML needed. Plannotator renders them as themed visual components.
+
+**Implementation plan, design doc, or proposal** → Follow the [Plan path](#plan-path). Read `references/design-system.md` and `references/svg-patterns.md`. Prescriptive structure. Prefer directives for structured sections; fall back to HTML only for custom layouts not covered by directives.
 
 **PR explainer, diff review, or code change walkthrough** → Follow the [PR path](#pr-path). Read `references/design-system.md` and `references/pr-components.md`. Prescriptive structure.
 
@@ -23,6 +25,11 @@ Three paths depending on content type. Each has its own references and structure
 ## Delivery
 
 Always deliver via Plannotator's annotation UI. Do NOT use `open` or `xdg-open`.
+
+**Markdown with directives** (preferred when directives cover the layout needs):
+```bash
+plannotator annotate <file.md>
+```
 
 **Plans/proposals** (user should approve/deny):
 ```bash
@@ -33,6 +40,71 @@ plannotator annotate <file> --render-html --gate
 ```bash
 plannotator annotate <file> --render-html
 ```
+
+---
+
+## Directive path
+
+Rich directives render structured visual components directly in markdown — no HTML, no CSS tokens, no iframe. They inherit the active Plannotator theme automatically.
+
+Available directives:
+
+**`:::stats`** — Summary strip of stat cards
+```
+:::stats
+4 | MRs
+2 | Approved | success
+2 | Blocked | destructive
+:::
+```
+Each line: `value | label` or `value | label | color`. Colors: `success`, `destructive`, `warning`, `primary`.
+
+**`:::milestone [status]`** — Timeline entry
+```
+:::milestone done
+### Deploy to staging
+All checks green.
+`backend-api`
+:::
+```
+Status on opening line: `done` (green), `warn` (yellow), `blocked` (red), or omitted (default). `###` heading = title. Backtick-only lines = tag chips. Consecutive milestones render as a connected vertical timeline.
+
+**`:::risks`** — Risk grid with severity badges
+```
+:::risks
+HIGH | Merge conflicts | Rebase before merging
+MED | Stale pipeline | Retrigger CI
+LOW | Reviewer OOO | Not blocking
+:::
+```
+Each line: `severity | name | mitigation`. HIGH/MED/LOW map to badge colors.
+
+**`:::cols`** — Multi-column layout
+```
+:::cols
+:::col
+Left column content.
+:::col
+Right column content.
+:::
+```
+N columns auto-detected from `:::col` count. Use `:::cols 3` for explicit count. Collapses to single column on narrow viewports.
+
+**`:::diagram [caption]`** — Diagram panel
+````
+:::diagram Request flow through the gateway
+```mermaid
+graph LR
+  A[Browser] --> B[Gateway]
+  B --> C[API]
+```
+:::
+````
+Wraps code fences (mermaid, graphviz) or inline `<svg>` in a bordered, captioned panel. Inline SVG inherits theme CSS variables — use `var(--primary)` etc. instead of hardcoded colors.
+
+**When to use directives vs HTML:**
+- Directives: stat summaries, timelines, risk tables, column layouts, diagram panels — anything the 5 directive kinds cover.
+- HTML (`--render-html`): custom layouts, PR diff rendering (Pierre CDN), UI mockups, complex SVG architecture diagrams with precise positioning.
 
 ---
 

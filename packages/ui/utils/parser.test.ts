@@ -674,6 +674,45 @@ describe("parseMarkdownToBlocks — directive containers", () => {
   });
 });
 
+describe("parseMarkdownToBlocks — directive args", () => {
+  test("captures trailing text as directiveArgs", () => {
+    const md = ":::milestone done\nDeploy to staging.\n:::";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("directive");
+    expect(blocks[0].directiveKind).toBe("milestone");
+    expect(blocks[0].directiveArgs).toBe("done");
+    expect(blocks[0].content).toBe("Deploy to staging.");
+  });
+
+  test("captures multi-word args", () => {
+    const md = ":::diagram Request flow through the gateway\n```mermaid\ngraph LR\n```\n:::";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks[0].directiveKind).toBe("diagram");
+    expect(blocks[0].directiveArgs).toBe("Request flow through the gateway");
+  });
+
+  test("directiveArgs is undefined when no trailing text", () => {
+    const md = ":::note\nbody\n:::";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks[0].directiveArgs).toBeUndefined();
+  });
+
+  test("cols with numeric arg", () => {
+    const md = ":::cols 3\ncol content\n:::";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks[0].directiveKind).toBe("cols");
+    expect(blocks[0].directiveArgs).toBe("3");
+  });
+
+  test("milestone statuses: done, warn, blocked", () => {
+    for (const status of ["done", "warn", "blocked"]) {
+      const blocks = parseMarkdownToBlocks(`:::milestone ${status}\nbody\n:::`);
+      expect(blocks[0].directiveArgs).toBe(status);
+    }
+  });
+});
+
 describe("parseMarkdownToBlocks — raw HTML blocks", () => {
   test("<details>/<summary> parsed as a single html block", () => {
     const md = "<details>\n<summary>Title</summary>\nBody text\n</details>";

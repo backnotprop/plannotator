@@ -483,6 +483,48 @@ body:has([data-popout="true"]) .os-scrollbar {
 .directive-danger, .directive-caution { background: color-mix(in srgb, #ef4444 10%, transparent); border-color: color-mix(in srgb, #ef4444 40%, transparent); }
 .directive-danger .directive-title, .directive-caution .directive-title { color: #ef4444; }
 
+/* Rich directive components */
+
+/* StatStrip: responsive grid collapse */
+.directive-stats {
+  container-type: inline-size;
+}
+@container (max-width: 480px) {
+  .directive-stats { grid-template-columns: repeat(2, 1fr) !important; }
+}
+
+/* MilestoneTimeline: connected vertical track for consecutive milestones */
+.directive-milestone + .directive-milestone {
+  margin-top: -0.25rem;
+}
+.directive-milestone:last-child .w-0\.5 {
+  display: none;
+}
+
+/* Columns: responsive grid */
+.directive-cols-grid {
+  display: grid;
+}
+@media (max-width: 720px) {
+  .directive-cols-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+.directive-col {
+  border-left: 2px solid color-mix(in oklab, var(--border) 40%, transparent);
+  padding-left: 1rem;
+}
+.directive-col:first-child {
+  border-left: none;
+  padding-left: 0;
+}
+
+/* DiagramPanel: SVG sizing */
+.directive-diagram .diagram-svg svg {
+  max-width: 100%;
+  height: auto;
+}
+
 /* Shared AI chat rendering */
 .ai-streaming-cursor {
   display: inline-block;

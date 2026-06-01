@@ -7,6 +7,11 @@ import { HtmlBlock } from "./blocks/HtmlBlock";
 import { Callout } from "./blocks/Callout";
 import { AlertBlock } from "./blocks/AlertBlock";
 import { TableBlock } from "./blocks/TableBlock";
+import { StatStrip } from "./blocks/StatStrip";
+import { MilestoneTimeline } from "./blocks/MilestoneTimeline";
+import { RiskGrid } from "./blocks/RiskGrid";
+import { Columns } from "./blocks/Columns";
+import { DiagramPanel } from "./blocks/DiagramPanel";
 
 export const BlockRenderer: React.FC<{
   block: Block;
@@ -139,22 +144,76 @@ export const BlockRenderer: React.FC<{
 
     case 'directive': {
       const kind = block.directiveKind || 'note';
-      return (
-        <Callout
-          blockId={block.id}
-          kind={kind}
-          body={block.content}
-          containerClassName={`directive directive-${kind} my-4 px-4 py-3 rounded-md border`}
-          blockType="directive"
-          kindAttribute={kind}
-          onOpenLinkedDoc={onOpenLinkedDoc}
-          onOpenCodeFile={onOpenCodeFile}
-          imageBaseDir={imageBaseDir}
-          onImageClick={onImageClick}
-          githubRepo={githubRepo}
-          onNavigateAnchor={onNavigateAnchor}
-        />
-      );
+      switch (kind) {
+        case 'stats':
+          return <StatStrip blockId={block.id} body={block.content} />;
+        case 'milestone':
+          return (
+            <MilestoneTimeline
+              blockId={block.id}
+              body={block.content}
+              status={block.directiveArgs}
+              imageBaseDir={imageBaseDir}
+              onImageClick={onImageClick}
+              onOpenLinkedDoc={onOpenLinkedDoc}
+              onOpenCodeFile={onOpenCodeFile}
+              githubRepo={githubRepo}
+              onNavigateAnchor={onNavigateAnchor}
+            />
+          );
+        case 'risks':
+          return (
+            <RiskGrid
+              blockId={block.id}
+              body={block.content}
+              imageBaseDir={imageBaseDir}
+              onImageClick={onImageClick}
+              onOpenLinkedDoc={onOpenLinkedDoc}
+              onOpenCodeFile={onOpenCodeFile}
+              githubRepo={githubRepo}
+              onNavigateAnchor={onNavigateAnchor}
+            />
+          );
+        case 'cols':
+          return (
+            <Columns
+              blockId={block.id}
+              body={block.content}
+              columnCount={block.directiveArgs ? parseInt(block.directiveArgs, 10) || undefined : undefined}
+              imageBaseDir={imageBaseDir}
+              onImageClick={onImageClick}
+              onOpenLinkedDoc={onOpenLinkedDoc}
+              onOpenCodeFile={onOpenCodeFile}
+              githubRepo={githubRepo}
+              onNavigateAnchor={onNavigateAnchor}
+            />
+          );
+        case 'diagram':
+          return (
+            <DiagramPanel
+              blockId={block.id}
+              body={block.content}
+              caption={block.directiveArgs}
+            />
+          );
+        default:
+          return (
+            <Callout
+              blockId={block.id}
+              kind={kind}
+              body={block.content}
+              containerClassName={`directive directive-${kind} my-4 px-4 py-3 rounded-md border`}
+              blockType="directive"
+              kindAttribute={kind}
+              onOpenLinkedDoc={onOpenLinkedDoc}
+              onOpenCodeFile={onOpenCodeFile}
+              imageBaseDir={imageBaseDir}
+              onImageClick={onImageClick}
+              githubRepo={githubRepo}
+              onNavigateAnchor={onNavigateAnchor}
+            />
+          );
+      }
     }
 
     default:

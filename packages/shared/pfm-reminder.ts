@@ -62,6 +62,46 @@ Or use directive containers for richer blocks:
   Body with **inline markdown**.
   :::
 
+Rich directives (structured visual blocks)
+Beyond callouts, these directives render as purpose-built visual components:
+
+  :::stats
+  4 | MRs
+  2 | Approved | success
+  2 | Blocked | destructive
+  :::
+  Each line: value | label or value | label | color (success, destructive, warning, primary).
+
+  :::milestone done
+  ### Deploy to staging
+  All checks green.
+  \`backend-api\`
+  :::
+  Status on opening line: done, warn, blocked, or omitted. ### heading = title. Backtick lines = tag chips. Consecutive milestones render as a connected timeline.
+
+  :::risks
+  HIGH | Merge conflicts | Rebase before merging
+  MED | Stale pipeline | Retrigger CI
+  LOW | Reviewer OOO | Not blocking
+  :::
+  Each line: severity | name | mitigation. HIGH/MED/LOW map to badge colors.
+
+  :::cols
+  :::col
+  Left content.
+  :::col
+  Right content.
+  :::
+  N columns auto-detected. Use :::cols 3 for explicit count. Collapses on narrow viewports.
+
+  :::diagram Caption text here
+  \`\`\`mermaid
+  graph LR
+    A --> B
+  \`\`\`
+  :::
+  Wraps code fences (mermaid, graphviz) or inline <svg> in a captioned panel. SVG inherits theme CSS vars.
+
 Tables
 Pipe tables are interactive — the reviewer can copy as Markdown/CSV from a hover toolbar, or expand to a sortable, filterable popout. Reach for them for comparisons, files-to-change lists, or risk summaries.
 

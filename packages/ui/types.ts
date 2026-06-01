@@ -66,6 +66,7 @@ export interface Block {
   orderedStart?: number; // For ordered list items: integer parsed from the marker (e.g. 5 for "5.")
   alertKind?: AlertKind; // For blockquotes starting with [!NOTE] / [!TIP] / etc.
   directiveKind?: string; // For directive containers (e.g. ':::note' → 'note')
+  directiveArgs?: string; // Optional trailing text on directive opening line (e.g. ':::milestone done' → 'done')
   order: number; // Sorting order
   startLine: number; // 1-based line number in source
 }

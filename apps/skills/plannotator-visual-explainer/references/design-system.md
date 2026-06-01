@@ -1,5 +1,7 @@
 # Design System Reference
 
+> **Prefer rich directives** for stat strips, milestones, risk grids, column layouts, and diagram panels — they render as themed components directly in markdown without any CSS. See SKILL.md → [Directive path]. Use this design system reference only for HTML escape-hatch layouts (custom SVG positioning, PR diffs, UI mockups) or when you need component patterns not covered by directives.
+
 Plan documents use Plannotator's semantic theme tokens. This makes them theme-aware: standalone files render with bundled defaults; embedded in the Plannotator UI, they inherit whatever theme is active (30+ themes, light and dark variants).
 
 ## Standalone defaults
