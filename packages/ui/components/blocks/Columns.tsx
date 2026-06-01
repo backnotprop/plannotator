@@ -62,7 +62,7 @@ export const Columns: React.FC<ColumnsProps> = ({
       {/* Design-system spec: gap 24px, responsive at 720px */}
       <div
         className="directive-cols-grid"
-        style={{ gap: '24px', gridTemplateColumns: `repeat(${count}, 1fr)` }}
+        style={{ gridTemplateColumns: `repeat(${count}, 1fr)` }}
       >
         {columns.map((col, i) => (
           <div key={i} className="directive-col min-w-0">

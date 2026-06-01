@@ -57,12 +57,7 @@ export const DiagramPanel: React.FC<DiagramPanelProps> = ({ blockId, body, capti
 
   return (
     <div
-      className="directive-diagram my-6 bg-card overflow-hidden"
-      style={{
-        border: '1.5px solid var(--border)',
-        borderRadius: 'var(--radius, 0.625rem)',
-        padding: '24px',
-      }}
+      className="directive-diagram"
       data-block-id={blockId}
       data-block-type="directive"
       data-directive-kind="diagram"
@@ -74,21 +69,13 @@ export const DiagramPanel: React.FC<DiagramPanelProps> = ({ blockId, body, capti
       ) : detected.type === 'diagram' && isGraphvizLanguage(detected.language) ? (
         <GraphvizBlock block={syntheticBlock} />
       ) : (
-        <pre className="font-mono overflow-x-auto" style={{ fontSize: '0.85rem', lineHeight: 1.55 }}>
+        <pre className="font-mono text-sm overflow-x-auto leading-relaxed">
           <code className={detected.language ? `language-${detected.language}` : ''}>
             {detected.content}
           </code>
         </pre>
       )}
-      {caption && (
-        <p className="text-muted-foreground text-center" style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: '0.72rem',
-          marginTop: '12px',
-        }}>
-          {caption}
-        </p>
-      )}
+      {caption && <p className="diagram-caption">{caption}</p>}
     </div>
   );
 };
