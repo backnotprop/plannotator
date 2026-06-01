@@ -528,6 +528,7 @@ const InlineModifiedBlock: React.FC<InlineModifiedBlockProps> = ({
   if (wrap.type === "list-item") {
     const listLevel = wrap.listLevel || 0;
     const isCheckbox = wrap.checked !== undefined;
+    const paragraphs = unified.split(/\n\n+/);
     return (
       <div
         data-diff-block-index={index}
@@ -541,9 +542,19 @@ const InlineModifiedBlock: React.FC<InlineModifiedBlockProps> = ({
           orderedIndex={wrap.orderedStart ?? 1}
           checked={wrap.checked}
         />
-        <span className={listItemTextClass(isCheckbox, wrap.checked)}>
-          <InlineMarkdown text={unified} />
-        </span>
+        {paragraphs.length === 1 ? (
+          <span className={listItemTextClass(isCheckbox, wrap.checked)}>
+            <InlineMarkdown text={unified} />
+          </span>
+        ) : (
+          <div className={listItemTextClass(isCheckbox, wrap.checked)}>
+            {paragraphs.map((para, i) => (
+              <p key={i} className={i > 0 ? "mt-3" : ""}>
+                <InlineMarkdown text={para} />
+              </p>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
@@ -620,6 +631,7 @@ const SimpleBlockRenderer: React.FC<{ block: Block; orderedIndex?: number | null
     case "list-item": {
       const listLevel = block.level || 0;
       const isCheckbox = block.checked !== undefined;
+      const paragraphs = block.content.split(/\n\n+/);
       return (
         <div
           className={LIST_ITEM_ROW_CLASS}
@@ -631,9 +643,19 @@ const SimpleBlockRenderer: React.FC<{ block: Block; orderedIndex?: number | null
             orderedIndex={orderedIndex}
             checked={block.checked}
           />
-          <span className={listItemTextClass(isCheckbox, block.checked)}>
-            <InlineMarkdown text={block.content} />
-          </span>
+          {paragraphs.length === 1 ? (
+            <span className={listItemTextClass(isCheckbox, block.checked)}>
+              <InlineMarkdown text={block.content} />
+            </span>
+          ) : (
+            <div className={listItemTextClass(isCheckbox, block.checked)}>
+              {paragraphs.map((para, i) => (
+                <p key={i} className={i > 0 ? "mt-3" : ""}>
+                  <InlineMarkdown text={para} />
+                </p>
+              ))}
+            </div>
+          )}
         </div>
       );
     }

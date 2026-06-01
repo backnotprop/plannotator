@@ -30,8 +30,10 @@ interface AnnotationToolbarProps {
   onRequestComment?: (initialChar?: string) => void;
   /** Called when a quick label chip is selected */
   onQuickLabel?: (label: QuickLabel) => void;
-  /** Text to copy (for text selection, pass source.text) */
+  /** Text to copy when the button is clicked */
   copyText?: string;
+  /** Hide the copy button (set when a keyboard copy handler exists) */
+  hideCopyButton?: boolean;
   /** Close toolbar when element scrolls out of viewport */
   closeOnScrollOut?: boolean;
   /** Exit animation state */
@@ -49,6 +51,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   onRequestComment,
   onQuickLabel,
   copyText,
+  hideCopyButton = false,
   closeOnScrollOut = false,
   isExiting = false,
   onMouseEnter,
@@ -61,21 +64,28 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   const zapButtonRef = useRef<HTMLButtonElement>(null);
   const quickLabels = useMemo(() => getQuickLabels(), []);
 
+  useEffect(() => { setCopied(false); }, [element]);
+
   const handleCopy = async () => {
     let textToCopy = copyText;
     if (!textToCopy) {
       const codeEl = element.querySelector('code');
       textToCopy = codeEl?.textContent || element.textContent || '';
     }
-    await navigator.clipboard.writeText(textToCopy);
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+    } catch {
+      const textarea = document.createElement('textarea');
+      textarea.value = textToCopy;
+      textarea.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      textarea.remove();
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
-
-  // Reset copied state when element changes
-  useEffect(() => {
-    setCopied(false);
-  }, [element]);
 
   // Update position on scroll/resize
   useEffect(() => {
@@ -196,13 +206,17 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
         }
       `}</style>
       <div className="flex items-center p-1 gap-0.5">
-        <ToolbarButton
-          onClick={handleCopy}
-          icon={copied ? <CheckIcon /> : <CopyIcon />}
-          label={copied ? "Copied!" : "Copy"}
-          className={copied ? "text-success" : "text-muted-foreground hover:bg-muted hover:text-foreground"}
-        />
-        <div className="w-px h-5 bg-border mx-0.5" />
+        {!hideCopyButton && (
+          <>
+            <ToolbarButton
+              onClick={handleCopy}
+              icon={copied ? <CheckIcon /> : <CopyIcon />}
+              label={copied ? "Copied!" : "Copy"}
+              className={copied ? "text-success" : "text-muted-foreground hover:bg-muted hover:text-foreground"}
+            />
+            <div className="w-px h-5 bg-border mx-0.5" />
+          </>
+        )}
         <ToolbarButton
           onClick={() => handleTypeSelect(AnnotationType.DELETION)}
           icon={<TrashIcon />}

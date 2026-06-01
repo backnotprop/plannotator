@@ -31,6 +31,37 @@ jobs:
       - name: Run tests
         run: bun test
 
+  pi-extension-ai-runtime-windows:
+    # Exercises the Pi extension's Node/jiti server mirror on Windows with an
+    # npm-style `pi` shim pair. This catches regressions where `where pi`
+    # resolves the extensionless shim before pi.cmd and the Ask AI provider
+    # crashes before the plan review UI opens.
+    name: Pi extension AI runtime (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Generate Pi extension shared copies
+        shell: bash
+        run: bash apps/pi-extension/vendor.sh
+
+      - name: Build Pi AI runtime smoke
+        run: bun build scripts/smoke-pi-extension-ai-runtime.ts --target=node --outfile "$env:RUNNER_TEMP/pi-ai-runtime-smoke.mjs"
+
+      - name: Run Pi AI runtime smoke
+        run: node "$env:RUNNER_TEMP/pi-ai-runtime-smoke.mjs"
+
   install-cmd-windows:
     # End-to-end integration test for scripts/install.cmd on real cmd.exe.
     # The unit tests in scripts/install.test.ts are file-content string checks
@@ -297,3 +328,57 @@ jobs:
             throw "install.cmd exited $($p.ExitCode) but not via the unknown-flag guard. Expected 'Unknown option:' in stderr but got: $stderr"
           }
           Write-Host "✓ Unknown flag rejected with exit code $($p.ExitCode) via the unknown-flag guard"
+
+  install-ps1-windows:
+    # End-to-end integration test for scripts/install.ps1 on real PowerShell.
+    # This specifically covers PLANNOTATOR_DATA_DIR tilde expansion because
+    # installer config lookup happens before any shared runtime code is loaded.
+    name: install.ps1 (Windows integration)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run install.ps1 end-to-end
+        shell: pwsh
+        run: .\scripts\install.ps1 v0.17.1 -SkipAttestation
+
+      - name: Config opt-in resolves PLANNOTATOR_DATA_DIR tilde paths
+        shell: pwsh
+        run: |
+          $configDir = Join-Path $env:USERPROFILE "plannotator-ci-config"
+          New-Item -ItemType Directory -Force -Path $configDir | Out-Null
+          Set-Content -Path (Join-Path $configDir "config.json") -Value '{ "verifyAttestation": true }' -NoNewline
+
+          $installedBinary = "$env:LOCALAPPDATA\plannotator\plannotator.exe"
+          if (-not (Test-Path $installedBinary)) {
+            throw "Expected $installedBinary to exist from the earlier install.ps1 step, but it's missing."
+          }
+          $baselineHash = (Get-FileHash $installedBinary -Algorithm SHA256).Hash
+          $baselineWriteTime = (Get-Item $installedBinary).LastWriteTime
+
+          $env:PLANNOTATOR_DATA_DIR = '~\plannotator-ci-config'
+          $stderrFile = New-TemporaryFile
+          $p = Start-Process -Wait -PassThru -NoNewWindow pwsh `
+            -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','.\scripts\install.ps1','v0.17.1' `
+            -RedirectStandardError $stderrFile.FullName
+          $stderr = Get-Content $stderrFile.FullName -Raw -ErrorAction SilentlyContinue
+          Remove-Item $stderrFile.FullName -ErrorAction SilentlyContinue
+
+          if ($p.ExitCode -eq 0) {
+            throw "install.ps1 should have found config.json via PLANNOTATOR_DATA_DIR=~\plannotator-ci-config and rejected v0.17.1, but exited 0."
+          }
+          if ($stderr -notmatch 'predates') {
+            throw "install.ps1 exited $($p.ExitCode), but not via the expected attestation pre-flight. Expected 'predates' in stderr, got: $stderr"
+          }
+
+          $postHash = (Get-FileHash $installedBinary -Algorithm SHA256).Hash
+          $postWriteTime = (Get-Item $installedBinary).LastWriteTime
+          if ($postHash -ne $baselineHash) {
+            throw "Binary at $installedBinary was overwritten during the rejected config-driven verifyAttestation run."
+          }
+          if ($postWriteTime -ne $baselineWriteTime) {
+            throw "Binary at $installedBinary had its LastWriteTime modified during the rejected config-driven verifyAttestation run."
+          }
+
+          Write-Host "✓ PLANNOTATOR_DATA_DIR tilde expansion found config.json"
+          Write-Host "✓ Config-driven verifyAttestation rejected before download/install"

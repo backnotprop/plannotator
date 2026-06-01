@@ -12,6 +12,7 @@
     "./endpoints": "./endpoints.ts",
     "./providers/claude-agent-sdk": "./providers/claude-agent-sdk.ts",
     "./providers/codex-sdk": "./providers/codex-sdk.ts",
+    "./providers/command-path": "./providers/command-path.ts",
     "./providers/pi-sdk": "./providers/pi-sdk.ts",
     "./providers/opencode-sdk": "./providers/opencode-sdk.ts",
     "./providers/pi-sdk-node": "./providers/pi-sdk-node.ts"

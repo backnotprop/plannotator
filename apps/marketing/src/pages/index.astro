@@ -8,7 +8,7 @@ import AnnoReplace from '../components/landing/AnnoReplace.astro';
 ---
 <Base
   title="Plannotator - Plan & Code Review for AI Coding Agents"
-  description="Free, open-source plugin for Claude Code, OpenCode, Codex, and Pi. Review agent plans before they execute, annotate agent-written code, send structured feedback back — all locally."
+  description="Free, open-source review tooling for Claude Code, OpenCode, Codex, Pi, and Droid. Review agent plans before they execute, annotate agent-written code, and send structured feedback back locally."
 >
   <div class="min-h-screen bg-background text-foreground">
     <Nav />
@@ -323,8 +323,8 @@ import AnnoReplace from '../components/landing/AnnoReplace.astro';
               <span class="cap-desc">Annotate the agent's last message</span>
             </div>
             <div class="cap-item">
-              <code class="cap-cmd">/plannotator-review &lt;null|pr-url&gt;</code>
-              <span class="cap-desc">Code review for local changes or GitHub and GitLab PRs</span>
+              <code class="cap-cmd">/plannotator-review [PR_URL]</code>
+              <span class="cap-desc">Leave blank for local changes, or pass a GitHub/GitLab PR URL</span>
             </div>
           </div>
           <div class="cap-group">
@@ -400,6 +400,33 @@ import AnnoReplace from '../components/landing/AnnoReplace.astro';
             class="text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
             Read the docs &rarr;
+          </a>
+        </div>
+      </section>
+
+      <!-- Workspaces teaser -->
+      <section class="workspaces-cta-band py-14 px-8 border-t border-border/30 landing-reveal">
+        <div class="relative z-10 max-w-2xl mx-auto text-center">
+          <span class="workspaces-cta-pill mb-4">
+            <span class="w-1.5 h-1.5 rounded-full bg-primary"></span>
+            Plannotator Workspaces · waitlist
+          </span>
+          <h2 class="font-display text-xl sm:text-2xl font-semibold tracking-tight mb-3">
+            Turn agent plans and code reviews into <span class="text-primary">shared team knowledge</span>.
+          </h2>
+          <p class="text-sm text-muted-foreground leading-relaxed mb-5 max-w-[52ch] mx-auto">
+            Workspaces is the hosted layer for teams &mdash; shared plans,
+            review history, integrations, and verification standards. The
+            local plugin stays free &amp; open source.
+          </p>
+          <a
+            href="/workspaces/"
+            class="hero-cta-btn inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-border text-sm text-foreground font-medium hover:bg-muted/50 transition-colors"
+          >
+            Join the waitlist
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+            </svg>
           </a>
         </div>
       </section>

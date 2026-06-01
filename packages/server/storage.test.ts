@@ -68,17 +68,18 @@ describe("getPlanDir", () => {
 
   test("uses default when no custom path", () => {
     const result = getPlanDir();
-    expect(result).toMatch(/\.plannotator\/plans$/);
+    expect(result).toMatch(/plans$/);
+    expect(result).toBe(getPlanDir(null));
   });
 
   test("uses default for null", () => {
     const result = getPlanDir(null);
-    expect(result).toMatch(/\.plannotator\/plans$/);
+    expect(result).toMatch(/plans$/);
   });
 
   test("uses default for whitespace-only custom path", () => {
     const result = getPlanDir("   ");
-    expect(result).toMatch(/\.plannotator\/plans$/);
+    expect(result).toMatch(/plans$/);
     expect(result).not.toBe(process.cwd());
   });
 });

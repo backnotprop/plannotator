@@ -105,7 +105,7 @@ export interface PreparedLocalReviewDiff {
 }
 
 const GIT_DIFF_TYPES = new Set(["uncommitted", "staged", "unstaged", "last-commit", "branch", "merge-base", "all"]);
-const JJ_DIFF_TYPES = new Set(["jj-current", "jj-last", "jj-line", "jj-all"]);
+const JJ_DIFF_TYPES = new Set(["jj-current", "jj-last", "jj-line", "jj-evolog", "jj-all"]);
 
 function selectNearestProvider(
   candidates: Array<{ provider: VcsProvider; root: string | null; order: number }>,

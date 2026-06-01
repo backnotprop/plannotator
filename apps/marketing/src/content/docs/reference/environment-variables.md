@@ -16,9 +16,15 @@ All Plannotator environment variables and their defaults.
 | `PLANNOTATOR_PORT` | random (local) / `19432` (remote) | Fixed server port. When not set, local sessions use a random port; remote sessions default to `19432`. |
 | `PLANNOTATOR_BROWSER` | system default | Custom browser to open the UI in. macOS: app name or path. Linux/Windows: executable path. Can also be a script. Takes priority over `BROWSER`. Also settable per-invocation with `--browser`. |
 | `BROWSER` | (none) | Standard env var for specifying a browser. VS Code sets this automatically in devcontainers. Used as fallback when `PLANNOTATOR_BROWSER` is not set. |
+| `PLANNOTATOR_ORIGIN` | auto-detect | Explicit agent-origin override. Valid values: `claude-code`, `amp`, `droid`, `opencode`, `codex`, `copilot-cli`, `pi`, `gemini-cli`. Invalid values silently fall through to env-based detection. |
+| `PLANNOTATOR_READY_FILE` | (none) | Internal host-plugin side channel. When set, Plannotator appends server-ready JSON lines containing the local UI URL. |
+| `PLANNOTATOR_SKIP_BROWSER_OPEN` | unset | Internal host-plugin flag. Set to `1` to prevent Plannotator from opening the browser itself when the host will open the URL. |
 | `PLANNOTATOR_SHARE` | enabled | Set to `disabled` to turn off sharing. Hides share UI and import options. |
 | `PLANNOTATOR_SHARE_URL` | `https://share.plannotator.ai` | Base URL for share links. Set this when self-hosting the share portal. |
+| `PLANNOTATOR_DATA_DIR` | `~/.plannotator` | Override the base data directory. Supports `~` expansion. All data (plans, history, drafts, config, hooks, sessions) is stored under this directory.* |
 | `PLANNOTATOR_PLAN_TIMEOUT_SECONDS` | `345600` | OpenCode only. `submit_plan` wait timeout in seconds. Set `0` to disable timeout. |
+
+\* If you use the VS Code extension, make sure `PLANNOTATOR_DATA_DIR` is visible to both your terminal and VS Code. On macOS, apps launched from the Dock don't inherit shell env vars — launch VS Code from the terminal (`code .`) or set the variable via `launchctl setenv`.
 
 ## Annotation variables
 
@@ -49,6 +55,7 @@ When running your own paste service binary, these variables configure it:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `PLANNOTATOR_VERIFY_ATTESTATION` | off | Set to `1` or `true` to have the install script run `gh attestation verify` on the downloaded binary. Requires `gh` CLI installed and authenticated. Can also be set via `~/.plannotator/config.json` (`{ "verifyAttestation": true }`) or per-invocation via `--verify-attestation`. |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | Custom Claude Code config directory. The install script places hooks here instead of the default location. |
 
 ## Remote mode behavior
@@ -72,7 +79,7 @@ If either is present, Plannotator enables remote mode automatically when `PLANNO
 
 ## Port resolution order
 
-1. `PLANNOTATOR_PORT` environment variable (if valid integer 1-65535)
+1. `PLANNOTATOR_PORT` environment variable (if valid integer 0-65535; `0` means random)
 2. `19432` if in remote mode
 3. `0` (random) if in local mode
 

@@ -41,7 +41,9 @@ import {
 } from "./storage";
 import { getRepoInfo } from "./repo";
 import { detectProjectName } from "./project";
-import { saveConfig, detectGitUser, getServerConfig } from "./config";
+import { loadConfig, saveConfig, detectGitUser, getServerConfig } from "./config";
+import { readImprovementHook, getImprovementHookExpectedPath } from "@plannotator/shared/improvement-hooks";
+import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft } from "./draft";
 import { handleDoc, handleDocExists, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, handleFileBrowserFiles } from "./reference-handlers";
@@ -49,6 +51,8 @@ import { warmFileListCache } from "@plannotator/shared/resolve-file";
 import { createEditorAnnotationHandler } from "./editor-annotations";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { isWSL } from "./browser";
+import { AI_QUERY_ENDPOINT, createAIRuntime } from "./ai-runtime";
+import type { AIEndpoints } from "@plannotator/ai";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -152,6 +156,7 @@ export async function startPlannotatorServer(
   const draftKey = mode !== "archive" ? contentHash(plan) : "";
   const editorAnnotations = mode !== "archive" ? createEditorAnnotationHandler() : null;
   const externalAnnotations = mode !== "archive" ? createExternalAnnotationHandler("plan") : null;
+  const aiRuntime = mode !== "archive" ? await createAIRuntime() : null;
   const slug = mode !== "archive" ? generateSlug(plan) : "";
 
   // Lazy cache for in-session archive browsing (plan review sidebar tab)
@@ -295,15 +300,37 @@ export async function startPlannotatorServer(
             return handleDocExists(req);
           }
 
+          // API: Hook status for the Settings Hooks tab
+          if (url.pathname === "/api/hooks/status" && req.method === "GET") {
+            const config = loadConfig();
+            const hook = readImprovementHook("enterplanmode-improve");
+            const pfmEnabled = config.pfmReminder === true;
+            const composed = composeImproveContext({
+              pfmEnabled,
+              improvementHookContent: hook?.content ?? null,
+            });
+            return Response.json({
+              pfmReminder: { enabled: pfmEnabled },
+              improvementHook: {
+                present: !!hook,
+                filePath: hook?.filePath ?? getImprovementHookExpectedPath("enterplanmode-improve"),
+                fileSize: hook?.content?.length ?? null,
+                content: hook?.content ?? null,
+              },
+              composedLength: composed?.length ?? null,
+            });
+          }
+
           // API: Update user config (write-back to ~/.plannotator/config.json)
           if (url.pathname === "/api/config" && req.method === "POST") {
             try {
-              const body = (await req.json()) as { displayName?: string; diffOptions?: Record<string, unknown>; conventionalComments?: boolean; conventionalLabels?: unknown[] | null };
+              const body = (await req.json()) as { displayName?: string; diffOptions?: Record<string, unknown>; conventionalComments?: boolean; conventionalLabels?: unknown[] | null; pfmReminder?: boolean };
               const toSave: Record<string, unknown> = {};
               if (body.displayName !== undefined) toSave.displayName = body.displayName;
               if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
               if (body.conventionalComments !== undefined) toSave.conventionalComments = body.conventionalComments;
               if (body.conventionalLabels !== undefined) toSave.conventionalLabels = body.conventionalLabels;
+              if (body.pfmReminder !== undefined) toSave.pfmReminder = body.pfmReminder;
               if (Object.keys(toSave).length > 0) saveConfig(toSave as Parameters<typeof saveConfig>[0]);
               return Response.json({ ok: true });
             } catch {
@@ -387,6 +414,23 @@ export async function startPlannotatorServer(
             disableIdleTimeout: () => server.timeout(req, 0),
           });
           if (externalResponse) return externalResponse;
+
+          if (url.pathname.startsWith("/api/ai/")) {
+            if (!aiRuntime) {
+              if (url.pathname.slice("/api/ai/".length) === "capabilities" && req.method === "GET") {
+                return Response.json({ available: false, providers: [] });
+              }
+              return Response.json({ error: "AI backend not available" }, { status: 503 });
+            }
+            const handler = aiRuntime.endpoints[url.pathname as keyof AIEndpoints];
+            if (handler) {
+              if (url.pathname === AI_QUERY_ENDPOINT) {
+                server.timeout(req, 0);
+              }
+              return handler(req);
+            }
+            return Response.json({ error: "Not found" }, { status: 404 });
+          }
 
           // API: Save to notes (decoupled from approve/deny)
           if (url.pathname === "/api/save-notes" && req.method === "POST") {
@@ -596,6 +640,9 @@ export async function startPlannotatorServer(
     isRemote,
     waitForDecision: () => decisionPromise,
     ...(donePromise && { waitForDone: () => donePromise }),
-    stop: () => server.stop(),
+    stop: () => {
+      aiRuntime?.dispose();
+      server.stop();
+    },
   };
 }

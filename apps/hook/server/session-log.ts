@@ -1,17 +1,18 @@
 /**
  * Session Log Parser
  *
- * Extracts the last rendered assistant message from a Claude Code session log.
+ * Extracts the last rendered assistant message from local agent session logs.
  * Used by the "annotate-last" feature to let users annotate the most recent
  * assistant response in the annotation UI.
  *
- * Session logs are JSONL files at:
- *   ~/.claude/projects/{project-slug}/{session-id}.jsonl
+ * Currently supports:
+ *   - Claude Code: ~/.claude/projects/{project-slug}/{session-id}.jsonl
+ *   - Droid/Factory: ~/.factory/sessions/{project-slug}/{session-id}.jsonl
  *
  * Each line is a JSON object with a `type` field. Assistant messages may be
- * split across multiple lines sharing the same `message.id` (streamed chunks).
- * Text content blocks (`type: "text"` inside `message.content`) are what the
- * user sees rendered in chat.
+ * split across multiple lines sharing the same logical message id. Text
+ * content blocks (`type: "text"` inside `message.content`) are what the user
+ * sees rendered in chat.
  */
 
 import { readdirSync, statSync, readFileSync } from "node:fs";
@@ -19,8 +20,13 @@ import { spawnSync } from "node:child_process";
 import { join, dirname, basename } from "node:path";
 import { homedir } from "node:os";
 
-const DEFAULT_SESSIONS_DIR = join(homedir(), ".claude", "sessions");
-const DEFAULT_PROJECTS_DIR = join(homedir(), ".claude", "projects");
+const claudeConfigDir =
+  process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+const DEFAULT_SESSIONS_DIR = join(claudeConfigDir, "sessions");
+const DEFAULT_PROJECTS_DIR = join(claudeConfigDir, "projects");
+const factoryConfigDir =
+  process.env.FACTORY_CONFIG_DIR || join(homedir(), ".factory");
+const DEFAULT_FACTORY_SESSIONS_DIR = join(factoryConfigDir, "sessions");
 
 /**
  * Normalize a cwd for comparison. On Windows, filesystems are case-insensitive
@@ -38,9 +44,12 @@ export function normalizeCwdForCompare(cwd: string): string {
 
 export interface SessionLogEntry {
   type: string;
+  id?: string;
+  visibility?: string;
   message?: {
     id?: string;
     role?: string;
+    visibility?: string;
     content?: string | ContentBlock[];
   };
   [key: string]: unknown;
@@ -135,6 +144,53 @@ export function findSessionLogsForCwd(cwd: string, projectsDirOverride?: string)
   }
 
   return [];
+}
+
+/**
+ * Find Droid/Factory session log candidates for a given working directory.
+ * Returns all .jsonl paths sorted by mtime (most recent first).
+ */
+export function findDroidSessionLogsForCwd(
+  cwd: string,
+  sessionsDirOverride?: string,
+): string[] {
+  return findSessionLogsForCwd(cwd, sessionsDirOverride ?? DEFAULT_FACTORY_SESSIONS_DIR);
+}
+
+/**
+ * Walk up the directory tree trying each ancestor against the Droid/Factory
+ * sessions directory. Useful when the user `cd`'d into a subdirectory after
+ * the session started.
+ */
+export function findDroidSessionLogsByAncestorWalk(
+  cwd: string,
+  sessionsDirOverride?: string,
+): string[] {
+  return findSessionLogsByAncestorWalk(
+    cwd,
+    sessionsDirOverride ?? DEFAULT_FACTORY_SESSIONS_DIR,
+  );
+}
+
+/**
+ * Best-effort current Droid/Factory session log resolution for a cwd.
+ *
+ * Factory does not expose per-process session metadata, so the safest
+ * available selector is the newest exact-cwd log, falling back to the newest
+ * log from the first ancestor slug with any sessions. Callers should inspect
+ * only this selected log and fail cleanly if it contains no assistant reply,
+ * rather than falling through to older sibling sessions.
+ */
+export function resolveDroidSessionLogForCwd(
+  cwd: string,
+  sessionsDirOverride?: string,
+): string | null {
+  const sessionsDir = sessionsDirOverride ?? DEFAULT_FACTORY_SESSIONS_DIR;
+  const exactLogs = findDroidSessionLogsForCwd(cwd, sessionsDir);
+  if (exactLogs.length > 0) return exactLogs[0];
+
+  const ancestorLogs = findDroidSessionLogsByAncestorWalk(cwd, sessionsDir);
+  return ancestorLogs[0] ?? null;
 }
 
 // --- Session Metadata Resolution ---
@@ -432,12 +488,15 @@ export function resolveSessionLogByCwdScan(
  * Used as a fallback when session metadata resolution (PPID) is unavailable.
  * Stops at the filesystem root to avoid infinite loops.
  */
-export function findSessionLogsByAncestorWalk(cwd: string): string[] {
+export function findSessionLogsByAncestorWalk(
+  cwd: string,
+  projectsDirOverride?: string
+): string[] {
   let dir = dirname(cwd);
   if (dir === cwd) return [];
 
   while (true) {
-    const logs = findSessionLogsForCwd(dir);
+    const logs = findSessionLogsForCwd(dir, projectsDirOverride);
     if (logs.length > 0) return logs;
 
     const parent = dirname(dir);
@@ -477,16 +536,49 @@ const SYSTEM_USER_PREFIXES = [
   "<command-name>",
   "<local-command-stdout>",
   "<local-command-stderr>",
+  "<system-reminder>",
+  "<system-notification>",
 ];
+
+function getEntryRole(entry: SessionLogEntry): "user" | "assistant" | null {
+  if (entry.type === "user" || entry.type === "assistant") return entry.type;
+  const role = entry.message?.role;
+  return role === "user" || role === "assistant" ? role : null;
+}
+
+function getVisibleTextBlocks(content: string | ContentBlock[] | undefined): string[] {
+  if (typeof content === "string") {
+    return content.trim() ? [content] : [];
+  }
+  if (!Array.isArray(content)) return [];
+  return content
+    .filter((b: ContentBlock) => b.type === "text" && b.text?.trim())
+    .map((b: ContentBlock) => b.text!);
+}
+
+function getEntryVisibility(entry: SessionLogEntry): string | undefined {
+  return entry.visibility ?? entry.message?.visibility;
+}
+
+function isHiddenTranscriptEntry(entry: SessionLogEntry): boolean {
+  const visibility = getEntryVisibility(entry)?.trim().toLowerCase();
+  return visibility === "llm_only" || visibility === "assistant_only" || visibility === "hidden";
+}
+
+function getEntryMessageId(entry: SessionLogEntry): string | undefined {
+  return entry.message?.id ?? entry.id;
+}
 
 /**
  * Check if a session log entry is a human-typed user prompt
  * (as opposed to a tool result or system-generated user message).
  */
 export function isHumanPrompt(entry: SessionLogEntry): boolean {
-  if (entry.type !== "user") return false;
-  if (typeof entry.message?.content !== "string") return false;
-  const content = entry.message.content;
+  if (getEntryRole(entry) !== "user") return false;
+  if (isHiddenTranscriptEntry(entry)) return false;
+  const blocks = getVisibleTextBlocks(entry.message?.content);
+  if (blocks.length === 0) return false;
+  const content = blocks.join("\n");
   // Filter out system-generated user messages
   for (const prefix of SYSTEM_USER_PREFIXES) {
     if (content.startsWith(prefix)) return false;
@@ -498,23 +590,18 @@ export function isHumanPrompt(entry: SessionLogEntry): boolean {
  * Check if a session log entry is an assistant message with rendered text.
  */
 function hasTextContent(entry: SessionLogEntry): boolean {
-  if (entry.type !== "assistant") return false;
-  const content = entry.message?.content;
-  if (!Array.isArray(content)) return false;
-  return content.some(
-    (block: ContentBlock) => block.type === "text" && block.text?.trim()
-  );
+  if (getEntryRole(entry) !== "assistant") return false;
+  if (isHiddenTranscriptEntry(entry)) return false;
+  return getVisibleTextBlocks(entry.message?.content).length > 0;
 }
 
 /**
  * Extract text blocks from an assistant message's content array.
  */
 function extractTextBlocks(entry: SessionLogEntry): string[] {
-  const content = entry.message?.content;
-  if (!Array.isArray(content)) return [];
-  return content
-    .filter((b: ContentBlock) => b.type === "text" && b.text?.trim())
-    .map((b: ContentBlock) => b.text!);
+  if (getEntryRole(entry) !== "assistant") return [];
+  if (isHiddenTranscriptEntry(entry)) return [];
+  return getVisibleTextBlocks(entry.message?.content);
 }
 
 /**
@@ -531,7 +618,7 @@ export function findAnchorIndex(
   for (let i = end; i >= 0; i--) {
     if (!isHumanPrompt(entries[i])) continue;
     if (!anchorText) return i;
-    const content = entries[i].message!.content as string;
+    const content = getVisibleTextBlocks(entries[i].message?.content).join("\n");
     if (content.includes(anchorText)) return i;
   }
   return -1;
@@ -562,7 +649,7 @@ export function extractLastRenderedMessage(
     if (entry.type === "queue-operation") continue;
 
     // Skip non-human user messages (tool results, system-generated)
-    if (entry.type === "user" && !isHumanPrompt(entry)) continue;
+    if (getEntryRole(entry) === "user" && !isHumanPrompt(entry)) continue;
 
     // At a human prompt: if we already have text, stop.
     // If no text yet, skip and keep looking in earlier turns.
@@ -571,11 +658,11 @@ export function extractLastRenderedMessage(
       continue;
     }
 
-    if (entry.type !== "assistant") continue;
+    if (getEntryRole(entry) !== "assistant") continue;
 
     // If we already locked onto a message.id, collect earlier chunks of it
     if (targetMessageId) {
-      const msgId = entry.message?.id;
+      const msgId = getEntryMessageId(entry);
       if (msgId !== targetMessageId) break;
       const texts = extractTextBlocks(entry);
       if (texts.length > 0) {
@@ -586,7 +673,7 @@ export function extractLastRenderedMessage(
 
     // Haven't found target yet — look for assistant with text
     if (!hasTextContent(entry)) continue;
-    const msgId = entry.message?.id;
+    const msgId = getEntryMessageId(entry);
     if (!msgId) continue;
 
     targetMessageId = msgId;

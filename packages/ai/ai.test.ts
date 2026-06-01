@@ -13,6 +13,13 @@ import type {
   AIMessage,
   AIContext,
 } from "./types.ts";
+import {
+  buildWindowsCommandScriptSpawnCommand,
+  killWindowsProcessTree,
+  resolveCommandFromWhichOutput,
+  resolveWindowsCommandShim,
+  shouldSpawnViaShell,
+} from "./providers/command-path.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers — mock provider/session for testing
@@ -70,6 +77,110 @@ function mockProvider(name = "mock"): AIProvider {
     dispose() {},
   };
 }
+
+// ---------------------------------------------------------------------------
+// Command path helpers
+// ---------------------------------------------------------------------------
+
+describe("command path helpers", () => {
+  test("resolveWindowsCommandShim prefers a sibling .cmd for npm shims", () => {
+    const raw = String.raw`C:\Users\Andrew\AppData\Roaming\npm\pi`;
+    const resolved = resolveWindowsCommandShim(
+      raw,
+      "win32",
+      (path) => path === `${raw}.cmd`,
+    );
+
+    expect(resolved).toBe(`${raw}.cmd`);
+  });
+
+  test("resolveCommandFromWhichOutput skips extensionless Windows shims", () => {
+    const raw = String.raw`C:\Users\Andrew\AppData\Roaming\npm\pi`;
+    const resolved = resolveCommandFromWhichOutput(
+      `${raw}\r\n${raw}.cmd\r\n`,
+      "win32",
+      () => false,
+    );
+
+    expect(resolved).toBe(`${raw}.cmd`);
+  });
+
+  test("resolveCommandFromWhichOutput preserves the first non-Windows result", () => {
+    expect(
+      resolveCommandFromWhichOutput("/usr/local/bin/pi\n/usr/bin/pi\n", "darwin"),
+    ).toBe("/usr/local/bin/pi");
+  });
+
+  test("shouldSpawnViaShell only flags Windows command scripts", () => {
+    expect(
+      shouldSpawnViaShell(
+        String.raw`C:\Users\Andrew\AppData\Roaming\npm\pi.cmd`,
+        "win32",
+      ),
+    ).toBe(true);
+    expect(shouldSpawnViaShell(String.raw`C:\tools\pi.exe`, "win32")).toBe(false);
+    expect(shouldSpawnViaShell("/usr/local/bin/pi.cmd", "darwin")).toBe(false);
+  });
+
+  test("buildWindowsCommandScriptSpawnCommand wraps command scripts for Bun.spawn", () => {
+    const command = buildWindowsCommandScriptSpawnCommand(
+      String.raw`C:\Users\Andrew Ramos\AppData\Roaming\npm\pi.cmd`,
+      ["--mode", "rpc"],
+      "win32",
+      String.raw`C:\Windows\System32\cmd.exe`,
+    );
+
+    expect(command).toEqual([
+      String.raw`C:\Windows\System32\cmd.exe`,
+      "/d",
+      "/s",
+      "/c",
+      String.raw`"C:\Users\Andrew Ramos\AppData\Roaming\npm\pi.cmd" --mode rpc`,
+    ]);
+  });
+
+  test("buildWindowsCommandScriptSpawnCommand ignores native executables", () => {
+    expect(
+      buildWindowsCommandScriptSpawnCommand(
+        String.raw`C:\tools\pi.exe`,
+        ["--mode", "rpc"],
+        "win32",
+      ),
+    ).toBeNull();
+  });
+
+  test("killWindowsProcessTree invokes taskkill with tree flags on Windows", () => {
+    const calls: Array<{
+      command: string;
+      args: string[];
+      options: { stdio: "ignore"; windowsHide: boolean };
+    }> = [];
+    const killed = killWindowsProcessTree(1234, "win32", (command, args, options) => {
+      calls.push({ command, args, options });
+      return { status: 0 };
+    });
+
+    expect(killed).toBe(true);
+    expect(calls).toEqual([
+      {
+        command: "taskkill",
+        args: ["/pid", "1234", "/t", "/f"],
+        options: { stdio: "ignore", windowsHide: true },
+      },
+    ]);
+  });
+
+  test("killWindowsProcessTree skips non-Windows platforms", () => {
+    let called = false;
+    const killed = killWindowsProcessTree(1234, "darwin", () => {
+      called = true;
+      return { status: 0 };
+    });
+
+    expect(killed).toBe(false);
+    expect(called).toBe(false);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // SessionManager
@@ -205,12 +316,21 @@ describe("Context builders", () => {
   test("buildSystemPrompt for plan-review", () => {
     const ctx: AIContext = {
       mode: "plan-review",
-      plan: { plan: "# My Plan\n\nStep 1: do things" },
+      plan: {
+        plan: "# My Plan\n\nStep 1: do things",
+        previousPlan: "# Old Plan",
+        version: 3,
+        totalVersions: 4,
+        project: "plannotator",
+      },
     };
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain("Plannotator");
     expect(prompt).toContain("# My Plan");
     expect(prompt).toContain("Step 1: do things");
+    expect(prompt).toContain("Plan version: 3 of 4");
+    expect(prompt).toContain("Project: plannotator");
+    expect(prompt).toContain("# Old Plan");
   });
 
   test("buildSystemPrompt for code-review", () => {
@@ -226,11 +346,20 @@ describe("Context builders", () => {
   test("buildSystemPrompt for annotate", () => {
     const ctx: AIContext = {
       mode: "annotate",
-      annotate: { content: "# Doc\nSome content", filePath: "/tmp/test.md" },
+      annotate: {
+        content: "# Doc\nSome content",
+        filePath: "/tmp/test.md",
+        sourceInfo: "https://example.com/doc.html",
+        sourceConverted: true,
+        renderAs: "html",
+      },
     };
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain("Plannotator");
     expect(prompt).toContain("/tmp/test.md");
+    expect(prompt).toContain("https://example.com/doc.html");
+    expect(prompt).toContain("Render mode: html");
+    expect(prompt).toContain("converted before annotation");
   });
 
   test("buildForkPreamble includes context and instructions", () => {
@@ -400,6 +529,30 @@ describe("AI endpoints", () => {
     expect(data.providers[0].capabilities.fork).toBe(true);
   });
 
+  test("capabilities waits for pending provider discovery", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    const provider = mockProvider("pi-sdk") as AIProvider & {
+      models?: Array<{ id: string; label: string; default?: boolean }>;
+    };
+    reg.register(provider);
+    const endpoints = createAIEndpoints({
+      registry: reg,
+      sessionManager: sm,
+      beforeCapabilities: async () => {
+        provider.models = [{ id: "pi/model", label: "Pi Model", default: true }];
+      },
+    });
+
+    const res = await endpoints["/api/ai/capabilities"](
+      new Request("http://localhost/api/ai/capabilities")
+    );
+    const data = await res.json();
+    expect(data.providers[0].models).toEqual([
+      { id: "pi/model", label: "Pi Model", default: true },
+    ]);
+  });
+
   test("capabilities lists multiple providers", async () => {
     const { reg, endpoints } = setup();
     reg.register(mockProvider("claude-agent-sdk"), "claude-1");
@@ -479,6 +632,34 @@ describe("AI endpoints", () => {
       })
     );
     expect(createRes.status).toBe(200);
+  });
+
+  test("session creation clamps client-supplied cost controls", async () => {
+    const { reg, endpoints } = setup();
+    let seenOptions: { maxTurns?: number; maxBudgetUsd?: number } | null = null;
+    reg.register({
+      ...mockProvider("mock"),
+      async createSession(opts) {
+        seenOptions = opts;
+        return mockSession(`session-${++sessionCounter}`, null);
+      },
+    });
+
+    const createRes = await endpoints["/api/ai/session"](
+      new Request("http://localhost/api/ai/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: { mode: "plan-review", plan: { plan: "# Test" } },
+          maxTurns: 9999,
+          maxBudgetUsd: 9999,
+        }),
+      })
+    );
+
+    expect(createRes.status).toBe(200);
+    expect(seenOptions?.maxTurns).toBe(99);
+    expect(seenOptions?.maxBudgetUsd).toBe(5);
   });
 
   test("session creation fails for unknown provider ID", async () => {

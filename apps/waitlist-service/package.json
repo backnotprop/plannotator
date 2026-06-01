@@ -1,0 +1,17 @@
+{
+  "name": "@plannotator/waitlist-service",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create plannotator-waitlist",
+    "db:migrate": "wrangler d1 execute plannotator-waitlist --remote --file=./schema.sql",
+    "db:migrate:local": "wrangler d1 execute plannotator-waitlist --local --file=./schema.sql",
+    "db:export": "wrangler d1 execute plannotator-waitlist --remote --command='SELECT * FROM waitlist ORDER BY created_at DESC' --json"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241218.0",
+    "wrangler": "^3.99.0"
+  }
+}

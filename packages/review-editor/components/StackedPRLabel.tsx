@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import * as Popover from '@radix-ui/react-popover';
-import { getPlatformLabel } from '@plannotator/shared/pr-provider';
+import { getPlatformLabel } from '@plannotator/shared/pr-types';
 import { buildMinimalStackTree } from '@plannotator/shared/pr-stack';
 import { getItem, setItem } from '@plannotator/ui/utils/storage';
-import type { PRMetadata } from '@plannotator/shared/pr-provider';
+import type { PRMetadata } from '@plannotator/shared/pr-types';
 import type { PRDiffScope, PRDiffScopeOption, PRStackInfo, PRStackTree, PRStackNode } from '@plannotator/shared/pr-stack';
 
 interface StackedPRLabelProps {

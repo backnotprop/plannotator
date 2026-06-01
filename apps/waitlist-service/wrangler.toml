@@ -1,0 +1,25 @@
+name = "plannotator-waitlist"
+main = "targets/cloudflare.ts"
+compatibility_date = "2024-12-01"
+
+# Run `bun run db:create` once, then paste the returned `database_id` below.
+[[d1_databases]]
+binding = "WAITLIST_DB"
+database_name = "plannotator-waitlist"
+database_id = "797d1a5a-d2da-4fc1-8aab-debe8c54c50d"
+
+[vars]
+# Comma-separated list of origins allowed to POST signups.
+# Override at deploy time with `wrangler secret put ALLOWED_ORIGINS` if you
+# want to keep the value private.
+ALLOWED_ORIGINS = "https://plannotator.ai,http://localhost:3002"
+
+# Optional bearer token required to call GET /admin/list.
+# Set with `wrangler secret put ADMIN_TOKEN`.
+# ADMIN_TOKEN = ""
+
+# Cloudflare Turnstile secret. When set, every /signup request must include a
+# valid `turnstile_token` produced by the widget on the marketing page.
+# Set with `wrangler secret put TURNSTILE_SECRET_KEY`. Pair this with the
+# public sitekey baked into the marketing page via PUBLIC_TURNSTILE_SITEKEY.
+# TURNSTILE_SECRET_KEY = ""

@@ -10,11 +10,12 @@ import { renderInlineMarkdown } from '../utils/renderInlineMarkdown';
 import { formatRelativeTime } from '../utils/formatRelativeTime';
 import { AITab } from './AITab';
 import { AgentsTab } from '@plannotator/ui/components/AgentsTab';
-import type { PRMetadata } from '@plannotator/shared/pr-provider';
+import type { PRMetadata } from '@plannotator/shared/pr-types';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import type { AgentJobInfo, AgentCapabilities } from '@plannotator/ui/types';
 import type { DiffFile } from '../types';
+import type { AIProviderOption } from '@plannotator/ui/utils/aiProvider';
 
 export type ReviewSidebarTab = 'annotations' | 'ai' | 'agents';
 
@@ -44,7 +45,7 @@ interface ReviewSidebarProps {
   onAskGeneral?: (question: string) => void;
   aiPermissionRequests?: import('../hooks/useAIChat').PendingPermission[];
   onRespondToPermission?: (requestId: string, allow: boolean) => void;
-  aiProviders?: Array<{ id: string; name: string; models?: Array<{ id: string; label: string; default?: boolean }> }>;
+  aiProviders?: AIProviderOption[];
   aiConfig?: { providerId: string | null; model: string | null; reasoningEffort?: string | null };
   onAIConfigChange?: (config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => void;
   hasAISession?: boolean;

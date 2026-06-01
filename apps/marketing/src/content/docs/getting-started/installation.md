@@ -1,6 +1,6 @@
 ---
 title: "Installation"
-description: "How to install Plannotator for Claude Code, Codex, OpenCode, Pi, and other agent hosts."
+description: "How to install Plannotator for Claude Code, Codex, OpenCode, Pi, Amp, Droid, and other agent hosts."
 sidebar:
   order: 1
 section: "Getting Started"
@@ -138,7 +138,7 @@ For manual setup, enable hooks in `~/.codex/config.toml` or `<repo>/.codex/confi
 
 ```toml
 [features]
-codex_hooks = true
+hooks = true
 ```
 
 Then add `hooks.json` next to that config layer:
@@ -193,3 +193,66 @@ pi -e npm:@plannotator/pi-extension
 Start plan mode with `pi --plan`, or toggle mid-session with `/plannotator` or `Ctrl+Alt+P`. The extension provides file-based plan review, code review (`/plannotator-review`), markdown annotation (`/plannotator-annotate`), bash safety gating during planning, and progress tracking during execution.
 
 See [Plannotator Meets Pi](/blog/plannotator-meets-pi) for the full walkthrough.
+
+## Amp
+
+Plannotator's Amp integration is currently commands-only. It adds command-palette actions for code review, file annotation, and annotating Amp's latest assistant message.
+
+Install the CLI first:
+
+```bash
+curl -fsSL https://plannotator.ai/install.sh | bash
+```
+
+Then install the Amp plugin:
+
+```bash
+mkdir -p ~/.config/amp/plugins
+curl -fsSL https://raw.githubusercontent.com/backnotprop/plannotator/main/apps/amp-plugin/plannotator.ts \
+  -o ~/.config/amp/plugins/plannotator.ts
+```
+
+Restart Amp or run `plugins: reload` from the command palette.
+
+This adds:
+
+```text
+Plannotator: Review changes
+Plannotator: Review changes or PR
+Plannotator: Annotate file
+Plannotator: Annotate last answer
+```
+
+For `Plannotator: Review changes or PR`, leave the input blank to review local changes, or enter a PR/MR URL.
+
+The plugin uses Amp's thread API for `Annotate last answer`, so it does not read transcript logs.
+
+## Droid
+
+Plannotator's Droid integration is currently commands-only. It does not intercept Droid's planning flow yet.
+
+Install the CLI first:
+
+```bash
+curl -fsSL https://plannotator.ai/install.sh | bash
+```
+
+Then install the Droid plugin:
+
+```bash
+droid plugin marketplace add https://github.com/backnotprop/plannotator
+droid plugin install plannotator@plannotator
+```
+
+Open a fresh Droid session after installing.
+
+This adds the following slash commands:
+
+```text
+/plannotator-review
+/plannotator-annotate <file|folder|url>
+/plannotator-last
+/plannotator-archive
+```
+
+Those commands open the browser-based Plannotator review UI and send the result back into the Droid session.

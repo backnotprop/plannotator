@@ -140,7 +140,6 @@ echo ""
 echo "Launching Pi..."
 echo ""
 
-# Install local extension and launch Pi
+# Launch Pi with only the local extension (no globally installed extensions)
 cd "$SANDBOX_DIR"
-pi install "$PI_EXT_DIR"
-pi
+pi --no-extensions -e "$PI_EXT_DIR"

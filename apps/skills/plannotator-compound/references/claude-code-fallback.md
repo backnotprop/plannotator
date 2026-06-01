@@ -3,7 +3,7 @@
 Read this file only when the user does **not** have a usable Plannotator archive.
 
 This is the secondary path for ordinary Claude Code users whose denial history
-exists in `~/.claude/projects/` rather than `~/.plannotator/plans/`.
+exists in `~/.claude/projects/` rather than the Plannotator plans directory (`$PLANNOTATOR_DATA_DIR/plans/` or `~/.plannotator/plans/`).
 
 The goal is the same as the main skill:
 
@@ -107,7 +107,7 @@ does not contain those artifacts.
 ### Previous Report Detection In Fallback Mode
 
 Previous report detection still applies. Check the user's home directory or
-`~/.plannotator/plans/` for existing `compound-planning-report*.html` files. If
+the Plannotator plans directory (`${PLANNOTATOR_DATA_DIR:-~/.plannotator}/plans/`) for existing `compound-planning-report*.html` files. If
 found, offer the same incremental vs full choice as Plannotator mode. In
 incremental mode, filter the parser output by timestamp rather than by filename
 date — use the `timestamp` field in each JSON record.
@@ -246,7 +246,7 @@ feedback and therefore could not contribute to the pattern analysis.
 ### Versioned Report Naming
 
 Versioned naming (`v2`, `v3`, etc.) applies to fallback mode too. Save reports
-to `~/.plannotator/plans/` (create the directory if it doesn't exist) so that
+to the Plannotator plans directory (`${PLANNOTATOR_DATA_DIR:-~/.plannotator}/plans/`, create the directory if it doesn't exist) so that
 all compound planning reports live in the same location regardless of data source.
 
 ## Summary In Fallback Mode

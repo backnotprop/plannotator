@@ -1,9 +1,7 @@
-import { execSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { createServer } from "node:http";
 import os from "node:os";
-
-import { Readable } from "node:stream";
 
 import { contentHash, deleteDraft } from "../generated/draft.js";
 import { loadConfig, saveConfig, detectGitUser, getServerConfig } from "../generated/config.js";
@@ -22,7 +20,7 @@ import {
 	type PRMetadata,
 	type PRReviewFileComment,
 	prRefFromMetadata,
-} from "../generated/pr-provider.js";
+} from "../generated/pr-types.js";
 import {
 	type DiffType,
 	type GitContext,
@@ -53,7 +51,8 @@ import {
 	handleImageRequest,
 	handleUploadRequest,
 } from "./handlers.js";
-import { html, json, parseBody, requestUrl, toWebRequest } from "./helpers.js";
+import { html, json, parseBody, requestUrl } from "./helpers.js";
+import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.js";
 
 import { isRemoteSession, listenOnPort } from "./network.js";
 import {
@@ -85,6 +84,13 @@ import {
 } from "../generated/claude-review.js";
 import { createTourSession, TOUR_EMPTY_OUTPUT_ERROR } from "../generated/tour-review.js";
 import {
+	type CodeNavRequest,
+	type CodeNavRuntime,
+	resolveCodeNav,
+	validateCodeNavRequest,
+	extractChangedFiles,
+} from "../generated/code-nav.js";
+import {
 	canStageFiles,
 	detectRemoteDefaultCompareTarget,
 	getVcsContext,
@@ -95,6 +101,37 @@ import {
 	stageFile,
 	unstageFile,
 } from "./vcs.js";
+
+const piCodeNavRuntime: CodeNavRuntime = {
+	runCommand(command, args, options) {
+		return new Promise((resolve) => {
+			const proc = spawn(command, args, {
+				cwd: options?.cwd,
+				stdio: ["ignore", "pipe", "pipe"],
+			});
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			if (options?.timeoutMs) {
+				timer = setTimeout(() => proc.kill(), options.timeoutMs);
+			}
+			const stdoutChunks: Buffer[] = [];
+			const stderrChunks: Buffer[] = [];
+			proc.stdout!.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
+			proc.stderr!.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+			proc.on("close", (code: number | null) => {
+				if (timer) clearTimeout(timer);
+				resolve({
+					stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
+					stderr: Buffer.concat(stderrChunks).toString("utf-8"),
+					exitCode: code ?? 1,
+				});
+			});
+			proc.on("error", () => {
+				if (timer) clearTimeout(timer);
+				resolve({ stdout: "", stderr: "command not found", exitCode: 1 });
+			});
+		});
+	},
+};
 
 /** Detect if running inside WSL (Windows Subsystem for Linux) */
 function detectWSL(): boolean {
@@ -168,15 +205,15 @@ export async function startReviewServer(options: {
 		? getPRDiffScopeOptions(prMeta, !!(options.worktreePool || options.agentCwd))
 		: [];
 
-	let prListCache: import("../generated/pr-provider.js").PRListItem[] | null = null;
+	let prListCache: import("../generated/pr-types.js").PRListItem[] | null = null;
 	let prListCacheTime = 0;
 	const prSwitchCache = new Map<string, { metadata: PRMetadata; rawPatch: string }>();
 	if (isPRMode && prMeta) prSwitchCache.set(prMeta.url, { metadata: prMeta, rawPatch: options.rawPatch });
-	const prStackTreeCache = new Map<string, import("../generated/pr-provider.js").PRStackTree | null>();
+	const prStackTreeCache = new Map<string, import("../generated/pr-types.js").PRStackTree | null>();
 
 	// Fetch full stack tree (best-effort — always try in PR mode so root PRs
 	// that target the default branch can still discover descendant PRs)
-	let prStackTree: import("../generated/pr-provider.js").PRStackTree | null = null;
+	let prStackTree: import("../generated/pr-types.js").PRStackTree | null = null;
 	if (prRef && prMeta) {
 		try {
 			prStackTree = await fetchPRStack(prRef, prMeta);
@@ -403,116 +440,7 @@ export async function startReviewServer(options: {
 		resolveDecision = r;
 	});
 
-	// AI provider setup (graceful — AI features degrade if SDK unavailable)
-	// Types are `any` because @plannotator/ai is a dynamic import
-	let aiEndpoints: Record<string, (req: Request) => Promise<Response>> | null =
-		null;
-	let aiSessionManager: { disposeAll: () => void } | null = null;
-	let aiRegistry: { disposeAll: () => void } | null = null;
-	try {
-		const ai = await import("../generated/ai/index.js");
-		const registry = new ai.ProviderRegistry();
-		const sessionManager = new ai.SessionManager();
-
-		// which() helper for Node.js
-		const whichCmd = (cmd: string): string | null => {
-			try {
-				return (
-					execSync(`which ${cmd}`, {
-						encoding: "utf-8",
-						stdio: ["pipe", "pipe", "pipe"],
-					}).trim() || null
-				);
-			} catch {
-				return null;
-			}
-		};
-
-		// Claude Agent SDK
-		try {
-			// @ts-ignore — dynamic import; Bun-only types resolved at runtime
-			await import("../generated/ai/providers/claude-agent-sdk.js");
-			const claudePath = whichCmd("claude");
-			const provider = await ai.createProvider({
-				type: "claude-agent-sdk",
-				cwd: process.cwd(),
-				...(claudePath && { claudeExecutablePath: claudePath }),
-			});
-			registry.register(provider);
-		} catch {
-			/* Claude SDK not available */
-		}
-
-		// Codex SDK
-		try {
-			// @ts-ignore — dynamic import; Bun-only types resolved at runtime
-			await import("../generated/ai/providers/codex-sdk.js");
-			await import("@openai/codex-sdk");
-			const codexPath = whichCmd("codex");
-			const provider = await ai.createProvider({
-				type: "codex-sdk",
-				cwd: process.cwd(),
-				...(codexPath && { codexExecutablePath: codexPath }),
-			});
-			registry.register(provider);
-		} catch {
-			/* Codex SDK not available */
-		}
-
-		// Pi SDK (Node.js variant)
-		try {
-			await import("../generated/ai/providers/pi-sdk-node.js");
-			const piPath = whichCmd("pi");
-			if (piPath) {
-				const provider = await ai.createProvider({
-					type: "pi-sdk",
-					cwd: process.cwd(),
-					piExecutablePath: piPath,
-				} as any);
-				if (provider && "fetchModels" in provider) {
-					await (
-						provider as { fetchModels: () => Promise<void> }
-					).fetchModels();
-				}
-				registry.register(provider);
-			}
-		} catch {
-			/* Pi not available */
-		}
-
-		// OpenCode SDK
-		try {
-			// @ts-ignore — dynamic import; Bun-only types resolved at runtime
-			await import("../generated/ai/providers/opencode-sdk.js");
-			const opencodePath = whichCmd("opencode");
-			if (opencodePath) {
-				const provider = await ai.createProvider({
-					type: "opencode-sdk",
-					cwd: process.cwd(),
-				});
-				if (provider && "fetchModels" in provider) {
-					await (
-						provider as { fetchModels: () => Promise<void> }
-					).fetchModels();
-				}
-				registry.register(provider);
-			}
-		} catch {
-			/* OpenCode not available */
-		}
-
-		if (registry.size > 0) {
-			aiEndpoints = ai.createAIEndpoints({
-				registry,
-				sessionManager,
-				getCwd: resolveAgentCwd,
-			});
-			aiSessionManager = sessionManager;
-			aiRegistry = registry;
-		}
-	} catch {
-		/* AI backbone not available */
-	}
+	const aiRuntime = await createPiAIRuntime({ getCwd: resolveAgentCwd });
 
 	const server = createServer(async (req, res) => {
 		const url = requestUrl(req);
@@ -965,6 +893,48 @@ export async function startReviewServer(options: {
 			}
 
 			json(res, { error: "No file access available" }, 400);
+		} else if (url.pathname === "/api/code-nav/resolve" && req.method === "POST") {
+			const hasCodeNavAccess = !!options.gitContext || !!options.agentCwd || !!options.worktreePool;
+			if (!hasCodeNavAccess) {
+				json(res, { error: "Code navigation requires local access" }, 400);
+				return;
+			}
+			try {
+				const body = (await parseBody(req)) as unknown as CodeNavRequest;
+				const error = validateCodeNavRequest(body);
+				if (error) {
+					json(res, { error }, 400);
+					return;
+				}
+				const navCwd = resolveAgentCwd();
+				const changedFiles = extractChangedFiles(currentPatch);
+				const result = await resolveCodeNav(piCodeNavRuntime, body, navCwd, changedFiles);
+				json(res, result);
+			} catch (err) {
+				json(res, { error: err instanceof Error ? err.message : "Code navigation failed" }, 500);
+			}
+		} else if (url.pathname === "/api/code-nav/file" && req.method === "GET") {
+			const hasCodeNavAccess = !!options.gitContext || !!options.agentCwd || !!options.worktreePool;
+			if (!hasCodeNavAccess) {
+				json(res, { error: "Code navigation requires local access" }, 400);
+				return;
+			}
+			const filePath = url.searchParams.get("path");
+			if (!filePath) {
+				json(res, { error: "Missing path" }, 400);
+				return;
+			}
+			try { validateFilePath(filePath); } catch {
+				json(res, { error: "Invalid path" }, 400);
+				return;
+			}
+			try {
+				const navCwd = resolveAgentCwd();
+				const content = readFileSync(`${navCwd}/${filePath}`, "utf-8");
+				json(res, { content });
+			} catch {
+				json(res, { error: "File not found" }, 404);
+			}
 		} else if (url.pathname === "/api/config" && req.method === "POST") {
 			try {
 				const body = (await parseBody(req)) as { displayName?: string; diffOptions?: Record<string, unknown>; conventionalComments?: boolean };
@@ -1017,34 +987,8 @@ export async function startReviewServer(options: {
 			return;
 		} else if (await agentJobs.handle(req, res, url)) {
 			return;
-		} else if (aiEndpoints && url.pathname.startsWith("/api/ai/")) {
-			const handler = aiEndpoints[url.pathname];
-			if (handler) {
-				try {
-					const webReq = toWebRequest(req);
-					const webRes = await handler(webReq);
-					// Pipe Web Response → node:http response
-					const headers: Record<string, string> = {};
-					webRes.headers.forEach((v, k) => {
-						headers[k] = v;
-					});
-					res.writeHead(webRes.status, headers);
-					if (webRes.body) {
-						const nodeStream = Readable.fromWeb(webRes.body as any);
-						nodeStream.pipe(res);
-					} else {
-						res.end();
-					}
-				} catch (err) {
-					json(
-						res,
-						{ error: err instanceof Error ? err.message : "AI endpoint error" },
-						500,
-					);
-				}
-				return;
-			}
-			json(res, { error: "Not found" }, 404);
+		} else if (url.pathname.startsWith("/api/ai/") && await handlePiAIRequest(req, res, url, aiRuntime)) {
+			return;
 		} else if (url.pathname === "/api/exit" && req.method === "POST") {
 			deleteDraft(draftKey);
 			resolveDecision({ approved: false, feedback: '', annotations: [], exit: true });
@@ -1087,8 +1031,7 @@ export async function startReviewServer(options: {
 		stop: () => {
 			process.removeListener("exit", exitHandler);
 			agentJobs.killAll();
-			aiSessionManager?.disposeAll();
-			aiRegistry?.disposeAll();
+			aiRuntime?.dispose();
 			server.close();
 			// Invoke cleanup callback (e.g., remove temp worktree)
 			if (options.onCleanup) {

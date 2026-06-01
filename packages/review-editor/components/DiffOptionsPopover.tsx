@@ -6,6 +6,7 @@ import {
   OVERFLOW_OPTIONS,
   INDICATOR_OPTIONS,
   LINE_DIFF_OPTIONS,
+  LINE_BG_INTENSITY_OPTIONS,
 } from '@plannotator/ui/components/Settings';
 
 function CompactSegmented<T extends string>({ options, value, onChange }: {
@@ -95,6 +96,7 @@ export const DiffOptionsPopover: React.FC = () => {
   const diffShowBackground = useConfigValue('diffShowBackground');
   const diffHideWhitespace = useConfigValue('diffHideWhitespace');
   const diffTabSize = useConfigValue('diffTabSize');
+  const diffLineBgIntensity = useConfigValue('diffLineBgIntensity');
 
   return (
     <Popover.Root>
@@ -144,6 +146,11 @@ export const DiffOptionsPopover: React.FC = () => {
             <div>
               <CompactToggle checked={diffShowLineNumbers} onChange={(v) => configStore.set('diffShowLineNumbers', v)} label="Line numbers" />
               <CompactToggle checked={diffShowBackground} onChange={(v) => configStore.set('diffShowBackground', v)} label="Diff background" />
+              {diffShowBackground && (
+                <div className="pl-3 pr-0.5 pb-1 -mt-0.5">
+                  <CompactSegmented options={LINE_BG_INTENSITY_OPTIONS} value={diffLineBgIntensity} onChange={(v) => configStore.set('diffLineBgIntensity', v)} />
+                </div>
+              )}
               <CompactToggle checked={diffHideWhitespace} onChange={(v) => configStore.set('diffHideWhitespace', v)} label="Hide whitespace" />
               <CompactStepper
                 label="Tab size"

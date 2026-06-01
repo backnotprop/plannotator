@@ -4,6 +4,7 @@
 @source "../ui/components/**/*.tsx";
 @source "../ui/hooks/**/*.ts";
 @source "./*.tsx";
+@source "./components/**/*.tsx";
 
 @import "../ui/theme.css";
 

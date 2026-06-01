@@ -67,8 +67,8 @@ Templates use `{{variable}}` placeholders. Here's what each one contains:
 |----------|-------------|
 | `{{feedback}}` | Your annotations, exported as structured text. This is the main content. |
 | `{{toolName}}` | The tool the agent needs to call to resubmit (`ExitPlanMode`, `submit_plan`, etc.). Varies by runtime. |
-| `{{planFileRule}}` | A conditional line telling the agent where the plan file is saved and how to edit it. Empty string when there's no file path. |
-| `{{planFilePath}}` | Path to the plan file being reviewed. |
+| `{{planFileRule}}` | A conditional line about the plan file location. In edit-based mode (OpenCode), this is always empty since the plugin manages the backing file internally. |
+| `{{planFilePath}}` | Path to the plan's backing file. In edit-based mode (OpenCode), this points to the plugin-managed backing file. |
 | `{{doneMsg}}` | Optional checklist instruction or save-path info, depending on the runtime. |
 | `{{fileHeader}}` | Either `"File"` or `"Folder"`, depending on what was annotated. |
 | `{{filePath}}` | Path to the annotated file or folder. |
@@ -107,7 +107,7 @@ The resolution order is:
 
 Blank or whitespace-only values are treated as "not set" and fall through to the next level. This means you can clear a runtime override by setting it to `""` without affecting others.
 
-Valid runtime keys: `claude-code`, `opencode`, `copilot-cli`, `pi`, `codex`, `gemini-cli`.
+Valid runtime keys: `claude-code`, `amp`, `droid`, `opencode`, `copilot-cli`, `pi`, `codex`, `gemini-cli`.
 
 ## Full config example
 
@@ -137,6 +137,7 @@ Here's a config that customizes several messages at once:
 If you don't set any `prompts` config, everything works the same as it always has. The built-in defaults are the exact messages Plannotator has always sent. Here are the key ones for reference:
 
 **Plan denied (default):**
+
 ```
 YOUR PLAN WAS NOT APPROVED.
 
@@ -152,12 +153,14 @@ Rules:
 ```
 
 **Plan approved (default, Pi runtime):**
+
 ```
 Plan approved. You now have full tool access (read, bash, edit,
 write). Execute the plan in {{planFilePath}}. {{doneMsg}}
 ```
 
 **Annotate file feedback (default):**
+
 ```
 # Markdown Annotations
 

@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import mermaid from 'mermaid';
 import type { Block } from '../types';
+import { normalizeMermaidSvgMarkup } from './mermaidSvg';
 
 mermaid.initialize({
   startOnLoad: false,
@@ -127,7 +128,7 @@ function fitBoundsToContainer(bounds: ViewBox, containerRect: DOMRect): ViewBox 
 /**
  * Renders a mermaid diagram block with zoom controls.
  */
-export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
+const MermaidBlockImpl: React.FC<{ block: Block }> = ({ block }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const expandedOverlayRef = useRef<HTMLDivElement>(null);
   const [svg, setSvg] = useState('');
@@ -191,8 +192,9 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
         const id = `mermaid-${block.id}`;
         const { svg: renderedSvg } = await mermaid.render(id, block.content);
         if (!cancelled) {
-          naturalBoundsRef.current = parseViewBoxFromMarkup(renderedSvg);
-          setSvg(renderedSvg);
+          const normalizedSvg = normalizeMermaidSvgMarkup(renderedSvg);
+          naturalBoundsRef.current = parseViewBoxFromMarkup(normalizedSvg);
+          setSvg(normalizedSvg);
           setError(null);
         }
       } catch (err) {
@@ -528,6 +530,7 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
   const diagramBody = (
     <div
       ref={containerRef}
+      data-pinpoint-ignore=""
       className={`rounded-xl bg-muted/30 border border-border/30 overflow-hidden select-none cursor-grab ${isExpanded ? 'h-full min-h-0' : 'h-[min(65vh,36rem)] min-h-[20rem]'}`}
       dangerouslySetInnerHTML={{ __html: svg }}
       onMouseDown={handleMouseDown}
@@ -567,3 +570,10 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
     </>
   );
 };
+
+export const MermaidBlock = React.memo(
+  MermaidBlockImpl,
+  (prev, next) =>
+    prev.block.id === next.block.id &&
+    prev.block.content === next.block.content,
+);

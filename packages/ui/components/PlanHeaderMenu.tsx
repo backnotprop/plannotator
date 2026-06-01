@@ -8,9 +8,16 @@ import {
 import { useTheme } from './ThemeProvider';
 import { SunIcon, MoonIcon, SystemIcon } from './icons/themeIcons';
 import { ReviewAgentsIcon } from './ReviewAgentsIcon';
+import { MenuVersionSection } from './MenuVersionSection';
+import { TextShimmer } from './TextShimmer';
+import type { UpdateInfo } from '../hooks/useUpdateCheck';
+import type { Origin } from '@plannotator/shared/agents';
 
 interface PlanHeaderMenuProps {
   appVersion: string;
+  updateInfo?: UpdateInfo | null;
+  origin?: Origin | null;
+  isWSL?: boolean;
   onOpenSettings: () => void;
   onOpenExport: () => void;
   onCopyAgentInstructions: () => void;
@@ -31,6 +38,9 @@ interface PlanHeaderMenuProps {
 
 export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
   appVersion,
+  updateInfo,
+  origin,
+  isWSL = false,
   onOpenSettings,
   onOpenExport,
   onCopyAgentInstructions,
@@ -50,6 +60,8 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
 }) => {
   const { theme, setTheme } = useTheme();
 
+  const showUpdateDot = !!updateInfo?.updateAvailable && !updateInfo.dismissed;
+
   const anyNotesAppConfigured =
     isApiMode && (obsidianConfigured || bearConfigured || octarineConfigured);
 
@@ -57,7 +69,10 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
     <ActionMenu
       renderTrigger={({ isOpen, toggleMenu }) => (
         <button
-          onClick={toggleMenu}
+          onClick={() => {
+            if (!isOpen && showUpdateDot) updateInfo?.dismiss();
+            toggleMenu();
+          }}
           className={`relative flex items-center gap-1.5 p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium transition-colors ${
             isOpen
               ? 'bg-muted text-foreground'
@@ -68,7 +83,16 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
           aria-expanded={isOpen}
         >
           {isOpen ? <CloseIcon /> : <MenuIcon />}
-          <span className="hidden md:inline">Options</span>
+          {showUpdateDot ? (
+            <TextShimmer className="hidden md:inline text-xs font-medium" duration={2.5} spread={1.5}>
+              Options
+            </TextShimmer>
+          ) : (
+            <span className="hidden md:inline">Options</span>
+          )}
+          {showUpdateDot && (
+            <span className="absolute top-0.5 right-0.5 md:-top-0.5 md:-right-0.5 w-2 h-2 rounded-full bg-primary ring-2 ring-background" />
+          )}
         </button>
       )}
     >
@@ -205,34 +229,13 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
 
           <ActionMenuDivider />
 
-          <div className="px-3 py-2 space-y-2">
-            <div className="flex items-center justify-between gap-3">
-              <ActionMenuSectionLabel>Plannotator</ActionMenuSectionLabel>
-              <span className="text-[10px] font-mono text-muted-foreground/70">
-                v{appVersion}
-              </span>
-            </div>
-            <div className="flex flex-col items-start gap-1 text-[11px]">
-              <a
-                href="https://github.com/backnotprop/plannotator/releases"
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={closeMenu}
-                className="text-muted-foreground hover:text-foreground transition-colors"
-              >
-                Release notes
-              </a>
-              <a
-                href="https://github.com/backnotprop/plannotator"
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={closeMenu}
-                className="text-muted-foreground hover:text-foreground transition-colors"
-              >
-                Project repo
-              </a>
-            </div>
-          </div>
+          <MenuVersionSection
+            appVersion={appVersion}
+            updateInfo={updateInfo}
+            origin={origin}
+            isWSL={isWSL}
+            closeMenu={closeMenu}
+          />
         </>
       )}
     </ActionMenu>

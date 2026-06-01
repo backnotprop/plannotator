@@ -2,6 +2,8 @@ import React, { useMemo, useCallback, useRef, useState, useEffect } from 'react'
 import { type DiffLineAnnotation } from '@pierre/diffs/react';
 import { getSingularPatch } from '@pierre/diffs';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/types';
+import type { DiffTokenEventBaseProps } from '@pierre/diffs';
+import { buildCodeNavRequest } from '../utils/buildCodeNavRequest';
 import { usePierreTheme } from '../hooks/usePierreTheme';
 import { LazyFileDiff } from './LazyFileDiff';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
@@ -12,6 +14,7 @@ import { detectLanguage } from '../utils/detectLanguage';
 import type { DiffFile } from '../types';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
 import { getLineNumberFromNode, getSideFromNode, getDiffSelection } from '../utils/diffSelection';
+import type { AIChatEntry } from '../hooks/useAIChat';
 
 interface AllFilesDiffViewProps {
   files: DiffFile[];
@@ -44,6 +47,13 @@ interface AllFilesDiffViewProps {
   prDiffScope?: string;
   onVisibleFileChange?: (filePath: string | null) => void;
   isActive?: boolean;
+  // AI props
+  aiAvailable?: boolean;
+  onAskAI?: (question: string) => void;
+  isAILoading?: boolean;
+  onViewAIResponse?: (questionId?: string) => void;
+  aiHistoryForSelection?: AIChatEntry[];
+  onCodeNavRequest?: (request: import('@plannotator/shared/code-nav').CodeNavRequest) => void;
 }
 
 export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
@@ -77,6 +87,12 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
   prDiffScope,
   onVisibleFileChange,
   isActive = true,
+  aiAvailable = false,
+  onAskAI,
+  isAILoading = false,
+  onViewAIResponse,
+  aiHistoryForSelection = [],
+  onCodeNavRequest,
 }) => {
   const pierreTheme = usePierreTheme({ fontFamily, fontSize });
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
@@ -89,6 +105,7 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
     setActiveFilePath(null);
     setCollapsedFiles(new Set());
     collapseHistory.current = [];
+    setFileCommentAnchor(null);
   }, [files]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -465,6 +482,21 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
                     }
                     onLineSelection(range);
                   },
+                  ...(onCodeNavRequest && {
+                    onTokenClick: (props: DiffTokenEventBaseProps, event: MouseEvent) => {
+                      if (event.metaKey || event.ctrlKey) {
+                        onCodeNavRequest(buildCodeNavRequest(props, file.path));
+                      }
+                    },
+                    onTokenEnter: (props: DiffTokenEventBaseProps, event: PointerEvent) => {
+                      if (event.metaKey || event.ctrlKey) {
+                        props.tokenElement.classList.add('pn-token-nav');
+                      }
+                    },
+                    onTokenLeave: (props: DiffTokenEventBaseProps) => {
+                      props.tokenElement.classList.remove('pn-token-nav');
+                    },
+                  }),
                 }}
                 annotations={fileAnnotations}
                 selectedLines={activeFilePath === file.path ? (pendingSelection || undefined) : undefined}
@@ -494,13 +526,20 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
         onLineSelection={onLineSelection}
         onAddAnnotation={handleAddAnnotation}
         onEditAnnotation={onEditAnnotation}
+        aiAvailable={aiAvailable}
+        onAskAI={onAskAI}
+        isAILoading={isAILoading}
+        onViewAIResponse={onViewAIResponse}
+        aiHistoryMessages={aiHistoryForSelection}
       />
 
       {fileCommentAnchor && onAddFileComment && (
         <CommentPopover
+          key={`file:${prUrl ?? ''}:${prDiffScope ?? ''}:${fileCommentAnchor.filePath}`}
           anchorEl={fileCommentAnchor.el}
           contextText={fileCommentAnchor.filePath.split('/').pop() || fileCommentAnchor.filePath}
           isGlobal={false}
+          draftKey={`file:${prUrl ?? ''}:${prDiffScope ?? ''}:${fileCommentAnchor.filePath}`}
           onSubmit={(text) => {
             onAddFileComment(fileCommentAnchor.filePath, text);
             setFileCommentAnchor(null);

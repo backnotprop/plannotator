@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { getItem, setItem } from '../utils/storage';
 
 declare const __APP_VERSION__: string;
 
@@ -7,7 +8,17 @@ export interface FeatureHighlight {
   description: string;
 }
 
-interface UpdateInfo {
+export interface UpdateInfo {
+  currentVersion: string;
+  latestVersion: string;
+  updateAvailable: boolean;
+  dismissed: boolean;
+  releaseUrl: string;
+  featureHighlight?: FeatureHighlight;
+  dismiss: () => void;
+}
+
+interface VersionCheckResult {
   currentVersion: string;
   latestVersion: string;
   updateAvailable: boolean;
@@ -16,6 +27,8 @@ interface UpdateInfo {
 }
 
 const GITHUB_API = 'https://api.github.com/repos/backnotprop/plannotator/releases/latest';
+
+const DISMISSED_VERSION_KEY = 'update-dismissed-version';
 
 // Feature highlights for milestone releases
 const FEATURE_HIGHLIGHTS: Record<string, FeatureHighlight> = {
@@ -39,8 +52,24 @@ function compareVersions(current: string, latest: string): boolean {
   return false;
 }
 
+function isDismissedVersion(latestVersion: string): boolean {
+  const dismissed = getItem(DISMISSED_VERSION_KEY);
+  if (!dismissed) return false;
+  const cleanLatest = latestVersion.replace(/^v/, '');
+  const cleanDismissed = dismissed.replace(/^v/, '');
+  return cleanLatest === cleanDismissed;
+}
+
 export function useUpdateCheck(): UpdateInfo | null {
-  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [checkResult, setCheckResult] = useState<VersionCheckResult | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+
+  const dismiss = useCallback(() => {
+    if (!checkResult?.latestVersion) return;
+    const clean = checkResult.latestVersion.replace(/^v/, '');
+    setItem(DISMISSED_VERSION_KEY, clean);
+    setDismissed(true);
+  }, [checkResult?.latestVersion]);
 
   useEffect(() => {
     const checkForUpdates = async () => {
@@ -55,7 +84,8 @@ export function useUpdateCheck(): UpdateInfo | null {
 
         if (previewVersion) {
           const cleanPreview = previewVersion.replace(/^v/, '');
-          setUpdateInfo({
+          setDismissed(isDismissedVersion(cleanPreview));
+          setCheckResult({
             currentVersion,
             latestVersion: previewVersion,
             updateAvailable: true,
@@ -73,11 +103,11 @@ export function useUpdateCheck(): UpdateInfo | null {
 
         const updateAvailable = compareVersions(currentVersion, latestVersion);
 
-        // Check for feature highlight for this version
         const cleanLatest = latestVersion.replace(/^v/, '');
         const featureHighlight = FEATURE_HIGHLIGHTS[cleanLatest];
 
-        setUpdateInfo({
+        setDismissed(isDismissedVersion(latestVersion));
+        setCheckResult({
           currentVersion,
           latestVersion,
           updateAvailable,
@@ -85,7 +115,6 @@ export function useUpdateCheck(): UpdateInfo | null {
           featureHighlight,
         });
       } catch (e) {
-        // Silently fail - update check is not critical
         console.debug('Update check failed:', e);
       }
     };
@@ -93,5 +122,11 @@ export function useUpdateCheck(): UpdateInfo | null {
     checkForUpdates();
   }, []);
 
-  return updateInfo;
+  if (!checkResult) return null;
+
+  return {
+    ...checkResult,
+    dismissed,
+    dismiss,
+  };
 }

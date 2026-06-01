@@ -1,9 +1,10 @@
 import React, { useEffect, useCallback, useState, useMemo } from 'react';
 import { CodeAnnotation } from '@plannotator/ui/types';
-import type { AvailableBranches, CompareTargetConfig, DiffOption, WorktreeInfo } from '@plannotator/shared/types';
+import type { AvailableBranches, CompareTargetConfig, DiffOption, JjEvoLogEntry, RecentCommit, WorktreeInfo } from '@plannotator/shared/types';
 import { buildFileTree, getAncestorPaths, getAllFolderPaths, getVisualFileOrder } from '../utils/buildFileTree';
 import { FileTreeNodeItem } from './FileTreeNode';
 import { BaseBranchPicker } from './BaseBranchPicker';
+import { EvoLogPicker } from './EvoLogPicker';
 import { DiffTypePicker } from './DiffTypePicker';
 import { WorktreePicker } from './WorktreePicker';
 import { getReviewSearchSideLabel, type ReviewSearchFileGroup, type ReviewSearchMatch } from '../utils/reviewSearch';
@@ -36,6 +37,12 @@ interface FileTreeProps {
   detectedBase?: string;
   onSelectBase?: (branch: string) => void;
   compareTarget?: CompareTargetConfig;
+  /** HEAD ancestry for the commit-baseline picker (git only, #709). */
+  recentCommits?: RecentCommit[];
+  /** Evolution log entries for the current jj change (jj-evolog mode only). */
+  jjEvologs?: JjEvoLogEntry[];
+  /** Default evolog commit ID to compare against (second evolog entry). */
+  detectedEvoBase?: string;
   stagedFiles?: Set<string>;
   onCopyRawDiff?: () => void;
   canCopyRawDiff?: boolean;
@@ -85,6 +92,9 @@ export const FileTree: React.FC<FileTreeProps> = ({
   detectedBase,
   onSelectBase,
   compareTarget,
+  recentCommits,
+  jjEvologs,
+  detectedEvoBase,
   stagedFiles,
   onCopyRawDiff,
   canCopyRawDiff = false,
@@ -368,8 +378,32 @@ export const FileTree: React.FC<FileTreeProps> = ({
         </div>
       )}
 
-      {/* Compare target picker — only relevant for base-dependent diff types */}
-      {onSelectBase &&
+      {/* Evolog picker — only shown when jj-evolog diff type is active */}
+      {activeDiffType === 'jj-evolog' &&
+        onSelectBase &&
+        selectedBase &&
+        jjEvologs &&
+        jjEvologs.length >= 2 &&
+        detectedEvoBase && (
+          <div className="px-2 py-1.5 border-b border-border/30 flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-wide text-muted-foreground flex-shrink-0">
+              from evolution
+            </span>
+            <div className="flex-1 min-w-0">
+              <EvoLogPicker
+                entries={jjEvologs}
+                selectedCommitId={selectedBase}
+                detectedCommitId={detectedEvoBase}
+                onSelect={onSelectBase}
+                disabled={isLoadingDiff}
+              />
+            </div>
+          </div>
+        )}
+
+      {/* Compare target picker — only relevant for base-dependent diff types (not evolog) */}
+      {activeDiffType !== 'jj-evolog' &&
+        onSelectBase &&
         selectedBase &&
         detectedBase &&
         availableBranches &&
@@ -387,6 +421,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
                 onSelectBase={onSelectBase}
                 disabled={isLoadingDiff}
                 copy={compareTarget.picker}
+                recentCommits={recentCommits}
               />
             </div>
           </div>

@@ -46,8 +46,10 @@ import {
 import { createTourSession, TOUR_EMPTY_OUTPUT_ERROR } from "./tour/tour-review";
 import { loadConfig, saveConfig, detectGitUser, getServerConfig } from "./config";
 import { type PRMetadata, type PRReviewFileComment, type PRStackTree, type PRListItem, fetchPR, fetchPRFileContent, fetchPRContext, submitPRReview, fetchPRViewedFiles, markPRFilesViewed, fetchPRStack, fetchPRList, getPRUser, parsePRUrl, prRefFromMetadata, isSameProject, getDisplayRepo, getMRLabel, getMRNumberLabel } from "./pr";
-import { createAIEndpoints, ProviderRegistry, SessionManager, createProvider, type AIEndpoints, type PiSDKConfig } from "@plannotator/ai";
+import { AI_QUERY_ENDPOINT, createAIRuntime } from "./ai-runtime";
+import type { AIEndpoints } from "@plannotator/ai";
 import { isWSL } from "./browser";
+import { handleCodeNavResolve, extractChangedFiles } from "./code-nav";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -330,86 +332,8 @@ export async function startReviewServer(
     },
   });
 
-  // AI provider setup (graceful — AI features degrade if SDK unavailable)
-  const aiRegistry = new ProviderRegistry();
-  const aiSessionManager = new SessionManager();
-  let aiEndpoints: AIEndpoints | null = null;
-
-  // Try Claude Agent SDK
-  try {
-    await import("@plannotator/ai/providers/claude-agent-sdk");
-    const claudePath = Bun.which("claude");
-    const provider = await createProvider({
-      type: "claude-agent-sdk",
-      cwd: process.cwd(),
-      ...(claudePath && { claudeExecutablePath: claudePath }),
-    });
-    aiRegistry.register(provider);
-  } catch {
-    // Claude SDK not available
-  }
-
-  // Try Codex SDK
-  try {
-    await import("@plannotator/ai/providers/codex-sdk");
-    // Eagerly verify the SDK is importable so we don't advertise a broken provider.
-    await import("@openai/codex-sdk");
-    const codexPath = Bun.which("codex");
-    const provider = await createProvider({
-      type: "codex-sdk",
-      cwd: process.cwd(),
-      ...(codexPath && { codexExecutablePath: codexPath }),
-    });
-    aiRegistry.register(provider);
-  } catch {
-    // Codex SDK not available
-  }
-
-  // Try Pi
-  try {
-    const { PiSDKProvider } = await import("@plannotator/ai/providers/pi-sdk");
-    const piPath = Bun.which("pi");
-    if (piPath) {
-      const provider = await createProvider({
-        type: "pi-sdk",
-        cwd: process.cwd(),
-        piExecutablePath: piPath,
-      } as PiSDKConfig);
-      if (provider instanceof PiSDKProvider) {
-        await provider.fetchModels();
-      }
-      aiRegistry.register(provider);
-    }
-  } catch {
-    // Pi not available
-  }
-
-  // Try OpenCode
-  try {
-    const { OpenCodeProvider } = await import("@plannotator/ai/providers/opencode-sdk");
-    const opencodePath = Bun.which("opencode");
-    if (opencodePath) {
-      const provider = await createProvider({
-        type: "opencode-sdk",
-        cwd: process.cwd(),
-      });
-      if (provider instanceof OpenCodeProvider) {
-        await provider.fetchModels();
-      }
-      aiRegistry.register(provider);
-    }
-  } catch {
-    // OpenCode not available
-  }
-
-  // Create endpoints if any provider registered
-  if (aiRegistry.size > 0) {
-    aiEndpoints = createAIEndpoints({
-      registry: aiRegistry,
-      sessionManager: aiSessionManager,
-      getCwd: resolveAgentCwd,
-    });
-  }
+  // AI provider setup (graceful — capabilities report unavailable if no provider is registered)
+  const aiRuntime = await createAIRuntime({ getCwd: resolveAgentCwd });
 
   const isRemote = isRemoteSession();
   const configuredPort = getServerPort();
@@ -902,6 +826,42 @@ export async function startReviewServer(
             return Response.json({ error: "No file access available" }, { status: 400 });
           }
 
+          // API: Code navigation (search-based symbol resolution)
+          if (url.pathname === "/api/code-nav/resolve" && req.method === "POST") {
+            const hasCodeNavAccess = !!gitContext || !!options.agentCwd || !!options.worktreePool;
+            if (!hasCodeNavAccess) {
+              return Response.json(
+                { error: "Code navigation requires local access" },
+                { status: 400 },
+              );
+            }
+            const navCwd = resolveAgentCwd();
+            const changedFiles = extractChangedFiles(currentPatch);
+            return handleCodeNavResolve(req, navCwd, changedFiles);
+          }
+
+          // API: Code navigation file preview (read file from working tree)
+          if (url.pathname === "/api/code-nav/file" && req.method === "GET") {
+            const hasCodeNavAccess = !!gitContext || !!options.agentCwd || !!options.worktreePool;
+            if (!hasCodeNavAccess) {
+              return Response.json({ error: "Code navigation requires local access" }, { status: 400 });
+            }
+            const filePath = url.searchParams.get("path");
+            if (!filePath) {
+              return Response.json({ error: "Missing path" }, { status: 400 });
+            }
+            try { validateFilePath(filePath); } catch {
+              return Response.json({ error: "Invalid path" }, { status: 400 });
+            }
+            try {
+              const navCwd = resolveAgentCwd();
+              const content = await Bun.file(`${navCwd}/${filePath}`).text();
+              return Response.json({ content });
+            } catch {
+              return Response.json({ error: "File not found" }, { status: 404 });
+            }
+          }
+
           // API: Stage / unstage a file (disabled when VCS doesn't support it)
           if (url.pathname === "/api/git-add" && req.method === "POST") {
             const stageCwd = resolveVcsCwd(currentDiffType, gitContext?.cwd);
@@ -1100,9 +1060,14 @@ export async function startReviewServer(
           }
 
           // AI endpoints
-          if (aiEndpoints && url.pathname.startsWith("/api/ai/")) {
-            const handler = aiEndpoints[url.pathname as keyof AIEndpoints];
-            if (handler) return handler(req);
+          if (url.pathname.startsWith("/api/ai/")) {
+            const handler = aiRuntime.endpoints[url.pathname as keyof AIEndpoints];
+            if (handler) {
+              if (url.pathname === AI_QUERY_ENDPOINT) {
+                server.timeout(req, 0);
+              }
+              return handler(req);
+            }
             return Response.json({ error: "Not found" }, { status: 404 });
           }
 
@@ -1165,8 +1130,7 @@ export async function startReviewServer(
     stop: () => {
       process.removeListener("exit", exitHandler);
       agentJobs.killAll();
-      aiSessionManager.disposeAll();
-      aiRegistry.disposeAll();
+      aiRuntime.dispose();
       server.stop();
       // Invoke cleanup callback (e.g., remove temp worktree)
       if (options.onCleanup) {

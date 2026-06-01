@@ -1,6 +1,6 @@
 import { useMemo, useCallback } from 'react';
-import { getDisplayRepo } from '@plannotator/shared/pr-provider';
-import type { PRMetadata } from '@plannotator/shared/pr-provider';
+import { getDisplayRepo } from '@plannotator/shared/pr-types';
+import type { PRMetadata } from '@plannotator/shared/pr-types';
 import type { PRDiffScope } from '@plannotator/shared/pr-stack';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 

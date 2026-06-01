@@ -93,7 +93,13 @@ Write-Host "Installing plannotator $latestTag..."
 $verifyAttestationResolved = $false
 
 # Layer 3: config file (lowest precedence of the opt-in sources).
-$configPath = "$env:USERPROFILE\.plannotator\config.json"
+$configDir = if ($env:PLANNOTATOR_DATA_DIR) { $env:PLANNOTATOR_DATA_DIR.Trim() } else { Join-Path $env:USERPROFILE ".plannotator" }
+if ($configDir -eq "~") {
+    $configDir = $env:USERPROFILE
+} elseif ($configDir.StartsWith("~/") -or $configDir.StartsWith('~\')) {
+    $configDir = Join-Path $env:USERPROFILE ($configDir.Substring(2))
+}
+$configPath = Join-Path $configDir "config.json"
 if (Test-Path $configPath) {
     try {
         $cfg = Get-Content $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -248,6 +254,18 @@ if (Test-Path $pluginHooks) {
     @"
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "EnterPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$exePathJson improve-context",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "PermissionRequest": [
       {
         "matcher": "ExitPlanMode",
@@ -287,7 +305,7 @@ if ($codexAvailable) {
     Write-Host "  1. Add this to $env:USERPROFILE\.codex\config.toml:"
     Write-Host ""
     Write-Host "     [features]"
-    Write-Host "     codex_hooks = true"
+    Write-Host "     hooks = true"
     Write-Host ""
     Write-Host "  2. Add a Stop hook in $env:USERPROFILE\.codex\hooks.json that runs:"
     Write-Host ""
@@ -305,7 +323,8 @@ Remove-Item -Recurse -Force "$env:TEMP\jiti" -ErrorAction SilentlyContinue
 function Test-PlannotatorSharedAgentSkillsAvailable {
     $agentsSkillsDir = "$env:USERPROFILE\.agents\skills"
     return (Test-Path (Join-Path $agentsSkillsDir "plannotator-compound\SKILL.md")) -and
-        (Test-Path (Join-Path $agentsSkillsDir "plannotator-setup-goal\SKILL.md"))
+        (Test-Path (Join-Path $agentsSkillsDir "plannotator-setup-goal\SKILL.md")) -and
+        (Test-Path (Join-Path $agentsSkillsDir "plannotator-visual-explainer\SKILL.md"))
 }
 
 function Configure-PiPlannotatorPackageFilter {
@@ -457,7 +476,7 @@ Address the annotation feedback above. The user has reviewed your last message a
 Write-Host "Installed /plannotator-last command to $claudeCommandsDir\plannotator-last.md"
 
 # Install OpenCode slash command
-$opencodeCommandsDir = "$env:USERPROFILE\.config\opencode\command"
+$opencodeCommandsDir = "$env:USERPROFILE\.config\opencode\commands"
 New-Item -ItemType Directory -Force -Path $opencodeCommandsDir | Out-Null
 
 @"
@@ -563,6 +582,7 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
                         Copy-Item -Recurse -Force "apps\skills\*" $claudeSkillsDir
                         Copy-SkillIfPresent "apps\skills\plannotator-compound" $agentsSkillsDir
                         Copy-SkillIfPresent "apps\skills\plannotator-setup-goal" $agentsSkillsDir
+                        Copy-SkillIfPresent "apps\skills\plannotator-visual-explainer" $agentsSkillsDir
                         if ($codexAvailable) {
                             New-Item -ItemType Directory -Force -Path $codexSkillsDir | Out-Null
                             Copy-SkillIfPresent "apps\skills\plannotator-review" $codexSkillsDir

@@ -34,7 +34,16 @@ import AnnoReplace from './AnnoReplace.astro';
     <!-- Agent selector + install area -->
     <div class="animate-fade-up animate-delay-2 mt-10">
       <!-- Agent selector buttons -->
-      <div class="flex flex-wrap items-center gap-2 mb-4" id="agent-selector">
+      <div class="flex flex-wrap items-center gap-1.5 mb-4" id="agent-selector">
+        <button
+          class="agent-btn"
+          data-agent="amp"
+          data-command="curl -fsSL https://plannotator.ai/install.sh | bash"
+          data-video=""
+        >
+          <img src="/assets/icon-amp.svg" alt="" class="w-4 h-4" />
+          <span>Amp</span>
+        </button>
         <button
           class="agent-btn active"
           data-agent="claude"
@@ -61,6 +70,15 @@ import AnnoReplace from './AnnoReplace.astro';
         >
           <img src="/assets/icon-copilot.svg" alt="" class="w-4 h-4 icon-copilot" />
           <span>Copilot</span>
+        </button>
+        <button
+          class="agent-btn"
+          data-agent="droid"
+          data-command="curl -fsSL https://plannotator.ai/install.sh | bash"
+          data-video=""
+        >
+          <img src="/assets/icon-droid.png" alt="" class="w-4 h-4 rounded-sm" />
+          <span>Droid</span>
         </button>
         <button
           class="agent-btn"
@@ -208,6 +226,37 @@ import AnnoReplace from './AnnoReplace.astro';
         ],
         detail: 'Then use in Codex:'
       },
+      droid: {
+        steps: [
+          'droid plugin marketplace add https://github.com/backnotprop/plannotator',
+          'droid plugin install plannotator@plannotator',
+          'Open a fresh Droid session to load the plugin',
+          '/plannotator-review',
+          '/plannotator-annotate <file|folder|url>',
+          '/plannotator-last'
+        ],
+        detail: 'Commands-only integration. Installs browser-based review and annotation slash commands in Droid:',
+        link: {
+          text: 'Read the Droid install docs',
+          url: '/docs/getting-started/installation/#droid'
+        }
+      },
+      amp: {
+        steps: [
+          'mkdir -p ~/.config/amp/plugins',
+          'curl -fsSL https://raw.githubusercontent.com/backnotprop/plannotator/main/apps/amp-plugin/plannotator.ts -o ~/.config/amp/plugins/plannotator.ts',
+          'Run plugins: reload in Amp',
+          'Plannotator: Review changes',
+          'Plannotator: Review changes or PR',
+          'Plannotator: Annotate file',
+          'Plannotator: Annotate last answer'
+        ],
+        detail: 'Commands-only integration. Installs command-palette actions in Amp:',
+        link: {
+          text: 'Read the Amp install docs',
+          url: '/docs/getting-started/installation/#amp'
+        }
+      },
       opencode: {
         steps: [
           '"plugin": ["@plannotator/opencode@latest"]',
@@ -321,8 +370,8 @@ import AnnoReplace from './AnnoReplace.astro';
       btn.addEventListener('click', function() { setAgent(btn); });
     });
 
-    // Init default (first button)
-    setAgent(buttons[0]);
+    // Init default
+    setAgent(document.querySelector('.agent-btn[data-agent="claude"]') || buttons[0]);
 
     if (copyBtn) {
       copyBtn.addEventListener('click', function() {

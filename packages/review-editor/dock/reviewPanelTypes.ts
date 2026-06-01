@@ -12,6 +12,7 @@ export const REVIEW_PANEL_TYPES = {
   PR_COMMENTS: 'review-pr-comments',
   PR_CHECKS: 'review-pr-checks',
   ALL_FILES: 'review-all-files',
+  CODE_NAV: 'review-code-nav',
 } as const;
 
 export const REVIEW_DIFF_PANEL_ID = 'review-diff';
@@ -27,6 +28,7 @@ export const REVIEW_PR_SUMMARY_PANEL_ID = 'review-pr-summary';
 export const REVIEW_PR_COMMENTS_PANEL_ID = 'review-pr-comments';
 export const REVIEW_PR_CHECKS_PANEL_ID = 'review-pr-checks';
 export const REVIEW_ALL_FILES_PANEL_ID = 'review-all-files';
+export const REVIEW_CODE_NAV_PANEL_ID = 'review-code-nav';
 
 export function isReviewDiffPanelId(panelId: string): boolean {
   return panelId === REVIEW_DIFF_PANEL_ID;

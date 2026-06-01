@@ -24,6 +24,7 @@ export interface ToolbarState {
 export interface CommentPopoverState {
   anchorEl: HTMLElement;
   contextText: string;
+  selectedText?: string;
   initialText?: string;
   source?: any;
 }
@@ -408,6 +409,7 @@ export function useAnnotationHighlighter({
             setCommentPopover({
               anchorEl: doms[0] as HTMLElement,
               contextText: source.text.slice(0, 80),
+              selectedText: source.text,
               source,
             });
           } else if (modeRef.current === 'quickLabel') {
@@ -565,6 +567,7 @@ export function useAnnotationHighlighter({
     setCommentPopover({
       anchorEl: toolbarState.element,
       contextText: toolbarState.selectionText.slice(0, 80),
+      selectedText: toolbarState.selectionText,
       initialText: initialChar,
       source: toolbarState.source,
     });

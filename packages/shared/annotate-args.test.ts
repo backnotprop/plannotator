@@ -9,6 +9,7 @@ describe("parseAnnotateArgs", () => {
       gate: false,
       json: false,
       hook: false,
+      renderHtml: false,
     });
   });
 
@@ -19,6 +20,7 @@ describe("parseAnnotateArgs", () => {
       gate: true,
       json: false,
       hook: false,
+      renderHtml: false,
     });
   });
 
@@ -29,6 +31,7 @@ describe("parseAnnotateArgs", () => {
       gate: true,
       json: false,
       hook: false,
+      renderHtml: false,
     });
   });
 
@@ -39,6 +42,7 @@ describe("parseAnnotateArgs", () => {
       gate: true,
       json: true,
       hook: false,
+      renderHtml: false,
     });
   });
 
@@ -49,6 +53,7 @@ describe("parseAnnotateArgs", () => {
       gate: true,
       json: true,
       hook: false,
+      renderHtml: false,
     });
   });
 
@@ -59,6 +64,7 @@ describe("parseAnnotateArgs", () => {
       gate: true,
       json: false,
       hook: false,
+      renderHtml: false,
     });
   });
 
@@ -75,6 +81,7 @@ describe("parseAnnotateArgs", () => {
       gate: true,
       json: false,
       hook: false,
+      renderHtml: false,
     });
   });
 
@@ -85,6 +92,7 @@ describe("parseAnnotateArgs", () => {
       gate: false,
       json: false,
       hook: false,
+      renderHtml: false,
     });
   });
 
@@ -95,6 +103,7 @@ describe("parseAnnotateArgs", () => {
       gate: true,
       json: true,
       hook: false,
+      renderHtml: false,
     });
   });
 
@@ -105,6 +114,7 @@ describe("parseAnnotateArgs", () => {
       gate: true,
       json: false,
       hook: false,
+      renderHtml: false,
     });
   });
 
@@ -115,6 +125,7 @@ describe("parseAnnotateArgs", () => {
       gate: true,
       json: false,
       hook: false,
+      renderHtml: false,
     });
   });
 
@@ -125,6 +136,7 @@ describe("parseAnnotateArgs", () => {
       gate: false,
       json: false,
       hook: false,
+      renderHtml: false,
     });
   });
 
@@ -135,6 +147,7 @@ describe("parseAnnotateArgs", () => {
       gate: false,
       json: false,
       hook: false,
+      renderHtml: false,
     });
   });
 
@@ -145,6 +158,7 @@ describe("parseAnnotateArgs", () => {
       gate: true,
       json: true,
       hook: false,
+      renderHtml: false,
     });
   });
 
@@ -161,6 +175,7 @@ describe("parseAnnotateArgs", () => {
       gate: true,
       json: false,
       hook: false,
+      renderHtml: false,
     });
   });
 
@@ -171,6 +186,7 @@ describe("parseAnnotateArgs", () => {
       gate: true,
       json: false,
       hook: false,
+      renderHtml: false,
     });
   });
 
@@ -181,6 +197,7 @@ describe("parseAnnotateArgs", () => {
       gate: true,
       json: false,
       hook: false,
+      renderHtml: false,
     });
   });
 
@@ -191,6 +208,7 @@ describe("parseAnnotateArgs", () => {
       gate: false,
       json: false,
       hook: false,
+      renderHtml: false,
     });
   });
 
@@ -206,6 +224,7 @@ describe("parseAnnotateArgs", () => {
       gate: true,
       json: false,
       hook: false,
+      renderHtml: false,
     });
   });
 
@@ -216,6 +235,7 @@ describe("parseAnnotateArgs", () => {
       gate: true,
       json: false,
       hook: false,
+      renderHtml: false,
     });
   });
 
@@ -226,6 +246,7 @@ describe("parseAnnotateArgs", () => {
       gate: true,
       json: false,
       hook: false,
+      renderHtml: false,
     });
   });
 
@@ -236,6 +257,7 @@ describe("parseAnnotateArgs", () => {
       gate: false,
       json: false,
       hook: false,
+      renderHtml: false,
     });
   });
 
@@ -251,6 +273,7 @@ describe("parseAnnotateArgs", () => {
       gate: true,
       json: false,
       hook: true,
+      renderHtml: false,
     });
   });
 
@@ -261,6 +284,7 @@ describe("parseAnnotateArgs", () => {
       gate: true,
       json: true,
       hook: true,
+      renderHtml: false,
     });
   });
 
@@ -271,6 +295,7 @@ describe("parseAnnotateArgs", () => {
       gate: true,
       json: false,
       hook: true,
+      renderHtml: false,
     });
   });
 
@@ -281,6 +306,29 @@ describe("parseAnnotateArgs", () => {
       gate: true,
       json: false,
       hook: true,
+      renderHtml: false,
+    });
+  });
+
+  test("--render-html with HTML file and --gate", () => {
+    expect(parseAnnotateArgs("plan.html --render-html --gate")).toEqual({
+      filePath: "plan.html",
+      rawFilePath: "plan.html",
+      gate: true,
+      json: false,
+      hook: false,
+      renderHtml: true,
+    });
+  });
+
+  test("--render-html alone", () => {
+    expect(parseAnnotateArgs("plan.html --render-html")).toEqual({
+      filePath: "plan.html",
+      rawFilePath: "plan.html",
+      gate: false,
+      json: false,
+      hook: false,
+      renderHtml: true,
     });
   });
 });

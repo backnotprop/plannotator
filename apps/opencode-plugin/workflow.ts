@@ -132,7 +132,9 @@ export function applyWorkflowConfig(
 
   opencodeConfig.agent ??= {};
 
+  const planningAgentConfigKeys = new Set<string>();
   for (const agentName of options.planningAgents) {
+    planningAgentConfigKeys.add(resolveAgentConfigKey(opencodeConfig, agentName));
     allowPlanningAgent(opencodeConfig, agentName);
   }
 
@@ -143,7 +145,7 @@ export function applyWorkflowConfig(
   }
 
   for (const [agentName, agentConfig] of Object.entries(opencodeConfig.agent)) {
-    if (options.planningAgentSet.has(agentName)) {
+    if (options.planningAgentSet.has(agentName) || planningAgentConfigKeys.has(agentName)) {
       allowPlanningAgent(opencodeConfig, agentName);
       continue;
     }
@@ -169,10 +171,36 @@ function denySubmitPlan(opencodeConfig: OpenCodeConfig, agentName: string): void
   ensurePermission(agent).submit_plan = "deny";
 }
 
+function normalizeAgentLookupKey(value: string): string {
+  return value.replace(/[\u200B-\u200D\uFEFF]/g, "").trim().toLowerCase();
+}
+
+function resolveAgentConfigKey(opencodeConfig: OpenCodeConfig, agentName: string): string {
+  opencodeConfig.agent ??= {};
+
+  if (Object.prototype.hasOwnProperty.call(opencodeConfig.agent, agentName)) {
+    return agentName;
+  }
+
+  const normalizedTarget = normalizeAgentLookupKey(agentName);
+  for (const existingKey of Object.keys(opencodeConfig.agent)) {
+    const normalizedExisting = normalizeAgentLookupKey(existingKey);
+    if (normalizedExisting === normalizedTarget) {
+      return existingKey;
+    }
+    if (normalizedExisting.startsWith(`${normalizedTarget} -`) || normalizedExisting.startsWith(`${normalizedTarget} (`)) {
+      return existingKey;
+    }
+  }
+
+  return agentName;
+}
+
 function ensureAgentConfig(opencodeConfig: OpenCodeConfig, agentName: string): AgentConfig {
   opencodeConfig.agent ??= {};
-  opencodeConfig.agent[agentName] ??= {};
-  return opencodeConfig.agent[agentName];
+  const resolvedAgentName = resolveAgentConfigKey(opencodeConfig, agentName);
+  opencodeConfig.agent[resolvedAgentName] ??= {};
+  return opencodeConfig.agent[resolvedAgentName];
 }
 
 function ensurePermission(agent: AgentConfig): Record<string, any> {

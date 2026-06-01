@@ -66,7 +66,7 @@ Options:
 ```
 
 Builds the hook and review apps, creates a disposable `HOME` plus sample git repo, copies your Codex `auth.json`,
-enables `codex_hooks`, and runs a real `codex exec` against the sample project. The script writes logs, rollout paths,
+enables `hooks`, and runs a real `codex exec` against the sample project. The script writes logs, rollout paths,
 history indices, and session URLs into an artifact directory under the temp root.
 
 Tips:

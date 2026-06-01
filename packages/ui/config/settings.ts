@@ -9,8 +9,14 @@
  * Add new settings here. Cookie-only settings omit serverKey.
  */
 
+import type { DiffLineBgIntensity } from '@plannotator/shared/config';
 import { storage } from '../utils/storage';
 import { generateIdentity } from '../utils/generateIdentity';
+
+const DIFF_LINE_BG_INTENSITY_VALUES = ['subtle', 'normal', 'strong'] as const;
+function isDiffLineBgIntensity(v: unknown): v is DiffLineBgIntensity {
+  return typeof v === 'string' && (DIFF_LINE_BG_INTENSITY_VALUES as readonly string[]).includes(v);
+}
 
 export interface SettingDef<T> {
   defaultValue: T | (() => T);
@@ -194,6 +200,21 @@ export const SETTINGS = {
       return typeof v === 'number' && v >= 1 && v <= 8 ? v : undefined;
     },
     toServer: (v: number) => ({ diffOptions: { tabSize: v } }),
+  },
+  diffLineBgIntensity: {
+    defaultValue: 'subtle' as DiffLineBgIntensity,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-line-bg-intensity');
+      return isDiffLineBgIntensity(v) ? v : undefined;
+    },
+    toCookie: (v: DiffLineBgIntensity) =>
+      storage.setItem('plannotator-diff-line-bg-intensity', v),
+    serverKey: 'diffOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = (sc.diffOptions as Record<string, unknown> | undefined)?.lineBgIntensity;
+      return isDiffLineBgIntensity(v) ? v : undefined;
+    },
+    toServer: (v: DiffLineBgIntensity) => ({ diffOptions: { lineBgIntensity: v } }),
   },
   conventionalComments: {
     defaultValue: false as boolean,

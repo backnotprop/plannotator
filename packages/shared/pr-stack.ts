@@ -5,8 +5,8 @@ import type {
   PRStackInfo,
   PRStackTree,
   PRStackNode,
-} from "./pr-provider";
-export type { PRDiffScope, PRDiffScopeOption, PRStackInfo, PRStackTree, PRStackNode } from "./pr-provider";
+} from "./pr-types";
+export type { PRDiffScope, PRDiffScopeOption, PRStackInfo, PRStackTree, PRStackNode } from "./pr-types";
 
 function branchNameIsSafe(branch: string): boolean {
   return branch.trim().length > 0 && !branch.startsWith("-") && !branch.includes("\0");

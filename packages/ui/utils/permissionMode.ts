@@ -5,8 +5,9 @@
  * Claude Code 2.1.7+ supports updatedPermissions in hook responses.
  *
  * Available modes:
- * - bypassPermissions: Auto-approve all tool calls
  * - acceptEdits: Auto-approve file edits only
+ * - auto: Autonomous execution gated by a model-based safety classifier (Claude Code 2026-03+, Sonnet 4.6+)
+ * - bypassPermissions: Auto-approve all tool calls
  * - default: Manually approve each tool call
  */
 
@@ -15,7 +16,7 @@ import { storage } from './storage';
 const STORAGE_KEY_MODE = 'plannotator-permission-mode';
 const STORAGE_KEY_CONFIGURED = 'plannotator-permission-mode-configured';
 
-export type PermissionMode = 'bypassPermissions' | 'acceptEdits' | 'default';
+export type PermissionMode = 'bypassPermissions' | 'acceptEdits' | 'auto' | 'default';
 
 export interface PermissionModeSettings {
   mode: PermissionMode;
@@ -27,6 +28,11 @@ export const PERMISSION_MODE_OPTIONS: { value: PermissionMode; label: string; de
     value: 'acceptEdits',
     label: 'Auto-accept Edits',
     description: 'Auto-approve file edits, ask for other tools',
+  },
+  {
+    value: 'auto',
+    label: 'Auto Mode',
+    description: 'Autonomous execution with a safety classifier (requires Claude Code 2026-03+ and Sonnet 4.6+)',
   },
   {
     value: 'bypassPermissions',

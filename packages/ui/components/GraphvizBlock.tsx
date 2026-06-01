@@ -164,7 +164,15 @@ export const GraphvizBlock: React.FC<{ block: Block }> = ({ block }) => {
         const cleaned = renderedSvg
           .replace(/ width="[^"]*"/, ' width="100%"')
           .replace(/ height="[^"]*"/, ' height="100%"')
-          .replace(/ style="[^"]*"/, '');
+          .replace(/ style="[^"]*"/, '')
+          .replace(/<polygon[^>]*fill="white"[^>]*\/>/, '')
+          .replace(/fill="black"/g, 'fill="var(--foreground)"')
+          .replace(/fill="#000000"/g, 'fill="var(--foreground)"')
+          .replace(/stroke="black"/g, 'stroke="var(--muted-foreground)"')
+          .replace(/stroke="#000000"/g, 'stroke="var(--muted-foreground)"')
+          .replace(/fill="lightgrey"/g, 'fill="var(--muted)"')
+          .replace(/fill="lightgray"/g, 'fill="var(--muted)"');
+
         if (!cancelled) {
           naturalBoundsRef.current = parseViewBoxFromMarkup(cleaned);
           setSvg(cleaned);
@@ -454,10 +462,15 @@ export const GraphvizBlock: React.FC<{ block: Block }> = ({ block }) => {
     </pre>
   );
 
+  const naturalHeight = naturalBoundsRef.current
+    ? `min(65vh, ${Math.min(36 * 16, Math.max(4 * 16, Math.round(naturalBoundsRef.current.height * (800 / naturalBoundsRef.current.width))))}px)`
+    : 'min(65vh, 36rem)';
+
   const diagramBody = (
     <div
       ref={containerRef}
-      className={`rounded-xl bg-muted/30 border border-border/30 overflow-hidden select-none cursor-grab ${isExpanded ? 'h-full min-h-0' : 'h-[min(65vh,36rem)] min-h-[20rem]'}`}
+      className={`rounded-xl bg-muted/30 border border-border/30 overflow-hidden select-none cursor-grab ${isExpanded ? 'h-full min-h-0' : ''}`}
+      style={isExpanded ? undefined : { height: naturalHeight }}
       dangerouslySetInnerHTML={{ __html: svg }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
@@ -470,7 +483,7 @@ export const GraphvizBlock: React.FC<{ block: Block }> = ({ block }) => {
     <>
       <div className="my-5 group relative" data-block-id={block.id}>
         {!isExpanded && controls}
-        {showSource || !svg ? inlineSource : !isExpanded ? diagramBody : <div className="rounded-xl border border-border/30 bg-muted/10 h-[min(65vh,36rem)] min-h-[20rem]" />}
+        {showSource || !svg ? inlineSource : !isExpanded ? diagramBody : <div className="rounded-xl border border-border/30 bg-muted/10" style={{ height: naturalHeight }} />}
       </div>
 
       {!showSource && svg && isExpanded && typeof document !== 'undefined' && createPortal(

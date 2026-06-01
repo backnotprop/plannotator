@@ -127,6 +127,13 @@ export function getLocalDiffInstruction(
         inspect: `Run \`jj diff --git --from ${shellQuote(baseRevset)} --to @\` to inspect the changes.`,
       };
     }
+    case "jj-evolog": {
+      const fromRev = defaultBranch || "<previous-evolog-commit>";
+      return {
+        target: "what changed between two evolutions of the current JJ change",
+        inspect: `Run \`jj diff --git --from ${shellQuote(fromRev)} --to @\` to inspect the changes (shows what was amended since the selected prior evolution).`,
+      };
+    }
     case "jj-all":
       return {
         target: "all files in the JJ workspace",

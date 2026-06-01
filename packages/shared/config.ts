@@ -5,12 +5,13 @@
  * Runtime-agnostic: uses only node:fs, node:os, node:child_process.
  */
 
-import { homedir } from "os";
 import { join } from "path";
+import { getPlannotatorDataDir } from "./data-dir";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { execSync } from "child_process";
 
 export type DefaultDiffType = 'uncommitted' | 'unstaged' | 'staged' | 'merge-base' | 'all';
+export type DiffLineBgIntensity = 'subtle' | 'normal' | 'strong';
 
 export interface DiffOptions {
   diffStyle?: 'split' | 'unified';
@@ -24,6 +25,7 @@ export interface DiffOptions {
   tabSize?: number;
   hideWhitespace?: boolean;
   defaultDiffType?: DefaultDiffType;
+  lineBgIntensity?: DiffLineBgIntensity;
 }
 
 /** Single conventional comment label entry stored in config.json */
@@ -37,6 +39,8 @@ export type PromptSectionOverrides = Record<string, string | undefined>;
 
 export type PromptRuntime =
   | "claude-code"
+  | "amp"
+  | "droid"
   | "opencode"
   | "copilot-cli"
   | "pi"
@@ -115,9 +119,16 @@ export interface PlannotatorConfig {
    * Set to false to always use plain fetch + Turndown.
    */
   jina?: boolean;
+  /**
+   * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
+   * call so the agent is aware it can enrich plans with code-file links,
+   * callouts, tables, diagrams, task lists, and the other PFM extensions.
+   * Read by the `improve-context` PreToolUse handler. Default: false.
+   */
+  pfmReminder?: boolean;
 }
 
-const CONFIG_DIR = join(homedir(), ".plannotator");
+const CONFIG_DIR = getPlannotatorDataDir();
 const CONFIG_PATH = join(CONFIG_DIR, "config.json");
 
 /**

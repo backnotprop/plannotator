@@ -13,6 +13,8 @@ import {
   isHumanPrompt,
   findAnchorIndex,
   extractLastRenderedMessage,
+  findDroidSessionLogsForCwd,
+  resolveDroidSessionLogForCwd,
   projectSlugFromCwd,
   findSessionLogsByAncestorWalk,
   findSessionLogsForCwd,
@@ -24,9 +26,8 @@ import {
   resolveSessionLogByCwdScan,
   type SessionLogEntry,
 } from "./session-log";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, utimesSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { tmpdir } from "node:os";
 
 // --- Fixture Helpers ---
@@ -169,6 +170,30 @@ function buildLog(...lines: string[]): string {
   return lines.join("\n");
 }
 
+function droidMessage(
+  id: string,
+  role: "user" | "assistant",
+  text: string,
+  opts: { visibility?: string; visibilityPlacement?: "message" | "entry" } = {},
+): string {
+  const message = {
+    role,
+    content: [{ type: "text", text }],
+    ...(opts.visibility && opts.visibilityPlacement !== "entry"
+      ? { visibility: opts.visibility }
+      : {}),
+  };
+  return JSON.stringify({
+    type: "message",
+    id,
+    timestamp: new Date().toISOString(),
+    message,
+    ...(opts.visibility && opts.visibilityPlacement === "entry"
+      ? { visibility: opts.visibility }
+      : {}),
+  });
+}
+
 // --- Tests ---
 
 describe("projectSlugFromCwd", () => {
@@ -244,6 +269,46 @@ describe("isHumanPrompt", () => {
 
   test("rejects assistant entries", () => {
     const entry = JSON.parse(assistantText("msg_1", "hello"));
+    expect(isHumanPrompt(entry)).toBe(false);
+  });
+
+  test("accepts visible Droid user messages", () => {
+    const entry = JSON.parse(droidMessage("m_user", "user", "real human prompt"));
+    expect(isHumanPrompt(entry)).toBe(true);
+  });
+
+  test("accepts Droid messages with visible transcript visibility", () => {
+    expect(
+      isHumanPrompt(JSON.parse(droidMessage("m_both", "user", "visible to both", { visibility: "both" })))
+    ).toBe(true);
+    expect(
+      isHumanPrompt(JSON.parse(droidMessage("m_user_only", "user", "visible to user", { visibility: "user_only" })))
+    ).toBe(true);
+  });
+
+  test("rejects Droid system reminders and command notifications", () => {
+    expect(
+      isHumanPrompt(JSON.parse(droidMessage("m_sys", "user", "<system-reminder>\ninternal")))
+    ).toBe(false);
+    expect(
+      isHumanPrompt(JSON.parse(droidMessage("m_note", "user", "<system-notification>\ncommand output")))
+    ).toBe(false);
+  });
+
+  test("rejects hidden Droid user messages", () => {
+    const entry = JSON.parse(
+      droidMessage("m_hidden", "user", "hidden", { visibility: "llm_only" })
+    );
+    expect(isHumanPrompt(entry)).toBe(false);
+  });
+
+  test("rejects hidden Droid user messages with top-level visibility", () => {
+    const entry = JSON.parse(
+      droidMessage("m_hidden_top", "user", "hidden", {
+        visibility: "llm_only",
+        visibilityPlacement: "entry",
+      })
+    );
     expect(isHumanPrompt(entry)).toBe(false);
   });
 });
@@ -535,6 +600,36 @@ describe("extractLastRenderedMessage", () => {
     expect(result).not.toBeNull();
     expect(result!.text).toBe("Response before queue op");
   });
+
+  test("handles Droid transcript entries and ignores slash-command notifications", () => {
+    const log = buildLog(
+      droidMessage("ctx", "user", "<system-reminder>\ncontext", { visibility: "llm_only" }),
+      droidMessage("u1", "user", "Tell me a story."),
+      droidMessage("a1", "assistant", "Once upon a time."),
+      droidMessage("cmd", "user", "<system-notification>\nCommand file: /tmp/plannotator-last.js"),
+      droidMessage("u2", "user", "ANCHOR")
+    );
+    const entries = parseSessionLog(log);
+    const anchor = findAnchorIndex(entries, "ANCHOR")!;
+    const result = extractLastRenderedMessage(entries, anchor);
+    expect(result).not.toBeNull();
+    expect(result!.messageId).toBe("a1");
+    expect(result!.text).toBe("Once upon a time.");
+  });
+
+  test("uses top-level Droid message ids when message.id is absent", () => {
+    const log = buildLog(
+      droidMessage("u1", "user", "Hi"),
+      droidMessage("a-top-level-id", "assistant", "Factory answer"),
+      droidMessage("u2", "user", "ANCHOR")
+    );
+    const entries = parseSessionLog(log);
+    const anchor = findAnchorIndex(entries, "ANCHOR")!;
+    const result = extractLastRenderedMessage(entries, anchor);
+    expect(result).not.toBeNull();
+    expect(result!.messageId).toBe("a-top-level-id");
+    expect(result!.text).toBe("Factory answer");
+  });
 });
 
 describe("extractLastRenderedMessage — edge cases", () => {
@@ -578,66 +673,121 @@ describe("parseSessionLog", () => {
 });
 
 describe("findSessionLogsByAncestorWalk", () => {
-  // These tests use the real ~/.claude/projects/ directory structure.
-  // They verify the ancestor walk logic without needing mocks.
-
   test("returns empty array for root directory (no parents to walk)", () => {
     const result = findSessionLogsByAncestorWalk("/");
     expect(result).toEqual([]);
   });
 
   test("walks up to find parent directory session logs", () => {
-    // Create a temporary project slug structure
-    const testId = `plannotator-test-${Date.now()}`;
-    const testDir = join(tmpdir(), testId, "sub", "deep");
-    const slugDir = join(
-      homedir(),
-      ".claude",
-      "projects",
-      // Slug for the parent (tmpdir/testId)
-      `${join(tmpdir(), testId)}`.replace(/[^a-zA-Z0-9-]/g, "-")
-    );
-
+    const { projectsDir, cleanup } = makeTempDirs("ancestor-walk");
     try {
-      // Set up: create a fake session log at the parent slug
+      const testId = `plannotator-test-${Date.now()}`;
+      const testDir = join(tmpdir(), testId, "sub", "deep");
+      const parentSlug = join(tmpdir(), testId).replace(/[^a-zA-Z0-9-]/g, "-");
+      const slugDir = join(projectsDir, parentSlug);
       mkdirSync(slugDir, { recursive: true });
       const fakeLog = join(slugDir, "fake-session.jsonl");
       writeFileSync(fakeLog, '{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"hello"}]}}\n');
 
-      // Walk from the deep subdirectory — should find the parent's logs
-      const result = findSessionLogsByAncestorWalk(testDir);
+      const result = findSessionLogsByAncestorWalk(testDir, projectsDir);
       expect(result.length).toBeGreaterThan(0);
       expect(result[0]).toBe(fakeLog);
     } finally {
-      // Cleanup
-      rmSync(slugDir, { recursive: true, force: true });
+      cleanup();
     }
   });
 
   test("does not return results for the exact CWD (caller already tried it)", () => {
-    // Create a temp slug for the exact CWD
-    const testId = `plannotator-test-exact-${Date.now()}`;
-    const testDir = join(tmpdir(), testId);
-    const slugDir = join(
-      homedir(),
-      ".claude",
-      "projects",
-      testDir.replace(/[^a-zA-Z0-9-]/g, "-")
-    );
-
+    const { projectsDir, cleanup } = makeTempDirs("ancestor-exact");
     try {
+      const testId = `plannotator-test-exact-${Date.now()}`;
+      const testDir = join(tmpdir(), testId);
+      const cwdSlug = testDir.replace(/[^a-zA-Z0-9-]/g, "-");
+      const slugDir = join(projectsDir, cwdSlug);
       mkdirSync(slugDir, { recursive: true });
       writeFileSync(
         join(slugDir, "fake.jsonl"),
         '{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"hi"}]}}\n'
       );
 
-      // Ancestor walk skips the exact CWD — the caller already tried it
-      const result = findSessionLogsByAncestorWalk(testDir);
-      // Should not find the CWD's own slug; only parents
+      const result = findSessionLogsByAncestorWalk(testDir, projectsDir);
       expect(result.every((p) => !p.includes(slugDir))).toBe(true);
     } finally {
-      rmSync(slugDir, { recursive: true, force: true });
+      cleanup();
+    }
+  });
+});
+
+describe("findDroidSessionLogsForCwd", () => {
+  test("finds session logs under the Factory sessions directory layout", () => {
+    const { projectsDir: sessionsDir, cleanup } = makeTempDirs("droid-cwd");
+    try {
+      const cwd = "/Users/example/project";
+      const logPath = writeSessionLog(sessionsDir, cwd, "droid-session-1");
+      const result = findDroidSessionLogsForCwd(cwd, sessionsDir);
+      expect(result[0]).toBe(logPath);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("resolveDroidSessionLogForCwd", () => {
+  test("returns the newest exact-cwd session candidate", () => {
+    const { projectsDir: sessionsDir, cleanup } = makeTempDirs("droid-current");
+    try {
+      const cwd = "/Users/example/project";
+      const older = writeSessionLog(
+        sessionsDir,
+        cwd,
+        "older-session",
+        buildLog(
+          droidMessage("u1", "user", "old prompt"),
+          droidMessage("a1", "assistant", "old reply"),
+        ),
+      );
+      const newer = writeSessionLog(
+        sessionsDir,
+        cwd,
+        "newer-session",
+        '{"type":"session_start","id":"newer-session"}\n',
+      );
+
+      const now = Date.now() / 1000;
+      utimesSync(older, now - 10, now - 10);
+      utimesSync(newer, now, now);
+
+      expect(resolveDroidSessionLogForCwd(cwd, sessionsDir)).toBe(newer);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("falls back to the newest ancestor session candidate when exact cwd has no logs", () => {
+    const { projectsDir: sessionsDir, cleanup } = makeTempDirs("droid-ancestor");
+    try {
+      const sessionRoot = "/Users/example/project";
+      const subdir = `${sessionRoot}/src/nested`;
+      const older = writeSessionLog(
+        sessionsDir,
+        sessionRoot,
+        "older-session",
+        buildLog(droidMessage("a1", "assistant", "old reply")),
+      );
+      const newer = writeSessionLog(
+        sessionsDir,
+        sessionRoot,
+        "newer-session",
+        '{"type":"session_start","id":"newer-session"}\n',
+      );
+
+      const now = Date.now() / 1000;
+      utimesSync(older, now - 10, now - 10);
+      utimesSync(newer, now, now);
+
+      expect(resolveDroidSessionLogForCwd(subdir, sessionsDir)).toBe(newer);
+    } finally {
+      cleanup();
     }
   });
 });

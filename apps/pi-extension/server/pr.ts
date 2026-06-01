@@ -6,6 +6,15 @@
 import { spawn } from "node:child_process";
 
 import {
+	type PRMetadata,
+	type PRRef,
+	type PRReviewFileComment,
+	type PRRuntime,
+	type PRStackTree,
+	type PRListItem,
+	parsePRUrl as parsePRUrlCore,
+} from "../generated/pr-types.js";
+import {
 	checkAuth as checkAuthCore,
 	fetchPRContext as fetchPRContextCore,
 	fetchPR as fetchPRCore,
@@ -15,13 +24,6 @@ import {
 	fetchPRList as fetchPRListCore,
 	getUser as getUserCore,
 	markPRFilesViewed as markPRFilesViewedCore,
-	type PRMetadata,
-	type PRRef,
-	type PRReviewFileComment,
-	type PRRuntime,
-	type PRStackTree,
-	type PRListItem,
-	parsePRUrl as parsePRUrlCore,
 	submitPRReview as submitPRReviewCore,
 } from "../generated/pr-provider.js";
 

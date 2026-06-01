@@ -23,6 +23,7 @@ const OPTION_HINTS: Record<string, string> = {
   'jj-current': "Changes in the current jj change.",
   'jj-last': "Changes in the previous jj change.",
   'jj-line': "Changes in your line of work from the selected bookmark or revision.",
+  'jj-evolog': "What changed between two evolutions of the current change — shows what you amended.",
   'jj-all': "Every tracked file in the current jj workspace, shown as additions.",
   branch: "Straight compare against the base branch (picked below). Can show commits that aren't yours if the base has new commits.",
   'merge-base': "Only what you've added on top of the base branch (picked below). Same as GitHub's PR view.",

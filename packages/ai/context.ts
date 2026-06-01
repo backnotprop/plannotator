@@ -49,6 +49,13 @@ export function buildForkPreamble(ctx: AIContext): string {
   switch (ctx.mode) {
     case "plan-review": {
       lines.push("## Current Plan Under Review");
+      if (ctx.plan.version) {
+        const total = ctx.plan.totalVersions ? ` of ${ctx.plan.totalVersions}` : "";
+        lines.push(`Plan version: ${ctx.plan.version}${total}`);
+      }
+      if (ctx.plan.project) {
+        lines.push(`Project: ${ctx.plan.project}`);
+      }
       lines.push("");
       lines.push(truncate(ctx.plan.plan, MAX_PLAN_CHARS));
       if (ctx.plan.annotations) {
@@ -87,6 +94,15 @@ export function buildForkPreamble(ctx: AIContext): string {
     }
     case "annotate": {
       lines.push(`## Annotating: ${ctx.annotate.filePath}`);
+      if (ctx.annotate.sourceInfo) {
+        lines.push(`Source: ${ctx.annotate.sourceInfo}`);
+      }
+      if (ctx.annotate.renderAs) {
+        lines.push(`Render mode: ${ctx.annotate.renderAs}`);
+      }
+      if (ctx.annotate.sourceConverted) {
+        lines.push("Note: this content was converted before annotation, so source line numbers may not match the original document.");
+      }
       lines.push("");
       lines.push(truncate(ctx.annotate.content, MAX_PLAN_CHARS));
       if (ctx.annotate.annotations) {
@@ -136,9 +152,19 @@ function buildPlanReviewPrompt(
     "The user is reviewing an implementation plan in Plannotator.",
     "",
     "## Plan Under Review",
-    "",
-    truncate(ctx.plan.plan, MAX_PLAN_CHARS),
   ];
+
+  if (ctx.plan.version) {
+    const total = ctx.plan.totalVersions ? ` of ${ctx.plan.totalVersions}` : "";
+    sections.push(`Plan version: ${ctx.plan.version}${total}`);
+  }
+
+  if (ctx.plan.project) {
+    sections.push(`Project: ${ctx.plan.project}`);
+  }
+
+  sections.push("");
+  sections.push(truncate(ctx.plan.plan, MAX_PLAN_CHARS));
 
   if (ctx.plan.previousPlan) {
     sections.push("");
@@ -197,9 +223,22 @@ function buildAnnotatePrompt(
     "The user is annotating a markdown document in Plannotator.",
     "",
     `## Document: ${ctx.annotate.filePath}`,
-    "",
-    truncate(ctx.annotate.content, MAX_PLAN_CHARS),
   ];
+
+  if (ctx.annotate.sourceInfo) {
+    sections.push(`Source: ${ctx.annotate.sourceInfo}`);
+  }
+
+  if (ctx.annotate.renderAs) {
+    sections.push(`Render mode: ${ctx.annotate.renderAs}`);
+  }
+
+  if (ctx.annotate.sourceConverted) {
+    sections.push("Note: this content was converted before annotation, so source line numbers may not match the original document.");
+  }
+
+  sections.push("");
+  sections.push(truncate(ctx.annotate.content, MAX_PLAN_CHARS));
 
   if (ctx.annotate.annotations) {
     sections.push("");

@@ -1,6 +1,6 @@
 # Plannotator for Pi
 
-Plannotator integration for the [Pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent). Adds file-based plan mode with a visual browser UI for reviewing, annotating, and approving agent plans.
+Plannotator integration for the [Pi coding agent](https://github.com/earendil-works/pi). Adds file-based plan mode with a visual browser UI for reviewing, annotating, and approving agent plans.
 
 ## Install
 
@@ -226,4 +226,4 @@ State persists across session restarts via Pi's `appendEntry` API.
 
 ## Requirements
 
-- [Pi](https://github.com/mariozechner/pi) >= 0.53.0
+- [Pi](https://github.com/earendil-works/pi) >= 0.74.0

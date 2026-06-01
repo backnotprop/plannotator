@@ -3,19 +3,14 @@ import type { AIChatEntry, PendingPermission } from '../hooks/useAIChat';
 import { renderChatMarkdown } from '../utils/renderChatMarkdown';
 import { formatLineRange } from '../utils/formatLineRange';
 import { formatRelativeTime } from '../utils/formatRelativeTime';
-import { SparklesIcon } from './SparklesIcon';
+import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
 import { CountBadge } from './CountBadge';
 import { CopyButton } from './CopyButton';
 import { PermissionCard } from './PermissionCard';
 import { AIConfigBar } from './AIConfigBar';
 import { submitHint } from '@plannotator/ui/utils/platform';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
-
-interface AIProviderInfo {
-  id: string;
-  name: string;
-  models?: Array<{ id: string; label: string; default?: boolean }>;
-}
+import type { AIProviderOption } from '@plannotator/ui/utils/aiProvider';
 
 interface AITabProps {
   messages: AIChatEntry[];
@@ -27,7 +22,7 @@ interface AITabProps {
   onAskGeneral?: (question: string) => void;
   permissionRequests?: PendingPermission[];
   onRespondToPermission?: (requestId: string, allow: boolean) => void;
-  aiProviders?: AIProviderInfo[];
+  aiProviders?: AIProviderOption[];
   aiConfig?: { providerId: string | null; model: string | null; reasoningEffort?: string | null };
   onAIConfigChange?: (config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => void;
   hasAISession?: boolean;
@@ -129,21 +124,16 @@ export const AITab: React.FC<AITabProps> = ({
     }
   }, [scrollToQuestionId]);
 
-  // Auto-scroll when new messages arrive (not on every streaming token)
-  const prevMsgCount = useRef(messages.length);
+  // Auto-scroll when new messages arrive or the latest response streams in.
+  const latestMessage = messages[messages.length - 1];
+  const latestResponseText = latestMessage?.response.text ?? '';
   useEffect(() => {
     if (!scrollRef.current) return;
-    const isNewMessage = messages.length > prevMsgCount.current;
-    prevMsgCount.current = messages.length;
-
-    if (isNewMessage) {
-      const allQAs = scrollRef.current.querySelectorAll('[data-question-id]');
-      const lastQA = allQAs[allQAs.length - 1];
-      if (lastQA) {
-        lastQA.scrollIntoView({ behavior: 'smooth', block: 'end' });
-      }
+    if (latestMessage) {
+      const latestQA = scrollRef.current.querySelector(`[data-question-id="${CSS.escape(latestMessage.question.id)}"]`);
+      latestQA?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
-  }, [messages.length]);
+  }, [latestMessage?.question.id, latestResponseText, messages.length]);
 
   const toggleFile = (filePath: string) => {
     setExpandedFiles(prev => {

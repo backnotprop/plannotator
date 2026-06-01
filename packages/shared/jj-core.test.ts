@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   getJjDiffArgs,
+  getJjEvoLogEntries,
   jjLineBaseRevset,
   parseJjBookmarkList,
   parseJjRemoteBookmarkList,
@@ -122,6 +123,95 @@ describe("jj compare targets", () => {
     expect(jjLineBaseRevset("main")).toBe('heads(::@ & ::(bookmarks(exact:"main")))');
     expect(jjLineBaseRevset("main@origin")).toBe('heads(::@ & ::(remote_bookmarks(exact:"main", exact:"origin")))');
     expect(jjLineBaseRevset("trunk()")).toBe("heads(::@ & ::(trunk()))");
+  });
+});
+
+describe("jj evolog", () => {
+  test("builds evolog diff args with explicit base", () => {
+    expect(getJjDiffArgs("jj-evolog", "abc123456789")).toEqual({
+      args: ["diff", "--git", "--from", "abc123456789", "--to", "@"],
+      label: "Evolution diff from abc12345",
+    });
+  });
+
+  test("builds evolog diff args with whitespace flag", () => {
+    expect(getJjDiffArgs("jj-evolog", "abc123456789", { hideWhitespace: true })?.args)
+      .toEqual(["diff", "--git", "-w", "--from", "abc123456789", "--to", "@"]);
+  });
+
+  test("parses evolog output correctly (commit.* template fields)", async () => {
+    const runtime: ReviewJjRuntime = {
+      async runJj() {
+        return {
+          stdout: [
+            "abc123456789\tAdd login form\t2 minutes ago",
+            "def456789012\tAdd login form\t10 minutes ago",
+            "ghi789012345\tAdd login form\t1 hour ago",
+            "",
+          ].join("\n"),
+          stderr: "",
+          exitCode: 0,
+        };
+      },
+    };
+    const entries = await getJjEvoLogEntries(runtime);
+    expect(entries).toHaveLength(3);
+    expect(entries[0]).toEqual({ commitId: "abc123456789", description: "Add login form", age: "2 minutes ago" });
+    expect(entries[1]).toEqual({ commitId: "def456789012", description: "Add login form", age: "10 minutes ago" });
+    expect(entries[2]).toEqual({ commitId: "ghi789012345", description: "Add login form", age: "1 hour ago" });
+  });
+
+  test("returns empty array when evolog exits non-zero", async () => {
+    const runtime: ReviewJjRuntime = {
+      async runJj() {
+        return { stdout: "", stderr: "error: no such revision", exitCode: 1 };
+      },
+    };
+    const entries = await getJjEvoLogEntries(runtime);
+    expect(entries).toHaveLength(0);
+  });
+
+  test("defaults to second evolog entry when no base given", async () => {
+    let callCount = 0;
+    const calls: string[][] = [];
+    const runtime: ReviewJjRuntime = {
+      async runJj(args) {
+        calls.push(args);
+        callCount++;
+        if (args[0] === "evolog") {
+          return {
+            stdout: [
+              "abc123456789\tFix bug\t1 minute ago",
+              "def456789012\tFix bug\t5 minutes ago",
+              "",
+            ].join("\n"),
+            stderr: "",
+            exitCode: 0,
+          };
+        }
+        return { stdout: "diff --git a/foo.ts b/foo.ts\n", stderr: "", exitCode: 0 };
+      },
+    };
+    const result = await runJjDiff(runtime, "jj-evolog", "");
+    expect(result.label).toBe("Evolution diff from def45678");
+    // evolog call + diff call
+    expect(callCount).toBe(2);
+    const diffCall = calls.find((c) => c[0] === "diff");
+    expect(diffCall).toEqual(["diff", "--git", "--from", "def456789012", "--to", "@"]);
+  });
+
+  test("returns error when evolog has no previous entry", async () => {
+    const runtime: ReviewJjRuntime = {
+      async runJj(args) {
+        if (args[0] === "evolog") {
+          return { stdout: "abc123456789\tInitial commit\t1 minute ago\n", stderr: "", exitCode: 0 };
+        }
+        return { stdout: "", stderr: "", exitCode: 0 };
+      },
+    };
+    const result = await runJjDiff(runtime, "jj-evolog", "");
+    expect(result.error).toBe("No previous evolution found");
+    expect(result.patch).toBe("");
   });
 });
 

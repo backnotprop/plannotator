@@ -5,6 +5,7 @@ import {
   type GitCommandResult,
   type GitContext,
   type GitDiffOptions,
+  type JjEvoLogEntry,
   JJ_TRUNK_REVSET,
   jjLineBaseRevset,
   validateFilePath,
@@ -15,6 +16,7 @@ export {
   jjCompareTargetRevset,
   jjLineBaseRevset,
   parseRemoteBookmark,
+  type JjEvoLogEntry,
 } from "./review-core";
 
 export interface ReviewJjRuntime {
@@ -41,6 +43,8 @@ export async function getJjContext(
   const defaultTarget = await selectDefaultJjCompareTarget(runtime, root ?? cwd);
   const contextCwd = root ?? cwd;
 
+  const evologs = await getJjEvoLogEntries(runtime, root ?? cwd);
+
   return {
     currentBranch: "",
     defaultBranch: defaultTarget,
@@ -48,6 +52,7 @@ export async function getJjContext(
       { id: "jj-current", label: "Current change" },
       { id: "jj-last", label: "Last change" },
       { id: "jj-line", label: "Line of work" },
+      ...(evologs.length >= 2 ? [{ id: "jj-evolog", label: "Evolution diff" }] : []),
       { id: "jj-all", label: "All files" },
     ],
     worktrees: [],
@@ -68,6 +73,7 @@ export async function getJjContext(
     repository: contextCwd ? { displayFallback: basename(contextCwd) } : undefined,
     cwd: contextCwd,
     vcsType: "jj",
+    jjEvologs: evologs.length >= 2 ? evologs : undefined,
   };
 }
 
@@ -78,7 +84,18 @@ export async function runJjDiff(
   cwd?: string,
   options?: GitDiffOptions,
 ): Promise<DiffResult> {
-  const compareTarget = defaultBranch.length > 0 ? defaultBranch : JJ_TRUNK_REVSET;
+  let compareTarget = defaultBranch.length > 0 ? defaultBranch : JJ_TRUNK_REVSET;
+
+  // For evolog diffs, when no explicit base is provided, default to the
+  // second evolog entry (the previous state of the current change).
+  if (diffType === "jj-evolog" && defaultBranch.length === 0) {
+    const evologs = await getJjEvoLogEntries(runtime, cwd);
+    if (evologs.length < 2) {
+      return { patch: "", label: "Evolution diff", error: "No previous evolution found" };
+    }
+    compareTarget = evologs[1].commitId;
+  }
+
   const args = getJjDiffArgs(diffType, compareTarget, options);
   if (!args) return { patch: "", label: "Unknown diff type" };
 
@@ -144,6 +161,14 @@ export async function getJjFileContentsForDiff(
         newContent: await jjFileContent(runtime, "@", filePath, fileCwd),
       };
     }
+    case "jj-evolog": {
+      // defaultBranch carries the evolog commit ID of the historical state.
+      const evologRev = defaultBranch.length > 0 ? defaultBranch : "@-";
+      return {
+        oldContent: await jjFileContent(runtime, evologRev, oldFilePath, fileCwd),
+        newContent: await jjFileContent(runtime, "@", filePath, fileCwd),
+      };
+    }
     case "jj-all":
       return {
         oldContent: null,
@@ -170,6 +195,13 @@ export function getJjDiffArgs(
       return {
         args: ["diff", "--git", ...whitespaceArgs, "--from", jjLineBaseRevset(compareTarget), "--to", "@"],
         label: `Line of work vs ${compareTarget}`,
+      };
+    case "jj-evolog":
+      // compareTarget is the short commit ID of an older evolog entry.
+      // Diff from that historical state to the current working copy.
+      return {
+        args: ["diff", "--git", ...whitespaceArgs, "--from", compareTarget, "--to", "@"],
+        label: `Evolution diff from ${compareTarget.slice(0, 8)}`,
       };
     case "jj-all":
       return { args: ["diff", "--git", ...whitespaceArgs, "--from", "root()", "--to", "@"], label: "All files" };
@@ -331,6 +363,47 @@ function parseSerializedJjString(value: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Returns the evolution log for the current change (`@`), newest-first.
+ * Each entry represents a previous state of the same change ID.
+ * Returns an empty array if evolog is unavailable or the change has no history.
+ */
+export async function getJjEvoLogEntries(
+  runtime: ReviewJjRuntime,
+  cwd?: string,
+): Promise<JjEvoLogEntry[]> {
+  // Template uses CommitEvolutionEntry type: each field is accessed via `commit.*`.
+  const result = await runtime.runJj(
+    [
+      "evolog",
+      "--no-graph",
+      "-r",
+      "@",
+      "-T",
+      'commit.commit_id().short(12) ++ "\t" ++ commit.description().first_line() ++ "\t" ++ commit.author().timestamp().ago() ++ "\n"',
+    ],
+    { cwd },
+  );
+
+  if (result.exitCode !== 0) return [];
+
+  const entries: JjEvoLogEntry[] = [];
+  for (const rawLine of result.stdout.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const tabIdx = line.indexOf("\t");
+    if (tabIdx === -1) continue;
+    const commitId = line.slice(0, tabIdx);
+    const rest = line.slice(tabIdx + 1);
+    const tab2 = rest.indexOf("\t");
+    const description = tab2 === -1 ? rest : rest.slice(0, tab2);
+    const age = tab2 === -1 ? undefined : rest.slice(tab2 + 1);
+    if (commitId) entries.push({ commitId, description, age });
+  }
+
+  return entries;
 }
 
 async function jjFileContent(

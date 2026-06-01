@@ -32,6 +32,7 @@ import {
 	isWithinProjectRoot,
 	warmFileListCache,
 } from "../generated/resolve-file.js";
+import { parseCodePath } from "../generated/code-file.js";
 import { htmlToMarkdown } from "../generated/html-to-markdown.js";
 import { preloadFile } from "@pierre/diffs/ssr";
 
@@ -116,7 +117,9 @@ export async function handleDocRequest(res: Res, url: URL): Promise<void> {
 
 	// Code files: try literal resolve first; on miss, fall back to smart resolver.
 	if (isCodeFilePath(requestedPath)) {
-		const literalPath = resolveUserPath(requestedPath, resolvedBase || projectRoot);
+		const parsed = parseCodePath(requestedPath);
+		const cleanPath = parsed.filePath;
+		const literalPath = resolveUserPath(cleanPath, resolvedBase || projectRoot);
 		const literalAllowed = resolvedBase || isWithinProjectRoot(literalPath, projectRoot);
 
 		let resolvedCode: string | null = null;
@@ -125,7 +128,7 @@ export async function handleDocRequest(res: Res, url: URL): Promise<void> {
 		}
 
 		if (!resolvedCode) {
-			const result = await resolveCodeFile(requestedPath, projectRoot);
+			const result = await resolveCodeFile(cleanPath, projectRoot);
 			if (result.kind === "found") {
 				resolvedCode = result.path;
 			} else if (result.kind === "ambiguous") {
@@ -163,7 +166,7 @@ export async function handleDocRequest(res: Res, url: URL): Promise<void> {
 			} catch {
 				// Fall back to client-side rendering
 			}
-			json(res, { codeFile: true, contents, filepath: resolvedCode, prerenderedHTML });
+			json(res, { codeFile: true, contents, filepath: resolvedCode, prerenderedHTML, line: parsed.line, lineEnd: parsed.lineEnd });
 			return;
 		} catch {
 			json(res, { error: `File not found: ${requestedPath}` }, 404);
@@ -234,7 +237,8 @@ export async function handleDocExistsRequest(res: Res, req: IncomingMessage): Pr
 
 	await Promise.all(
 		(paths as string[]).map(async (p) => {
-			const r = await resolveCodeFile(p, projectRoot, baseDir);
+			const cleanP = parseCodePath(p).filePath;
+			const r = await resolveCodeFile(cleanP, projectRoot, baseDir);
 			if (r.kind === "found") {
 				results[p] = { status: "found", resolved: r.path };
 			} else if (r.kind === "ambiguous") {

@@ -14,6 +14,7 @@
     "./vcs-core": "./vcs-core.ts",
     "./checklist": "./checklist.ts",
     "./types": "./types.ts",
+    "./pr-types": "./pr-types.ts",
     "./pr-provider": "./pr-provider.ts",
     "./pr-stack": "./pr-stack.ts",
     "./project": "./project.ts",
@@ -29,15 +30,19 @@
     "./external-annotation": "./external-annotation.ts",
     "./agent-jobs": "./agent-jobs.ts",
     "./config": "./config.ts",
+    "./data-dir": "./data-dir.ts",
     "./prompts": "./prompts.ts",
     "./improvement-hooks": "./improvement-hooks.ts",
+    "./pfm-reminder": "./pfm-reminder.ts",
     "./worktree": "./worktree.ts",
     "./worktree-pool": "./worktree-pool.ts",
     "./html-to-markdown": "./html-to-markdown.ts",
     "./url-to-markdown": "./url-to-markdown.ts",
     "./tour": "./tour.ts",
     "./annotate-args": "./annotate-args.ts",
-    "./at-reference": "./at-reference.ts"
+    "./at-reference": "./at-reference.ts",
+    "./code-nav": "./code-nav.ts",
+    "./goal-setup": "./goal-setup.ts"
   },
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.64",

@@ -33,7 +33,7 @@ class ToolbarErrorBoundary extends React.Component<
   }
 }
 
-import { CommentPopover } from './CommentPopover';
+import { CommentPopover, type CommentAskAIContext } from './CommentPopover';
 import { TaterSpriteSitting } from './TaterSpriteSitting';
 import { AttachmentsButton } from './AttachmentsButton';
 import { GraphvizBlock } from './GraphvizBlock';
@@ -96,6 +96,7 @@ interface ViewerProps {
   // Checkbox toggle props
   onToggleCheckbox?: (blockId: string, checked: boolean) => void;
   checkboxOverrides?: Map<string, boolean>;
+  onAskAI?: (question: string, context: CommentAskAIContext) => void;
 }
 
 export interface ViewerHandle {
@@ -170,6 +171,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   sourceInfo,
   onToggleCheckbox,
   checkboxOverrides,
+  onAskAI,
 }, ref) => {
   const [copied, setCopied] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
@@ -190,6 +192,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // anchor ids stay stable across re-renders and duplicate heading texts get
   // `-1`/`-2`/... suffixes rather than colliding on the same id.
   const headingSlugMap = useMemo(() => buildHeadingSlugMap(blocks), [blocks]);
+  const isTouchDevice = useMemo(() => window.matchMedia('(pointer: coarse)').matches, []);
   const [hoveredCodeBlock, setHoveredCodeBlock] = useState<{ block: Block; element: HTMLElement } | null>(null);
   const [isCodeBlockToolbarExiting, setIsCodeBlockToolbarExiting] = useState(false);
   const [hoveredTable, setHoveredTable] = useState<{ block: Block; element: HTMLElement } | null>(null);
@@ -200,6 +203,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   const [viewerCommentPopover, setViewerCommentPopover] = useState<{
     anchorEl: HTMLElement;
     contextText: string;
+    selectedText?: string;
     initialText?: string;
     isGlobal: boolean;
     codeBlock?: { block: Block; element: HTMLElement };
@@ -263,6 +267,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       setViewerCommentPopover({
         anchorEl: element,
         contextText: (codeEl.textContent || '').slice(0, 80),
+        selectedText: codeEl.textContent || '',
         isGlobal: false,
         codeBlock: { block: blocks.find(b => b.id === blockId)!, element },
       });
@@ -280,9 +285,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // Suppress native context menu on touch devices (prevents cut/copy/paste overlay on mobile)
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
-    const isTouchPrimary = window.matchMedia('(pointer: coarse)').matches;
-    if (!isTouchPrimary) return;
+    if (!container || !isTouchDevice) return;
 
     const handleContextMenu = (e: Event) => {
       e.preventDefault();
@@ -355,30 +358,23 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     return () => window.clearTimeout(timer);
   }, [blocks, locationHash, scrollToAnchor, stickyScrollViewport]);
 
-  // Cmd+C / Ctrl+C keyboard shortcut for copying selected text
+  // Use the native copy event so clipboard writes are synchronous (Safari
+  // rejects the async navigator.clipboard API outside the user-gesture window).
+  // web-highlighter clears the DOM selection on mouseup, so the browser has
+  // nothing to copy by the time Cmd+C fires — we inject the captured text here.
   useEffect(() => {
-    const handleKeyDown = async (e: KeyboardEvent) => {
-      // Check for Cmd+C (Mac) or Ctrl+C (Windows/Linux)
-      if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
-        // Don't intercept if typing in an input/textarea
-        const tag = (e.target as HTMLElement)?.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    const handleCopy = (e: ClipboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
-        // If we have an active selection with captured text, use that
-        if (toolbarState?.selectionText) {
-          e.preventDefault();
-          try {
-            await navigator.clipboard.writeText(toolbarState.selectionText);
-          } catch (err) {
-            console.error('Failed to copy:', err);
-          }
-        }
-        // Otherwise let the browser handle default copy behavior
+      if (toolbarState?.selectionText) {
+        e.preventDefault();
+        e.clipboardData?.setData('text/plain', toolbarState.selectionText);
       }
     };
 
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    document.addEventListener('copy', handleCopy);
+    return () => document.removeEventListener('copy', handleCopy);
   }, [toolbarState]);
 
   // Imperative handle — delegates to hook, extends removeHighlight for code blocks
@@ -479,6 +475,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     setViewerCommentPopover({
       anchorEl: hoveredCodeBlock.element,
       contextText: codeText.slice(0, 80),
+      selectedText: codeText,
       initialText: initialChar,
       isGlobal: false,
       codeBlock: hoveredCodeBlock,
@@ -714,6 +711,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               onRequestComment={handleRequestComment}
               onQuickLabel={handleQuickLabel}
               copyText={toolbarState.selectionText}
+              hideCopyButton={!isTouchDevice}
               closeOnScrollOut
             />
           </ToolbarErrorBoundary>
@@ -808,15 +806,22 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 
         {/* Comment popover — hook handles text selection, Viewer handles global + code block */}
         {hookCommentPopover && (
-          <CommentPopover
-            anchorEl={hookCommentPopover.anchorEl}
-            contextText={hookCommentPopover.contextText}
-            isGlobal={false}
-            initialText={hookCommentPopover.initialText}
-            onSubmit={hookCommentSubmit}
-            onClose={hookCommentClose}
-          />
-        )}
+            <CommentPopover
+              anchorEl={hookCommentPopover.anchorEl}
+              contextText={hookCommentPopover.contextText}
+              isGlobal={false}
+              initialText={hookCommentPopover.initialText}
+              onSubmit={hookCommentSubmit}
+              onClose={hookCommentClose}
+              onAskAI={onAskAI}
+              askAIContext={{
+                kind: 'selection',
+                label: 'Selected text',
+                text: hookCommentPopover.selectedText ?? hookCommentPopover.contextText,
+                sourcePath: linkedDocInfo?.filepath ?? sourceInfo,
+              }}
+            />
+          )}
         {viewerCommentPopover && (
           <CommentPopover
             anchorEl={viewerCommentPopover.anchorEl}
@@ -825,6 +830,13 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             initialText={viewerCommentPopover.initialText}
             onSubmit={handleViewerCommentSubmit}
             onClose={handleViewerCommentClose}
+            onAskAI={onAskAI}
+            askAIContext={{
+              kind: viewerCommentPopover.isGlobal ? 'general' : 'selection',
+              label: viewerCommentPopover.isGlobal ? 'Document' : 'Code block',
+              text: viewerCommentPopover.selectedText,
+              sourcePath: linkedDocInfo?.filepath ?? sourceInfo,
+            }}
           />
         )}
 
@@ -924,5 +936,4 @@ function groupBlocks(blocks: Block[]): RenderGroup[] {
   }
   return groups;
 }
-
 
