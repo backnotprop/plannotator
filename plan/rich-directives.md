@@ -2,7 +2,7 @@
 
 ## Brief
 
-Agents generating plans, explainers, and PR walkthroughs through Plannotator currently write 20-30KB of raw HTML with copy-pasted CSS tokens because the markdown renderer lacks structured visual components. The directive system (`:::kind ... :::`) already parses arbitrary kinds but only renders a generic `<Callout>` for all of them. This proposal extends the directive system with purpose-built React components — stat strips, milestone timelines, risk grids, two-column layouts, and diagram panels — so agents write concise markdown instead of verbose, inconsistent HTML.
+Agents generating plans, explainers, and PR walkthroughs through Plannotator currently write 20-30KB of raw HTML with copy-pasted CSS tokens because the markdown renderer lacks structured visual components. The directive system (`:::kind ... :::`) already parses arbitrary kinds but only renders a generic `<Callout>` for all of them. This proposal extends the directive system with purpose-built React components — stat strips, milestone timelines, risk grids, multi-column layouts, and diagram panels — so agents write concise markdown instead of verbose, inconsistent HTML.
 
 ## Problem
 
@@ -41,52 +41,52 @@ Each line: `value | label` or `value | label | color`. Color is a semantic token
 
 ```
 :::milestone done
-### Merge !64
-Approved, clean, independent.
-`evo-action-center`
+### Deploy to staging
+All checks green.
+`backend-api`
 :::
 
 :::milestone blocked
-### Rebase + fix !381
-Conflicts, squash=false.
-`fusion-lms`
+### Rebase feature branch
+Conflicts with main.
+`data-service`
 :::
 ```
 
-Status: `done` (green dot), `warn` (yellow), `blocked` (red), or omitted (default purple outline). First `###` heading becomes the title. Body is prose (rendered with `InlineMarkdown`). Backtick-only lines become tag chips. Consecutive `:::milestone` blocks render as a connected vertical timeline.
+Status: `done` (green dot), `warn` (yellow), `blocked` (red), or omitted (default purple outline). Status lives on the opening line — same pattern as `:::note`. First `###` heading becomes the title. Body is prose (rendered with `InlineMarkdown`). Backtick-only lines become tag chips. Consecutive `:::milestone` blocks render as a connected vertical timeline.
 
 #### `:::risks` — Risk grid
 
 ```
 :::risks
-HIGH | 12 bot threads on !246 | Resolve/dismiss each
-MED | squash=false on !381 | Fix via API
-LOW | dlynn OOO | Not a hard blocker
+HIGH | Merge conflicts on main | Rebase before merging
+MED | Stale pipeline | Retrigger CI
+LOW | Reviewer OOO | Not a hard blocker
 :::
 ```
 
 Each line: `severity | name | mitigation`. Severity maps to badge color (`HIGH` → destructive, `MED` → warning, `LOW` → success). Renders as the design-system.md risk-grid pattern.
 
-#### `:::cols` — Two-column layout
+#### `:::cols [N]` — Multi-column layout
 
 ```
 :::cols
 :::col
-#### Left column content
-Paragraph here.
+#### Left column
+Content here.
 :::
 :::col
-#### Right column content
+#### Right column
 More content.
 :::
 :::
 ```
 
-Nesting support: `:::cols` contains exactly two `:::col` children. Each column renders its body with full block rendering (headings, lists, code, inline markdown). Responsive: collapses to single column below 720px.
+Nesting support: `:::cols` contains N `:::col` children (default 2, auto-detected from child count). Each column renders its body with full block rendering (headings, lists, code, inline markdown). Responsive: collapses to single column below 720px. For explicit column count: `:::cols 3`.
 
 #### `:::diagram [caption]` — Diagram panel
 
-```
+````
 :::diagram Request flow through the API gateway
 ```mermaid
 graph LR
@@ -94,9 +94,9 @@ graph LR
   B --> C[API]
 ```
 :::
-```
+````
 
-Wraps a code fence (mermaid, graphviz, or SVG) in a bordered panel with an optional caption. The design-system.md `diagram-panel` pattern.
+Wraps a code fence (mermaid, graphviz) or inline `<svg>` in a bordered panel with an optional caption. Inline SVG is sanitized through the same DOMPurify path as `HtmlBlock` and inherits theme tokens from CSS variables — no hardcoded colors needed. The design-system.md `diagram-panel` pattern.
 
 ### Inline extensions (future, not in this PR)
 
@@ -115,13 +115,17 @@ These require `InlineMarkdown` tokenizer changes and are out of scope for this P
 | `packages/ui/components/blocks/MilestoneTimeline.tsx` | New component | ~80 |
 | `packages/ui/components/blocks/RiskGrid.tsx` | New component | ~70 |
 | `packages/ui/components/blocks/TwoCol.tsx` | New component + nested block rendering | ~50 |
-| `packages/ui/components/blocks/DiagramPanel.tsx` | New component wrapping existing mermaid/graphviz | ~40 |
+| `packages/ui/components/blocks/DiagramPanel.tsx` | New component wrapping existing mermaid/graphviz + sanitized SVG | ~50 |
 | `packages/ui/components/BlockRenderer.tsx` | New `directiveKind` cases in switch | ~25 |
 | `packages/ui/theme.css` | Directive-specific CSS classes | ~80 |
 | `packages/shared/pfm-reminder.ts` | Document new directive kinds | ~30 |
 | `packages/ui/utils/parser.ts` | No changes needed | 0 |
 | `packages/ui/utils/parser.test.ts` | Tests for directive body parsing | ~60 |
-| **Total** | | **~495** |
+| `apps/skills/plannotator-visual-explainer/SKILL.md` | Add directive path + update delivery | ~30 |
+| `apps/skills/plannotator-visual-explainer/references/design-system.md` | Directive syntax examples | ~60 |
+| `apps/skills/plannotator-visual-explainer/references/theme-override.md` | Directive theme inheritance note | ~10 |
+| `apps/skills/plannotator-visual-explainer/references/svg-patterns.md` | `:::diagram` SVG embedding note | ~10 |
+| **Total** | | **~615** |
 
 ### Parser: zero changes
 
@@ -171,34 +175,22 @@ Each component renders with `data-block-id={block.id}` and `data-block-type="dir
 
 All existing `:::note`, `:::tip`, `:::warning`, `:::caution`, `:::important` directives continue routing to `<Callout>` via the `default` case. No breaking changes.
 
-## Skill updates needed (downstream, not in the plannotator PR)
+## Skill updates (in this repo)
 
-After the plannotator PR lands:
+The `plannotator-visual-explainer` skill and its references ship with plannotator at `apps/skills/plannotator-visual-explainer/`. The installer deploys them to `~/.agents/skills/`. These updates are part of the same PR:
 
-| Skill | Change |
+| File | Change |
 |---|---|
-| `plannotator-visual-explainer` | Add directive path: "For structured layouts, use rich directives instead of raw HTML." Update delivery to `plannotator annotate <file.md>` (no `--render-html`). Keep HTML path for SVG architecture diagrams only. |
-| `plannotator-visual-explainer/references/design-system.md` | Add directive syntax examples alongside existing HTML/CSS patterns. |
-| `plannotator-visual-explainer/references/theme-override.md` | Note that directives inherit theme natively — no token copy needed. |
+| `apps/skills/plannotator-visual-explainer/SKILL.md` | Add directive path: "For structured layouts, use rich directives instead of raw HTML." Update delivery to `plannotator annotate <file.md>` (no `--render-html`). Keep HTML path only for custom SVG architecture diagrams. |
+| `apps/skills/plannotator-visual-explainer/references/design-system.md` | Add directive syntax examples alongside existing HTML/CSS component patterns. Show both formats so agents can choose. |
+| `apps/skills/plannotator-visual-explainer/references/theme-override.md` | Note that directives inherit theme natively — no token copy needed. The override doc becomes relevant only for the HTML escape hatch. |
+| `apps/skills/plannotator-visual-explainer/references/svg-patterns.md` | Add note that SVG can be embedded inside `:::diagram` directives, inheriting theme tokens from CSS vars. |
 
 ## Open questions
 
 :::callout
-### Should `:::cols` support more than 2 columns?
-The design-system.md only defines a two-column grid. Three columns would need a `:::col` counter or explicit `:::cols 3` syntax.
-**Decide with: plannotator maintainer**
-:::
-
-:::callout
-### Should `:::milestone` parse status from the opening line or from a body prefix?
-Current proposal: `:::milestone done` (status on the opening line). Alternative: `:::milestone` with `status: done` as a YAML-like first line. The opening-line approach is simpler and matches how `:::note` already works.
-**Decide with: plannotator maintainer**
-:::
-
-:::callout
-### Should diagram panel support inline SVG directly (not just mermaid/graphviz)?
-The design-system.md SVG patterns are pure inline SVG with Plannotator tokens. A `:::diagram` containing raw `<svg>` would need to pass through `HtmlBlock`-style sanitization inside the directive body. This could be a fast follow.
-**Decide with: plannotator maintainer**
+### Should `:::diagram` support inline SVG directly?
+Yes — included in this PR. Inline `<svg>` inside `:::diagram` is sanitized via DOMPurify (same path as `HtmlBlock`) and inherits theme tokens from CSS variables. This lets agents write SVG architecture diagrams with `var(--primary)` etc. without the `--render-html` iframe path.
 :::
 
 ## Prior art
@@ -213,8 +205,8 @@ The `:::kind` syntax is widely adopted. Extending it with structured kinds follo
 
 ## Contribution process
 
-1. **Open a GitHub issue** on `backnotprop/plannotator` describing the feature request with this plan as the body
-2. **Wait for maintainer feedback** before coding (the `accepted` label signals green light)
-3. **Fork → branch → PR** per CONTRIBUTING.md (dual MIT/Apache-2.0 license)
-4. PR targets `main`, includes the components + theme CSS + pfm-reminder update + tests
-5. After merge: update the chezmoi-managed skills downstream
+1. **Open a GitHub issue** on `backnotprop/plannotator` describing the feature with a link to the PR
+2. **Fork → branch → implement → PR** per CONTRIBUTING.md (dual MIT/Apache-2.0 license)
+3. PR targets `main`, includes the components + theme CSS + pfm-reminder update + tests
+4. Maintain the fork regardless — the implementation is immediately useful on our machines before upstream merge
+5. After upstream merge (if accepted): update operator-owned skills in dotfiles
