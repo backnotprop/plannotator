@@ -139,12 +139,27 @@ If the user edits or removes facts in the UI, apply that result directly. If the
 
 Explore the codebase. Discover and validate implementation paths toward each accepted fact. Treat facts with `automatedVerification: true` as requiring concrete automated checks unless you document a blocker. Trace through code, identify files and systems involved, surface risks and unknowns. Refine until you have a confident order of operations.
 
-Write `goals/<slug>/plan.md`:
+Write `goals/<slug>/plan.md` using Plannotator's rich directive syntax for structured sections:
 
-- Solution approach (brief)
-- Ordered steps with the files/systems each touches
-- Verification for each step (concrete commands or checks)
-- Risks or open questions worth flagging
+**Available directives** (rendered as themed visual components in the reviewer):
+
+- `:::stats` — key numbers. Each line: `value | label` or `value | label | color` (success/destructive/warning/primary).
+- `:::milestone [status]` — timeline phase. Status: `done`, `warn`, `blocked`, or omitted. `###` heading = title. Backtick lines = tag chips. Consecutive milestones render as a connected timeline.
+- `:::risks` — risk grid. Each line: `severity | name | mitigation` (HIGH/MED/LOW).
+- `:::cols` — multi-column layout. Split with `:::col` markers. Use `:::cols N` for explicit count.
+- `:::diagram [caption]` — wraps mermaid/graphviz code fences or inline SVG in a captioned panel.
+- `:::note`, `:::tip`, `:::warning`, `:::caution`, `:::important` — callouts.
+
+**Plan structure:**
+
+- `:::stats` strip with scope numbers (files touched, facts covered, steps)
+- `:::milestone` entries for ordered implementation steps, each listing files/systems touched
+- Verification for each step (concrete commands or checks, inside the milestone body or as a task list)
+- `:::risks` grid for anything worth flagging
+- `:::cols` for side-by-side comparisons (before/after, option A vs B) when useful
+- `:::diagram` for architecture or data flow when 3+ components interact
+
+Keep it scannable. One idea per section. Skip directives that don't serve the content — plain prose, headings, code fences, and task lists are always fine.
 
 Gate the plan with Plannotator:
 
