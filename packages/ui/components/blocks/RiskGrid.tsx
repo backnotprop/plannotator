@@ -18,19 +18,11 @@ interface RiskEntry {
   mitigation: string;
 }
 
-const SEVERITY_STYLES: Record<string, { badge: string; border: string }> = {
-  high: {
-    badge: 'bg-destructive/15 text-destructive border-destructive/30',
-    border: 'border-l-destructive/50',
-  },
-  med: {
-    badge: 'bg-warning/15 text-warning border-warning/30',
-    border: 'border-l-warning/50',
-  },
-  low: {
-    badge: 'bg-success/15 text-success border-success/30',
-    border: 'border-l-success/50',
-  },
+/* Design-system spec: .badge colors via color-mix */
+const SEVERITY_BADGE: Record<string, string> = {
+  high: 'background: color-mix(in oklab, var(--destructive) 15%, transparent); color: var(--destructive);',
+  med:  'background: color-mix(in oklab, var(--warning) 15%, transparent); color: var(--warning);',
+  low:  'background: color-mix(in oklab, var(--success) 15%, transparent); color: var(--success);',
 };
 
 function parseRisks(body: string): RiskEntry[] {
@@ -48,11 +40,6 @@ function parseRisks(body: string): RiskEntry[] {
     });
 }
 
-function getSeverityStyle(severity: string) {
-  const key = severity.toLowerCase();
-  return SEVERITY_STYLES[key] || SEVERITY_STYLES.low;
-}
-
 export const RiskGrid: React.FC<RiskGridProps> = ({
   blockId,
   body,
@@ -67,39 +54,59 @@ export const RiskGrid: React.FC<RiskGridProps> = ({
   if (risks.length === 0) return null;
 
   const inlineProps = { imageBaseDir, onImageClick, onOpenLinkedDoc, onOpenCodeFile, githubRepo, onNavigateAnchor };
+  const badgeStyle = (sev: string): string =>
+    SEVERITY_BADGE[sev.toLowerCase()] || SEVERITY_BADGE.low;
 
   return (
     <div
-      className="directive-risks my-4 space-y-2"
+      className="directive-risks my-4 overflow-hidden"
+      style={{ border: '1.5px solid var(--border)', borderRadius: 'var(--radius, 0.625rem)' }}
       data-block-id={blockId}
       data-block-type="directive"
       data-directive-kind="risks"
     >
-      {risks.map((risk, i) => {
-        const style = getSeverityStyle(risk.severity);
-        return (
-          <div
-            key={i}
-            className={`flex items-start gap-3 rounded-md border border-l-[3px] ${style.border} bg-card/50 px-3 py-2.5`}
+      {risks.map((risk, i) => (
+        <div
+          key={i}
+          className="items-center"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'auto 1fr 1.5fr',
+            gap: '16px',
+            padding: '14px 24px',
+            borderBottom: i < risks.length - 1 ? '1px solid var(--border)' : 'none',
+          }}
+        >
+          {/* Badge — design-system spec: font-mono, 0.68rem, weight 600, uppercase */}
+          <span
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.68rem',
+              fontWeight: 600,
+              padding: '2px 8px',
+              borderRadius: 'calc(var(--radius, 0.625rem) - 4px)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.04em',
+              ...Object.fromEntries(
+                badgeStyle(risk.severity).split(';').filter(Boolean).map(s => {
+                  const [k, v] = s.split(':').map(x => x.trim());
+                  return [k.replace(/-([a-z])/g, (_, c) => c.toUpperCase()), v];
+                })
+              ),
+            }}
           >
-            <span
-              className={`inline-flex items-center shrink-0 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${style.badge}`}
-            >
-              {risk.severity}
-            </span>
-            <div className="min-w-0 flex-1">
-              <span className="text-sm font-medium text-foreground/90">
-                <InlineMarkdown text={risk.name} {...inlineProps} />
-              </span>
-              {risk.mitigation && (
-                <span className="text-sm text-muted-foreground ml-1">
-                  — <InlineMarkdown text={risk.mitigation} {...inlineProps} />
-                </span>
-              )}
-            </div>
-          </div>
-        );
-      })}
+            {risk.severity}
+          </span>
+          {/* Name — design-system spec: weight 500 */}
+          <span style={{ fontWeight: 500, fontSize: '0.9rem' }}>
+            <InlineMarkdown text={risk.name} {...inlineProps} />
+          </span>
+          {/* Mitigation — design-system spec: 0.9rem, muted-foreground */}
+          <span className="text-muted-foreground" style={{ fontSize: '0.85rem' }}>
+            <InlineMarkdown text={risk.mitigation} {...inlineProps} />
+          </span>
+        </div>
+      ))}
     </div>
   );
 };

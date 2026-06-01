@@ -1,128 +1,151 @@
-# Rich Directives Demo
+# Implementation Plan: User Notification Service
 
-A showcase of the 5 new directive kinds.
+> **Brief:** Add a notification service that delivers real-time alerts to users via WebSocket, email digest, and in-app badge. Must integrate with the existing event bus and respect per-user quiet hours.
 
 ---
-
-## Stats Strip
 
 :::stats
-5 | Components
-3 | New Files | success
-2 | Modified | warning
-1 | Breaking | destructive
+3 | New Services | primary
+5 | Files Changed | warning
+2 | API Endpoints
+1 | DB Migration | destructive
+12 | Tests Added | success
 :::
 
 ---
 
-## Milestone Timeline
+## Milestones
 
 :::milestone done
-### Parser regex update
-Extended directive regex to capture trailing args. Added `directiveArgs` to Block type. All tests pass.
-`parser.ts`
-`types.ts`
+### Database schema & migration
+Add `notifications` and `user_preferences` tables. Online DDL with zero-downtime migration.
+`packages/db/migrations`
+`packages/db/schema.ts`
 :::
 
 :::milestone done
-### Component implementation
-Built StatStrip, MilestoneTimeline, RiskGrid, Columns, and DiagramPanel. Theme CSS added.
-`BlockRenderer.tsx`
-`theme.css`
+### Event bus consumer
+Subscribe to domain events, transform into notification payloads, fan out to delivery channels.
+`packages/server/consumers`
+`packages/shared/events.ts`
 :::
 
 :::milestone warn
-### Skill updates
-Visual-explainer and setup-goal skills updated with directive syntax. PR path still uses HTML for Pierre diffs.
-`SKILL.md`
+### WebSocket delivery channel
+Persistent connections per user session. Reconnect with exponential backoff. Heartbeat every 30s.
+`packages/server/ws`
+`packages/client/hooks/useNotifications.ts`
 :::
 
 :::milestone blocked
-### Upstream merge
-PR submitted. Waiting on maintainer review.
-`backnotprop/plannotator#835`
+### Email digest aggregation
+Batch notifications into hourly/daily digests. Respect quiet hours. Requires email provider API key.
+`packages/server/digests`
+:::
+
+:::milestone
+### In-app badge & notification center
+Badge count in nav bar. Dropdown panel with mark-as-read, dismiss, and bulk actions.
+`packages/client/components/NotificationBadge.tsx`
+`packages/client/components/NotificationPanel.tsx`
 :::
 
 ---
 
-## Risk Grid
+## Architecture
 
-:::risks
-HIGH | Breaking change to parser regex | Backwards compatible — existing directives still route to Callout
-MED | SVG sanitization bypass | Uses same DOMPurify path as HtmlBlock
-LOW | Theme token mismatch | Components use Tailwind bridge, no hardcoded colors
-:::
-
----
-
-## Multi-Column Layout
-
-:::cols
-:::col
-#### Before (HTML)
-
-Agents wrote 20-30KB of raw HTML with:
-- ~100 lines of `:root` CSS tokens
-- ~200 lines of component CSS
-- Inline SVG with hardcoded colors
-- Delivery via `--render-html` iframe
-:::col
-#### After (Directives)
-
-Agents write 3KB of structured markdown:
-- Zero CSS — theme inherited
-- Native annotation precision
-- `plannotator annotate file.md`
-- Full theme switching support
-:::
-
----
-
-## Diagram Panel
-
-:::diagram Architecture: directive rendering pipeline
+:::diagram Notification delivery pipeline
 ```mermaid
 graph LR
-    A[Markdown] --> B[Parser]
-    B --> C{directiveKind?}
-    C -->|stats| D[StatStrip]
-    C -->|milestone| E[MilestoneTimeline]
-    C -->|risks| F[RiskGrid]
-    C -->|cols| G[Columns]
-    C -->|diagram| H[DiagramPanel]
-    C -->|default| I[Callout]
+    A[Domain Event] --> B[Event Bus]
+    B --> C[Notification Consumer]
+    C --> D{Channel Router}
+    D -->|realtime| E[WebSocket]
+    D -->|batch| F[Email Digest]
+    D -->|passive| G[In-App Badge]
+    E --> H[Client]
+    F --> I[Mailgun]
+    G --> H
 ```
 :::
 
 ---
 
-## Combined Example
+## Key Interface
 
-A typical plan section mixing directives with standard markdown:
+```typescript
+interface NotificationPayload {
+  userId: string;
+  type: 'mention' | 'review' | 'deploy' | 'alert';
+  title: string;
+  body: string;
+  channel: ('ws' | 'email' | 'badge')[];
+  priority: 'low' | 'normal' | 'urgent';
+  metadata?: Record<string, unknown>;
+}
+```
 
-:::stats
-4 | MRs Open
-2 | Approved | success
-2 | Blocked | destructive
-5 | Jira Subtasks
-:::
+---
 
-> [!NOTE]
-> All MR approvals are from human reviewers. Bot threads (CodeRabbit) are informational only.
+## Comparison
 
 :::cols
 :::col
-#### Ready to merge
-- !64 evo-action-center (1/1 approved)
-- !246 evo-conversions (2/2 approved, bot threads only)
+#### Current State
+Events fire into the void. Users poll dashboards manually. No notification preferences. Email is all-or-nothing — users either get every event or unsubscribe entirely.
+
+- No real-time delivery
+- No per-user preferences
+- No quiet hours
+- ~2min latency via polling
 :::col
-#### Needs work
-- !381 fusion-lms (conflicts, squash fix)
-- !143 gtm-recommendations (blocked by UX decision)
+#### After This Change
+Real-time WebSocket push with < 200ms latency. Per-user channel preferences and quiet hours. Smart batching for email to reduce noise. Badge count for passive awareness.
+
+- Sub-200ms WebSocket delivery
+- Granular channel preferences
+- Quiet hours respected
+- Hourly/daily email digests
 :::
 
+---
+
+## Risk Assessment
+
 :::risks
-HIGH | !381 has merge conflicts with main | Rebase before re-requesting review
-MED | !246 has 12 unresolved CodeRabbit threads | Resolve or dismiss — they block merge
-LOW | dlynn OOO until Jun 13 | Already approved !246, not blocking
+HIGH | Database migration on large users table | Run during off-peak window with online DDL — no locks
+HIGH | WebSocket connection storms at deploy | Staggered reconnect with jittered backoff (2-30s range)
+MED | Email provider rate limits | Queue with exponential retry, circuit breaker at 80% quota
+MED | Quiet hours timezone edge cases | Store preferences in UTC, convert at delivery time
+LOW | Badge count drift on network partition | Reconcile on next successful WebSocket heartbeat
+LOW | Digest email formatting across clients | Use MJML templates, test with Litmus
 :::
+
+---
+
+## Open Questions
+
+:::warning
+**Should WebSocket connections be per-tab or per-user?** Per-tab is simpler but wastes server resources for users with 10+ tabs. Per-user with SharedWorker saves connections but adds browser compat complexity.
+Decide with: infrastructure team
+:::
+
+:::note
+**Email provider choice:** Mailgun vs SendGrid vs SES. Mailgun is cheapest at our volume (< 50k/month). SendGrid has better templates. SES needs more operational overhead.
+Decide with: platform lead
+:::
+
+:::tip
+**Quick win:** The in-app badge can ship independently before WebSocket and email channels are ready. It only needs the DB schema and a polling endpoint — no event bus dependency.
+:::
+
+---
+
+## Verification
+
+- [ ] Migration runs in < 30s on staging (5M rows)
+- [ ] WebSocket reconnects within 5s after network drop
+- [ ] Quiet hours block delivery between configured times
+- [ ] Email digest batches correctly across timezone boundaries
+- [ ] Badge count matches unread notification count after page refresh
+- [ ] Load test: 1000 concurrent WebSocket connections, < 200ms p95 delivery

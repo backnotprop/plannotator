@@ -15,16 +15,17 @@ interface MilestoneTimelineProps {
 
 type MilestoneStatus = 'done' | 'warn' | 'blocked' | 'default';
 
+/* Design-system spec: .dot is 14px with 3px border */
 const STATUS_DOT: Record<MilestoneStatus, string> = {
-  done: 'bg-success border-success/40',
-  warn: 'bg-warning border-warning/40',
-  blocked: 'bg-destructive border-destructive/40',
-  default: 'border-primary/50 bg-transparent',
+  done:    'bg-success border-success',
+  warn:    'bg-warning border-warning',
+  blocked: 'bg-destructive border-destructive',
+  default: 'border-primary bg-card',
 };
 
 const STATUS_LINE: Record<MilestoneStatus, string> = {
-  done: 'bg-success/30',
-  warn: 'bg-warning/30',
+  done:    'bg-success/30',
+  warn:    'bg-warning/30',
   blocked: 'bg-destructive/30',
   default: 'bg-border',
 };
@@ -41,7 +42,7 @@ function parseStatus(raw?: string): MilestoneStatus {
 /**
  * Parse the milestone body into title, prose paragraphs, and tag chips.
  * - First `### heading` line becomes the title.
- * - Lines that are only backtick-wrapped text (e.g. `backend-api`) become tags.
+ * - Lines that are only backtick-wrapped text become tags.
  * - Everything else is prose.
  */
 function parseMilestoneBody(body: string): {
@@ -86,21 +87,30 @@ export const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({
 
   return (
     <div
-      className="directive-milestone flex gap-4 my-1 relative"
+      className="directive-milestone flex relative"
+      style={{ gap: '18px' }}
       data-block-id={blockId}
       data-block-type="directive"
       data-directive-kind="milestone"
     >
-      {/* Timeline track */}
-      <div className="flex flex-col items-center pt-1">
-        <div className={`w-3 h-3 rounded-full border-2 shrink-0 ${dotClass}`} />
-        <div className={`w-0.5 flex-1 mt-1 ${lineClass}`} />
+      {/* Timeline track — design-system spec: 14px dot, 3px border, 2px line */}
+      <div className="flex flex-col items-center" style={{ paddingTop: '4px' }}>
+        <div
+          className={`rounded-full shrink-0 ${dotClass}`}
+          style={{ width: '14px', height: '14px', borderWidth: '3px', borderStyle: 'solid' }}
+        />
+        <div className={`flex-1 ${lineClass}`} style={{ width: '2px', marginTop: '4px' }} />
       </div>
 
-      {/* Content */}
-      <div className="pb-4 min-w-0">
+      {/* Content — design-system spec: h3 is font-display 1.15rem, p is 0.88rem */}
+      <div style={{ paddingBottom: '36px' }}>
         {title && (
-          <div className="font-semibold text-[15px] text-foreground/90">
+          <div style={{
+            fontFamily: 'var(--font-sans)',
+            fontSize: '1rem',
+            fontWeight: 600,
+            marginBottom: '4px',
+          }}>
             <InlineMarkdown
               text={title}
               imageBaseDir={imageBaseDir}
@@ -113,7 +123,12 @@ export const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({
           </div>
         )}
         {prose.length > 0 && (
-          <div className="text-sm text-muted-foreground mt-1 leading-relaxed">
+          <div className="text-muted-foreground" style={{
+            fontSize: '0.88rem',
+            lineHeight: 1.55,
+            maxWidth: '620px',
+            marginBottom: '10px',
+          }}>
             <InlineMarkdown
               text={prose.join(' ')}
               imageBaseDir={imageBaseDir}
@@ -126,11 +141,18 @@ export const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({
           </div>
         )}
         {tags.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mt-2">
+          <div className="flex flex-wrap" style={{ gap: '6px', marginTop: '8px' }}>
             {tags.map((tag, i) => (
               <span
                 key={i}
-                className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-mono bg-muted text-muted-foreground border border-border/40"
+                className="bg-muted text-muted-foreground"
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '0.68rem',
+                  padding: '2px 8px',
+                  borderRadius: 'calc(var(--radius, 0.625rem) - 4px)',
+                  border: '1px solid var(--border)',
+                }}
               >
                 {tag}
               </span>

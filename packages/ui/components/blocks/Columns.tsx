@@ -15,28 +15,17 @@ interface ColumnsProps {
 
 /**
  * Split the :::cols body on :::col markers.
- * Each :::col ... ::: block becomes a column. Content before the first
- * :::col is ignored (or treated as a single column if no :::col markers).
  */
 function parseColumns(body: string): string[] {
-  // Split on :::col lines. The regex matches standalone :::col on its own line.
   const parts = body.split(/^:::col\s*$/m);
-
-  // First element is content before the first :::col — drop it if empty
   const columns = parts
-    .slice(1) // skip preamble
-    .map(col => {
-      // Remove a trailing ::: that closes the col container (if the
-      // author used :::col ... ::: instead of relying on the parent :::)
-      return col.replace(/^:::\s*$/m, '').trim();
-    })
+    .slice(1)
+    .map(col => col.replace(/^:::\s*$/m, '').trim())
     .filter(Boolean);
 
-  // Fallback: no :::col markers → treat the entire body as one column
   if (columns.length === 0 && body.trim()) {
     return [body.trim()];
   }
-
   return columns;
 }
 
@@ -70,16 +59,17 @@ export const Columns: React.FC<ColumnsProps> = ({
       data-block-type="directive"
       data-directive-kind="cols"
     >
+      {/* Design-system spec: gap 24px, responsive at 720px */}
       <div
-        className="directive-cols-grid gap-4"
-        style={{ gridTemplateColumns: `repeat(${count}, 1fr)` }}
+        className="directive-cols-grid"
+        style={{ gap: '24px', gridTemplateColumns: `repeat(${count}, 1fr)` }}
       >
         {columns.map((col, i) => (
           <div key={i} className="directive-col min-w-0">
             {renderProseBody({
               body: col,
-              paragraphClassName: 'text-[15px] leading-relaxed text-foreground/90',
-              listClassName: 'text-[15px] leading-relaxed text-foreground/90',
+              paragraphClassName: 'leading-relaxed text-foreground/90',
+              listClassName: 'leading-relaxed text-foreground/90',
               ...proseProps,
             })}
           </div>
