@@ -1,16 +1,22 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  canStageFiles,
   getGitContext,
   getVcsContext,
+  getVcsFileContentsForDiff,
   prepareLocalReviewDiff,
   runGitDiff,
+  runVcsDiff,
+  stageFile,
   startReviewServer,
+  unstageFile,
 } from "./server";
+import { WorkspaceReviewSession } from "./generated/review-workspace.js";
 
 const tempDirs: string[] = [];
 const originalCwd = process.cwd();
@@ -353,6 +359,102 @@ describe("pi review server", () => {
         }),
       });
       await server.waitForDecision();
+    } finally {
+      server.stop();
+    }
+  }, 15_000);
+
+  test("workspace mode maps prefixed paths to child repos", async () => {
+    const homeDir = makeTempDir("plannotator-pi-home-");
+    const root = makeTempDir("plannotator-pi-workspace-");
+    const apiDir = join(root, "api");
+    mkdirSync(apiDir, { recursive: true });
+    process.env.HOME = homeDir;
+    process.env.PLANNOTATOR_PORT = String(await reservePort());
+
+    git(apiDir, ["init"]);
+    git(apiDir, ["branch", "-M", "main"]);
+    git(apiDir, ["config", "user.email", "pi-review@example.com"]);
+    git(apiDir, ["config", "user.name", "Pi Review"]);
+    writeFileSync(join(apiDir, "tracked.txt"), "before\n", "utf-8");
+    git(apiDir, ["add", "tracked.txt"]);
+    git(apiDir, ["commit", "-m", "initial"]);
+    writeFileSync(join(apiDir, "tracked.txt"), "after\n", "utf-8");
+
+    const workspace = await WorkspaceReviewSession.create({
+      getVcsContext,
+      runVcsDiff,
+      getVcsFileContentsForDiff,
+      canStageFiles,
+      stageFile,
+      unstageFile,
+    }, root);
+
+    const server = await startReviewServer({
+      rawPatch: workspace.rawPatch,
+      gitRef: workspace.gitRef,
+      error: workspace.error,
+      diffType: workspace.diffType,
+      origin: "pi",
+      htmlContent: "<!doctype html><html><body>review</body></html>",
+      workspace,
+      agentCwd: root,
+    });
+
+    try {
+      const diffResponse = await fetch(`${server.url}/api/diff`);
+      const diffPayload = await diffResponse.json() as {
+        mode?: string;
+        agentCwd?: string;
+        diffType?: string;
+        diffOptions?: Array<{ id: string }>;
+      };
+      expect(diffPayload.mode).toBe("workspace");
+      expect(diffPayload.diffType).toBe("workspace-current");
+      expect(diffPayload.diffOptions?.map((option) => option.id)).toContain("workspace-last");
+      expect(diffPayload.agentCwd).toBe(root);
+      expect("workspace" in diffPayload).toBe(false);
+
+      const switchResponse = await fetch(`${server.url}/api/diff/switch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ diffType: "workspace-last", hideWhitespace: true }),
+      });
+      expect(switchResponse.status).toBe(200);
+      const switched = await switchResponse.json() as { diffType?: string; diffOptions?: Array<{ id: string }> };
+      expect(switched.diffType).toBe("workspace-last");
+      expect(switched.diffOptions?.map((option) => option.id)).toContain("workspace-current");
+
+      const currentResponse = await fetch(`${server.url}/api/diff/switch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ diffType: "workspace-current", hideWhitespace: false }),
+      });
+      expect(currentResponse.status).toBe(200);
+
+      const fileContentResponse = await fetch(`${server.url}/api/file-content?path=api/tracked.txt`);
+      expect(fileContentResponse.status).toBe(200);
+      const fileContent = await fileContentResponse.json() as {
+        oldContent: string | null;
+        newContent: string | null;
+      };
+      expect(fileContent.oldContent).toBe("before\n");
+      expect(fileContent.newContent).toBe("after\n");
+
+      const stageResponse = await fetch(`${server.url}/api/git-add`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filePath: "api/tracked.txt" }),
+      });
+      expect(stageResponse.status).toBe(200);
+      expect(git(apiDir, ["diff", "--staged", "--name-only"])).toContain("tracked.txt");
+
+      const invalidStageResponse = await fetch(`${server.url}/api/git-add`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filePath: "api/../tracked.txt" }),
+      });
+      expect(invalidStageResponse.status).toBe(400);
     } finally {
       server.stop();
     }

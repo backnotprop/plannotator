@@ -23,8 +23,7 @@ export type {
 } from "./review-core";
 
 export type {
-  WorkspaceRepoSource,
-  WorkspacePRCandidate,
+  WorkspaceDiffType,
   WorkspaceRepoState,
   WorkspaceReviewState,
 } from "./review-workspace";

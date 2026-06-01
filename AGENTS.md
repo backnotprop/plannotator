@@ -171,7 +171,9 @@ User runs /plannotator-review command
 Claude Code: plannotator review subcommand runs
 OpenCode: event handler intercepts command
         ↓
-VCS diff captures local changes (git diff or jj diff)
+VCS diff captures local changes (git diff or jj diff). When review runs from a
+non-VCS parent that contains nested Git repos, child diffs are combined with
+folder-prefixed paths.
         ↓
 Review server starts, opens browser with diff viewer
         ↓
@@ -276,7 +278,7 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 
 | Endpoint              | Method | Purpose                                    |
 | --------------------- | ------ | ------------------------------------------ |
-| `/api/diff`           | GET    | Returns `{ rawPatch, gitRef, origin, diffType, base, hideWhitespace, gitContext }` |
+| `/api/diff`           | GET    | Returns `{ rawPatch, gitRef, origin, mode?, diffType, base, hideWhitespace, gitContext, agentCwd? }`. Workspace mode returns `mode: "workspace"` with folder-prefixed paths and no `gitContext`. |
 | `/api/diff/switch`    | POST   | Switch diff type, base branch, or whitespace mode (body: `{ diffType, base?, hideWhitespace? }`) |
 | `/api/file-content`   | GET    | Returns `{ oldContent, newContent }` for expandable diff context (`?path=&oldPath=&base=`) |
 | `/api/git-add`        | POST   | Stage/unstage a file (body: `{ filePath, undo? }`) |

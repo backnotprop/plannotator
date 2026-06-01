@@ -127,7 +127,7 @@ import {
 } from "./cli";
 import path from "path";
 import { tmpdir } from "os";
-import { buildWorkspaceLocalRepos, buildWorkspacePRRepos } from "@plannotator/server/review-workspace";
+import { buildLocalWorkspaceReview, type WorkspaceDiffType } from "@plannotator/server/review-workspace";
 
 // Embed the built HTML at compile time
 // @ts-ignore - Bun import attribute for text
@@ -398,27 +398,18 @@ if (args[0] === "sessions") {
   const isPRMode = urlArg !== undefined;
   const useLocal = isPRMode && reviewArgs.useLocal;
 
-  // Multi-PR workspace: detect additional PR URLs beyond the first parsed one
-  const extraUrlArgs = args.slice(1).filter((arg) => arg.startsWith("http://") || arg.startsWith("https://"));
-  const allPRUrls = urlArg ? [urlArg, ...extraUrlArgs.filter(u => u !== urlArg)] : extraUrlArgs;
-  const isMultiPRMode = allPRUrls.length > 1;
-
   let rawPatch: string;
   let gitRef: string;
   let diffError: string | undefined;
   let gitContext: Awaited<ReturnType<typeof prepareLocalReviewDiff>>["gitContext"] | undefined;
   let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
-  let initialDiffType: DiffType | undefined;
+  let initialDiffType: DiffType | WorkspaceDiffType | undefined;
   let agentCwd: string | undefined;
   let worktreePool: WorktreePool | undefined;
   let worktreeCleanup: (() => void | Promise<void>) | undefined;
-  let workspaceRepos: Awaited<ReturnType<typeof buildWorkspaceLocalRepos>> | undefined;
+  let workspace: Awaited<ReturnType<typeof buildLocalWorkspaceReview>> | undefined;
 
-  if (isMultiPRMode) {
-    workspaceRepos = await buildWorkspacePRRepos(allPRUrls);
-    rawPatch = "";
-    gitRef = "Workspace review";
-  } else if (isPRMode) {
+  if (isPRMode) {
     // --- PR Review Mode ---
     const prRef = parsePRUrl(urlArg);
     if (!prRef) {
@@ -607,25 +598,34 @@ if (args[0] === "sessions") {
   } else {
     // --- Local Review Mode ---
     const config = loadConfig();
-    const diffResult = await prepareLocalReviewDiff({
-      vcsType: reviewArgs.vcsType,
-      configuredDiffType: resolveDefaultDiffType(config),
-      hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
-    });
-    gitContext = diffResult.gitContext;
-    initialDiffType = diffResult.diffType;
-    rawPatch = diffResult.rawPatch;
-    gitRef = diffResult.gitRef;
-    diffError = diffResult.error;
+    const managedVcs = await detectManagedVcs(process.cwd(), reviewArgs.vcsType);
+    const forcedVcs = !!reviewArgs.vcsType && reviewArgs.vcsType !== "auto";
 
-    // Fallback: if no VCS detected, try workspace review (multi-repo / poly-repo setups)
-    if (!gitContext) {
-      workspaceRepos = await buildWorkspaceLocalRepos(process.cwd());
-      if (workspaceRepos.length === 0) {
-        throw new Error("Not in a git repo and no nested repositories were found.");
+    if (managedVcs || forcedVcs) {
+      const diffResult = await prepareLocalReviewDiff({
+        vcsType: reviewArgs.vcsType,
+        configuredDiffType: resolveDefaultDiffType(config),
+        hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
+      });
+      gitContext = diffResult.gitContext;
+      initialDiffType = diffResult.diffType;
+      rawPatch = diffResult.rawPatch;
+      gitRef = diffResult.gitRef;
+      diffError = diffResult.error;
+    } else {
+      workspace = await buildLocalWorkspaceReview(process.cwd(), {
+        configuredDiffType: resolveDefaultDiffType(config),
+        hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
+      });
+      if (workspace.repos.length === 0) {
+        console.error("Not in a VCS repo and no nested Git/JJ repositories were found.");
+        process.exit(1);
       }
-      rawPatch = "";
-      gitRef = "Workspace review";
+      rawPatch = workspace.rawPatch;
+      gitRef = workspace.gitRef;
+      diffError = workspace.error;
+      initialDiffType = workspace.diffType;
+      agentCwd = workspace.root;
     }
   }
 
@@ -637,10 +637,10 @@ if (args[0] === "sessions") {
     gitRef,
     error: diffError,
     origin: detectedOrigin,
-    diffType: gitContext ? (initialDiffType ?? "unstaged") : undefined,
+    diffType: workspace ? (initialDiffType ?? workspace.diffType) : gitContext ? (initialDiffType ?? "unstaged") : undefined,
     gitContext,
     prMetadata,
-    workspaceRepos,
+    workspace,
     agentCwd,
     worktreePool,
     sharingEnabled,

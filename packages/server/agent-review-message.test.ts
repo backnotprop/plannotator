@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildAgentReviewUserMessage, getLocalDiffInstruction } from "./agent-review-message";
+import { buildAgentReviewUserMessage, buildAgentReviewUserMessageForTarget, getLocalDiffInstruction } from "./agent-review-message";
 import { buildClaudeCommand } from "./claude-review";
 
 const patch = "diff --git a/src/large.ts b/src/large.ts\n+const value = 1;\n";
@@ -66,6 +66,29 @@ describe("buildAgentReviewUserMessage", () => {
     expect(message).toContain("Review the following code changes");
     expect(message).toContain(patch);
   });
+
+  test("builds workspace review instructions with prefixed paths and inline patch", () => {
+    const message = buildAgentReviewUserMessageForTarget({
+      kind: "workspace",
+      patch,
+      workspace: {
+        root: "/tmp/workspace",
+        repos: [
+          { label: "api", cwd: "/tmp/workspace/api", vcsType: "git", gitRef: "Uncommitted changes" },
+          { label: "web", cwd: "/tmp/workspace/web", vcsType: "jj", gitRef: "Uncommitted changes" },
+        ],
+      },
+    });
+
+    expect(message).toContain("multiple nested VCS repositories");
+    expect(message).toContain("workspace root: /tmp/workspace");
+    expect(message).toContain("api/src/file.ts");
+    expect(message).toContain("- api/ [git] -> /tmp/workspace/api");
+    expect(message).toContain("- web/ [jj] -> /tmp/workspace/web");
+    expect(message).toContain("git -C <child-repo-folder>");
+    expect(message).toContain("JJ child repos");
+    expect(message).toContain(patch);
+  });
 });
 
 describe("getLocalDiffInstruction", () => {
@@ -86,5 +109,6 @@ describe("buildClaudeCommand", () => {
     expect(allowedTools).toContain("Bash(jj file show:*)");
     expect(allowedTools).toContain("Bash(jj cat:*)");
     expect(allowedTools).toContain("Bash(jj bookmark list:*)");
+    expect(allowedTools).toContain("Bash(git -C:*)");
   });
 });

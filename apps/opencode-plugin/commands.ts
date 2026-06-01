@@ -18,7 +18,7 @@ import {
   startAnnotateServer,
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
-import { type DiffType, prepareLocalReviewDiff } from "@plannotator/server/vcs";
+import { type DiffType, prepareLocalReviewDiff, detectManagedVcs } from "@plannotator/server/vcs";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
 import {
@@ -32,6 +32,7 @@ import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { parseAnnotateArgs } from "@plannotator/shared/annotate-args";
 import { parseReviewArgs } from "@plannotator/shared/review-args";
 import { urlToMarkdown, isConvertedSource } from "@plannotator/shared/url-to-markdown";
+import { buildLocalWorkspaceReview, type WorkspaceDiffType } from "@plannotator/server/review-workspace";
 import { statSync } from "fs";
 import path from "path";
 
@@ -60,9 +61,11 @@ export async function handleReviewCommand(
   let rawPatch: string;
   let gitRef: string;
   let diffError: string | undefined;
-  let userDiffType: DiffType | undefined;
+  let userDiffType: DiffType | WorkspaceDiffType | undefined;
   let gitContext: Awaited<ReturnType<typeof prepareLocalReviewDiff>>["gitContext"] | undefined;
   let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
+  let workspace: Awaited<ReturnType<typeof buildLocalWorkspaceReview>> | undefined;
+  let agentCwd: string | undefined;
 
   if (isPRMode) {
     const prRef = parsePRUrl(urlArg);
@@ -94,17 +97,41 @@ export async function handleReviewCommand(
     client.app.log({ level: "info", message: "Opening code review UI..." });
 
     const config = loadConfig();
-    const diffResult = await prepareLocalReviewDiff({
-      cwd: directory,
-      vcsType: reviewArgs.vcsType,
-      configuredDiffType: resolveDefaultDiffType(config),
-      hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
-    });
-    gitContext = diffResult.gitContext;
-    userDiffType = diffResult.diffType;
-    rawPatch = diffResult.rawPatch;
-    gitRef = diffResult.gitRef;
-    diffError = diffResult.error;
+    const cwd = directory ?? process.cwd();
+    const managedVcs = await detectManagedVcs(cwd, reviewArgs.vcsType);
+    const forcedVcs = !!reviewArgs.vcsType && reviewArgs.vcsType !== "auto";
+    if (managedVcs || forcedVcs) {
+      try {
+        const diffResult = await prepareLocalReviewDiff({
+          cwd,
+          vcsType: reviewArgs.vcsType,
+          configuredDiffType: resolveDefaultDiffType(config),
+          hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
+        });
+        gitContext = diffResult.gitContext;
+        userDiffType = diffResult.diffType;
+        rawPatch = diffResult.rawPatch;
+        gitRef = diffResult.gitRef;
+        diffError = diffResult.error;
+      } catch (err) {
+        client.app.log({ level: "error", message: err instanceof Error ? err.message : "Failed to prepare local review diff" });
+        return;
+      }
+    } else {
+      workspace = await buildLocalWorkspaceReview(cwd, {
+        configuredDiffType: resolveDefaultDiffType(config),
+        hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
+      });
+      if (workspace.repos.length === 0) {
+        client.app.log({ level: "error", message: "Not in a VCS repo and no nested Git/JJ repositories were found." });
+        return;
+      }
+      rawPatch = workspace.rawPatch;
+      gitRef = workspace.gitRef;
+      diffError = workspace.error;
+      userDiffType = workspace.diffType;
+      agentCwd = workspace.root;
+    }
   }
 
   const server = await startReviewServer({
@@ -115,6 +142,8 @@ export async function handleReviewCommand(
     diffType: isPRMode ? undefined : userDiffType,
     gitContext,
     prMetadata,
+    workspace,
+    agentCwd,
     sharingEnabled: await getSharingEnabled(),
     shareBaseUrl: getShareBaseUrl(),
     htmlContent: reviewHtmlContent,

@@ -11,6 +11,7 @@ export type {
 	DiffType,
 	GitContext,
 } from "./generated/review-core.js";
+export type { WorkspaceDiffType } from "./generated/review-workspace.js";
 export type { VcsSelection } from "./server/vcs.js";
 export {
 	type AnnotateServerResult,
@@ -26,6 +27,7 @@ export {
 } from "./server/serverReview.js";
 export {
 	canStageFiles,
+	detectManagedVcs,
 	detectRemoteDefaultCompareTarget,
 	detectVcs,
 	getGitContext,

@@ -205,7 +205,7 @@ export function buildClaudeCommand(prompt: string, model: string = "claude-opus-
     "Bash(git show:*)", "Bash(git blame:*)", "Bash(git branch:*)",
     "Bash(git grep:*)", "Bash(git ls-remote:*)", "Bash(git ls-tree:*)",
     "Bash(git merge-base:*)", "Bash(git remote:*)", "Bash(git rev-parse:*)",
-    "Bash(git show-ref:*)",
+    "Bash(git show-ref:*)", "Bash(git -C:*)",
     // JJ (read-only)
     "Bash(jj status:*)", "Bash(jj diff:*)", "Bash(jj log:*)",
     "Bash(jj show:*)", "Bash(jj file show:*)", "Bash(jj cat:*)",
