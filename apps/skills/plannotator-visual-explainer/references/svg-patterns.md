@@ -2,6 +2,8 @@
 
 Building blocks for creating diagrams in implementation plans. All SVGs are inline — no external dependencies. Compose these patterns to build architecture diagrams, data flow visualizations, flowcharts, and charts.
 
+> **For simple diagrams**, use `:::diagram` directives — they wrap mermaid/graphviz code fences or inline `<svg>` in a captioned, themed panel without any HTML boilerplate. Use these SVG patterns only for complex architecture diagrams with precise positioning that need the full HTML escape hatch.
+
 All colors reference Plannotator theme tokens. In SVG, use the CSS custom property values directly via `style` attributes or the corresponding CSS classes.
 
 ## Table of Contents

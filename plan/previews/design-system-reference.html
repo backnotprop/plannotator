@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Design System Reference — Notification Service Plan</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --background: oklch(0.15 0.02 260);
+  --foreground: oklch(0.90 0.01 260);
+  --card: oklch(0.22 0.02 260);
+  --card-foreground: oklch(0.90 0.01 260);
+  --primary: oklch(0.75 0.18 280);
+  --primary-foreground: oklch(0.15 0.02 260);
+  --secondary: oklch(0.50 0.18 180);
+  --muted: oklch(0.26 0.02 260);
+  --muted-foreground: oklch(0.72 0.02 260);
+  --accent: oklch(0.70 0.20 60);
+  --destructive: oklch(0.65 0.20 25);
+  --success: oklch(0.72 0.17 150);
+  --warning: oklch(0.75 0.15 85);
+  --border: oklch(0.35 0.02 260);
+  --code-bg: oklch(0.26 0.02 260);
+  --ring: oklch(0.75 0.18 280);
+  --radius: 0.625rem;
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  --font-display: ui-serif, Georgia, 'Times New Roman', serif;
+}
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: var(--font-sans);
+  background: var(--background);
+  color: var(--foreground);
+  line-height: 1.65;
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+}
+.container { max-width: 1080px; margin: 0 auto; padding: 64px 24px; }
+
+/* Page header */
+.eyebrow {
+  font-family: var(--font-mono); font-size: 0.72rem; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted-foreground);
+}
+header h1 {
+  font-family: var(--font-display); font-size: 2rem; font-weight: 500;
+  margin: 8px 0 24px; line-height: 1.2;
+}
+.prompt-box {
+  background: var(--muted); border: 1.5px solid var(--border);
+  border-radius: var(--radius); padding: 16px 24px;
+}
+.prompt-label {
+  font-family: var(--font-mono); font-size: 0.7rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted-foreground);
+  display: block; margin-bottom: 4px;
+}
+.prompt-box p { font-size: 0.92rem; color: var(--muted-foreground); line-height: 1.55; }
+
+/* Summary strip */
+.summary-strip {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 16px; margin: 32px 0;
+}
+.stat-card {
+  border: 1.5px solid var(--border); border-radius: var(--radius);
+  padding: 16px 24px; text-align: center; background: var(--card);
+}
+.stat-card.primary { border-color: color-mix(in oklab, var(--primary) 40%, transparent); }
+.stat-card.warning { border-color: color-mix(in oklab, var(--warning) 40%, transparent); }
+.stat-card.destructive { border-color: color-mix(in oklab, var(--destructive) 40%, transparent); }
+.stat-card.success { border-color: color-mix(in oklab, var(--success) 40%, transparent); }
+.stat-value {
+  font-family: var(--font-display); font-size: 1.8rem; font-weight: 500; display: block;
+}
+.stat-card.primary .stat-value { color: var(--primary); }
+.stat-card.warning .stat-value { color: var(--warning); }
+.stat-card.destructive .stat-value { color: var(--destructive); }
+.stat-card.success .stat-value { color: var(--success); }
+.stat-label {
+  font-family: var(--font-mono); font-size: 0.7rem; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted-foreground);
+  margin-top: 4px; display: block;
+}
+
+/* Section header */
+section { margin-top: 64px; }
+.section-header {
+  display: flex; align-items: baseline; gap: 16px; margin-bottom: 24px;
+  padding-bottom: 8px; border-bottom: 1.5px solid var(--border);
+}
+.section-number { font-family: var(--font-mono); font-size: 0.75rem; font-weight: 600; color: var(--primary); }
+.section-header h2 { font-family: var(--font-display); font-size: 1.4rem; font-weight: 500; }
+
+/* Milestones */
+.milestones { display: flex; flex-direction: column; gap: 0; }
+.milestone { display: grid; grid-template-columns: 28px 1fr; gap: 0 18px; }
+.milestone .dot-col { display: flex; flex-direction: column; align-items: center; }
+.milestone .dot {
+  width: 14px; height: 14px; border-radius: 50%; background: var(--card);
+  border: 3px solid var(--primary); flex-shrink: 0;
+}
+.milestone .dot.done { background: var(--success); border-color: var(--success); }
+.milestone .dot.warn { background: var(--warning); border-color: var(--warning); }
+.milestone .dot.blocked { background: var(--destructive); border-color: var(--destructive); }
+.milestone .line { width: 2px; flex: 1; background: var(--border); margin: 4px 0; }
+.milestone:last-child .line { display: none; }
+.milestone .body { padding-bottom: 36px; }
+.milestone .body h3 { font-family: var(--font-sans); font-size: 1rem; font-weight: 600; margin-bottom: 4px; }
+.milestone .body p { font-size: 0.88rem; color: var(--muted-foreground); max-width: 620px; margin-bottom: 10px; }
+
+/* Tags */
+.tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.tag {
+  font-family: var(--font-mono); font-size: 0.68rem; padding: 2px 8px;
+  border-radius: calc(var(--radius) - 4px); background: var(--muted); color: var(--muted-foreground);
+  border: 1px solid var(--border);
+}
+
+/* Diagram panel */
+.diagram-panel {
+  border: 1.5px solid var(--border); border-radius: var(--radius);
+  padding: 24px; margin: 24px 0; background: var(--card);
+}
+.diagram-panel svg { width: 100%; height: auto; }
+.diagram-caption {
+  font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted-foreground);
+  display: block; margin-top: 12px; text-align: center; font-style: italic;
+}
+
+/* Code panel */
+.code-panel {
+  background: var(--code-bg); border-radius: var(--radius); padding: 24px;
+  overflow-x: auto; margin: 16px 0; border: 1.5px solid var(--border);
+}
+.code-label {
+  font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted-foreground);
+  display: block; margin-bottom: 8px;
+}
+.code-panel pre { margin: 0; font-family: var(--font-mono); font-size: 0.85rem; line-height: 1.55; color: var(--foreground); }
+.code-panel .kw { color: var(--primary); }
+.code-panel .fn { color: var(--accent); }
+.code-panel .str { color: var(--success); }
+.code-panel .cm { color: var(--muted-foreground); font-style: italic; }
+
+/* Two-column grid */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+@media (max-width: 720px) { .two-col { grid-template-columns: 1fr; } }
+.col-card {
+  background: var(--card); border: 1.5px solid var(--border);
+  border-radius: var(--radius); padding: 20px 24px;
+}
+.col-card h3 { font-family: var(--font-sans); font-size: 0.95rem; font-weight: 600; margin-bottom: 8px; }
+.col-card p { font-size: 0.88rem; color: var(--muted-foreground); line-height: 1.55; margin-bottom: 12px; }
+.col-card ul { list-style: disc; padding-left: 1.2rem; }
+.col-card li { font-size: 0.88rem; color: var(--muted-foreground); margin: 4px 0; }
+
+/* Risk grid */
+.risk-grid { border: 1.5px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.risk-row {
+  display: grid; grid-template-columns: auto 1fr 1.5fr; gap: 16px;
+  padding: 14px 24px; align-items: center; border-bottom: 1px solid var(--border);
+}
+.risk-row:last-child { border-bottom: none; }
+.risk-name { font-weight: 500; font-size: 0.9rem; }
+.risk-mitigation { font-size: 0.85rem; color: var(--muted-foreground); }
+.badge {
+  font-family: var(--font-mono); font-size: 0.68rem; font-weight: 600;
+  padding: 2px 8px; border-radius: calc(var(--radius) - 4px);
+  text-transform: uppercase; letter-spacing: 0.04em; display: inline-block;
+}
+.badge.high { background: color-mix(in oklab, var(--destructive) 15%, transparent); color: var(--destructive); }
+.badge.med { background: color-mix(in oklab, var(--warning) 15%, transparent); color: var(--warning); }
+.badge.low { background: color-mix(in oklab, var(--success) 15%, transparent); color: var(--success); }
+
+/* Callout */
+.callout {
+  border-left: 3px solid var(--primary); padding: 16px 24px; margin: 16px 0;
+  background: var(--card); border-radius: 0 var(--radius) var(--radius) 0;
+}
+.callout.warn { border-left-color: var(--warning); }
+.callout.tip { border-left-color: var(--success); }
+.callout h3 { font-family: var(--font-sans); font-size: 0.95rem; font-weight: 600; margin-bottom: 4px; }
+.callout p { font-size: 0.88rem; color: var(--muted-foreground); line-height: 1.55; }
+.decide-with {
+  font-family: var(--font-mono); font-size: 0.72rem; color: var(--primary); font-weight: 500;
+  display: block; margin-top: 8px;
+}
+
+/* Verification checklist */
+.checklist { list-style: none; padding: 0; }
+.checklist li {
+  font-size: 0.88rem; padding: 6px 0; display: flex; align-items: flex-start; gap: 8px;
+}
+.checklist li::before {
+  content: ''; width: 16px; height: 16px; border: 1.5px solid var(--border);
+  border-radius: 50%; flex-shrink: 0; margin-top: 2px;
+}
+
+/* Collapsible details */
+details { border: 1.5px solid var(--border); border-radius: var(--radius); margin: 16px 0; }
+summary {
+  font-family: var(--font-sans); font-weight: 500; padding: 16px 24px;
+  cursor: pointer; list-style: none;
+}
+summary::before { content: '▸'; display: inline-block; margin-right: 8px; transition: transform 0.2s; }
+details[open] summary::before { transform: rotate(90deg); }
+.details-body { padding: 0 24px 24px; font-size: 0.88rem; color: var(--muted-foreground); line-height: 1.55; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- PAGE HEADER -->
+  <header>
+    <span class="eyebrow">Implementation plan · Notifications</span>
+    <h1>User Notification Service</h1>
+    <div class="prompt-box">
+      <span class="prompt-label">Brief</span>
+      <p>Add a notification service that delivers real-time alerts to users via WebSocket, email digest, and in-app badge. Must integrate with the existing event bus and respect per-user quiet hours.</p>
+    </div>
+  </header>
+
+  <!-- SUMMARY STRIP -->
+  <div class="summary-strip">
+    <div class="stat-card primary"><span class="stat-value">3</span><span class="stat-label">New Services</span></div>
+    <div class="stat-card warning"><span class="stat-value">5</span><span class="stat-label">Files Changed</span></div>
+    <div class="stat-card"><span class="stat-value">2</span><span class="stat-label">API Endpoints</span></div>
+    <div class="stat-card destructive"><span class="stat-value">1</span><span class="stat-label">DB Migration</span></div>
+    <div class="stat-card success"><span class="stat-value">12</span><span class="stat-label">Tests Added</span></div>
+  </div>
+
+  <!-- MILESTONES -->
+  <section>
+    <div class="section-header"><span class="section-number">01</span><h2>Milestones</h2></div>
+    <div class="milestones">
+      <div class="milestone">
+        <div class="dot-col"><span class="dot done"></span><span class="line"></span></div>
+        <div class="body">
+          <h3>Database schema &amp; migration</h3>
+          <p>Add <code>notifications</code> and <code>user_preferences</code> tables. Online DDL with zero-downtime migration.</p>
+          <div class="tags"><span class="tag">packages/db/migrations</span><span class="tag">packages/db/schema.ts</span></div>
+        </div>
+      </div>
+      <div class="milestone">
+        <div class="dot-col"><span class="dot done"></span><span class="line"></span></div>
+        <div class="body">
+          <h3>Event bus consumer</h3>
+          <p>Subscribe to domain events, transform into notification payloads, fan out to delivery channels.</p>
+          <div class="tags"><span class="tag">packages/server/consumers</span><span class="tag">packages/shared/events.ts</span></div>
+        </div>
+      </div>
+      <div class="milestone">
+        <div class="dot-col"><span class="dot warn"></span><span class="line"></span></div>
+        <div class="body">
+          <h3>WebSocket delivery channel</h3>
+          <p>Persistent connections per user session. Reconnect with exponential backoff. Heartbeat every 30s.</p>
+          <div class="tags"><span class="tag">packages/server/ws</span><span class="tag">packages/client/hooks/useNotifications.ts</span></div>
+        </div>
+      </div>
+      <div class="milestone">
+        <div class="dot-col"><span class="dot blocked"></span><span class="line"></span></div>
+        <div class="body">
+          <h3>Email digest aggregation</h3>
+          <p>Batch notifications into hourly/daily digests. Respect quiet hours. Requires email provider API key.</p>
+          <div class="tags"><span class="tag">packages/server/digests</span></div>
+        </div>
+      </div>
+      <div class="milestone">
+        <div class="dot-col"><span class="dot"></span></div>
+        <div class="body">
+          <h3>In-app badge &amp; notification center</h3>
+          <p>Badge count in nav bar. Dropdown panel with mark-as-read, dismiss, and bulk actions.</p>
+          <div class="tags"><span class="tag">packages/client/components/NotificationBadge.tsx</span><span class="tag">packages/client/components/NotificationPanel.tsx</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ARCHITECTURE DIAGRAM -->
+  <section>
+    <div class="section-header"><span class="section-number">02</span><h2>Architecture</h2></div>
+    <div class="diagram-panel">
+      <svg viewBox="0 0 820 200" xmlns="http://www.w3.org/2000/svg" style="width:100%">
+        <defs>
+          <marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="none" stroke="oklch(0.72 0.02 260)" stroke-width="1.5"/></marker>
+        </defs>
+        <!-- Nodes -->
+        <rect x="10" y="80" width="120" height="40" rx="8" fill="oklch(0.26 0.02 260)" stroke="oklch(0.35 0.02 260)" stroke-width="1.5"/>
+        <text x="70" y="105" text-anchor="middle" fill="oklch(0.90 0.01 260)" font-family="Inter" font-size="12" font-weight="500">Domain Event</text>
+
+        <rect x="170" y="80" width="100" height="40" rx="8" fill="oklch(0.26 0.02 260)" stroke="oklch(0.35 0.02 260)" stroke-width="1.5"/>
+        <text x="220" y="105" text-anchor="middle" fill="oklch(0.90 0.01 260)" font-family="Inter" font-size="12" font-weight="500">Event Bus</text>
+
+        <rect x="310" y="80" width="120" height="40" rx="8" fill="color-mix(in oklab, oklch(0.75 0.18 280) 15%, oklch(0.22 0.02 260))" stroke="oklch(0.75 0.18 280)" stroke-width="1.5"/>
+        <text x="370" y="105" text-anchor="middle" fill="oklch(0.90 0.01 260)" font-family="Inter" font-size="12" font-weight="500">Consumer</text>
+
+        <rect x="490" y="10" width="110" height="36" rx="8" fill="oklch(0.26 0.02 260)" stroke="oklch(0.72 0.17 150)" stroke-width="1.5"/>
+        <text x="545" y="33" text-anchor="middle" fill="oklch(0.72 0.17 150)" font-family="Inter" font-size="11" font-weight="500">WebSocket</text>
+
+        <rect x="490" y="82" width="110" height="36" rx="8" fill="oklch(0.26 0.02 260)" stroke="oklch(0.75 0.15 85)" stroke-width="1.5"/>
+        <text x="545" y="105" text-anchor="middle" fill="oklch(0.75 0.15 85)" font-family="Inter" font-size="11" font-weight="500">Email Digest</text>
+
+        <rect x="490" y="154" width="110" height="36" rx="8" fill="oklch(0.26 0.02 260)" stroke="oklch(0.35 0.02 260)" stroke-width="1.5"/>
+        <text x="545" y="177" text-anchor="middle" fill="oklch(0.90 0.01 260)" font-family="Inter" font-size="11" font-weight="500">In-App Badge</text>
+
+        <rect x="660" y="80" width="100" height="40" rx="8" fill="oklch(0.26 0.02 260)" stroke="oklch(0.35 0.02 260)" stroke-width="1.5"/>
+        <text x="710" y="105" text-anchor="middle" fill="oklch(0.90 0.01 260)" font-family="Inter" font-size="12" font-weight="500">Client</text>
+
+        <!-- Arrows -->
+        <line x1="130" y1="100" x2="170" y2="100" stroke="oklch(0.72 0.02 260)" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="270" y1="100" x2="310" y2="100" stroke="oklch(0.72 0.02 260)" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="430" y1="92" x2="490" y2="30" stroke="oklch(0.72 0.02 260)" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="430" y1="100" x2="490" y2="100" stroke="oklch(0.72 0.02 260)" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="430" y1="108" x2="490" y2="170" stroke="oklch(0.72 0.02 260)" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="600" y1="28" x2="660" y2="92" stroke="oklch(0.72 0.02 260)" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="600" y1="172" x2="660" y2="108" stroke="oklch(0.72 0.02 260)" stroke-width="1.5" marker-end="url(#arr)"/>
+      </svg>
+      <span class="diagram-caption">Notification delivery pipeline</span>
+    </div>
+  </section>
+
+  <!-- KEY INTERFACE -->
+  <section>
+    <div class="section-header"><span class="section-number">03</span><h2>Key Interface</h2></div>
+    <div class="code-panel">
+      <span class="code-label">packages/shared/types.ts</span>
+      <pre><code><span class="kw">interface</span> <span class="fn">NotificationPayload</span> {
+  <span class="fn">userId</span>: <span class="kw">string</span>;
+  <span class="fn">type</span>: <span class="str">'mention'</span> | <span class="str">'review'</span> | <span class="str">'deploy'</span> | <span class="str">'alert'</span>;
+  <span class="fn">title</span>: <span class="kw">string</span>;
+  <span class="fn">body</span>: <span class="kw">string</span>;
+  <span class="fn">channel</span>: (<span class="str">'ws'</span> | <span class="str">'email'</span> | <span class="str">'badge'</span>)[];
+  <span class="fn">priority</span>: <span class="str">'low'</span> | <span class="str">'normal'</span> | <span class="str">'urgent'</span>;
+  <span class="fn">metadata</span>?: <span class="fn">Record</span>&lt;<span class="kw">string</span>, <span class="kw">unknown</span>&gt;;
+}</code></pre>
+    </div>
+  </section>
+
+  <!-- COMPARISON (TWO-COL) -->
+  <section>
+    <div class="section-header"><span class="section-number">04</span><h2>Comparison</h2></div>
+    <div class="two-col">
+      <div class="col-card">
+        <h3>Current State</h3>
+        <p>Events fire into the void. Users poll dashboards manually. No notification preferences. Email is all-or-nothing.</p>
+        <ul>
+          <li>No real-time delivery</li>
+          <li>No per-user preferences</li>
+          <li>No quiet hours</li>
+          <li>~2min latency via polling</li>
+        </ul>
+      </div>
+      <div class="col-card">
+        <h3>After This Change</h3>
+        <p>Real-time WebSocket push with &lt; 200ms latency. Per-user channel preferences and quiet hours. Smart batching for email.</p>
+        <ul>
+          <li>Sub-200ms WebSocket delivery</li>
+          <li>Granular channel preferences</li>
+          <li>Quiet hours respected</li>
+          <li>Hourly/daily email digests</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- RISK ASSESSMENT -->
+  <section>
+    <div class="section-header"><span class="section-number">05</span><h2>Risk Assessment</h2></div>
+    <div class="risk-grid">
+      <div class="risk-row"><span class="badge high">HIGH</span><div class="risk-name">Database migration on large users table</div><div class="risk-mitigation">Run during off-peak window with online DDL — no locks</div></div>
+      <div class="risk-row"><span class="badge high">HIGH</span><div class="risk-name">WebSocket connection storms at deploy</div><div class="risk-mitigation">Staggered reconnect with jittered backoff (2-30s range)</div></div>
+      <div class="risk-row"><span class="badge med">MED</span><div class="risk-name">Email provider rate limits</div><div class="risk-mitigation">Queue with exponential retry, circuit breaker at 80% quota</div></div>
+      <div class="risk-row"><span class="badge med">MED</span><div class="risk-name">Quiet hours timezone edge cases</div><div class="risk-mitigation">Store preferences in UTC, convert at delivery time</div></div>
+      <div class="risk-row"><span class="badge low">LOW</span><div class="risk-name">Badge count drift on network partition</div><div class="risk-mitigation">Reconcile on next successful WebSocket heartbeat</div></div>
+      <div class="risk-row"><span class="badge low">LOW</span><div class="risk-name">Digest email formatting across clients</div><div class="risk-mitigation">Use MJML templates, test with Litmus</div></div>
+    </div>
+  </section>
+
+  <!-- OPEN QUESTIONS (CALLOUTS) -->
+  <section>
+    <div class="section-header"><span class="section-number">06</span><h2>Open Questions</h2></div>
+    <div class="callout warn">
+      <h3>Should WebSocket connections be per-tab or per-user?</h3>
+      <p>Per-tab is simpler but wastes server resources for users with 10+ tabs. Per-user with SharedWorker saves connections but adds browser compat complexity.</p>
+      <span class="decide-with">Decide with: infrastructure team</span>
+    </div>
+    <div class="callout">
+      <h3>Email provider choice</h3>
+      <p>Mailgun vs SendGrid vs SES. Mailgun is cheapest at our volume (&lt; 50k/month). SendGrid has better templates. SES needs more operational overhead.</p>
+      <span class="decide-with">Decide with: platform lead</span>
+    </div>
+    <div class="callout tip">
+      <h3>Quick win</h3>
+      <p>The in-app badge can ship independently before WebSocket and email channels are ready. It only needs the DB schema and a polling endpoint — no event bus dependency.</p>
+    </div>
+  </section>
+
+  <!-- COLLAPSIBLE DETAILS -->
+  <section>
+    <div class="section-header"><span class="section-number">07</span><h2>Implementation Details</h2></div>
+    <details>
+      <summary>WebSocket reconnection strategy</summary>
+      <div class="details-body">
+        <p>Initial delay: 1s. Backoff factor: 2x with ±30% jitter. Max delay: 30s. After 5 failed attempts, show a "reconnecting..." banner in the UI. After 10, switch to polling fallback at 15s intervals.</p>
+      </div>
+    </details>
+    <details>
+      <summary>Email digest batching algorithm</summary>
+      <div class="details-body">
+        <p>Notifications are bucketed by user + digest frequency (hourly/daily). A cron job fires every 15 minutes, collects all pending notifications for users whose bucket window has elapsed, renders the MJML template, and enqueues to the email provider. Failed sends are retried 3x with exponential backoff before being marked as dropped.</p>
+      </div>
+    </details>
+  </section>
+
+  <!-- VERIFICATION CHECKLIST -->
+  <section>
+    <div class="section-header"><span class="section-number">08</span><h2>Verification</h2></div>
+    <ul class="checklist">
+      <li>Migration runs in &lt; 30s on staging (5M rows)</li>
+      <li>WebSocket reconnects within 5s after network drop</li>
+      <li>Quiet hours block delivery between configured times</li>
+      <li>Email digest batches correctly across timezone boundaries</li>
+      <li>Badge count matches unread notification count after page refresh</li>
+      <li>Load test: 1000 concurrent WebSocket connections, &lt; 200ms p95 delivery</li>
+    </ul>
+  </section>
+
+</div>
+</body>
+</html>

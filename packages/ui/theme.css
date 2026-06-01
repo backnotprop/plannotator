@@ -483,6 +483,125 @@ body:has([data-popout="true"]) .os-scrollbar {
 .directive-danger, .directive-caution { background: color-mix(in srgb, #ef4444 10%, transparent); border-color: color-mix(in srgb, #ef4444 40%, transparent); }
 .directive-danger .directive-title, .directive-caution .directive-title { color: #ef4444; }
 
+/* ------------------------------------------------------------------ */
+/* Rich directive components                                          */
+/* Design-system spec values live here, not inline in components.     */
+/* ------------------------------------------------------------------ */
+
+/* StatStrip -------------------------------------------------------- */
+.directive-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 16px;
+  container-type: inline-size;
+  margin: 32px 0;
+}
+@container (max-width: 480px) {
+  .directive-stats { grid-template-columns: repeat(2, 1fr) !important; }
+}
+.directive-stats .stat-card {
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 24px;
+  text-align: center;
+  background: var(--card);
+}
+.directive-stats .stat-value {
+  font-family: var(--font-display, ui-serif, Georgia, serif);
+  font-size: 1.8rem;
+  font-weight: 500;
+  display: block;
+}
+.directive-stats .stat-label {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+  margin-top: 4px;
+  display: block;
+}
+/* Semantic stat card border tints */
+.stat-card--primary     { border-color: color-mix(in oklab, var(--primary) 40%, var(--border)); }
+.stat-card--success     { border-color: color-mix(in oklab, var(--success) 40%, var(--border)); }
+.stat-card--warning     { border-color: color-mix(in oklab, var(--warning) 40%, var(--border)); }
+.stat-card--destructive { border-color: color-mix(in oklab, var(--destructive) 40%, var(--border)); }
+
+/* MilestoneTimeline ------------------------------------------------ */
+.directive-milestone { display: flex; gap: 18px; }
+.directive-milestone + .directive-milestone { margin-top: -0.25rem; }
+.directive-milestone .milestone-track { display: flex; flex-direction: column; align-items: center; padding-top: 4px; }
+.directive-milestone .milestone-dot {
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 3px solid var(--primary); background: var(--card);
+  flex-shrink: 0;
+}
+.directive-milestone .milestone-dot--done    { background: var(--success); border-color: var(--success); }
+.directive-milestone .milestone-dot--warn    { background: var(--warning); border-color: var(--warning); }
+.directive-milestone .milestone-dot--blocked { background: var(--destructive); border-color: var(--destructive); }
+.directive-milestone .milestone-line { width: 2px; flex: 1; background: var(--border); margin-top: 4px; }
+.directive-milestone .milestone-line--done    { background: color-mix(in oklab, var(--success) 30%, transparent); }
+.directive-milestone .milestone-line--warn    { background: color-mix(in oklab, var(--warning) 30%, transparent); }
+.directive-milestone .milestone-line--blocked { background: color-mix(in oklab, var(--destructive) 30%, transparent); }
+.directive-milestone:last-child .milestone-line { display: none; }
+.directive-milestone .milestone-body { padding-bottom: 36px; }
+.directive-milestone .milestone-title {
+  font-family: var(--font-sans); font-size: 1rem; font-weight: 600; margin-bottom: 4px;
+}
+.directive-milestone .milestone-prose {
+  font-size: 0.88rem; line-height: 1.55; color: var(--muted-foreground); max-width: 620px; margin-bottom: 10px;
+}
+.directive-milestone .milestone-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.directive-milestone .milestone-tag {
+  font-family: var(--font-mono); font-size: 0.68rem; padding: 2px 8px;
+  border-radius: calc(var(--radius) - 4px);
+  background: var(--muted); color: var(--muted-foreground); border: 1px solid var(--border);
+}
+
+/* RiskGrid --------------------------------------------------------- */
+.directive-risks {
+  border: 1.5px solid var(--border); border-radius: var(--radius); overflow: hidden;
+}
+.directive-risks .risk-row {
+  display: grid; grid-template-columns: auto 1fr 1.5fr; gap: 16px;
+  padding: 14px 24px; align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+.directive-risks .risk-row:last-child { border-bottom: none; }
+.directive-risks .risk-badge {
+  font-family: var(--font-mono); font-size: 0.68rem; font-weight: 600;
+  padding: 2px 8px; border-radius: calc(var(--radius) - 4px);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.risk-badge--high { background: color-mix(in oklab, var(--destructive) 15%, transparent); color: var(--destructive); }
+.risk-badge--med  { background: color-mix(in oklab, var(--warning) 15%, transparent); color: var(--warning); }
+.risk-badge--low  { background: color-mix(in oklab, var(--success) 15%, transparent); color: var(--success); }
+.directive-risks .risk-name { font-weight: 500; font-size: 0.9rem; }
+.directive-risks .risk-mitigation { font-size: 0.85rem; color: var(--muted-foreground); }
+
+/* Columns ---------------------------------------------------------- */
+.directive-cols-grid { display: grid; gap: 24px; }
+@media (max-width: 720px) {
+  .directive-cols-grid { grid-template-columns: 1fr !important; }
+}
+.directive-col {
+  border-left: 2px solid color-mix(in oklab, var(--border) 40%, transparent);
+  padding-left: 1rem;
+}
+.directive-col:first-child { border-left: none; padding-left: 0; }
+
+/* DiagramPanel ----------------------------------------------------- */
+.directive-diagram {
+  border: 1.5px solid var(--border); border-radius: var(--radius);
+  padding: 24px; margin: 24px 0; background: var(--card);
+}
+.directive-diagram .diagram-svg svg { max-width: 100%; height: auto; }
+.directive-diagram .diagram-caption {
+  font-family: var(--font-mono); font-size: 0.72rem;
+  color: var(--muted-foreground); text-align: center; margin-top: 12px;
+}
+
 /* Shared AI chat rendering */
 .ai-streaming-cursor {
   display: inline-block;

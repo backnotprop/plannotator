@@ -323,11 +323,12 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
     // Directive container: `:::kind` opens, `:::` closes. Inline kind is
     // restricted to simple identifiers (letters, digits, hyphens). Body is
     // accumulated verbatim and rendered with inline markdown.
-    const directiveOpen = trimmed.match(/^:::\s*([a-zA-Z][a-zA-Z0-9-]*)\s*$/);
+    const directiveOpen = trimmed.match(/^:::\s*([a-zA-Z][a-zA-Z0-9-]*)(?:\s+(.+?))?\s*$/);
     if (directiveOpen) {
       flush();
       const directiveStartLine = currentLineNum;
       const kind = directiveOpen[1].toLowerCase();
+      const args = directiveOpen[2] || undefined;
       const bodyLines: string[] = [];
       while (i + 1 < lines.length) {
         i++;
@@ -339,6 +340,7 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
         type: 'directive',
         content: bodyLines.join('\n'),
         directiveKind: kind,
+        directiveArgs: args,
         order: currentId,
         startLine: directiveStartLine,
       });

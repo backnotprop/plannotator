@@ -1,5 +1,7 @@
 # Plannotator Theme Override
 
+> **Rich directives inherit the active theme automatically** — no `:root` token block, no variable mapping, no override needed. This document is only relevant when generating standalone HTML files via `--render-html` that need to work outside the Plannotator UI.
+
 When visual-explainer's workflow says to pick a palette and font pairing, use these Plannotator tokens instead. Everything else — layout, structure, components, anti-slop rules — stays as visual-explainer prescribes.
 
 ## CSS Custom Properties
