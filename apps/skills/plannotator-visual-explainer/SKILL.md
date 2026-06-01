@@ -2,41 +2,39 @@
 name: plannotator-visual-explainer
 disable-model-invocation: true
 description: >
-  Generate self-contained HTML visualizations with Plannotator theming. Use for implementation
-  plans, PR explainers, architecture diagrams, data tables, slide decks, and any visual
-  explanation of technical concepts. Plans and PR explainers follow Plannotator's prescriptive
-  approach; all other visual content delegates to nicobailon/visual-explainer.
+  Generate visual plans, PR explainers, and technical documents with Plannotator.
+  Use rich directives (:::stats, :::milestone, :::risks, :::cols, :::diagram) for
+  structured layouts in markdown. Fall back to HTML only for PR diffs (Pierre CDN),
+  UI mockups, or complex SVG positioning that directives don't cover.
 ---
 
 # Plannotator Visual Explainer
 
-Three paths depending on content type. Each has its own references and structure.
-
 ## Route by content type
 
-**Structured layouts in markdown** (stat strips, milestones, risk grids, columns, diagrams) → Use [rich directives](#directive-path) directly in your markdown. No HTML needed. Plannotator renders them as themed visual components.
+**Implementation plan, design doc, or proposal** → Follow the [Plan path](#plan-path). Uses directives for structure. No HTML references needed.
 
-**Implementation plan, design doc, or proposal** → Follow the [Plan path](#plan-path). Read `references/design-system.md` and `references/svg-patterns.md`. Prescriptive structure. Prefer directives for structured sections; fall back to HTML only for custom layouts not covered by directives.
+**PR explainer, diff review, or code change walkthrough** → Follow the [PR path](#pr-path). Read `references/pr-components.md` for Pierre diff rendering. Directives for summary sections; HTML for diff hunks.
 
-**PR explainer, diff review, or code change walkthrough** → Follow the [PR path](#pr-path). Read `references/design-system.md` and `references/pr-components.md`. Prescriptive structure.
+**Everything else** (data tables, slide decks, project recaps, general visual explanations) → Follow the [Visual explainer path](#visual-explainer-path). Delegates to nicobailon/visual-explainer with Plannotator theme tokens.
 
-**Everything else** (architecture diagrams, data tables, slide decks, project recaps, general visual explanations) → Follow the [Visual explainer path](#visual-explainer-path). Delegates to nicobailon/visual-explainer with Plannotator theme tokens.
+**HTML escape hatch** → Only when directives don't cover the layout (custom SVG positioning, UI mockups, bespoke grids). Read `references/design-system.md` + `references/svg-patterns.md` at that point, not before.
 
 ## Delivery
 
 Always deliver via Plannotator's annotation UI. Do NOT use `open` or `xdg-open`.
 
-**Markdown with directives** (preferred when directives cover the layout needs):
+**Markdown with directives** (default):
 ```bash
 plannotator annotate <file.md>
 ```
 
-**Plans/proposals** (user should approve/deny):
+**Plans/proposals with gate** (user should approve/deny):
 ```bash
-plannotator annotate <file> --render-html --gate
+plannotator annotate <file.md> --gate
 ```
 
-**Everything else** (informational):
+**HTML escape hatch** (only when directives don't suffice):
 ```bash
 plannotator annotate <file> --render-html
 ```
@@ -102,34 +100,26 @@ graph LR
 ````
 Wraps code fences (mermaid, graphviz) or inline `<svg>` in a bordered, captioned panel. Inline SVG inherits theme CSS variables — use `var(--primary)` etc. instead of hardcoded colors.
 
-**When to use directives vs HTML:**
-- Directives: stat summaries, timelines, risk tables, column layouts, diagram panels — anything the 5 directive kinds cover.
-- HTML (`--render-html`): custom layouts, PR diff rendering (Pierre CDN), UI mockups, complex SVG architecture diagrams with precise positioning.
-
 ---
 
 ## Plan path
 
-For implementation plans, design docs, feature specs, migration guides, and proposals.
-
-**Before generating, read:**
-1. `references/design-system.md` — Plannotator theme tokens, typography, component patterns
-2. `references/svg-patterns.md` — inline SVG building blocks for architecture diagrams, flowcharts, data flow
+For implementation plans, design docs, feature specs, migration guides, and proposals. Uses directives — no HTML references to read.
 
 **Document structure (in order, pick what fits):**
 
-1. **Header** — eyebrow label (mono, uppercase), title (serif, large), prompt box (the original brief)
-2. **Summary strip** — 3-5 stat cards showing key numbers at a glance (components, endpoints, tables, etc.)
-3. **Milestones / timeline** — vertical timeline showing phases without time estimates. Phases show sequence and dependencies, not duration.
-4. **Architecture / data flow** — inline SVG diagram. Use for 3+ interacting components. Highlighted boxes for new components, dashed arrows for async paths.
-5. **Mockups** — build UI mockups in HTML/CSS directly, not as descriptions
-6. **Key code** — dark-theme code blocks with syntax highlighting. Only architecturally significant interfaces/schemas — not every function.
-7. **Risks & mitigations** — table with severity badges (HIGH/MED/LOW)
-8. **Open questions** — callout cards with decision owner ("Decide with: backend team")
+1. **Header** — `#` title, then a `>` blockquote with the original brief
+2. **Summary strip** — `:::stats` with 3-5 key numbers at a glance
+3. **Milestones / timeline** — consecutive `:::milestone` blocks showing phases. No time estimates — phases show sequence and dependencies, not duration.
+4. **Architecture / data flow** — `:::diagram` wrapping mermaid or inline SVG. Use for 3+ interacting components.
+5. **Side-by-side comparison** — `:::cols` for before/after, option A vs B, or any two-pane layout
+6. **Key code** — fenced code blocks. Only architecturally significant interfaces/schemas.
+7. **Risks & mitigations** — `:::risks` with severity and mitigation per row
+8. **Open questions** — `:::note` or `:::warning` callouts with decision owner
 
 Not every plan needs every section. Skip what doesn't serve the content. Never include time estimates, boilerplate sections, or exhaustive file lists.
 
-**Adapt to the task:** Backend → lead with data flow. Frontend → lead with mockups. Refactoring → lead with before/after diagrams. Infrastructure → lead with architecture.
+**Adapt to the task:** Backend → lead with data flow diagram. Frontend → lead with columns (mockup vs spec). Refactoring → lead with before/after columns. Infrastructure → lead with architecture diagram.
 
 **Quality bar:** The plan answers "what, why, and how" within 30 seconds of reading. Whitespace is a feature — one idea per viewport.
 
@@ -139,22 +129,17 @@ Not every plan needs every section. Skip what doesn't serve the content. Never i
 
 For PR walkthroughs, diff reviews, code change explainers, and reviewer guides.
 
-**Before generating, read:**
-1. `references/design-system.md` — Plannotator theme tokens, typography, component patterns
-2. `references/pr-components.md` — diff rendering, review comment bubbles, risk chips, file cards, before/after panels
+**Before generating, read:** `references/pr-components.md` — Pierre diff CDN, file cards, before/after panels. Use directives for summary sections (stats, risks, cols); HTML only for diff hunks that need Pierre syntax highlighting.
 
 **Document structure (in order, pick what fits):**
 
-1. **Header** — PR title, meta strip (file count, +/- lines, branch, author)
-2. **TL;DR** — bordered card with primary accent left border. 2-3 sentences. Readers who see nothing else should get the gist.
-3. **Why** — motivation and before/after comparison (two-column grid)
-4. **File tour** — collapsible cards per file. Each has: file path + badge (NEW/MOD/DEL) + line stats, a "why" paragraph, and important diff hunks. High-risk files expanded, safe files collapsed.
-5. **Risk map** — visual chips showing which files need careful review vs. which are mechanical. Three tiers: attention (destructive), medium (warning), safe (success).
-6. **Where to focus** — numbered callout cards. Each names a file/function and describes the concern.
-7. **Test plan** — checkbox-style verification checklist
-8. **Rollout** (if applicable) — phased deployment with feature flags
-
-Use Pierre diffs via CDN for syntax-highlighted inline diffs — see `references/pr-components.md` for the pattern.
+1. **Header** — PR title, `:::stats` meta strip (file count, +/- lines)
+2. **TL;DR** — `:::note` callout. 2-3 sentences.
+3. **Why** — `:::cols` with before/after comparison
+4. **File tour** — HTML file cards with Pierre diffs (this is the HTML escape hatch — directives can't render syntax-highlighted diffs)
+5. **Risk map** — `:::risks` showing which files need careful review
+6. **Where to focus** — numbered `:::warning` callouts per concern
+7. **Test plan** — checkbox task list (`- [ ]`)
 
 ---
 
