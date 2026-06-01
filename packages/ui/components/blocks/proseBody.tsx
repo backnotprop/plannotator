@@ -82,6 +82,27 @@ export function renderProseBody(args: {
       flushList();
       continue;
     }
+    // Headings (## through ######)
+    const headingMatch = line.match(/^(#{2,6})\s+(.+)$/);
+    if (headingMatch) {
+      flushPara();
+      flushList();
+      const level = headingMatch[1].length as 2 | 3 | 4 | 5 | 6;
+      const Tag = `h${level}` as React.ElementType;
+      const styles: Record<number, string> = {
+        2: 'text-lg font-semibold mt-4 mb-2 text-foreground/90',
+        3: 'text-base font-semibold mt-3 mb-1.5 text-foreground/85',
+        4: 'text-sm font-semibold mt-2.5 mb-1 text-foreground/80',
+        5: 'text-sm font-medium mt-2 mb-1 text-foreground/75',
+        6: 'text-xs font-medium mt-2 mb-1 text-foreground/70 uppercase tracking-wide',
+      };
+      out.push(
+        <Tag key={`h-${key++}`} className={styles[level] || styles[4]}>
+          {inline(headingMatch[2])}
+        </Tag>,
+      );
+      continue;
+    }
     const listMatch = line.match(/^\s*(\*|-|\d+\.)\s+(.*)$/);
     if (listMatch) {
       flushPara();
