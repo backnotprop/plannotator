@@ -7,6 +7,7 @@ import {
 } from '@plannotator/ui/components/ActionMenu';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { MenuVersionSection } from '@plannotator/ui/components/MenuVersionSection';
+import { TextShimmer } from '@plannotator/ui/components/TextShimmer';
 import { modKey } from '@plannotator/ui/utils/platform';
 import type { UpdateInfo } from '@plannotator/ui/hooks/useUpdateCheck';
 import type { Origin } from '@plannotator/shared/agents';
@@ -61,7 +62,13 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
           aria-expanded={isOpen}
         >
           {isOpen ? <CloseIcon /> : <MenuIcon />}
-          <span className="hidden md:inline">Options</span>
+          {showUpdateDot ? (
+            <TextShimmer className="hidden md:inline text-xs font-medium" duration={2.5} spread={1.5}>
+              Options
+            </TextShimmer>
+          ) : (
+            <span className="hidden md:inline">Options</span>
+          )}
           {showUpdateDot && (
             <span className="absolute top-0.5 right-0.5 md:-top-0.5 md:-right-0.5 w-2 h-2 rounded-full bg-primary ring-2 ring-background" />
           )}

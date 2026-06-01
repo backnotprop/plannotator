@@ -9,6 +9,7 @@ import { useTheme } from './ThemeProvider';
 import { SunIcon, MoonIcon, SystemIcon } from './icons/themeIcons';
 import { ReviewAgentsIcon } from './ReviewAgentsIcon';
 import { MenuVersionSection } from './MenuVersionSection';
+import { TextShimmer } from './TextShimmer';
 import type { UpdateInfo } from '../hooks/useUpdateCheck';
 import type { Origin } from '@plannotator/shared/agents';
 
@@ -82,7 +83,13 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
           aria-expanded={isOpen}
         >
           {isOpen ? <CloseIcon /> : <MenuIcon />}
-          <span className="hidden md:inline">Options</span>
+          {showUpdateDot ? (
+            <TextShimmer className="hidden md:inline text-xs font-medium" duration={2.5} spread={1.5}>
+              Options
+            </TextShimmer>
+          ) : (
+            <span className="hidden md:inline">Options</span>
+          )}
           {showUpdateDot && (
             <span className="absolute top-0.5 right-0.5 md:-top-0.5 md:-right-0.5 w-2 h-2 rounded-full bg-primary ring-2 ring-background" />
           )}

@@ -80,7 +80,7 @@ export const MenuVersionSection: React.FC<MenuVersionSectionProps> = ({
         {hasUpdate && (
           <button
             onClick={handleCopy}
-            className="text-emerald-500 hover:text-emerald-400 transition-colors"
+            className="w-full mt-1 px-2.5 py-1.5 rounded-md text-[11px] font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
           >
             {copied ? 'Copied!' : 'Copy update command'}
           </button>

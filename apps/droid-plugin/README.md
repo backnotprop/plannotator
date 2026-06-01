@@ -2,7 +2,7 @@
 
 Plannotator's Droid plugin ships the manual slash-command workflow only:
 
-- `/plannotator-review`
+- `/plannotator-review [PR_URL]` (no args reviews local changes)
 - `/plannotator-annotate <file|folder|url>`
 - `/plannotator-last`
 - `/plannotator-archive`

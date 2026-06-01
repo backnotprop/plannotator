@@ -1,6 +1,6 @@
 ---
 title: "Installation"
-description: "How to install Plannotator for Claude Code, Codex, OpenCode, Pi, Droid, and other agent hosts."
+description: "How to install Plannotator for Claude Code, Codex, OpenCode, Pi, Amp, Droid, and other agent hosts."
 sidebar:
   order: 1
 section: "Getting Started"
@@ -193,6 +193,39 @@ pi -e npm:@plannotator/pi-extension
 Start plan mode with `pi --plan`, or toggle mid-session with `/plannotator` or `Ctrl+Alt+P`. The extension provides file-based plan review, code review (`/plannotator-review`), markdown annotation (`/plannotator-annotate`), bash safety gating during planning, and progress tracking during execution.
 
 See [Plannotator Meets Pi](/blog/plannotator-meets-pi) for the full walkthrough.
+
+## Amp
+
+Plannotator's Amp integration is currently commands-only. It adds command-palette actions for code review, file annotation, and annotating Amp's latest assistant message.
+
+Install the CLI first:
+
+```bash
+curl -fsSL https://plannotator.ai/install.sh | bash
+```
+
+Then install the Amp plugin:
+
+```bash
+mkdir -p ~/.config/amp/plugins
+curl -fsSL https://raw.githubusercontent.com/backnotprop/plannotator/main/apps/amp-plugin/plannotator.ts \
+  -o ~/.config/amp/plugins/plannotator.ts
+```
+
+Restart Amp or run `plugins: reload` from the command palette.
+
+This adds:
+
+```text
+Plannotator: Review changes
+Plannotator: Review changes or PR
+Plannotator: Annotate file
+Plannotator: Annotate last answer
+```
+
+For `Plannotator: Review changes or PR`, leave the input blank to review local changes, or enter a PR/MR URL.
+
+The plugin uses Amp's thread API for `Annotate last answer`, so it does not read transcript logs.
 
 ## Droid
 

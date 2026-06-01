@@ -398,6 +398,9 @@ describe("install.cmd", () => {
     // findstr pattern with escaped quotes; assert the key + findstr
     // separately rather than the quoted form)
     expect(script).toContain("PLANNOTATOR_DATA_DIR");
+    expect(script).toContain('if /i "!_CONFIG_DIR!"=="~" set "_CONFIG_DIR=%USERPROFILE%"');
+    expect(script).toContain('if "!_CONFIG_DIR:~0,2!"=="~\\" set "_CONFIG_DIR=%USERPROFILE%\\!_CONFIG_DIR:~2!"');
+    expect(script).toContain('if "!_CONFIG_DIR:~0,2!"=="~/" set "_CONFIG_DIR=%USERPROFILE%\\!_CONFIG_DIR:~2!"');
     expect(script).toContain("verifyAttestation");
     expect(script).toContain("findstr");
     // Layer 2: env var
@@ -441,6 +444,11 @@ describe("install shared behavior", () => {
   test("install.ps1 has three-layer opt-in resolution", () => {
     // Layer 3: config file via ConvertFrom-Json, respecting PLANNOTATOR_DATA_DIR
     expect(ps).toContain("PLANNOTATOR_DATA_DIR");
+    expect(ps).toContain('$configDir -eq "~"');
+    expect(ps).toContain('$configDir.StartsWith("~/")');
+    expect(ps).toContain("$configDir.StartsWith('~\\')");
+    expect(ps).toContain("Join-Path $env:USERPROFILE ($configDir.Substring(2))");
+    expect(ps).toContain('Join-Path $configDir "config.json"');
     expect(ps).toContain("ConvertFrom-Json");
     expect(ps).toContain("$cfg.verifyAttestation");
     // Layer 2: env var

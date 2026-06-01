@@ -18,6 +18,7 @@ type AgentConfigEntry = {
 
 export const AGENT_CONFIG = {
   'claude-code': { name: 'Claude Code', badge: 'bg-orange-500/15 text-orange-400', aiProviderTypes: ['claude-agent-sdk'] },
+  'amp':         { name: 'Amp',         badge: 'bg-lime-500/15 text-lime-400' },
   'droid':       { name: 'Droid',       badge: 'bg-cyan-500/15 text-cyan-400' },
   'opencode':    { name: 'OpenCode',    badge: 'bg-emerald-500/15 text-emerald-400', aiProviderTypes: ['opencode-sdk'] },
   'copilot-cli': { name: 'GitHub Copilot', badge: 'bg-blue-500/15 text-blue-400' },

@@ -1466,8 +1466,8 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
 
                     <style>{`
                       @keyframes tip-slide-open {
-                        from { max-height: 0; opacity: 0; }
-                        to   { max-height: 60px; opacity: 1; }
+                        from { opacity: 0; transform: translateY(-4px); }
+                        to   { opacity: 1; transform: translateY(0); }
                       }
                     `}</style>
                     <div className="space-y-1.5">
