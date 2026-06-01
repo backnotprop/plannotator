@@ -141,6 +141,24 @@ Decide with: platform lead
 
 ---
 
+## Implementation Details
+
+<details>
+<summary>WebSocket reconnection strategy</summary>
+
+Initial delay: 1s. Backoff factor: 2x with ±30% jitter. Max delay: 30s. After 5 failed attempts, show a "reconnecting..." banner in the UI. After 10, switch to polling fallback at 15s intervals.
+
+</details>
+
+<details>
+<summary>Email digest batching algorithm</summary>
+
+Notifications are bucketed by user + digest frequency (hourly/daily). A cron job fires every 15 minutes, collects all pending notifications for users whose bucket window has elapsed, renders the MJML template, and enqueues to the email provider. Failed sends are retried 3x with exponential backoff before being marked as dropped.
+
+</details>
+
+---
+
 ## Verification
 
 - [ ] Migration runs in < 30s on staging (5M rows)
