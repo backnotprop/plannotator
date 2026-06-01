@@ -623,6 +623,16 @@ const App: React.FC = () => {
     : annotateSource === 'message' ? 'message'
     : 'plan';
 
+  // Viewer identity must change when the rendered document changes: web-highlighter
+  // mutates the Viewer DOM, so reconciling new content against the old subtree throws
+  // removeChild errors — a changed key remounts it cleanly instead. StickyHeaderLane
+  // observes a node inside Viewer, so it re-anchors off the same token.
+  const viewerContentKey = linkedDocHook.isActive
+    ? `doc:${linkedDocHook.filepath}`
+    : annotateSource === 'message' && selectedMessageId
+      ? `msg:${selectedMessageId}`
+      : 'plan';
+
   // Track active section for TOC highlighting
   const headingCount = useMemo(() => blocks.filter(b => b.type === 'heading').length, [blocks]);
   const activeSection = useActiveSection(containerRef, headingCount, scrollViewport);
@@ -2144,7 +2154,8 @@ const App: React.FC = () => {
                   of doc; original toolstrip/badges remain the source of
                   truth there. Hidden in plan diff or archive mode, or when
                   sticky actions are disabled. remountToken re-anchors the
-                  ResizeObserver when Viewer swaps content (linked docs). */}
+                  ResizeObserver when Viewer swaps content (linked docs or
+                  message switches). */}
               {!goalSetupMode && !isPlanDiffActive && !archive.archiveMode && uiPrefs.stickyActionsEnabled && (
                 <StickyHeaderLane
                   inputMethod={inputMethod}
@@ -2159,7 +2170,7 @@ const App: React.FC = () => {
                   onPlanDiffToggle={() => setIsPlanDiffActive(!isPlanDiffActive)}
                   archiveInfo={archive.currentInfo}
                   maxWidth={annotateReaderMaxWidth}
-                  remountToken={linkedDocHook.isActive ? `doc:${linkedDocHook.filepath}` : 'plan'}
+                  remountToken={viewerContentKey}
                 />
               )}
 
@@ -2270,7 +2281,7 @@ const App: React.FC = () => {
                   />
                 ) : (
                   <Viewer
-                    key={linkedDocHook.isActive ? `doc:${linkedDocHook.filepath}` : 'plan'}
+                    key={viewerContentKey}
                     ref={viewerRef}
                     blocks={blocks}
                     markdown={markdown}

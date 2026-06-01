@@ -20,6 +20,16 @@ interface MessagesBrowserProps {
   onSelect: (messageId: string) => void;
 }
 
+// Hard cap for browsers where line-clamp is unavailable, and to avoid huge sidebar text nodes.
+const PREVIEW_MAX_CHARS = 140;
+
+function previewText(text: string): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  return normalized.length > PREVIEW_MAX_CHARS
+    ? normalized.slice(0, PREVIEW_MAX_CHARS).trimEnd() + "…"
+    : normalized;
+}
+
 function formatTimestamp(ts?: string): string | null {
   if (!ts) return null;
   const d = new Date(ts);
@@ -70,8 +80,8 @@ export const MessagesBrowser: React.FC<MessagesBrowserProps> = ({
                 {isDefault ? " ★" : ""}
               </span>
               <span className="flex-1 min-w-0">
-                <span className="block line-clamp-2 leading-snug">
-                  {msg.text.replace(/\s+/g, " ").trim()}
+                <span className="line-clamp-2 leading-snug">
+                  {previewText(msg.text)}
                 </span>
                 {ts && (
                   <span className="block text-[10px] text-muted-foreground mt-0.5">
