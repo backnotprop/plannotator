@@ -60,7 +60,6 @@ interface SidebarContainerProps {
   selectedArchiveFile: string | null;
   onArchiveSelect: (filename: string) => void;
   isLoadingArchive: boolean;
-  // Messages Browser props (annotate-last picker, #800)
   showMessagesTab?: boolean;
   messages?: PickerMessage[];
   selectedMessageId?: string | null;

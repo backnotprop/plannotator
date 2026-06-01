@@ -106,7 +106,7 @@ export interface PlannotatorAnnotatePayload {
 	markdown?: string;
 	mode?: "annotate" | "annotate-folder" | "annotate-last";
 	folderPath?: string;
-	/** Enable review-gate UX (Approve / Annotate / Close), #570 */
+	/** Enable review-gate UX (Approve / Annotate / Close). */
 	gate?: boolean;
 }
 
@@ -114,7 +114,7 @@ export interface PlannotatorAnnotationResult {
 	feedback: string;
 	/** True when the reviewer closed the session without providing feedback. */
 	exit?: boolean;
-	/** True when the reviewer clicked Approve in review-gate mode, #570 */
+	/** True when the reviewer clicked Approve in review-gate mode. */
 	approved?: boolean;
 }
 

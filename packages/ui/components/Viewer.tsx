@@ -95,10 +95,10 @@ interface ViewerProps {
   /** Source attribution for HTML/URL annotations (e.g. URL or filename) */
   sourceInfo?: string;
   /**
-   * Message picker affordance (#800) — annotate-last mode only. Shown as a
-   * button in the sticky-top action bar so the user can switch to a different
-   * recent assistant message. Clicking opens the full picker in the left
-   * sidebar's Messages tab.
+   * Message picker affordance — annotate-last mode only. Shown as a button in
+   * the sticky-top action bar so the user can switch to a different recent
+   * assistant message. Clicking opens the full picker in the left sidebar's
+   * Messages tab.
    */
   messagePickerInfo?: { current: number; total: number; onOpen: () => void };
   // Checkbox toggle props

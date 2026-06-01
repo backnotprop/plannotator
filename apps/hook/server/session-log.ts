@@ -719,9 +719,9 @@ export function getLastRenderedMessage(
  *
  * Returned newest-first. Unlike `extractLastRenderedMessage`, this does not
  * stop at turn boundaries (human prompts) — picker UIs want a flat list of
- * recent assistant bubbles. Necessary for the rewind case (#800): after
- * `/rewind`, the message at the bottom of the terminal isn't the newest
- * transcript entry, so the user needs to pick from a list.
+ * recent assistant bubbles. Necessary for the rewind case: after `/rewind`,
+ * the message at the bottom of the terminal isn't the newest transcript
+ * entry, so the user needs to pick from a list.
  *
  * Chunks of a single API message (same message.id) are concatenated.
  */

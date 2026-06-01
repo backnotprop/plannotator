@@ -152,10 +152,10 @@ const noJinaIdx = args.indexOf("--no-jina");
 const cliNoJina = noJinaIdx !== -1;
 if (cliNoJina) args.splice(noJinaIdx, 1);
 
-// Annotate review-gate flags (#570): --gate adds an Approve button,
-// --json switches stdout to structured decision output, --hook emits
-// hook-native JSON that works directly with Claude Code and Codex
-// PostToolUse/Stop hook protocols.
+// Annotate review-gate flags: --gate adds an Approve button, --json
+// switches stdout to structured decision output, --hook emits hook-native
+// JSON that works directly with Claude Code and Codex PostToolUse/Stop
+// hook protocols.
 const gateIdx = args.indexOf("--gate");
 let gateFlag = gateIdx !== -1;
 if (gateFlag) args.splice(gateIdx, 1);
@@ -170,7 +170,7 @@ const renderHtmlIdx = args.indexOf("--render-html");
 const renderHtmlFlag = renderHtmlIdx !== -1;
 if (renderHtmlFlag) args.splice(renderHtmlIdx, 1);
 
-// Stdout matrix for annotate / annotate-last / copilot annotate-last (#570).
+// Stdout matrix for annotate / annotate-last / copilot annotate-last.
 //
 // --hook (recommended for hooks):
 //   Approve/Close → empty stdout (hook passes, agent proceeds).
@@ -849,12 +849,12 @@ if (args[0] === "sessions") {
   const isCodex = !!codexThreadId;
   const isDroid = detectedOrigin === "droid";
 
-  // Picker UI (#800): collect up to N recent assistant messages so the user
-  // can pick the right one — defaults to the same selection as the legacy
-  // "last message" behavior (index 0). Necessary because the newest
-  // transcript entry isn't always the message the user intended to annotate
-  // (e.g., after /rewind). 25 covers even long conversations worth of rewinds
-  // without flooding the picker; the list scrolls past this if more are shown.
+  // Collect up to N recent assistant messages so the user can pick the right
+  // one — defaults to the same selection as the legacy "last message"
+  // behavior (index 0). Necessary because the newest transcript entry isn't
+  // always the message the user intended to annotate (e.g., after /rewind).
+  // 25 covers long conversations worth of rewinds without flooding the
+  // picker; the list scrolls past this if more are shown.
   const RECENT_MESSAGES_LIMIT = 25;
   let lastMessage: RenderedMessage | null = null;
   let recentMessages: RenderedMessage[] = [];

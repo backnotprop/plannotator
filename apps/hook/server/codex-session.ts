@@ -345,9 +345,9 @@ export function getLastCodexMessage(
  * Extract up to `limit` of the most recent assistant messages from a Codex
  * rollout file. Returned newest-first.
  *
- * Used by the picker UI (#800) to let users choose among recent messages
- * rather than always defaulting to the newest transcript entry — which is
- * incorrect after a /rewind.
+ * Used by the picker UI to let users choose among recent messages rather
+ * than always defaulting to the newest transcript entry — which is incorrect
+ * after a /rewind.
  */
 export interface CodexRecentMessage {
   messageId: string;

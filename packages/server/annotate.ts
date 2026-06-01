@@ -46,10 +46,10 @@ export interface AnnotateServerOptions {
   /** Folder path when annotating a directory (used as projectRoot for file browser) */
   folderPath?: string;
   /**
-   * Picker UI (#800): list of recent assistant messages for `annotate-last`
-   * mode. Newest-first. Presence implies more than one entry — the editor
-   * renders a picker so users can choose which message to annotate. The
-   * default (index 0) matches today's "last message" behavior.
+   * Recent assistant messages for `annotate-last` mode (newest-first). When
+   * provided with more than one entry, the editor renders a picker so users
+   * can choose which message to annotate; index 0 is the default selection
+   * and matches the legacy "last message" behavior.
    */
   recentMessages?: { messageId: string; text: string; timestamp?: string }[];
   /** Whether URL sharing is enabled (default: true) */
@@ -63,7 +63,7 @@ export interface AnnotateServerOptions {
   /** True when `markdown` was produced by Turndown/Jina (HTML or URL) —
    *  feedback line numbers won't match the original source. */
   sourceConverted?: boolean;
-  /** Enable review-gate UX: adds an Approve button alongside Close/Send Annotations (#570) */
+  /** Enable review-gate UX: adds an Approve button alongside Close/Send Annotations */
   gate?: boolean;
   /** Raw HTML content for direct iframe rendering (--render-html mode) */
   rawHtml?: string;
@@ -292,7 +292,7 @@ export async function startAnnotateServer(
             return Response.json({ ok: true });
           }
 
-          // API: Approve the annotation session (review-gate UX, #570)
+          // API: Approve the annotation session (review-gate UX)
           if (url.pathname === "/api/approve" && req.method === "POST") {
             deleteDraft(draftKey);
             resolveDecision({ feedback: "", annotations: [], approved: true });

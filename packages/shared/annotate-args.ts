@@ -1,8 +1,8 @@
 /**
  * Parse CLI-style args arriving as a single whitespace-delimited string.
  *
- * Extracts the `--gate`, `--json`, and `--hook` flags (issue #570)
- * from the remainder, which is treated as the target path. Leading `@` is
+ * Extracts the `--gate`, `--json`, and `--hook` flags from the remainder,
+ * which is treated as the target path. Leading `@` is
  * stripped via the shared at-reference helper — reference-mode is primary.
  * Scoped-package-style literal `@` paths are handled by a fallback that the
  * downstream resolver opts into (see at-reference.ts).

@@ -506,7 +506,7 @@ Do NOT proceed with implementation until your plan is approved.`);
         directory: ctx.directory,
       };
       // input.arguments is the raw tail string from OpenCode's command dispatcher —
-      // needed so --gate / --json reach the handlers' parseAnnotateArgs (#570).
+      // needed so --gate / --json reach the handlers' parseAnnotateArgs.
       const event = {
         properties: { sessionID: input.sessionID, arguments: input.arguments },
       };

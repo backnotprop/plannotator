@@ -172,7 +172,7 @@ export async function handleAnnotateCommand(
 
   // @ts-ignore - Event properties contain arguments
   const rawArgs = event.properties?.arguments || event.arguments || "";
-  // #570: split --gate / --json out of the args; rest is the file path.
+  // Split --gate / --json out of the args; rest is the file path.
   // --json is accepted silently (OpenCode writes to session, not stdout).
   // parseAnnotateArgs strips leading @ on filePath (reference-mode convention).
   // `rawFilePath` preserves it for the scoped-package markdown fallback.
@@ -349,7 +349,7 @@ export async function handleAnnotateLastCommand(
 
   // @ts-ignore - Event properties contain arguments
   const rawArgs = event.properties?.arguments || event.arguments || "";
-  // #570: support --gate on /plannotator-last (Stop-hook review-gate pattern).
+  // Support --gate on /plannotator-last (Stop-hook review-gate pattern).
   const { gate } = parseAnnotateArgs(rawArgs);
 
   // @ts-ignore - Event properties contain sessionID

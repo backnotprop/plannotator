@@ -661,7 +661,7 @@ describe("extractLastRenderedMessage — edge cases", () => {
   });
 });
 
-describe("extractRecentRenderedMessages (#800 picker)", () => {
+describe("extractRecentRenderedMessages (picker)", () => {
   test("returns newest-first across turn boundaries", () => {
     // Multiple turns — picker must surface assistant bubbles from all of them,
     // not stop at the most recent turn boundary like extractLastRenderedMessage does.

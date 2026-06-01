@@ -487,9 +487,9 @@ const App: React.FC = () => {
 
   // File browser file selection: open via linked doc system
   // For vault dirs (isVault), use the Obsidian doc endpoint; otherwise use generic /api/doc
-  // Annotate-last picker (#800): switching messages replaces the editor
-  // content. Annotations are anchored to text spans, so they're invalidated
-  // when the underlying message changes — we clear them.
+  // Annotate-last picker: switching messages replaces the editor content.
+  // Annotations are anchored to text spans, so they're invalidated when the
+  // underlying message changes — we clear them.
   const handleSelectMessage = React.useCallback((messageId: string) => {
     const msg = recentMessages.find((m) => m.messageId === messageId);
     if (!msg || messageId === selectedMessageId) return;
@@ -1193,7 +1193,7 @@ const App: React.FC = () => {
     }
   };
 
-  // Annotate gate-mode handler — approves the artifact without feedback (#570)
+  // Annotate gate-mode handler — approves the artifact without feedback
   const handleAnnotateApprove = async () => {
     setIsSubmitting(true);
     try {

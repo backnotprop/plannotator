@@ -491,7 +491,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 	pi.registerCommand("plannotator-annotate", {
 		description: "Open markdown file or folder in annotation UI",
 		handler: async (args, ctx) => {
-			// #570: split --gate / --json from the path. --json is silently
+			// Split --gate / --json from the path. --json is silently
 			// accepted (Pi writes back via sendUserMessage, not stdout).
 			// `rawFilePath` keeps any leading `@` for the literal-@ fallback
 			// (scoped-package-style names).
@@ -651,7 +651,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 	pi.registerCommand("plannotator-last", {
 		description: "Annotate the last assistant message",
 		handler: async (args, ctx) => {
-			// #570: support --gate on /plannotator-last for Stop-hook review gate.
+			// Support --gate on /plannotator-last for the Stop-hook review gate.
 			const { gate } = parseAnnotateArgs(args ?? "");
 
 			if (!hasPlanBrowserHtml()) {
