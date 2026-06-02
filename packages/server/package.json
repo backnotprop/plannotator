@@ -27,8 +27,9 @@
   ],
   "dependencies": {
     "@pierre/diffs": "^1.1.12",
+    "@plannotator/ai": "workspace:*",
     "@plannotator/shared": "workspace:*",
-    "@plannotator/ai": "workspace:*"
+    "glimpseui": "^0.8.0"
   },
   "peerDependencies": {
     "bun": ">=1.0.0"

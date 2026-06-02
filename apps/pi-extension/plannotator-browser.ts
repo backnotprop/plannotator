@@ -80,8 +80,8 @@ export function getStartupErrorMessage(err: unknown): string {
 	return err instanceof Error ? err.message : "Unknown error";
 }
 
-function openBrowserForServer(serverUrl: string, ctx: ExtensionContext): void {
-	const browserResult = openBrowser(serverUrl);
+async function openBrowserForServer(serverUrl: string, ctx: ExtensionContext): Promise<void> {
+	const browserResult = await openBrowser(serverUrl);
 	if (isRemoteSession()) {
 		ctx.ui.notify(`[Plannotator] ${serverUrl}`, "info");
 	} else if (!browserResult.opened) {
@@ -94,7 +94,7 @@ async function openBrowserAndWait<T>(
 	ctx: ExtensionContext,
 	waitForResult: () => Promise<T>,
 ): Promise<T> {
-	openBrowserForServer(server.url, ctx);
+	await openBrowserForServer(server.url, ctx);
 	return waitForDecisionWithCleanup(server, waitForResult);
 }
 

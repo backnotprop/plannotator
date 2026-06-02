@@ -173,5 +173,5 @@ export async function handleServerReady(
   const skipBrowserOpen = options.skipBrowserOpen ?? process.env.PLANNOTATOR_SKIP_BROWSER_OPEN === "1";
   if (skipBrowserOpen) return;
 
-  await (options.openBrowser ?? openBrowserImpl)(url, { isRemote });
+  await (options.openBrowser ?? openBrowserImpl)(url, { isRemote, useGlimpse: true });
 }
