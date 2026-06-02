@@ -41,6 +41,7 @@ export type PromptRuntime =
   | "claude-code"
   | "amp"
   | "droid"
+  | "kiro-cli"
   | "opencode"
   | "copilot-cli"
   | "pi"

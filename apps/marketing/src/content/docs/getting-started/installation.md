@@ -1,6 +1,6 @@
 ---
 title: "Installation"
-description: "How to install Plannotator for Claude Code, Codex, OpenCode, Pi, Amp, Droid, and other agent hosts."
+description: "How to install Plannotator for Claude Code, Codex, OpenCode, Kiro CLI, Pi, Amp, Droid, and other agent hosts."
 sidebar:
   order: 1
 section: "Getting Started"
@@ -115,6 +115,32 @@ curl -fsSL https://plannotator.ai/install.sh | bash
 ```
 
 This also clears any cached plugin versions.
+
+## Kiro CLI
+
+Kiro is auto-detected — no extra flag or step. If `~/.kiro` exists (or `kiro-cli` is on your PATH) when you run the installer, Plannotator's Kiro skills install automatically, the same way Codex and Gemini are handled. This works on every platform; use the installer for your OS:
+
+**macOS / Linux / WSL:**
+
+```bash
+curl -fsSL https://plannotator.ai/install.sh | bash
+```
+
+**Windows PowerShell:**
+
+```powershell
+irm https://plannotator.ai/install.ps1 | iex
+```
+
+**Windows CMD:**
+
+```cmd
+curl -fsSL https://plannotator.ai/install.cmd -o install.cmd && install.cmd && del install.cmd
+```
+
+On Windows the installer checks for `%USERPROFILE%\.kiro` (or `kiro-cli` on your PATH). This installs the Kiro skills to `~/.kiro/skills` and the Plannotator agent to `~/.kiro/agents/plannotator.json` (an existing agent file is never overwritten). If you install Kiro *after* Plannotator, just re-run the installer.
+
+See the [Kiro guide](/docs/guides/kiro-cli/) for the skill list and the Plannotator agent.
 
 ## Kilo Code
 
