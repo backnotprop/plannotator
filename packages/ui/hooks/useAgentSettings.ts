@@ -24,9 +24,13 @@ interface CodexSection {
   perModel: Record<string, { reasoning: string; fast: boolean }>;
 }
 
+export type AgentMode = 'review' | 'tour';
+export type AgentEngine = 'claude' | 'codex';
+
 interface AgentSettingsState {
-  selectedProvider?: string;
-  tourEngine: 'claude' | 'codex';
+  selectedMode?: AgentMode;
+  reviewEngine: AgentEngine;
+  tourEngine: AgentEngine;
   claude: ClaudeSection;
   codex: CodexSection;
   tourClaude: ClaudeSection;
@@ -34,6 +38,8 @@ interface AgentSettingsState {
 }
 
 const initialState: AgentSettingsState = {
+  selectedMode: 'review',
+  reviewEngine: 'claude',
   tourEngine: 'claude',
   claude: { model: DEFAULT_CLAUDE_MODEL, perModel: {} },
   codex: { model: DEFAULT_CODEX_MODEL, perModel: {} },
@@ -60,14 +66,24 @@ export function sanitizeCodexPerModel(
   return out;
 }
 
+function parseEngine(value: unknown): AgentEngine {
+  return value === 'codex' ? 'codex' : 'claude';
+}
+
+function parseMode(value: unknown): AgentMode | undefined {
+  if (value === 'review' || value === 'tour') return value;
+  return undefined;
+}
+
 function readCookie(): AgentSettingsState {
   const raw = getItem(COOKIE_KEY);
   if (!raw) return initialState;
   try {
     const parsed = JSON.parse(raw);
     return {
-      selectedProvider: typeof parsed.selectedProvider === 'string' ? parsed.selectedProvider : undefined,
-      tourEngine: parsed.tourEngine === 'codex' ? 'codex' : 'claude',
+      selectedMode: parseMode(parsed.selectedMode) ?? initialState.selectedMode,
+      reviewEngine: parseEngine(parsed.reviewEngine),
+      tourEngine: parseEngine(parsed.tourEngine),
       claude: {
         model: typeof parsed.claude?.model === 'string' ? parsed.claude.model : DEFAULT_CLAUDE_MODEL,
         perModel: parsed.claude?.perModel ?? {},
@@ -97,11 +113,15 @@ export function useAgentSettings() {
     setItem(COOKIE_KEY, JSON.stringify(state));
   }, [state]);
 
-  const setSelectedProvider = useCallback((id: string) => {
-    setState((s) => ({ ...s, selectedProvider: id }));
+  const setSelectedMode = useCallback((mode: AgentMode) => {
+    setState((s) => ({ ...s, selectedMode: mode }));
   }, []);
 
-  const setTourEngine = useCallback((engine: 'claude' | 'codex') => {
+  const setReviewEngine = useCallback((engine: AgentEngine) => {
+    setState((s) => ({ ...s, reviewEngine: engine }));
+  }, []);
+
+  const setTourEngine = useCallback((engine: AgentEngine) => {
     setState((s) => ({ ...s, tourEngine: engine }));
   }, []);
 
@@ -195,7 +215,8 @@ export function useAgentSettings() {
   const tourCodexFast = state.tourCodex.perModel[state.tourCodex.model]?.fast ?? DEFAULT_TOUR_CODEX_FAST;
 
   return {
-    selectedProvider: state.selectedProvider,
+    selectedMode: state.selectedMode,
+    reviewEngine: state.reviewEngine,
     tourEngine: state.tourEngine,
     claudeModel: state.claude.model,
     claudeEffort,
@@ -207,7 +228,8 @@ export function useAgentSettings() {
     tourCodexModel: state.tourCodex.model,
     tourCodexReasoning,
     tourCodexFast,
-    setSelectedProvider,
+    setSelectedMode,
+    setReviewEngine,
     setTourEngine,
     setClaudeModel,
     setClaudeEffort,
