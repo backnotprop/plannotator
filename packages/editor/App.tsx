@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { toast, Toaster } from 'sonner';
 import { type Origin, getAgentName } from '@plannotator/shared/agents';
+import { parseCodePath } from '@plannotator/shared/code-file';
 import { parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, exportCodeFileAnnotations, extractFrontmatter, wrapFeedbackForAgent, Frontmatter, type LinkedDocAnnotationEntry } from '@plannotator/ui/utils/parser';
 import { Viewer, ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { HtmlViewer } from '@plannotator/ui/components/html-viewer';
@@ -70,8 +71,10 @@ import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotat
 import { useExternalAnnotationHighlights } from '@plannotator/ui/hooks/useExternalAnnotationHighlights';
 import { buildPlanAgentInstructions } from '@plannotator/ui/utils/planAgentInstructions';
 import { useFileBrowser } from '@plannotator/ui/hooks/useFileBrowser';
+import { useValidatedCodePaths, type ValidationEntry } from '@plannotator/ui/hooks/useValidatedCodePaths';
 import { isVaultBrowserEnabled } from '@plannotator/ui/utils/obsidian';
 import { isFileBrowserEnabled, getFileBrowserSettings } from '@plannotator/ui/utils/fileBrowser';
+import { extractPlanContextFiles, type PlanContextFile } from '@plannotator/ui/utils/planContext';
 import { generateId } from '@plannotator/ui/utils/generateId';
 import { SidebarTabs } from '@plannotator/ui/components/sidebar/SidebarTabs';
 import { SidebarContainer } from '@plannotator/ui/components/sidebar/SidebarContainer';
@@ -413,6 +416,42 @@ const App: React.FC = () => {
     }, [activeDocBaseDir]),
   });
 
+  const rawPlanContextFiles = useMemo(
+    () => extractPlanContextFiles(blocks),
+    [blocks],
+  );
+  const planContextValidation = useValidatedCodePaths(markdown);
+  const planContextValidationByPath = useMemo(() => {
+    const next = new Map<string, ValidationEntry>();
+    for (const [candidate, validation] of planContextValidation.validated) {
+      const path = parseCodePath(candidate).filePath;
+      const existing = next.get(path);
+      if (!existing || validation.status === 'found') {
+        next.set(path, validation);
+      }
+    }
+    return next;
+  }, [planContextValidation.validated]);
+  const planContextFiles = useMemo<PlanContextFile[]>(
+    () => rawPlanContextFiles.map((file) => {
+      if (!planContextValidation.ready) return file;
+      const validation = planContextValidationByPath.get(file.path);
+      if (!validation) return file;
+      if (validation.status === 'found') {
+        return {
+          ...file,
+          resolvedPath: validation.resolved,
+          validationStatus: validation.status,
+        };
+      }
+      return {
+        ...file,
+        validationStatus: validation.status,
+      };
+    }),
+    [rawPlanContextFiles, planContextValidation.ready, planContextValidationByPath],
+  );
+
   // Archive browser
   const archive = useArchive({
     markdown, viewerRef, linkedDocHook,
@@ -423,6 +462,22 @@ const App: React.FC = () => {
     archiveMode: archive.archiveMode,
     isPlanDiffActive,
   }), [archive.archiveMode, isPlanDiffActive]);
+
+  const showContextTab = useMemo(
+    () => planContextFiles.length > 0
+      && !archive.archiveMode
+      && !annotateMode
+      && !linkedDocHook.isActive
+      && renderAs === 'markdown'
+      && !isPlanDiffActive,
+    [planContextFiles.length, archive.archiveMode, annotateMode, linkedDocHook.isActive, renderAs, isPlanDiffActive],
+  );
+
+  useEffect(() => {
+    if (sidebar.isOpen && sidebar.activeTab === 'context' && !showContextTab) {
+      sidebar.open('toc');
+    }
+  }, [sidebar.isOpen, sidebar.activeTab, sidebar.open, showContextTab]);
 
   const enterViewMode = useCallback((type: WideModeType) => {
     if (!canUseWideMode) return;
@@ -1441,6 +1496,22 @@ const App: React.FC = () => {
     // This is just a placeholder for future custom logic
   };
 
+  const handleContextNavigate = useCallback((blockId: string) => {
+    const target = document.querySelector(`[data-block-id="${blockId}"]`);
+    if (!target || !scrollViewport) return;
+
+    const headerOffset = 80;
+    const containerRect = scrollViewport.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const offsetPosition =
+      scrollViewport.scrollTop + targetRect.top - containerRect.top - headerOffset;
+
+    scrollViewport.scrollTo({
+      top: offsetPosition,
+      behavior: 'smooth',
+    });
+  }, [scrollViewport]);
+
   const annotationsOutput = useMemo(() => {
     const docAnnotations = linkedDocHook.getDocAnnotations();
     const hasDocAnnotations = Array.from(docAnnotations.values()).some(
@@ -2042,6 +2113,7 @@ const App: React.FC = () => {
               onToggleTab={toggleSidebarTab}
               hasDiff={planDiff.hasPreviousVersion}
               showVersionsTab={versionInfo !== null && versionInfo.totalVersions > 1}
+              showContextTab={showContextTab}
               showFilesTab={showFilesTab && !archive.archiveMode}
               hasFileAnnotations={hasFileAnnotations}
               className="hidden lg:flex absolute left-0 top-0 z-10"
@@ -2066,6 +2138,9 @@ const App: React.FC = () => {
                 linkedDocFilepath={linkedDocHook.filepath}
                 onLinkedDocBack={linkedDocHook.isActive ? handleLinkedDocBack : undefined}
                 backLabel={backLabel}
+                showContextTab={showContextTab}
+                planContextFiles={planContextFiles}
+                onContextNavigate={handleContextNavigate}
                 showFilesTab={showFilesTab && !archive.archiveMode}
                 fileAnnotationCounts={fileAnnotationCounts}
                 highlightedFiles={highlightedFiles}
