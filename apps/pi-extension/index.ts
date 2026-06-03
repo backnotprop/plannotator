@@ -1165,9 +1165,16 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 	pi.on("agent_end", async (_event, ctx) => {
 		if (phase === "executing" && justApprovedPlan) {
 			justApprovedPlan = false;
-			pi.sendUserMessage("Continue with the approved plan.", {
-				deliverAs: "followUp",
-			});
+			let attempts = 0;
+			const continueWhenIdle = (): void => {
+				if (!ctx.isIdle()) {
+					attempts += 1;
+					if (attempts <= 200) setTimeout(continueWhenIdle, 50);
+					return;
+				}
+				pi.sendUserMessage("Continue with the approved plan.");
+			};
+			setTimeout(continueWhenIdle, 0);
 			return;
 		}
 
