@@ -1,8 +1,21 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { getServerHostname, getServerPort, isRemoteSession } from "./network";
+import {
+	getServerHostname,
+	getServerPort,
+	isNoOpBrowserSentinel,
+	isRemoteSession,
+	openBrowser,
+} from "./network";
 
 const savedEnv: Record<string, string | undefined> = {};
-const envKeys = ["PLANNOTATOR_REMOTE", "PLANNOTATOR_PORT", "SSH_TTY", "SSH_CONNECTION"];
+const envKeys = [
+	"PLANNOTATOR_REMOTE",
+	"PLANNOTATOR_PORT",
+	"SSH_TTY",
+	"SSH_CONNECTION",
+	"PLANNOTATOR_BROWSER",
+	"BROWSER",
+];
 
 function clearEnv() {
 	for (const key of envKeys) {
@@ -105,5 +118,41 @@ describe("pi server hostname", () => {
 		clearEnv();
 		process.env.PLANNOTATOR_REMOTE = "1";
 		expect(getServerHostname()).toBe("0.0.0.0");
+	});
+});
+
+describe("pi browser no-op sentinels", () => {
+	test("recognizes no-op values case- and whitespace-insensitively", () => {
+		for (const value of [
+			"true",
+			"false",
+			"none",
+			":",
+			"0",
+			"1",
+			"TRUE",
+			"  none  ",
+		]) {
+			expect(isNoOpBrowserSentinel(value)).toBe(true);
+		}
+	});
+
+	test("does not flag real browser handlers or explicit command paths", () => {
+		expect(isNoOpBrowserSentinel("/usr/bin/firefox")).toBe(false);
+		expect(isNoOpBrowserSentinel("Google Chrome")).toBe(false);
+		expect(isNoOpBrowserSentinel("open")).toBe(false);
+		expect(isNoOpBrowserSentinel("/usr/bin/true")).toBe(false);
+	});
+
+	test("remote BROWSER=true is treated as no browser handler", async () => {
+		clearEnv();
+		process.env.PLANNOTATOR_REMOTE = "1";
+		process.env.BROWSER = "true";
+
+		expect(await openBrowser("http://127.0.0.1:19432")).toEqual({
+			opened: false,
+			isRemote: true,
+			url: "http://127.0.0.1:19432",
+		});
 	});
 });

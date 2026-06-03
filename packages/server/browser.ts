@@ -3,24 +3,13 @@
  */
 
 import { $ } from "bun";
+import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
-import { pathToFileURL } from "node:url";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 
 const IPC_REGISTRY = path.join(getPlannotatorDataDir(), "vscode-ipc.json");
-const DEFAULT_GLIMPSE_PATH = path.join(
-  os.homedir(),
-  ".pi",
-  "agent",
-  "git",
-  "github.com",
-  "hazat",
-  "glimpse",
-  "src",
-  "glimpse.mjs",
-);
 
 /**
  * Common "no-op" values for $BROWSER used by headless/background environments
@@ -114,74 +103,65 @@ export function shouldTryRemoteBrowserFallback(isRemote: boolean): boolean {
   return !hasRealHandler;
 }
 
-type GlimpseWindowLike = {
-  once: (event: "ready" | "error" | "closed", listener: (...args: unknown[]) => void) => unknown;
-};
-
-async function loadGlimpse(): Promise<{ open: (html: string, options?: Record<string, unknown>) => GlimpseWindowLike } | null> {
-  try {
-    const glimpsePackageName = "glimpseui";
-    return await import(glimpsePackageName);
-  } catch {
-    // Fall through to explicit/local path resolution.
-  }
-
-  const glimpsePath = process.env.PLANNOTATOR_GLIMPSE_PATH || DEFAULT_GLIMPSE_PATH;
-  try {
-    if (!fs.existsSync(glimpsePath)) {
-      return null;
-    }
-    return await import(pathToFileURL(glimpsePath).href);
-  } catch {
-    return null;
-  }
-}
-
-async function openGlimpse(url: string): Promise<boolean> {
-  try {
-    const glimpse = await loadGlimpse();
-    if (!glimpse) {
-      return false;
-    }
-
-    const { open } = glimpse;
-    const html = `<!doctype html>
+function buildGlimpseHtml(url: string): string {
+  const encodedUrl = JSON.stringify(url);
+  return `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
     <title>Plannotator</title>
     <style>
-      html, body, iframe { width: 100%; height: 100%; margin: 0; }
+      html, body { width: 100%; height: 100%; margin: 0; }
       body { overflow: hidden; background: #0f1115; }
-      iframe { border: 0; display: block; }
     </style>
   </head>
   <body>
-    <iframe src="${url.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}" allow="clipboard-read; clipboard-write"></iframe>
+    <script>
+      location.replace(${encodedUrl});
+    </script>
   </body>
 </html>`;
+}
 
-    const window = open(html, {
-      width: Number(process.env.PLANNOTATOR_GLIMPSE_WIDTH || 1280),
-      height: Number(process.env.PLANNOTATOR_GLIMPSE_HEIGHT || 900),
-      title: "Plannotator",
-      openLinks: true,
+async function openGlimpse(url: string): Promise<boolean> {
+  const glimpseCli = Bun.which("glimpseui");
+  if (!glimpseCli) return false;
+
+  const args = [
+    "--width",
+    String(Number(process.env.PLANNOTATOR_GLIMPSE_WIDTH || 1280)),
+    "--height",
+    String(Number(process.env.PLANNOTATOR_GLIMPSE_HEIGHT || 900)),
+    "--title",
+    "Plannotator",
+    "--open-links",
+  ];
+  const html = buildGlimpseHtml(url);
+
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    let successTimer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (opened: boolean) => {
+      if (settled) return;
+      settled = true;
+      if (successTimer) clearTimeout(successTimer);
+      resolve(opened);
+    };
+
+    const child = spawn(glimpseCli, args, {
+      detached: true,
+      stdio: ["pipe", "ignore", "ignore"],
     });
+    successTimer = setTimeout(() => {
+      child.unref();
+      finish(true);
+    }, 750);
 
-    return await new Promise<boolean>((resolve) => {
-      const timeout = setTimeout(() => resolve(false), 3000);
-      const finish = (opened: boolean) => {
-        clearTimeout(timeout);
-        resolve(opened);
-      };
-
-      window.once("ready", () => finish(true));
-      window.once("error", () => finish(false));
-      window.once("closed", () => finish(false));
-    });
-  } catch {
-    return false;
-  }
+    child.once("error", () => finish(false));
+    child.once("exit", () => finish(false));
+    child.stdin.once("error", () => finish(false));
+    child.stdin.end(html);
+  });
 }
 
 export async function openBrowser(
