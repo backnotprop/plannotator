@@ -700,9 +700,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 							const target = result.selectedMessageId && result.selectedMessageId !== snapshot.entryId
 								? findAssistantMessageByEntryId(ctx, result.selectedMessageId) ?? snapshot
 								: snapshot;
-							const feedback = shouldAnchorLastMessageFeedback(ctx, target.entryId, origin)
-								? anchorMessageFeedback(result.feedback, target.text)
-								: result.feedback;
+								const feedback = result.feedbackScope !== "messages" && shouldAnchorLastMessageFeedback(ctx, target.entryId, origin)
+									? anchorMessageFeedback(result.feedback, target.text)
+									: result.feedback;
 							sendUserMessageWithCurrentSessionFallback(
 								pi,
 								getAnnotateMessageFeedbackPrompt("pi", loadConfig(), {

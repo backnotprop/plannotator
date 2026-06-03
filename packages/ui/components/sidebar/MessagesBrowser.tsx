@@ -18,6 +18,7 @@ interface MessagesBrowserProps {
   messages: PickerMessage[];
   selectedMessageId: string | null;
   onSelect: (messageId: string) => void;
+  annotationCounts?: Map<string, number>;
 }
 
 // Hard cap for browsers where line-clamp is unavailable, and to avoid huge sidebar text nodes.
@@ -46,6 +47,7 @@ export const MessagesBrowser: React.FC<MessagesBrowserProps> = ({
   messages,
   selectedMessageId,
   onSelect,
+  annotationCounts,
 }) => {
   if (messages.length === 0) {
     return (
@@ -65,6 +67,7 @@ export const MessagesBrowser: React.FC<MessagesBrowserProps> = ({
           const isSelected = msg.messageId === selectedMessageId;
           const isDefault = idx === 0;
           const ts = formatTimestamp(msg.timestamp);
+          const annotationCount = annotationCounts?.get(msg.messageId) ?? 0;
           return (
             <button
               key={msg.messageId}
@@ -89,6 +92,14 @@ export const MessagesBrowser: React.FC<MessagesBrowserProps> = ({
                   </span>
                 )}
               </span>
+              {annotationCount > 0 && (
+                <span
+                  className="shrink-0 min-w-5 h-5 px-1 rounded-full bg-primary/10 text-primary border border-primary/30 text-[10px] font-semibold inline-flex items-center justify-center"
+                  title={`${annotationCount} annotation${annotationCount === 1 ? "" : "s"}`}
+                >
+                  {annotationCount}
+                </span>
+              )}
             </button>
           );
         })}

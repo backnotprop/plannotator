@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { toast, Toaster } from 'sonner';
 import { type Origin, getAgentName } from '@plannotator/shared/agents';
-import { parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, exportCodeFileAnnotations, extractFrontmatter, wrapFeedbackForAgent, Frontmatter, type LinkedDocAnnotationEntry } from '@plannotator/ui/utils/parser';
+import { parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, exportCodeFileAnnotations, exportMessageAnnotations, extractFrontmatter, wrapFeedbackForAgent, Frontmatter, type LinkedDocAnnotationEntry, type MessageAnnotationEntry } from '@plannotator/ui/utils/parser';
 import { Viewer, ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { HtmlViewer } from '@plannotator/ui/components/html-viewer';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
@@ -61,7 +61,7 @@ import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
 import { deriveImageName } from '@plannotator/ui/components/AttachmentsButton';
 import { useSidebar, type SidebarTab } from '@plannotator/ui/hooks/useSidebar';
 import { usePlanDiff, type VersionInfo } from '@plannotator/ui/hooks/usePlanDiff';
-import { useLinkedDoc } from '@plannotator/ui/hooks/useLinkedDoc';
+import { useLinkedDoc, type LinkedDocSessionState } from '@plannotator/ui/hooks/useLinkedDoc';
 import { useCodeFilePopout } from '@plannotator/ui/hooks/useCodeFilePopout';
 import { useAnnotationDraft } from '@plannotator/ui/hooks/useAnnotationDraft';
 import { useArchive } from '@plannotator/ui/hooks/useArchive';
@@ -108,6 +108,76 @@ type NoteAutoSaveResults = {
   obsidian?: boolean;
   bear?: boolean;
   octarine?: boolean;
+};
+
+type MessageAnnotationState = {
+  messageId: string;
+  text: string;
+  timestamp?: string;
+  linkedDocSession: LinkedDocSessionState;
+  codeAnnotations: CodeAnnotation[];
+  selectedCodeAnnotationId: string | null;
+};
+
+const countLinkedDocSessionAnnotations = (session: LinkedDocSessionState): number => {
+  let total =
+    session.root.annotations.length +
+    session.root.globalAttachments.length;
+  for (const doc of session.docs.values()) {
+    total += doc.annotations.length + doc.globalAttachments.length;
+  }
+  return total;
+};
+
+const countMessageAnnotations = (state: MessageAnnotationState): number =>
+  countLinkedDocSessionAnnotations(state.linkedDocSession) +
+  state.codeAnnotations.length;
+
+const createEmptyMessageState = (message: PickerMessage): MessageAnnotationState => ({
+  messageId: message.messageId,
+  text: message.text,
+  timestamp: message.timestamp,
+  linkedDocSession: {
+    root: {
+      markdown: message.text,
+      annotations: [],
+      selectedAnnotationId: null,
+      globalAttachments: [],
+    },
+    docs: new Map(),
+  },
+  codeAnnotations: [],
+  selectedCodeAnnotationId: null,
+});
+
+const normalizeMessageState = (
+  state: MessageAnnotationState,
+  message: PickerMessage,
+): MessageAnnotationState => ({
+  ...state,
+  text: message.text,
+  timestamp: message.timestamp,
+  linkedDocSession: {
+    root: {
+      ...state.linkedDocSession.root,
+      // The root document for a message is immutable and comes from the picker.
+      // Keep it as the source of truth so transient UI state cannot cache an
+      // empty markdown value for a message.
+      markdown: message.text,
+    },
+    docs: new Map(state.linkedDocSession.docs),
+  },
+});
+
+const buildMessageAnnotationCounts = (
+  states: Map<string, MessageAnnotationState>
+): Map<string, number> => {
+  const counts = new Map<string, number>();
+  for (const [messageId, state] of states) {
+    const count = countMessageAnnotations(state);
+    if (count > 0) counts.set(messageId, count);
+  }
+  return counts;
 };
 
 const App: React.FC = () => {
@@ -176,6 +246,8 @@ const App: React.FC = () => {
   const [annotateSource, setAnnotateSource] = useState<'file' | 'message' | 'folder' | null>(null);
   const [recentMessages, setRecentMessages] = useState<PickerMessage[]>([]);
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
+  const messageStateCacheRef = useRef<Map<string, MessageAnnotationState>>(new Map());
+  const [cachedMessageAnnotationCounts, setCachedMessageAnnotationCounts] = useState<Map<string, number>>(new Map());
   const [goalSetupBundle, setGoalSetupBundle] = useState<GoalSetupBundle | null>(null);
   const goalSetupSurfaceRef = useRef<GoalSetupSurfaceHandle>(null);
   const [goalSetupAction, setGoalSetupAction] = useState<GoalSetupActionState>({
@@ -500,19 +572,119 @@ const App: React.FC = () => {
     }
   }, [sidebar.activeTab, showFilesTab, fileBrowserDirs, vaultPath]);
 
+  const buildCurrentMessageState = React.useCallback((): MessageAnnotationState | null => {
+    if (annotateSource !== 'message' || !selectedMessageId) return null;
+    const msg = recentMessages.find((m) => m.messageId === selectedMessageId);
+    if (!msg) return null;
+    const snapshot = linkedDocHook.snapshotSession();
+    return normalizeMessageState({
+      messageId: msg.messageId,
+      text: msg.text,
+      timestamp: msg.timestamp,
+      linkedDocSession: snapshot,
+      codeAnnotations: [...codeAnnotations],
+      selectedCodeAnnotationId,
+    }, msg);
+  }, [
+    annotateSource,
+    selectedMessageId,
+    recentMessages,
+    linkedDocHook.snapshotSession,
+    codeAnnotations,
+    selectedCodeAnnotationId,
+  ]);
+
+  const getMessageStatesWithCurrent = React.useCallback((): Map<string, MessageAnnotationState> => {
+    const states = new Map(messageStateCacheRef.current);
+    const current = buildCurrentMessageState();
+    if (current) states.set(current.messageId, current);
+    return states;
+  }, [buildCurrentMessageState]);
+
+  const saveCurrentMessageState = React.useCallback((): Map<string, MessageAnnotationState> => {
+    const states = getMessageStatesWithCurrent();
+    messageStateCacheRef.current = states;
+    setCachedMessageAnnotationCounts(buildMessageAnnotationCounts(states));
+    return states;
+  }, [getMessageStatesWithCurrent]);
+
+  const messageAnnotationEntries = React.useMemo<MessageAnnotationEntry[]>(() => {
+    if (annotateSource !== 'message' || recentMessages.length === 0) return [];
+    const states = getMessageStatesWithCurrent();
+    return recentMessages.map((msg) => {
+      const state = states.get(msg.messageId) ?? createEmptyMessageState(msg);
+      const linkedDocs: Map<string, LinkedDocAnnotationEntry> = new Map();
+      for (const [filepath, doc] of state.linkedDocSession.docs) {
+        linkedDocs.set(filepath, {
+          ...doc,
+          blocks: doc.markdown ? parseMarkdownToBlocks(doc.markdown) : undefined,
+        });
+      }
+      return {
+        messageId: msg.messageId,
+        text: msg.text,
+        timestamp: msg.timestamp,
+        annotations: state.linkedDocSession.root.annotations,
+        globalAttachments: state.linkedDocSession.root.globalAttachments,
+        blocks: parseMarkdownToBlocks(state.linkedDocSession.root.markdown),
+        linkedDocs,
+        codeAnnotations: state.codeAnnotations,
+      };
+    });
+  }, [annotateSource, recentMessages, getMessageStatesWithCurrent]);
+
+  const activeMessageAnnotationCounts = React.useMemo(() => {
+    const counts = new Map(cachedMessageAnnotationCounts);
+    const current = buildCurrentMessageState();
+    if (current) {
+      const count = countMessageAnnotations(current);
+      if (count > 0) counts.set(current.messageId, count);
+      else counts.delete(current.messageId);
+    }
+    return counts;
+  }, [cachedMessageAnnotationCounts, buildCurrentMessageState]);
+
+  const messageFeedbackAnnotationCount = React.useMemo(
+    () => Array.from(activeMessageAnnotationCounts.values()).reduce((sum, count) => sum + count, 0),
+    [activeMessageAnnotationCounts]
+  );
+
+  const annotatedMessageIds = React.useMemo(
+    () => messageAnnotationEntries
+      .filter((entry) =>
+        entry.annotations.length > 0 ||
+        entry.globalAttachments.length > 0 ||
+        (entry.codeAnnotations?.length ?? 0) > 0 ||
+        (entry.linkedDocs
+          ? Array.from(entry.linkedDocs.values()).some((doc) => doc.annotations.length > 0 || doc.globalAttachments.length > 0)
+          : false)
+      )
+      .map((entry) => entry.messageId),
+    [messageAnnotationEntries]
+  );
+
   // File browser file selection: open via linked doc system
   // For vault dirs (isVault), use the Obsidian doc endpoint; otherwise use generic /api/doc
-  // Annotate-last picker: switching messages replaces the editor content.
-  // Annotations are anchored to text spans, so they're invalidated when the
-  // underlying message changes — we clear them.
   const handleSelectMessage = React.useCallback((messageId: string) => {
     const msg = recentMessages.find((m) => m.messageId === messageId);
     if (!msg || messageId === selectedMessageId) return;
+
+    const states = saveCurrentMessageState();
+    const targetState = normalizeMessageState(
+      states.get(messageId) ?? createEmptyMessageState(msg),
+      msg,
+    );
+
     setSelectedMessageId(messageId);
-    setMarkdown(msg.text);
-    setAnnotations([]);
-    setSelectedAnnotationId(null);
-  }, [recentMessages, selectedMessageId]);
+    linkedDocHook.restoreSession(targetState.linkedDocSession);
+    setCodeAnnotations([...targetState.codeAnnotations]);
+    setSelectedCodeAnnotationId(targetState.selectedCodeAnnotationId);
+  }, [
+    recentMessages,
+    selectedMessageId,
+    saveCurrentMessageState,
+    linkedDocHook.restoreSession,
+  ]);
 
   const handleFileBrowserSelect = React.useCallback((absolutePath: string, dirPath: string) => {
     const dirState = fileBrowser.dirs.find(d => d.path === dirPath);
@@ -674,20 +846,32 @@ const App: React.FC = () => {
   const viewerAnnotations = useMemo(() => allAnnotations.filter(a => !a.diffContext), [allAnnotations]);
   // Any-annotations flag used by Close/Approve/Send guards. Consolidates the
   // four-term check that was inlined across the annotate-mode header + keyboard paths.
+  const messageMultiSelectMode = annotateSource === 'message' && recentMessages.length > 1;
   const hasAnyAnnotations = useMemo(
-    () => allAnnotations.length > 0
-      || codeAnnotations.length > 0
-      || editorAnnotations.length > 0
-      || linkedDocHook.docAnnotationCount > 0
-      || globalAttachments.length > 0,
-    [allAnnotations.length, codeAnnotations.length, editorAnnotations.length, linkedDocHook.docAnnotationCount, globalAttachments.length],
+    () => messageMultiSelectMode
+      ? messageFeedbackAnnotationCount > 0 || editorAnnotations.length > 0
+      : allAnnotations.length > 0
+        || codeAnnotations.length > 0
+        || editorAnnotations.length > 0
+        || linkedDocHook.docAnnotationCount > 0
+        || globalAttachments.length > 0,
+    [
+      messageMultiSelectMode,
+      messageFeedbackAnnotationCount,
+      allAnnotations.length,
+      codeAnnotations.length,
+      editorAnnotations.length,
+      linkedDocHook.docAnnotationCount,
+      globalAttachments.length,
+    ],
   );
-  const feedbackAnnotationCount =
-    allAnnotations.length +
-    codeAnnotations.length +
-    editorAnnotations.length +
-    linkedDocHook.docAnnotationCount +
-    globalAttachments.length;
+  const feedbackAnnotationCount = messageMultiSelectMode
+    ? messageFeedbackAnnotationCount + editorAnnotations.length
+    : allAnnotations.length +
+      codeAnnotations.length +
+      editorAnnotations.length +
+      linkedDocHook.docAnnotationCount +
+      globalAttachments.length;
   // Code-file comments are intentionally not serialized into share URLs in v1.
   // Hide share entry points once they exist so we do not silently drop feedback.
   const canShareCurrentSession = sharingEnabled && codeAnnotations.length === 0;
@@ -857,8 +1041,15 @@ const App: React.FC = () => {
           setAnnotateSource(data.mode === 'annotate-last' ? 'message' : data.mode === 'annotate-folder' ? 'folder' : 'file');
         }
         if (data.mode === 'annotate-last' && data.recentMessages && data.recentMessages.length > 0) {
+          messageStateCacheRef.current = new Map();
+          setCachedMessageAnnotationCounts(new Map());
           setRecentMessages(data.recentMessages);
           setSelectedMessageId(data.recentMessages[0].messageId);
+        } else {
+          messageStateCacheRef.current = new Map();
+          setCachedMessageAnnotationCounts(new Map());
+          setRecentMessages([]);
+          setSelectedMessageId(null);
         }
         setSourceInfo(data.sourceInfo ?? undefined);
         setSourceConverted(!!data.sourceConverted);
@@ -1202,6 +1393,12 @@ const App: React.FC = () => {
   const handleAnnotateFeedback = async () => {
     setIsSubmitting(true);
     try {
+      if (messageMultiSelectMode) {
+        saveCurrentMessageState();
+      }
+      const scopedSelectedMessageId = messageMultiSelectMode
+        ? annotatedMessageIds.length === 1 ? annotatedMessageIds[0] : undefined
+        : selectedMessageId ?? undefined;
       await fetch('/api/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1209,7 +1406,8 @@ const App: React.FC = () => {
           feedback: annotationsOutput,
           annotations: allAnnotations,
           codeAnnotations,
-          ...(selectedMessageId ? { selectedMessageId } : {}),
+          ...(scopedSelectedMessageId ? { selectedMessageId: scopedSelectedMessageId } : {}),
+          ...(messageMultiSelectMode && annotatedMessageIds.length > 1 ? { feedbackScope: 'messages' } : {}),
         }),
       });
       setSubmitted('denied'); // reuse 'denied' state for "feedback sent" overlay
@@ -1472,6 +1670,14 @@ const App: React.FC = () => {
   };
 
   const annotationsOutput = useMemo(() => {
+    if (messageMultiSelectMode) {
+      let output = exportMessageAnnotations(messageAnnotationEntries);
+      if (editorAnnotations.length > 0) {
+        output += `\n\n${exportEditorAnnotations(editorAnnotations)}`;
+      }
+      return output;
+    }
+
     const docAnnotations = linkedDocHook.getDocAnnotations();
     const hasDocAnnotations = Array.from(docAnnotations.values()).some(
       (d) => d.annotations.length > 0 || d.globalAttachments.length > 0
@@ -1522,7 +1728,7 @@ const App: React.FC = () => {
     }
 
     return output;
-  }, [blocks, allAnnotations, globalAttachments, linkedDocHook.getDocAnnotations, editorAnnotations, codeAnnotations, sourceConverted, annotateSource, linkedDocHook.isActive, linkedDocHook.filepath]);
+  }, [messageMultiSelectMode, messageAnnotationEntries, blocks, allAnnotations, globalAttachments, linkedDocHook.getDocAnnotations, editorAnnotations, codeAnnotations, sourceConverted, annotateSource, linkedDocHook.isActive, linkedDocHook.filepath]);
 
   const aiAnnotationsContext = useMemo(
     () => hasAnyAnnotations ? annotationsOutput : undefined,
@@ -2074,6 +2280,7 @@ const App: React.FC = () => {
               showVersionsTab={versionInfo !== null && versionInfo.totalVersions > 1}
               showFilesTab={showFilesTab && !archive.archiveMode}
               showMessagesTab={annotateSource === 'message' && recentMessages.length > 1}
+              hasMessageAnnotations={activeMessageAnnotationCounts.size > 0}
               hasFileAnnotations={hasFileAnnotations}
               className="hidden lg:flex absolute left-0 top-0 z-10"
             />
@@ -2126,6 +2333,7 @@ const App: React.FC = () => {
                 messages={recentMessages}
                 selectedMessageId={selectedMessageId}
                 onSelectMessage={handleSelectMessage}
+                messageAnnotationCounts={activeMessageAnnotationCounts}
               />
               <ResizeHandle {...tocResize.handleProps} className="hidden lg:block" side="left" />
             </>

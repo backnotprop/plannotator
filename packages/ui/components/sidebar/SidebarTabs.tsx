@@ -17,6 +17,7 @@ interface SidebarTabsProps {
   showFilesTab?: boolean;
   showMessagesTab?: boolean;
   hasFileAnnotations?: boolean;
+  hasMessageAnnotations?: boolean;
   className?: string;
 }
 
@@ -28,6 +29,7 @@ export const SidebarTabs: React.FC<SidebarTabsProps> = ({
   showFilesTab,
   showMessagesTab,
   hasFileAnnotations,
+  hasMessageAnnotations,
   className,
 }) => {
   return (
@@ -90,6 +92,9 @@ export const SidebarTabs: React.FC<SidebarTabsProps> = ({
           title="Pick a different message"
         >
           <MessagesIcon />
+          {hasMessageAnnotations && (
+            <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-primary" />
+          )}
         </button>
       )}
 

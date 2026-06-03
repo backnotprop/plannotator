@@ -31,7 +31,7 @@ export interface AnnotateServerResult {
 	port: number;
 	portSource: "env" | "remote-default" | "random";
 	url: string;
-	waitForDecision: () => Promise<{ feedback: string; annotations: unknown[]; exit?: boolean; approved?: boolean; selectedMessageId?: string }>;
+	waitForDecision: () => Promise<{ feedback: string; annotations: unknown[]; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>;
 	stop: () => void;
 }
 
@@ -68,6 +68,7 @@ export async function startAnnotateServer(options: {
 		exit?: boolean;
 		approved?: boolean;
 		selectedMessageId?: string;
+		feedbackScope?: "message" | "messages";
 	}) => void;
 	const decisionPromise = new Promise<{
 		feedback: string;
@@ -75,6 +76,7 @@ export async function startAnnotateServer(options: {
 		exit?: boolean;
 		approved?: boolean;
 		selectedMessageId?: string;
+		feedbackScope?: "message" | "messages";
 	}>((r) => {
 		resolveDecision = r;
 	});
@@ -170,6 +172,7 @@ export async function startAnnotateServer(options: {
 					feedback: (body.feedback as string) || "",
 					annotations: (body.annotations as unknown[]) || [],
 					selectedMessageId: typeof body.selectedMessageId === "string" ? body.selectedMessageId : undefined,
+					feedbackScope: body.feedbackScope === "messages" ? "messages" : body.feedbackScope === "message" ? "message" : undefined,
 				});
 				json(res, { ok: true });
 			} catch (err) {

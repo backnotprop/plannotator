@@ -448,7 +448,7 @@ export async function openMarkdownAnnotation(
 	sourceInfo?: string,
 	sourceConverted?: boolean,
 	gate?: boolean,
-): Promise<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string }> {
+): Promise<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }> {
 	const session = await startMarkdownAnnotationSession(
 		ctx,
 		filePath,
@@ -474,7 +474,7 @@ export async function startMarkdownAnnotationSession(
 	rawHtml?: string,
 	renderHtml?: boolean,
 	recentMessages?: { messageId: string; text: string; timestamp?: string }[],
-): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string }>> {
+): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>> {
 	if (!ctx.hasUI || !planHtmlContent) {
 		throw new Error("Plannotator annotation browser is unavailable in this session.");
 	}
@@ -517,7 +517,7 @@ export async function openLastMessageAnnotation(
 	lastText: string,
 	gate?: boolean,
 	recentMessages?: { messageId: string; text: string; timestamp?: string }[],
-): Promise<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string }> {
+): Promise<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }> {
 	const session = await startLastMessageAnnotationSession(ctx, lastText, gate, recentMessages);
 	return session.waitForDecision();
 }
@@ -527,7 +527,7 @@ export async function startLastMessageAnnotationSession(
 	lastText: string,
 	gate?: boolean,
 	recentMessages?: { messageId: string; text: string; timestamp?: string }[],
-): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string }>> {
+): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>> {
 	return startMarkdownAnnotationSession(
 		ctx,
 		"last-message",
