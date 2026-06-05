@@ -28,10 +28,12 @@
   "dependencies": {
     "@pierre/diffs": "^1.1.12",
     "@plannotator/ai": "workspace:*",
-    "@plannotator/shared": "workspace:*",
-    "glimpseui": "^0.8.0"
+    "@plannotator/shared": "workspace:*"
   },
   "peerDependencies": {
     "bun": ">=1.0.0"
+  },
+  "devDependencies": {
+    "glimpseui": "^0.8.0"
   }
 }
