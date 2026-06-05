@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const scriptsDir = import.meta.dir;
@@ -552,19 +552,29 @@ describe("Core Plannotator skills", () => {
     }
   });
 
-  test("every core skill sets disable-model-invocation: true", () => {
-    // Load-bearing for #842: Pi natively discovers ~/.agents/skills, and this
-    // frontmatter line is the only thing keeping the core skills out of Pi's
-    // system prompt (<available_skills>). Removing it from any core skill
-    // silently reintroduces the context-bloat bug.
-    for (const skill of CORE_SKILLS) {
-      const skillMd = readFileSync(
-        join(scriptsDir, "..", "apps", "skills", "core", skill, "SKILL.md"),
-        "utf-8",
-      );
-      const frontmatter = skillMd.split("---")[1] ?? "";
-      expect(frontmatter).toContain("disable-model-invocation: true");
+  test("every skill in the repo sets disable-model-invocation: true", () => {
+    // Maintainer rule: ALL Plannotator skills are user-invoked, never
+    // model-auto-invoked. Load-bearing for #842: Pi natively discovers
+    // ~/.agents/skills, and this frontmatter line is the only thing keeping
+    // skills out of Pi's system prompt (<available_skills>). Scans every
+    // SKILL.md dynamically so newly added skills are covered automatically.
+    const skillRoots = [
+      join(scriptsDir, "..", "apps", "skills", "core"),
+      join(scriptsDir, "..", "apps", "skills", "extra"),
+      join(scriptsDir, "..", "apps", "kiro-cli", "skills"),
+    ];
+    let checked = 0;
+    for (const root of skillRoots) {
+      for (const dir of readdirSync(root)) {
+        const skillMd = join(root, dir, "SKILL.md");
+        if (!existsSync(skillMd)) continue;
+        const frontmatter = readFileSync(skillMd, "utf-8").split("---")[1] ?? "";
+        expect(frontmatter).toContain("disable-model-invocation: true");
+        checked++;
+      }
     }
+    // 4 core + 3 extra + 3 kiro — bump when adding skills, never below.
+    expect(checked).toBeGreaterThanOrEqual(10);
   });
 });
 

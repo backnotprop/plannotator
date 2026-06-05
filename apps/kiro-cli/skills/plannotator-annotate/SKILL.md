@@ -1,5 +1,6 @@
 ---
 name: plannotator-annotate
+disable-model-invocation: true
 description: Open Plannotator's annotation UI for a file, folder, or URL, then address the returned annotations.
 ---
 
