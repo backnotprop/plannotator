@@ -98,7 +98,11 @@ describe("install.sh", () => {
     // A command file may only be removed once its same-name skill exists on
     // disk, and the cleanup must run AFTER the skill install — so a failed
     // fetch or an old pinned tag never deletes commands without replacement.
-    expect(script).toContain('if [ -d "$CLAUDE_SKILLS_DIR/$cmd" ] && [ -f "$CLAUDE_COMMANDS_DIR/$cmd.md" ]');
+    // Outer guard: the replacement skill must exist before any command file
+    // (bare or plugin-checkout) is removed.
+    expect(script).toContain('if [ -d "$CLAUDE_SKILLS_DIR/$cmd" ]');
+    expect(script).toContain('if [ -f "$CLAUDE_COMMANDS_DIR/$cmd.md" ]');
+    expect(script).toContain('if [ -f "$PLUGIN_COMMANDS_DIR/$cmd.md" ]');
     const cleanupIndex = script.indexOf('Removed legacy Claude command');
     const installIndex = script.indexOf('copy_skill_if_present apps/skills/core/plannotator-review');
     expect(installIndex).toBeGreaterThan(0);
@@ -370,7 +374,11 @@ describe("install.ps1", () => {
     expect(script).toContain("claudeCommandsDir");
     // Command cleanup is guarded on the replacement skill existing and runs
     // after the skill install (parity with install.sh).
-    expect(script).toContain("(Test-Path $skillPath) -and (Test-Path $cmdPath)");
+    // Outer guard: the replacement skill must exist before any command file
+    // (bare or plugin-checkout) is removed.
+    expect(script).toContain("if (Test-Path $skillPath) {");
+    expect(script).toContain("if (Test-Path $cmdPath) {");
+    expect(script).toContain("if (Test-Path $pluginCmdPath) {");
     // Legacy ~/.agents review/annotate/last cleanup is gone.
     expect(script).not.toContain("legacyAgentsSkillsDir");
     // Codex cleanup includes the per-command skills now.
@@ -488,7 +496,11 @@ describe("install.cmd", () => {
     expect(script).toContain("CLAUDE_COMMANDS_DIR");
     // Command cleanup is guarded on the replacement skill existing and runs
     // after the skill install (parity with install.sh / install.ps1).
-    expect(script).toContain('if exist "!CLAUDE_SKILLS_DIR!\\%%C" if exist "!CLAUDE_COMMANDS_DIR!\\%%C.md"');
+    // Outer guard: the replacement skill must exist before any command file
+    // (bare or plugin-checkout) is removed.
+    expect(script).toContain('if exist "!CLAUDE_SKILLS_DIR!\\%%C" (');
+    expect(script).toContain('if exist "!CLAUDE_COMMANDS_DIR!\\%%C.md"');
+    expect(script).toContain('if exist "!PLUGIN_COMMANDS_DIR!\\%%C.md"');
     // Legacy ~/.agents review/annotate/last cleanup is gone.
     expect(script).not.toContain("LEGACY_AGENTS_SKILLS_DIR");
     // Codex cleanup includes the per-command skills now.
@@ -646,6 +658,18 @@ describe("install shared behavior", () => {
     for (const s of [sh, ps, cmdScript]) {
       expect(s).toContain("allow_implicit_invocation: true");
     }
+  });
+
+  test("stale plugin command files are cleaned from the plugin checkout", () => {
+    // The installer already manages hooks.json inside the installed plugin
+    // checkout, so it removes the old namespaced plannotator:* command files
+    // there too — same replacement-skill guard as the bare commands. This is
+    // what lets #817's duplicate menu entries die on a single installer run
+    // instead of waiting for /plugin marketplace update.
+    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    expect(sh).toContain("plugins/marketplaces/plannotator/apps/hook/commands");
+    expect(ps).toContain("plugins\\marketplaces\\plannotator\\apps\\hook\\commands");
+    expect(cmdScript).toContain("plugins\\marketplaces\\plannotator\\apps\\hook\\commands");
   });
 
   test("all installers respect CODEX_HOME for the Codex home directory", () => {

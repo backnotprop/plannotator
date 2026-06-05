@@ -727,13 +727,29 @@ if ($checkoutFailed) {
 # command file only once its replacement skill is actually on disk — running
 # AFTER the install above guarantees a failed or skipped skill install never
 # leaves users with neither the command nor the skill.
+# Older marketplace plugin versions shipped their own commands/ dir (the
+# namespaced plannotator:* entries); newer plugin versions are hooks-only.
+# We already manage hooks.json inside this same checkout, so remove the stale
+# plugin command files too — same replacement-skill guard as the bare ones.
+$claudeConfigRoot = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { "$env:USERPROFILE\.claude" }
+$pluginCommandsDir = Join-Path $claudeConfigRoot "plugins\marketplaces\plannotator\apps\hook\commands"
 foreach ($cmd in @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-archive")) {
-    $cmdPath = Join-Path $claudeCommandsDir "$cmd.md"
     $skillPath = Join-Path $claudeSkillsDir $cmd
-    if ((Test-Path $skillPath) -and (Test-Path $cmdPath)) {
-        Write-Host "Removing stale Claude command $cmdPath (replaced by the $cmd skill)"
-        Remove-Item -Force $cmdPath -ErrorAction SilentlyContinue
+    if (Test-Path $skillPath) {
+        $cmdPath = Join-Path $claudeCommandsDir "$cmd.md"
+        if (Test-Path $cmdPath) {
+            Write-Host "Removing stale Claude command $cmdPath (replaced by the $cmd skill)"
+            Remove-Item -Force $cmdPath -ErrorAction SilentlyContinue
+        }
+        $pluginCmdPath = Join-Path $pluginCommandsDir "$cmd.md"
+        if (Test-Path $pluginCmdPath) {
+            Write-Host "Removing stale plugin command $pluginCmdPath (plugin is hooks-only now)"
+            Remove-Item -Force $pluginCmdPath -ErrorAction SilentlyContinue
+        }
     }
+}
+if ((Test-Path $pluginCommandsDir) -and -not (Get-ChildItem $pluginCommandsDir -ErrorAction SilentlyContinue)) {
+    Remove-Item -Force $pluginCommandsDir -ErrorAction SilentlyContinue
 }
 
 # Codex no longer hosts core skills (they now live in ~/.agents/skills).
@@ -894,8 +910,8 @@ Write-Host "Install the Claude Code plugin:"
 Write-Host "  /plugin marketplace add backnotprop/plannotator"
 Write-Host "  /plugin install plannotator@plannotator"
 Write-Host ""
-Write-Host "Upgrading from an older version? Also run /plugin marketplace update"
-Write-Host "so the plugin drops its old plannotator:* command entries."
+Write-Host "Upgrading from an older version? Run /plugin marketplace update to pull"
+Write-Host "the latest hooks-only plugin (stale plugin commands are cleaned up here)."
 Write-Host ""
 Write-Host "The /plannotator-review, /plannotator-annotate, /plannotator-last, and /plannotator-archive commands are ready to use after you restart Claude Code!"
 

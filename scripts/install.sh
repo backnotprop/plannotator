@@ -1030,12 +1030,24 @@ fi
 # AFTER the install above guarantees a failed or skipped skill install never
 # leaves users with neither the command nor the skill.
 CLAUDE_COMMANDS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/commands"
+# Older marketplace plugin versions shipped their own commands/ dir (the
+# namespaced plannotator:* entries); newer plugin versions are hooks-only.
+# We already manage hooks.json inside this same checkout, so remove the stale
+# plugin command files too — same replacement-skill guard as the bare ones.
+PLUGIN_COMMANDS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/marketplaces/plannotator/apps/hook/commands"
 for cmd in plannotator-review plannotator-annotate plannotator-last plannotator-archive; do
-    if [ -d "$CLAUDE_SKILLS_DIR/$cmd" ] && [ -f "$CLAUDE_COMMANDS_DIR/$cmd.md" ]; then
-        rm -f "$CLAUDE_COMMANDS_DIR/$cmd.md"
-        echo "Removed legacy Claude command ${CLAUDE_COMMANDS_DIR}/$cmd.md (replaced by the $cmd skill)"
+    if [ -d "$CLAUDE_SKILLS_DIR/$cmd" ]; then
+        if [ -f "$CLAUDE_COMMANDS_DIR/$cmd.md" ]; then
+            rm -f "$CLAUDE_COMMANDS_DIR/$cmd.md"
+            echo "Removed legacy Claude command ${CLAUDE_COMMANDS_DIR}/$cmd.md (replaced by the $cmd skill)"
+        fi
+        if [ -f "$PLUGIN_COMMANDS_DIR/$cmd.md" ]; then
+            rm -f "$PLUGIN_COMMANDS_DIR/$cmd.md"
+            echo "Removed stale plugin command ${PLUGIN_COMMANDS_DIR}/$cmd.md (plugin is hooks-only now)"
+        fi
     fi
 done
+rmdir "$PLUGIN_COMMANDS_DIR" 2>/dev/null || true
 
 # Codex no longer hosts core skills (they now live in ~/.agents/skills).
 # Core skills are removed only once their replacement exists; the stale
@@ -1221,8 +1233,8 @@ echo "Install the Claude Code plugin:"
 echo "  /plugin marketplace add backnotprop/plannotator"
 echo "  /plugin install plannotator@plannotator"
 echo ""
-echo "Upgrading from an older version? Also run /plugin marketplace update"
-echo "so the plugin drops its old plannotator:* command entries."
+echo "Upgrading from an older version? Run /plugin marketplace update to pull"
+echo "the latest hooks-only plugin (stale plugin commands are cleaned up here)."
 echo ""
 echo "The /plannotator-review, /plannotator-annotate, /plannotator-last, and /plannotator-archive commands are ready to use after you restart Claude Code!"
 
