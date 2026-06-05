@@ -572,6 +572,16 @@ describe("install shared behavior", () => {
   const sh = readFileSync(join(scriptsDir, "install.sh"), "utf-8");
   const ps = readFileSync(join(scriptsDir, "install.ps1"), "utf-8");
 
+  test("install.cmd contains no unix redirect bash-isms", () => {
+    // Tripwire: during PR #850 development, three freshly written `>nul`
+    // redirects in install.cmd were found rewritten to `>/dev/null` by an
+    // unidentified external tool. In batch, >/dev/null redirects to a literal
+    // .\dev\null file. If this trips, something between editor and disk is
+    // rewriting cmd syntax.
+    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    expect(cmdScript).not.toContain("/dev/null");
+  });
+
   test("all installers respect CODEX_HOME for the Codex home directory", () => {
     // Codex stores config and state under $CODEX_HOME when set, falling back
     // to ~/.codex (developers.openai.com/codex/config-advanced). #852
