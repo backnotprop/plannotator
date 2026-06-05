@@ -16,8 +16,7 @@
   },
   "keywords": ["pi-package", "plannotator", "plan-review", "ai-agent", "coding-agent"],
   "pi": {
-    "extensions": ["./"],
-    "skills": ["./skills"]
+    "extensions": ["./"]
   },
   "files": [
     "index.ts",
@@ -33,23 +32,22 @@
     "generated/",
     "README.md",
     "plannotator.html",
-    "review-editor.html",
-    "skills/"
+    "review-editor.html"
   ],
   "scripts": {
-    "build": "cp ../hook/dist/index.html plannotator.html && cp ../hook/dist/review.html review-editor.html && rm -rf skills && cp -r ../skills skills && bash vendor.sh",
+    "build": "cp ../hook/dist/index.html plannotator.html && cp ../hook/dist/review.html review-editor.html && bash vendor.sh",
     "prepublishOnly": "cd ../.. && bun run build:pi"
   },
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.64",
     "@pierre/diffs": "^1.1.12",
-    "glimpseui": "^0.8.0",
     "turndown": "^7.2.4"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.74.0"
   },
   "devDependencies": {
+    "glimpseui": "^0.8.0",
     "@earendil-works/pi-coding-agent": ">=0.74.0",
     "@earendil-works/pi-agent-core": ">=0.74.0",
     "@earendil-works/pi-ai": ">=0.74.0",

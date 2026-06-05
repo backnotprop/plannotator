@@ -1,6 +1,7 @@
 ---
 name: plannotator-annotate
 description: Open Plannotator's annotation UI for a markdown file, converted HTML file, URL, or folder and then respond to the returned annotations.
+disable-model-invocation: true
 ---
 
 # Plannotator Annotate

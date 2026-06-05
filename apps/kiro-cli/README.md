@@ -8,6 +8,10 @@ one-liner as everyone else.
 
 - `skills/` — Kiro-specific skill packages (`plannotator-review`, `plannotator-annotate`,
   `plannotator-archive`), each baking `PLANNOTATOR_ORIGIN=kiro-cli` into its command.
+  <!-- NOTE: The canonical, single-sourced core skills live in `apps/skills/core/`. These Kiro
+       copies are intentionally independent (they hardcode PLANNOTATOR_ORIGIN=kiro-cli) and are
+       exempt from single-sourcing — do not replace them with the core copies. -->
+
 - `agents/plannotator.json` — an example Kiro custom agent that exposes the Plannotator skills via
   `skill://` resources and a `plannotator`-scoped `shell` tool.
 
@@ -18,7 +22,7 @@ convention used for Codex and Gemini) and installs:
 
 - the 3 Kiro-specific skills above → `~/.kiro/skills`
 - the 2 shared skills `plannotator-setup-goal` and `plannotator-visual-explainer` (pulled from
-  `apps/skills/`, not duplicated here) → `~/.kiro/skills`
+  `apps/skills/extra/`, not duplicated here) → `~/.kiro/skills`
 - the example agent `agents/plannotator.json` → `~/.kiro/agents/plannotator.json` (an existing file
   is never overwritten)
 

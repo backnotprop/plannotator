@@ -7,14 +7,13 @@ A plan review UI for Claude Code that intercepts `ExitPlanMode` via hooks, letti
 ```
 plannotator/
 ├── apps/
-│   ├── hook/                     # Claude Code plugin
+│   ├── hook/                     # Claude Code plugin (no commands/ — core skills installed to ~/.claude/skills act as slash commands)
 │   │   ├── .claude-plugin/plugin.json
-│   │   ├── commands/             # Slash commands (plannotator-review.md, plannotator-annotate.md)
 │   │   ├── hooks/hooks.json      # PermissionRequest hook config
 │   │   ├── server/index.ts       # Entry point (plan + review + annotate + archive subcommands)
 │   │   └── dist/                 # Built single-file apps (index.html, review.html)
 │   ├── opencode-plugin/          # OpenCode plugin
-│   │   ├── commands/             # Slash commands (plannotator-review.md, plannotator-annotate.md)
+│   │   ├── commands/             # Slash command stubs (review, annotate, last, archive — plugin intercepts execution)
 │   │   ├── index.ts              # Plugin entry with submit_plan tool + review/annotate event handlers
 │   │   ├── plannotator.html      # Built plan review app
 │   │   └── review-editor.html    # Built code review app
@@ -29,7 +28,7 @@ plannotator/
 │   │   └── astro.config.mjs      # Astro 5 static site with content collections
 │   ├── kiro-cli/                 # Kiro CLI integration source (consumed by scripts/install.sh; auto-detected via ~/.kiro)
 │   │   ├── agents/plannotator.json   # Example Kiro custom agent
-│   │   └── skills/               # Kiro-specific skill packages (review, annotate, archive); setup-goal + visual-explainer install from apps/skills
+│   │   └── skills/               # Kiro-specific skill packages (review, annotate, archive); setup-goal + visual-explainer install from apps/skills/extra
 │   ├── paste-service/            # Paste service for short URL sharing
 │   │   ├── core/                 # Platform-agnostic logic (handler, storage interface, cors)
 │   │   ├── stores/               # Storage backends (fs, kv, s3)
@@ -43,12 +42,15 @@ plannotator/
 │   │   ├── src/                   # extension.ts, cookie-proxy.ts, ipc-server.ts, panel-manager.ts, editor-annotations.ts, vscode-theme.ts
 │   │   └── package.json           # Extension manifest (publisher: backnotprop)
 │   └── skills/                    # Agent skills (agentskills.io format)
-│       ├── plannotator-review/          # Lightweight: opens review UI
-│       ├── plannotator-annotate/        # Lightweight: opens annotate UI
-│       ├── plannotator-last/            # Lightweight: annotates last message
-│       ├── plannotator-compound/        # Research analysis agent (map-reduce over denied plans)
-│       ├── plannotator-setup-goal/      # Goal package scaffolder for /goal workflows
-│       └── plannotator-visual-explainer/ # Visual HTML generator (plans, diagrams, PR explainers) with Plannotator theming
+│       ├── core/                  # CORE skills (single-sourced) — installed to ~/.claude/skills and ~/.agents/skills (Codex)
+│       │   ├── plannotator-review/    # Lightweight: opens review UI
+│       │   ├── plannotator-annotate/  # Lightweight: opens annotate UI
+│       │   ├── plannotator-last/      # Lightweight: annotates last message
+│       │   └── plannotator-archive/   # Lightweight: opens read-only archive UI
+│       └── extra/                 # EXTRA skills — NOT default-installed (except Kiro); add via `npx skills add backnotprop/plannotator/apps/skills/extra`
+│           ├── plannotator-compound/        # Research analysis agent (map-reduce over denied plans)
+│           ├── plannotator-setup-goal/      # Goal package scaffolder for /goal workflows
+│           └── plannotator-visual-explainer/ # Visual HTML generator (plans, diagrams, PR explainers) with Plannotator theming
 ├── packages/
 │   ├── server/                   # Shared server implementation
 │   │   ├── index.ts              # startPlannotatorServer(), handleServerReady()

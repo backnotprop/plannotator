@@ -10,7 +10,9 @@ Plannotator runs as a plugin for your coding agent. Install the CLI first, then 
 
 ## Prerequisites
 
-Install the `plannotator` command so your agent can use it.
+Install the `plannotator` command so your agent can use it. The installer
+requires `git` (it fetches the skills and command files from a sparse checkout
+of the release tag) and fails with a clear message if git is missing.
 
 **macOS / Linux / WSL:**
 
@@ -23,6 +25,16 @@ curl -fsSL https://plannotator.ai/install.sh | bash
 ```powershell
 irm https://plannotator.ai/install.ps1 | iex
 ```
+
+### Guided install
+
+When run in a terminal for the first time, the installer asks three questions:
+
+1. **Install the extra skills?** (compound planning, setup-goal, visual explainer) — answering yes launches `npx skills add` so you pick which agents get them in its UI. Skipped automatically if the extras are already installed.
+2. **Make any skills callable by the model?** — answering yes opens a picker (space toggles on macOS/Linux/PowerShell; numbered toggles in the cmd installer). Chosen skills have `disable-model-invocation` removed from their *installed* copies (and the Codex sidecar flipped to match); everything else stays user-invoked only.
+3. **Install Glimpse?** — [`glimpseui`](https://github.com/hazat/glimpse) gives Plannotator a native window instead of a browser tab. Yes runs `npm install -g glimpseui`; the Plannotator runtime auto-detects it on PATH from then on. Skipped automatically if Glimpse is already installed. Disable later anytime with `PLANNOTATOR_GLIMPSE=0`.
+
+Answers are saved to `<data dir>/install-prefs` and reused silently on re-runs — pass `--reconfigure` to change them. **Automated installs are unaffected**: runs without a terminal (CI, scripts) never prompt and keep the defaults (no extras, nothing model-invocable). Automation can opt in explicitly with `--extras` / `--no-extras` / `--model-invocable <list>` / `--glimpse` / `--no-glimpse` / `--non-interactive`.
 
 **Windows CMD:**
 
@@ -64,6 +76,8 @@ Every release includes SHA256 checksums (verified automatically) and optional [S
 
 Restart Claude Code after installing for hooks to take effect.
 
+The plugin provides the plan-review hook only. To also get the `/plannotator-*` slash commands you must run the [install script](#prerequisites) — it installs them as Claude Code skills in `~/.claude/skills` (see [Slash commands](#slash-commands) below).
+
 ### Manual installation
 
 If you prefer not to use the plugin system, add this to your `~/.claude/settings.json`:
@@ -93,6 +107,18 @@ To test a local checkout of Plannotator:
 
 ```bash
 claude --plugin-dir ./apps/hook
+```
+
+### Slash commands
+
+Plannotator's slash commands (`/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`, `/plannotator-archive`) are installed as Claude Code skills in `~/.claude/skills` by the install script — Claude Code skills are user-invocable by directory name, so the command names are unchanged. There is no separate `~/.claude/commands` step.
+
+Upgrading from an older version? The installer removes the legacy `~/.claude/commands/plannotator-*.md` files automatically, but the marketplace plugin's old namespaced `plannotator:*` command entries are managed by Claude Code — run `/plugin marketplace update` once so they disappear from the `/` menu.
+
+Optional extra skills (compound planning, setup-goal, visual explainer) are not installed by default. Add them with:
+
+```bash
+npx skills add backnotprop/plannotator/apps/skills/extra
 ```
 
 ## OpenCode
@@ -193,6 +219,12 @@ Notes:
 - Prefer an absolute `plannotator` command path in `hooks.json` for Codex Desktop, because app-launched processes may not inherit your shell `PATH`.
 - Codex hooks are currently experimental.
 - The current official Codex hooks docs say hooks are disabled on Windows, so this flow is currently macOS/Linux/WSL only.
+
+The installer also copies Plannotator's core skills (`plannotator-review`, `plannotator-annotate`, `plannotator-last`, `plannotator-archive`) into `~/.agents/skills` — the official OpenAI agent skills path. Optional extra skills (compound planning, setup-goal, visual explainer) are not installed by default; add them with:
+
+```bash
+npx skills add backnotprop/plannotator/apps/skills/extra
+```
 
 You can still use the direct commands at any time:
 

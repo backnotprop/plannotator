@@ -1,5 +1,6 @@
 ---
 name: plannotator-setup-goal
+disable-model-invocation: true
 description: Turn an idea or objective into a goal package for /goal. Interviews the user, builds a reviewed fact sheet via Plannotator, then explores the codebase to produce an execution plan.
 ---
 

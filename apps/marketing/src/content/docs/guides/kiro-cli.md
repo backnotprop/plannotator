@@ -46,7 +46,7 @@ Kiro-specific skills (run with `PLANNOTATOR_ORIGIN=kiro-cli`):
 - `plannotator-annotate`
 - `plannotator-archive`
 
-Shared skills (installed from Plannotator's canonical `apps/skills/` set, not duplicated):
+Shared extra skills (installed from Plannotator's canonical `apps/skills/extra/` set, not duplicated):
 
 - `plannotator-setup-goal`
 - `plannotator-visual-explainer`

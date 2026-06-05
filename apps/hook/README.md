@@ -106,13 +106,14 @@ Host your-server
 
 ## Slash Commands
 
-The plugin registers three slash commands:
+Plannotator's slash commands are installed as Claude Code skills in `~/.claude/skills` by the install script (the canonical source is `apps/skills/core/`). Claude Code skills are user-invocable by directory name, so these four work like slash commands inside your session:
 
 | Command | Description |
 |---------|-------------|
 | `/plannotator-review [--git]` | Open code review UI for current changes or a GitHub PR; `--git` forces Git in JJ workspaces |
 | `/plannotator-annotate <file.md>` | Annotate any markdown file |
 | `/plannotator-last` | Annotate the agent's last message |
+| `/plannotator-archive` | Browse saved plan decisions in the read-only archive UI |
 
 ## Obsidian Integration
 

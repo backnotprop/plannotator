@@ -2,7 +2,8 @@
  * Codex Session Parser
  *
  * Extracts the last rendered assistant message from a Codex rollout file.
- * Codex stores sessions at ~/.codex/sessions/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl
+ * Codex stores sessions at $CODEX_HOME/sessions/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl
+ * (default ~/.codex when CODEX_HOME is unset)
  *
  * Detection: Codex injects CODEX_THREAD_ID into every spawned process.
  * The thread ID is the UUID in the rollout filename.
@@ -64,14 +65,25 @@ const PROPOSED_PLAN_RE = /<proposed_plan>([\s\S]*?)<\/proposed_plan>/gi;
 // --- Rollout File Discovery ---
 
 /**
+ * Resolve the Codex home directory. Codex stores config and state under
+ * $CODEX_HOME when set, falling back to ~/.codex
+ * (https://developers.openai.com/codex/config-advanced#config-and-state-locations).
+ * Same pattern as COPILOT_HOME in copilot-session.ts and CLAUDE_CONFIG_DIR
+ * in session-log.ts. (#852)
+ */
+function codexHome(): string {
+  return process.env.CODEX_HOME || join(homedir(), ".codex");
+}
+
+/**
  * Find the Codex rollout file for a given thread ID.
  * The thread ID is the UUID portion of the filename:
  *   rollout-<timestamp>-<uuid>.jsonl
  *
- * Scans ~/.codex/sessions/ directory tree for a matching file.
+ * Scans $CODEX_HOME/sessions/ (default ~/.codex/sessions/) for a matching file.
  */
 export function findCodexRolloutByThreadId(threadId: string): string | null {
-  const sessionsDir = join(homedir(), ".codex", "sessions");
+  const sessionsDir = join(codexHome(), "sessions");
 
   try {
     // Walk YYYY/MM/DD directories in reverse order (most recent first)

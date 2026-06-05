@@ -8,10 +8,19 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const scriptsDir = import.meta.dir;
+
+// The four always-installed core skills (apps/skills/core/*). Single list so
+// the copy assertions, sidecar checks, and frontmatter checks can't drift.
+const CORE_SKILLS = [
+  "plannotator-review",
+  "plannotator-annotate",
+  "plannotator-last",
+  "plannotator-archive",
+];
 
 describe("install.sh", () => {
   const script = readFileSync(join(scriptsDir, "install.sh"), "utf-8");
@@ -59,25 +68,94 @@ describe("install.sh", () => {
     expect(script).toContain('"command".*plannotator');
   });
 
-  test("installs skills via git sparse-checkout", () => {
+  test("installs core skills via git sparse-checkout to claude + agents", () => {
     expect(script).toContain("git clone --depth 1 --filter=blob:none --sparse");
-    expect(script).toContain("git sparse-checkout set apps/skills");
+    // Sparse set extended to also fetch the command stubs from the checkout.
+    expect(script).toContain(
+      "git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands",
+    );
     expect(script).toContain("CLAUDE_SKILLS_DIR");
-    expect(script).toContain("CODEX_SKILLS_DIR");
     expect(script).toContain("AGENTS_SKILLS_DIR");
-    expect(script).toContain("$HOME/.codex/skills");
     expect(script).toContain("$HOME/.agents/skills");
     expect(script).toContain("copy_skill_if_present");
-    expect(script).toContain('copy_skill_if_present apps/skills/plannotator-review "$CODEX_SKILLS_DIR"');
-    expect(script).toContain('copy_skill_if_present apps/skills/plannotator-annotate "$CODEX_SKILLS_DIR"');
-    expect(script).toContain('copy_skill_if_present apps/skills/plannotator-last "$CODEX_SKILLS_DIR"');
-    expect(script).toContain('copy_skill_if_present apps/skills/plannotator-compound "$AGENTS_SKILLS_DIR"');
-    expect(script).toContain('copy_skill_if_present apps/skills/plannotator-setup-goal "$AGENTS_SKILLS_DIR"');
-    expect(script).toContain('if [ "$codex_available" -eq 1 ]; then');
-    expect(script).not.toContain('cp -r apps/skills/* "$CODEX_SKILLS_DIR/"');
-    expect(script).not.toContain('cp -r apps/skills/* "$AGENTS_SKILLS_DIR/"');
-    expect(script).not.toContain('cp -r apps/skills/plannotator-review "$CODEX_SKILLS_DIR/"');
-    expect(script).toContain('Skipping skills install (git not found)');
+    // Core skills (all 4) -> Claude Code and the official OpenAI shared-agent path.
+    for (const skill of CORE_SKILLS) {
+      expect(script).toContain(`copy_skill_if_present apps/skills/core/${skill} "$CLAUDE_SKILLS_DIR"`);
+      expect(script).toContain(`copy_skill_if_present apps/skills/core/${skill} "$AGENTS_SKILLS_DIR"`);
+    }
+    // Codex no longer receives a skills install (core skills live in ~/.agents/skills).
+    expect(script).not.toContain('copy_skill_if_present apps/skills/core/plannotator-review "$CODEX_SKILLS_DIR"');
+    // Extras are not default-installed anywhere except Kiro.
+    expect(script).not.toContain("copy_skill_if_present apps/skills/extra/plannotator-compound");
+    expect(script).not.toContain('cp -r apps/skills/* "$CLAUDE_SKILLS_DIR/"');
+    // Missing git is a hard failure with an actionable message, not a silent
+    // skip — the legacy commands are gone, so a no-skill install is broken.
+    expect(script).toContain("Error: git is required to install Plannotator's skills and slash commands.");
+    expect(script).toContain("Install git, then run this installer again.");
+  });
+
+  test("legacy Claude command cleanup is guarded on the replacement skill", () => {
+    // A command file may only be removed once its same-name skill exists on
+    // disk, and the cleanup must run AFTER the skill install — so a failed
+    // fetch or an old pinned tag never deletes commands without replacement.
+    expect(script).toContain('if [ -d "$CLAUDE_SKILLS_DIR/$cmd" ] && [ -f "$CLAUDE_COMMANDS_DIR/$cmd.md" ]');
+    const cleanupIndex = script.indexOf('Removed legacy Claude command');
+    const installIndex = script.indexOf('copy_skill_if_present apps/skills/core/plannotator-review');
+    expect(installIndex).toBeGreaterThan(0);
+    expect(cleanupIndex).toBeGreaterThan(installIndex);
+  });
+
+  test("extras cleanup runs once via the migrations ledger", () => {
+    // The npx-installed extras are byte-identical to our old default installs;
+    // only the ledger can tell them apart. The cleanup must be gated on the
+    // migration marker and honor PLANNOTATOR_DATA_DIR (via _config_dir).
+    expect(script).toContain('MIGRATIONS_DIR="$_config_dir/migrations"');
+    expect(script).toContain("2026-06-extras-default-install-removed");
+    expect(script).toContain('if [ ! -f "$EXTRAS_MIGRATION" ]');
+  });
+
+  test("guided install: flags, tty gating, prefs persistence, flip pass", () => {
+    // Wizard flags exist.
+    for (const flag of ["--extras", "--no-extras", "--model-invocable", "--non-interactive", "--reconfigure"]) {
+      expect(script).toContain(flag);
+    }
+    // Prompts require a real terminal: all wizard I/O runs on /dev/tty so
+    // piped installs (curl | bash) can still prompt and CI never does.
+    expect(script).toContain("{ : < /dev/tty; } 2>/dev/null");
+    expect(script).toContain("ask_yes_no");
+    expect(script).toContain("select_skills_checkbox");
+    // Answers persist to the data dir and silent re-runs reuse them.
+    expect(script).toContain('PREFS_FILE="$_config_dir/install-prefs"');
+    // Extras install is delegated to the skills CLI with the terminal attached.
+    expect(script).toContain("npx skills add backnotprop/plannotator/apps/skills/extra < /dev/tty");
+    // Flip pass unlocks INSTALLED copies only (repo sources always stay
+    // locked) and flips the Codex sidecar to match.
+    expect(script).toContain("grep -v '^disable-model-invocation: true$'");
+    expect(script).toContain("allow_implicit_invocation: true");
+  });
+
+  test("old pinned tags soft-skip core skills without aborting command installs", () => {
+    // Regression guard: a --version tag that predates apps/skills/core must
+    // skip the core-skill copy with an accurate message — NOT abort the whole
+    // sparse-checkout subshell, which would also skip the OpenCode/Gemini
+    // command installs that follow it (and ps1/cmd would diverge).
+    expect(script).toContain("predates the core/extra skill layout");
+    expect(script).not.toMatch(/^\s*\[ -d "apps\/skills\/core" \]\s*$/m);
+    // Subshell failure (clone/network) gets its own honest message rather
+    // than falsely claiming git is missing.
+    expect(script).toContain("network or git error");
+  });
+
+  test("installs OpenCode and Gemini commands from the checkout, not heredocs", () => {
+    // Command stubs/TOMLs are copied verbatim from the sparse checkout.
+    expect(script).toContain("copy_commands_if_present");
+    expect(script).toContain('copy_commands_if_present apps/opencode-plugin/commands "$OPENCODE_COMMANDS_DIR"');
+    expect(script).toContain('copy_commands_if_present apps/gemini/commands "$GEMINI_COMMANDS_DIR"');
+    // Gemini commands only when ~/.gemini exists.
+    expect(script).toContain('if [ -d "$HOME/.gemini" ]; then');
+    // The old command heredocs must be gone entirely.
+    expect(script).not.toContain("COMMAND_EOF");
+    expect(script).not.toContain("GEMINI_CMD_EOF");
   });
 
   test("auto-installs Kiro skills when ~/.kiro is detected (no flag)", () => {
@@ -91,9 +169,9 @@ describe("install.sh", () => {
     expect(script).toContain('copy_skill_if_present apps/kiro-cli/skills/plannotator-review "$KIRO_SKILLS_DIR"');
     expect(script).toContain('copy_skill_if_present apps/kiro-cli/skills/plannotator-annotate "$KIRO_SKILLS_DIR"');
     expect(script).toContain('copy_skill_if_present apps/kiro-cli/skills/plannotator-archive "$KIRO_SKILLS_DIR"');
-    // Shared skills come from apps/skills (not duplicated into apps/kiro-cli/skills).
-    expect(script).toContain('copy_skill_if_present apps/skills/plannotator-setup-goal "$KIRO_SKILLS_DIR"');
-    expect(script).toContain('copy_skill_if_present apps/skills/plannotator-visual-explainer "$KIRO_SKILLS_DIR"');
+    // The two extras Kiro keeps receiving come from apps/skills/extra.
+    expect(script).toContain('copy_skill_if_present apps/skills/extra/plannotator-setup-goal "$KIRO_SKILLS_DIR"');
+    expect(script).toContain('copy_skill_if_present apps/skills/extra/plannotator-visual-explainer "$KIRO_SKILLS_DIR"');
     // sparse-checkout fetches apps/kiro-cli (skills + agent example).
     expect(script).toContain("git sparse-checkout set apps/skills apps/kiro-cli");
     // The installer also writes the example custom agent to ~/.kiro/agents.
@@ -103,24 +181,34 @@ describe("install.sh", () => {
     expect(script).not.toContain("INSTALL_KIRO");
   });
 
-  test("cleans only legacy command-overlap agent skills", () => {
-    expect(script).toContain("LEGACY_AGENTS_SKILLS_DIR");
-    expect(script).toContain("plannotator-review plannotator-annotate plannotator-last");
-    expect(script).not.toContain("plannotator-review plannotator-annotate plannotator-last plannotator-compound");
-    expect(script).not.toContain("plannotator-review plannotator-annotate plannotator-last plannotator-setup-goal");
-  });
-
-  test("removes shared-agent Plannotator skills from Codex scope", () => {
-    expect(script).toContain("STALE_CODEX_SKILLS_DIR");
-    expect(script).toContain("plannotator-compound plannotator-setup-goal");
-  });
-
-  test("installs slash commands for Claude Code and OpenCode", () => {
-    expect(script).toContain("plannotator-review.md");
-    expect(script).toContain("plannotator-annotate.md");
-    expect(script).toContain("plannotator-last.md");
+  test("aggressively cleans up deprecated commands and stale skills on upgrade", () => {
+    // Claude Code commands are deprecated in favor of skills — remove the files.
     expect(script).toContain("CLAUDE_COMMANDS_DIR");
-    expect(script).toContain("OPENCODE_COMMANDS_DIR");
+    expect(script).toContain(
+      "for cmd in plannotator-review plannotator-annotate plannotator-last plannotator-archive; do",
+    );
+    // The legacy ~/.agents cleanup block (review/annotate/last) is GONE —
+    // core skills now intentionally live in ~/.agents/skills.
+    expect(script).not.toContain("LEGACY_AGENTS_SKILLS_DIR");
+    // Codex cleanup now also removes the per-command skills, plus the
+    // previously-stale compound/setup-goal.
+    expect(script).toContain("STALE_CODEX_SKILLS_DIR");
+    expect(script).toContain(
+      "for skill in plannotator-review plannotator-annotate plannotator-last plannotator-compound plannotator-setup-goal; do",
+    );
+    // Extras stop being managed in the Claude and shared-agent scopes.
+    expect(script).toContain("plannotator-compound plannotator-setup-goal plannotator-visual-explainer");
+  });
+
+  test("suggests installing extras via npx skills add", () => {
+    expect(script).toContain("Optional skills (compound planning, setup-goal, visual explainer):");
+    expect(script).toContain("npx skills add backnotprop/plannotator/apps/skills/extra");
+  });
+
+  test("no longer installs core skills to ~/.codex/skills", () => {
+    // Codex skills install removed; ~/.codex/skills only appears in cleanup.
+    expect(script).not.toContain('mkdir -p "$CODEX_SKILLS_DIR"');
+    expect(script).not.toContain('copy_skill_if_present apps/skills/core/plannotator-review "$CODEX_SKILLS_DIR"');
   });
 
   test("enables Codex hooks only after Stop hook setup succeeds", () => {
@@ -152,20 +240,40 @@ describe("install.sh", () => {
     expect(script).not.toContain('hook.command.includes("plannotator")) {\n      hook.command = command;');
   });
 
-  test("configures Pi to skip bundled skills only after shared skills exist", () => {
-    expect(script).toContain("configure_pi_plannotator_package_filter");
-    expect(script).toContain("plannotator_shared_agent_skills_available");
-    expect(script).toContain("PI_CODING_AGENT_DIR");
+  test("Pi extension update keeps no settings.json package-skills filter", () => {
+    // Pi no longer bundles skills, so the settings.json filter machinery is gone.
+    expect(script).toContain("update_pi_extension_if_present");
     expect(script).toContain("npm:@plannotator/pi-extension");
-    expect(script).toContain("return { source: entry, skills: [] };");
-    expect(script).toContain("Leaving Pi bundled skills enabled (global Plannotator agent skills not found).");
-    expect(script).toContain("Configured Pi to use global Plannotator skills and skip bundled package skills.");
-    expect(script).toContain("if plannotator_shared_agent_skills_available; then\n            configure_pi_plannotator_package_filter");
+    expect(script).not.toContain("configure_pi_plannotator_package_filter");
+    expect(script).not.toContain("plannotator_shared_agent_skills_available");
+    expect(script).not.toContain("PI_CODING_AGENT_DIR");
+    expect(script).not.toContain("return { source: entry, skills: [] };");
 
-    const skillsInstallIndex = script.indexOf("# Install skills (requires git)");
+    // Pi update still runs after the git-gated skills/commands install.
+    const skillsInstallIndex = script.indexOf(
+      "# Install skills and slash commands from a sparse checkout",
+    );
     const piUpdateCallIndex = script.lastIndexOf("update_pi_extension_if_present");
     expect(skillsInstallIndex).toBeGreaterThan(0);
     expect(piUpdateCallIndex).toBeGreaterThan(skillsInstallIndex);
+  });
+
+  test("hook/config writing happens before the git hard-fail", () => {
+    // Missing git hard-fails the install, but the hook/config writes that
+    // don't need git (plugin hooks, Codex hook config) must already have run
+    // by then so a re-run after installing git completes the rest.
+    const gitGateIndex = script.indexOf("if ! command -v git &>/dev/null; then");
+    expect(gitGateIndex).toBeGreaterThan(0);
+    const pluginHooksIndex = script.indexOf('cat > "$PLUGIN_HOOKS"');
+    const codexHooksIndex = script.indexOf('enable_codex_hooks_config || true');
+    expect(pluginHooksIndex).toBeGreaterThan(0);
+    expect(pluginHooksIndex).toBeLessThan(gitGateIndex);
+    expect(codexHooksIndex).toBeGreaterThan(0);
+    expect(codexHooksIndex).toBeLessThan(gitGateIndex);
+    // Gemini policy/settings config heredocs are still present (after the
+    // skills section, unaffected by the git requirement once git exists).
+    expect(script).toContain('GEMINI_POLICY_EOF');
+    expect(script).toContain('GEMINI_SETTINGS_EOF');
   });
 });
 
@@ -226,37 +334,52 @@ describe("install.ps1", () => {
     expect(script).toContain("DUPLICATE HOOK DETECTED");
   });
 
-  test("installs skills via git sparse-checkout", () => {
+  test("installs core skills via git sparse-checkout to claude + agents", () => {
     expect(script).toContain("git clone --depth 1 --filter=blob:none --sparse");
-    expect(script).toContain("git sparse-checkout set apps/skills");
+    expect(script).toContain(
+      "git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands",
+    );
     expect(script).toContain("claudeSkillsDir");
-    expect(script).toContain("codexSkillsDir");
     expect(script).toContain("agentsSkillsDir");
-    expect(script).toContain("$env:USERPROFILE\\.codex\\skills");
     expect(script).toContain("$env:USERPROFILE\\.agents\\skills");
     expect(script).toContain("Copy-SkillIfPresent");
-    expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\plannotator-review" $codexSkillsDir');
-    expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\plannotator-annotate" $codexSkillsDir');
-    expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\plannotator-last" $codexSkillsDir');
-    expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\plannotator-compound" $agentsSkillsDir');
-    expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\plannotator-setup-goal" $agentsSkillsDir');
-    expect(script).toContain("if ($codexAvailable)");
-    expect(script).not.toContain('Copy-Item -Recurse -Force "skills\\*" $codexSkillsDir');
-    expect(script).not.toContain('Copy-Item -Recurse -Force "skills\\*" $agentsSkillsDir');
-    expect(script).not.toContain('Copy-Item -Recurse -Force "apps\\skills\\plannotator-review" $codexSkillsDir');
-    expect(script).toContain('Skipping skills install (git not found)');
+    // Core skills (all 4) copied verbatim to both Claude and the shared-agent
+    // scope, per-skill via Copy-SkillIfPresent so re-runs replace rather than
+    // nest (PowerShell's Copy-Item -Recurse into an existing dir nests).
+    expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\core\\$skill" $claudeSkillsDir');
+    expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\core\\$skill" $agentsSkillsDir');
+    expect(script).toContain('"plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-archive"');
+    // Copy-SkillIfPresent pre-removes the destination to avoid nesting on upgrade.
+    expect(script).toContain("if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }");
+    // No Codex skills install.
+    expect(script).not.toContain('Copy-SkillIfPresent "apps\\skills\\plannotator-review" $codexSkillsDir');
+    // Missing git is a hard failure with an actionable message (parity with sh).
+    expect(script).toContain("Error: git is required to install Plannotator's skills and slash commands.");
+    expect(script).toContain("Install git, then run this installer again.");
+    expect(script).toContain("checkoutFailed");
   });
 
-  test("cleans only legacy command-overlap agent skills", () => {
-    expect(script).toContain("legacyAgentsSkillsDir");
-    expect(script).toContain('"plannotator-review", "plannotator-annotate", "plannotator-last"');
-    expect(script).not.toContain('"plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-compound"');
-    expect(script).not.toContain('"plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-setup-goal"');
+  test("installs OpenCode and Gemini commands from the checkout", () => {
+    expect(script).toContain('Copy-Item -Force "apps\\opencode-plugin\\commands\\*.md" $opencodeCommandsDir');
+    expect(script).toContain('Copy-Item -Force "apps\\gemini\\commands\\*.toml" $geminiCommandsDir');
+    // No Gemini command heredocs remain.
+    expect(script).not.toContain("GEMINI_CMD_EOF");
   });
 
-  test("removes shared-agent Plannotator skills from Codex scope", () => {
+  test("aggressively cleans up deprecated commands and stale skills on upgrade", () => {
+    expect(script).toContain("claudeCommandsDir");
+    // Command cleanup is guarded on the replacement skill existing and runs
+    // after the skill install (parity with install.sh).
+    expect(script).toContain("(Test-Path $skillPath) -and (Test-Path $cmdPath)");
+    // Legacy ~/.agents review/annotate/last cleanup is gone.
+    expect(script).not.toContain("legacyAgentsSkillsDir");
+    // Codex cleanup includes the per-command skills now.
     expect(script).toContain("staleCodexSkillsDir");
-    expect(script).toContain('"plannotator-compound", "plannotator-setup-goal"');
+    expect(script).toContain('"plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-compound", "plannotator-setup-goal"');
+    // Extras removed from Claude + shared-agent scopes, once, via the ledger.
+    expect(script).toContain('"plannotator-compound", "plannotator-setup-goal", "plannotator-visual-explainer"');
+    expect(script).toContain("2026-06-extras-default-install-removed");
+    expect(script).toContain("if (-not (Test-Path $extrasMigration))");
   });
 
   test("does not treat a skills-only Codex home as configured", () => {
@@ -265,26 +388,20 @@ describe("install.ps1", () => {
     expect(script).toContain("$codexAvailable");
   });
 
-  test("installs slash commands", () => {
-    expect(script).toContain("plannotator-review.md");
-    expect(script).toContain("plannotator-annotate.md");
-    expect(script).toContain("plannotator-last.md");
+  test("suggests installing extras via npx skills add", () => {
+    expect(script).toContain("Optional skills (compound planning, setup-goal, visual explainer):");
+    expect(script).toContain("npx skills add backnotprop/plannotator/apps/skills/extra");
   });
 
-  test("configures Pi to skip bundled skills only after shared skills exist", () => {
-    expect(script).toContain("Configure-PiPlannotatorPackageFilter");
-    expect(script).toContain("Test-PlannotatorSharedAgentSkillsAvailable");
-    expect(script).toContain("PI_CODING_AGENT_DIR");
+  test("Pi extension update keeps no settings.json package-skills filter", () => {
+    expect(script).toContain("Update-PiExtensionIfPresent");
     expect(script).toContain("npm:@plannotator/pi-extension");
-    expect(script).toContain("skills = @()");
-    expect(script).toContain("New-Object System.Text.UTF8Encoding -ArgumentList $false");
-    expect(script).toContain("[System.IO.File]::WriteAllText($tmpPath, $json, $utf8NoBom)");
-    expect(script).not.toContain("$settings | ConvertTo-Json -Depth 20 | Set-Content -Path $tmpPath -Encoding UTF8");
-    expect(script).toContain("Leaving Pi bundled skills enabled (global Plannotator agent skills not found).");
-    expect(script).toContain("Configured Pi to use global Plannotator skills and skip bundled package skills.");
-    expect(script).toContain("if (Test-PlannotatorSharedAgentSkillsAvailable) {\n            Configure-PiPlannotatorPackageFilter");
+    expect(script).not.toContain("Configure-PiPlannotatorPackageFilter");
+    expect(script).not.toContain("Test-PlannotatorSharedAgentSkillsAvailable");
+    expect(script).not.toContain("PI_CODING_AGENT_DIR");
+    expect(script).not.toContain("skills = @()");
 
-    const skillsInstallIndex = script.indexOf("# Install skills (requires git)");
+    const skillsInstallIndex = script.indexOf("# Install skills and command stubs (requires git)");
     const piUpdateCallIndex = script.lastIndexOf("Update-PiExtensionIfPresent");
     expect(skillsInstallIndex).toBeGreaterThan(0);
     expect(piUpdateCallIndex).toBeGreaterThan(skillsInstallIndex);
@@ -342,35 +459,45 @@ describe("install.cmd", () => {
     expect(script).toContain("DUPLICATE HOOK DETECTED");
   });
 
-  test("installs skills via git sparse-checkout", () => {
+  test("installs core skills via git sparse-checkout to claude + agents", () => {
     expect(script).toContain("git clone --depth 1 --filter=blob:none --sparse");
-    expect(script).toContain("git sparse-checkout set apps/skills");
+    expect(script).toContain(
+      "git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands",
+    );
     expect(script).toContain("CLAUDE_SKILLS_DIR");
-    expect(script).toContain("CODEX_SKILLS_DIR");
     expect(script).toContain("AGENTS_SKILLS_DIR");
-    expect(script).toContain("%USERPROFILE%\\.codex\\skills");
     expect(script).toContain("%USERPROFILE%\\.agents\\skills");
-    expect(script).toContain('if "!CODEX_AVAILABLE!"=="1"');
-    expect(script).toContain('if exist "apps\\skills\\plannotator-review" xcopy /s /i /y /q "apps\\skills\\plannotator-review" "!CODEX_SKILLS_DIR!\\plannotator-review\\"');
-    expect(script).toContain('if exist "apps\\skills\\plannotator-annotate" xcopy /s /i /y /q "apps\\skills\\plannotator-annotate" "!CODEX_SKILLS_DIR!\\plannotator-annotate\\"');
-    expect(script).toContain('if exist "apps\\skills\\plannotator-last" xcopy /s /i /y /q "apps\\skills\\plannotator-last" "!CODEX_SKILLS_DIR!\\plannotator-last\\"');
-    expect(script).toContain('if exist "apps\\skills\\plannotator-compound" xcopy /s /i /y /q "apps\\skills\\plannotator-compound" "!AGENTS_SKILLS_DIR!\\plannotator-compound\\"');
-    expect(script).toContain('if exist "apps\\skills\\plannotator-setup-goal" xcopy /s /i /y /q "apps\\skills\\plannotator-setup-goal" "!AGENTS_SKILLS_DIR!\\plannotator-setup-goal\\"');
-    expect(script).not.toContain('xcopy /s /y /q "skills\\*" "!CODEX_SKILLS_DIR!\\"');
-    expect(script).not.toContain('xcopy /s /y /q "skills\\*" "!AGENTS_SKILLS_DIR!\\"');
-    expect(script).toContain("Skipping skills install");
+    // Core skills (all 4) copied to both Claude and shared-agent scope.
+    expect(script).toContain('xcopy /s /i /y /q "apps\\skills\\core\\%%S" "!CLAUDE_SKILLS_DIR!\\%%S\\"');
+    expect(script).toContain('xcopy /s /i /y /q "apps\\skills\\core\\%%S" "!AGENTS_SKILLS_DIR!\\%%S\\"');
+    expect(script).toContain("for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator-archive) do");
+    // No Codex skills install — only the cleanup loop references CODEX skills.
+    expect(script).not.toContain('xcopy /s /i /y /q "apps\\skills\\core\\%%S" "!CODEX_SKILLS_DIR!\\%%S\\"');
+    // Missing git is a hard failure with an actionable message (parity with sh/ps1).
+    expect(script).toContain("Error: git is required to install Plannotator's skills and slash commands.");
+    expect(script).toContain("Install git, then run this installer again.");
+    expect(script).toContain("CHECKOUT_FAILED");
   });
 
-  test("cleans only legacy command-overlap agent skills", () => {
-    expect(script).toContain("LEGACY_AGENTS_SKILLS_DIR");
-    expect(script).toContain("plannotator-review plannotator-annotate plannotator-last");
-    expect(script).not.toContain("plannotator-review plannotator-annotate plannotator-last plannotator-compound");
-    expect(script).not.toContain("plannotator-review plannotator-annotate plannotator-last plannotator-setup-goal");
+  test("installs OpenCode and Gemini commands from the checkout", () => {
+    expect(script).toContain('xcopy /y /q "apps\\opencode-plugin\\commands\\*.md" "!OPENCODE_COMMANDS_DIR!\\"');
+    expect(script).toContain('xcopy /y /q "apps\\gemini\\commands\\*.toml" "!GEMINI_COMMANDS_DIR!\\"');
   });
 
-  test("removes shared-agent Plannotator skills from Codex scope", () => {
+  test("aggressively cleans up deprecated commands and stale skills on upgrade", () => {
+    expect(script).toContain("CLAUDE_COMMANDS_DIR");
+    // Command cleanup is guarded on the replacement skill existing and runs
+    // after the skill install (parity with install.sh / install.ps1).
+    expect(script).toContain('if exist "!CLAUDE_SKILLS_DIR!\\%%C" if exist "!CLAUDE_COMMANDS_DIR!\\%%C.md"');
+    // Legacy ~/.agents review/annotate/last cleanup is gone.
+    expect(script).not.toContain("LEGACY_AGENTS_SKILLS_DIR");
+    // Codex cleanup includes the per-command skills now.
     expect(script).toContain("STALE_CODEX_SKILLS_DIR");
-    expect(script).toContain("plannotator-compound plannotator-setup-goal");
+    expect(script).toContain("for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator-compound plannotator-setup-goal) do");
+    // Extras removed from Claude + shared-agent scopes, once, via the ledger.
+    expect(script).toContain("for %%S in (plannotator-compound plannotator-setup-goal plannotator-visual-explainer) do");
+    expect(script).toContain("2026-06-extras-default-install-removed");
+    expect(script).toContain('if not exist "!EXTRAS_MIGRATION!"');
   });
 
   test("does not treat a skills-only Codex home as configured", () => {
@@ -378,10 +505,9 @@ describe("install.cmd", () => {
     expect(script).toContain('if /i not "%%C"=="skills"');
   });
 
-  test("installs slash commands", () => {
-    expect(script).toContain("plannotator-review.md");
-    expect(script).toContain("plannotator-annotate.md");
-    expect(script).toContain("plannotator-last.md");
+  test("suggests installing extras via npx skills add", () => {
+    expect(script).toContain("Optional skills");
+    expect(script).toContain("npx skills add backnotprop/plannotator/apps/skills/extra");
   });
 
   test("Gemini settings merge uses || idiom (issue #506 regression)", () => {
@@ -395,22 +521,15 @@ describe("install.cmd", () => {
     expect(script).not.toContain("if(!s.hooks.BeforeTool)");
   });
 
-  test("configures Pi to skip bundled skills only after shared skills exist", () => {
-    expect(script).toContain("PI_CODING_AGENT_DIR");
-    expect(script).toContain("PI_SETTINGS_PATH");
-    expect(script).toContain("$env:PI_SETTINGS_PATH");
+  test("Pi extension update keeps no settings.json package-skills filter", () => {
     expect(script).toContain("npm:@plannotator/pi-extension");
-    expect(script).toContain("skills=@()");
-    expect(script).toContain("New-Object System.Text.UTF8Encoding -ArgumentList $false");
-    expect(script).toContain("[System.IO.File]::WriteAllText($tmp,$json,$utf8NoBom)");
-    expect(script).not.toContain("Set-Content -Path $tmp -Encoding UTF8");
-    expect(script).toContain("Leaving Pi bundled skills enabled ^(global Plannotator agent skills not found^).");
-    expect(script).toContain("Configured Pi to use global Plannotator skills and skip bundled package skills.");
-    expect(script).toContain('set "PI_SHARED_SKILLS_AVAILABLE=0"');
-    expect(script).toContain('if exist "!PI_SHARED_SKILLS_DIR!\\plannotator-compound\\SKILL.md" if exist "!PI_SHARED_SKILLS_DIR!\\plannotator-setup-goal\\SKILL.md" if exist "!PI_SHARED_SKILLS_DIR!\\plannotator-visual-explainer\\SKILL.md" set "PI_SHARED_SKILLS_AVAILABLE=1"');
-    expect(script).toContain('if "!PI_SHARED_SKILLS_AVAILABLE!"=="1"');
+    // The settings.json package-skills filter machinery is fully removed.
+    expect(script).not.toContain("PI_CODING_AGENT_DIR");
+    expect(script).not.toContain("PI_SETTINGS_PATH");
+    expect(script).not.toContain("skills=@()");
+    expect(script).not.toContain("PI_SHARED_SKILLS_AVAILABLE");
 
-    const skillsInstallIndex = script.indexOf("REM Install skills (requires git)");
+    const skillsInstallIndex = script.indexOf("REM Skills + command stubs install (requires git)");
     const piUpdateIndex = script.lastIndexOf("REM Update Pi extension if pi is installed.");
     expect(skillsInstallIndex).toBeGreaterThan(0);
     expect(piUpdateIndex).toBeGreaterThan(skillsInstallIndex);
@@ -436,18 +555,125 @@ describe("install.cmd", () => {
   });
 });
 
-describe("Codex Plannotator skills", () => {
-  test("command-overlap skills include OpenAI agent config", () => {
-    for (const skill of ["plannotator-review", "plannotator-annotate", "plannotator-last"]) {
-      const configPath = join(scriptsDir, "..", "apps", "skills", skill, "agents", "openai.yaml");
+describe("Core Plannotator skills", () => {
+  test("every core skill includes an OpenAI agent config sidecar", () => {
+    for (const skill of CORE_SKILLS) {
+      const configPath = join(
+        scriptsDir,
+        "..",
+        "apps",
+        "skills",
+        "core",
+        skill,
+        "agents",
+        "openai.yaml",
+      );
       expect(existsSync(configPath)).toBe(true);
     }
+  });
+
+  test("every skill in the repo sets disable-model-invocation: true", () => {
+    // Maintainer rule: ALL Plannotator skills are user-invoked, never
+    // model-auto-invoked. Load-bearing for #842: Pi natively discovers
+    // ~/.agents/skills, and this frontmatter line is the only thing keeping
+    // skills out of Pi's system prompt (<available_skills>). Scans every
+    // SKILL.md dynamically so newly added skills are covered automatically.
+    const skillRoots = [
+      join(scriptsDir, "..", "apps", "skills", "core"),
+      join(scriptsDir, "..", "apps", "skills", "extra"),
+      join(scriptsDir, "..", "apps", "kiro-cli", "skills"),
+    ];
+    let checked = 0;
+    for (const root of skillRoots) {
+      for (const dir of readdirSync(root)) {
+        const skillMd = join(root, dir, "SKILL.md");
+        if (!existsSync(skillMd)) continue;
+        const frontmatter = readFileSync(skillMd, "utf-8").split("---")[1] ?? "";
+        expect(frontmatter).toContain("disable-model-invocation: true");
+        checked++;
+      }
+    }
+    // 4 core + 3 extra + 3 kiro — bump when adding skills, never below.
+    expect(checked).toBeGreaterThanOrEqual(10);
   });
 });
 
 describe("install shared behavior", () => {
   const sh = readFileSync(join(scriptsDir, "install.sh"), "utf-8");
   const ps = readFileSync(join(scriptsDir, "install.ps1"), "utf-8");
+
+  test("install.cmd contains no unix redirect bash-isms", () => {
+    // Tripwire: during PR #850 development, three freshly written `>nul`
+    // redirects in install.cmd were found rewritten to `>/dev/null` by an
+    // unidentified external tool. In batch, >/dev/null redirects to a literal
+    // .\dev\null file. If this trips, something between editor and disk is
+    // rewriting cmd syntax.
+    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    expect(cmdScript).not.toContain("/dev/null");
+  });
+
+  test("guided install exists in all three installers with safe automation behavior", () => {
+    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    // Shared prefs file (same format across platforms) in the data dir.
+    expect(sh).toContain('PREFS_FILE="$_config_dir/install-prefs"');
+    expect(ps).toContain('Join-Path $configDir "install-prefs"');
+    expect(cmdScript).toContain('set "PREFS_FILE=!_CONFIG_DIR!\\install-prefs"');
+    // Non-interactive escape hatch everywhere.
+    expect(sh).toContain("--non-interactive");
+    expect(ps).toContain("[switch]$NonInteractive");
+    expect(cmdScript).toContain('"%~1"=="--non-interactive"');
+    // The wizard only runs with a real terminal/console attached.
+    expect(sh).toContain("{ : < /dev/tty; } 2>/dev/null");
+    expect(ps).toContain("[Console]::IsInputRedirected");
+    // cmd probes for a real console via `timeout /t 0` (errors when stdin is
+    // redirected) so CI/redirected runs never see the wizard — and never run
+    // the wizard-only installs (npx extras, Glimpse). set /p's empty-at-EOF
+    // behavior remains as a second line of defense against hangs.
+    expect(cmdScript).toContain("timeout /t 0");
+    expect(cmdScript).toContain('if "!CAN_PROMPT!"=="1"');
+    expect(cmdScript).toContain("set /p");
+    // Silent re-runs must not clobber saved answers with defaults.
+    expect(sh).toContain('if [ "$run_wizard" -eq 1 ] || [ -n "$EXTRAS_FLAG" ] || [ -n "$MODEL_INVOCABLE_FLAG" ] || [ -n "$GLIMPSE_FLAG" ]');
+    expect(ps).toContain("if ($runWizard -or $Extras -or $NoExtras -or $ModelInvocable -or $Glimpse -or $NoGlimpse)");
+    expect(cmdScript).toContain('if "!DO_PERSIST!"=="1"');
+    // Glimpse question: detect-on-PATH skip + global npm install in all three.
+    for (const s of [sh, ps, cmdScript]) {
+      expect(s).toContain("glimpseui");
+      expect(s).toContain("npm install -g glimpseui");
+    }
+    expect(sh).toContain("--no-glimpse");
+    expect(ps).toContain("[switch]$NoGlimpse");
+    expect(cmdScript).toContain('"%~1"=="--no-glimpse"');
+    // Flip pass in all three: SKILL.md line removal + Codex sidecar flip.
+    expect(ps).toContain('Where-Object { $_ -ne "disable-model-invocation: true" }');
+    expect(cmdScript).toContain('findstr /v /c:"disable-model-invocation: true"');
+    for (const s of [sh, ps, cmdScript]) {
+      expect(s).toContain("allow_implicit_invocation: true");
+    }
+  });
+
+  test("all installers respect CODEX_HOME for the Codex home directory", () => {
+    // Codex stores config and state under $CODEX_HOME when set, falling back
+    // to ~/.codex (developers.openai.com/codex/config-advanced). #852
+    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    expect(sh).toContain('CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"');
+    expect(ps).toContain('if ($env:CODEX_HOME) { $env:CODEX_HOME } else { "$env:USERPROFILE\\.codex" }');
+    expect(cmdScript).toContain('if defined CODEX_HOME set "CODEX_DIR=%CODEX_HOME%"');
+    // The fallback definition must be the ONLY hardcoded ~/.codex path left.
+    expect((sh.match(/\$HOME\/\.codex/g) ?? []).length).toBe(1);
+  });
+
+  test("all installers explain the old-tag core-skill soft-skip", () => {
+    // A --version tag predating apps/skills/core must be diagnosed in every
+    // installer, not just bash — a silent skip leaves Windows users with no
+    // skills and no explanation.
+    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    expect(sh).toContain("predates the core/extra skill layout");
+    expect(ps).toContain("predates the core/extra skill layout");
+    expect(cmdScript).toContain("predates the core/extra skill layout");
+    // ps1's clone-failure branch must not blame git when git is present.
+    expect(ps).toContain("network or git error");
+  });
 
   test("install.sh has three-layer opt-in resolution", () => {
     // Layer 3: config file via grep, respecting PLANNOTATOR_DATA_DIR
@@ -714,31 +940,21 @@ describe("install shared behavior", () => {
     expect(sh).not.toContain("bash install.sh v0.17.1");
   });
 
-  test("install.cmd double-escapes ! in Claude Code and Gemini slash command echoes", () => {
-    // Regression guard: under setlocal enabledelayedexpansion, preserving a
-    // literal `!` through both cmd parser phases requires `^^!`, not `^!`.
-    // Phase 1 consumes one caret (`^^` → `^`), Phase 2 consumes the second
-    // (`^!` → `!`). A single `^!` gets converted to `!` by Phase 1 and then
-    // stripped by Phase 2 because it's an unmatched delayed-expansion
-    // reference — yielding a written file with no `!` at all. This was
-    // caught by the Windows CI integration step reading back the generated
-    // command files, after an earlier "fix" with single-caret escape
-    // silently continued to drop the prefix.
-    //
-    // Also covers the Gemini section, which used the same incorrect
-    // single-caret escape and was equally broken (but had no CI coverage).
+  test("no installer generates slash command files via heredoc/echo", () => {
+    // Commands are now copied verbatim from the sparse checkout
+    // (apps/opencode-plugin/commands, apps/gemini/commands) instead of being
+    // emitted by heredocs/echoes. This retires the old `^^!` cmd-escaping
+    // regression entirely — the fragile echo lines no longer exist.
     const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
-    // Claude Code slash commands (three files)
-    expect(cmdScript).toContain("echo ^^!`plannotator review $ARGUMENTS`");
-    expect(cmdScript).toContain("echo ^^!`plannotator annotate $ARGUMENTS`");
-    expect(cmdScript).toContain("echo ^^!`plannotator annotate-last`");
-    // Gemini slash commands (two files)
-    expect(cmdScript).toContain("echo ^^!{plannotator review {{args}}}");
-    expect(cmdScript).toContain("echo ^^!{plannotator annotate {{args}}}");
-    // And the single-caret and unescaped forms must be gone
-    expect(cmdScript).not.toMatch(/^echo !`plannotator/m);
+    // install.cmd no longer echoes plannotator command bodies.
+    expect(cmdScript).not.toContain("echo ^^!`plannotator");
+    expect(cmdScript).not.toContain("echo ^^!{plannotator");
     expect(cmdScript).not.toMatch(/^echo \^!`plannotator/m);
     expect(cmdScript).not.toMatch(/^echo \^!{plannotator/m);
+    // install.sh / install.ps1 no longer carry command heredocs.
+    expect(sh).not.toContain("COMMAND_EOF");
+    expect(sh).not.toContain("GEMINI_CMD_EOF");
+    expect(ps).not.toContain("GEMINI_CMD_EOF");
   });
 
   test("install.cmd uses substring test (not echo|findstr) for v-prefix normalization", () => {
