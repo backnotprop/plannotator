@@ -629,9 +629,17 @@ describe("install shared behavior", () => {
     // defaults without hanging (no tty check possible in batch).
     expect(cmdScript).toContain("set /p");
     // Silent re-runs must not clobber saved answers with defaults.
-    expect(sh).toContain('if [ "$run_wizard" -eq 1 ] || [ -n "$EXTRAS_FLAG" ] || [ -n "$MODEL_INVOCABLE_FLAG" ]');
-    expect(ps).toContain("if ($runWizard -or $Extras -or $NoExtras -or $ModelInvocable)");
+    expect(sh).toContain('if [ "$run_wizard" -eq 1 ] || [ -n "$EXTRAS_FLAG" ] || [ -n "$MODEL_INVOCABLE_FLAG" ] || [ -n "$GLIMPSE_FLAG" ]');
+    expect(ps).toContain("if ($runWizard -or $Extras -or $NoExtras -or $ModelInvocable -or $Glimpse -or $NoGlimpse)");
     expect(cmdScript).toContain('if "!DO_PERSIST!"=="1"');
+    // Glimpse question: detect-on-PATH skip + global npm install in all three.
+    for (const s of [sh, ps, cmdScript]) {
+      expect(s).toContain("glimpseui");
+      expect(s).toContain("npm install -g glimpseui");
+    }
+    expect(sh).toContain("--no-glimpse");
+    expect(ps).toContain("[switch]$NoGlimpse");
+    expect(cmdScript).toContain('"%~1"=="--no-glimpse"');
     // Flip pass in all three: SKILL.md line removal + Codex sidecar flip.
     expect(ps).toContain('Where-Object { $_ -ne "disable-model-invocation: true" }');
     expect(cmdScript).toContain('findstr /v /c:"disable-model-invocation: true"');

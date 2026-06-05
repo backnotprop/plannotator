@@ -16,6 +16,7 @@ REM Guided-install answers. Precedence: CLI flags > wizard (interactive, first
 REM run or --reconfigure) > saved prefs from a previous run > defaults.
 set "EXTRAS_FLAG="
 set "MODEL_INVOCABLE_FLAG="
+set "GLIMPSE_FLAG="
 set "NON_INTERACTIVE=0"
 set "RECONFIGURE=0"
 
@@ -77,6 +78,16 @@ if /i "%~1"=="--model-invocable" (
     shift
     goto parse_args
 )
+if /i "%~1"=="--glimpse" (
+    set "GLIMPSE_FLAG=yes"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--no-glimpse" (
+    set "GLIMPSE_FLAG=no"
+    shift
+    goto parse_args
+)
 if /i "%~1"=="--non-interactive" (
     set "NON_INTERACTIVE=1"
     shift
@@ -106,7 +117,7 @@ REM unquoted arg containing `&` would re-trigger metacharacter interpretation.
 set "CURRENT_ARG=%~1"
 if "!CURRENT_ARG:~0,1!"=="-" (
     echo Unknown option: "%~1" >&2
-    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--non-interactive] [--reconfigure] >&2
+    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--glimpse ^| --no-glimpse] [--non-interactive] [--reconfigure] >&2
     exit /b 1
 )
 REM Positional form: install.cmd vX.Y.Z (legacy interface).
@@ -559,12 +570,20 @@ REM No checkbox UI in batch — the skill picker uses numbered toggles instead.
 set "PREFS_FILE=!_CONFIG_DIR!\install-prefs"
 set "SAVED_EXTRAS="
 set "SAVED_INVOCABLE="
+set "SAVED_GLIMPSE="
 if exist "!PREFS_FILE!" (
     for /f "usebackq tokens=1,* delims==" %%A in ("!PREFS_FILE!") do (
         if /i "%%A"=="extras" set "SAVED_EXTRAS=%%B"
         if /i "%%A"=="model_invocable" set "SAVED_INVOCABLE=%%B"
+        if /i "%%A"=="glimpse" set "SAVED_GLIMPSE=%%B"
     )
 )
+
+REM Glimpse (glimpseui) gives Plannotator a native window instead of a browser
+REM tab; the runtime auto-detects it on PATH. Skip the question when installed.
+set "GLIMPSE_PRESENT=0"
+where glimpseui >nul 2>&1
+if !ERRORLEVEL! equ 0 set "GLIMPSE_PRESENT=1"
 
 REM Extras already on disk? Then the extras question is moot — they still
 REM count toward the picker list, and we never launch the npx flow over them.
@@ -582,16 +601,21 @@ if "!NON_INTERACTIVE!"=="0" (
 
 set "EXTRAS_CHOICE="
 set "INVOCABLE_CHOICE="
+set "GLIMPSE_CHOICE="
 if "!RUN_WIZARD!"=="1" call :guided_wizard
 
 REM Flags override the wizard and saved answers; otherwise saved, then defaults.
 if defined EXTRAS_FLAG set "EXTRAS_CHOICE=!EXTRAS_FLAG!"
 if defined MODEL_INVOCABLE_FLAG set "INVOCABLE_CHOICE=!MODEL_INVOCABLE_FLAG!"
+if defined GLIMPSE_FLAG set "GLIMPSE_CHOICE=!GLIMPSE_FLAG!"
 if not defined EXTRAS_CHOICE (
     if defined SAVED_EXTRAS (set "EXTRAS_CHOICE=!SAVED_EXTRAS!") else (set "EXTRAS_CHOICE=no")
 )
 if not defined INVOCABLE_CHOICE (
     if defined SAVED_INVOCABLE (set "INVOCABLE_CHOICE=!SAVED_INVOCABLE!") else (set "INVOCABLE_CHOICE=none")
+)
+if not defined GLIMPSE_CHOICE (
+    if defined SAVED_GLIMPSE (set "GLIMPSE_CHOICE=!SAVED_GLIMPSE!") else (set "GLIMPSE_CHOICE=no")
 )
 
 REM Persist only when the wizard ran or a flag set something — silent re-runs
@@ -600,11 +624,29 @@ set "DO_PERSIST=0"
 if "!RUN_WIZARD!"=="1" set "DO_PERSIST=1"
 if defined EXTRAS_FLAG set "DO_PERSIST=1"
 if defined MODEL_INVOCABLE_FLAG set "DO_PERSIST=1"
+if defined GLIMPSE_FLAG set "DO_PERSIST=1"
 if "!DO_PERSIST!"=="1" (
     if not exist "!_CONFIG_DIR!" mkdir "!_CONFIG_DIR!" >nul 2>&1
     > "!PREFS_FILE!" (
         echo extras=!EXTRAS_CHOICE!
         echo model_invocable=!INVOCABLE_CHOICE!
+        echo glimpse=!GLIMPSE_CHOICE!
+    )
+)
+
+REM Glimpse install (global npm package; the runtime auto-detects it on PATH).
+REM Wizard or explicit flag only — silent re-runs never install software.
+set "DO_GLIMPSE_INSTALL=0"
+if "!RUN_WIZARD!"=="1" set "DO_GLIMPSE_INSTALL=1"
+if defined GLIMPSE_FLAG set "DO_GLIMPSE_INSTALL=1"
+if "!GLIMPSE_CHOICE!"=="yes" if "!GLIMPSE_PRESENT!"=="0" if "!DO_GLIMPSE_INSTALL!"=="1" (
+    where npm >nul 2>&1
+    if !ERRORLEVEL! equ 0 (
+        echo Installing Glimpse ^(npm install -g glimpseui^)...
+        call npm install -g glimpseui
+        if not !ERRORLEVEL! equ 0 echo Glimpse install failed — install later with: npm install -g glimpseui
+    ) else (
+        echo npm not found — install Node.js, then: npm install -g glimpseui
     )
 )
 
@@ -923,7 +965,7 @@ if "!EXTRAS_PRESENT!"=="1" (
 if defined MODEL_INVOCABLE_FLAG (
     REM Flag already answered this question — don't ask and then ignore.
     set "INVOCABLE_CHOICE=!MODEL_INVOCABLE_FLAG!"
-    goto :eof
+    goto :glimpse_question
 )
 set "ANSWER="
 set /p "ANSWER=Make any skills callable by the model (instead of user-invoked only)? [y/N] "
@@ -932,7 +974,7 @@ if /i "!ANSWER!"=="y" set "WANT_INVOCABLE=yes"
 if /i "!ANSWER!"=="yes" set "WANT_INVOCABLE=yes"
 if "!WANT_INVOCABLE!"=="no" (
     set "INVOCABLE_CHOICE=none"
-    goto :eof
+    goto :glimpse_question
 )
 set "SKILL_COUNT=4"
 set "SKILL_1=plannotator-review"
@@ -983,4 +1025,24 @@ for /l %%I in (1,1,!SKILL_COUNT!) do (
     )
 )
 if not defined INVOCABLE_CHOICE set "INVOCABLE_CHOICE=none"
+:glimpse_question
+if "!GLIMPSE_PRESENT!"=="1" (
+    echo Glimpse already installed — Plannotator will open in its native window.
+    set "GLIMPSE_CHOICE=yes"
+    goto :eof
+)
+if defined GLIMPSE_FLAG (
+    REM Flag already answered this question — don't ask and then ignore.
+    set "GLIMPSE_CHOICE=!GLIMPSE_FLAG!"
+    goto :eof
+)
+set "DEF_GLIMPSE=yes"
+if defined SAVED_GLIMPSE set "DEF_GLIMPSE=!SAVED_GLIMPSE!"
+set "ANSWER="
+set /p "ANSWER=Install Glimpse so Plannotator opens in a native window instead of a browser tab? (npm i -g glimpseui) [Y/n] "
+set "GLIMPSE_CHOICE=!DEF_GLIMPSE!"
+if /i "!ANSWER!"=="y" set "GLIMPSE_CHOICE=yes"
+if /i "!ANSWER!"=="yes" set "GLIMPSE_CHOICE=yes"
+if /i "!ANSWER!"=="n" set "GLIMPSE_CHOICE=no"
+if /i "!ANSWER!"=="no" set "GLIMPSE_CHOICE=no"
 goto :eof

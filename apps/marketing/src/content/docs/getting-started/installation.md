@@ -28,12 +28,13 @@ irm https://plannotator.ai/install.ps1 | iex
 
 ### Guided install
 
-When run in a terminal for the first time, the installer asks two questions:
+When run in a terminal for the first time, the installer asks three questions:
 
 1. **Install the extra skills?** (compound planning, setup-goal, visual explainer) — answering yes launches `npx skills add` so you pick which agents get them in its UI. Skipped automatically if the extras are already installed.
 2. **Make any skills callable by the model?** — answering yes opens a picker (space toggles on macOS/Linux/PowerShell; numbered toggles in the cmd installer). Chosen skills have `disable-model-invocation` removed from their *installed* copies (and the Codex sidecar flipped to match); everything else stays user-invoked only.
+3. **Install Glimpse?** — [`glimpseui`](https://github.com/hazat/glimpse) gives Plannotator a native window instead of a browser tab. Yes runs `npm install -g glimpseui`; the Plannotator runtime auto-detects it on PATH from then on. Skipped automatically if Glimpse is already installed. Disable later anytime with `PLANNOTATOR_GLIMPSE=0`.
 
-Answers are saved to `<data dir>/install-prefs` and reused silently on re-runs — pass `--reconfigure` to change them. **Automated installs are unaffected**: runs without a terminal (CI, scripts) never prompt and keep the defaults (no extras, nothing model-invocable). Automation can opt in explicitly with `--extras` / `--no-extras` / `--model-invocable <list>` / `--non-interactive`.
+Answers are saved to `<data dir>/install-prefs` and reused silently on re-runs — pass `--reconfigure` to change them. **Automated installs are unaffected**: runs without a terminal (CI, scripts) never prompt and keep the defaults (no extras, nothing model-invocable). Automation can opt in explicitly with `--extras` / `--no-extras` / `--model-invocable <list>` / `--glimpse` / `--no-glimpse` / `--non-interactive`.
 
 **Windows CMD:**
 

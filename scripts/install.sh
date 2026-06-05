@@ -36,6 +36,7 @@ VERIFY_ATTESTATION_FLAG=-1
 # nothing model-invocable). Empty string = not set by a flag.
 EXTRAS_FLAG=""
 MODEL_INVOCABLE_FLAG=""
+GLIMPSE_FLAG=""
 NON_INTERACTIVE=0
 RECONFIGURE=0
 
@@ -61,6 +62,9 @@ Options:
   --model-invocable <l>  Comma-separated skill names to make model-invocable
                          (e.g. plannotator-review,plannotator-compound), or
                          "none". Skills are user-invoked-only by default.
+  --glimpse              Install Glimpse (glimpseui, npm -g) so Plannotator
+                         opens in a native window instead of a browser tab.
+  --no-glimpse           Skip the Glimpse install without asking.
   --non-interactive      Never prompt, even in a terminal. Uses flags, then
                          saved answers from a previous run, then the defaults
                          (no extras, nothing model-invocable).
@@ -166,6 +170,14 @@ while [ $# -gt 0 ]; do
                 usage >&2
                 exit 1
             fi
+            shift
+            ;;
+        --glimpse)
+            GLIMPSE_FLAG="yes"
+            shift
+            ;;
+        --no-glimpse)
+            GLIMPSE_FLAG="no"
             shift
             ;;
         --non-interactive|--yes)
@@ -685,9 +697,11 @@ EXTRA_SKILL_NAMES="plannotator-compound plannotator-setup-goal plannotator-visua
 
 saved_extras=""
 saved_invocable=""
+saved_glimpse=""
 if [ -f "$PREFS_FILE" ]; then
     saved_extras=$(sed -n 's/^extras=//p' "$PREFS_FILE" | head -1)
     saved_invocable=$(sed -n 's/^model_invocable=//p' "$PREFS_FILE" | head -1)
+    saved_glimpse=$(sed -n 's/^glimpse=//p' "$PREFS_FILE" | head -1)
 fi
 
 # Extras already on disk (pre-existing or previously npx-installed)? Then the
@@ -700,6 +714,14 @@ for skill in $EXTRA_SKILL_NAMES; do
         break
     fi
 done
+
+# Glimpse (glimpseui) gives Plannotator a native window instead of a browser
+# tab; the runtime auto-detects it on PATH, so installing it globally is all
+# that's needed. Skip the question when it's already installed.
+glimpse_present=0
+if command -v glimpseui >/dev/null 2>&1; then
+    glimpse_present=1
+fi
 
 # A wizard needs a real keyboard. Piped installs (curl | bash) still have a
 # terminal at /dev/tty even though stdin is the pipe; CI and scripts do not.
@@ -781,6 +803,7 @@ select_skills_checkbox() {
 
 extras_choice=""
 invocable_choice=""
+glimpse_choice=""
 
 if [ "$run_wizard" -eq 1 ]; then
     {
@@ -814,22 +837,50 @@ if [ "$run_wizard" -eq 1 ]; then
             invocable_choice="none"
         fi
     fi
+    if [ "$glimpse_present" -eq 1 ]; then
+        echo "Glimpse already installed — Plannotator will open in its native window." > /dev/tty
+        glimpse_choice="yes"
+    elif [ -n "$GLIMPSE_FLAG" ]; then
+        # Flag already answered this question — don't ask and then ignore.
+        glimpse_choice="$GLIMPSE_FLAG"
+    else
+        glimpse_choice=$(ask_yes_no "Install Glimpse so Plannotator opens in a native window instead of a browser tab? (npm i -g glimpseui)" "${saved_glimpse:-yes}")
+    fi
 fi
 
 # Flags override the wizard and saved answers; otherwise saved, then defaults.
 [ -n "$EXTRAS_FLAG" ] && extras_choice="$EXTRAS_FLAG"
 [ -n "$MODEL_INVOCABLE_FLAG" ] && invocable_choice="$MODEL_INVOCABLE_FLAG"
+[ -n "$GLIMPSE_FLAG" ] && glimpse_choice="$GLIMPSE_FLAG"
 [ -z "$extras_choice" ] && extras_choice="${saved_extras:-no}"
 [ -z "$invocable_choice" ] && invocable_choice="${saved_invocable:-none}"
+[ -z "$glimpse_choice" ] && glimpse_choice="${saved_glimpse:-no}"
 
 # Persist only when the wizard ran or a flag set something — silent re-runs
 # must not clobber saved answers with defaults.
-if [ "$run_wizard" -eq 1 ] || [ -n "$EXTRAS_FLAG" ] || [ -n "$MODEL_INVOCABLE_FLAG" ]; then
+if [ "$run_wizard" -eq 1 ] || [ -n "$EXTRAS_FLAG" ] || [ -n "$MODEL_INVOCABLE_FLAG" ] || [ -n "$GLIMPSE_FLAG" ]; then
     mkdir -p "$_config_dir"
     {
         echo "extras=$extras_choice"
         echo "model_invocable=$invocable_choice"
+        echo "glimpse=$glimpse_choice"
     } > "$PREFS_FILE"
+fi
+
+# Glimpse install (global npm package; the runtime auto-detects it on PATH).
+# Wizard or explicit flag only — silent re-runs never install software.
+if [ "$glimpse_choice" = "yes" ] && [ "$glimpse_present" -eq 0 ]; then
+    if [ "$run_wizard" -eq 1 ] || [ -n "$GLIMPSE_FLAG" ]; then
+        if command -v npm >/dev/null 2>&1; then
+            echo "Installing Glimpse (npm install -g glimpseui)..."
+            npm install -g glimpseui || echo "Glimpse install failed — install later with: npm install -g glimpseui"
+        elif command -v bun >/dev/null 2>&1; then
+            echo "Installing Glimpse (bun install -g glimpseui)..."
+            bun install -g glimpseui || echo "Glimpse install failed — install later with: bun install -g glimpseui"
+        else
+            echo "npm/bun not found — install Node.js, then: npm install -g glimpseui"
+        fi
+    fi
 fi
 
 # Extras install is delegated to the skills CLI (its UI picks the agents).
