@@ -64,7 +64,11 @@ export function buildWorkspacePromptContextLines(
   ];
 
   if (options.includeReportingInstruction) {
-    lines.push("When reporting findings, use the same prefixed paths shown in the diff.");
+    lines.push(
+      "When reporting findings, the file path must exactly match the path shown in the diff.",
+      "Use the child repo prefix, such as `api/src/file.ts` or `web/src/file.ts`.",
+      "Do not use bare repo-relative paths like `src/file.ts`, and do not use absolute filesystem paths.",
+    );
   }
 
   return [

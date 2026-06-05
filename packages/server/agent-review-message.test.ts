@@ -83,6 +83,10 @@ describe("buildAgentReviewUserMessage", () => {
     expect(message).toContain("multiple nested VCS repositories");
     expect(message).toContain("workspace root: /tmp/workspace");
     expect(message).toContain("api/src/file.ts");
+    expect(message).toContain("must exactly match the path shown in the diff");
+    expect(message).toContain("web/src/file.ts");
+    expect(message).toContain("Do not use bare repo-relative paths like `src/file.ts`");
+    expect(message).toContain("do not use absolute filesystem paths");
     expect(message).toContain("- api/ [git, changed] -> /tmp/workspace/api");
     expect(message).toContain("- web/ [jj, changed] -> /tmp/workspace/web");
     expect(message).toContain("git -C <child-repo-folder>");
