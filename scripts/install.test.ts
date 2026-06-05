@@ -625,8 +625,12 @@ describe("install shared behavior", () => {
     // The wizard only runs with a real terminal/console attached.
     expect(sh).toContain("{ : < /dev/tty; } 2>/dev/null");
     expect(ps).toContain("[Console]::IsInputRedirected");
-    // cmd's set /p returns empty at EOF so redirected runs fall through to
-    // defaults without hanging (no tty check possible in batch).
+    // cmd probes for a real console via `timeout /t 0` (errors when stdin is
+    // redirected) so CI/redirected runs never see the wizard — and never run
+    // the wizard-only installs (npx extras, Glimpse). set /p's empty-at-EOF
+    // behavior remains as a second line of defense against hangs.
+    expect(cmdScript).toContain("timeout /t 0");
+    expect(cmdScript).toContain('if "!CAN_PROMPT!"=="1"');
     expect(cmdScript).toContain("set /p");
     // Silent re-runs must not clobber saved answers with defaults.
     expect(sh).toContain('if [ "$run_wizard" -eq 1 ] || [ -n "$EXTRAS_FLAG" ] || [ -n "$MODEL_INVOCABLE_FLAG" ] || [ -n "$GLIMPSE_FLAG" ]');

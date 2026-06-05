@@ -603,8 +603,17 @@ for %%S in (plannotator-compound plannotator-setup-goal plannotator-visual-expla
     if exist "!AGENTS_SKILLS_DIR!\%%S" set "EXTRAS_PRESENT=1"
 )
 
+REM A wizard needs a real console. `timeout` exits non-zero when stdin is
+REM redirected ("Input redirection is not supported"), making it a reliable
+REM console probe — CI and redirected runs never see the wizard and never
+REM trigger the wizard-only installs (npx extras, Glimpse). The set /p
+REM EOF-fallthrough remains as a second line of defense.
+set "CAN_PROMPT=0"
+timeout /t 0 >nul 2>&1
+if !ERRORLEVEL! equ 0 set "CAN_PROMPT=1"
+if "!NON_INTERACTIVE!"=="1" set "CAN_PROMPT=0"
 set "RUN_WIZARD=0"
-if "!NON_INTERACTIVE!"=="0" (
+if "!CAN_PROMPT!"=="1" (
     if "!RECONFIGURE!"=="1" set "RUN_WIZARD=1"
     if not exist "!PREFS_FILE!" set "RUN_WIZARD=1"
 )
