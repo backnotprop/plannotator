@@ -73,10 +73,11 @@ Options:
   -h, --help             Show this help and exit.
 
 Guided install: when run in a terminal for the first time (or with
---reconfigure), the installer asks whether to install the extra skills and
-whether any skills should be callable by the model. Answers are saved to
-<data dir>/install-prefs and reused silently on re-runs. Piped/CI runs
-(no terminal) never prompt and keep the defaults.
+--reconfigure), the installer asks whether to install the extra skills,
+whether any skills should be callable by the model, and whether to install
+Glimpse (native window). Answers are saved to <data dir>/install-prefs and
+reused silently on re-runs. Piped/CI runs (no terminal) never prompt and
+keep the defaults.
 
 Provenance verification is off by default. Enable it by any of:
   - passing --verify-attestation

@@ -646,7 +646,14 @@ if "!GLIMPSE_CHOICE!"=="yes" if "!GLIMPSE_PRESENT!"=="0" if "!DO_GLIMPSE_INSTALL
         call npm install -g glimpseui
         if not !ERRORLEVEL! equ 0 echo Glimpse install failed — install later with: npm install -g glimpseui
     ) else (
-        echo npm not found — install Node.js, then: npm install -g glimpseui
+        where bun >nul 2>&1
+        if !ERRORLEVEL! equ 0 (
+            echo Installing Glimpse ^(bun install -g glimpseui^)...
+            call bun install -g glimpseui
+            if not !ERRORLEVEL! equ 0 echo Glimpse install failed — install later with: bun install -g glimpseui
+        ) else (
+            echo npm/bun not found — install Node.js, then: npm install -g glimpseui
+        )
     )
 )
 
