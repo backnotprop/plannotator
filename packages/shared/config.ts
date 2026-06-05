@@ -24,6 +24,7 @@ export interface DiffOptions {
   fontSize?: string;
   tabSize?: number;
   hideWhitespace?: boolean;
+  expandUnchanged?: boolean;
   defaultDiffType?: DefaultDiffType;
   lineBgIntensity?: DiffLineBgIntensity;
 }
