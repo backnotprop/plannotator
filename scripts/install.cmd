@@ -508,10 +508,11 @@ if not exist "!EXTRAS_MIGRATION!" (
     type nul > "!EXTRAS_MIGRATION!"
 )
 
-REM File-copy installs require git (sparse checkout). Hook/config writing
-REM elsewhere in this script does NOT depend on git. Hard requirement: without
+REM File-copy installs require git (sparse checkout). Hard requirement: without
 REM git we cannot install the /plannotator-* skills, so fail loudly instead of
-REM leaving a partial install.
+REM leaving a partial install. Hook/config writing above has already run; the
+REM Pi update and Gemini config below are skipped on failure and complete when
+REM the user re-runs the installer.
 where git >nul 2>&1
 if not !ERRORLEVEL! equ 0 (
     echo Error: git is required to install Plannotator's skills and slash commands. 1>&2

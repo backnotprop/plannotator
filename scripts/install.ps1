@@ -387,9 +387,10 @@ if (-not (Test-Path $extrasMigration)) {
 # Core skills, Kiro skills/extras, OpenCode command stubs, and Gemini TOML
 # commands are all copied verbatim from a sparse checkout of the release tag.
 # copy-if-present means older pinned tags that lack a given path simply skip it
-# rather than failing. Hook/config writing above does NOT depend on git.
-# Hard requirement: without git we cannot install the /plannotator-* skills,
-# so fail loudly instead of leaving a partial install.
+# rather than failing. Hard requirement: without git we cannot install the
+# /plannotator-* skills, so fail loudly instead of leaving a partial install.
+# Hook/config writing above has already run; the Pi update and Gemini config
+# below are skipped on failure and complete when the user re-runs.
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     Write-Host "Error: git is required to install Plannotator's skills and slash commands."
     Write-Host "Install git, then run this installer again."
