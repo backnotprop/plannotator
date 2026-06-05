@@ -139,6 +139,26 @@ async function openGlimpse(url: string): Promise<boolean> {
   ];
   const html = buildGlimpseHtml(url);
 
+  // On Windows, `glimpseui` resolves to an npm script shim, not an exe, which
+  // spawn() can't launch without a shell. `shell: true` would break the stdin
+  // HTML pipe below, so run the package entry with node directly instead.
+  let command = glimpseCli;
+  let spawnArgs = args;
+  if (process.platform === "win32" && !/\.exe$/i.test(glimpseCli)) {
+    const node = Bun.which("node");
+    const entry = path.join(
+      path.dirname(glimpseCli),
+      "node_modules",
+      "glimpseui",
+      "bin",
+      "glimpse.mjs"
+    );
+    if (node && fs.existsSync(entry)) {
+      command = node;
+      spawnArgs = [entry, ...args];
+    }
+  }
+
   return await new Promise<boolean>((resolve) => {
     let settled = false;
     let successTimer: ReturnType<typeof setTimeout> | undefined;
@@ -149,7 +169,7 @@ async function openGlimpse(url: string): Promise<boolean> {
       resolve(opened);
     };
 
-    const child = spawn(glimpseCli, args, {
+    const child = spawn(command, spawnArgs, {
       detached: true,
       stdio: ["pipe", "ignore", "ignore"],
     });
