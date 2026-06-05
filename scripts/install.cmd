@@ -12,6 +12,12 @@ REM Three-layer opt-in for SLSA provenance verification.
 REM Precedence: CLI flag > env var > %USERPROFILE%\.plannotator\config.json > default.
 REM -1 = flag not set (fall through); 0 = disable; 1 = enable.
 set "VERIFY_ATTESTATION_FLAG=-1"
+REM Guided-install answers. Precedence: CLI flags > wizard (interactive, first
+REM run or --reconfigure) > saved prefs from a previous run > defaults.
+set "EXTRAS_FLAG="
+set "MODEL_INVOCABLE_FLAG="
+set "NON_INTERACTIVE=0"
+set "RECONFIGURE=0"
 
 :parse_args
 if "%~1"=="" goto args_done
@@ -48,6 +54,41 @@ if /i "%~1"=="--skip-attestation" (
         exit /b 1
     )
     set "VERIFY_ATTESTATION_FLAG=0"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--extras" (
+    set "EXTRAS_FLAG=yes"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--no-extras" (
+    set "EXTRAS_FLAG=no"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--model-invocable" (
+    if "%~2"=="" (
+        echo --model-invocable requires a comma-separated skill list or 'none' >&2
+        exit /b 1
+    )
+    set "MODEL_INVOCABLE_FLAG=%~2"
+    shift
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--non-interactive" (
+    set "NON_INTERACTIVE=1"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--yes" (
+    set "NON_INTERACTIVE=1"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--reconfigure" (
+    set "RECONFIGURE=1"
     shift
     goto parse_args
 )
@@ -508,6 +549,81 @@ if not exist "!EXTRAS_MIGRATION!" (
     type nul > "!EXTRAS_MIGRATION!"
 )
 
+REM --- Guided install (interactive consoles only) ---
+REM Mirrors install.sh: two questions (extras? model-invocable skills?),
+REM answers persisted to install-prefs in the Plannotator data dir and reused
+REM silently on re-runs. --reconfigure re-opens the wizard; --non-interactive
+REM forces silence. `set /p` returns empty at EOF, so redirected/CI runs fall
+REM through to the defaults without hanging. Flags win over everything.
+REM No checkbox UI in batch — the skill picker uses numbered toggles instead.
+set "PREFS_FILE=!_CONFIG_DIR!\install-prefs"
+set "SAVED_EXTRAS="
+set "SAVED_INVOCABLE="
+if exist "!PREFS_FILE!" (
+    for /f "usebackq tokens=1,* delims==" %%A in ("!PREFS_FILE!") do (
+        if /i "%%A"=="extras" set "SAVED_EXTRAS=%%B"
+        if /i "%%A"=="model_invocable" set "SAVED_INVOCABLE=%%B"
+    )
+)
+
+REM Extras already on disk? Then the extras question is moot — they still
+REM count toward the picker list, and we never launch the npx flow over them.
+set "EXTRAS_PRESENT=0"
+for %%S in (plannotator-compound plannotator-setup-goal plannotator-visual-explainer) do (
+    if exist "!CLAUDE_SKILLS_DIR!\%%S" set "EXTRAS_PRESENT=1"
+    if exist "!AGENTS_SKILLS_DIR!\%%S" set "EXTRAS_PRESENT=1"
+)
+
+set "RUN_WIZARD=0"
+if "!NON_INTERACTIVE!"=="0" (
+    if "!RECONFIGURE!"=="1" set "RUN_WIZARD=1"
+    if not exist "!PREFS_FILE!" set "RUN_WIZARD=1"
+)
+
+set "EXTRAS_CHOICE="
+set "INVOCABLE_CHOICE="
+if "!RUN_WIZARD!"=="1" call :guided_wizard
+
+REM Flags override the wizard and saved answers; otherwise saved, then defaults.
+if defined EXTRAS_FLAG set "EXTRAS_CHOICE=!EXTRAS_FLAG!"
+if defined MODEL_INVOCABLE_FLAG set "INVOCABLE_CHOICE=!MODEL_INVOCABLE_FLAG!"
+if not defined EXTRAS_CHOICE (
+    if defined SAVED_EXTRAS (set "EXTRAS_CHOICE=!SAVED_EXTRAS!") else (set "EXTRAS_CHOICE=no")
+)
+if not defined INVOCABLE_CHOICE (
+    if defined SAVED_INVOCABLE (set "INVOCABLE_CHOICE=!SAVED_INVOCABLE!") else (set "INVOCABLE_CHOICE=none")
+)
+
+REM Persist only when the wizard ran or a flag set something — silent re-runs
+REM must not clobber saved answers with defaults.
+set "DO_PERSIST=0"
+if "!RUN_WIZARD!"=="1" set "DO_PERSIST=1"
+if defined EXTRAS_FLAG set "DO_PERSIST=1"
+if defined MODEL_INVOCABLE_FLAG set "DO_PERSIST=1"
+if "!DO_PERSIST!"=="1" (
+    if not exist "!_CONFIG_DIR!" mkdir "!_CONFIG_DIR!" >nul 2>&1
+    > "!PREFS_FILE!" (
+        echo extras=!EXTRAS_CHOICE!
+        echo model_invocable=!INVOCABLE_CHOICE!
+    )
+)
+
+REM Extras install is delegated to the skills CLI (its UI picks the agents).
+REM Interactive wizard runs only — silent runs and CI get the printed command.
+REM Never runs when the extras already exist.
+if "!EXTRAS_CHOICE!"=="yes" if "!EXTRAS_PRESENT!"=="0" (
+    set "NPX_OK=0"
+    where npx >nul 2>&1
+    if !ERRORLEVEL! equ 0 if "!RUN_WIZARD!"=="1" set "NPX_OK=1"
+    if "!NPX_OK!"=="1" (
+        echo Launching the skills CLI for the extras ^(pick your agents in its UI^)...
+        call npx skills add backnotprop/plannotator/apps/skills/extra
+        if not !ERRORLEVEL! equ 0 echo skills CLI did not complete — install later with: npx skills add backnotprop/plannotator/apps/skills/extra
+    ) else (
+        echo Install the extras with: npx skills add backnotprop/plannotator/apps/skills/extra
+    )
+)
+
 REM File-copy installs require git (sparse checkout). Hard requirement: without
 REM git we cannot install the /plannotator-* skills, so fail loudly instead of
 REM leaving a partial install. Hook/config writing above has already run; the
@@ -612,6 +728,32 @@ for %%C in (plannotator-review plannotator-annotate plannotator-last plannotator
     if exist "!CLAUDE_SKILLS_DIR!\%%C" if exist "!CLAUDE_COMMANDS_DIR!\%%C.md" (
         del /q "!CLAUDE_COMMANDS_DIR!\%%C.md" >nul 2>&1
         echo Removed deprecated Claude command !CLAUDE_COMMANDS_DIR!\%%C.md ^(replaced by the %%C skill^)
+    )
+)
+
+REM Apply the saved model-invocation choices. Installed skill copies always
+REM arrive locked (disable-model-invocation: true in SKILL.md); for each
+REM chosen skill we unlock the INSTALLED copy by removing that line, and flip
+REM the Codex sidecar's allow_implicit_invocation to match. Re-applied on
+REM every run because installs replace the skill folders wholesale.
+if defined INVOCABLE_CHOICE if not "!INVOCABLE_CHOICE!"=="none" (
+    for %%K in ("!INVOCABLE_CHOICE:,=" "!") do (
+        for %%D in ("!CLAUDE_SKILLS_DIR!" "!AGENTS_SKILLS_DIR!") do (
+            if exist "%%~D\%%~K\SKILL.md" (
+                findstr /c:"disable-model-invocation: true" "%%~D\%%~K\SKILL.md" >nul 2>&1
+                if !ERRORLEVEL! equ 0 (
+                    findstr /v /c:"disable-model-invocation: true" "%%~D\%%~K\SKILL.md" > "%%~D\%%~K\SKILL.md.tmp"
+                    move /y "%%~D\%%~K\SKILL.md.tmp" "%%~D\%%~K\SKILL.md" >nul 2>&1
+                    echo Enabled model invocation: %%~D\%%~K
+                )
+            )
+            if exist "%%~D\%%~K\agents\openai.yaml" (
+                findstr /c:"allow_implicit_invocation: false" "%%~D\%%~K\agents\openai.yaml" >nul 2>&1
+                if !ERRORLEVEL! equ 0 (
+                    powershell -NoProfile -Command "(Get-Content '%%~D\%%~K\agents\openai.yaml' -Raw) -replace 'allow_implicit_invocation: false','allow_implicit_invocation: true' | Set-Content '%%~D\%%~K\agents\openai.yaml' -NoNewline"
+                )
+            )
+        )
     )
 )
 
@@ -720,9 +862,11 @@ echo Upgrading from an older version? Also run /plugin marketplace update
 echo so the plugin drops its old plannotator:* command entries.
 echo.
 echo The /plannotator-review, /plannotator-annotate, /plannotator-last, and /plannotator-archive skills are ready to use!
-echo.
-echo Optional skills ^(compound planning, setup-goal, visual explainer^):
-echo   npx skills add backnotprop/plannotator/apps/skills/extra
+if not "!EXTRAS_CHOICE!"=="yes" (
+    echo.
+    echo Optional skills ^(compound planning, setup-goal, visual explainer^):
+    echo   npx skills add backnotprop/plannotator/apps/skills/extra
+)
 
 REM Warn if plannotator is configured in both settings.json hooks AND the plugin (causes double execution)
 REM Only warn when the plugin is installed — manual-only users won't have overlap
@@ -749,3 +893,83 @@ if exist "!PLUGIN_HOOKS!" if exist "!CLAUDE_SETTINGS!" (
 
 echo.
 exit /b 0
+
+REM ======================================================================
+REM Guided-install wizard (called only on interactive first runs or with
+REM --reconfigure). Sets EXTRAS_CHOICE and INVOCABLE_CHOICE.
+REM ======================================================================
+:guided_wizard
+echo.
+echo ==========================================
+echo   PLANNOTATOR GUIDED INSTALL
+echo ==========================================
+echo.
+if "!EXTRAS_PRESENT!"=="1" (
+    echo Extra skills already installed — keeping them.
+    set "EXTRAS_CHOICE=yes"
+) else (
+    set "DEF_EXTRAS=no"
+    if defined SAVED_EXTRAS set "DEF_EXTRAS=!SAVED_EXTRAS!"
+    set "ANSWER="
+    set /p "ANSWER=Install the extra skills (compound planning, setup-goal, visual explainer)? [y/N] "
+    set "EXTRAS_CHOICE=no"
+    if /i "!ANSWER!"=="y" set "EXTRAS_CHOICE=yes"
+    if /i "!ANSWER!"=="yes" set "EXTRAS_CHOICE=yes"
+    if "!ANSWER!"=="" set "EXTRAS_CHOICE=!DEF_EXTRAS!"
+)
+set "ANSWER="
+set /p "ANSWER=Make any skills callable by the model (instead of user-invoked only)? [y/N] "
+set "WANT_INVOCABLE=no"
+if /i "!ANSWER!"=="y" set "WANT_INVOCABLE=yes"
+if /i "!ANSWER!"=="yes" set "WANT_INVOCABLE=yes"
+if "!WANT_INVOCABLE!"=="no" (
+    set "INVOCABLE_CHOICE=none"
+    goto :eof
+)
+set "SKILL_COUNT=4"
+set "SKILL_1=plannotator-review"
+set "SKILL_2=plannotator-annotate"
+set "SKILL_3=plannotator-last"
+set "SKILL_4=plannotator-archive"
+if "!EXTRAS_CHOICE!"=="yes" (
+    set "SKILL_COUNT=7"
+    set "SKILL_5=plannotator-compound"
+    set "SKILL_6=plannotator-setup-goal"
+    set "SKILL_7=plannotator-visual-explainer"
+)
+for /l %%I in (1,1,!SKILL_COUNT!) do (
+    set "SEL_%%I=0"
+    if defined SAVED_INVOCABLE (
+        echo ,!SAVED_INVOCABLE!, | findstr /c:",!SKILL_%%I!," >nul 2>&1
+        if !ERRORLEVEL! equ 0 set "SEL_%%I=1"
+    )
+)
+:toggle_loop
+echo.
+for /l %%I in (1,1,!SKILL_COUNT!) do (
+    set "MARK= "
+    if "!SEL_%%I!"=="1" set "MARK=x"
+    echo   %%I^) [!MARK!] !SKILL_%%I!
+)
+set "PICK="
+set /p "PICK=Toggle a number (press enter on empty input to confirm): "
+if "!PICK!"=="" goto :collect_invocable
+set "VALID=0"
+for /l %%I in (1,1,!SKILL_COUNT!) do if "!PICK!"=="%%I" set "VALID=1"
+if "!VALID!"=="0" (
+    echo Invalid choice: !PICK!
+    goto :toggle_loop
+)
+for %%I in (!PICK!) do (
+    if "!SEL_%%I!"=="1" (set "SEL_%%I=0") else (set "SEL_%%I=1")
+)
+goto :toggle_loop
+:collect_invocable
+set "INVOCABLE_CHOICE="
+for /l %%I in (1,1,!SKILL_COUNT!) do (
+    if "!SEL_%%I!"=="1" (
+        if defined INVOCABLE_CHOICE (set "INVOCABLE_CHOICE=!INVOCABLE_CHOICE!,!SKILL_%%I!") else (set "INVOCABLE_CHOICE=!SKILL_%%I!")
+    )
+)
+if not defined INVOCABLE_CHOICE set "INVOCABLE_CHOICE=none"
+goto :eof

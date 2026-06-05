@@ -2,7 +2,12 @@
 param(
     [string]$Version = "latest",
     [switch]$VerifyAttestation,
-    [switch]$SkipAttestation
+    [switch]$SkipAttestation,
+    [switch]$Extras,
+    [switch]$NoExtras,
+    [string]$ModelInvocable = "",
+    [switch]$NonInteractive,
+    [switch]$Reconfigure
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,6 +17,10 @@ $ErrorActionPreference = "Stop"
 # one the user meant is worse than failing fast.
 if ($VerifyAttestation -and $SkipAttestation) {
     [Console]::Error.WriteLine("-VerifyAttestation and -SkipAttestation are mutually exclusive. Pass one or the other.")
+    exit 1
+}
+if ($Extras -and $NoExtras) {
+    [Console]::Error.WriteLine("-Extras and -NoExtras are mutually exclusive. Pass one or the other.")
     exit 1
 }
 
@@ -382,6 +391,151 @@ if (-not (Test-Path $extrasMigration)) {
     New-Item -ItemType File -Force -Path $extrasMigration | Out-Null
 }
 
+# --- Guided install (interactive consoles only) ---
+# Mirrors install.sh: two questions (extras? model-invocable skills?), answers
+# persisted to install-prefs in the Plannotator data dir and reused silently on
+# re-runs. -Reconfigure re-opens the wizard; -NonInteractive forces silence;
+# redirected/CI runs never prompt. Flags win over everything.
+$prefsFile = Join-Path $configDir "install-prefs"
+$coreSkillNames = @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-archive")
+$extraSkillNames = @("plannotator-compound", "plannotator-setup-goal", "plannotator-visual-explainer")
+
+$savedExtras = ""
+$savedInvocable = ""
+if (Test-Path $prefsFile) {
+    foreach ($line in Get-Content $prefsFile) {
+        if ($line -match '^extras=(.*)$') { $savedExtras = $Matches[1] }
+        if ($line -match '^model_invocable=(.*)$') { $savedInvocable = $Matches[1] }
+    }
+}
+
+# Extras already on disk (pre-existing or previously npx-installed)? Then the
+# extras question is moot — they still count toward the checkbox list, and we
+# never launch the npx flow over them.
+$extrasPresent = $false
+foreach ($skill in $extraSkillNames) {
+    if ((Test-Path (Join-Path $claudeSkillsDir $skill)) -or (Test-Path (Join-Path $agentsSkillsDir $skill))) {
+        $extrasPresent = $true
+        break
+    }
+}
+
+# A wizard needs a real console. `irm | iex` keeps the console attached;
+# CI and redirected runs do not.
+$canPrompt = $false
+if (-not $NonInteractive) {
+    try {
+        $canPrompt = (-not [Console]::IsInputRedirected) -and (-not [Console]::IsOutputRedirected)
+    } catch {
+        $canPrompt = $false
+    }
+}
+
+$runWizard = $canPrompt -and ($Reconfigure -or -not (Test-Path $prefsFile))
+
+function Read-YesNo {
+    param([string]$Prompt, [string]$Default)
+    $suffix = if ($Default -eq "yes") { "[Y/n]" } else { "[y/N]" }
+    Write-Host "$Prompt $suffix " -NoNewline
+    $answer = [Console]::ReadLine()
+    switch -regex ($answer) {
+        '^(y|yes)$' { return "yes" }
+        '^(n|no)$'  { return "no" }
+        default     { return $Default }
+    }
+}
+
+# Space-toggle checkbox. Up/down (or j/k) moves, space toggles, enter
+# confirms. Returns the chosen names as a comma list, or "none".
+function Select-SkillsCheckbox {
+    param([string[]]$Names, [string]$Preselected)
+    $pre = ",$Preselected,"
+    $sel = @()
+    foreach ($n in $Names) { $sel += ($pre -like "*,$n,*") }
+    $idx = 0
+    Write-Host "Space toggles, enter confirms, up/down or j/k moves:"
+    $top = [Console]::CursorTop
+    while ($true) {
+        [Console]::SetCursorPosition(0, $top)
+        for ($i = 0; $i -lt $Names.Count; $i++) {
+            $mark = if ($sel[$i]) { "x" } else { " " }
+            $cursor = if ($i -eq $idx) { "> " } else { "  " }
+            Write-Host ("{0}[{1}] {2}    " -f $cursor, $mark, $Names[$i])
+        }
+        $key = [Console]::ReadKey($true)
+        switch ($key.Key) {
+            "Spacebar"  { $sel[$idx] = -not $sel[$idx] }
+            "UpArrow"   { if ($idx -gt 0) { $idx-- } }
+            "DownArrow" { if ($idx -lt $Names.Count - 1) { $idx++ } }
+            "K"         { if ($idx -gt 0) { $idx-- } }
+            "J"         { if ($idx -lt $Names.Count - 1) { $idx++ } }
+            "Enter"     {
+                $chosen = @()
+                for ($i = 0; $i -lt $Names.Count; $i++) {
+                    if ($sel[$i]) { $chosen += $Names[$i] }
+                }
+                if ($chosen.Count -eq 0) { return "none" }
+                return ($chosen -join ",")
+            }
+        }
+    }
+}
+
+$extrasChoice = ""
+$invocableChoice = ""
+
+if ($runWizard) {
+    Write-Host ""
+    Write-Host "=========================================="
+    Write-Host "  PLANNOTATOR GUIDED INSTALL"
+    Write-Host "=========================================="
+    Write-Host ""
+    if ($extrasPresent) {
+        Write-Host "Extra skills already installed — keeping them."
+        $extrasChoice = "yes"
+    } else {
+        $defaultExtras = if ($savedExtras) { $savedExtras } else { "no" }
+        $extrasChoice = Read-YesNo "Install the extra skills (compound planning, setup-goal, visual explainer)?" $defaultExtras
+    }
+    $invocableList = $coreSkillNames
+    if ($extrasChoice -eq "yes") { $invocableList = $coreSkillNames + $extraSkillNames }
+    $wantInvocable = Read-YesNo "Make any skills callable by the model (instead of user-invoked only)?" "no"
+    if ($wantInvocable -eq "yes") {
+        $invocableChoice = Select-SkillsCheckbox -Names $invocableList -Preselected $savedInvocable
+    } else {
+        $invocableChoice = "none"
+    }
+}
+
+# Flags override the wizard and saved answers; otherwise saved, then defaults.
+if ($Extras) { $extrasChoice = "yes" }
+if ($NoExtras) { $extrasChoice = "no" }
+if ($ModelInvocable) { $invocableChoice = $ModelInvocable }
+if (-not $extrasChoice) { $extrasChoice = if ($savedExtras) { $savedExtras } else { "no" } }
+if (-not $invocableChoice) { $invocableChoice = if ($savedInvocable) { $savedInvocable } else { "none" } }
+
+# Persist only when the wizard ran or a flag set something — silent re-runs
+# must not clobber saved answers with defaults.
+if ($runWizard -or $Extras -or $NoExtras -or $ModelInvocable) {
+    New-Item -ItemType Directory -Force -Path $configDir | Out-Null
+    @("extras=$extrasChoice", "model_invocable=$invocableChoice") | Set-Content $prefsFile
+}
+
+# Extras install is delegated to the skills CLI (its UI picks the agents).
+# Interactive only — silent runs and CI get the printed command instead.
+# Never runs when the extras already exist.
+if (($extrasChoice -eq "yes") -and (-not $extrasPresent)) {
+    if ($canPrompt -and (Get-Command npx -ErrorAction SilentlyContinue)) {
+        Write-Host "Launching the skills CLI for the extras (pick your agents in its UI)..."
+        npx skills add backnotprop/plannotator/apps/skills/extra
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "skills CLI did not complete — install later with: npx skills add backnotprop/plannotator/apps/skills/extra"
+        }
+    } else {
+        Write-Host "Install the extras with: npx skills add backnotprop/plannotator/apps/skills/extra"
+    }
+}
+
 # Install skills and command stubs (requires git).
 #
 # Core skills, Kiro skills/extras, OpenCode command stubs, and Gemini TOML
@@ -526,6 +680,34 @@ foreach ($cmd in @("plannotator-review", "plannotator-annotate", "plannotator-la
     }
 }
 
+# Apply the saved model-invocation choices. Installed skill copies always
+# arrive locked (disable-model-invocation: true in SKILL.md); for each chosen
+# skill we unlock the INSTALLED copy by removing that line, and flip the Codex
+# sidecar's allow_implicit_invocation to match. Re-applied on every run
+# because installs replace the skill folders wholesale. Repo sources never
+# change.
+if ($invocableChoice -and ($invocableChoice -ne "none")) {
+    foreach ($skill in ($invocableChoice -split ",")) {
+        foreach ($scope in @($claudeSkillsDir, $agentsSkillsDir)) {
+            $skillMd = Join-Path $scope (Join-Path $skill "SKILL.md")
+            if (Test-Path $skillMd) {
+                $content = Get-Content $skillMd
+                if ($content -contains "disable-model-invocation: true") {
+                    $content | Where-Object { $_ -ne "disable-model-invocation: true" } | Set-Content $skillMd
+                    Write-Host "Enabled model invocation: $scope\$skill"
+                }
+            }
+            $sidecar = Join-Path $scope (Join-Path $skill "agents\openai.yaml")
+            if (Test-Path $sidecar) {
+                $yaml = Get-Content $sidecar -Raw
+                if ($yaml -match "allow_implicit_invocation: false") {
+                    ($yaml -replace "allow_implicit_invocation: false", "allow_implicit_invocation: true") | Set-Content $sidecar -NoNewline
+                }
+            }
+        }
+    }
+}
+
 # Update Pi extension if pi is installed. Pi keeps its extension commands and
 # the plannotator_submit_plan tool; it no longer bundles skills.
 Update-PiExtensionIfPresent
@@ -648,9 +830,11 @@ Write-Host "so the plugin drops its old plannotator:* command entries."
 Write-Host ""
 Write-Host "The /plannotator-review, /plannotator-annotate, /plannotator-last, and /plannotator-archive commands are ready to use after you restart Claude Code!"
 
-Write-Host ""
-Write-Host "Optional skills (compound planning, setup-goal, visual explainer):"
-Write-Host "  npx skills add backnotprop/plannotator/apps/skills/extra"
+if ($extrasChoice -ne "yes") {
+    Write-Host ""
+    Write-Host "Optional skills (compound planning, setup-goal, visual explainer):"
+    Write-Host "  npx skills add backnotprop/plannotator/apps/skills/extra"
+}
 
 # Warn if plannotator is configured in both settings.json hooks AND the plugin (causes double execution)
 # Only warn when the plugin is installed — manual-only users won't have overlap

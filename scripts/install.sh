@@ -31,10 +31,19 @@ VERSION_EXPLICIT=0
 # Precedence: CLI flag > env var > ~/.plannotator/config.json > default (off).
 # -1 = flag not set yet (fall through to lower layers); 0 = disable; 1 = enable.
 VERIFY_ATTESTATION_FLAG=-1
+# Guided-install answers. Precedence: CLI flags > wizard (terminal, first run
+# or --reconfigure) > saved prefs from a previous run > defaults (no extras,
+# nothing model-invocable). Empty string = not set by a flag.
+EXTRAS_FLAG=""
+MODEL_INVOCABLE_FLAG=""
+NON_INTERACTIVE=0
+RECONFIGURE=0
 
 usage() {
     cat <<'USAGE'
-Usage: install.sh [--version <tag>] [--verify-attestation | --skip-attestation] [--help]
+Usage: install.sh [--version <tag>] [--verify-attestation | --skip-attestation]
+                  [--extras | --no-extras] [--model-invocable <list>|none]
+                  [--non-interactive] [--reconfigure] [--help]
        install.sh <tag>
 
 Options:
@@ -46,7 +55,24 @@ Options:
                          not available or the check does not pass.
   --skip-attestation     Force-skip provenance verification even if enabled
                          via env var or ~/.plannotator/config.json.
+  --extras               Install the extra skills (compound, setup-goal,
+                         visual-explainer) via `npx skills add` without asking.
+  --no-extras            Skip the extras without asking.
+  --model-invocable <l>  Comma-separated skill names to make model-invocable
+                         (e.g. plannotator-review,plannotator-compound), or
+                         "none". Skills are user-invoked-only by default.
+  --non-interactive      Never prompt, even in a terminal. Uses flags, then
+                         saved answers from a previous run, then the defaults
+                         (no extras, nothing model-invocable).
+  --reconfigure          Re-open the guided questions even if answers were
+                         saved by a previous run.
   -h, --help             Show this help and exit.
+
+Guided install: when run in a terminal for the first time (or with
+--reconfigure), the installer asks whether to install the extra skills and
+whether any skills should be callable by the model. Answers are saved to
+<data dir>/install-prefs and reused silently on re-runs. Piped/CI runs
+(no terminal) never prompt and keep the defaults.
 
 Provenance verification is off by default. Enable it by any of:
   - passing --verify-attestation
@@ -56,7 +82,7 @@ Provenance verification is off by default. Enable it by any of:
 Examples:
   curl -fsSL https://plannotator.ai/install.sh | bash
   curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version vX.Y.Z
-  curl -fsSL https://plannotator.ai/install.sh | bash -s -- --verify-attestation
+  curl -fsSL https://plannotator.ai/install.sh | bash -s -- --no-extras --model-invocable none
   bash install.sh vX.Y.Z
 USAGE
 }
@@ -114,6 +140,40 @@ while [ $# -gt 0 ]; do
                 exit 1
             fi
             VERIFY_ATTESTATION_FLAG=0
+            shift
+            ;;
+        --extras)
+            EXTRAS_FLAG="yes"
+            shift
+            ;;
+        --no-extras)
+            EXTRAS_FLAG="no"
+            shift
+            ;;
+        --model-invocable)
+            if [ -z "${2:-}" ]; then
+                echo "--model-invocable requires a comma-separated skill list or 'none'" >&2
+                usage >&2
+                exit 1
+            fi
+            MODEL_INVOCABLE_FLAG="$2"
+            shift 2
+            ;;
+        --model-invocable=*)
+            MODEL_INVOCABLE_FLAG="${1#--model-invocable=}"
+            if [ -z "$MODEL_INVOCABLE_FLAG" ]; then
+                echo "--model-invocable requires a comma-separated skill list or 'none'" >&2
+                usage >&2
+                exit 1
+            fi
+            shift
+            ;;
+        --non-interactive|--yes)
+            NON_INTERACTIVE=1
+            shift
+            ;;
+        --reconfigure)
+            RECONFIGURE=1
             shift
             ;;
         -h|--help)
@@ -614,6 +674,169 @@ if [ ! -f "$EXTRAS_MIGRATION" ]; then
     : > "$EXTRAS_MIGRATION"
 fi
 
+# --- Guided install (interactive terminals only) ---
+# Two questions: install the extra skills? make any skills callable by the
+# model? Answers persist to $PREFS_FILE and are reused silently on re-runs.
+# --reconfigure re-opens the wizard; --non-interactive forces silence; piped
+# CI runs without a terminal never prompt. CLI flags win over everything.
+PREFS_FILE="$_config_dir/install-prefs"
+CORE_SKILL_NAMES="plannotator-review plannotator-annotate plannotator-last plannotator-archive"
+EXTRA_SKILL_NAMES="plannotator-compound plannotator-setup-goal plannotator-visual-explainer"
+
+saved_extras=""
+saved_invocable=""
+if [ -f "$PREFS_FILE" ]; then
+    saved_extras=$(sed -n 's/^extras=//p' "$PREFS_FILE" | head -1)
+    saved_invocable=$(sed -n 's/^model_invocable=//p' "$PREFS_FILE" | head -1)
+fi
+
+# Extras already on disk (pre-existing or previously npx-installed)? Then the
+# extras question is moot — they still count toward the checkbox list, and we
+# never launch the npx flow over them.
+extras_present=0
+for skill in $EXTRA_SKILL_NAMES; do
+    if [ -d "$CLAUDE_SKILLS_DIR/$skill" ] || [ -d "$AGENTS_SKILLS_DIR/$skill" ]; then
+        extras_present=1
+        break
+    fi
+done
+
+# A wizard needs a real keyboard. Piped installs (curl | bash) still have a
+# terminal at /dev/tty even though stdin is the pipe; CI and scripts do not.
+can_prompt=0
+if [ "$NON_INTERACTIVE" -eq 0 ] && { : < /dev/tty; } 2>/dev/null; then
+    can_prompt=1
+fi
+
+run_wizard=0
+if [ "$can_prompt" -eq 1 ]; then
+    if [ "$RECONFIGURE" -eq 1 ] || [ ! -f "$PREFS_FILE" ]; then
+        run_wizard=1
+    fi
+fi
+
+# Ask a y/n question on the terminal. $1 prompt, $2 default (yes/no).
+ask_yes_no() {
+    local prompt="$1" default="$2" answer suffix
+    suffix="[y/N]"
+    [ "$default" = "yes" ] && suffix="[Y/n]"
+    printf '%s %s ' "$prompt" "$suffix" > /dev/tty
+    IFS= read -r answer < /dev/tty || answer=""
+    case "$answer" in
+        y|Y|yes|YES|Yes) echo "yes" ;;
+        n|N|no|NO|No)    echo "no" ;;
+        *)               echo "$default" ;;
+    esac
+}
+
+# Space-toggle checkbox over the skill names in $1 (space-separated), with
+# the names in $2 (comma-separated) preselected. Echoes the chosen names as
+# a comma list, or "none". Up/down (or j/k) moves, space toggles, enter
+# confirms. All I/O goes to /dev/tty so piped stdout is unaffected.
+select_skills_checkbox() {
+    local names=($1) pre=",$2," idx=0 count key seq i mark cursor
+    count=${#names[@]}
+    local sel=()
+    for ((i = 0; i < count; i++)); do
+        case "$pre" in
+            *",${names[$i]},"*) sel[i]=1 ;;
+            *)                  sel[i]=0 ;;
+        esac
+    done
+    printf 'Space toggles, enter confirms, up/down or j/k moves:\n' > /dev/tty
+    while true; do
+        for ((i = 0; i < count; i++)); do
+            mark=" "; [ "${sel[$i]}" -eq 1 ] && mark="x"
+            cursor="  "; [ "$i" -eq "$idx" ] && cursor="> "
+            printf '%s[%s] %s\033[K\n' "$cursor" "$mark" "${names[$i]}" > /dev/tty
+        done
+        IFS= read -rsn1 key < /dev/tty || key=""
+        if [ -z "$key" ]; then
+            break # enter
+        fi
+        case "$key" in
+            " ") sel[idx]=$((1 - sel[idx])) ;;
+            j)   [ "$idx" -lt $((count - 1)) ] && idx=$((idx + 1)) ;;
+            k)   [ "$idx" -gt 0 ] && idx=$((idx - 1)) ;;
+            $'\x1b')
+                seq=""
+                IFS= read -rsn2 -t 1 seq < /dev/tty || seq=""
+                case "$seq" in
+                    '[A') [ "$idx" -gt 0 ] && idx=$((idx - 1)) ;;
+                    '[B') [ "$idx" -lt $((count - 1)) ] && idx=$((idx + 1)) ;;
+                esac
+                ;;
+        esac
+        printf '\033[%dA' "$count" > /dev/tty
+    done
+    local out=""
+    for ((i = 0; i < count; i++)); do
+        if [ "${sel[$i]}" -eq 1 ]; then
+            [ -n "$out" ] && out="$out,"
+            out="$out${names[$i]}"
+        fi
+    done
+    echo "${out:-none}"
+}
+
+extras_choice=""
+invocable_choice=""
+
+if [ "$run_wizard" -eq 1 ]; then
+    {
+        echo ""
+        echo "=========================================="
+        echo "  PLANNOTATOR GUIDED INSTALL"
+        echo "=========================================="
+        echo ""
+    } > /dev/tty
+    if [ "$extras_present" -eq 1 ]; then
+        echo "Extra skills already installed — keeping them." > /dev/tty
+        extras_choice="yes"
+    else
+        extras_choice=$(ask_yes_no "Install the extra skills (compound planning, setup-goal, visual explainer)?" "${saved_extras:-no}")
+    fi
+    invocable_list="$CORE_SKILL_NAMES"
+    if [ "$extras_choice" = "yes" ]; then
+        invocable_list="$CORE_SKILL_NAMES $EXTRA_SKILL_NAMES"
+    fi
+    want_invocable=$(ask_yes_no "Make any skills callable by the model (instead of user-invoked only)?" "no")
+    if [ "$want_invocable" = "yes" ]; then
+        invocable_choice=$(select_skills_checkbox "$invocable_list" "$saved_invocable")
+    else
+        invocable_choice="none"
+    fi
+fi
+
+# Flags override the wizard and saved answers; otherwise saved, then defaults.
+[ -n "$EXTRAS_FLAG" ] && extras_choice="$EXTRAS_FLAG"
+[ -n "$MODEL_INVOCABLE_FLAG" ] && invocable_choice="$MODEL_INVOCABLE_FLAG"
+[ -z "$extras_choice" ] && extras_choice="${saved_extras:-no}"
+[ -z "$invocable_choice" ] && invocable_choice="${saved_invocable:-none}"
+
+# Persist only when the wizard ran or a flag set something — silent re-runs
+# must not clobber saved answers with defaults.
+if [ "$run_wizard" -eq 1 ] || [ -n "$EXTRAS_FLAG" ] || [ -n "$MODEL_INVOCABLE_FLAG" ]; then
+    mkdir -p "$_config_dir"
+    {
+        echo "extras=$extras_choice"
+        echo "model_invocable=$invocable_choice"
+    } > "$PREFS_FILE"
+fi
+
+# Extras install is delegated to the skills CLI (its UI picks the agents).
+# Interactive only — the CLI needs the keyboard, so silent runs and CI get
+# the printed command instead. Never runs when the extras already exist.
+if [ "$extras_choice" = "yes" ] && [ "$extras_present" -eq 0 ]; then
+    if [ "$can_prompt" -eq 1 ] && command -v npx >/dev/null 2>&1; then
+        echo "Launching the skills CLI for the extras (pick your agents in its UI)..."
+        npx skills add backnotprop/plannotator/apps/skills/extra < /dev/tty || \
+            echo "skills CLI did not complete — install later with: npx skills add backnotprop/plannotator/apps/skills/extra"
+    else
+        echo "Install the extras with: npx skills add backnotprop/plannotator/apps/skills/extra"
+    fi
+fi
+
 # Install skills and slash commands from a sparse checkout (requires git).
 # Hard requirement: without git we cannot install the /plannotator-* skills,
 # so fail loudly instead of leaving a partial install. Hook/config writing
@@ -747,6 +970,28 @@ for cmd in plannotator-review plannotator-annotate plannotator-last plannotator-
         echo "Removed legacy Claude command ${CLAUDE_COMMANDS_DIR}/$cmd.md (replaced by the $cmd skill)"
     fi
 done
+
+# Apply the saved model-invocation choices. Installed skill copies always
+# arrive locked (disable-model-invocation: true in SKILL.md); for each chosen
+# skill we unlock the INSTALLED copy by removing that line, and flip the Codex
+# sidecar's allow_implicit_invocation to match. Re-applied on every run
+# because installs replace the skill folders wholesale. Source files in the
+# repo never change.
+if [ -n "$invocable_choice" ] && [ "$invocable_choice" != "none" ]; then
+    for skill in $(echo "$invocable_choice" | tr ',' ' '); do
+        for scope in "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR"; do
+            skill_md="$scope/$skill/SKILL.md"
+            if [ -f "$skill_md" ] && grep -q '^disable-model-invocation: true$' "$skill_md"; then
+                grep -v '^disable-model-invocation: true$' "$skill_md" > "$skill_md.tmp" && mv "$skill_md.tmp" "$skill_md"
+                echo "Enabled model invocation: ${scope}/${skill}"
+            fi
+            sidecar="$scope/$skill/agents/openai.yaml"
+            if [ -f "$sidecar" ] && grep -q 'allow_implicit_invocation: false' "$sidecar"; then
+                sed 's/allow_implicit_invocation: false/allow_implicit_invocation: true/' "$sidecar" > "$sidecar.tmp" && mv "$sidecar.tmp" "$sidecar"
+            fi
+        done
+    done
+fi
 
 # Update Pi extension if pi is installed. The pi-extension no longer bundles
 # skills; Pi keeps its extension commands and the plannotator_submit_plan tool.
@@ -900,9 +1145,11 @@ echo "so the plugin drops its old plannotator:* command entries."
 echo ""
 echo "The /plannotator-review, /plannotator-annotate, /plannotator-last, and /plannotator-archive commands are ready to use after you restart Claude Code!"
 
-echo ""
-echo "Optional skills (compound planning, setup-goal, visual explainer):"
-echo "  npx skills add backnotprop/plannotator/apps/skills/extra"
+if [ "$extras_choice" != "yes" ]; then
+    echo ""
+    echo "Optional skills (compound planning, setup-goal, visual explainer):"
+    echo "  npx skills add backnotprop/plannotator/apps/skills/extra"
+fi
 
 # Warn if plannotator is configured in both settings.json hooks AND the plugin (causes double execution)
 # Only warn when the plugin is installed — manual-only users won't have overlap

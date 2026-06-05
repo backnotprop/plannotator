@@ -26,6 +26,15 @@ curl -fsSL https://plannotator.ai/install.sh | bash
 irm https://plannotator.ai/install.ps1 | iex
 ```
 
+### Guided install
+
+When run in a terminal for the first time, the installer asks two questions:
+
+1. **Install the extra skills?** (compound planning, setup-goal, visual explainer) — answering yes launches `npx skills add` so you pick which agents get them in its UI. Skipped automatically if the extras are already installed.
+2. **Make any skills callable by the model?** — answering yes opens a picker (space toggles on macOS/Linux/PowerShell; numbered toggles in the cmd installer). Chosen skills have `disable-model-invocation` removed from their *installed* copies (and the Codex sidecar flipped to match); everything else stays user-invoked only.
+
+Answers are saved to `<data dir>/install-prefs` and reused silently on re-runs — pass `--reconfigure` to change them. **Automated installs are unaffected**: runs without a terminal (CI, scripts) never prompt and keep the defaults (no extras, nothing model-invocable). Automation can opt in explicitly with `--extras` / `--no-extras` / `--model-invocable <list>` / `--non-interactive`.
+
 **Windows CMD:**
 
 ```cmd

@@ -114,6 +114,26 @@ describe("install.sh", () => {
     expect(script).toContain('if [ ! -f "$EXTRAS_MIGRATION" ]');
   });
 
+  test("guided install: flags, tty gating, prefs persistence, flip pass", () => {
+    // Wizard flags exist.
+    for (const flag of ["--extras", "--no-extras", "--model-invocable", "--non-interactive", "--reconfigure"]) {
+      expect(script).toContain(flag);
+    }
+    // Prompts require a real terminal: all wizard I/O runs on /dev/tty so
+    // piped installs (curl | bash) can still prompt and CI never does.
+    expect(script).toContain("{ : < /dev/tty; } 2>/dev/null");
+    expect(script).toContain("ask_yes_no");
+    expect(script).toContain("select_skills_checkbox");
+    // Answers persist to the data dir and silent re-runs reuse them.
+    expect(script).toContain('PREFS_FILE="$_config_dir/install-prefs"');
+    // Extras install is delegated to the skills CLI with the terminal attached.
+    expect(script).toContain("npx skills add backnotprop/plannotator/apps/skills/extra < /dev/tty");
+    // Flip pass unlocks INSTALLED copies only (repo sources always stay
+    // locked) and flips the Codex sidecar to match.
+    expect(script).toContain("grep -v '^disable-model-invocation: true$'");
+    expect(script).toContain("allow_implicit_invocation: true");
+  });
+
   test("old pinned tags soft-skip core skills without aborting command installs", () => {
     // Regression guard: a --version tag that predates apps/skills/core must
     // skip the core-skill copy with an accurate message — NOT abort the whole
@@ -590,6 +610,34 @@ describe("install shared behavior", () => {
     // rewriting cmd syntax.
     const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
     expect(cmdScript).not.toContain("/dev/null");
+  });
+
+  test("guided install exists in all three installers with safe automation behavior", () => {
+    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    // Shared prefs file (same format across platforms) in the data dir.
+    expect(sh).toContain('PREFS_FILE="$_config_dir/install-prefs"');
+    expect(ps).toContain('Join-Path $configDir "install-prefs"');
+    expect(cmdScript).toContain('set "PREFS_FILE=!_CONFIG_DIR!\\install-prefs"');
+    // Non-interactive escape hatch everywhere.
+    expect(sh).toContain("--non-interactive");
+    expect(ps).toContain("[switch]$NonInteractive");
+    expect(cmdScript).toContain('"%~1"=="--non-interactive"');
+    // The wizard only runs with a real terminal/console attached.
+    expect(sh).toContain("{ : < /dev/tty; } 2>/dev/null");
+    expect(ps).toContain("[Console]::IsInputRedirected");
+    // cmd's set /p returns empty at EOF so redirected runs fall through to
+    // defaults without hanging (no tty check possible in batch).
+    expect(cmdScript).toContain("set /p");
+    // Silent re-runs must not clobber saved answers with defaults.
+    expect(sh).toContain('if [ "$run_wizard" -eq 1 ] || [ -n "$EXTRAS_FLAG" ] || [ -n "$MODEL_INVOCABLE_FLAG" ]');
+    expect(ps).toContain("if ($runWizard -or $Extras -or $NoExtras -or $ModelInvocable)");
+    expect(cmdScript).toContain('if "!DO_PERSIST!"=="1"');
+    // Flip pass in all three: SKILL.md line removal + Codex sidecar flip.
+    expect(ps).toContain('Where-Object { $_ -ne "disable-model-invocation: true" }');
+    expect(cmdScript).toContain('findstr /v /c:"disable-model-invocation: true"');
+    for (const s of [sh, ps, cmdScript]) {
+      expect(s).toContain("allow_implicit_invocation: true");
+    }
   });
 
   test("all installers respect CODEX_HOME for the Codex home directory", () => {
