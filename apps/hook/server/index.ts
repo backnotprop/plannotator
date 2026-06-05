@@ -1292,9 +1292,11 @@ if (args[0] === "sessions") {
   let rawPatch: string;
   let gitRef: string;
   let diffError: string | undefined;
-  let userDiffType: DiffType | undefined;
+  let userDiffType: DiffType | WorkspaceDiffType | undefined;
   let gitContext: Awaited<ReturnType<typeof prepareLocalReviewDiff>>["gitContext"] | undefined;
   let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
+  let workspace: Awaited<ReturnType<typeof buildLocalWorkspaceReview>> | undefined;
+  let agentCwd: string | undefined;
 
   if (isPRMode) {
     const prRef = parsePRUrl(urlArg);
@@ -1326,17 +1328,37 @@ if (args[0] === "sessions") {
     console.error("Opening code review UI...");
 
     const config = loadConfig();
-    const diffResult = await prepareLocalReviewDiff({
-      cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
-      vcsType: reviewArgs.vcsType,
-      configuredDiffType: resolveDefaultDiffType(config),
-      hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
-    });
-    gitContext = diffResult.gitContext;
-    userDiffType = diffResult.diffType;
-    rawPatch = diffResult.rawPatch;
-    gitRef = diffResult.gitRef;
-    diffError = diffResult.error;
+    const cwd = process.env.PLANNOTATOR_CWD || process.cwd();
+    const managedVcs = await detectManagedVcs(cwd, reviewArgs.vcsType);
+    const forcedVcs = !!reviewArgs.vcsType && reviewArgs.vcsType !== "auto";
+
+    if (managedVcs || forcedVcs) {
+      const diffResult = await prepareLocalReviewDiff({
+        cwd,
+        vcsType: reviewArgs.vcsType,
+        configuredDiffType: resolveDefaultDiffType(config),
+        hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
+      });
+      gitContext = diffResult.gitContext;
+      userDiffType = diffResult.diffType;
+      rawPatch = diffResult.rawPatch;
+      gitRef = diffResult.gitRef;
+      diffError = diffResult.error;
+    } else {
+      workspace = await buildLocalWorkspaceReview(cwd, {
+        configuredDiffType: resolveDefaultDiffType(config),
+        hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
+      });
+      if (workspace.repos.length === 0) {
+        console.error("Not in a VCS repo and no nested Git/JJ repositories were found.");
+        process.exit(1);
+      }
+      rawPatch = workspace.rawPatch;
+      gitRef = workspace.gitRef;
+      diffError = workspace.error;
+      userDiffType = workspace.diffType;
+      agentCwd = workspace.root;
+    }
   }
 
   const bridgeSharingEnabled = getBridgeSharingEnabled(input);
@@ -1351,6 +1373,8 @@ if (args[0] === "sessions") {
     diffType: isPRMode ? undefined : userDiffType,
     gitContext,
     prMetadata,
+    workspace,
+    agentCwd,
     sharingEnabled: bridgeSharingEnabled,
     shareBaseUrl: bridgeShareBaseUrl,
     htmlContent: reviewHtmlContent,

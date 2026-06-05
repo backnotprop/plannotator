@@ -124,6 +124,16 @@ function formatPatchPathToken(side: "a" | "b", filePath: string): string {
   return quoteGitPath(`${side}/${filePath}`);
 }
 
+function parseMetadataPathToken(token: string): string {
+  if (token === "/dev/null") return token;
+  return unquoteGitPath(token);
+}
+
+function formatMetadataPathToken(filePath: string): string {
+  if (filePath === "/dev/null") return filePath;
+  return quoteGitPath(filePath);
+}
+
 function prefixRepoPath(label: string, filePath: string): string {
   if (filePath === "/dev/null") return filePath;
   const normalizedFilePath = normalizeWorkspacePath(filePath);
@@ -154,9 +164,11 @@ function parseDiffMetadataPathLines(lines: string[]): { oldPath?: string; newPat
 
   for (const line of lines) {
     if (line.startsWith("rename from ") || line.startsWith("copy from ")) {
-      oldPath = line.slice(line.indexOf(" from ") + " from ".length);
+      const parsed = parseMetadataPathToken(line.slice(line.indexOf(" from ") + " from ".length));
+      if (parsed !== "/dev/null") oldPath = parsed;
     } else if (line.startsWith("rename to ") || line.startsWith("copy to ")) {
-      newPath = line.slice(line.indexOf(" to ") + " to ".length);
+      const parsed = parseMetadataPathToken(line.slice(line.indexOf(" to ") + " to ".length));
+      if (parsed !== "/dev/null") newPath = parsed;
     }
   }
 
@@ -179,16 +191,24 @@ function rewritePatchLine(line: string, label: string): string {
   }
 
   if (line.startsWith("rename from ")) {
-    return `rename from ${prefixRepoPath(label, line.slice("rename from ".length))}`;
+    const parsed = parseMetadataPathToken(line.slice("rename from ".length));
+    if (parsed === "/dev/null") return line;
+    return `rename from ${formatMetadataPathToken(prefixRepoPath(label, parsed))}`;
   }
   if (line.startsWith("rename to ")) {
-    return `rename to ${prefixRepoPath(label, line.slice("rename to ".length))}`;
+    const parsed = parseMetadataPathToken(line.slice("rename to ".length));
+    if (parsed === "/dev/null") return line;
+    return `rename to ${formatMetadataPathToken(prefixRepoPath(label, parsed))}`;
   }
   if (line.startsWith("copy from ")) {
-    return `copy from ${prefixRepoPath(label, line.slice("copy from ".length))}`;
+    const parsed = parseMetadataPathToken(line.slice("copy from ".length));
+    if (parsed === "/dev/null") return line;
+    return `copy from ${formatMetadataPathToken(prefixRepoPath(label, parsed))}`;
   }
   if (line.startsWith("copy to ")) {
-    return `copy to ${prefixRepoPath(label, line.slice("copy to ".length))}`;
+    const parsed = parseMetadataPathToken(line.slice("copy to ".length));
+    if (parsed === "/dev/null") return line;
+    return `copy to ${formatMetadataPathToken(prefixRepoPath(label, parsed))}`;
   }
 
   return line;

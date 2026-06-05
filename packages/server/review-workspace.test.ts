@@ -177,6 +177,44 @@ describe("review-workspace", () => {
       expect(result).toContain("rename to repo-a/src/new.ts");
     });
 
+    it("keeps quoted rename and copy metadata valid", () => {
+      const patch = [
+        'diff --git "a/old name.ts" "b/new name.ts"',
+        "similarity index 100%",
+        'rename from "old name.ts"',
+        'rename to "new name.ts"',
+        'diff --git "a/source name.ts" "b/copy name.ts"',
+        "similarity index 100%",
+        'copy from "source name.ts"',
+        'copy to "copy name.ts"',
+      ].join("\n");
+
+      const result = prefixPatchPaths(patch, "repo-a");
+
+      expect(result).toContain('diff --git "a/repo-a/old name.ts" "b/repo-a/new name.ts"');
+      expect(result).toContain('rename from "repo-a/old name.ts"');
+      expect(result).toContain('rename to "repo-a/new name.ts"');
+      expect(result).toContain('diff --git "a/repo-a/source name.ts" "b/repo-a/copy name.ts"');
+      expect(result).toContain('copy from "repo-a/source name.ts"');
+      expect(result).toContain('copy to "repo-a/copy name.ts"');
+      expect(result).not.toContain('repo-a/"old name.ts"');
+    });
+
+    it("keeps embedded quotes valid in rename metadata", () => {
+      const patch = [
+        'diff --git "a/old\\"name.ts" "b/new\\"name.ts"',
+        "similarity index 100%",
+        'rename from "old\\"name.ts"',
+        'rename to "new\\"name.ts"',
+      ].join("\n");
+
+      const result = prefixPatchPaths(patch, "repo-a");
+
+      expect(result).toContain('diff --git "a/repo-a/old\\"name.ts" "b/repo-a/new\\"name.ts"');
+      expect(result).toContain('rename from "repo-a/old\\"name.ts"');
+      expect(result).toContain('rename to "repo-a/new\\"name.ts"');
+    });
+
     it("prefixes unquoted headers from the right when file path lines are absent", () => {
       const patch = [
         "diff --git a/foo b/old.bin b/new.bin",
