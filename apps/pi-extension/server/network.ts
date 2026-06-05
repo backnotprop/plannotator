@@ -4,11 +4,20 @@
  */
 
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import type { Server } from "node:http";
 import { release } from "node:os";
+import { delimiter, join } from "node:path";
+import { loadConfig, resolveUseGlimpse } from "../generated/config.js";
 
 const DEFAULT_REMOTE_PORT = 19432;
 const LOOPBACK_HOST = "127.0.0.1";
+const NOOP_BROWSER_VALUES = new Set(["true", "false", "none", ":", "0", "1"]);
+
+export function isNoOpBrowserSentinel(value: string | undefined): boolean {
+	if (!value) return false;
+	return NOOP_BROWSER_VALUES.has(value.trim().toLowerCase());
+}
 
 /**
  * Check if running in a remote session (SSH, devcontainer, etc.)
@@ -123,14 +132,100 @@ export async function listenOnPort(
  * Honors PLANNOTATOR_BROWSER and BROWSER env vars.
  * Returns { opened: true } if browser was opened, { opened: false, isRemote: true, url } if remote session.
  */
-export function openBrowser(url: string): {
+function findCommandOnPath(command: string): string | null {
+	const extensions = process.platform === "win32" ? [".cmd", ".exe", ".bat", ""] : [""];
+	for (const dir of (process.env.PATH || "").split(delimiter)) {
+		if (!dir) continue;
+		for (const ext of extensions) {
+			const candidate = join(dir, `${command}${ext}`);
+			if (existsSync(candidate)) return candidate;
+		}
+	}
+	return null;
+}
+
+function buildGlimpseHtml(url: string): string {
+	const encodedUrl = JSON.stringify(url);
+	return `<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<title>Plannotator</title>
+		<style>
+			html, body { width: 100%; height: 100%; margin: 0; }
+			body { overflow: hidden; background: #0f1115; }
+		</style>
+	</head>
+	<body>
+		<script>
+			location.replace(${encodedUrl});
+		</script>
+	</body>
+</html>`;
+}
+
+async function openGlimpse(url: string): Promise<boolean> {
+	const glimpseCli = findCommandOnPath("glimpseui");
+	if (!glimpseCli) return false;
+
+	const args = [
+		"--width",
+		String(Number(process.env.PLANNOTATOR_GLIMPSE_WIDTH || 1280)),
+		"--height",
+		String(Number(process.env.PLANNOTATOR_GLIMPSE_HEIGHT || 900)),
+		"--title",
+		"Plannotator",
+		"--open-links",
+	];
+	const html = buildGlimpseHtml(url);
+
+	return await new Promise<boolean>((resolve) => {
+		let settled = false;
+		let successTimer: ReturnType<typeof setTimeout> | undefined;
+		const finish = (opened: boolean) => {
+			if (settled) return;
+			settled = true;
+			if (successTimer) clearTimeout(successTimer);
+			resolve(opened);
+		};
+
+		const child = spawn(glimpseCli, args, {
+			detached: true,
+			stdio: ["pipe", "ignore", "ignore"],
+		});
+		successTimer = setTimeout(() => {
+			child.unref();
+			finish(true);
+		}, 750);
+
+		child.once("error", () => finish(false));
+		child.once("exit", () => finish(false));
+		child.stdin.once("error", () => finish(false));
+		child.stdin.end(html);
+	});
+}
+
+export async function openBrowser(url: string): Promise<{
 	opened: boolean;
 	isRemote?: boolean;
 	url?: string;
-} {
-	const browser = process.env.PLANNOTATOR_BROWSER || process.env.BROWSER;
+}> {
+	const rawPlannotatorBrowser = process.env.PLANNOTATOR_BROWSER;
+	const rawBrowser = process.env.BROWSER;
+	const plannotatorBrowser = isNoOpBrowserSentinel(rawPlannotatorBrowser)
+		? undefined
+		: rawPlannotatorBrowser;
+	const envBrowser = isNoOpBrowserSentinel(rawBrowser) ? undefined : rawBrowser;
+	const browser = plannotatorBrowser || envBrowser;
 	if (isRemoteSession() && !browser) {
 		return { opened: false, isRemote: true, url };
+	}
+
+	if (!browser && resolveUseGlimpse(loadConfig())) {
+		const openedViaGlimpse = await openGlimpse(url);
+		if (openedViaGlimpse) {
+			return { opened: true };
+		}
 	}
 
 	try {
@@ -142,12 +237,12 @@ export function openBrowser(url: string): {
 		let args: string[];
 
 		if (browser) {
-			if (process.env.PLANNOTATOR_BROWSER && platform === "darwin") {
+			if (plannotatorBrowser && platform === "darwin") {
 				cmd = "open";
-				args = ["-a", browser, url];
-			} else if (platform === "win32" || wsl) {
+				args = ["-a", plannotatorBrowser, url];
+			} else if ((platform === "win32" || wsl) && plannotatorBrowser) {
 				cmd = "cmd.exe";
-				args = ["/c", "start", "", browser, url];
+				args = ["/c", "start", "", plannotatorBrowser, url];
 			} else {
 				cmd = browser;
 				args = [url];

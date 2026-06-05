@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/pi-extension",
-  "version": "0.19.26",
+  "version": "0.19.27",
   "type": "module",
   "description": "Plannotator Pi extension - interactive plan review with annotations, annotate agent messages, and review code/PRs",
   "author": "backnotprop",
@@ -41,9 +41,10 @@
     "prepublishOnly": "cd ../.. && bun run build:pi"
   },
   "dependencies": {
+    "@joplin/turndown-plugin-gfm": "^1.0.64",
     "@pierre/diffs": "^1.1.12",
-    "turndown": "^7.2.4",
-    "@joplin/turndown-plugin-gfm": "^1.0.64"
+    "glimpseui": "^0.8.0",
+    "turndown": "^7.2.4"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.74.0"

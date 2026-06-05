@@ -1,7 +1,7 @@
 /**
  * Plannotator CLI for Claude Code, Droid, Codex, Gemini CLI, and Copilot CLI
  *
- * Supports nine modes:
+ * Supports twelve modes:
  *
  * 1. Plan Review (default, no args):
  *    - Spawned by Claude/Gemini/Codex hook entrypoints
@@ -41,7 +41,18 @@
  *    - Opens the bundled question or facts acceptance UI
  *    - Outputs structured JSON for setup-goal workflows
  *
- * 9. Improve Context (`plannotator improve-context`):
+ * 9. OpenCode Plan (`plannotator opencode-plan`):
+ *    - Internal bridge mode used by the OpenCode plugin CLI fallback
+ *    - Reads `{ plan, timeoutSeconds, sharingEnabled, agents }` from stdin
+ *    - Outputs structured JSON for the plugin
+ *
+ * 10. OpenCode Review (`plannotator opencode-review`):
+ *    - Internal structured review bridge used by the OpenCode plugin CLI fallback
+ *
+ * 11. OpenCode Last (`plannotator opencode-annotate-last`):
+ *    - Internal structured last-message annotation bridge for OpenCode
+ *
+ * 12. Improve Context (`plannotator improve-context`):
  *    - Spawned by PreToolUse hook on EnterPlanMode
  *    - Reads improvement hook file from ~/.plannotator/hooks/
  *    - Returns additionalContext or silently passes through
@@ -72,7 +83,7 @@ import {
   startGoalSetupServer,
   handleGoalSetupServerReady,
 } from "@plannotator/server/goal-setup";
-import { type DiffType, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
+import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
 import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
 import { parseReviewArgs } from "@plannotator/shared/review-args";
 import {
@@ -109,14 +120,14 @@ import {
   findDroidSessionLogsForCwd,
   findSessionLogsByAncestorWalk,
   findSessionLogsForCwd,
-  getLastRenderedMessage,
+  getRecentRenderedMessages,
   resolveDroidSessionLogForCwd,
   resolveSessionLogByAncestorPids,
   resolveSessionLogByCwdScan,
   type RenderedMessage,
 } from "./session-log";
-import { findCodexRolloutByThreadId, getLastCodexMessage, getLatestCodexPlan } from "./codex-session";
-import { findCopilotPlanContent, findCopilotSessionForCwd, getLastCopilotMessage } from "./copilot-session";
+import { findCodexRolloutByThreadId, getLatestCodexPlan, getRecentCodexMessages } from "./codex-session";
+import { findCopilotPlanContent, findCopilotSessionForCwd, getRecentCopilotMessages } from "./copilot-session";
 import {
   formatInteractiveNoArgClarification,
   formatTopLevelHelp,
@@ -153,10 +164,10 @@ const noJinaIdx = args.indexOf("--no-jina");
 const cliNoJina = noJinaIdx !== -1;
 if (cliNoJina) args.splice(noJinaIdx, 1);
 
-// Annotate review-gate flags (#570): --gate adds an Approve button,
-// --json switches stdout to structured decision output, --hook emits
-// hook-native JSON that works directly with Claude Code and Codex
-// PostToolUse/Stop hook protocols.
+// Annotate review-gate flags: --gate adds an Approve button, --json
+// switches stdout to structured decision output, --hook emits hook-native
+// JSON that works directly with Claude Code and Codex PostToolUse/Stop
+// hook protocols.
 const gateIdx = args.indexOf("--gate");
 let gateFlag = gateIdx !== -1;
 if (gateFlag) args.splice(gateIdx, 1);
@@ -171,7 +182,7 @@ const renderHtmlIdx = args.indexOf("--render-html");
 const renderHtmlFlag = renderHtmlIdx !== -1;
 if (renderHtmlFlag) args.splice(renderHtmlIdx, 1);
 
-// Stdout matrix for annotate / annotate-last / copilot annotate-last (#570).
+// Stdout matrix for annotate / annotate-last / copilot annotate-last.
 //
 // --hook (recommended for hooks):
 //   Approve/Close → empty stdout (hook passes, agent proceeds).
@@ -280,6 +291,98 @@ const detectedOrigin: Origin =
   process.env.OPENCODE ? "opencode" :
   process.env.GEMINI_CLI ? "gemini-cli" :
   "claude-code";
+
+type OpenCodeBridgeAgent = {
+  name: string;
+  description?: string;
+  mode: string;
+  hidden?: boolean;
+};
+
+type OpenCodeBridgeInput = {
+  sharingEnabled?: unknown;
+  shareBaseUrl?: unknown;
+  pasteApiUrl?: unknown;
+  agents?: unknown;
+};
+
+function parseOpenCodeBridgeInput<T extends object>(
+  mode: string,
+  inputJson: string,
+): T & OpenCodeBridgeInput {
+  try {
+    return JSON.parse(inputJson) as T & OpenCodeBridgeInput;
+  } catch (error) {
+    console.error(`Failed to parse ${mode} input: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
+}
+
+function getBridgeSharingEnabled(input: OpenCodeBridgeInput): boolean {
+  return typeof input.sharingEnabled === "boolean" ? input.sharingEnabled : sharingEnabled;
+}
+
+function getBridgeShareBaseUrl(input: OpenCodeBridgeInput): string | undefined {
+  return typeof input.shareBaseUrl === "string" && input.shareBaseUrl ? input.shareBaseUrl : shareBaseUrl;
+}
+
+function getBridgePasteApiUrl(input: OpenCodeBridgeInput): string | undefined {
+  return typeof input.pasteApiUrl === "string" && input.pasteApiUrl ? input.pasteApiUrl : pasteApiUrl;
+}
+
+function normalizeOpenCodeBridgeAgents(value: unknown): OpenCodeBridgeAgent[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+
+  const agents = value
+    .map((agent): OpenCodeBridgeAgent | null => {
+      if (!agent || typeof agent !== "object") return null;
+      const record = agent as Record<string, unknown>;
+      if (typeof record.name !== "string" || !record.name) return null;
+      return {
+        name: record.name,
+        ...(typeof record.description === "string" && { description: record.description }),
+        mode: typeof record.mode === "string" ? record.mode : "primary",
+        ...(typeof record.hidden === "boolean" && { hidden: record.hidden }),
+      };
+    })
+    .filter((agent): agent is OpenCodeBridgeAgent => agent !== null);
+
+  return agents.length > 0 ? agents : undefined;
+}
+
+function makeOpenCodeBridgeClient(agents: unknown) {
+  const data = normalizeOpenCodeBridgeAgents(agents);
+  if (!data) return undefined;
+
+  return {
+    app: {
+      agents: async () => ({ data }),
+    },
+  };
+}
+
+function emitOpenCodeAnnotateOutcome(result: {
+  feedback: string;
+  exit?: boolean;
+  approved?: boolean;
+  selectedMessageId?: string;
+  feedbackScope?: "message" | "messages";
+}): void {
+  if (result.approved) {
+    console.log(JSON.stringify({ decision: "approved" }));
+    return;
+  }
+  if (result.exit) {
+    console.log(JSON.stringify({ decision: "dismissed" }));
+    return;
+  }
+  console.log(JSON.stringify({
+    decision: "annotated",
+    feedback: result.feedback || "",
+    ...(result.selectedMessageId && { selectedMessageId: result.selectedMessageId }),
+    ...(result.feedbackScope && { feedbackScope: result.feedbackScope }),
+  }));
+}
 
 if (args[0] === "sessions") {
   // ============================================
@@ -875,7 +978,15 @@ if (args[0] === "sessions") {
   const isCodex = !!codexThreadId;
   const isDroid = detectedOrigin === "droid";
 
+  // Collect up to N recent assistant messages so the user can pick the right
+  // one — defaults to the same selection as the legacy "last message"
+  // behavior (index 0). Necessary because the newest transcript entry isn't
+  // always the message the user intended to annotate (e.g., after /rewind).
+  // 25 covers long conversations worth of rewinds without flooding the
+  // picker; the list scrolls past this if more are shown.
+  const RECENT_MESSAGES_LIMIT = 25;
   let lastMessage: RenderedMessage | null = null;
+  let recentMessages: RenderedMessage[] = [];
 
   if (stdinFlag) {
     const text = (await Bun.stdin.text()).trim();
@@ -892,10 +1003,9 @@ if (args[0] === "sessions") {
       if (process.env.PLANNOTATOR_DEBUG) {
         console.error(`[DEBUG] Rollout: ${rolloutPath}`);
       }
-      const msg = getLastCodexMessage(rolloutPath, { beforeActiveTurn: true });
-      if (msg) {
-        lastMessage = { messageId: codexThreadId, text: msg.text, lineNumbers: [] };
-      }
+      recentMessages = getRecentCodexMessages(rolloutPath, RECENT_MESSAGES_LIMIT, { beforeActiveTurn: true })
+        .map((m) => ({ messageId: m.messageId, text: m.text, lineNumbers: [], timestamp: m.timestamp }));
+      lastMessage = recentMessages[0] ?? null;
     }
   } else if (isDroid) {
     // Droid/Factory path: resolve the current repo's session log from
@@ -925,7 +1035,8 @@ if (args[0] === "sessions") {
       console.error(`[DEBUG] Droid selected log: ${droidLog ?? "(none)"}`);
     }
     if (droidLog) {
-      lastMessage = getLastRenderedMessage(droidLog);
+      recentMessages = getRecentRenderedMessages(droidLog, RECENT_MESSAGES_LIMIT);
+      lastMessage = recentMessages[0] ?? null;
     }
   } else {
     // Claude Code path: resolve session log
@@ -957,8 +1068,12 @@ if (args[0] === "sessions") {
         console.error(`[DEBUG] ${label}: ${paths.length ? paths.join(", ") : "(none)"}`);
       }
       for (const logPath of paths) {
-        lastMessage = getLastRenderedMessage(logPath);
-        if (lastMessage) return;
+        const recent = getRecentRenderedMessages(logPath, RECENT_MESSAGES_LIMIT);
+        if (recent.length > 0) {
+          recentMessages = recent;
+          lastMessage = recent[0];
+          return;
+        }
       }
     }
 
@@ -991,6 +1106,12 @@ if (args[0] === "sessions") {
   const annotatedMessage = lastMessage;
   const annotateProject = (await detectProjectName()) ?? "_unknown";
 
+  // Only ship the picker list when there's a choice to make. The client uses
+  // its presence (length > 1) as the signal to render the picker UI.
+  const pickerMessages = recentMessages.length > 1
+    ? recentMessages.map((m) => ({ messageId: m.messageId, text: m.text, timestamp: m.timestamp }))
+    : undefined;
+
   const server = await startAnnotateServer({
     markdown: annotatedMessage.text,
     filePath: "last-message",
@@ -1001,6 +1122,7 @@ if (args[0] === "sessions") {
     pasteApiUrl,
     gate: gateFlag,
     htmlContent: planHtmlContent,
+    recentMessages: pickerMessages,
     onReady: async (url, isRemote, port) => {
       handleAnnotateServerReady(url, isRemote, port);
 
@@ -1062,6 +1184,284 @@ if (args[0] === "sessions") {
 
   await Bun.sleep(500);
   server.stop();
+  process.exit(0);
+
+} else if (args[0] === "opencode-plan") {
+  // ============================================
+  // OPENCODE PLUGIN PLAN REVIEW MODE
+  // ============================================
+  //
+  // Internal CLI bridge used when the OpenCode plugin is running in a host
+  // that cannot import Bun-only server modules directly.
+
+  const inputJson = await Bun.stdin.text();
+  const input = parseOpenCodeBridgeInput<{ plan?: unknown; timeoutSeconds?: unknown }>(
+    "opencode-plan",
+    inputJson,
+  );
+
+  const planContent = typeof input.plan === "string" ? input.plan : "";
+  if (!planContent.trim()) {
+    console.error("No plan content in opencode-plan input");
+    process.exit(1);
+  }
+
+  const timeoutSeconds = input.timeoutSeconds === null
+    ? null
+    : typeof input.timeoutSeconds === "number" && Number.isFinite(input.timeoutSeconds) && input.timeoutSeconds > 0
+      ? input.timeoutSeconds
+      : null;
+
+  const planProject = (await detectProjectName()) ?? "_unknown";
+  const bridgeSharingEnabled = getBridgeSharingEnabled(input);
+  const bridgeShareBaseUrl = getBridgeShareBaseUrl(input);
+  const bridgePasteApiUrl = getBridgePasteApiUrl(input);
+  const server = await startPlannotatorServer({
+    plan: planContent,
+    origin: "opencode",
+    sharingEnabled: bridgeSharingEnabled,
+    shareBaseUrl: bridgeShareBaseUrl,
+    pasteApiUrl: bridgePasteApiUrl,
+    htmlContent: planHtmlContent,
+    opencodeClient: makeOpenCodeBridgeClient(input.agents),
+    onReady: async (url, isRemote, port) => {
+      await handleServerReady(url, isRemote, port);
+
+      if (isRemote && bridgeSharingEnabled) {
+        await writeRemoteShareLink(planContent, bridgeShareBaseUrl, "review the plan", "plan only").catch(() => {});
+      }
+    },
+  });
+
+  registerSession({
+    pid: process.pid,
+    port: server.port,
+    url: server.url,
+    mode: "plan",
+    project: planProject,
+    startedAt: new Date().toISOString(),
+    label: `plan-${planProject}`,
+  });
+
+  const result = timeoutSeconds === null
+    ? await server.waitForDecision()
+    : await new Promise<Awaited<ReturnType<typeof server.waitForDecision>>>((resolve) => {
+        const timeoutId = setTimeout(
+          () =>
+            resolve({
+              approved: false,
+              feedback: `[Plannotator] No response within ${timeoutSeconds} seconds. Port released automatically. Please call submit_plan again.`,
+            }),
+          timeoutSeconds * 1000,
+        );
+
+        server.waitForDecision().then((decision) => {
+          clearTimeout(timeoutId);
+          resolve(decision);
+        });
+      });
+
+  await Bun.sleep(1500);
+  server.stop();
+
+  console.log(JSON.stringify({
+    approved: result.approved,
+    ...(result.feedback && { feedback: result.feedback }),
+    ...(result.savedPath && { savedPath: result.savedPath }),
+    ...(result.agentSwitch && { agentSwitch: result.agentSwitch }),
+  }));
+  process.exit(0);
+
+} else if (args[0] === "opencode-review") {
+  // ============================================
+  // OPENCODE PLUGIN CODE REVIEW MODE
+  // ============================================
+  //
+  // Internal structured CLI bridge used when the OpenCode plugin is running
+  // in a host that cannot import Bun-only server modules directly.
+
+  const inputJson = await Bun.stdin.text();
+  const input = parseOpenCodeBridgeInput<{ arguments?: unknown }>(
+    "opencode-review",
+    inputJson,
+  );
+  const reviewArgs = parseReviewArgs(typeof input.arguments === "string" ? input.arguments : "");
+  const urlArg = reviewArgs.prUrl;
+  const isPRMode = urlArg !== undefined;
+
+  let rawPatch: string;
+  let gitRef: string;
+  let diffError: string | undefined;
+  let userDiffType: DiffType | undefined;
+  let gitContext: Awaited<ReturnType<typeof prepareLocalReviewDiff>>["gitContext"] | undefined;
+  let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
+
+  if (isPRMode) {
+    const prRef = parsePRUrl(urlArg);
+    if (!prRef) {
+      console.error(`Invalid PR/MR URL: ${urlArg}`);
+      process.exit(1);
+    }
+
+    console.error(`Fetching ${getMRLabel(prRef)} ${getMRNumberLabel(prRef)} from ${getDisplayRepo(prRef)}...`);
+
+    try {
+      await checkPRAuth(prRef);
+    } catch (err) {
+      const cliName = getCliName(prRef);
+      console.error(err instanceof Error ? err.message : `${cliName} auth check failed`);
+      process.exit(1);
+    }
+
+    try {
+      const pr = await fetchPR(prRef);
+      rawPatch = pr.rawPatch;
+      gitRef = `${getMRLabel(prRef)} ${getMRNumberLabel(prRef)}`;
+      prMetadata = pr.metadata;
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : `Failed to fetch ${getMRLabel(prRef)} ${getMRNumberLabel(prRef)}`);
+      process.exit(1);
+    }
+  } else {
+    console.error("Opening code review UI...");
+
+    const config = loadConfig();
+    const diffResult = await prepareLocalReviewDiff({
+      cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+      vcsType: reviewArgs.vcsType,
+      configuredDiffType: resolveDefaultDiffType(config),
+      hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
+    });
+    gitContext = diffResult.gitContext;
+    userDiffType = diffResult.diffType;
+    rawPatch = diffResult.rawPatch;
+    gitRef = diffResult.gitRef;
+    diffError = diffResult.error;
+  }
+
+  const bridgeSharingEnabled = getBridgeSharingEnabled(input);
+  const bridgeShareBaseUrl = getBridgeShareBaseUrl(input);
+  const reviewProject = (await detectProjectName()) ?? "_unknown";
+
+  const server = await startReviewServer({
+    rawPatch,
+    gitRef,
+    error: diffError,
+    origin: "opencode",
+    diffType: isPRMode ? undefined : userDiffType,
+    gitContext,
+    prMetadata,
+    sharingEnabled: bridgeSharingEnabled,
+    shareBaseUrl: bridgeShareBaseUrl,
+    htmlContent: reviewHtmlContent,
+    opencodeClient: makeOpenCodeBridgeClient(input.agents),
+    onReady: (url, isRemote, port) => {
+      handleReviewServerReady(url, isRemote, port);
+    },
+  });
+
+  registerSession({
+    pid: process.pid,
+    port: server.port,
+    url: server.url,
+    mode: "review",
+    project: reviewProject,
+    startedAt: new Date().toISOString(),
+    label: isPRMode && prMetadata
+      ? `${getMRLabel(prMetadata).toLowerCase()}-review-${getDisplayRepo(prMetadata)}${getMRNumberLabel(prMetadata)}`
+      : `review-${reviewProject}`,
+  });
+
+  const result = await server.waitForDecision();
+  await Bun.sleep(1500);
+  server.stop();
+
+  console.log(JSON.stringify({
+    decision: result.exit
+      ? "dismissed"
+      : result.approved
+        ? "approved"
+        : "annotated",
+    approved: result.approved,
+    isPRMode,
+    ...(result.feedback && { feedback: result.feedback }),
+    ...(result.agentSwitch && { agentSwitch: result.agentSwitch }),
+  }));
+  process.exit(0);
+
+} else if (args[0] === "opencode-annotate-last") {
+  // ============================================
+  // OPENCODE PLUGIN ANNOTATE LAST MESSAGE MODE
+  // ============================================
+
+  const inputJson = await Bun.stdin.text();
+  const input = parseOpenCodeBridgeInput<{
+    gate?: unknown;
+    recentMessages?: unknown;
+  }>("opencode-annotate-last", inputJson);
+
+  const recentMessages = Array.isArray(input.recentMessages)
+    ? input.recentMessages
+        .map((message): { messageId: string; text: string; timestamp?: string } | null => {
+          if (!message || typeof message !== "object") return null;
+          const record = message as Record<string, unknown>;
+          if (typeof record.text !== "string" || !record.text.trim()) return null;
+          return {
+            messageId: typeof record.messageId === "string" && record.messageId
+              ? record.messageId
+              : crypto.randomUUID(),
+            text: record.text,
+            ...(typeof record.timestamp === "string" && { timestamp: record.timestamp }),
+          };
+        })
+        .filter((message): message is { messageId: string; text: string; timestamp?: string } => message !== null)
+    : [];
+
+  const lastMessage = recentMessages[0] ?? null;
+  if (!lastMessage) {
+    console.error("No assistant message found in opencode-annotate-last input.");
+    process.exit(1);
+  }
+
+  console.error("Opening annotation UI for last message...");
+
+  const bridgeSharingEnabled = getBridgeSharingEnabled(input);
+  const bridgeShareBaseUrl = getBridgeShareBaseUrl(input);
+  const bridgePasteApiUrl = getBridgePasteApiUrl(input);
+  const annotateProject = (await detectProjectName()) ?? "_unknown";
+  const pickerMessages = recentMessages.length > 1 ? recentMessages : undefined;
+
+  const server = await startAnnotateServer({
+    markdown: lastMessage.text,
+    filePath: "last-message",
+    origin: "opencode",
+    mode: "annotate-last",
+    recentMessages: pickerMessages,
+    sharingEnabled: bridgeSharingEnabled,
+    shareBaseUrl: bridgeShareBaseUrl,
+    pasteApiUrl: bridgePasteApiUrl,
+    gate: input.gate === true,
+    htmlContent: planHtmlContent,
+    onReady: (url, isRemote, port) => {
+      handleAnnotateServerReady(url, isRemote, port);
+    },
+  });
+
+  registerSession({
+    pid: process.pid,
+    port: server.port,
+    url: server.url,
+    mode: "annotate",
+    project: annotateProject,
+    startedAt: new Date().toISOString(),
+    label: "annotate-last",
+  });
+
+  const result = await server.waitForDecision();
+  await Bun.sleep(1500);
+  server.stop();
+
+  emitOpenCodeAnnotateOutcome(result);
   process.exit(0);
 
 } else if (args[0] === "copilot-plan") {
@@ -1169,7 +1569,8 @@ if (args[0] === "sessions") {
     console.error(`[DEBUG] Session dir: ${sessionDir}`);
   }
 
-  const msg = getLastCopilotMessage(sessionDir);
+  const recent = getRecentCopilotMessages(sessionDir, 25);
+  const msg = recent[0] ?? null;
   if (!msg) {
     console.error("No assistant message found in Copilot CLI session.");
     process.exit(1);
@@ -1180,12 +1581,14 @@ if (args[0] === "sessions") {
   }
 
   const annotateProject = (await detectProjectName()) ?? "_unknown";
+  const pickerMessages = recent.length > 1 ? recent : undefined;
 
   const server = await startAnnotateServer({
     markdown: msg.text,
     filePath: "last-message",
     origin: "copilot-cli",
     mode: "annotate-last",
+    recentMessages: pickerMessages,
     sharingEnabled,
     shareBaseUrl,
     gate: gateFlag,

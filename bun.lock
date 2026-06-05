@@ -64,7 +64,7 @@
     },
     "apps/opencode-plugin": {
       "name": "@plannotator/opencode",
-      "version": "0.19.24",
+      "version": "0.19.26",
       "dependencies": {
         "@opencode-ai/plugin": "^1.1.10",
       },
@@ -86,10 +86,11 @@
     },
     "apps/pi-extension": {
       "name": "@plannotator/pi-extension",
-      "version": "0.19.24",
+      "version": "0.19.26",
       "dependencies": {
         "@joplin/turndown-plugin-gfm": "^1.0.64",
         "@pierre/diffs": "^1.1.12",
+        "glimpseui": "^0.8.0",
         "turndown": "^7.2.4",
       },
       "devDependencies": {
@@ -201,11 +202,12 @@
     },
     "packages/server": {
       "name": "@plannotator/server",
-      "version": "0.19.24",
+      "version": "0.19.26",
       "dependencies": {
         "@pierre/diffs": "^1.1.12",
         "@plannotator/ai": "workspace:*",
         "@plannotator/shared": "workspace:*",
+        "glimpseui": "^0.8.0",
       },
       "peerDependencies": {
         "bun": ">=1.0.0",
@@ -1685,6 +1687,8 @@
     "github-from-package": ["github-from-package@0.0.0", "", {}, "sha512-SyHy3T1v2NUXn29OsWdxmK6RwHD+vkj3v8en8AOBZ1wBQ/hCAQ5bAQTD02kW4W9tUp/3Qh6J8r9EvntiyCmOOw=="],
 
     "github-slugger": ["github-slugger@2.0.0", "", {}, "sha512-IaOQ9puYtjrkq7Y0Ygl9KDZnrf/aiUJYUpVf89y8kyaxbRG7Y1SrX/jaumrv81vc61+kiMempujsM3Yw7w5qcw=="],
+
+    "glimpseui": ["glimpseui@0.8.0", "", { "os": [ "linux", "win32", "darwin", ], "bin": { "glimpseui": "bin/glimpse.mjs" } }, "sha512-trpEKiULW9sGjsLqtSH/+hMPcohvq3tkN6yM55t0WIgTsHt53+HXVTMf5ipy/w+kXbkbC/XP7DSRvzZC+E8xig=="],
 
     "glob": ["glob@13.0.6", "", { "dependencies": { "minimatch": "^10.2.2", "minipass": "^7.1.3", "path-scurry": "^2.0.2" } }, "sha512-Wjlyrolmm8uDpm/ogGyXZXb1Z+Ca2B8NbJwqBVg0axK9GbBeoS7yGV6vjXnYdGm6X53iehEuxxbyiKp8QmN4Vw=="],
 

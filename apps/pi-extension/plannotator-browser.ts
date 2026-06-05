@@ -91,8 +91,8 @@ export function getStartupErrorMessage(err: unknown): string {
 	return err instanceof Error ? err.message : "Unknown error";
 }
 
-function openBrowserForServer(serverUrl: string, ctx: ExtensionContext): void {
-	const browserResult = openBrowser(serverUrl);
+async function openBrowserForServer(serverUrl: string, ctx: ExtensionContext): Promise<void> {
+	const browserResult = await openBrowser(serverUrl);
 	if (isRemoteSession()) {
 		ctx.ui.notify(`[Plannotator] ${serverUrl}`, "info");
 	} else if (!browserResult.opened) {
@@ -119,7 +119,7 @@ async function openBrowserAndWait<T>(
 	ctx: ExtensionContext,
 	waitForResult: () => Promise<T>,
 ): Promise<T> {
-	openBrowserForServer(server.url, ctx);
+	await openBrowserForServer(server.url, ctx);
 	return waitForDecisionWithCleanup(server, waitForResult);
 }
 
@@ -493,7 +493,7 @@ export async function openMarkdownAnnotation(
 	sourceInfo?: string,
 	sourceConverted?: boolean,
 	gate?: boolean,
-): Promise<{ feedback: string; exit?: boolean; approved?: boolean }> {
+): Promise<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }> {
 	const session = await startMarkdownAnnotationSession(
 		ctx,
 		filePath,
@@ -518,7 +518,8 @@ export async function startMarkdownAnnotationSession(
 	gate?: boolean,
 	rawHtml?: string,
 	renderHtml?: boolean,
-): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean }>> {
+	recentMessages?: { messageId: string; text: string; timestamp?: string }[],
+): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>> {
 	if (!ctx.hasUI || !planHtmlContent) {
 		throw new Error("Plannotator annotation browser is unavailable in this session.");
 	}
@@ -541,6 +542,7 @@ export async function startMarkdownAnnotationSession(
 		origin: "pi",
 		mode,
 		folderPath,
+		recentMessages,
 		sourceInfo,
 		sourceConverted,
 		gate,
@@ -559,15 +561,18 @@ export async function openLastMessageAnnotation(
 	ctx: ExtensionContext,
 	lastText: string,
 	gate?: boolean,
-): Promise<{ feedback: string; exit?: boolean; approved?: boolean }> {
-	return openMarkdownAnnotation(ctx, "last-message", lastText, "annotate-last", undefined, undefined, undefined, gate);
+	recentMessages?: { messageId: string; text: string; timestamp?: string }[],
+): Promise<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }> {
+	const session = await startLastMessageAnnotationSession(ctx, lastText, gate, recentMessages);
+	return session.waitForDecision();
 }
 
 export async function startLastMessageAnnotationSession(
 	ctx: ExtensionContext,
 	lastText: string,
 	gate?: boolean,
-): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean }>> {
+	recentMessages?: { messageId: string; text: string; timestamp?: string }[],
+): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>> {
 	return startMarkdownAnnotationSession(
 		ctx,
 		"last-message",
@@ -577,6 +582,9 @@ export async function startLastMessageAnnotationSession(
 		undefined,
 		undefined,
 		gate,
+		undefined,
+		undefined,
+		recentMessages,
 	);
 }
 

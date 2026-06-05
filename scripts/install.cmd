@@ -413,6 +413,11 @@ if exist "%USERPROFILE%\.codex" (
         if /i not "%%C"=="skills" if /i not "%%C"==".DS_Store" set "CODEX_AVAILABLE=1"
     )
 )
+REM Kiro is auto-detected like Codex/Gemini: PATH executable or an existing %USERPROFILE%\.kiro.
+set "KIRO_AVAILABLE=0"
+where kiro-cli >nul 2>&1
+if !ERRORLEVEL! equ 0 set "KIRO_AVAILABLE=1"
+if exist "%USERPROFILE%\.kiro" set "KIRO_AVAILABLE=1"
 if "!CODEX_AVAILABLE!"=="1" (
     echo.
     echo Codex detected.
@@ -525,13 +530,15 @@ if !ERRORLEVEL! equ 0 (
     )
     set "CODEX_SKILLS_DIR=%USERPROFILE%\.codex\skills"
     set "AGENTS_SKILLS_DIR=%USERPROFILE%\.agents\skills"
+    set "KIRO_SKILLS_DIR=%USERPROFILE%\.kiro\skills"
+    set "KIRO_AGENTS_DIR=%USERPROFILE%\.kiro\agents"
     set "SKILLS_TMP=%TEMP%\plannotator-skills-%RANDOM%"
     mkdir "!SKILLS_TMP!" >nul 2>&1
 
     git clone --depth 1 --filter=blob:none --sparse "https://github.com/!REPO!.git" --branch "!TAG!" "!SKILLS_TMP!\repo" >nul 2>&1
     if !ERRORLEVEL! equ 0 (
         pushd "!SKILLS_TMP!\repo"
-        git sparse-checkout set apps/skills >nul 2>&1
+        git sparse-checkout set apps/skills apps/kiro-cli >nul 2>&1
 
         if exist "apps\skills" (
             if not exist "!CLAUDE_SKILLS_DIR!" mkdir "!CLAUDE_SKILLS_DIR!"
@@ -548,6 +555,22 @@ if !ERRORLEVEL! equ 0 (
                 echo Installed skills to !CLAUDE_SKILLS_DIR!\, Codex command skills to !CODEX_SKILLS_DIR!\, and shared agent skills to !AGENTS_SKILLS_DIR!\
             ) else (
                 echo Installed skills to !CLAUDE_SKILLS_DIR!\ and shared agent skills to !AGENTS_SKILLS_DIR!\
+            )
+            if "!KIRO_AVAILABLE!"=="1" if exist "apps\kiro-cli\skills" (
+                if not exist "!KIRO_SKILLS_DIR!" mkdir "!KIRO_SKILLS_DIR!"
+                REM Kiro-specific skills with origin baked in come from apps/kiro-cli/skills.
+                if exist "apps\kiro-cli\skills\plannotator-review" xcopy /s /i /y /q "apps\kiro-cli\skills\plannotator-review" "!KIRO_SKILLS_DIR!\plannotator-review\" >nul 2>&1
+                if exist "apps\kiro-cli\skills\plannotator-annotate" xcopy /s /i /y /q "apps\kiro-cli\skills\plannotator-annotate" "!KIRO_SKILLS_DIR!\plannotator-annotate\" >nul 2>&1
+                if exist "apps\kiro-cli\skills\plannotator-archive" xcopy /s /i /y /q "apps\kiro-cli\skills\plannotator-archive" "!KIRO_SKILLS_DIR!\plannotator-archive\" >nul 2>&1
+                REM Shared skills come from apps/skills, not duplicated into apps/kiro-cli/skills.
+                if exist "apps\skills\plannotator-setup-goal" xcopy /s /i /y /q "apps\skills\plannotator-setup-goal" "!KIRO_SKILLS_DIR!\plannotator-setup-goal\" >nul 2>&1
+                if exist "apps\skills\plannotator-visual-explainer" xcopy /s /i /y /q "apps\skills\plannotator-visual-explainer" "!KIRO_SKILLS_DIR!\plannotator-visual-explainer\" >nul 2>&1
+                REM Plannotator custom agent — don't clobber a user's existing one.
+                if not exist "!KIRO_AGENTS_DIR!\plannotator.json" if exist "apps\kiro-cli\agents\plannotator.json" (
+                    if not exist "!KIRO_AGENTS_DIR!" mkdir "!KIRO_AGENTS_DIR!"
+                    copy /y "apps\kiro-cli\agents\plannotator.json" "!KIRO_AGENTS_DIR!\plannotator.json" >nul 2>&1
+                )
+                echo Installed Kiro skills to !KIRO_SKILLS_DIR!\ and agent to !KIRO_AGENTS_DIR!\plannotator.json
             )
         )
 
@@ -687,6 +710,19 @@ echo """
     ) > "%USERPROFILE%\.gemini\commands\plannotator-annotate.toml"
 
     echo Installed Gemini slash commands to %USERPROFILE%\.gemini\commands\
+)
+
+echo.
+echo ==========================================
+echo   KIRO CLI USERS
+echo ==========================================
+echo.
+if "!KIRO_AVAILABLE!"=="1" (
+    echo Kiro skills are installed to %USERPROFILE%\.kiro\skills\
+    echo The Plannotator agent is installed to %USERPROFILE%\.kiro\agents\plannotator.json
+    echo Launch it: kiro-cli chat --agent plannotator
+) else (
+    echo Kiro was not detected. After installing Kiro, rerun this installer to add Kiro skills.
 )
 
 echo.

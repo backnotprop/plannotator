@@ -59,6 +59,19 @@ Default config:
 }
 ```
 
+Runtime selection is automatic. In Bun-hosted OpenCode, Plannotator uses the embedded server bundled with the plugin. In Node-hosted or wrapped OpenCode environments, the plugin falls back to the installed `plannotator` CLI and sends the result back through OpenCode. You can force the fallback while debugging:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    ["@plannotator/opencode@latest", {
+      "runtime": "cli"
+    }]
+  ]
+}
+```
+
 If you use other OpenCode plugins, keep everything in one `plugin` array and attach Plannotator's options directly to the Plannotator entry:
 
 ```json
@@ -144,6 +157,7 @@ Register the tool but manage prompts and permissions yourself:
 | `PLANNOTATOR_SHARE_URL` | Custom share portal URL for self-hosting. Default: `https://share.plannotator.ai`. |
 | `PLANNOTATOR_PASTE_URL` | Custom paste service URL for self-hosting. Default: `https://plannotator-paste.plannotator.workers.dev`. |
 | `PLANNOTATOR_PLAN_TIMEOUT_SECONDS` | Timeout for `submit_plan` review wait. Default: `345600` (96h). Set `0` to disable timeout. |
+| `PLANNOTATOR_BIN` | Override the CLI path used by the OpenCode plugin's CLI runtime fallback. Default: `plannotator` on `PATH`. |
 
 ## Devcontainer / Docker
 

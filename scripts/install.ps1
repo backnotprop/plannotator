@@ -295,6 +295,8 @@ if (Test-Path $codexDir) {
         Select-Object -First 1)
 }
 $codexAvailable = [bool](Get-Command codex -ErrorAction SilentlyContinue) -or $codexHomeHasUserConfig
+# Kiro is auto-detected like Codex/Gemini: PATH executable or an existing ~/.kiro.
+$kiroAvailable = [bool](Get-Command kiro-cli -ErrorAction SilentlyContinue) -or (Test-Path "$env:USERPROFILE\.kiro")
 
 if ($codexAvailable) {
     $codexExePath = "$installDir\plannotator.exe"
@@ -572,7 +574,7 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
             # only on the success path) leaks the location stack if a
             # PS-native cmdlet (Copy-Item etc.) throws under Stop.
             try {
-                git sparse-checkout set apps/skills 2>$null
+                git sparse-checkout set apps/skills apps/kiro-cli 2>$null
 
                 if (Test-Path "apps\skills") {
                     $items = Get-ChildItem "apps\skills" -ErrorAction SilentlyContinue
@@ -591,6 +593,24 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
                             Write-Host "Installed skills to $claudeSkillsDir\, Codex command skills to $codexSkillsDir\, and shared agent skills to $agentsSkillsDir\"
                         } else {
                             Write-Host "Installed skills to $claudeSkillsDir\ and shared agent skills to $agentsSkillsDir\"
+                        }
+                        if ($kiroAvailable -and (Test-Path "apps\kiro-cli\skills")) {
+                            $kiroSkillsDir = "$env:USERPROFILE\.kiro\skills"
+                            New-Item -ItemType Directory -Force -Path $kiroSkillsDir | Out-Null
+                            # Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
+                            Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-review" $kiroSkillsDir
+                            Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-annotate" $kiroSkillsDir
+                            Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-archive" $kiroSkillsDir
+                            # Shared skills come from apps/skills (not duplicated into apps/kiro-cli/skills).
+                            Copy-SkillIfPresent "apps\skills\plannotator-setup-goal" $kiroSkillsDir
+                            Copy-SkillIfPresent "apps\skills\plannotator-visual-explainer" $kiroSkillsDir
+                            # Plannotator custom agent — don't clobber a user's existing one.
+                            $kiroAgentsDir = "$env:USERPROFILE\.kiro\agents"
+                            if (-not (Test-Path "$kiroAgentsDir\plannotator.json") -and (Test-Path "apps\kiro-cli\agents\plannotator.json")) {
+                                New-Item -ItemType Directory -Force -Path $kiroAgentsDir | Out-Null
+                                Copy-Item -Force "apps\kiro-cli\agents\plannotator.json" "$kiroAgentsDir\plannotator.json"
+                            }
+                            Write-Host "Installed Kiro skills to $kiroSkillsDir\ and agent to $kiroAgentsDir\plannotator.json"
                         }
                     }
                 }
@@ -733,6 +753,18 @@ Write-Host ""
 Write-Host "Install or update the extension:"
 Write-Host ""
 Write-Host "  pi install npm:@plannotator/pi-extension"
+Write-Host ""
+Write-Host "=========================================="
+Write-Host "  KIRO CLI USERS"
+Write-Host "=========================================="
+Write-Host ""
+if ($kiroAvailable) {
+    Write-Host "Kiro skills are installed to $env:USERPROFILE\.kiro\skills\"
+    Write-Host "The Plannotator agent is installed to $env:USERPROFILE\.kiro\agents\plannotator.json"
+    Write-Host "Launch it: kiro-cli chat --agent plannotator"
+} else {
+    Write-Host "Kiro was not detected. After installing Kiro, rerun this installer to add Kiro skills."
+}
 Write-Host ""
 Write-Host "=========================================="
 Write-Host "  CLAUDE CODE USERS: YOU ARE ALL SET!"

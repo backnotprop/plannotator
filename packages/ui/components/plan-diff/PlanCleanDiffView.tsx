@@ -9,7 +9,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import hljs from "highlight.js";
 import { parseMarkdownToBlocks, computeListIndices } from "../../utils/parser";
-import { ListMarker } from "../ListMarker";
+import { ListItemBody } from "../ListItemBody";
 import type { Block, Annotation, EditorMode, ImageAttachment } from "../../types";
 import { AnnotationType } from "../../types";
 import type {
@@ -462,7 +462,7 @@ const headingStyleFor = (level: number): string =>
   HEADING_STYLE_BY_LEVEL[level] || HEADING_STYLE_FALLBACK;
 
 const PARAGRAPH_CLASS = "mb-4 leading-relaxed text-foreground/90 text-[15px]";
-const LIST_ITEM_ROW_CLASS = "flex gap-3 my-1.5";
+const LIST_ITEM_ROW_CLASS = "flex items-start gap-3 my-1.5";
 const listItemIndentRem = (level: number): string => `${level * 1.25}rem`;
 const listItemTextClass = (isCheckbox: boolean, checked?: boolean): string =>
   `text-sm leading-relaxed ${isCheckbox && checked ? "text-muted-foreground line-through" : "text-foreground/90"}`;
@@ -528,7 +528,6 @@ const InlineModifiedBlock: React.FC<InlineModifiedBlockProps> = ({
   if (wrap.type === "list-item") {
     const listLevel = wrap.listLevel || 0;
     const isCheckbox = wrap.checked !== undefined;
-    const paragraphs = unified.split(/\n\n+/);
     return (
       <div
         data-diff-block-index={index}
@@ -536,25 +535,15 @@ const InlineModifiedBlock: React.FC<InlineModifiedBlockProps> = ({
         style={{ marginLeft: listItemIndentRem(listLevel), ...hoverStyle }}
         {...hoverRest}
       >
-        <ListMarker
+        <ListItemBody
           level={listLevel}
           ordered={wrap.ordered}
           orderedIndex={wrap.orderedStart ?? 1}
           checked={wrap.checked}
+          textClassName={listItemTextClass(isCheckbox, wrap.checked)}
+          content={unified}
+          renderInline={(text) => <InlineMarkdown text={text} />}
         />
-        {paragraphs.length === 1 ? (
-          <span className={listItemTextClass(isCheckbox, wrap.checked)}>
-            <InlineMarkdown text={unified} />
-          </span>
-        ) : (
-          <div className={listItemTextClass(isCheckbox, wrap.checked)}>
-            {paragraphs.map((para, i) => (
-              <p key={i} className={i > 0 ? "mt-3" : ""}>
-                <InlineMarkdown text={para} />
-              </p>
-            ))}
-          </div>
-        )}
       </div>
     );
   }
@@ -631,31 +620,20 @@ const SimpleBlockRenderer: React.FC<{ block: Block; orderedIndex?: number | null
     case "list-item": {
       const listLevel = block.level || 0;
       const isCheckbox = block.checked !== undefined;
-      const paragraphs = block.content.split(/\n\n+/);
       return (
         <div
           className={LIST_ITEM_ROW_CLASS}
           style={{ marginLeft: listItemIndentRem(listLevel) }}
         >
-          <ListMarker
+          <ListItemBody
             level={listLevel}
             ordered={block.ordered}
             orderedIndex={orderedIndex}
             checked={block.checked}
+            textClassName={listItemTextClass(isCheckbox, block.checked)}
+            content={block.content}
+            renderInline={(text) => <InlineMarkdown text={text} />}
           />
-          {paragraphs.length === 1 ? (
-            <span className={listItemTextClass(isCheckbox, block.checked)}>
-              <InlineMarkdown text={block.content} />
-            </span>
-          ) : (
-            <div className={listItemTextClass(isCheckbox, block.checked)}>
-              {paragraphs.map((para, i) => (
-                <p key={i} className={i > 0 ? "mt-3" : ""}>
-                  <InlineMarkdown text={para} />
-                </p>
-              ))}
-            </div>
-          )}
         </div>
       );
     }

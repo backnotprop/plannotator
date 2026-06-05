@@ -303,15 +303,15 @@ describe("review-workspace", () => {
 
     it("discovers multiple nested VCS repos", () => {
       const root = makeTempDir("plannotator-workspace-multi-");
-      
+
       // Create nested repos
       const frontend = join(root, "frontend");
       const backend = join(root, "backend");
       const backendApi = join(backend, "api");
-      
+
       mkdirSync(frontend, { recursive: true });
       mkdirSync(backendApi, { recursive: true });
-      
+
       initRepo(frontend);
       initRepo(backendApi);
 
@@ -326,14 +326,14 @@ describe("review-workspace", () => {
 
     it("stops recursion at git repo boundaries (does not discover nested repos inside other repos)", () => {
       const root = makeTempDir("plannotator-workspace-boundary-");
-      
+
       // Create a repo with a nested directory that would be a repo
       const parentRepo = join(root, "parent");
       const childDir = join(parentRepo, "child");
-      
+
       mkdirSync(childDir, { recursive: true });
       initRepo(parentRepo);
-      
+
       // Create a git repo inside the child (should NOT be discovered separately
       // because parent repo stops recursion - we don't traverse into git repos)
       const grandchildRepo = join(childDir, "grandchild");
@@ -360,12 +360,12 @@ describe("review-workspace", () => {
 
     it("skips ignored directories", () => {
       const root = makeTempDir("plannotator-workspace-skip-");
-      
+
       // Create node_modules with a fake .git (should be skipped)
       const nodeModules = join(root, "node_modules", "some-pkg");
       mkdirSync(nodeModules, { recursive: true });
       mkdirSync(join(nodeModules, ".git"), { recursive: true });
-      
+
       // Create a real repo
       const realRepo = join(root, "src");
       mkdirSync(realRepo, { recursive: true });
@@ -379,7 +379,7 @@ describe("review-workspace", () => {
 
     it("returns empty array when root has no git repos", () => {
       const root = makeTempDir("plannotator-workspace-empty-");
-      
+
       // Create some non-git directories
       mkdirSync(join(root, "src"), { recursive: true });
       mkdirSync(join(root, "docs"), { recursive: true });
@@ -392,15 +392,15 @@ describe("review-workspace", () => {
 
     it("sorts results alphabetically", () => {
       const root = makeTempDir("plannotator-workspace-sort-");
-      
+
       const zebra = join(root, "zebra");
       const alpha = join(root, "alpha");
       const beta = join(root, "beta");
-      
+
       mkdirSync(zebra, { recursive: true });
       mkdirSync(alpha, { recursive: true });
       mkdirSync(beta, { recursive: true });
-      
+
       initRepo(zebra);
       initRepo(alpha);
       initRepo(beta);
@@ -412,7 +412,7 @@ describe("review-workspace", () => {
 
     it("handles deeply nested repos", () => {
       const root = makeTempDir("plannotator-workspace-deep-");
-      
+
       const deepRepo = join(root, "a", "b", "c", "d", "repo");
       mkdirSync(deepRepo, { recursive: true });
       initRepo(deepRepo);

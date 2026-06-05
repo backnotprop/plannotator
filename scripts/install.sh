@@ -332,6 +332,11 @@ if command -v codex >/dev/null 2>&1 || codex_home_has_user_config; then
     codex_available=1
 fi
 
+kiro_available=0
+if command -v kiro-cli >/dev/null 2>&1 || [ -d "$HOME/.kiro" ]; then
+    kiro_available=1
+fi
+
 if [ "$codex_available" -eq 1 ]; then
     CODEX_DIR="$HOME/.codex"
     CODEX_CONFIG="$CODEX_DIR/config.toml"
@@ -772,6 +777,7 @@ if command -v git &>/dev/null; then
     CLAUDE_SKILLS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills"
     CODEX_SKILLS_DIR="$HOME/.codex/skills"
     AGENTS_SKILLS_DIR="$HOME/.agents/skills"
+    KIRO_SKILLS_DIR="$HOME/.kiro/skills"
     skills_tmp=$(mktemp -d)
 
     copy_skill_if_present() {
@@ -800,7 +806,7 @@ if command -v git &>/dev/null; then
         git clone --depth 1 --filter=blob:none --sparse \
             "https://github.com/${REPO}.git" --branch "$latest_tag" repo 2>/dev/null
         cd repo
-        git sparse-checkout set apps/skills 2>/dev/null
+        git sparse-checkout set apps/skills apps/kiro-cli 2>/dev/null
         [ -d "apps/skills" ]
         [ "$(ls -A apps/skills 2>/dev/null)" ]
         mkdir -p "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR"
@@ -813,6 +819,22 @@ if command -v git &>/dev/null; then
             copy_skill_if_present apps/skills/plannotator-review "$CODEX_SKILLS_DIR"
             copy_skill_if_present apps/skills/plannotator-annotate "$CODEX_SKILLS_DIR"
             copy_skill_if_present apps/skills/plannotator-last "$CODEX_SKILLS_DIR"
+        fi
+        if [ "$kiro_available" -eq 1 ] && [ -d "apps/kiro-cli/skills" ] && [ -n "$(ls -A apps/kiro-cli/skills 2>/dev/null)" ]; then
+            mkdir -p "$KIRO_SKILLS_DIR"
+            # Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
+            copy_skill_if_present apps/kiro-cli/skills/plannotator-review "$KIRO_SKILLS_DIR"
+            copy_skill_if_present apps/kiro-cli/skills/plannotator-annotate "$KIRO_SKILLS_DIR"
+            copy_skill_if_present apps/kiro-cli/skills/plannotator-archive "$KIRO_SKILLS_DIR"
+            # Shared skills come from apps/skills (not duplicated into apps/kiro-cli/skills).
+            copy_skill_if_present apps/skills/plannotator-setup-goal "$KIRO_SKILLS_DIR"
+            copy_skill_if_present apps/skills/plannotator-visual-explainer "$KIRO_SKILLS_DIR"
+            # Plannotator custom agent — don't clobber a user's existing one.
+            if [ ! -f "$HOME/.kiro/agents/plannotator.json" ] && [ -f "apps/kiro-cli/agents/plannotator.json" ]; then
+                mkdir -p "$HOME/.kiro/agents"
+                cp apps/kiro-cli/agents/plannotator.json "$HOME/.kiro/agents/plannotator.json"
+            fi
+            echo "Installed Kiro skills to ${KIRO_SKILLS_DIR}/ and agent to ~/.kiro/agents/plannotator.json"
         fi
     ); then
         if [ "$codex_available" -eq 1 ]; then
@@ -983,6 +1005,18 @@ if [ "$codex_available" -eq 1 ]; then
 else
     echo "Codex was not detected. After installing Codex, rerun this installer to add"
     echo "the Stop hook and Codex skills."
+fi
+echo ""
+echo "=========================================="
+echo "  KIRO CLI USERS"
+echo "=========================================="
+echo ""
+if [ "$kiro_available" -eq 1 ]; then
+    echo "Kiro skills are installed to ~/.kiro/skills/"
+    echo "The Plannotator agent is installed to ~/.kiro/agents/plannotator.json"
+    echo "Launch it: kiro-cli chat --agent plannotator"
+else
+    echo "Kiro was not detected. After installing Kiro, rerun this installer to add Kiro skills."
 fi
 echo ""
 echo "=========================================="

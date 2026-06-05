@@ -33,6 +33,7 @@ interface AllFilesDiffViewProps {
   lineDiffType?: 'word-alt' | 'word' | 'char' | 'none';
   disableLineNumbers?: boolean;
   disableBackground?: boolean;
+  expandUnchanged?: boolean;
   fontFamily?: string;
   fontSize?: string;
   viewedFiles: Set<string>;
@@ -73,6 +74,7 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
   lineDiffType,
   disableLineNumbers,
   disableBackground,
+  expandUnchanged,
   fontFamily,
   fontSize,
   viewedFiles,
@@ -460,6 +462,7 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
                   lineDiffType,
                   disableLineNumbers,
                   disableBackground,
+                  expandUnchanged,
                   hunkSeparators: 'line-info',
                   enableLineSelection: true,
                   enableGutterUtility: true,

@@ -45,6 +45,13 @@ export interface AnnotateServerOptions {
   mode?: "annotate" | "annotate-last" | "annotate-folder";
   /** Folder path when annotating a directory (used as projectRoot for file browser) */
   folderPath?: string;
+  /**
+   * Recent assistant messages for `annotate-last` mode (newest-first). When
+   * provided with more than one entry, the editor renders a picker so users
+   * can choose which message to annotate; index 0 is the default selection
+   * and matches the legacy "last message" behavior.
+   */
+  recentMessages?: { messageId: string; text: string; timestamp?: string }[];
   /** Whether URL sharing is enabled (default: true) */
   sharingEnabled?: boolean;
   /** Custom base URL for share links */
@@ -56,7 +63,7 @@ export interface AnnotateServerOptions {
   /** True when `markdown` was produced by Turndown/Jina (HTML or URL) —
    *  feedback line numbers won't match the original source. */
   sourceConverted?: boolean;
-  /** Enable review-gate UX: adds an Approve button alongside Close/Send Annotations (#570) */
+  /** Enable review-gate UX: adds an Approve button alongside Close/Send Annotations */
   gate?: boolean;
   /** Raw HTML content for direct iframe rendering (--render-html mode) */
   rawHtml?: string;
@@ -79,6 +86,8 @@ export interface AnnotateServerResult {
     annotations: unknown[];
     exit?: boolean;
     approved?: boolean;
+    selectedMessageId?: string;
+    feedbackScope?: "message" | "messages";
   }>;
   /** Stop the server */
   stop: () => void;
@@ -110,6 +119,7 @@ export async function startAnnotateServer(
     origin,
     mode = "annotate",
     folderPath,
+    recentMessages,
     sourceInfo,
     sourceConverted,
     sharingEnabled = true,
@@ -142,12 +152,16 @@ export async function startAnnotateServer(
     annotations: unknown[];
     exit?: boolean;
     approved?: boolean;
+    selectedMessageId?: string;
+    feedbackScope?: "message" | "messages";
   }) => void;
   const decisionPromise = new Promise<{
     feedback: string;
     annotations: unknown[];
     exit?: boolean;
     approved?: boolean;
+    selectedMessageId?: string;
+    feedbackScope?: "message" | "messages";
   }>((resolve) => {
     resolveDecision = resolve;
   });
@@ -183,6 +197,7 @@ export async function startAnnotateServer(
               projectRoot: folderPath || process.cwd(),
               isWSL: wslFlag,
               serverConfig: getServerConfig(gitUser),
+              ...(recentMessages ? { recentMessages } : {}),
             });
           }
 
@@ -280,7 +295,7 @@ export async function startAnnotateServer(
             return Response.json({ ok: true });
           }
 
-          // API: Approve the annotation session (review-gate UX, #570)
+          // API: Approve the annotation session (review-gate UX)
           if (url.pathname === "/api/approve" && req.method === "POST") {
             deleteDraft(draftKey);
             resolveDecision({ feedback: "", annotations: [], approved: true });
@@ -293,12 +308,16 @@ export async function startAnnotateServer(
               const body = (await req.json()) as {
                 feedback: string;
                 annotations: unknown[];
+                selectedMessageId?: string;
+                feedbackScope?: "message" | "messages";
               };
 
               deleteDraft(draftKey);
               resolveDecision({
                 feedback: body.feedback || "",
                 annotations: body.annotations || [],
+                selectedMessageId: body.selectedMessageId,
+                feedbackScope: body.feedbackScope,
               });
 
               return Response.json({ ok: true });

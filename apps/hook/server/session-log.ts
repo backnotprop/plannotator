@@ -68,6 +68,8 @@ export interface RenderedMessage {
   text: string;
   /** Line numbers in the JSONL where this message appeared */
   lineNumbers: number[];
+  /** Timestamp from the entry (ISO 8601), if available */
+  timestamp?: string;
 }
 
 // --- Session File Discovery ---
@@ -709,5 +711,83 @@ export function getLastRenderedMessage(
     return extractLastRenderedMessage(entries, entries.length);
   } catch {
     return null;
+  }
+}
+
+/**
+ * Extract up to `limit` of the most recent rendered assistant messages.
+ *
+ * Returned newest-first. Unlike `extractLastRenderedMessage`, this does not
+ * stop at turn boundaries (human prompts) — picker UIs want a flat list of
+ * recent assistant bubbles. Necessary for the rewind case: after `/rewind`,
+ * the message at the bottom of the terminal isn't the newest transcript
+ * entry, so the user needs to pick from a list.
+ *
+ * Chunks of a single API message (same message.id) are concatenated.
+ */
+export function extractRecentRenderedMessages(
+  entries: SessionLogEntry[],
+  beforeIndex: number,
+  limit: number,
+): RenderedMessage[] {
+  if (limit <= 0) return [];
+
+  // Map preserves insertion order — we walk backward, so first key inserted is
+  // newest. Each bucket collects the chunks of one API message (same message.id).
+  const buckets = new Map<
+    string,
+    { chunks: { texts: string[]; lineNum: number }[]; timestamp?: string }
+  >();
+
+  for (let i = beforeIndex - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (!entry) continue;
+
+    if (entry.type === "progress" || entry.type === "system") continue;
+    if (entry.type === "file-history-snapshot") continue;
+    if (entry.type === "queue-operation") continue;
+    if (getEntryRole(entry) !== "assistant") continue;
+    if (isHiddenTranscriptEntry(entry)) continue;
+
+    const texts = extractTextBlocks(entry);
+    if (texts.length === 0) continue;
+    const msgId = getEntryMessageId(entry);
+    if (!msgId) continue;
+
+    let bucket = buckets.get(msgId);
+    if (!bucket) {
+      if (buckets.size >= limit) continue;
+      const ts = typeof entry.timestamp === "string" ? entry.timestamp : undefined;
+      bucket = { chunks: [], timestamp: ts };
+      buckets.set(msgId, bucket);
+    }
+    bucket.chunks.push({ texts, lineNum: i + 1 });
+  }
+
+  return Array.from(buckets, ([messageId, b]) => {
+    // Walked backward, so reverse to restore chronological order within a message
+    const chrono = b.chunks.slice().reverse();
+    return {
+      messageId,
+      text: chrono.flatMap((e) => e.texts).join("\n"),
+      lineNumbers: chrono.map((e) => e.lineNum),
+      timestamp: b.timestamp,
+    };
+  });
+}
+
+/**
+ * High-level: read up to `limit` recent assistant messages from a session log.
+ */
+export function getRecentRenderedMessages(
+  logPath: string,
+  limit: number,
+): RenderedMessage[] {
+  try {
+    const content = readFileSync(logPath, "utf-8");
+    const entries = parseSessionLog(content);
+    return extractRecentRenderedMessages(entries, entries.length, limit);
+  } catch {
+    return [];
   }
 }

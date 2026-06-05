@@ -78,4 +78,3 @@ export {
   parseWorktreeDiffType,
   validateFilePath,
 } from "@plannotator/shared/vcs-core";
-

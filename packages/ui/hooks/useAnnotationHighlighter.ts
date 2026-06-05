@@ -111,6 +111,78 @@ export function useAnnotationHighlighter({
     const searchOnce = (needle: string): Range | null => {
       if (!needle || !containerRef.current) return null;
 
+      const rangeFromTextOffsets = (startIndex: number, endIndex: number): Range | null => {
+        const walker = document.createTreeWalker(
+          containerRef.current!,
+          NodeFilter.SHOW_TEXT,
+          null
+        );
+
+        let charCount = 0;
+        let startNode: Text | null = null;
+        let startOffset = 0;
+        let endNode: Text | null = null;
+        let endOffset = 0;
+        let node: Text | null;
+
+        while ((node = walker.nextNode() as Text | null)) {
+          const nodeLength = node.textContent?.length || 0;
+
+          if (!startNode && charCount + nodeLength > startIndex) {
+            startNode = node;
+            startOffset = startIndex - charCount;
+          }
+
+          if (startNode && charCount + nodeLength >= endIndex) {
+            endNode = node;
+            endOffset = endIndex - charCount;
+            break;
+          }
+
+          charCount += nodeLength;
+        }
+
+        if (startNode && endNode) {
+          const range = document.createRange();
+          range.setStart(startNode, startOffset);
+          range.setEnd(endNode, endOffset);
+          return range;
+        }
+
+        return null;
+      };
+
+      const normalizeWithMap = (text: string): { text: string; map: number[] } => {
+        let normalized = '';
+        const map: number[] = [];
+        let inWhitespace = false;
+
+        for (let i = 0; i < text.length; i++) {
+          const ch = text[i];
+          if (/\s/.test(ch)) {
+            if (!inWhitespace) {
+              normalized += ' ';
+              map.push(i);
+              inWhitespace = true;
+            }
+          } else {
+            normalized += ch;
+            map.push(i);
+            inWhitespace = false;
+          }
+        }
+
+        let start = 0;
+        let end = normalized.length;
+        while (start < end && normalized[start] === ' ') start++;
+        while (end > start && normalized[end - 1] === ' ') end--;
+
+        return {
+          text: normalized.slice(start, end),
+          map: map.slice(start, end),
+        };
+      };
+
       const walker = document.createTreeWalker(
         containerRef.current,
         NodeFilter.SHOW_TEXT,
@@ -131,42 +203,17 @@ export function useAnnotationHighlighter({
 
       const fullText = containerRef.current.textContent || '';
       const searchIndex = fullText.indexOf(needle);
-      if (searchIndex === -1) return null;
-
-      const walker2 = document.createTreeWalker(
-        containerRef.current,
-        NodeFilter.SHOW_TEXT,
-        null
-      );
-
-      let charCount = 0;
-      let startNode: Text | null = null;
-      let startOffset = 0;
-      let endNode: Text | null = null;
-      let endOffset = 0;
-
-      while ((node = walker2.nextNode() as Text | null)) {
-        const nodeLength = node.textContent?.length || 0;
-
-        if (!startNode && charCount + nodeLength > searchIndex) {
-          startNode = node;
-          startOffset = searchIndex - charCount;
-        }
-
-        if (startNode && charCount + nodeLength >= searchIndex + needle.length) {
-          endNode = node;
-          endOffset = searchIndex + needle.length - charCount;
-          break;
-        }
-
-        charCount += nodeLength;
+      if (searchIndex !== -1) {
+        return rangeFromTextOffsets(searchIndex, searchIndex + needle.length);
       }
 
-      if (startNode && endNode) {
-        const range = document.createRange();
-        range.setStart(startNode, startOffset);
-        range.setEnd(endNode, endOffset);
-        return range;
+      const haystack = normalizeWithMap(fullText);
+      const normalizedNeedle = normalizeWithMap(needle).text;
+      const normalizedIndex = haystack.text.indexOf(normalizedNeedle);
+      if (normalizedNeedle && normalizedIndex !== -1) {
+        const originalStart = haystack.map[normalizedIndex];
+        const originalEnd = haystack.map[normalizedIndex + normalizedNeedle.length - 1] + 1;
+        return rangeFromTextOffsets(originalStart, originalEnd);
       }
 
       return null;
@@ -257,6 +304,21 @@ export function useAnnotationHighlighter({
       } catch {}
       const existingManual = containerRef.current?.querySelector(`[data-bind-id="${ann.id}"]`);
       if (existingManual) return;
+
+      if (ann.startMeta && ann.endMeta) {
+        try {
+          highlighter.fromStore(ann.startMeta, ann.endMeta, ann.originalText, ann.id);
+          const restoredDoms = highlighter.getDoms(ann.id);
+          if (restoredDoms && restoredDoms.length > 0) {
+            if (ann.type === AnnotationType.DELETION) {
+              highlighter.addClass('deletion', ann.id);
+            } else if (ann.type === AnnotationType.COMMENT) {
+              highlighter.addClass('comment', ann.id);
+            }
+            return;
+          }
+        } catch {}
+      }
 
       const range = findTextInDOM(ann.originalText);
       if (!range) {
@@ -388,7 +450,8 @@ export function useAnnotationHighlighter({
 
     highlighterRef.current = highlighter;
 
-    highlighter.on(Highlighter.event.CREATE, ({ sources }: { sources: any[] }) => {
+    highlighter.on(Highlighter.event.CREATE, ({ sources, type }: { sources: any[]; type?: string }) => {
+      if (type === 'from-store') return;
       if (sources.length > 0) {
         const source = sources[0];
         const doms = highlighter.getDoms(source.id);

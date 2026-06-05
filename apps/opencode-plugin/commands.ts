@@ -150,9 +150,7 @@ export async function handleReviewCommand(
     opencodeClient: client,
     onReady: (url, isRemote, port) => {
       handleReviewServerReady(url, isRemote, port);
-      if (isRemote) {
-        client.app.log({ level: "info", message: `[Plannotator] Open in browser: ${url}` });
-      }
+      client.app.log({ level: "info", message: `[Plannotator] Open code review: ${url}` });
     },
   });
 
@@ -201,14 +199,14 @@ export async function handleAnnotateCommand(
 
   // @ts-ignore - Event properties contain arguments
   const rawArgs = event.properties?.arguments || event.arguments || "";
-  // #570: split --gate / --json out of the args; rest is the file path.
+  // Split known annotate flags out of the args; rest is the file path.
   // --json is accepted silently (OpenCode writes to session, not stdout).
   // parseAnnotateArgs strips leading @ on filePath (reference-mode convention).
   // `rawFilePath` preserves it for the scoped-package markdown fallback.
-  const { filePath, rawFilePath, gate, renderHtml: renderHtmlFlag } = parseAnnotateArgs(rawArgs);
+  const { filePath, rawFilePath, gate, renderHtml: renderHtmlFlag, noJina } = parseAnnotateArgs(rawArgs);
 
   if (!filePath) {
-    client.app.log({ level: "error", message: "Usage: /plannotator-annotate <file.md | file.html | https://... | folder/> [--gate] [--json]" });
+    client.app.log({ level: "error", message: "Usage: /plannotator-annotate <file.md | file.html | https://... | folder/> [--no-jina] [--gate] [--json]" });
     return;
   }
 
@@ -225,7 +223,7 @@ export async function handleAnnotateCommand(
   const isUrl = /^https?:\/\//i.test(filePath);
 
   if (isUrl) {
-    const useJina = resolveUseJina(false, loadConfig());
+    const useJina = resolveUseJina(noJina, loadConfig());
     client.app.log({ level: "info", message: `Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}...` });
     try {
       const result = await urlToMarkdown(filePath, { useJina });
@@ -324,9 +322,7 @@ export async function handleAnnotateCommand(
     htmlContent,
     onReady: (url, isRemote, port) => {
       handleAnnotateServerReady(url, isRemote, port);
-      if (isRemote) {
-        client.app.log({ level: "info", message: `[Plannotator] Open in browser: ${url}` });
-      }
+      client.app.log({ level: "info", message: `[Plannotator] Open annotation UI: ${url}` });
     },
   });
 
@@ -378,7 +374,7 @@ export async function handleAnnotateLastCommand(
 
   // @ts-ignore - Event properties contain arguments
   const rawArgs = event.properties?.arguments || event.arguments || "";
-  // #570: support --gate on /plannotator-last (Stop-hook review-gate pattern).
+  // Support --gate on /plannotator-last (Stop-hook review-gate pattern).
   const { gate } = parseAnnotateArgs(rawArgs);
 
   // @ts-ignore - Event properties contain sessionID
@@ -394,23 +390,25 @@ export async function handleAnnotateLastCommand(
   });
   const messages = messagesResponse.data;
 
-  // Walk backward, find last assistant message with text
-  let lastText: string | null = null;
+  const RECENT_LIMIT = 25;
+  const recentMessages: { messageId: string; text: string; timestamp?: string }[] = [];
   if (messages) {
-    for (let i = messages.length - 1; i >= 0; i--) {
+    for (let i = messages.length - 1; i >= 0 && recentMessages.length < RECENT_LIMIT; i--) {
       const msg = messages[i];
-      if (msg.info.role === "assistant") {
-        const textParts = msg.parts
-          .filter((p: any) => p.type === "text" && p.text?.trim())
-          .map((p: any) => p.text);
-        if (textParts.length > 0) {
-          lastText = textParts.join("\n");
-          break;
-        }
-      }
+      if (msg.info.role !== "assistant") continue;
+      const textParts = msg.parts
+        .filter((p: any) => p.type === "text" && p.text?.trim())
+        .map((p: any) => p.text);
+      if (textParts.length === 0) continue;
+      recentMessages.push({
+        messageId: msg.info.id ?? `opencode-${i}`,
+        text: textParts.join("\n"),
+        timestamp: msg.info.time?.created ? new Date(msg.info.time.created).toISOString() : undefined,
+      });
     }
   }
 
+  const lastText = recentMessages[0]?.text ?? null;
   if (!lastText) {
     client.app.log({ level: "error", message: "No assistant message found in session." });
     return null;
@@ -418,11 +416,14 @@ export async function handleAnnotateLastCommand(
 
   client.app.log({ level: "info", message: "Opening annotation UI for last message..." });
 
+  const pickerMessages = recentMessages.length > 1 ? recentMessages : undefined;
+
   const server = await startAnnotateServer({
     markdown: lastText,
     filePath: "last-message",
     origin: "opencode",
     mode: "annotate-last",
+    recentMessages: pickerMessages,
     sharingEnabled: await getSharingEnabled(),
     shareBaseUrl: getShareBaseUrl(),
     pasteApiUrl: getPasteApiUrl(),
@@ -430,9 +431,7 @@ export async function handleAnnotateLastCommand(
     htmlContent,
     onReady: (url, isRemote, port) => {
       handleAnnotateServerReady(url, isRemote, port);
-      if (isRemote) {
-        client.app.log({ level: "info", message: `[Plannotator] Open in browser: ${url}` });
-      }
+      client.app.log({ level: "info", message: `[Plannotator] Open annotation UI: ${url}` });
     },
   });
 
@@ -466,9 +465,7 @@ export async function handleArchiveCommand(
     htmlContent,
     onReady: (url, isRemote, port) => {
       handleServerReady(url, isRemote, port);
-      if (isRemote) {
-        client.app.log({ level: "info", message: `[Plannotator] Open in browser: ${url}` });
-      }
+      client.app.log({ level: "info", message: `[Plannotator] Open archive: ${url}` });
     },
   });
 

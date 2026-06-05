@@ -31,7 +31,7 @@ export interface AnnotateServerResult {
 	port: number;
 	portSource: "env" | "remote-default" | "random";
 	url: string;
-	waitForDecision: () => Promise<{ feedback: string; annotations: unknown[]; exit?: boolean; approved?: boolean }>;
+	waitForDecision: () => Promise<{ feedback: string; annotations: unknown[]; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>;
 	stop: () => void;
 }
 
@@ -42,6 +42,7 @@ export async function startAnnotateServer(options: {
 	origin?: string;
 	mode?: string;
 	folderPath?: string;
+	recentMessages?: { messageId: string; text: string; timestamp?: string }[];
 	sharingEnabled?: boolean;
 	shareBaseUrl?: string;
 	pasteApiUrl?: string;
@@ -66,12 +67,16 @@ export async function startAnnotateServer(options: {
 		annotations: unknown[];
 		exit?: boolean;
 		approved?: boolean;
+		selectedMessageId?: string;
+		feedbackScope?: "message" | "messages";
 	}) => void;
 	const decisionPromise = new Promise<{
 		feedback: string;
 		annotations: unknown[];
 		exit?: boolean;
 		approved?: boolean;
+		selectedMessageId?: string;
+		feedbackScope?: "message" | "messages";
 	}>((r) => {
 		resolveDecision = r;
 	});
@@ -112,6 +117,7 @@ export async function startAnnotateServer(options: {
 				repoInfo,
 				projectRoot: options.folderPath || process.cwd(),
 				serverConfig: getServerConfig(gitUser),
+				...(options.recentMessages ? { recentMessages: options.recentMessages } : {}),
 			});
 		} else if (url.pathname === "/api/config" && req.method === "POST") {
 			try {
@@ -165,6 +171,8 @@ export async function startAnnotateServer(options: {
 				resolveDecision({
 					feedback: (body.feedback as string) || "",
 					annotations: (body.annotations as unknown[]) || [],
+					selectedMessageId: typeof body.selectedMessageId === "string" ? body.selectedMessageId : undefined,
+					feedbackScope: body.feedbackScope === "messages" ? "messages" : body.feedbackScope === "message" ? "message" : undefined,
 				});
 				json(res, { ok: true });
 			} catch (err) {

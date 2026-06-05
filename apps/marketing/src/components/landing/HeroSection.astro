@@ -91,6 +91,15 @@ import AnnoReplace from './AnnoReplace.astro';
         </button>
         <button
           class="agent-btn"
+          data-agent="kiro"
+          data-command="curl -fsSL https://plannotator.ai/install.sh | bash"
+          data-video=""
+        >
+          <img src="/assets/icon-kiro.svg" alt="" class="w-4 h-4 rounded-sm" />
+          <span>Kiro</span>
+        </button>
+        <button
+          class="agent-btn"
           data-agent="opencode"
           data-command="curl -fsSL https://plannotator.ai/install.sh | bash"
           data-video="https://youtu.be/_N7uo0EFI-U"
@@ -255,6 +264,19 @@ import AnnoReplace from './AnnoReplace.astro';
         link: {
           text: 'Read the Amp install docs',
           url: '/docs/getting-started/installation/#amp'
+        }
+      },
+      kiro: {
+        steps: [
+          'kiro-cli chat --agent plannotator',
+          'plannotator-review',
+          'plannotator-annotate <file|folder|url>',
+          'plannotator-archive'
+        ],
+        detail: 'Skills-based integration. Installs review, annotation, and archive skills in Kiro:',
+        link: {
+          text: 'Read the Kiro install docs',
+          url: '/docs/guides/kiro-cli/'
         }
       },
       opencode: {

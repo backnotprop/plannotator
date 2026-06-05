@@ -160,13 +160,10 @@ export async function handleServerReady(
   port: number,
   options: ServerReadyOptions = {},
 ): Promise<void> {
-  const freshUrl = new URL(url);
-  freshUrl.searchParams.set("session", `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
-
   const readyFile = options.readyFile ?? process.env.PLANNOTATOR_READY_FILE;
   if (readyFile) {
     try {
-      writeServerReadyMetadata(readyFile, { url: freshUrl.toString(), isRemote, port });
+      writeServerReadyMetadata(readyFile, { url, isRemote, port });
     } catch (error) {
       if (options.readyFile) throw error;
       // Best effort: host plugins use this side channel to open the browser.
@@ -176,5 +173,5 @@ export async function handleServerReady(
   const skipBrowserOpen = options.skipBrowserOpen ?? process.env.PLANNOTATOR_SKIP_BROWSER_OPEN === "1";
   if (skipBrowserOpen) return;
 
-  await (options.openBrowser ?? openBrowserImpl)(freshUrl.toString(), { isRemote });
+  await (options.openBrowser ?? openBrowserImpl)(url, { isRemote, useGlimpse: true });
 }

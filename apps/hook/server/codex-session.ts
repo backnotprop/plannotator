@@ -342,6 +342,53 @@ export function getLastCodexMessage(
 }
 
 /**
+ * Extract up to `limit` of the most recent assistant messages from a Codex
+ * rollout file. Returned newest-first.
+ *
+ * Used by the picker UI to let users choose among recent messages rather
+ * than always defaulting to the newest transcript entry — which is incorrect
+ * after a /rewind.
+ */
+export interface CodexRecentMessage {
+  messageId: string;
+  text: string;
+  timestamp?: string;
+}
+
+export function getRecentCodexMessages(
+  rolloutPath: string,
+  limit: number,
+  options: GetLastCodexMessageOptions = {}
+): CodexRecentMessage[] {
+  if (limit <= 0) return [];
+  const entries = parseRolloutEntries(rolloutPath);
+  const activeTurnStart = options.beforeActiveTurn
+    ? findActiveTurnStartIndex(entries)
+    : -1;
+  const endIndex = activeTurnStart === -1 ? entries.length - 1 : activeTurnStart - 1;
+
+  const messages: CodexRecentMessage[] = [];
+  for (let i = endIndex; i >= 0; i--) {
+    if (messages.length >= limit) break;
+    const entry = entries[i];
+    if (entry.type !== "response_item") continue;
+    if (entry.payload?.type !== "message") continue;
+    if (entry.payload?.role !== "assistant") continue;
+
+    const text = getMessageText(entry, ["output_text"]);
+    if (!text) continue;
+    // Codex doesn't expose a stable message id in the rollout format we read,
+    // so fall back to an index-based id. Stable within a single rollout read.
+    messages.push({
+      messageId: `codex-msg-${i}`,
+      text,
+      timestamp: entry.timestamp,
+    });
+  }
+  return messages;
+}
+
+/**
  * Extract the latest Codex plan from a rollout file.
  *
  * Primary source: persisted completed TurnItem::Plan events.

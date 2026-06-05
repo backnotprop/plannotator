@@ -36,6 +36,7 @@ class ToolbarErrorBoundary extends React.Component<
 import { CommentPopover, type CommentAskAIContext } from './CommentPopover';
 import { TaterSpriteSitting } from './TaterSpriteSitting';
 import { AttachmentsButton } from './AttachmentsButton';
+import { MessagesIcon } from './icons/MessagesIcon';
 import { GraphvizBlock } from './GraphvizBlock';
 import { MermaidBlock } from './MermaidBlock';
 import { getImageSrc } from './ImageThumbnail';
@@ -93,6 +94,13 @@ interface ViewerProps {
   archiveInfo?: { status: 'approved' | 'denied' | 'unknown'; timestamp: string; title: string } | null;
   /** Source attribution for HTML/URL annotations (e.g. URL or filename) */
   sourceInfo?: string;
+  /**
+   * Message picker affordance — annotate-last mode only. Shown as a button in
+   * the sticky-top action bar so the user can switch to a different recent
+   * assistant message. Clicking opens the full picker in the left sidebar's
+   * Messages tab.
+   */
+  messagePickerInfo?: { current: number; total: number; onOpen: () => void };
   // Checkbox toggle props
   onToggleCheckbox?: (blockId: string, checked: boolean) => void;
   checkboxOverrides?: Map<string, boolean>;
@@ -169,6 +177,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   actionsLabelMode = 'full',
   archiveInfo,
   sourceInfo,
+  messagePickerInfo,
   onToggleCheckbox,
   checkboxOverrides,
   onAskAI,
@@ -549,6 +558,22 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 
         {/* Header buttons - top right */}
         <div data-print-hide data-sticky-actions className={`${stickyActions ? 'sticky top-3' : ''} z-30 float-right flex items-start gap-1 md:gap-2 rounded-lg p-1 md:p-2 transition-colors duration-150 ${isStuck ? 'bg-card/95 backdrop-blur-sm shadow-sm' : ''} -mr-3 mt-6 md:-mr-5 md:-mt-5 lg:-mr-7 lg:-mt-7 xl:-mr-9 xl:-mt-9`}>
+          {messagePickerInfo && (
+            <button
+              onClick={messagePickerInfo.onOpen}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors"
+              title="Pick a different message to annotate"
+            >
+              <MessagesIcon />
+              {actionsLabelMode === 'full' && (
+                <span>Message {messagePickerInfo.current} of {messagePickerInfo.total}</span>
+              )}
+              {actionsLabelMode === 'short' && (
+                <span>{messagePickerInfo.current}/{messagePickerInfo.total}</span>
+              )}
+            </button>
+          )}
+
           {/* Attachments button */}
           {onAddGlobalAttachment && onRemoveGlobalAttachment && (
             <AttachmentsButton

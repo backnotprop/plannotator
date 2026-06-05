@@ -14,6 +14,8 @@ import { TableOfContents } from "../TableOfContents";
 import { VersionBrowser } from "./VersionBrowser";
 import { FileBrowser } from "./FileBrowser";
 import { ArchiveBrowser, type ArchivedPlan } from "./ArchiveBrowser";
+import { MessagesBrowser, type PickerMessage } from "./MessagesBrowser";
+import { MessagesIcon } from "../icons/MessagesIcon";
 import { OverlayScrollArea } from "../OverlayScrollArea";
 
 interface SidebarContainerProps {
@@ -58,6 +60,11 @@ interface SidebarContainerProps {
   selectedArchiveFile: string | null;
   onArchiveSelect: (filename: string) => void;
   isLoadingArchive: boolean;
+  showMessagesTab?: boolean;
+  messages?: PickerMessage[];
+  selectedMessageId?: string | null;
+  onSelectMessage?: (messageId: string) => void;
+  messageAnnotationCounts?: Map<string, number>;
 }
 
 export const SidebarContainer: React.FC<SidebarContainerProps> = ({
@@ -97,6 +104,11 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
   selectedArchiveFile,
   onArchiveSelect,
   isLoadingArchive,
+  showMessagesTab,
+  messages,
+  selectedMessageId,
+  onSelectMessage,
+  messageAnnotationCounts,
 }) => {
   return (
     <aside
@@ -145,6 +157,15 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
               </svg>
             }
             label="Versions"
+          />
+        )}
+        {showMessagesTab && (
+          <TabButton
+            active={activeTab === "messages"}
+            onClick={() => onTabChange("messages")}
+            icon={<MessagesIcon className="w-3 h-3" />}
+            label="Messages"
+            badge={messageAnnotationCounts !== undefined && messageAnnotationCounts.size > 0}
           />
         )}
         {showFilesTab && (
@@ -264,6 +285,14 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
             selectedFile={selectedArchiveFile}
             onSelect={onArchiveSelect}
             isLoading={isLoadingArchive}
+          />
+        )}
+        {activeTab === "messages" && showMessagesTab && messages && onSelectMessage && (
+          <MessagesBrowser
+            messages={messages}
+            selectedMessageId={selectedMessageId ?? null}
+            onSelect={onSelectMessage}
+            annotationCounts={messageAnnotationCounts}
           />
         )}
       </OverlayScrollArea>

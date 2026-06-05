@@ -80,6 +80,29 @@ describe("install.sh", () => {
     expect(script).toContain('Skipping skills install (git not found)');
   });
 
+  test("auto-installs Kiro skills when ~/.kiro is detected (no flag)", () => {
+    // Auto-detected like Codex/Gemini — never gated behind a bespoke flag.
+    expect(script).toContain("kiro_available=0");
+    expect(script).toContain('[ -d "$HOME/.kiro" ]');
+    expect(script).toContain("KIRO_SKILLS_DIR");
+    expect(script).toContain("$HOME/.kiro/skills");
+    expect(script).toContain('if [ "$kiro_available" -eq 1 ]');
+    // Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
+    expect(script).toContain('copy_skill_if_present apps/kiro-cli/skills/plannotator-review "$KIRO_SKILLS_DIR"');
+    expect(script).toContain('copy_skill_if_present apps/kiro-cli/skills/plannotator-annotate "$KIRO_SKILLS_DIR"');
+    expect(script).toContain('copy_skill_if_present apps/kiro-cli/skills/plannotator-archive "$KIRO_SKILLS_DIR"');
+    // Shared skills come from apps/skills (not duplicated into apps/kiro-cli/skills).
+    expect(script).toContain('copy_skill_if_present apps/skills/plannotator-setup-goal "$KIRO_SKILLS_DIR"');
+    expect(script).toContain('copy_skill_if_present apps/skills/plannotator-visual-explainer "$KIRO_SKILLS_DIR"');
+    // sparse-checkout fetches apps/kiro-cli (skills + agent example).
+    expect(script).toContain("git sparse-checkout set apps/skills apps/kiro-cli");
+    // The installer also writes the example custom agent to ~/.kiro/agents.
+    expect(script).toContain('cp apps/kiro-cli/agents/plannotator.json "$HOME/.kiro/agents/plannotator.json"');
+    // Parity: no bespoke flag, like every other agent.
+    expect(script).not.toContain("--kiro");
+    expect(script).not.toContain("INSTALL_KIRO");
+  });
+
   test("cleans only legacy command-overlap agent skills", () => {
     expect(script).toContain("LEGACY_AGENTS_SKILLS_DIR");
     expect(script).toContain("plannotator-review plannotator-annotate plannotator-last");

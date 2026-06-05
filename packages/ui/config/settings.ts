@@ -175,6 +175,21 @@ export const SETTINGS = {
     toServer: (v: boolean) => ({ diffOptions: { hideWhitespace: v } }),
   },
 
+  diffExpandUnchanged: {
+    defaultValue: false as boolean,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-expand-unchanged');
+      return v === 'true' ? true : v === 'false' ? false : undefined;
+    },
+    toCookie: (v: boolean) => storage.setItem('plannotator-diff-expand-unchanged', String(v)),
+    serverKey: 'diffOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = (sc.diffOptions as Record<string, unknown> | undefined)?.expandUnchanged;
+      return typeof v === 'boolean' ? v : undefined;
+    },
+    toServer: (v: boolean) => ({ diffOptions: { expandUnchanged: v } }),
+  },
+
   diffFontSize: {
     defaultValue: '' as string, // empty = theme default
     fromCookie: () => storage.getItem('plannotator-diff-font-size') || undefined,
