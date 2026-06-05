@@ -9,7 +9,6 @@ import {
 import {
   WorkspaceReviewSession,
   type WorkspaceReviewBuildOptions,
-  type WorkspaceRepoRuntimeState,
 } from "@plannotator/shared/review-workspace";
 
 export {
@@ -46,12 +45,4 @@ export async function buildLocalWorkspaceReview(
   options: WorkspaceReviewBuildOptions = {},
 ): Promise<WorkspaceReviewSession> {
   return WorkspaceReviewSession.create(workspaceRuntime, root, options);
-}
-
-export async function buildWorkspaceLocalRepos(
-  root: string,
-  options: WorkspaceReviewBuildOptions = {},
-): Promise<WorkspaceRepoRuntimeState[]> {
-  const session = await buildLocalWorkspaceReview(root, options);
-  return session.repos;
 }

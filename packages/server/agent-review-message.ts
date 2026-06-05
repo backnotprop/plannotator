@@ -5,21 +5,14 @@ import {
   type DiffType,
 } from "./vcs";
 import type { PRMetadata } from "./pr";
+import type { WorkspaceReviewPromptContext } from "@plannotator/shared/review-workspace";
+
+export type { WorkspaceReviewPromptContext } from "@plannotator/shared/review-workspace";
 
 export interface AgentReviewUserMessageOptions {
   defaultBranch?: string;
   hasLocalAccess?: boolean;
   prDiffScope?: string;
-}
-
-export interface WorkspaceReviewPromptContext {
-  root: string;
-  repos: Array<{
-    label: string;
-    cwd: string;
-    vcsType?: "git" | "jj";
-    gitRef?: string;
-  }>;
 }
 
 export type AgentReviewTarget =
@@ -53,7 +46,11 @@ export function buildWorkspacePromptContextLines(
 ): string[] {
   const repoList = workspace.repos.length > 0
     ? workspace.repos
-      .map((repo) => `- ${repo.label}/${repo.vcsType ? ` [${repo.vcsType}]` : ""} -> ${repo.cwd}${repo.gitRef ? ` (${repo.gitRef})` : ""}`)
+      .map((repo) => {
+        const status = repo.changed ? "changed" : "failed";
+        const details = [repo.vcsType, status].filter(Boolean).join(", ");
+        return `- ${repo.label}/${details ? ` [${details}]` : ""} -> ${repo.cwd}${repo.gitRef ? ` (${repo.gitRef})` : ""}${repo.error ? ` - ${repo.changed ? "warning" : "error"}: ${repo.error}` : ""}`;
+      })
       .join("\n")
     : "- No changed child repositories were detected.";
 
@@ -61,6 +58,7 @@ export function buildWorkspacePromptContextLines(
     `You are starting in the workspace root: ${workspace.root}`,
     "The workspace root is not itself the VCS repository for these changes.",
     "Each changed path in the diff is prefixed with the child repository folder, such as `api/src/file.ts`.",
+    "If any repository is marked failed, treat this as a partial workspace review and say so.",
     "For Git child repos, inspect with `git -C <child-repo-folder> ...` from the workspace root.",
     "For JJ child repos, treat the inline diff and prefixed files as authoritative review context.",
   ];

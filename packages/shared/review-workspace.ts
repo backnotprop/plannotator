@@ -23,12 +23,10 @@ export interface WorkspaceRepoState {
   label: string;
   cwd: string;
   selected: boolean;
-  source: "local";
   vcsType?: WorkspaceChildVcsType;
   diffType?: DiffType;
   gitContext?: GitContext;
   diffOptions?: DiffOption[];
-  platformUser: string | null;
   error?: string;
 }
 
@@ -74,8 +72,10 @@ export interface WorkspaceReviewBuildOptions {
 export interface WorkspacePromptRepoContext {
   label: string;
   cwd: string;
+  changed: boolean;
   vcsType?: WorkspaceChildVcsType;
   gitRef?: string;
+  error?: string;
 }
 
 export interface WorkspaceReviewPromptContext {
@@ -278,11 +278,9 @@ export class WorkspaceReviewSession implements WorkspaceReviewState {
           label,
           cwd,
           selected: false,
-          source: "local",
           vcsType,
           gitContext,
           diffOptions: gitContext.diffOptions,
-          platformUser: null,
           rawPatch: "",
           gitRef: "",
         } satisfies WorkspaceRepoRuntimeState;
@@ -292,8 +290,6 @@ export class WorkspaceReviewSession implements WorkspaceReviewState {
           label,
           cwd,
           selected: false,
-          source: "local",
-          platformUser: null,
           rawPatch: "",
           gitRef: "",
           error: error instanceof Error ? error.message : String(error),
@@ -385,12 +381,14 @@ export class WorkspaceReviewSession implements WorkspaceReviewState {
     return {
       root: this.root,
       repos: this.repos
-        .filter((repo) => repo.selected && repo.rawPatch.trim())
+        .filter((repo) => (repo.selected && repo.rawPatch.trim()) || repo.error)
         .map((repo) => ({
           label: repo.label,
           cwd: repo.cwd,
+          changed: repo.selected && !!repo.rawPatch.trim(),
           vcsType: repo.vcsType,
           gitRef: repo.gitRef,
+          error: repo.error,
         })),
     };
   }

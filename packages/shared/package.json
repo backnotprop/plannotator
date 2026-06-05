@@ -6,6 +6,7 @@
     "./agents": "./agents.ts",
     "./compress": "./compress.ts",
     "./crypto": "./crypto.ts",
+    "./diff-paths": "./diff-paths.ts",
     "./feedback-templates": "./feedback-templates.ts",
     "./jj-core": "./jj-core.ts",
     "./review-core": "./review-core.ts",

@@ -1,6 +1,15 @@
 import { existsSync, readdirSync, type Dirent } from "node:fs";
 import { basename, relative, resolve } from "node:path";
 
+import {
+  formatDiffMetadataPathToken,
+  formatPatchPathToken,
+  parseDiffFilePathLines,
+  parseDiffGitHeader,
+  parseDiffMetadataPathLines,
+  parseDiffMetadataPathToken,
+  parsePatchPathToken,
+} from "./diff-paths";
 import { validateFilePath } from "./review-core";
 
 const SKIP_DIRS = new Set([
@@ -43,136 +52,10 @@ export function normalizeWorkspacePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\/+/, "");
 }
 
-function unquoteGitPath(value: string): string {
-  if (!value.startsWith('"') || !value.endsWith('"')) return value;
-  try {
-    return JSON.parse(value) as string;
-  } catch {
-    return value.slice(1, -1)
-      .replace(/\\"/g, '"')
-      .replace(/\\\\/g, "\\")
-      .replace(/\\t/g, "\t")
-      .replace(/\\n/g, "\n");
-  }
-}
-
-function quoteGitPath(value: string): string {
-  if (!/[\s"\\]/.test(value)) return value;
-  return JSON.stringify(value);
-}
-
-function parsePatchPathToken(token: string, side: "a" | "b"): string | null {
-  if (token === "/dev/null") return "/dev/null";
-  const unquoted = unquoteGitPath(token);
-  const prefix = `${side}/`;
-  return unquoted.startsWith(prefix) ? unquoted.slice(prefix.length) : null;
-}
-
-function scanHeaderToken(input: string): { token: string; rest: string } | null {
-  const trimmed = input.trimStart();
-  if (!trimmed) return null;
-
-  if (trimmed.startsWith('"')) {
-    let escaped = false;
-    for (let i = 1; i < trimmed.length; i += 1) {
-      const char = trimmed[i];
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (char === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (char === '"') {
-        return { token: trimmed.slice(0, i + 1), rest: trimmed.slice(i + 1) };
-      }
-    }
-    return null;
-  }
-
-  const space = trimmed.indexOf(" ");
-  if (space === -1) return { token: trimmed, rest: "" };
-  return { token: trimmed.slice(0, space), rest: trimmed.slice(space + 1) };
-}
-
-function parseDiffGitHeader(line: string): { oldPath?: string; newPath?: string } {
-  const prefix = "diff --git ";
-  if (!line.startsWith(prefix)) return {};
-
-  const rest = line.slice(prefix.length);
-  if (rest.trimStart().startsWith('"')) {
-    const first = scanHeaderToken(rest);
-    const second = first ? scanHeaderToken(first.rest) : null;
-    if (first && second) {
-      const oldPath = parsePatchPathToken(first.token, "a");
-      const newPath = parsePatchPathToken(second.token, "b");
-      return {
-        oldPath: oldPath && oldPath !== "/dev/null" ? oldPath : undefined,
-        newPath: newPath && newPath !== "/dev/null" ? newPath : undefined,
-      };
-    }
-  }
-
-  const match = line.match(/^diff --git a\/(.+) b\/(.+)$/);
-  if (!match) return {};
-  return { oldPath: match[1], newPath: match[2] };
-}
-
-function formatPatchPathToken(side: "a" | "b", filePath: string): string {
-  if (filePath === "/dev/null") return filePath;
-  return quoteGitPath(`${side}/${filePath}`);
-}
-
-function parseMetadataPathToken(token: string): string {
-  if (token === "/dev/null") return token;
-  return unquoteGitPath(token);
-}
-
-function formatMetadataPathToken(filePath: string): string {
-  if (filePath === "/dev/null") return filePath;
-  return quoteGitPath(filePath);
-}
-
 function prefixRepoPath(label: string, filePath: string): string {
   if (filePath === "/dev/null") return filePath;
   const normalizedFilePath = normalizeWorkspacePath(filePath);
   return `${normalizeWorkspacePath(label)}/${normalizedFilePath}`;
-}
-
-export function parseDiffFilePathLines(lines: string[]): { oldPath?: string; newPath?: string } {
-  let oldPath: string | undefined;
-  let newPath: string | undefined;
-
-  for (const line of lines) {
-    if (line.startsWith("@@ ") || line === "GIT binary patch") break;
-    if (line.startsWith("--- ")) {
-      const parsed = parsePatchPathToken(line.slice(4), "a");
-      if (parsed && parsed !== "/dev/null") oldPath = parsed;
-    } else if (line.startsWith("+++ ")) {
-      const parsed = parsePatchPathToken(line.slice(4), "b");
-      if (parsed && parsed !== "/dev/null") newPath = parsed;
-    }
-  }
-
-  return { oldPath, newPath };
-}
-
-function parseDiffMetadataPathLines(lines: string[]): { oldPath?: string; newPath?: string } {
-  let oldPath: string | undefined;
-  let newPath: string | undefined;
-
-  for (const line of lines) {
-    if (line.startsWith("rename from ") || line.startsWith("copy from ")) {
-      const parsed = parseMetadataPathToken(line.slice(line.indexOf(" from ") + " from ".length));
-      if (parsed !== "/dev/null") oldPath = parsed;
-    } else if (line.startsWith("rename to ") || line.startsWith("copy to ")) {
-      const parsed = parseMetadataPathToken(line.slice(line.indexOf(" to ") + " to ".length));
-      if (parsed !== "/dev/null") newPath = parsed;
-    }
-  }
-
-  return { oldPath, newPath };
 }
 
 function rewritePatchLine(line: string, label: string): string {
@@ -191,24 +74,24 @@ function rewritePatchLine(line: string, label: string): string {
   }
 
   if (line.startsWith("rename from ")) {
-    const parsed = parseMetadataPathToken(line.slice("rename from ".length));
+    const parsed = parseDiffMetadataPathToken(line.slice("rename from ".length));
     if (parsed === "/dev/null") return line;
-    return `rename from ${formatMetadataPathToken(prefixRepoPath(label, parsed))}`;
+    return `rename from ${formatDiffMetadataPathToken(prefixRepoPath(label, parsed))}`;
   }
   if (line.startsWith("rename to ")) {
-    const parsed = parseMetadataPathToken(line.slice("rename to ".length));
+    const parsed = parseDiffMetadataPathToken(line.slice("rename to ".length));
     if (parsed === "/dev/null") return line;
-    return `rename to ${formatMetadataPathToken(prefixRepoPath(label, parsed))}`;
+    return `rename to ${formatDiffMetadataPathToken(prefixRepoPath(label, parsed))}`;
   }
   if (line.startsWith("copy from ")) {
-    const parsed = parseMetadataPathToken(line.slice("copy from ".length));
+    const parsed = parseDiffMetadataPathToken(line.slice("copy from ".length));
     if (parsed === "/dev/null") return line;
-    return `copy from ${formatMetadataPathToken(prefixRepoPath(label, parsed))}`;
+    return `copy from ${formatDiffMetadataPathToken(prefixRepoPath(label, parsed))}`;
   }
   if (line.startsWith("copy to ")) {
-    const parsed = parseMetadataPathToken(line.slice("copy to ".length));
+    const parsed = parseDiffMetadataPathToken(line.slice("copy to ".length));
     if (parsed === "/dev/null") return line;
-    return `copy to ${formatMetadataPathToken(prefixRepoPath(label, parsed))}`;
+    return `copy to ${formatDiffMetadataPathToken(prefixRepoPath(label, parsed))}`;
   }
 
   return line;

@@ -74,8 +74,8 @@ describe("buildAgentReviewUserMessage", () => {
       workspace: {
         root: "/tmp/workspace",
         repos: [
-          { label: "api", cwd: "/tmp/workspace/api", vcsType: "git", gitRef: "Uncommitted changes" },
-          { label: "web", cwd: "/tmp/workspace/web", vcsType: "jj", gitRef: "Uncommitted changes" },
+          { label: "api", cwd: "/tmp/workspace/api", changed: true, vcsType: "git", gitRef: "Uncommitted changes" },
+          { label: "web", cwd: "/tmp/workspace/web", changed: true, vcsType: "jj", gitRef: "Uncommitted changes" },
         ],
       },
     });
@@ -83,11 +83,28 @@ describe("buildAgentReviewUserMessage", () => {
     expect(message).toContain("multiple nested VCS repositories");
     expect(message).toContain("workspace root: /tmp/workspace");
     expect(message).toContain("api/src/file.ts");
-    expect(message).toContain("- api/ [git] -> /tmp/workspace/api");
-    expect(message).toContain("- web/ [jj] -> /tmp/workspace/web");
+    expect(message).toContain("- api/ [git, changed] -> /tmp/workspace/api");
+    expect(message).toContain("- web/ [jj, changed] -> /tmp/workspace/web");
     expect(message).toContain("git -C <child-repo-folder>");
     expect(message).toContain("JJ child repos");
     expect(message).toContain(patch);
+  });
+
+  test("discloses failed child repositories in workspace review instructions", () => {
+    const message = buildAgentReviewUserMessageForTarget({
+      kind: "workspace",
+      patch,
+      workspace: {
+        root: "/tmp/workspace",
+        repos: [
+          { label: "api", cwd: "/tmp/workspace/api", changed: true, vcsType: "git", gitRef: "Uncommitted changes" },
+          { label: "web", cwd: "/tmp/workspace/web", changed: false, error: "Git workspace not found." },
+        ],
+      },
+    });
+
+    expect(message).toContain("partial workspace review");
+    expect(message).toContain("- web/ [failed] -> /tmp/workspace/web - error: Git workspace not found.");
   });
 });
 

@@ -111,6 +111,14 @@ describe("exportReviewFeedback - workspace mode", () => {
     expect(exportReviewFeedback([], undefined)).toBe("# Code Review\n\nNo feedback provided.");
   });
 
+  it("describes exact workspace diff mode in feedback context", () => {
+    const staged = exportReviewFeedback([ann()], undefined, { mode: "workspace-staged" });
+    const last = exportReviewFeedback([ann()], undefined, { mode: "workspace-last" });
+
+    expect(staged).toContain("**Diff:** Workspace staged changes");
+    expect(last).toContain("**Diff:** Workspace last change");
+  });
+
   it("contains exactly one top-level heading in workspace mode", () => {
     const result = exportReviewFeedback([
       ann({ filePath: "repo-a/src/a.ts" }),

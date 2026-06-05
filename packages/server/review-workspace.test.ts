@@ -274,8 +274,8 @@ describe("review-workspace", () => {
   describe("resolveWorkspaceFilePath", () => {
     it("resolves the longest matching repo label first", () => {
       const repos = [
-        { id: "1", label: "apps", cwd: "/tmp/apps", selected: true, source: "local", rawPatch: "", gitRef: "" },
-        { id: "2", label: "apps/api", cwd: "/tmp/apps-api", selected: true, source: "local", rawPatch: "", gitRef: "" },
+        { id: "1", label: "apps", cwd: "/tmp/apps", selected: true, rawPatch: "", gitRef: "" },
+        { id: "2", label: "apps/api", cwd: "/tmp/apps-api", selected: true, rawPatch: "", gitRef: "" },
       ] as WorkspaceRepoRuntimeState[];
 
       const resolved = resolveWorkspaceFilePath(repos, "apps/api/src/index.ts");
@@ -286,7 +286,7 @@ describe("review-workspace", () => {
 
     it("returns null when no repo matches", () => {
       const repos = [
-        { id: "1", label: "frontend", cwd: "/tmp/frontend", selected: true, source: "local", rawPatch: "", gitRef: "" },
+        { id: "1", label: "frontend", cwd: "/tmp/frontend", selected: true, rawPatch: "", gitRef: "" },
       ] as WorkspaceRepoRuntimeState[];
 
       const resolved = resolveWorkspaceFilePath(repos, "backend/src/index.ts");
@@ -296,7 +296,7 @@ describe("review-workspace", () => {
 
     it("handles exact label matches", () => {
       const repos = [
-        { id: "1", label: "repo-a", cwd: "/tmp/repo-a", selected: true, source: "local", rawPatch: "", gitRef: "" },
+        { id: "1", label: "repo-a", cwd: "/tmp/repo-a", selected: true, rawPatch: "", gitRef: "" },
       ] as WorkspaceRepoRuntimeState[];
 
       const resolved = resolveWorkspaceFilePath(repos, "repo-a/file.ts");
@@ -307,7 +307,7 @@ describe("review-workspace", () => {
 
     it("rejects bare repo labels", () => {
       const repos = [
-        { id: "1", label: "repo-a", cwd: "/tmp/repo-a", selected: true, source: "local", rawPatch: "", gitRef: "" },
+        { id: "1", label: "repo-a", cwd: "/tmp/repo-a", selected: true, rawPatch: "", gitRef: "" },
       ] as WorkspaceRepoRuntimeState[];
 
       const resolved = resolveWorkspaceFilePath(repos, "repo-a");
@@ -317,7 +317,7 @@ describe("review-workspace", () => {
 
     it("validates file paths for directory traversal attacks", () => {
       const repos = [
-        { id: "1", label: "repo", cwd: "/tmp/repo", selected: true, source: "local", rawPatch: "", gitRef: "" },
+        { id: "1", label: "repo", cwd: "/tmp/repo", selected: true, rawPatch: "", gitRef: "" },
       ] as WorkspaceRepoRuntimeState[];
 
       expect(() => resolveWorkspaceFilePath(repos, "repo/../../../etc/passwd")).toThrow();
@@ -468,8 +468,8 @@ describe("review-workspace", () => {
       // The label building logic is internal, but we verify it works
       // through resolveWorkspaceFilePath tests with realistic labels
       const repos = [
-        { id: "1", label: "packages/frontend", cwd: "/tmp/packages/frontend", selected: true, source: "local", rawPatch: "", gitRef: "" },
-        { id: "2", label: "packages/backend", cwd: "/tmp/packages/backend", selected: true, source: "local", rawPatch: "", gitRef: "" },
+        { id: "1", label: "packages/frontend", cwd: "/tmp/packages/frontend", selected: true, rawPatch: "", gitRef: "" },
+        { id: "2", label: "packages/backend", cwd: "/tmp/packages/backend", selected: true, rawPatch: "", gitRef: "" },
       ] as WorkspaceRepoRuntimeState[];
 
       const resolved1 = resolveWorkspaceFilePath(repos, "packages/frontend/src/index.ts");
@@ -483,8 +483,8 @@ describe("review-workspace", () => {
       // When two repos have the same basename but different paths,
       // the second should get a numbered suffix
       const repos = [
-        { id: "1", label: "api", cwd: "/tmp/apps/api", selected: true, source: "local", rawPatch: "", gitRef: "" },
-        { id: "2", label: "api-2", cwd: "/tmp/services/api", selected: true, source: "local", rawPatch: "", gitRef: "" },
+        { id: "1", label: "api", cwd: "/tmp/apps/api", selected: true, rawPatch: "", gitRef: "" },
+        { id: "2", label: "api-2", cwd: "/tmp/services/api", selected: true, rawPatch: "", gitRef: "" },
       ] as WorkspaceRepoRuntimeState[];
 
       const resolved = resolveWorkspaceFilePath(repos, "api-2/src/index.ts");
@@ -670,6 +670,10 @@ describe("review-workspace", () => {
       expect(workspace.diffOptions.map((option) => option.id)).toContain("workspace-staged");
       expect(workspace.rawPatch).toContain("diff --git a/api/src/file.ts b/api/src/file.ts");
       expect(workspace.error).toContain("broken repo");
+      expect(workspace.getPromptContext().repos).toEqual([
+        expect.objectContaining({ label: "api", changed: true }),
+        expect.objectContaining({ label: "broken", changed: false, error: "broken repo" }),
+      ]);
     });
 
     it("passes hide-whitespace through child repo diffs", async () => {

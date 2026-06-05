@@ -327,7 +327,7 @@ export async function startReviewServer(options: {
 			const launchPrUrl = prMeta?.url;
 			const launchDiffScope = isPRMode ? currentPRDiffScope : undefined;
 			const diffContext: AgentJobInfo["diffContext"] | undefined = workspacePrompt
-				? { mode: "workspace", worktreePath: null }
+				? { mode: String(currentDiffType), worktreePath: null }
 				: prMeta
 				? undefined
 				: {
