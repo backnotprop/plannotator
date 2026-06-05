@@ -783,28 +783,12 @@ REM Claude Code commands are deprecated in favor of skills. Remove a legacy
 REM command file only once its replacement skill is actually on disk — running
 REM AFTER the install above guarantees a failed or skipped skill install never
 REM leaves users with neither the command nor the skill.
-REM Older marketplace plugin versions shipped their own commands dir (the
-REM namespaced plannotator:* entries); newer plugin versions are hooks-only.
-REM We already manage hooks.json inside this same checkout, so remove the
-REM stale plugin command files too — same replacement-skill guard.
-if defined CLAUDE_CONFIG_DIR (
-    set "PLUGIN_COMMANDS_DIR=%CLAUDE_CONFIG_DIR%\plugins\marketplaces\plannotator\apps\hook\commands"
-) else (
-    set "PLUGIN_COMMANDS_DIR=%USERPROFILE%\.claude\plugins\marketplaces\plannotator\apps\hook\commands"
-)
 for %%C in (plannotator-review plannotator-annotate plannotator-last plannotator-archive) do (
-    if exist "!CLAUDE_SKILLS_DIR!\%%C" (
-        if exist "!CLAUDE_COMMANDS_DIR!\%%C.md" (
-            del /q "!CLAUDE_COMMANDS_DIR!\%%C.md" >nul 2>&1
-            echo Removed deprecated Claude command !CLAUDE_COMMANDS_DIR!\%%C.md ^(replaced by the %%C skill^)
-        )
-        if exist "!PLUGIN_COMMANDS_DIR!\%%C.md" (
-            del /q "!PLUGIN_COMMANDS_DIR!\%%C.md" >nul 2>&1
-            echo Removed stale plugin command !PLUGIN_COMMANDS_DIR!\%%C.md ^(plugin is hooks-only now^)
-        )
+    if exist "!CLAUDE_SKILLS_DIR!\%%C" if exist "!CLAUDE_COMMANDS_DIR!\%%C.md" (
+        del /q "!CLAUDE_COMMANDS_DIR!\%%C.md" >nul 2>&1
+        echo Removed deprecated Claude command !CLAUDE_COMMANDS_DIR!\%%C.md ^(replaced by the %%C skill^)
     )
 )
-rmdir "!PLUGIN_COMMANDS_DIR!" >nul 2>&1
 
 REM Codex no longer hosts core skills (they live in %%USERPROFILE%%\.agents\skills).
 REM Core skills are removed only once their replacement exists; the stale
@@ -949,8 +933,8 @@ echo Then install the Claude Code plugin:
 echo   /plugin marketplace add backnotprop/plannotator
 echo   /plugin install plannotator@plannotator
 echo.
-echo Upgrading from an older version? Run /plugin marketplace update to pull
-echo the latest hooks-only plugin ^(stale plugin commands are cleaned up here^).
+echo Upgrading from an older version? Also run /plugin marketplace update
+echo so the plugin drops its old plannotator:* command entries.
 echo.
 echo The /plannotator-review, /plannotator-annotate, /plannotator-last, and /plannotator-archive skills are ready to use!
 if not "!EXTRAS_CHOICE!"=="yes" (

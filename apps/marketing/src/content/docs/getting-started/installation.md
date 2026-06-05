@@ -113,7 +113,7 @@ claude --plugin-dir ./apps/hook
 
 Plannotator's slash commands (`/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`, `/plannotator-archive`) are installed as Claude Code skills in `~/.claude/skills` by the install script — Claude Code skills are user-invocable by directory name, so the command names are unchanged. There is no separate `~/.claude/commands` step.
 
-Upgrading from an older version? The installer removes the legacy `~/.claude/commands/plannotator-*.md` files **and** the old namespaced `plannotator:*` command files from the installed plugin automatically (both only once the replacement skills are on disk). Restart Claude Code afterward, and run `/plugin marketplace update` when convenient to pull the latest hooks-only plugin.
+Upgrading from an older version? The installer removes the legacy `~/.claude/commands/plannotator-*.md` files automatically, but the marketplace plugin's old namespaced `plannotator:*` command entries are managed by Claude Code — run `/plugin marketplace update` once so they disappear from the `/` menu.
 
 Optional extra skills (compound planning, setup-goal, visual explainer) are not installed by default. Add them with:
 
