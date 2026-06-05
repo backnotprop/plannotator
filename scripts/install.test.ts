@@ -88,8 +88,30 @@ describe("install.sh", () => {
     // Extras are not default-installed anywhere except Kiro.
     expect(script).not.toContain("copy_skill_if_present apps/skills/extra/plannotator-compound");
     expect(script).not.toContain('cp -r apps/skills/* "$CLAUDE_SKILLS_DIR/"');
-    // git gate uses the spec's warning text.
-    expect(script).toContain("git required for command/skill install — skipped");
+    // Missing git is a hard failure with an actionable message, not a silent
+    // skip — the legacy commands are gone, so a no-skill install is broken.
+    expect(script).toContain("Error: git is required to install Plannotator's skills and slash commands.");
+    expect(script).toContain("Install git, then run this installer again.");
+  });
+
+  test("legacy Claude command cleanup is guarded on the replacement skill", () => {
+    // A command file may only be removed once its same-name skill exists on
+    // disk, and the cleanup must run AFTER the skill install — so a failed
+    // fetch or an old pinned tag never deletes commands without replacement.
+    expect(script).toContain('if [ -d "$CLAUDE_SKILLS_DIR/$cmd" ] && [ -f "$CLAUDE_COMMANDS_DIR/$cmd.md" ]');
+    const cleanupIndex = script.indexOf('Removed legacy Claude command');
+    const installIndex = script.indexOf('copy_skill_if_present apps/skills/core/plannotator-review');
+    expect(installIndex).toBeGreaterThan(0);
+    expect(cleanupIndex).toBeGreaterThan(installIndex);
+  });
+
+  test("extras cleanup runs once via the migrations ledger", () => {
+    // The npx-installed extras are byte-identical to our old default installs;
+    // only the ledger can tell them apart. The cleanup must be gated on the
+    // migration marker and honor PLANNOTATOR_DATA_DIR (via _config_dir).
+    expect(script).toContain('MIGRATIONS_DIR="$_config_dir/migrations"');
+    expect(script).toContain("2026-06-extras-default-install-removed");
+    expect(script).toContain('if [ ! -f "$EXTRAS_MIGRATION" ]');
   });
 
   test("old pinned tags soft-skip core skills without aborting command installs", () => {
@@ -216,21 +238,20 @@ describe("install.sh", () => {
     expect(piUpdateCallIndex).toBeGreaterThan(skillsInstallIndex);
   });
 
-  test("hook/config writing is not gated behind the git check", () => {
-    // The git gate must only wrap the file-copy installs. Codex hook config,
-    // Gemini policy/settings, the plugin hooks, and OpenCode cache clear must
-    // run regardless of whether git is available.
-    const gitGateIndex = script.indexOf("if command -v git &>/dev/null; then");
+  test("hook/config writing happens before the git hard-fail", () => {
+    // Missing git hard-fails the install, but the hook/config writes that
+    // don't need git (plugin hooks, Codex hook config) must already have run
+    // by then so a re-run after installing git completes the rest.
+    const gitGateIndex = script.indexOf("if ! command -v git &>/dev/null; then");
     expect(gitGateIndex).toBeGreaterThan(0);
-    // Plugin hooks and Codex hook config are written before the git gate.
     const pluginHooksIndex = script.indexOf('cat > "$PLUGIN_HOOKS"');
     const codexHooksIndex = script.indexOf('enable_codex_hooks_config || true');
     expect(pluginHooksIndex).toBeGreaterThan(0);
     expect(pluginHooksIndex).toBeLessThan(gitGateIndex);
     expect(codexHooksIndex).toBeGreaterThan(0);
     expect(codexHooksIndex).toBeLessThan(gitGateIndex);
-    // Gemini policy/settings config (heredocs) live after the git gate but are
-    // not themselves wrapped by the git conditional.
+    // Gemini policy/settings config heredocs are still present (after the
+    // skills section, unaffected by the git requirement once git exists).
     expect(script).toContain('GEMINI_POLICY_EOF');
     expect(script).toContain('GEMINI_SETTINGS_EOF');
   });
@@ -312,7 +333,10 @@ describe("install.ps1", () => {
     expect(script).toContain("if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }");
     // No Codex skills install.
     expect(script).not.toContain('Copy-SkillIfPresent "apps\\skills\\plannotator-review" $codexSkillsDir');
-    expect(script).toContain("git required for command/skill install — skipped");
+    // Missing git is a hard failure with an actionable message (parity with sh).
+    expect(script).toContain("Error: git is required to install Plannotator's skills and slash commands.");
+    expect(script).toContain("Install git, then run this installer again.");
+    expect(script).toContain("checkoutFailed");
   });
 
   test("installs OpenCode and Gemini commands from the checkout", () => {
@@ -324,14 +348,18 @@ describe("install.ps1", () => {
 
   test("aggressively cleans up deprecated commands and stale skills on upgrade", () => {
     expect(script).toContain("claudeCommandsDir");
-    expect(script).toContain('"plannotator-review.md", "plannotator-annotate.md", "plannotator-last.md", "plannotator-archive.md"');
+    // Command cleanup is guarded on the replacement skill existing and runs
+    // after the skill install (parity with install.sh).
+    expect(script).toContain("(Test-Path $skillPath) -and (Test-Path $cmdPath)");
     // Legacy ~/.agents review/annotate/last cleanup is gone.
     expect(script).not.toContain("legacyAgentsSkillsDir");
     // Codex cleanup includes the per-command skills now.
     expect(script).toContain("staleCodexSkillsDir");
     expect(script).toContain('"plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-compound", "plannotator-setup-goal"');
-    // Extras removed from Claude + shared-agent scopes.
+    // Extras removed from Claude + shared-agent scopes, once, via the ledger.
     expect(script).toContain('"plannotator-compound", "plannotator-setup-goal", "plannotator-visual-explainer"');
+    expect(script).toContain("2026-06-extras-default-install-removed");
+    expect(script).toContain("if (-not (Test-Path $extrasMigration))");
   });
 
   test("does not treat a skills-only Codex home as configured", () => {
@@ -425,7 +453,10 @@ describe("install.cmd", () => {
     expect(script).toContain("for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator-archive) do");
     // No Codex skills install — only the cleanup loop references CODEX skills.
     expect(script).not.toContain('xcopy /s /i /y /q "apps\\skills\\core\\%%S" "!CODEX_SKILLS_DIR!\\%%S\\"');
-    expect(script).toContain("git required for command/skill install — skipped");
+    // Missing git is a hard failure with an actionable message (parity with sh/ps1).
+    expect(script).toContain("Error: git is required to install Plannotator's skills and slash commands.");
+    expect(script).toContain("Install git, then run this installer again.");
+    expect(script).toContain("CHECKOUT_FAILED");
   });
 
   test("installs OpenCode and Gemini commands from the checkout", () => {
@@ -435,14 +466,18 @@ describe("install.cmd", () => {
 
   test("aggressively cleans up deprecated commands and stale skills on upgrade", () => {
     expect(script).toContain("CLAUDE_COMMANDS_DIR");
-    expect(script).toContain("for %%C in (plannotator-review.md plannotator-annotate.md plannotator-last.md plannotator-archive.md) do");
+    // Command cleanup is guarded on the replacement skill existing and runs
+    // after the skill install (parity with install.sh / install.ps1).
+    expect(script).toContain('if exist "!CLAUDE_SKILLS_DIR!\\%%C" if exist "!CLAUDE_COMMANDS_DIR!\\%%C.md"');
     // Legacy ~/.agents review/annotate/last cleanup is gone.
     expect(script).not.toContain("LEGACY_AGENTS_SKILLS_DIR");
     // Codex cleanup includes the per-command skills now.
     expect(script).toContain("STALE_CODEX_SKILLS_DIR");
     expect(script).toContain("for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator-compound plannotator-setup-goal) do");
-    // Extras removed from Claude + shared-agent scopes.
+    // Extras removed from Claude + shared-agent scopes, once, via the ledger.
     expect(script).toContain("for %%S in (plannotator-compound plannotator-setup-goal plannotator-visual-explainer) do");
+    expect(script).toContain("2026-06-extras-default-install-removed");
+    expect(script).toContain('if not exist "!EXTRAS_MIGRATION!"');
   });
 
   test("does not treat a skills-only Codex home as configured", () => {

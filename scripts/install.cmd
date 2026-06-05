@@ -461,17 +461,13 @@ REM Nothing goes to the Codex home (CODEX_DIR\skills) anymore.
 REM ----------------------------------------------------------------------
 
 REM Aggressive cleanup on upgrade — echo each removal, ignore missing.
-REM Remove deprecated Claude Code command files (now served by core skills).
+REM NOTE: legacy Claude command cleanup happens AFTER the skill install below —
+REM a command file is only removed once its replacement skill is on disk, so a
+REM failed or skipped skill install never leaves users with neither.
 if defined CLAUDE_CONFIG_DIR (
     set "CLAUDE_COMMANDS_DIR=%CLAUDE_CONFIG_DIR%\commands"
 ) else (
     set "CLAUDE_COMMANDS_DIR=%USERPROFILE%\.claude\commands"
-)
-for %%C in (plannotator-review.md plannotator-annotate.md plannotator-last.md plannotator-archive.md) do (
-    if exist "!CLAUDE_COMMANDS_DIR!\%%C" (
-        del /q "!CLAUDE_COMMANDS_DIR!\%%C" >nul 2>&1
-        echo Removed deprecated Claude command !CLAUDE_COMMANDS_DIR!\%%C
-    )
 )
 
 REM Codex no longer receives core skills (they live in %%USERPROFILE%%\.agents\skills).
@@ -484,108 +480,138 @@ for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator
     )
 )
 
-REM Extras are no longer managed in the Claude / shared-agent scopes. Remove them
-REM from both (the user may reinstall them later via `npx skills add`).
+REM Extras are no longer managed in the Claude / shared-agent scopes. Remove
+REM previously default-installed copies ONCE per machine — recorded in the
+REM migrations ledger under the Plannotator data dir — because copies the user
+REM reinstalls via `npx skills add` are byte-identical to ours and can only be
+REM told apart by remembering that this cleanup already ran.
 if defined CLAUDE_CONFIG_DIR (
     set "CLAUDE_SKILLS_DIR=%CLAUDE_CONFIG_DIR%\skills"
 ) else (
     set "CLAUDE_SKILLS_DIR=%USERPROFILE%\.claude\skills"
 )
 set "AGENTS_SKILLS_DIR=%USERPROFILE%\.agents\skills"
-for %%S in (plannotator-compound plannotator-setup-goal plannotator-visual-explainer) do (
-    if exist "!CLAUDE_SKILLS_DIR!\%%S" (
-        rmdir /s /q "!CLAUDE_SKILLS_DIR!\%%S" >nul 2>&1
-        echo Removed extra Plannotator skill from !CLAUDE_SKILLS_DIR!\%%S
+set "MIGRATIONS_DIR=!_CONFIG_DIR!\migrations"
+set "EXTRAS_MIGRATION=!MIGRATIONS_DIR!\2026-06-extras-default-install-removed"
+if not exist "!EXTRAS_MIGRATION!" (
+    for %%S in (plannotator-compound plannotator-setup-goal plannotator-visual-explainer) do (
+        if exist "!CLAUDE_SKILLS_DIR!\%%S" (
+            rmdir /s /q "!CLAUDE_SKILLS_DIR!\%%S" >nul 2>&1
+            echo Removed extra Plannotator skill from !CLAUDE_SKILLS_DIR!\%%S ^(reinstall via npx skills add^)
+        )
+        if exist "!AGENTS_SKILLS_DIR!\%%S" (
+            rmdir /s /q "!AGENTS_SKILLS_DIR!\%%S" >nul 2>&1
+            echo Removed extra Plannotator skill from !AGENTS_SKILLS_DIR!\%%S ^(reinstall via npx skills add^)
+        )
     )
-    if exist "!AGENTS_SKILLS_DIR!\%%S" (
-        rmdir /s /q "!AGENTS_SKILLS_DIR!\%%S" >nul 2>&1
-        echo Removed extra Plannotator skill from !AGENTS_SKILLS_DIR!\%%S
-    )
+    if not exist "!MIGRATIONS_DIR!" mkdir "!MIGRATIONS_DIR!" >nul 2>&1
+    type nul > "!EXTRAS_MIGRATION!"
 )
 
-REM File-copy installs are gated on git (sparse checkout). Hook/config writing
-REM elsewhere in this script is NOT behind this gate.
+REM File-copy installs require git (sparse checkout). Hook/config writing
+REM elsewhere in this script does NOT depend on git. Hard requirement: without
+REM git we cannot install the /plannotator-* skills, so fail loudly instead of
+REM leaving a partial install.
 where git >nul 2>&1
+if not !ERRORLEVEL! equ 0 (
+    echo Error: git is required to install Plannotator's skills and slash commands. 1>&2
+    echo Install git, then run this installer again. 1>&2
+    exit /b 1
+)
+set "CHECKOUT_FAILED=0"
+set "KIRO_SKILLS_DIR=%USERPROFILE%\.kiro\skills"
+set "KIRO_AGENTS_DIR=%USERPROFILE%\.kiro\agents"
+set "OPENCODE_COMMANDS_DIR=%USERPROFILE%\.config\opencode\commands"
+set "GEMINI_COMMANDS_DIR=%USERPROFILE%\.gemini\commands"
+set "SKILLS_TMP=%TEMP%\plannotator-skills-%RANDOM%"
+mkdir "!SKILLS_TMP!" >nul 2>&1
+
+git clone --depth 1 --filter=blob:none --sparse "https://github.com/!REPO!.git" --branch "!TAG!" "!SKILLS_TMP!\repo" >nul 2>&1
 if !ERRORLEVEL! equ 0 (
-    set "KIRO_SKILLS_DIR=%USERPROFILE%\.kiro\skills"
-    set "KIRO_AGENTS_DIR=%USERPROFILE%\.kiro\agents"
-    set "OPENCODE_COMMANDS_DIR=%USERPROFILE%\.config\opencode\commands"
-    set "GEMINI_COMMANDS_DIR=%USERPROFILE%\.gemini\commands"
-    set "SKILLS_TMP=%TEMP%\plannotator-skills-%RANDOM%"
-    mkdir "!SKILLS_TMP!" >nul 2>&1
+    pushd "!SKILLS_TMP!\repo"
+    git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands >nul 2>&1
 
-    git clone --depth 1 --filter=blob:none --sparse "https://github.com/!REPO!.git" --branch "!TAG!" "!SKILLS_TMP!\repo" >nul 2>&1
-    if !ERRORLEVEL! equ 0 (
-        pushd "!SKILLS_TMP!\repo"
-        git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands >nul 2>&1
-
-        REM Core skills -> Claude + shared agent scope (all 4, copy-if-present).
-        if exist "apps\skills\core" (
-            if not exist "!CLAUDE_SKILLS_DIR!" mkdir "!CLAUDE_SKILLS_DIR!"
-            if not exist "!AGENTS_SKILLS_DIR!" mkdir "!AGENTS_SKILLS_DIR!"
-            for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator-archive) do (
-                if exist "apps\skills\core\%%S" (
-                    REM Replace rather than merge so files removed upstream don't linger.
-                    if exist "!CLAUDE_SKILLS_DIR!\%%S" rmdir /s /q "!CLAUDE_SKILLS_DIR!\%%S" >nul 2>&1
-                    if exist "!AGENTS_SKILLS_DIR!\%%S" rmdir /s /q "!AGENTS_SKILLS_DIR!\%%S" >nul 2>&1
-                    xcopy /s /i /y /q "apps\skills\core\%%S" "!CLAUDE_SKILLS_DIR!\%%S\" >nul 2>&1
-                    xcopy /s /i /y /q "apps\skills\core\%%S" "!AGENTS_SKILLS_DIR!\%%S\" >nul 2>&1
-                )
+    REM Core skills -> Claude + shared agent scope (all 4, copy-if-present).
+    if exist "apps\skills\core" (
+        if not exist "!CLAUDE_SKILLS_DIR!" mkdir "!CLAUDE_SKILLS_DIR!"
+        if not exist "!AGENTS_SKILLS_DIR!" mkdir "!AGENTS_SKILLS_DIR!"
+        for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator-archive) do (
+            if exist "apps\skills\core\%%S" (
+                REM Replace rather than merge so files removed upstream don't linger.
+                if exist "!CLAUDE_SKILLS_DIR!\%%S" rmdir /s /q "!CLAUDE_SKILLS_DIR!\%%S" >nul 2>&1
+                if exist "!AGENTS_SKILLS_DIR!\%%S" rmdir /s /q "!AGENTS_SKILLS_DIR!\%%S" >nul 2>&1
+                xcopy /s /i /y /q "apps\skills\core\%%S" "!CLAUDE_SKILLS_DIR!\%%S\" >nul 2>&1
+                xcopy /s /i /y /q "apps\skills\core\%%S" "!AGENTS_SKILLS_DIR!\%%S\" >nul 2>&1
             )
-            echo Installed core skills to !CLAUDE_SKILLS_DIR!\ and !AGENTS_SKILLS_DIR!\
-        ) else (
-            echo Tag !TAG! predates the core/extra skill layout — skipping core skill install
         )
-
-        REM OpenCode command stubs -> always (plugin intercepts execution).
-        if exist "apps\opencode-plugin\commands" (
-            if not exist "!OPENCODE_COMMANDS_DIR!" mkdir "!OPENCODE_COMMANDS_DIR!"
-            xcopy /y /q "apps\opencode-plugin\commands\*.md" "!OPENCODE_COMMANDS_DIR!\" >nul 2>&1
-            echo Installed OpenCode commands to !OPENCODE_COMMANDS_DIR!\
-        )
-
-        REM Gemini TOML commands -> only when ~/.gemini exists (Gemini's native format).
-        if exist "%USERPROFILE%\.gemini" if exist "apps\gemini\commands" (
-            if not exist "!GEMINI_COMMANDS_DIR!" mkdir "!GEMINI_COMMANDS_DIR!"
-            xcopy /y /q "apps\gemini\commands\*.toml" "!GEMINI_COMMANDS_DIR!\" >nul 2>&1
-            echo Installed Gemini commands to !GEMINI_COMMANDS_DIR!\
-        )
-
-        REM Kiro -> hand-maintained kiro skills (3) + 2 extras, only when detected.
-        if "!KIRO_AVAILABLE!"=="1" if exist "apps\kiro-cli\skills" (
-            if not exist "!KIRO_SKILLS_DIR!" mkdir "!KIRO_SKILLS_DIR!"
-            REM Kiro-specific skills with origin baked in come from apps\kiro-cli\skills.
-            for %%S in (plannotator-review plannotator-annotate plannotator-archive) do (
-                if exist "apps\kiro-cli\skills\%%S" (
-                    if exist "!KIRO_SKILLS_DIR!\%%S" rmdir /s /q "!KIRO_SKILLS_DIR!\%%S" >nul 2>&1
-                    xcopy /s /i /y /q "apps\kiro-cli\skills\%%S" "!KIRO_SKILLS_DIR!\%%S\" >nul 2>&1
-                )
-            )
-            REM The two extras Kiro keeps receiving come from apps\skills\extra.
-            if exist "apps\skills\extra\plannotator-setup-goal" (
-                if exist "!KIRO_SKILLS_DIR!\plannotator-setup-goal" rmdir /s /q "!KIRO_SKILLS_DIR!\plannotator-setup-goal" >nul 2>&1
-                xcopy /s /i /y /q "apps\skills\extra\plannotator-setup-goal" "!KIRO_SKILLS_DIR!\plannotator-setup-goal\" >nul 2>&1
-            )
-            if exist "apps\skills\extra\plannotator-visual-explainer" (
-                if exist "!KIRO_SKILLS_DIR!\plannotator-visual-explainer" rmdir /s /q "!KIRO_SKILLS_DIR!\plannotator-visual-explainer" >nul 2>&1
-                xcopy /s /i /y /q "apps\skills\extra\plannotator-visual-explainer" "!KIRO_SKILLS_DIR!\plannotator-visual-explainer\" >nul 2>&1
-            )
-            REM Plannotator custom agent — don't clobber a user's existing one.
-            if not exist "!KIRO_AGENTS_DIR!\plannotator.json" if exist "apps\kiro-cli\agents\plannotator.json" (
-                if not exist "!KIRO_AGENTS_DIR!" mkdir "!KIRO_AGENTS_DIR!"
-                copy /y "apps\kiro-cli\agents\plannotator.json" "!KIRO_AGENTS_DIR!\plannotator.json" >nul 2>&1
-            )
-            echo Installed Kiro skills to !KIRO_SKILLS_DIR!\ and agent to !KIRO_AGENTS_DIR!\plannotator.json
-        )
-
-        popd
+        echo Installed core skills to !CLAUDE_SKILLS_DIR!\ and !AGENTS_SKILLS_DIR!\
     ) else (
-        echo git required for command/skill install — skipped ^(sparse checkout failed^)
+        echo Tag !TAG! predates the core/extra skill layout — skipping core skill install
     )
 
-    rmdir /s /q "!SKILLS_TMP!" >nul 2>&1
+    REM OpenCode command stubs -> always (plugin intercepts execution).
+    if exist "apps\opencode-plugin\commands" (
+        if not exist "!OPENCODE_COMMANDS_DIR!" mkdir "!OPENCODE_COMMANDS_DIR!"
+        xcopy /y /q "apps\opencode-plugin\commands\*.md" "!OPENCODE_COMMANDS_DIR!\" >nul 2>&1
+        echo Installed OpenCode commands to !OPENCODE_COMMANDS_DIR!\
+    )
+
+    REM Gemini TOML commands -> only when ~/.gemini exists (Gemini's native format).
+    if exist "%USERPROFILE%\.gemini" if exist "apps\gemini\commands" (
+        if not exist "!GEMINI_COMMANDS_DIR!" mkdir "!GEMINI_COMMANDS_DIR!"
+        xcopy /y /q "apps\gemini\commands\*.toml" "!GEMINI_COMMANDS_DIR!\" >nul 2>&1
+        echo Installed Gemini commands to !GEMINI_COMMANDS_DIR!\
+    )
+
+    REM Kiro -> hand-maintained kiro skills (3) + 2 extras, only when detected.
+    if "!KIRO_AVAILABLE!"=="1" if exist "apps\kiro-cli\skills" (
+        if not exist "!KIRO_SKILLS_DIR!" mkdir "!KIRO_SKILLS_DIR!"
+        REM Kiro-specific skills with origin baked in come from apps\kiro-cli\skills.
+        for %%S in (plannotator-review plannotator-annotate plannotator-archive) do (
+            if exist "apps\kiro-cli\skills\%%S" (
+                if exist "!KIRO_SKILLS_DIR!\%%S" rmdir /s /q "!KIRO_SKILLS_DIR!\%%S" >nul 2>&1
+                xcopy /s /i /y /q "apps\kiro-cli\skills\%%S" "!KIRO_SKILLS_DIR!\%%S\" >nul 2>&1
+            )
+        )
+        REM The two extras Kiro keeps receiving come from apps\skills\extra.
+        if exist "apps\skills\extra\plannotator-setup-goal" (
+            if exist "!KIRO_SKILLS_DIR!\plannotator-setup-goal" rmdir /s /q "!KIRO_SKILLS_DIR!\plannotator-setup-goal" >nul 2>&1
+            xcopy /s /i /y /q "apps\skills\extra\plannotator-setup-goal" "!KIRO_SKILLS_DIR!\plannotator-setup-goal\" >nul 2>&1
+        )
+        if exist "apps\skills\extra\plannotator-visual-explainer" (
+            if exist "!KIRO_SKILLS_DIR!\plannotator-visual-explainer" rmdir /s /q "!KIRO_SKILLS_DIR!\plannotator-visual-explainer" >nul 2>&1
+            xcopy /s /i /y /q "apps\skills\extra\plannotator-visual-explainer" "!KIRO_SKILLS_DIR!\plannotator-visual-explainer\" >nul 2>&1
+        )
+        REM Plannotator custom agent — don't clobber a user's existing one.
+        if not exist "!KIRO_AGENTS_DIR!\plannotator.json" if exist "apps\kiro-cli\agents\plannotator.json" (
+            if not exist "!KIRO_AGENTS_DIR!" mkdir "!KIRO_AGENTS_DIR!"
+            copy /y "apps\kiro-cli\agents\plannotator.json" "!KIRO_AGENTS_DIR!\plannotator.json" >nul 2>&1
+        )
+        echo Installed Kiro skills to !KIRO_SKILLS_DIR!\ and agent to !KIRO_AGENTS_DIR!\plannotator.json
+    )
+
+    popd
 ) else (
-    echo git required for command/skill install — skipped
+    set "CHECKOUT_FAILED=1"
+)
+
+rmdir /s /q "!SKILLS_TMP!" >nul 2>&1
+
+if "!CHECKOUT_FAILED!"=="1" (
+    echo Error: unable to fetch !REPO! at !TAG! ^(network or git error^). 1>&2
+    echo Something went wrong — run the installer again. 1>&2
+    exit /b 1
+)
+
+REM Claude Code commands are deprecated in favor of skills. Remove a legacy
+REM command file only once its replacement skill is actually on disk — running
+REM AFTER the install above guarantees a failed or skipped skill install never
+REM leaves users with neither the command nor the skill.
+for %%C in (plannotator-review plannotator-annotate plannotator-last plannotator-archive) do (
+    if exist "!CLAUDE_SKILLS_DIR!\%%C" if exist "!CLAUDE_COMMANDS_DIR!\%%C.md" (
+        del /q "!CLAUDE_COMMANDS_DIR!\%%C.md" >nul 2>&1
+        echo Removed deprecated Claude command !CLAUDE_COMMANDS_DIR!\%%C.md ^(replaced by the %%C skill^)
+    )
 )
 
 REM Update Pi extension if pi is installed. Pi keeps its 6 extension commands

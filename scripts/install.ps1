@@ -341,17 +341,10 @@ function Update-PiExtensionIfPresent {
 # Aggressive cleanup of stale install locations from prior versions.
 # Echo each removal and ignore anything that is already gone.
 
-# Claude Code commands are deprecated in favor of skills. The core skills
-# installed to ~/.claude/skills now serve as the slash commands, so remove
-# any leftover command markdown files from older installs.
+# NOTE: legacy Claude command cleanup happens AFTER the skill install below —
+# a command file is only removed once its replacement skill is on disk, so a
+# failed or skipped skill install never leaves users with neither.
 $claudeCommandsDir = if ($env:CLAUDE_CONFIG_DIR) { "$env:CLAUDE_CONFIG_DIR\commands" } else { "$env:USERPROFILE\.claude\commands" }
-foreach ($cmd in @("plannotator-review.md", "plannotator-annotate.md", "plannotator-last.md", "plannotator-archive.md")) {
-    $cmdPath = Join-Path $claudeCommandsDir $cmd
-    if (Test-Path $cmdPath) {
-        Write-Host "Removing stale Claude command $cmdPath"
-        Remove-Item -Force $cmdPath -ErrorAction SilentlyContinue
-    }
-}
 
 # Codex no longer receives skills under the Codex home — core skills live in
 # ~/.agents/skills now. Remove the core skills (and existing stale extras) that
@@ -366,19 +359,27 @@ foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-
 }
 
 # Extras (compound / setup-goal / visual-explainer) are no longer managed in
-# the Claude or shared-agent skill scopes. Remove any copies prior installs put
-# there. Users may reinstall them later via `npx skills add ...`; we just stop
-# managing them.
+# the Claude or shared-agent skill scopes. Remove previously default-installed
+# copies ONCE per machine — recorded in the migrations ledger under the
+# Plannotator data dir — because copies the user reinstalls via `npx skills
+# add` are byte-identical to ours and can only be told apart by remembering
+# that this cleanup already ran.
 $claudeSkillsDir = if ($env:CLAUDE_CONFIG_DIR) { "$env:CLAUDE_CONFIG_DIR\skills" } else { "$env:USERPROFILE\.claude\skills" }
 $agentsSkillsDir = "$env:USERPROFILE\.agents\skills"
-foreach ($skill in @("plannotator-compound", "plannotator-setup-goal", "plannotator-visual-explainer")) {
-    foreach ($scopeDir in @($claudeSkillsDir, $agentsSkillsDir)) {
-        $extraSkillPath = Join-Path $scopeDir $skill
-        if (Test-Path $extraSkillPath) {
-            Write-Host "Removing unmanaged extra skill $extraSkillPath"
-            Remove-Item -Recurse -Force $extraSkillPath -ErrorAction SilentlyContinue
+$migrationsDir = Join-Path $configDir "migrations"
+$extrasMigration = Join-Path $migrationsDir "2026-06-extras-default-install-removed"
+if (-not (Test-Path $extrasMigration)) {
+    foreach ($skill in @("plannotator-compound", "plannotator-setup-goal", "plannotator-visual-explainer")) {
+        foreach ($scopeDir in @($claudeSkillsDir, $agentsSkillsDir)) {
+            $extraSkillPath = Join-Path $scopeDir $skill
+            if (Test-Path $extraSkillPath) {
+                Write-Host "Removing unmanaged extra skill $extraSkillPath (reinstall via npx skills add)"
+                Remove-Item -Recurse -Force $extraSkillPath -ErrorAction SilentlyContinue
+            }
         }
     }
+    New-Item -ItemType Directory -Force -Path $migrationsDir | Out-Null
+    New-Item -ItemType File -Force -Path $extrasMigration | Out-Null
 }
 
 # Install skills and command stubs (requires git).
@@ -386,117 +387,142 @@ foreach ($skill in @("plannotator-compound", "plannotator-setup-goal", "plannota
 # Core skills, Kiro skills/extras, OpenCode command stubs, and Gemini TOML
 # commands are all copied verbatim from a sparse checkout of the release tag.
 # copy-if-present means older pinned tags that lack a given path simply skip it
-# rather than failing. Hook/config writing is intentionally NOT gated on git.
-if (Get-Command git -ErrorAction SilentlyContinue) {
-    $skillsTmp = Join-Path ([System.IO.Path]::GetTempPath()) "plannotator-skills-$(Get-Random)"
-    New-Item -ItemType Directory -Force -Path $skillsTmp | Out-Null
+# rather than failing. Hook/config writing above does NOT depend on git.
+# Hard requirement: without git we cannot install the /plannotator-* skills,
+# so fail loudly instead of leaving a partial install.
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    Write-Host "Error: git is required to install Plannotator's skills and slash commands."
+    Write-Host "Install git, then run this installer again."
+    exit 1
+}
 
-    function Copy-SkillIfPresent {
-        param(
-            [string]$SourceDir,
-            [string]$TargetDir
-        )
+$checkoutFailed = $false
+$skillsTmp = Join-Path ([System.IO.Path]::GetTempPath()) "plannotator-skills-$(Get-Random)"
+New-Item -ItemType Directory -Force -Path $skillsTmp | Out-Null
 
-        if (Test-Path $SourceDir) {
-            # Remove any existing copy first so re-runs replace rather than
-            # nest. PowerShell's `Copy-Item -Recurse` into an existing target
-            # dir copies the source INSIDE it (dest\skill\skill); mirror
-            # install.sh's `rm -rf` guard so upgrades stay clean.
-            $dest = Join-Path $TargetDir (Split-Path $SourceDir -Leaf)
-            if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
-            Copy-Item -Recurse -Force $SourceDir $TargetDir
-        }
+function Copy-SkillIfPresent {
+    param(
+        [string]$SourceDir,
+        [string]$TargetDir
+    )
+
+    if (Test-Path $SourceDir) {
+        # Remove any existing copy first so re-runs replace rather than
+        # nest. PowerShell's `Copy-Item -Recurse` into an existing target
+        # dir copies the source INSIDE it (dest\skill\skill); mirror
+        # install.sh's `rm -rf` guard so upgrades stay clean.
+        $dest = Join-Path $TargetDir (Split-Path $SourceDir -Leaf)
+        if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+        Copy-Item -Recurse -Force $SourceDir $TargetDir
     }
+}
 
-    try {
-        git clone --depth 1 --filter=blob:none --sparse "https://github.com/$repo.git" --branch $latestTag "$skillsTmp\repo" 2>$null
-        # git is a native executable — it does not throw under
-        # $ErrorActionPreference=Stop on non-zero exit. Guard with
-        # Test-Path so we only Push-Location if the clone actually
-        # produced a repo directory.
-        if (Test-Path "$skillsTmp\repo") {
-            Push-Location "$skillsTmp\repo"
-            # Inner try/finally guarantees Pop-Location runs exactly once
-            # after a successful Push-Location, regardless of whether the
-            # copy operations below throw. The naive pattern (Pop-Location
-            # only on the success path) leaks the location stack if a
-            # PS-native cmdlet (Copy-Item etc.) throws under Stop.
-            try {
-                git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands 2>$null
+try {
+    git clone --depth 1 --filter=blob:none --sparse "https://github.com/$repo.git" --branch $latestTag "$skillsTmp\repo" 2>$null
+    # git is a native executable — it does not throw under
+    # $ErrorActionPreference=Stop on non-zero exit. Guard with
+    # Test-Path so we only Push-Location if the clone actually
+    # produced a repo directory.
+    if (Test-Path "$skillsTmp\repo") {
+        Push-Location "$skillsTmp\repo"
+        # Inner try/finally guarantees Pop-Location runs exactly once
+        # after a successful Push-Location, regardless of whether the
+        # copy operations below throw. The naive pattern (Pop-Location
+        # only on the success path) leaks the location stack if a
+        # PS-native cmdlet (Copy-Item etc.) throws under Stop.
+        try {
+            git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands 2>$null
 
-                # Core skills -> ~/.claude/skills and ~/.agents/skills (all 4).
-                # Route each through Copy-SkillIfPresent (which pre-removes the
-                # existing target dir) so re-runs replace rather than nest,
-                # matching install.sh's per-skill structure.
-                if ((Test-Path "apps\skills\core") -and (Get-ChildItem "apps\skills\core" -ErrorAction SilentlyContinue)) {
-                    New-Item -ItemType Directory -Force -Path $claudeSkillsDir | Out-Null
-                    New-Item -ItemType Directory -Force -Path $agentsSkillsDir | Out-Null
-                    foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-archive")) {
-                        Copy-SkillIfPresent "apps\skills\core\$skill" $claudeSkillsDir
-                        Copy-SkillIfPresent "apps\skills\core\$skill" $agentsSkillsDir
-                    }
-                    Write-Host "Installed core skills to $claudeSkillsDir\ and $agentsSkillsDir\"
-                } else {
-                    Write-Host "Tag $latestTag predates the core/extra skill layout — skipping core skill install"
+            # Core skills -> ~/.claude/skills and ~/.agents/skills (all 4).
+            # Route each through Copy-SkillIfPresent (which pre-removes the
+            # existing target dir) so re-runs replace rather than nest,
+            # matching install.sh's per-skill structure.
+            if ((Test-Path "apps\skills\core") -and (Get-ChildItem "apps\skills\core" -ErrorAction SilentlyContinue)) {
+                New-Item -ItemType Directory -Force -Path $claudeSkillsDir | Out-Null
+                New-Item -ItemType Directory -Force -Path $agentsSkillsDir | Out-Null
+                foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-archive")) {
+                    Copy-SkillIfPresent "apps\skills\core\$skill" $claudeSkillsDir
+                    Copy-SkillIfPresent "apps\skills\core\$skill" $agentsSkillsDir
                 }
-
-                # Kiro: hand-maintained skills (origin baked in) + two extras.
-                if ($kiroAvailable -and (Test-Path "apps\kiro-cli\skills")) {
-                    $kiroSkillsDir = "$env:USERPROFILE\.kiro\skills"
-                    New-Item -ItemType Directory -Force -Path $kiroSkillsDir | Out-Null
-                    # Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
-                    Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-review" $kiroSkillsDir
-                    Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-annotate" $kiroSkillsDir
-                    Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-archive" $kiroSkillsDir
-                    # Two extras come from apps/skills/extra (not duplicated into apps/kiro-cli/skills).
-                    Copy-SkillIfPresent "apps\skills\extra\plannotator-setup-goal" $kiroSkillsDir
-                    Copy-SkillIfPresent "apps\skills\extra\plannotator-visual-explainer" $kiroSkillsDir
-                    # Plannotator custom agent — don't clobber a user's existing one.
-                    $kiroAgentsDir = "$env:USERPROFILE\.kiro\agents"
-                    if (-not (Test-Path "$kiroAgentsDir\plannotator.json") -and (Test-Path "apps\kiro-cli\agents\plannotator.json")) {
-                        New-Item -ItemType Directory -Force -Path $kiroAgentsDir | Out-Null
-                        Copy-Item -Force "apps\kiro-cli\agents\plannotator.json" "$kiroAgentsDir\plannotator.json"
-                    }
-                    Write-Host "Installed Kiro skills to $kiroSkillsDir\ and agent to $kiroAgentsDir\plannotator.json"
-                }
-
-                # OpenCode command stubs -> ~/.config/opencode/commands (always).
-                # The plugin intercepts execution; these stubs just register the
-                # slash commands in OpenCode.
-                if (Test-Path "apps\opencode-plugin\commands") {
-                    $opencodeCommandsDir = "$env:USERPROFILE\.config\opencode\commands"
-                    $opencodeCmds = Get-ChildItem "apps\opencode-plugin\commands\*.md" -ErrorAction SilentlyContinue
-                    if ($opencodeCmds) {
-                        New-Item -ItemType Directory -Force -Path $opencodeCommandsDir | Out-Null
-                        Copy-Item -Force "apps\opencode-plugin\commands\*.md" $opencodeCommandsDir
-                        Write-Host "Installed OpenCode commands to $opencodeCommandsDir\"
-                    }
-                }
-
-                # Gemini TOML commands -> ~/.gemini/commands (only when ~/.gemini exists).
-                # These are Gemini's native command format.
-                if ((Test-Path "$env:USERPROFILE\.gemini") -and (Test-Path "apps\gemini\commands")) {
-                    $geminiCommandsDir = "$env:USERPROFILE\.gemini\commands"
-                    $geminiCmds = Get-ChildItem "apps\gemini\commands\*.toml" -ErrorAction SilentlyContinue
-                    if ($geminiCmds) {
-                        New-Item -ItemType Directory -Force -Path $geminiCommandsDir | Out-Null
-                        Copy-Item -Force "apps\gemini\commands\*.toml" $geminiCommandsDir
-                        Write-Host "Installed Gemini slash commands to $geminiCommandsDir\"
-                    }
-                }
-            } finally {
-                Pop-Location
+                Write-Host "Installed core skills to $claudeSkillsDir\ and $agentsSkillsDir\"
+            } else {
+                Write-Host "Tag $latestTag predates the core/extra skill layout — skipping core skill install"
             }
-        } else {
-            Write-Host "Unable to fetch $repo at $latestTag (network or git error) — command/skill install skipped"
-        }
-    } catch {
-        Write-Host "Command/skill install failed: $($_.Exception.Message) — skipped"
-    }
 
-    Remove-Item -Recurse -Force $skillsTmp -ErrorAction SilentlyContinue
-} else {
-    Write-Host "git required for command/skill install — skipped"
+            # Kiro: hand-maintained skills (origin baked in) + two extras.
+            if ($kiroAvailable -and (Test-Path "apps\kiro-cli\skills")) {
+                $kiroSkillsDir = "$env:USERPROFILE\.kiro\skills"
+                New-Item -ItemType Directory -Force -Path $kiroSkillsDir | Out-Null
+                # Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
+                Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-review" $kiroSkillsDir
+                Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-annotate" $kiroSkillsDir
+                Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-archive" $kiroSkillsDir
+                # Two extras come from apps/skills/extra (not duplicated into apps/kiro-cli/skills).
+                Copy-SkillIfPresent "apps\skills\extra\plannotator-setup-goal" $kiroSkillsDir
+                Copy-SkillIfPresent "apps\skills\extra\plannotator-visual-explainer" $kiroSkillsDir
+                # Plannotator custom agent — don't clobber a user's existing one.
+                $kiroAgentsDir = "$env:USERPROFILE\.kiro\agents"
+                if (-not (Test-Path "$kiroAgentsDir\plannotator.json") -and (Test-Path "apps\kiro-cli\agents\plannotator.json")) {
+                    New-Item -ItemType Directory -Force -Path $kiroAgentsDir | Out-Null
+                    Copy-Item -Force "apps\kiro-cli\agents\plannotator.json" "$kiroAgentsDir\plannotator.json"
+                }
+                Write-Host "Installed Kiro skills to $kiroSkillsDir\ and agent to $kiroAgentsDir\plannotator.json"
+            }
+
+            # OpenCode command stubs -> ~/.config/opencode/commands (always).
+            # The plugin intercepts execution; these stubs just register the
+            # slash commands in OpenCode.
+            if (Test-Path "apps\opencode-plugin\commands") {
+                $opencodeCommandsDir = "$env:USERPROFILE\.config\opencode\commands"
+                $opencodeCmds = Get-ChildItem "apps\opencode-plugin\commands\*.md" -ErrorAction SilentlyContinue
+                if ($opencodeCmds) {
+                    New-Item -ItemType Directory -Force -Path $opencodeCommandsDir | Out-Null
+                    Copy-Item -Force "apps\opencode-plugin\commands\*.md" $opencodeCommandsDir
+                    Write-Host "Installed OpenCode commands to $opencodeCommandsDir\"
+                }
+            }
+
+            # Gemini TOML commands -> ~/.gemini/commands (only when ~/.gemini exists).
+            # These are Gemini's native command format.
+            if ((Test-Path "$env:USERPROFILE\.gemini") -and (Test-Path "apps\gemini\commands")) {
+                $geminiCommandsDir = "$env:USERPROFILE\.gemini\commands"
+                $geminiCmds = Get-ChildItem "apps\gemini\commands\*.toml" -ErrorAction SilentlyContinue
+                if ($geminiCmds) {
+                    New-Item -ItemType Directory -Force -Path $geminiCommandsDir | Out-Null
+                    Copy-Item -Force "apps\gemini\commands\*.toml" $geminiCommandsDir
+                    Write-Host "Installed Gemini slash commands to $geminiCommandsDir\"
+                }
+            }
+        } finally {
+            Pop-Location
+        }
+    } else {
+        $checkoutFailed = $true
+    }
+} catch {
+    Write-Host "Command/skill install failed: $($_.Exception.Message)"
+    $checkoutFailed = $true
+}
+
+Remove-Item -Recurse -Force $skillsTmp -ErrorAction SilentlyContinue
+
+if ($checkoutFailed) {
+    Write-Host "Error: unable to fetch $repo at $latestTag (network or git error)."
+    Write-Host "Something went wrong — run the installer again."
+    exit 1
+}
+
+# Claude Code commands are deprecated in favor of skills. Remove a legacy
+# command file only once its replacement skill is actually on disk — running
+# AFTER the install above guarantees a failed or skipped skill install never
+# leaves users with neither the command nor the skill.
+foreach ($cmd in @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-archive")) {
+    $cmdPath = Join-Path $claudeCommandsDir "$cmd.md"
+    $skillPath = Join-Path $claudeSkillsDir $cmd
+    if ((Test-Path $skillPath) -and (Test-Path $cmdPath)) {
+        Write-Host "Removing stale Claude command $cmdPath (replaced by the $cmd skill)"
+        Remove-Item -Force $cmdPath -ErrorAction SilentlyContinue
+    }
 }
 
 # Update Pi extension if pi is installed. Pi keeps its extension commands and
