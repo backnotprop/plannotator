@@ -615,9 +615,10 @@ if [ ! -f "$EXTRAS_MIGRATION" ]; then
 fi
 
 # Install skills and slash commands from a sparse checkout (requires git).
-# Hook/config writing above does NOT depend on git — only these file copies do.
 # Hard requirement: without git we cannot install the /plannotator-* skills,
-# so fail loudly instead of leaving a partial install.
+# so fail loudly instead of leaving a partial install. Hook/config writing
+# above has already run by this point; the Pi update and Gemini config below
+# are skipped on failure and complete when the user re-runs the installer.
 if ! command -v git &>/dev/null; then
     echo "Error: git is required to install Plannotator's skills and slash commands." >&2
     echo "Install git, then run this installer again." >&2

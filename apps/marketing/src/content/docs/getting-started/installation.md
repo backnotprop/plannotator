@@ -10,7 +10,9 @@ Plannotator runs as a plugin for your coding agent. Install the CLI first, then 
 
 ## Prerequisites
 
-Install the `plannotator` command so your agent can use it.
+Install the `plannotator` command so your agent can use it. The installer
+requires `git` (it fetches the skills and command files from a sparse checkout
+of the release tag) and fails with a clear message if git is missing.
 
 **macOS / Linux / WSL:**
 
