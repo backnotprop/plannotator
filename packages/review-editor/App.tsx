@@ -1987,12 +1987,12 @@ const ReviewApp: React.FC = () => {
                   </div>
                 )}
 
-                {reviewMode === 'workspace' && diffError && files.length > 0 && (
+                {reviewMode === 'workspace' && diffError && (
                   <div
                     className="text-xs text-amber-700 dark:text-amber-300 px-2 py-1 bg-amber-500/10 rounded border border-amber-500/25 max-w-[240px] truncate"
                     title={diffError}
                   >
-                    Some workspace changes could not be loaded
+                    {files.length > 0 ? 'Some workspace changes could not be loaded' : 'Workspace changes could not be loaded'}
                   </div>
                 )}
 

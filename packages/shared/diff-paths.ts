@@ -21,9 +21,16 @@ export function quoteGitPath(value: string): string {
   return JSON.stringify(value);
 }
 
+function stripUnquotedPathMetadata(token: string): string {
+  if (token.startsWith('"')) return token;
+  const tabIndex = token.indexOf("\t");
+  return tabIndex === -1 ? token : token.slice(0, tabIndex);
+}
+
 export function parsePatchPathToken(token: string, side: "a" | "b"): string | null {
-  if (token === "/dev/null") return "/dev/null";
-  const unquoted = unquoteGitPath(token);
+  const pathToken = stripUnquotedPathMetadata(token);
+  if (pathToken === "/dev/null") return "/dev/null";
+  const unquoted = unquoteGitPath(pathToken);
   const prefix = `${side}/`;
   return unquoted.startsWith(prefix) ? unquoted.slice(prefix.length) : null;
 }
