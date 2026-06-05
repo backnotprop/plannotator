@@ -793,6 +793,9 @@ if [ "$run_wizard" -eq 1 ]; then
     if [ "$extras_present" -eq 1 ]; then
         echo "Extra skills already installed — keeping them." > /dev/tty
         extras_choice="yes"
+    elif [ -n "$EXTRAS_FLAG" ]; then
+        # Flag already answered this question — don't ask and then ignore.
+        extras_choice="$EXTRAS_FLAG"
     else
         extras_choice=$(ask_yes_no "Install the extra skills (compound planning, setup-goal, visual explainer)?" "${saved_extras:-no}")
     fi
@@ -800,11 +803,16 @@ if [ "$run_wizard" -eq 1 ]; then
     if [ "$extras_choice" = "yes" ]; then
         invocable_list="$CORE_SKILL_NAMES $EXTRA_SKILL_NAMES"
     fi
-    want_invocable=$(ask_yes_no "Make any skills callable by the model (instead of user-invoked only)?" "no")
-    if [ "$want_invocable" = "yes" ]; then
-        invocable_choice=$(select_skills_checkbox "$invocable_list" "$saved_invocable")
+    if [ -n "$MODEL_INVOCABLE_FLAG" ]; then
+        # Flag already answered this question — don't ask and then ignore.
+        invocable_choice="$MODEL_INVOCABLE_FLAG"
     else
-        invocable_choice="none"
+        want_invocable=$(ask_yes_no "Make any skills callable by the model (instead of user-invoked only)?" "no")
+        if [ "$want_invocable" = "yes" ]; then
+            invocable_choice=$(select_skills_checkbox "$invocable_list" "$saved_invocable")
+        else
+            invocable_choice="none"
+        fi
     fi
 fi
 

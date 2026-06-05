@@ -106,7 +106,7 @@ REM unquoted arg containing `&` would re-trigger metacharacter interpretation.
 set "CURRENT_ARG=%~1"
 if "!CURRENT_ARG:~0,1!"=="-" (
     echo Unknown option: "%~1" >&2
-    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] >&2
+    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--non-interactive] [--reconfigure] >&2
     exit /b 1
 )
 REM Positional form: install.cmd vX.Y.Z (legacy interface).
@@ -907,6 +907,9 @@ echo.
 if "!EXTRAS_PRESENT!"=="1" (
     echo Extra skills already installed — keeping them.
     set "EXTRAS_CHOICE=yes"
+) else if defined EXTRAS_FLAG (
+    REM Flag already answered this question — don't ask and then ignore.
+    set "EXTRAS_CHOICE=!EXTRAS_FLAG!"
 ) else (
     set "DEF_EXTRAS=no"
     if defined SAVED_EXTRAS set "DEF_EXTRAS=!SAVED_EXTRAS!"
@@ -916,6 +919,11 @@ if "!EXTRAS_PRESENT!"=="1" (
     if /i "!ANSWER!"=="y" set "EXTRAS_CHOICE=yes"
     if /i "!ANSWER!"=="yes" set "EXTRAS_CHOICE=yes"
     if "!ANSWER!"=="" set "EXTRAS_CHOICE=!DEF_EXTRAS!"
+)
+if defined MODEL_INVOCABLE_FLAG (
+    REM Flag already answered this question — don't ask and then ignore.
+    set "INVOCABLE_CHOICE=!MODEL_INVOCABLE_FLAG!"
+    goto :eof
 )
 set "ANSWER="
 set /p "ANSWER=Make any skills callable by the model (instead of user-invoked only)? [y/N] "
@@ -937,11 +945,14 @@ if "!EXTRAS_CHOICE!"=="yes" (
     set "SKILL_6=plannotator-setup-goal"
     set "SKILL_7=plannotator-visual-explainer"
 )
+REM Preselect previously chosen skills. NOTE: no pipes here — each side of a
+REM cmd pipe runs in a child without delayed expansion, so !vars! would pass
+REM through literally. A substring-replace containment test avoids that trap.
+set "PRESEL=,!SAVED_INVOCABLE!,"
 for /l %%I in (1,1,!SKILL_COUNT!) do (
     set "SEL_%%I=0"
     if defined SAVED_INVOCABLE (
-        echo ,!SAVED_INVOCABLE!, | findstr /c:",!SKILL_%%I!," >nul 2>&1
-        if !ERRORLEVEL! equ 0 set "SEL_%%I=1"
+        for %%K in ("!SKILL_%%I!") do if not "!PRESEL:,%%~K,=!"=="!PRESEL!" set "SEL_%%I=1"
     )
 )
 :toggle_loop

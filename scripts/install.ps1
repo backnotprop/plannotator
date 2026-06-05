@@ -493,17 +493,25 @@ if ($runWizard) {
     if ($extrasPresent) {
         Write-Host "Extra skills already installed — keeping them."
         $extrasChoice = "yes"
+    } elseif ($Extras -or $NoExtras) {
+        # Flag already answered this question — don't ask and then ignore.
+        $extrasChoice = if ($Extras) { "yes" } else { "no" }
     } else {
         $defaultExtras = if ($savedExtras) { $savedExtras } else { "no" }
         $extrasChoice = Read-YesNo "Install the extra skills (compound planning, setup-goal, visual explainer)?" $defaultExtras
     }
     $invocableList = $coreSkillNames
     if ($extrasChoice -eq "yes") { $invocableList = $coreSkillNames + $extraSkillNames }
-    $wantInvocable = Read-YesNo "Make any skills callable by the model (instead of user-invoked only)?" "no"
-    if ($wantInvocable -eq "yes") {
-        $invocableChoice = Select-SkillsCheckbox -Names $invocableList -Preselected $savedInvocable
+    if ($ModelInvocable) {
+        # Flag already answered this question — don't ask and then ignore.
+        $invocableChoice = $ModelInvocable
     } else {
-        $invocableChoice = "none"
+        $wantInvocable = Read-YesNo "Make any skills callable by the model (instead of user-invoked only)?" "no"
+        if ($wantInvocable -eq "yes") {
+            $invocableChoice = Select-SkillsCheckbox -Names $invocableList -Preselected $savedInvocable
+        } else {
+            $invocableChoice = "none"
+        }
     }
 }
 
