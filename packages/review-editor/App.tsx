@@ -408,6 +408,13 @@ const ReviewApp: React.FC = () => {
   const allAnnotationsRef = useRef(allAnnotations);
   allAnnotationsRef.current = allAnnotations;
 
+  // Tripwires are informational only and must NEVER be sent to the agent.
+  // Display surfaces use `allAnnotations`; every submit/export path uses this.
+  const reviewerAnnotations = useMemo(
+    () => allAnnotations.filter(a => a.source !== 'tripwire'),
+    [allAnnotations],
+  );
+
   // Auto-save code annotation drafts
   const { draftBanner, restoreDraft, dismissDraft } = useCodeAnnotationDraft({
     annotations: allAnnotations,
@@ -1502,12 +1509,12 @@ const ReviewApp: React.FC = () => {
 
   // Copy feedback markdown to clipboard
   const handleCopyFeedback = useCallback(async () => {
-    if (allAnnotations.length === 0) {
+    if (reviewerAnnotations.length === 0) {
       setShowNoAnnotationsDialog(true);
       return;
     }
     try {
-      const feedback = exportReviewFeedback(allAnnotations, prMetadata, feedbackDiffContext, prReviewScopeLabel);
+      const feedback = exportReviewFeedback(reviewerAnnotations, prMetadata, feedbackDiffContext, prReviewScopeLabel);
       await navigator.clipboard.writeText(feedback);
       setCopyFeedback('Feedback copied!');
       setTimeout(() => setCopyFeedback(null), 2000);
@@ -1516,17 +1523,17 @@ const ReviewApp: React.FC = () => {
       setCopyFeedback('Failed to copy');
       setTimeout(() => setCopyFeedback(null), 2000);
     }
-  }, [allAnnotations, prMetadata, feedbackDiffContext, prReviewScopeLabel]);
+  }, [reviewerAnnotations, prMetadata, feedbackDiffContext, prReviewScopeLabel]);
 
   const feedbackMarkdown = useMemo(() => {
-    let output = exportReviewFeedback(allAnnotations, prMetadata, feedbackDiffContext, prReviewScopeLabel);
+    let output = exportReviewFeedback(reviewerAnnotations, prMetadata, feedbackDiffContext, prReviewScopeLabel);
     if (editorAnnotations.length > 0) {
       output += exportEditorAnnotations(editorAnnotations);
     }
     return output;
-  }, [allAnnotations, prMetadata, feedbackDiffContext, prReviewScopeLabel, editorAnnotations]);
+  }, [reviewerAnnotations, prMetadata, feedbackDiffContext, prReviewScopeLabel, editorAnnotations]);
 
-  const totalAnnotationCount = allAnnotations.length + editorAnnotations.length;
+  const totalAnnotationCount = reviewerAnnotations.length + editorAnnotations.length;
 
   // Send feedback to OpenCode via API
   const handleSendFeedback = useCallback(async () => {
@@ -1545,7 +1552,7 @@ const ReviewApp: React.FC = () => {
         body: JSON.stringify({
           approved: false,
           feedback: feedbackMarkdown,
-          annotations: allAnnotations,
+          annotations: reviewerAnnotations,
           ...(effectiveAgent && { agentSwitch: effectiveAgent }),
         }),
       });
@@ -1560,7 +1567,7 @@ const ReviewApp: React.FC = () => {
       setTimeout(() => setCopyFeedback(null), 2000);
       setIsSendingFeedback(false);
     }
-  }, [totalAnnotationCount, feedbackMarkdown, allAnnotations]);
+  }, [totalAnnotationCount, feedbackMarkdown, reviewerAnnotations]);
 
   // Exit review session without sending any feedback
   const handleExit = useCallback(async () => {
@@ -1708,10 +1715,10 @@ const ReviewApp: React.FC = () => {
       title: prMetadata.title,
       repo: getDisplayRepo(prMetadata),
     } : undefined;
-    const plan = buildReviewSubmission(allAnnotations, editorAnnotations, prMetadata?.url, diffPaths, prMeta);
+    const plan = buildReviewSubmission(reviewerAnnotations, editorAnnotations, prMetadata?.url, diffPaths, prMeta);
     setPlatformGeneralComment('');
     setPlatformCommentDialog({ action, plan });
-  }, [allAnnotations, editorAnnotations, files, prMetadata]);
+  }, [reviewerAnnotations, editorAnnotations, files, prMetadata]);
 
   // Double-tap Option/Alt to toggle review destination (PR mode only)
   useEffect(() => {
@@ -2353,7 +2360,7 @@ const ReviewApp: React.FC = () => {
               </div>
               <div className="flex-1 overflow-auto p-4">
                 <div className="text-xs text-muted-foreground mb-2">
-                  {allAnnotations.length} annotation{allAnnotations.length !== 1 ? 's' : ''}
+                  {reviewerAnnotations.length} annotation{reviewerAnnotations.length !== 1 ? 's' : ''}
                 </div>
                 <pre className="export-code-block whitespace-pre-wrap">
                   {feedbackMarkdown}

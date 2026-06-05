@@ -5,6 +5,14 @@ export interface ParsedReviewArgs {
   prUrl?: string;
   vcsType?: VcsSelection;
   useLocal: boolean;
+  /** Non-interactive tripwire scan (`--tripwires` / `-t`). */
+  tripwires?: boolean;
+  /**
+   * Natural-language description for `--add-tripwire <description...>`.
+   * Consumes everything after the flag (so unquoted multi-word descriptions
+   * work); undefined when the flag has no value.
+   */
+  addTripwire?: string;
 }
 
 export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
@@ -14,9 +22,21 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
 
   let vcsType: VcsSelection | undefined;
   let useLocal = true;
+  let tripwires: boolean | undefined;
+  let addTripwire: string | undefined;
   const positional: string[] = [];
 
+  // True after `--add-tripwire`: every remaining token is part of the
+  // natural-language description, not a positional or flag. A missing next
+  // token leaves addTripwire undefined.
+  let collectAddTripwire = false;
+  const addTripwireParts: string[] = [];
+
   for (const token of tokens) {
+    if (collectAddTripwire) {
+      addTripwireParts.push(token);
+      continue;
+    }
     switch (token) {
       case "--git":
         vcsType = "git";
@@ -27,10 +47,21 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
       case "--no-local":
         useLocal = false;
         break;
+      case "--tripwires":
+      case "-t":
+        tripwires = true;
+        break;
+      case "--add-tripwire":
+        collectAddTripwire = true;
+        break;
       default:
         positional.push(token);
         break;
     }
+  }
+
+  if (addTripwireParts.length > 0) {
+    addTripwire = addTripwireParts.join(" ");
   }
 
   const target = positional[0];
@@ -38,6 +69,8 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
     prUrl: target && isReviewUrl(target) ? target : undefined,
     vcsType,
     useLocal,
+    ...(tripwires ? { tripwires } : {}),
+    ...(addTripwire !== undefined ? { addTripwire } : {}),
   };
 }
 

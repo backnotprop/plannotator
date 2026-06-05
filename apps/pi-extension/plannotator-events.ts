@@ -329,6 +329,8 @@ export {
 	getLastAssistantMessageText,
 	hasPlanBrowserHtml,
 	hasReviewBrowserHtml,
+	scanTripwires,
+	buildAddTripwireInstruction,
 	startCodeReviewBrowserSession,
 	startLastMessageAnnotationSession,
 	startMarkdownAnnotationSession,

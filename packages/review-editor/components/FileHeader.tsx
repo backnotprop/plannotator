@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { ShieldAlert } from 'lucide-react';
 import { DiffOptionsPopover } from './DiffOptionsPopover';
 
 interface FileHeaderProps {
@@ -11,6 +12,7 @@ interface FileHeaderProps {
   onStage?: () => void;
   canStage?: boolean;
   stageError?: string | null;
+  isTripwired?: boolean;
   onFileComment?: (anchorEl: HTMLElement) => void;
   collapseToggle?: React.ReactNode;
   onCollapseToggle?: () => void;
@@ -44,6 +46,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   onStage,
   canStage = false,
   stageError,
+  isTripwired = false,
   onFileComment,
   collapseToggle,
   onCollapseToggle,
@@ -103,6 +106,11 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
         </span>
       </div>
       <div className={`flex flex-shrink-0 items-center pl-2 ${isCompact ? 'gap-1' : 'gap-2'}`}>
+        {isTripwired && (
+          <span className="flex items-center" title="Touches a slop-free zone (tripwire)">
+            <ShieldAlert className="w-3.5 h-3.5" style={{ color: 'var(--warning)' }} aria-label="Tripwire" />
+          </span>
+        )}
         {onToggleViewed && (
           <button
             onClick={onToggleViewed}

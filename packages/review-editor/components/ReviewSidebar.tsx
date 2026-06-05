@@ -7,6 +7,7 @@ import { ConventionalLabelBadge } from './ConventionalLabelPicker';
 import { HighlightedCode } from './HighlightedCode';
 import { detectLanguage } from '../utils/detectLanguage';
 import { renderInlineMarkdown } from '../utils/renderInlineMarkdown';
+import { isTripwireAnnotation } from '../utils/tripwire';
 import { formatRelativeTime } from '../utils/formatRelativeTime';
 import { AITab } from './AITab';
 import { AgentsTab } from '@plannotator/ui/components/AgentsTab';
@@ -143,7 +144,10 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   onOpenJobDetail,
   onOpenPRPanel,
 }) => {
-  const totalCount = annotations.length + (editorAnnotations?.length ?? 0);
+  // Tripwires are informational and never sent to the agent, so they don't
+  // count toward the reviewer's annotation total (header badge, empty state).
+  const reviewerAnnotationCount = annotations.filter(a => !isTripwireAnnotation(a)).length;
+  const totalCount = reviewerAnnotationCount + (editorAnnotations?.length ?? 0);
   const [copied, setCopied] = useState(false);
 
   const handleQuickCopy = async () => {
@@ -198,6 +202,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   function renderAnnotationCard(annotation: CodeAnnotation) {
     const isSelected = selectedAnnotationId === annotation.id;
     const isFileScope = getAnnotationScope(annotation) === 'file';
+    const isTripwire = isTripwireAnnotation(annotation);
     return (
       <div
         key={annotation.id}
@@ -209,8 +214,15 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
         }`}
       >
         <div className="flex items-center justify-between mb-1.5">
-          <div className="flex items-center gap-2">
-            {isFileScope ? (
+          <div className="flex items-center gap-2 min-w-0">
+            {isTripwire ? (
+              <span
+                className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded"
+                style={{ color: 'var(--warning)', background: 'oklch(from var(--warning) l c h / 0.12)' }}
+              >
+                tripwire
+              </span>
+            ) : isFileScope ? (
               <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary">
                 file
               </span>
@@ -222,6 +234,15 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                 {annotation.tokenText && (
                   <span className="ml-1 text-primary/70">{`\`${annotation.tokenText.length > 30 ? annotation.tokenText.slice(0, 27) + '...' : annotation.tokenText}\``}</span>
                 )}
+              </span>
+            )}
+            {isTripwire && (
+              <span className="text-[10px] font-mono text-muted-foreground/70 truncate">
+                {isFileScope
+                  ? annotation.filePath.split('/').pop()
+                  : annotation.lineStart === annotation.lineEnd
+                    ? `L${annotation.lineStart}`
+                    : `L${annotation.lineStart}-${annotation.lineEnd}`}
               </span>
             )}
             {annotation.conventionalLabel && (
@@ -308,7 +329,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
           {/* Annotations tab */}
           {activeTab === 'annotations' && (
             <div className="p-2 space-y-1.5">
-              {totalCount === 0 ? (
+              {totalCount === 0 && annotations.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-40 text-center px-4">
                   <div className="w-10 h-10 rounded-full bg-muted/50 flex items-center justify-center mb-3">
                     <svg className="w-5 h-5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>

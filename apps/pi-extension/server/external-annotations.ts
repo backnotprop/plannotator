@@ -57,6 +57,11 @@ export function createExternalAnnotationHandler(mode: "plan" | "review") {
 			return { ids: created.map((a: { id: string }) => a.id) };
 		},
 
+		/** Remove every annotation from a given source. Returns the count removed. */
+		clearBySource(source: string): number {
+			return store.clearBySource(source);
+		},
+
 		async handle(
 			req: IncomingMessage,
 			res: ServerResponse,

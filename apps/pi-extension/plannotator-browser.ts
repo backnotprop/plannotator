@@ -16,6 +16,13 @@ import {
 } from "./server.js";
 import { openBrowser, isRemoteSession } from "./server/network.js";
 import { parsePRUrl, checkPRAuth, fetchPR } from "./server/pr.js";
+import { piResolveMergedTripwires, piGlobalTripwiresPath } from "./server/serverReview.js";
+import {
+	evaluateTripwires,
+	formatTripwiresMarkdown,
+	parseTripwiresConfig,
+	buildAddTripwirePrompt,
+} from "./generated/tripwires.js";
 import {
 	getMRLabel,
 	getMRNumberLabel,
@@ -437,6 +444,103 @@ export async function startCodeReviewBrowserSession(
 	});
 
 	return startBrowserDecisionSession(server, ctx, server.waitForDecision);
+}
+
+/**
+ * Non-interactive tripwire scan: compute the review diff (PR or local) along the
+ * LIGHTWEIGHT path — no worktree, no exit handlers, no review server — evaluate
+ * the merged (global + repo) tripwires config against it, and return a markdown
+ * report. Mirrors the Bun CLI `--tripwires` short-circuit.
+ */
+export async function scanTripwires(
+	ctx: ExtensionContext,
+	options: { prUrl?: string; vcsType?: VcsSelection; useLocal?: boolean; cwd?: string } = {},
+): Promise<string> {
+	const urlArg = options.prUrl;
+	const isPRMode = urlArg?.startsWith("http://") || urlArg?.startsWith("https://");
+
+	let rawPatch: string;
+
+	if (isPRMode && urlArg) {
+		// --- PR scan: fetch the patch only (no checkout) ---
+		const prRef = parsePRUrl(urlArg);
+		if (!prRef) {
+			throw new Error(
+				`Invalid PR/MR URL: ${urlArg}\n` +
+				"Supported formats:\n" +
+				"  GitHub: https://github.com/owner/repo/pull/123\n" +
+				"  GitLab: https://gitlab.com/group/project/-/merge_requests/42",
+			);
+		}
+
+		const cliName = getCliName(prRef);
+		const cliUrl = getCliInstallUrl(prRef);
+		try {
+			await checkPRAuth(prRef);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (msg.includes("not found") || msg.includes("ENOENT")) {
+				throw new Error(`${cliName === "gh" ? "GitHub" : "GitLab"} CLI (${cliName}) is not installed. Install it from ${cliUrl}`);
+			}
+			throw err;
+		}
+
+		const pr = await fetchPR(prRef);
+		rawPatch = pr.rawPatch;
+	} else {
+		// --- Local scan: compute the working-tree diff only ---
+		const cwd = options.cwd ?? ctx.cwd;
+		const config = loadConfig();
+		const result = await prepareLocalReviewDiff({
+			cwd,
+			vcsType: options.vcsType,
+			configuredDiffType: resolveDefaultDiffType(config),
+			hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
+		});
+		rawPatch = result.rawPatch;
+	}
+
+	const scanCwd = options.cwd ?? ctx.cwd;
+	const { config, root, key } = piResolveMergedTripwires(scanCwd);
+	const hits = evaluateTripwires(rawPatch, config, { cwd: root ?? undefined });
+
+	// Re-read each layer separately for the grouped display (the resolver only
+	// returns the merged config). Key + root are already resolved, so no extra
+	// git calls — just the file reads.
+	const globalPath = key ? piGlobalTripwiresPath(key) : "";
+	const globalRules = key && globalPath && existsSync(globalPath)
+		? parseTripwiresConfig(readFileSync(globalPath, "utf-8")).rules
+		: [];
+	const repoPath = root ? join(root, ".plannotator", "tripwires.json") : null;
+	const repoRules = repoPath && existsSync(repoPath)
+		? parseTripwiresConfig(readFileSync(repoPath, "utf-8")).rules
+		: [];
+
+	return formatTripwiresMarkdown({
+		globalKey: key,
+		globalPath,
+		repoPath,
+		globalRules,
+		repoRules,
+		hits,
+	});
+}
+
+/**
+ * Build the agent-facing add-tripwire instruction with the project's resolved
+ * config paths filled in. Mirrors the Bun CLI's `--add-tripwire` short-circuit.
+ */
+export function buildAddTripwireInstruction(
+	ctx: ExtensionContext,
+	description: string,
+	cwd?: string,
+): string {
+	const { root, key } = piResolveMergedTripwires(cwd ?? ctx.cwd);
+	return buildAddTripwirePrompt({
+		description,
+		globalPath: key ? piGlobalTripwiresPath(key) : undefined,
+		repoPath: root ? join(root, ".plannotator", "tripwires.json") : undefined,
+	});
 }
 
 export async function openMarkdownAnnotation(

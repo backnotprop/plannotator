@@ -15,6 +15,8 @@ import { FileHeader } from './FileHeader';
 import { getLineNumberFromNode, getSideFromNode, getDiffSelection } from '../utils/diffSelection';
 import { InlineAnnotation } from './InlineAnnotation';
 import { InlineAIMarker } from './InlineAIMarker';
+import { InlineTripwireMarker } from './InlineTripwireMarker';
+import { isTripwireAnnotation } from '../utils/tripwire';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import { type ReviewSearchMatch } from '../utils/reviewSearch';
 import {
@@ -447,6 +449,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           reasoning: ann.reasoning,
           conventionalLabel: ann.conventionalLabel,
           decorations: ann.decorations,
+          source: ann.source,
+          kind: isTripwireAnnotation(ann) ? 'tripwire' as const : undefined,
         } as DiffAnnotationMetadata,
       }));
   }, [annotations]);
@@ -476,6 +480,12 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     [lineAnnotations, aiLineAnnotations],
   );
 
+  // True when any annotation for this file is a tripwire hit
+  const isTripwired = useMemo(
+    () => annotations.some(isTripwireAnnotation),
+    [annotations],
+  );
+
   // Handle edit: find annotation and start editing in toolbar
   const handleEdit = useCallback((id: string) => {
     const ann = annotations.find(a => a.id === id);
@@ -485,6 +495,16 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   // Render annotation or AI marker in diff
   const renderAnnotation = useCallback((annotation: { side: string; lineNumber: number; metadata?: DiffAnnotationMetadata }) => {
     if (!annotation.metadata) return null;
+
+    if (annotation.metadata.kind === 'tripwire') {
+      return (
+        <InlineTripwireMarker
+          annotationId={annotation.metadata.annotationId}
+          note={annotation.metadata.text ?? ''}
+          onClick={onSelectAnnotation}
+        />
+      );
+    }
 
     if (annotation.metadata.kind === 'ai-marker') {
       return (
@@ -582,6 +602,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         onStage={onStage}
         canStage={canStage}
         stageError={stageError}
+        isTripwired={isTripwired}
         onFileComment={setFileCommentAnchor}
       />
 

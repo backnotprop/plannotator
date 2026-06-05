@@ -58,6 +58,8 @@ import {
 	hasReviewBrowserHtml,
 	getStartupErrorMessage,
 	openArchiveBrowserAction,
+	scanTripwires,
+	buildAddTripwireInstruction,
 	startCodeReviewBrowserSession,
 	startLastMessageAnnotationSession,
 	startMarkdownAnnotationSession,
@@ -424,6 +426,36 @@ export default function plannotator(pi: ExtensionAPI): void {
 
 			try {
 				const reviewArgs = parseReviewArgs(args ?? "");
+
+				// Non-interactive tripwire flags short-circuit before any review UI:
+				// compute/scan and deliver the report (or add-tripwire snippet) back to
+				// the session, then return without opening the browser.
+				if (reviewArgs.tripwires) {
+					const report = await scanTripwires(ctx, {
+						prUrl: reviewArgs.prUrl,
+						vcsType: reviewArgs.vcsType,
+						useLocal: reviewArgs.useLocal,
+					});
+					sendUserMessageWithCurrentSessionFallback(
+						pi,
+						report,
+						{ deliverAs: "followUp" },
+						"Tripwire scan could not be sent",
+						origin,
+					);
+					return;
+				}
+				if (reviewArgs.addTripwire) {
+					sendUserMessageWithCurrentSessionFallback(
+						pi,
+						buildAddTripwireInstruction(ctx, reviewArgs.addTripwire),
+						{ deliverAs: "followUp" },
+						"Tripwire scan could not be sent",
+						origin,
+					);
+					return;
+				}
+
 				const isPRReview = reviewArgs.prUrl !== undefined;
 				const session = await startCodeReviewBrowserSession(ctx, {
 					prUrl: reviewArgs.prUrl,

@@ -849,6 +849,22 @@ diffs-container {
   color: var(--primary);
 }
 
+/* Tripwire inline markers in diff — quiet, editor-native: a single amber
+   glyph carries the signal; no border, no chrome. Read-only. */
+.tripwire-marker {
+  color: var(--muted-foreground);
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.tripwire-marker svg {
+  color: var(--warning);
+}
+
+.tripwire-marker:hover {
+  background: oklch(from var(--warning) l c h / 0.06);
+  color: var(--foreground);
+}
+
 /* AI markdown — rendered responses from marked */
 .ai-markdown {
   line-height: 1.5;

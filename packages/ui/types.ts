@@ -153,8 +153,9 @@ export interface DiffAnnotationMetadata {
   reasoning?: string;
   conventionalLabel?: ConventionalLabel;
   decorations?: ConventionalDecoration[];
+  source?: string; // External tool identifier (e.g., "tripwire") — set when annotation comes from external API
   // AI marker fields (set when kind === 'ai-marker')
-  kind?: 'annotation' | 'ai-marker';
+  kind?: 'annotation' | 'ai-marker' | 'tripwire';
   questionId?: string;
   promptPreview?: string;
   hasResponse?: boolean;

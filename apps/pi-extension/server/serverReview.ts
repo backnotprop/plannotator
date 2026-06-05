@@ -1,6 +1,8 @@
-import { spawn } from "node:child_process";
-import { readFileSync, existsSync } from "node:fs";
+import { spawn, execFileSync } from "node:child_process";
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
+import { dirname, join, resolve } from "node:path";
 import os from "node:os";
 
 import { contentHash, deleteDraft } from "../generated/draft.js";
@@ -91,6 +93,18 @@ import {
 	extractChangedFiles,
 } from "../generated/code-nav.js";
 import {
+	parseTripwiresConfig,
+	parseTripwiresConfigDetailed,
+	evaluateTripwires,
+	tripwireHitToReviewAnnotation,
+	normalizeRemoteIdentity,
+	mergeTripwiresConfigs,
+	TRIPWIRE_SOURCE,
+	type TripwiresConfig,
+	type TripwireDiagnostic,
+} from "../generated/tripwires.js";
+import { getPlannotatorDataDir } from "../generated/data-dir.js";
+import {
 	canStageFiles,
 	detectRemoteDefaultCompareTarget,
 	getVcsContext,
@@ -144,6 +158,152 @@ function detectWSL(): boolean {
 		}
 	} catch { /* ignore */ }
 	return false;
+}
+
+/** Resolve the git repo root for a cwd, or null when not in a git repo. */
+function piRepoRoot(cwd: string): string | null {
+	try {
+		return execFileSync("git", ["rev-parse", "--show-toplevel"], {
+			cwd,
+			encoding: "utf-8",
+		}).trim();
+	} catch {
+		return null;
+	}
+}
+
+/** Read `<root>/.plannotator/tripwires.json`, or null on miss/throw. */
+function piReadTripwires(root: string): string | null {
+	try {
+		const path = `${root}/.plannotator/tripwires.json`;
+		if (!existsSync(path)) return null;
+		return readFileSync(path, "utf-8");
+	} catch {
+		return null;
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tripwires — global store glue (node:crypto + sync fs + execFileSync).
+//
+// Mirrors the Bun glue in packages/server/tripwires.ts. The pure normalization
+// + merge live in the shared module; everything impure (git remote/common-dir
+// resolution, hashing, file I/O) lives here so it stays runtime-specific.
+// ---------------------------------------------------------------------------
+
+/** The `origin` remote URL for a cwd, or null when there is no remote/git. */
+function piRemoteUrl(cwd: string): string | null {
+	try {
+		const url = execFileSync("git", ["remote", "get-url", "origin"], {
+			cwd,
+			encoding: "utf-8",
+		}).trim();
+		return url || null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Canonical per-repo base dir for the remote-less key: the parent of the
+ * git-common-dir. Unlike `--show-toplevel` (per-worktree), the common dir is
+ * shared across linked worktrees, so they collapse to one key. Null when not a
+ * git repo.
+ */
+function piRepoKeyBase(cwd: string): string | null {
+	try {
+		const commonDir = execFileSync(
+			"git",
+			["rev-parse", "--path-format=absolute", "--git-common-dir"],
+			{ cwd, encoding: "utf-8" },
+		).trim();
+		if (!commonDir) return null;
+		return dirname(commonDir);
+	} catch {
+		// `--path-format=absolute` was added in git 2.31 (2021); on older git the
+		// command above throws. Fall back to the plain (possibly relative)
+		// common-dir resolved against cwd so distinct remote-less repos never
+		// collapse onto one shared global key (worktree-sharing is best-effort).
+		try {
+			const commonDir = execFileSync(
+				"git",
+				["rev-parse", "--git-common-dir"],
+				{ cwd, encoding: "utf-8" },
+			).trim();
+			if (!commonDir) return null;
+			return dirname(resolve(cwd, commonDir));
+		} catch {
+			return null;
+		}
+	}
+}
+
+/** Hash a normalized identity into the 16-char project key used in the path. */
+function piProjectKey(identity: string): string {
+	return createHash("sha256").update(identity).digest("hex").slice(0, 16);
+}
+
+/** Absolute path to the global tripwires file for a project key. */
+export function piGlobalTripwiresPath(key: string): string {
+	return join(getPlannotatorDataDir(), "tripwires", `${key}.json`);
+}
+
+/** Read the global tripwires file for a key, or null on miss/throw (fail-open). */
+function piReadGlobalTripwires(key: string): string | null {
+	try {
+		const path = piGlobalTripwiresPath(key);
+		if (!existsSync(path)) return null;
+		return readFileSync(path, "utf-8");
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Write-once create the global tripwires file ({rules:[]}) if it is missing.
+ * Race-tolerant: if another process created it between the existence check and
+ * the write, that's a no-op; any other write failure is logged but never fatal.
+ */
+function piEnsureGlobalTripwires(key: string): void {
+	try {
+		const path = piGlobalTripwiresPath(key);
+		if (existsSync(path)) return;
+		mkdirSync(dirname(path), { recursive: true });
+		writeFileSync(path, `${JSON.stringify({ rules: [] }, null, 2)}\n`, { flag: "wx" });
+	} catch (err) {
+		// `wx` throws EEXIST if the file appeared concurrently — that's fine.
+		if (!(err instanceof Error && "code" in err && (err as { code?: string }).code === "EEXIST")) {
+			console.error("[tripwires] failed to create global file:", err);
+		}
+	}
+}
+
+/**
+ * Resolve the merged (global + repo) tripwires config for a cwd. Mirrors the
+ * Bun `resolveMergedTripwires`: derives the project key from the remote
+ * identity (or git-common-dir for remote-less repos), ensures the global file
+ * exists, then merges global rules first with the repo layer appended.
+ */
+export function piResolveMergedTripwires(cwd: string): {
+	config: TripwiresConfig;
+	root: string | null;
+	key: string | null;
+	globalDiagnostics: TripwireDiagnostic[];
+} {
+	const root = piRepoRoot(cwd);
+	const remote = piRemoteUrl(cwd);
+	const keyBase = piRepoKeyBase(cwd);
+	const identity = normalizeRemoteIdentity(remote, keyBase);
+	const key = piProjectKey(identity);
+	piEnsureGlobalTripwires(key);
+	const globalParsed = parseTripwiresConfigDetailed(piReadGlobalTripwires(key));
+	const repo = root ? parseTripwiresConfig(piReadTripwires(root)) : { rules: [] };
+	return {
+		config: mergeTripwiresConfigs(globalParsed.config, repo),
+		root,
+		key,
+		globalDiagnostics: globalParsed.diagnostics,
+	};
 }
 
 export interface ReviewServerResult {
@@ -284,6 +444,50 @@ export async function startReviewServer(options: {
 		if (options.agentCwd) return options.agentCwd;
 		return resolveVcsCwd(currentDiffType, options.gitContext?.cwd) ?? process.cwd();
 	}
+
+	// Resolve the global project key ONCE at server start (git remote /
+	// common-dir resolution + global-file creation). Cached for the session;
+	// subsequent refreshes re-read only the file CONTENTS and re-merge. A
+	// corrupt global file is logged once here, distinguishing it from an empty
+	// one. Fail-open: any failure leaves the key null and refreshes use repo-only.
+	let tripwiresGlobalKey: string | null = null;
+	try {
+		const resolved = piResolveMergedTripwires(resolveAgentCwd());
+		tripwiresGlobalKey = resolved.key;
+		for (const diag of resolved.globalDiagnostics) {
+			if (diag.level === "error") {
+				console.error(`[tripwires] global config: ${diag.message}`);
+			}
+		}
+	} catch (err) {
+		console.error(`[tripwires] global key resolution failed:`, err);
+	}
+
+	// Re-evaluate tripwires against the current patch and republish them as
+	// external annotations. Fail-open: any error leaves the review usable. Called
+	// at startup and after every patch reassignment (diff/PR switches). Global
+	// rules fire even when `root` is null (PR mode without a local checkout).
+	function refreshTripwires(): void {
+		try {
+			externalAnnotations.clearBySource(TRIPWIRE_SOURCE);
+			const root = piRepoRoot(resolveAgentCwd());
+			const globalConfig = tripwiresGlobalKey
+				? parseTripwiresConfig(piReadGlobalTripwires(tripwiresGlobalKey))
+				: { rules: [] };
+			const repoConfig = root ? parseTripwiresConfig(piReadTripwires(root)) : { rules: [] };
+			const config = mergeTripwiresConfigs(globalConfig, repoConfig);
+			const hits = evaluateTripwires(currentPatch, config, { cwd: root ?? undefined });
+			if (hits.length === 0) return;
+			const result = externalAnnotations.addAnnotations({
+				annotations: hits.map(tripwireHitToReviewAnnotation),
+			});
+			if ("error" in result) console.error(`[tripwires] addAnnotations error:`, result.error);
+		} catch (err) {
+			console.error(`[tripwires] refresh failed:`, err);
+		}
+	}
+	refreshTripwires();
+
 	const tour = createTourSession();
 
 	const agentJobs = createAgentJobHandler({
@@ -530,6 +734,7 @@ export async function startReviewServer(options: {
 				currentBase = base;
 				baseEverSwitched = true;
 				currentError = result.error;
+				refreshTripwires();
 
 				// Recompute gitContext for the effective cwd so the client's
 				// sidebar reflects the worktree we're now reviewing.
@@ -578,6 +783,7 @@ export async function startReviewServer(options: {
 					currentGitRef = originalPRGitRef;
 					currentError = originalPRError;
 					currentPRDiffScope = "layer";
+					refreshTripwires();
 					json(res, {
 						rawPatch: currentPatch,
 						gitRef: currentGitRef,
@@ -605,6 +811,7 @@ export async function startReviewServer(options: {
 				currentGitRef = result.label;
 				currentError = undefined;
 				currentPRDiffScope = "full-stack";
+				refreshTripwires();
 				json(res, {
 					rawPatch: currentPatch,
 					gitRef: currentGitRef,
@@ -678,6 +885,9 @@ export async function startReviewServer(options: {
 					display: getDisplayRepo(pr.metadata),
 					branch: `${getMRLabel(pr.metadata)} ${getMRNumberLabel(pr.metadata)}`,
 				};
+
+				// Re-evaluate against the switched-to PR's patch and local checkout.
+				refreshTripwires();
 
 				return json(res, {
 					rawPatch: currentPatch,

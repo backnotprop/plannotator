@@ -31,6 +31,18 @@ import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { parseAnnotateArgs } from "@plannotator/shared/annotate-args";
 import { parseReviewArgs } from "@plannotator/shared/review-args";
+import {
+  evaluateTripwires,
+  formatTripwiresMarkdown,
+  buildAddTripwirePrompt,
+  parseTripwiresConfig,
+} from "@plannotator/shared/tripwires";
+import {
+  resolveMergedTripwires,
+  globalTripwiresPath,
+  readGlobalTripwiresFile,
+  readTripwiresFile,
+} from "@plannotator/server/tripwires";
 import { urlToMarkdown, isConvertedSource } from "@plannotator/shared/url-to-markdown";
 import { statSync } from "fs";
 import path from "path";
@@ -105,6 +117,59 @@ export async function handleReviewCommand(
     rawPatch = diffResult.rawPatch;
     gitRef = diffResult.gitRef;
     diffError = diffResult.error;
+  }
+
+  // Non-interactive tripwire flags short-circuit the review UI: scan the diff
+  // we just captured (rawPatch is assigned in both the PR and local branches
+  // above) and inject the result into the session instead of opening a browser.
+  if (reviewArgs.tripwires || reviewArgs.addTripwire) {
+    // @ts-ignore - Event properties contain sessionID
+    const sessionId = event.properties?.sessionID;
+
+    const sendToSession = async (text: string) => {
+      if (!sessionId) return;
+      try {
+        await client.session.prompt({
+          path: { id: sessionId },
+          body: { parts: [{ type: "text", text }] },
+        });
+      } catch {
+        // Session may not be available
+      }
+    };
+
+    if (reviewArgs.addTripwire) {
+      const { root, key } = await resolveMergedTripwires(directory ?? process.cwd());
+      await sendToSession(
+        buildAddTripwirePrompt({
+          description: reviewArgs.addTripwire,
+          globalPath: key ? globalTripwiresPath(key) : undefined,
+          repoPath: root ? `${root}/.plannotator/tripwires.json` : undefined,
+        }),
+      );
+      return;
+    }
+
+    const { config, root, key } = await resolveMergedTripwires(
+      directory ?? process.cwd(),
+    );
+    const hits = evaluateTripwires(rawPatch, config, { cwd: root ?? undefined });
+    const globalRules = parseTripwiresConfig(
+      key ? readGlobalTripwiresFile(key) : null,
+    ).rules;
+    const repoRules = parseTripwiresConfig(
+      root ? readTripwiresFile(root) : null,
+    ).rules;
+    const report = formatTripwiresMarkdown({
+      globalKey: key,
+      globalPath: key ? globalTripwiresPath(key) : "~/.plannotator/tripwires/<project-key>.json",
+      repoPath: root ? `${root}/.plannotator/tripwires.json` : null,
+      globalRules,
+      repoRules,
+      hits,
+    });
+    await sendToSession(report);
+    return;
   }
 
   const server = await startReviewServer({

@@ -215,12 +215,27 @@ export function transformReviewInput(
     const filePath = requireString(obj, "filePath", i);
     if (typeof filePath !== "string") return filePath;
 
-    if (typeof obj.lineStart !== "number") {
-      return { error: `annotations[${i}] missing required "lineStart" field` };
+    // scope: optional, defaults to "line"
+    const scope = typeof obj.scope === "string" ? obj.scope : "line";
+    if (!VALID_SCOPES.includes(scope)) {
+      return {
+        error: `annotations[${i}] invalid scope "${scope}". Must be one of: ${VALID_SCOPES.join(", ")}`,
+      };
     }
-    if (typeof obj.lineEnd !== "number") {
-      return { error: `annotations[${i}] missing required "lineEnd" field` };
+
+    // Line anchors are required for line-scope annotations. File-scope
+    // annotations (e.g. a rename that touches a tripwired path with no edited
+    // line) may omit them; they default to 0 and render at the file level.
+    if (scope === "line") {
+      if (typeof obj.lineStart !== "number") {
+        return { error: `annotations[${i}] missing required "lineStart" field` };
+      }
+      if (typeof obj.lineEnd !== "number") {
+        return { error: `annotations[${i}] missing required "lineEnd" field` };
+      }
     }
+    const lineStart = typeof obj.lineStart === "number" ? obj.lineStart : 0;
+    const lineEnd = typeof obj.lineEnd === "number" ? obj.lineEnd : 0;
 
     // side: optional, defaults to "new"
     const side = typeof obj.side === "string" ? obj.side : "new";
@@ -238,14 +253,6 @@ export function transformReviewInput(
       };
     }
 
-    // scope: optional, defaults to "line"
-    const scope = typeof obj.scope === "string" ? obj.scope : "line";
-    if (!VALID_SCOPES.includes(scope)) {
-      return {
-        error: `annotations[${i}] invalid scope "${scope}". Must be one of: ${VALID_SCOPES.join(", ")}`,
-      };
-    }
-
     // Must have at least text or suggestedCode
     if (typeof obj.text !== "string" && typeof obj.suggestedCode !== "string") {
       return {
@@ -258,8 +265,8 @@ export function transformReviewInput(
       type,
       scope,
       filePath,
-      lineStart: obj.lineStart,
-      lineEnd: obj.lineEnd,
+      lineStart,
+      lineEnd,
       side,
       text: typeof obj.text === "string" ? obj.text : undefined,
       suggestedCode: typeof obj.suggestedCode === "string" ? obj.suggestedCode : undefined,

@@ -35,6 +35,8 @@ export interface ExternalAnnotationHandler {
   ) => Promise<Response | null>;
   /** Push annotations directly into the store (bypasses HTTP, reuses same validation). */
   addAnnotations: (body: unknown) => { ids: string[] } | { error: string };
+  /** Remove all annotations with the given source. Returns the removed count. */
+  clearBySource: (source: string) => number;
 }
 
 // ---------------------------------------------------------------------------
@@ -75,6 +77,10 @@ export function createExternalAnnotationHandler(
       if ("error" in parsed) return { error: parsed.error };
       const created = store.add(parsed.annotations);
       return { ids: created.map((a) => a.id) };
+    },
+
+    clearBySource(source: string): number {
+      return store.clearBySource(source);
     },
 
     async handle(

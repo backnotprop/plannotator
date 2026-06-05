@@ -158,4 +158,29 @@ describe("OpenCode CLI bridge helpers", () => {
     });
     expect(prFeedback.message).toBe("PR comment only.");
   });
+
+  test("returns a tripwire scan report verbatim (no review-denied suffix)", () => {
+    // The opencode-review tripwire short-circuit emits
+    // { decision: "annotated", feedback: <report>, isPRMode: true }. This locks
+    // the rebuttal contract it relies on: isPRMode:true returns the report
+    // unchanged, with NO getReviewDeniedSuffix appended.
+    const report = [
+      "## Global (~/.plannotator/tripwires/abc123.json)",
+      "(none)",
+      "## Repo (.plannotator/tripwires.json)",
+      "| id | globs | symbols | note |\n| --- | --- | --- | --- |\n| auth | src/auth/** |  | Touches a slop-free zone |",
+      "## Live status",
+      "No tripwires tripped.",
+    ].join("\n\n");
+
+    const outcome = buildReviewPromptFromBridgeOutcome({
+      decision: "annotated",
+      approved: false,
+      isPRMode: true,
+      feedback: report,
+    });
+
+    expect(outcome).toEqual({ message: report });
+    expect(outcome.agent).toBeUndefined();
+  });
 });

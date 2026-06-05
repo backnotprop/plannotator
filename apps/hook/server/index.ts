@@ -87,6 +87,22 @@ import { type DiffType, prepareLocalReviewDiff, gitRuntime } from "@plannotator/
 import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
 import { parseReviewArgs } from "@plannotator/shared/review-args";
 import {
+  evaluateTripwires,
+  formatTripwiresMarkdown,
+  buildAddTripwirePrompt,
+  appendRuleToTripwiresJson,
+  parseTripwiresConfigDetailed,
+} from "@plannotator/shared/tripwires";
+import {
+  resolveMergedTripwires,
+  globalTripwiresPath,
+  readGlobalTripwiresFile,
+  readTripwiresFile,
+  repoRootFromCwd,
+  writeGlobalTripwiresFile,
+  writeRepoTripwiresFile,
+} from "@plannotator/server/tripwires";
+import {
   normalizeGoalSetupBundle,
   type GoalSetupStage,
 } from "@plannotator/shared/goal-setup";
@@ -490,6 +506,178 @@ if (args[0] === "sessions") {
   }
   process.exit(0);
 
+} else if (args[0] === "tripwires") {
+  // ============================================
+  // TRIPWIRES MODE (list | validate | path)
+  // ============================================
+  //
+  // Inspect the two-layer slop-free-zone config: a global per-project file
+  // under <dataDir>/tripwires/<key>.json plus the repo-local
+  // .plannotator/tripwires.json. All subcommands are read-only and fail-open.
+
+  const sub = args[1];
+
+  if (sub === "list") {
+    // Resolve key + root (ensures the global file exists), then re-read each
+    // layer separately so the report can group global vs. repo rules.
+    const { key, root } = await resolveMergedTripwires(process.cwd());
+    const globalPath = key ? globalTripwiresPath(key) : "(unknown)";
+    const globalRules = parseTripwiresConfigDetailed(
+      key ? readGlobalTripwiresFile(key) : null,
+    ).config.rules;
+    const repoPath = root ? `${root}/.plannotator/tripwires.json` : null;
+    const repoRules = root
+      ? parseTripwiresConfigDetailed(readTripwiresFile(root)).config.rules
+      : [];
+
+    console.log(
+      formatTripwiresMarkdown({
+        globalKey: key,
+        globalPath,
+        repoPath,
+        globalRules,
+        repoRules,
+      }),
+    );
+    process.exit(0);
+  }
+
+  if (sub === "validate") {
+    const { key, root } = await resolveMergedTripwires(process.cwd());
+    const globalPath = key ? globalTripwiresPath(key) : "(unknown)";
+    const repoPath = root ? `${root}/.plannotator/tripwires.json` : null;
+
+    const globalResult = parseTripwiresConfigDetailed(
+      key ? readGlobalTripwiresFile(key) : null,
+    );
+    const repoResult = parseTripwiresConfigDetailed(
+      root ? readTripwiresFile(root) : null,
+    );
+
+    let hasError = false;
+    const report = (label: string, path: string, result: ReturnType<typeof parseTripwiresConfigDetailed>) => {
+      console.log(`${label} (${path})`);
+      if (result.diagnostics.length === 0) {
+        console.log(`  ${result.config.rules.length} rule(s), no problems`);
+      } else {
+        for (const d of result.diagnostics) {
+          if (d.level === "error") hasError = true;
+          const where = typeof d.ruleIndex === "number" ? ` [rule ${d.ruleIndex}]` : "";
+          console.log(`  ${d.level}: ${d.message}${where}`);
+        }
+      }
+    };
+
+    report("Global", globalPath, globalResult);
+    report("Repo", repoPath ?? ".plannotator/tripwires.json", repoResult);
+    process.exit(hasError ? 1 : 0);
+  }
+
+  if (sub === "path") {
+    const root = await repoRootFromCwd(process.cwd());
+    const { key } = await resolveMergedTripwires(process.cwd());
+    if (key) console.log(globalTripwiresPath(key));
+    console.log(root ? `${root}/.plannotator/tripwires.json` : ".plannotator/tripwires.json");
+    process.exit(0);
+  }
+
+  if (sub === "add") {
+    // Two modes sharing one verb:
+    //   structured flags (--glob ...) → write the rule directly
+    //   free text                    → print the agent instruction (no write)
+    const globs: string[] = [];
+    const symbols: string[] = [];
+    let note: string | undefined;
+    let id: string | undefined;
+    let toRepo = false;
+    const descriptionParts: string[] = [];
+
+    const rest = args.slice(2);
+    for (let i = 0; i < rest.length; i++) {
+      const token = rest[i];
+      if (token === "--glob" || token === "-g") {
+        if (rest[i + 1]) globs.push(rest[++i]);
+      } else if (token === "--symbol" || token === "-s") {
+        if (rest[i + 1]) symbols.push(rest[++i]);
+      } else if (token === "--note") {
+        if (rest[i + 1]) note = rest[++i];
+      } else if (token === "--id") {
+        if (rest[i + 1]) id = rest[++i];
+      } else if (token === "--repo") {
+        toRepo = true;
+      } else {
+        descriptionParts.push(token);
+      }
+    }
+
+    if (globs.length > 0) {
+      // Direct write. Explicit user action → errors are reported, not
+      // swallowed (unlike review-time fail-open reads).
+      const { root, key } = await resolveMergedTripwires(process.cwd());
+      let targetPath: string;
+      let raw: string | null;
+      if (toRepo) {
+        if (!root) {
+          console.error("tripwires add --repo requires running inside a git repository.");
+          process.exit(1);
+        }
+        targetPath = `${root}/.plannotator/tripwires.json`;
+        raw = readTripwiresFile(root);
+      } else {
+        if (!key) {
+          console.error("Could not derive a project key (not inside a git repository?). Run from the repo, or use --repo inside one.");
+          process.exit(1);
+        }
+        targetPath = globalTripwiresPath(key);
+        raw = readGlobalTripwiresFile(key);
+      }
+
+      const result = appendRuleToTripwiresJson(raw, { globs, symbols, note, id });
+      if (!result.ok) {
+        console.error(`Cannot add rule: ${result.error}`);
+        process.exit(1);
+      }
+      try {
+        if (toRepo) {
+          writeRepoTripwiresFile(root!, result.json);
+        } else {
+          writeGlobalTripwiresFile(key!, result.json);
+        }
+      } catch (err) {
+        console.error(`Failed to write ${targetPath}:`, err instanceof Error ? err.message : err);
+        process.exit(1);
+      }
+
+      console.log(`Added tripwire "${result.rule.id}" to ${toRepo ? "repo" : "global"} config:`);
+      console.log(`  ${targetPath}`);
+      console.log("");
+      console.log(JSON.stringify(result.rule, null, 2));
+      console.log("");
+      console.log("Run `plannotator tripwires list` to see all rules.");
+      process.exit(0);
+    }
+
+    const description = descriptionParts.join(" ").trim();
+    if (description) {
+      const { root, key } = await resolveMergedTripwires(process.cwd());
+      console.log(
+        buildAddTripwirePrompt({
+          description,
+          globalPath: key ? globalTripwiresPath(key) : undefined,
+          repoPath: root ? `${root}/.plannotator/tripwires.json` : undefined,
+        }),
+      );
+      process.exit(0);
+    }
+
+    console.error("Usage: plannotator tripwires add <description...>");
+    console.error("       plannotator tripwires add --glob <glob> [--glob ...] [--symbol <s> ...] [--note <text>] [--id <id>] [--repo]");
+    process.exit(1);
+  }
+
+  console.error("Usage: plannotator tripwires <list|add|validate|path>");
+  process.exit(1);
+
 } else if (args[0] === "review") {
   // ============================================
   // CODE REVIEW MODE
@@ -509,6 +697,45 @@ if (args[0] === "sessions") {
   let agentCwd: string | undefined;
   let worktreePool: WorktreePool | undefined;
   let worktreeCleanup: (() => void | Promise<void>) | undefined;
+
+  // Non-interactive tripwire flags short-circuit as soon as rawPatch is known —
+  // BEFORE the --local PR checkout (worktree/clone) so a PR scan never pays for a
+  // checkout it discards, and BEFORE detectProjectName/server startup. The scan
+  // only needs rawPatch. Keyed off the launch repo (no agentCwd yet → cwd falls
+  // through to gitContext?.cwd / process.cwd()), matching Pi and OpenCode.
+  const maybeRunTripwireShortCircuit = async (): Promise<void> => {
+    if (reviewArgs.tripwires) {
+      const tripwireCwd = gitContext?.cwd ?? process.cwd();
+      const { config, root, key } = await resolveMergedTripwires(tripwireCwd);
+      const hits = evaluateTripwires(rawPatch, config, { cwd: root ?? undefined });
+      const globalPath = key ? globalTripwiresPath(key) : "(unknown)";
+      const globalRules = parseTripwiresConfigDetailed(
+        key ? readGlobalTripwiresFile(key) : null,
+      ).config.rules;
+      const repoPath = root ? `${root}/.plannotator/tripwires.json` : null;
+      const repoRules = root
+        ? parseTripwiresConfigDetailed(readTripwiresFile(root)).config.rules
+        : [];
+      console.log(
+        formatTripwiresMarkdown({ globalKey: key, globalPath, repoPath, globalRules, repoRules, hits }),
+      );
+      process.exit(0);
+    }
+    if (reviewArgs.addTripwire) {
+      // The description is natural language; resolve real paths so the
+      // emitted instruction points the agent at the exact files.
+      const tripwireCwd = gitContext?.cwd ?? process.cwd();
+      const { root, key } = await resolveMergedTripwires(tripwireCwd);
+      console.log(
+        buildAddTripwirePrompt({
+          description: reviewArgs.addTripwire,
+          globalPath: key ? globalTripwiresPath(key) : undefined,
+          repoPath: root ? `${root}/.plannotator/tripwires.json` : undefined,
+        }),
+      );
+      process.exit(0);
+    }
+  };
 
   if (isPRMode) {
     // --- PR Review Mode ---
@@ -547,6 +774,9 @@ if (args[0] === "sessions") {
       console.error(err instanceof Error ? err.message : "Failed to fetch PR");
       process.exit(1);
     }
+
+    // Scan with the PR rawPatch and exit before any --local checkout work.
+    await maybeRunTripwireShortCircuit();
 
     // --local: create a local checkout with the PR head for full file access
     if (useLocal && prMetadata) {
@@ -709,6 +939,9 @@ if (args[0] === "sessions") {
     rawPatch = diffResult.rawPatch;
     gitRef = diffResult.gitRef;
     diffError = diffResult.error;
+
+    // Local mode: rawPatch is ready, scan and exit before server startup.
+    await maybeRunTripwireShortCircuit();
   }
 
   const reviewProject = (await detectProjectName()) ?? "_unknown";
@@ -1315,6 +1548,40 @@ if (args[0] === "sessions") {
     rawPatch = diffResult.rawPatch;
     gitRef = diffResult.gitRef;
     diffError = diffResult.error;
+  }
+
+  // Non-interactive tripwire flags short-circuit BEFORE server startup. Emits
+  // {decision:"annotated", feedback, isPRMode:true} — the bridge returns
+  // feedback verbatim for isPRMode:true (no deny suffix), so no bridge change.
+  if (reviewArgs.tripwires) {
+    const tripwireCwd = gitContext?.cwd ?? process.env.PLANNOTATOR_CWD ?? process.cwd();
+    const { config, root, key } = await resolveMergedTripwires(tripwireCwd);
+    const hits = evaluateTripwires(rawPatch, config, { cwd: root ?? undefined });
+    const globalPath = key ? globalTripwiresPath(key) : "(unknown)";
+    const globalRules = parseTripwiresConfigDetailed(
+      key ? readGlobalTripwiresFile(key) : null,
+    ).config.rules;
+    const repoPath = root ? `${root}/.plannotator/tripwires.json` : null;
+    const repoRules = root
+      ? parseTripwiresConfigDetailed(readTripwiresFile(root)).config.rules
+      : [];
+    const report = formatTripwiresMarkdown({ globalKey: key, globalPath, repoPath, globalRules, repoRules, hits });
+    console.log(JSON.stringify({ decision: "annotated", feedback: report, isPRMode: true }));
+    process.exit(0);
+  }
+  if (reviewArgs.addTripwire) {
+    const tripwireCwd = gitContext?.cwd ?? process.env.PLANNOTATOR_CWD ?? process.cwd();
+    const { root, key } = await resolveMergedTripwires(tripwireCwd);
+    console.log(JSON.stringify({
+      decision: "annotated",
+      feedback: buildAddTripwirePrompt({
+        description: reviewArgs.addTripwire,
+        globalPath: key ? globalTripwiresPath(key) : undefined,
+        repoPath: root ? `${root}/.plannotator/tripwires.json` : undefined,
+      }),
+      isPRMode: true,
+    }));
+    process.exit(0);
   }
 
   const bridgeSharingEnabled = getBridgeSharingEnabled(input);

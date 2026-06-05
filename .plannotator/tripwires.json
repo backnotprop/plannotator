@@ -1,0 +1,26 @@
+{
+  "rules": [
+    {
+      "id": "annotation-pipeline",
+      "globs": ["packages/shared/external-annotation.ts"],
+      "note": "External annotation pipeline — agent findings, tour stops, and tripwires all flow through here. Changes affect every runtime."
+    },
+    {
+      "id": "review-server-core",
+      "globs": ["packages/server/review.ts", "apps/pi-extension/server/serverReview.ts"],
+      "symbols": ["resolveAgentCwd", "waitForDecision"],
+      "note": "Review server lifecycle — cwd resolution and the decision promise are load-bearing for every integration."
+    },
+    {
+      "id": "pi-vendoring",
+      "globs": ["apps/pi-extension/vendor.sh"],
+      "note": "Vendor list controls which shared modules reach Pi. A miss here silently breaks runtime parity."
+    },
+    {
+      "id": "feedback-submission",
+      "globs": ["packages/review-editor/App.tsx"],
+      "symbols": ["exportReviewFeedback", "reviewerAnnotations"],
+      "note": "Feedback submission path — what reviewers send back to the agent. Double-check exclusion filters."
+    }
+  ]
+}

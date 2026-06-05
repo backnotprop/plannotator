@@ -2,6 +2,7 @@ import React, { useEffect, useCallback, useState, useMemo } from 'react';
 import { CodeAnnotation } from '@plannotator/ui/types';
 import type { AvailableBranches, CompareTargetConfig, DiffOption, JjEvoLogEntry, RecentCommit, WorktreeInfo } from '@plannotator/shared/types';
 import { buildFileTree, getAncestorPaths, getAllFolderPaths, getVisualFileOrder } from '../utils/buildFileTree';
+import { isTripwireAnnotation } from '../utils/tripwire';
 import { FileTreeNodeItem } from './FileTreeNode';
 import { BaseBranchPicker } from './BaseBranchPicker';
 import { EvoLogPicker } from './EvoLogPicker';
@@ -175,6 +176,8 @@ export const FileTree: React.FC<FileTreeProps> = ({
   const annotationCountMap = useMemo(() => {
     const map = new Map<string, number>();
     for (const a of annotations) {
+      // Tripwires are informational and shown via a warning glyph, not counted.
+      if (isTripwireAnnotation(a)) continue;
       map.set(a.filePath, (map.get(a.filePath) ?? 0) + 1);
     }
     return map;
@@ -183,6 +186,14 @@ export const FileTree: React.FC<FileTreeProps> = ({
   const getAnnotationCount = useCallback((filePath: string) => {
     return annotationCountMap.get(filePath) ?? 0;
   }, [annotationCountMap]);
+
+  const tripwiredFiles = useMemo(() => {
+    const set = new Set<string>();
+    for (const a of annotations) {
+      if (isTripwireAnnotation(a)) set.add(a.filePath);
+    }
+    return set;
+  }, [annotations]);
 
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set(allFolderPaths));
   const [prevTree, setPrevTree] = useState(tree);
@@ -487,6 +498,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
               hideViewedFiles={hideViewedFiles}
               getAnnotationCount={getAnnotationCount}
               stagedFiles={stagedFiles}
+              tripwiredFiles={tripwiredFiles}
               repoRoot={repoRoot}
             />
           ))}

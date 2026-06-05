@@ -1,5 +1,6 @@
 import React from 'react';
 import * as ContextMenu from '@radix-ui/react-context-menu';
+import { ShieldAlert } from 'lucide-react';
 import type { FileTreeNode as TreeNode } from '../utils/buildFileTree';
 
 interface FileTreeNodeProps {
@@ -14,6 +15,7 @@ interface FileTreeNodeProps {
   hideViewedFiles: boolean;
   getAnnotationCount: (filePath: string) => number;
   stagedFiles?: Set<string>;
+  tripwiredFiles?: Set<string>;
   scrollHighlightIndex?: number;
   /** Absolute repo root used to build the "Copy full path" menu item. Null in PR-review mode (files aren't on local disk). */
   repoRoot?: string | null;
@@ -48,6 +50,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
   hideViewedFiles,
   getAnnotationCount,
   stagedFiles,
+  tripwiredFiles,
   scrollHighlightIndex,
   repoRoot,
 }) => {
@@ -98,6 +101,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
             hideViewedFiles={hideViewedFiles}
             getAnnotationCount={getAnnotationCount}
             stagedFiles={stagedFiles}
+            tripwiredFiles={tripwiredFiles}
             scrollHighlightIndex={scrollHighlightIndex}
             repoRoot={repoRoot}
           />
@@ -111,6 +115,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
   const isScrollActive = !isActive && scrollHighlightIndex != null && node.fileIndex === scrollHighlightIndex;
   const isViewed = viewedFiles.has(node.path);
   const isStaged = stagedFiles?.has(node.path) ?? false;
+  const isTripwired = tripwiredFiles?.has(node.path) ?? false;
   const annotationCount = getAnnotationCount(node.path);
 
   if (hideViewedFiles && isViewed && !isActive) {
@@ -151,6 +156,11 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
           <div className="flex items-center gap-1.5 flex-shrink-0 text-[10px]">
             {isStaged && (
               <span className="text-primary font-medium" title="Staged (git add)">+</span>
+            )}
+            {isTripwired && (
+              <span title="Touches a slop-free zone (tripwire)">
+                <ShieldAlert className="w-3 h-3" style={{ color: 'var(--warning)' }} aria-label="Tripwire" />
+              </span>
             )}
             {annotationCount > 0 && (
               <span className="text-primary font-medium">{annotationCount}</span>

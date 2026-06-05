@@ -8,6 +8,8 @@ import { usePierreTheme } from '../hooks/usePierreTheme';
 import { LazyFileDiff } from './LazyFileDiff';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import { InlineAnnotation } from './InlineAnnotation';
+import { InlineTripwireMarker } from './InlineTripwireMarker';
+import { isTripwireAnnotation } from '../utils/tripwire';
 import { FileHeader } from './FileHeader';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { detectLanguage } from '../utils/detectLanguage';
@@ -405,8 +407,14 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
               reasoning: ann.reasoning,
               conventionalLabel: ann.conventionalLabel,
               decorations: ann.decorations,
+              source: ann.source,
+              kind: isTripwireAnnotation(ann) ? 'tripwire' as const : undefined,
             } as DiffAnnotationMetadata,
           }));
+
+        const isTripwired = annotations.some(
+          a => a.filePath === file.path && isTripwireAnnotation(a),
+        );
 
         return (
           <div key={file.path}>
@@ -424,6 +432,7 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
                 onStage={onStage ? () => onStage(file.path) : undefined}
                 canStage={canStageFiles}
                 stageError={stagingFile === file.path ? stageError : null}
+                isTripwired={isTripwired}
                 collapseToggle={
                   <button
                     onClick={(e) => { e.stopPropagation(); toggleCollapse(file.path); }}
@@ -505,6 +514,15 @@ export const AllFilesDiffView: React.FC<AllFilesDiffViewProps> = ({
                 selectedLines={activeFilePath === file.path ? (pendingSelection || undefined) : undefined}
                 renderAnnotation={(annotation: DiffLineAnnotation<DiffAnnotationMetadata>) => {
                   if (!annotation.metadata) return null;
+                  if (annotation.metadata.kind === 'tripwire') {
+                    return (
+                      <InlineTripwireMarker
+                        annotationId={annotation.metadata.annotationId}
+                        note={annotation.metadata.text ?? ''}
+                        onClick={onSelectAnnotation}
+                      />
+                    );
+                  }
                   return (
                     <InlineAnnotation
                       metadata={annotation.metadata}
