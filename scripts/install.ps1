@@ -361,15 +361,21 @@ function Update-PiExtensionIfPresent {
 # failed or skipped skill install never leaves users with neither.
 $claudeCommandsDir = if ($env:CLAUDE_CONFIG_DIR) { "$env:CLAUDE_CONFIG_DIR\commands" } else { "$env:USERPROFILE\.claude\commands" }
 
-# Codex no longer receives skills under the Codex home — core skills live in
-# ~/.agents/skills now. Remove the core skills (and existing stale extras) that
-# older installs placed under <codex home>\skills.
+# NOTE: Codex stale-skill cleanup happens AFTER the skill install below — the
+# core skills are only removed from the Codex home once their replacement
+# exists in ~/.agents/skills, so an old pinned tag never strips Codex users
+# of working skills without a successor.
 $staleCodexSkillsDir = Join-Path $codexDir "skills"
-foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-compound", "plannotator-setup-goal")) {
-    $staleSkillPath = Join-Path $staleCodexSkillsDir $skill
-    if (Test-Path $staleSkillPath) {
-        Write-Host "Removing stale Codex skill $staleSkillPath"
-        Remove-Item -Recurse -Force $staleSkillPath -ErrorAction SilentlyContinue
+
+# Old installers (pre core/extra split) ran a wholesale skills copy against a
+# new-layout tag and could leave junk `core`/`extra` directory copies in the
+# Claude skills scope. Never valid skill names — always safe to remove.
+$claudeSkillsScope = if ($env:CLAUDE_CONFIG_DIR) { "$env:CLAUDE_CONFIG_DIR\skills" } else { "$env:USERPROFILE\.claude\skills" }
+foreach ($junk in @("core", "extra")) {
+    $junkPath = Join-Path $claudeSkillsScope $junk
+    if (Test-Path $junkPath) {
+        Write-Host "Removing stale layout directory $junkPath (left by an older installer)"
+        Remove-Item -Recurse -Force $junkPath -ErrorAction SilentlyContinue
     }
 }
 
@@ -727,6 +733,19 @@ foreach ($cmd in @("plannotator-review", "plannotator-annotate", "plannotator-la
     if ((Test-Path $skillPath) -and (Test-Path $cmdPath)) {
         Write-Host "Removing stale Claude command $cmdPath (replaced by the $cmd skill)"
         Remove-Item -Force $cmdPath -ErrorAction SilentlyContinue
+    }
+}
+
+# Codex no longer hosts core skills (they now live in ~/.agents/skills).
+# Core skills are removed only once their replacement exists; the stale
+# shared-agent extras were never Codex's and are removed unconditionally.
+foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-compound", "plannotator-setup-goal")) {
+    $staleSkillPath = Join-Path $staleCodexSkillsDir $skill
+    if (Test-Path $staleSkillPath) {
+        $isCore = $skill -in @("plannotator-review", "plannotator-annotate", "plannotator-last")
+        if ($isCore -and -not (Test-Path (Join-Path $agentsSkillsDir $skill))) { continue }
+        Write-Host "Removing stale Codex skill $staleSkillPath"
+        Remove-Item -Recurse -Force $staleSkillPath -ErrorAction SilentlyContinue
     }
 }
 

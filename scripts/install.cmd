@@ -522,13 +522,23 @@ if defined CLAUDE_CONFIG_DIR (
     set "CLAUDE_COMMANDS_DIR=%USERPROFILE%\.claude\commands"
 )
 
-REM Codex no longer receives core skills (they live in %%USERPROFILE%%\.agents\skills).
-REM Remove the old per-skill Codex installs plus the previously-stale compound/setup-goal.
+REM NOTE: Codex stale-skill cleanup happens AFTER the skill install below —
+REM the core skills are only removed from the Codex home once their
+REM replacement exists in %%USERPROFILE%%\.agents\skills.
 set "STALE_CODEX_SKILLS_DIR=!CODEX_DIR!\skills"
-for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator-compound plannotator-setup-goal) do (
-    if exist "!STALE_CODEX_SKILLS_DIR!\%%S" (
-        rmdir /s /q "!STALE_CODEX_SKILLS_DIR!\%%S" >nul 2>&1
-        echo Removed Plannotator skill from !STALE_CODEX_SKILLS_DIR!\%%S
+
+REM Old installers (pre core/extra split) ran a wholesale skills copy against
+REM a new-layout tag and could leave junk core/extra directory copies in the
+REM Claude skills scope. Never valid skill names — always safe to remove.
+if defined CLAUDE_CONFIG_DIR (
+    set "CLAUDE_SKILLS_SCOPE=%CLAUDE_CONFIG_DIR%\skills"
+) else (
+    set "CLAUDE_SKILLS_SCOPE=%USERPROFILE%\.claude\skills"
+)
+for %%J in (core extra) do (
+    if exist "!CLAUDE_SKILLS_SCOPE!\%%J" (
+        rmdir /s /q "!CLAUDE_SKILLS_SCOPE!\%%J" >nul 2>&1
+        echo Removed stale layout directory !CLAUDE_SKILLS_SCOPE!\%%J ^(left by an older installer^)
     )
 )
 
@@ -777,6 +787,22 @@ for %%C in (plannotator-review plannotator-annotate plannotator-last plannotator
     if exist "!CLAUDE_SKILLS_DIR!\%%C" if exist "!CLAUDE_COMMANDS_DIR!\%%C.md" (
         del /q "!CLAUDE_COMMANDS_DIR!\%%C.md" >nul 2>&1
         echo Removed deprecated Claude command !CLAUDE_COMMANDS_DIR!\%%C.md ^(replaced by the %%C skill^)
+    )
+)
+
+REM Codex no longer hosts core skills (they live in %%USERPROFILE%%\.agents\skills).
+REM Core skills are removed only once their replacement exists; the stale
+REM shared-agent extras were never Codex's and are removed unconditionally.
+for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator-compound plannotator-setup-goal) do (
+    if exist "!STALE_CODEX_SKILLS_DIR!\%%S" (
+        set "OK_REMOVE=1"
+        if "%%S"=="plannotator-review" if not exist "!AGENTS_SKILLS_DIR!\%%S" set "OK_REMOVE=0"
+        if "%%S"=="plannotator-annotate" if not exist "!AGENTS_SKILLS_DIR!\%%S" set "OK_REMOVE=0"
+        if "%%S"=="plannotator-last" if not exist "!AGENTS_SKILLS_DIR!\%%S" set "OK_REMOVE=0"
+        if "!OK_REMOVE!"=="1" (
+            rmdir /s /q "!STALE_CODEX_SKILLS_DIR!\%%S" >nul 2>&1
+            echo Removed Plannotator skill from !STALE_CODEX_SKILLS_DIR!\%%S
+        )
     )
 )
 

@@ -655,13 +655,19 @@ update_pi_extension_if_present() {
 # a command file is only removed once its replacement skill is on disk, so a
 # failed or skipped skill install never leaves users with neither.
 
-# Codex no longer hosts core skills (they now live in ~/.agents/skills).
-# Remove the command-overlap skills and the stale shared-agent skills.
+# NOTE: Codex stale-skill cleanup happens AFTER the skill install below —
+# the core skills are only removed from the Codex home once their replacement
+# exists in ~/.agents/skills, so an old pinned tag never strips Codex users
+# of working skills without a successor.
 STALE_CODEX_SKILLS_DIR="$CODEX_DIR/skills"
-for skill in plannotator-review plannotator-annotate plannotator-last plannotator-compound plannotator-setup-goal; do
-    if [ -d "$STALE_CODEX_SKILLS_DIR/$skill" ]; then
-        rm -rf "$STALE_CODEX_SKILLS_DIR/$skill"
-        echo "Removed Plannotator skill from ${STALE_CODEX_SKILLS_DIR}/$skill"
+
+# Old installers (pre core/extra split) ran `cp -r apps/skills/*` against a
+# new-layout tag and could leave junk `core`/`extra` directory copies in the
+# Claude skills scope. Never valid skill names — always safe to remove.
+for junk in core extra; do
+    if [ -d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/$junk" ]; then
+        rm -rf "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/$junk"
+        echo "Removed stale layout directory ~/.claude/skills/$junk (left by an older installer)"
     fi
 done
 
@@ -1028,6 +1034,21 @@ for cmd in plannotator-review plannotator-annotate plannotator-last plannotator-
     if [ -d "$CLAUDE_SKILLS_DIR/$cmd" ] && [ -f "$CLAUDE_COMMANDS_DIR/$cmd.md" ]; then
         rm -f "$CLAUDE_COMMANDS_DIR/$cmd.md"
         echo "Removed legacy Claude command ${CLAUDE_COMMANDS_DIR}/$cmd.md (replaced by the $cmd skill)"
+    fi
+done
+
+# Codex no longer hosts core skills (they now live in ~/.agents/skills).
+# Core skills are removed only once their replacement exists; the stale
+# shared-agent extras were never Codex's and are removed unconditionally.
+for skill in plannotator-review plannotator-annotate plannotator-last plannotator-compound plannotator-setup-goal; do
+    if [ -d "$STALE_CODEX_SKILLS_DIR/$skill" ]; then
+        case "$skill" in
+            plannotator-review|plannotator-annotate|plannotator-last)
+                [ -d "$AGENTS_SKILLS_DIR/$skill" ] || continue
+                ;;
+        esac
+        rm -rf "$STALE_CODEX_SKILLS_DIR/$skill"
+        echo "Removed Plannotator skill from ${STALE_CODEX_SKILLS_DIR}/$skill"
     fi
 done
 
