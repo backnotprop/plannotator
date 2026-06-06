@@ -1,4 +1,4 @@
-import { resolve, join } from "path";
+import { resolve, join, normalize } from "path";
 import { tmpdir } from "os";
 
 const ALLOWED_IMAGE_EXTENSIONS = new Set([
@@ -27,6 +27,23 @@ function hasImageExtension(filePath: string): boolean {
   return ALLOWED_IMAGE_EXTENSIONS.has(getExtension(filePath));
 }
 
+/**
+ * Check whether resolved path is within an allowed root directory
+ * (project root or the uploads temp directory).
+ */
+function isWithinAllowedRoot(resolved: string): boolean {
+  const normalizedResolved = normalize(resolved);
+  const projectRoot = normalize(process.cwd());
+  const uploadDir = normalize(UPLOAD_DIR);
+
+  return (
+    normalizedResolved === projectRoot ||
+    normalizedResolved.startsWith(projectRoot + "/") ||
+    normalizedResolved === uploadDir ||
+    normalizedResolved.startsWith(uploadDir + "/")
+  );
+}
+
 export function validateImagePath(rawPath: string): {
   valid: boolean;
   resolved: string;
@@ -39,6 +56,14 @@ export function validateImagePath(rawPath: string): {
       valid: false,
       resolved,
       error: "Path does not point to a supported image file",
+    };
+  }
+
+  if (!isWithinAllowedRoot(resolved)) {
+    return {
+      valid: false,
+      resolved,
+      error: "Access denied: path is outside project root",
     };
   }
 

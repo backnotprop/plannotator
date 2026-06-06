@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
-import { join, resolve as resolvePath } from "node:path";
+import { join, normalize, resolve as resolvePath } from "node:path";
 import { saveDraft, loadDraft, deleteDraft } from "../generated/draft.js";
 import { FAVICON_SVG } from "../generated/favicon.js";
 
@@ -51,6 +51,23 @@ function getExtension(filePath: string): string {
 	return filePath.slice(lastDot + 1).toLowerCase();
 }
 
+/**
+ * Check whether resolved path is within an allowed root directory
+ * (project root or the uploads temp directory).
+ */
+function isWithinAllowedRoot(resolved: string): boolean {
+	const normalizedResolved = normalize(resolved);
+	const projectRoot = normalize(process.cwd());
+	const uploadDir = normalize(UPLOAD_DIR);
+
+	return (
+		normalizedResolved === projectRoot ||
+		normalizedResolved.startsWith(projectRoot + "/") ||
+		normalizedResolved === uploadDir ||
+		normalizedResolved.startsWith(uploadDir + "/")
+	);
+}
+
 function validateImagePath(rawPath: string): {
 	valid: boolean;
 	resolved: string;
@@ -64,6 +81,14 @@ function validateImagePath(rawPath: string): {
 			valid: false,
 			resolved,
 			error: "Path does not point to a supported image file",
+		};
+	}
+
+	if (!isWithinAllowedRoot(resolved)) {
+		return {
+			valid: false,
+			resolved,
+			error: "Access denied: path is outside project root",
 		};
 	}
 
