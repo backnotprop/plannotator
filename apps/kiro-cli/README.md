@@ -6,8 +6,8 @@ one-liner as everyone else.
 
 ## Contents
 
-- `skills/` — Kiro-specific skill packages (`plannotator-review`, `plannotator-annotate`,
-  `plannotator-archive`), each baking `PLANNOTATOR_ORIGIN=kiro-cli` into its command.
+- `skills/` — Kiro-specific skill packages (`plannotator-review`, `plannotator-annotate`),
+  each baking `PLANNOTATOR_ORIGIN=kiro-cli` into its command.
   <!-- NOTE: The canonical, single-sourced core skills live in `apps/skills/core/`. These Kiro
        copies are intentionally independent (they hardcode PLANNOTATOR_ORIGIN=kiro-cli) and are
        exempt from single-sourcing — do not replace them with the core copies. -->
@@ -20,7 +20,7 @@ one-liner as everyone else.
 `scripts/install.sh` auto-detects Kiro (if `~/.kiro` exists or `kiro-cli` is on PATH — the same
 convention used for Codex and Gemini) and installs:
 
-- the 3 Kiro-specific skills above → `~/.kiro/skills`
+- the 2 Kiro-specific skills above → `~/.kiro/skills`
 - the 2 shared skills `plannotator-setup-goal` and `plannotator-visual-explainer` (pulled from
   `apps/skills/extra/`, not duplicated here) → `~/.kiro/skills`
 - the example agent `agents/plannotator.json` → `~/.kiro/agents/plannotator.json` (an existing file
@@ -32,8 +32,8 @@ curl -fsSL https://plannotator.ai/install.sh | bash
 
 ## Use the Plannotator agent
 
-The installed agent wires all five skills via `skill://` resources and, in its prompt, documents
-which skill to use for which task (review, annotate, archive, setup-goal, visual-explainer). Launch
+The installed agent wires all four skills via `skill://` resources and, in its prompt, documents
+which skill to use for which task (review, annotate, setup-goal, visual-explainer). Launch
 it:
 
 ```bash

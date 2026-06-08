@@ -409,7 +409,7 @@ if (-not (Test-Path $extrasMigration)) {
 # re-runs. -Reconfigure re-opens the wizard; -NonInteractive forces silence;
 # redirected/CI runs never prompt. Flags win over everything.
 $prefsFile = Join-Path $configDir "install-prefs"
-$coreSkillNames = @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-archive")
+$coreSkillNames = @("plannotator-review", "plannotator-annotate", "plannotator-last")
 $extraSkillNames = @("plannotator-compound", "plannotator-setup-goal", "plannotator-visual-explainer")
 
 $savedExtras = ""
@@ -655,7 +655,7 @@ try {
             # existing target dir) so re-runs replace rather than nest.
             if ((Test-Path "apps\skills\claude") -and (Get-ChildItem "apps\skills\claude" -ErrorAction SilentlyContinue)) {
                 New-Item -ItemType Directory -Force -Path $claudeSkillsDir | Out-Null
-                foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-archive")) {
+                foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last")) {
                     Copy-SkillIfPresent "apps\skills\claude\$skill" $claudeSkillsDir
                 }
                 Write-Host "Installed Claude Code skills to $claudeSkillsDir\"
@@ -664,7 +664,7 @@ try {
             }
             if ((Test-Path "apps\skills\core") -and (Get-ChildItem "apps\skills\core" -ErrorAction SilentlyContinue)) {
                 New-Item -ItemType Directory -Force -Path $agentsSkillsDir | Out-Null
-                foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-archive")) {
+                foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last")) {
                     Copy-SkillIfPresent "apps\skills\core\$skill" $agentsSkillsDir
                 }
                 Write-Host "Installed shared agent skills to $agentsSkillsDir\"
@@ -679,7 +679,6 @@ try {
                 # Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
                 Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-review" $kiroSkillsDir
                 Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-annotate" $kiroSkillsDir
-                Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-archive" $kiroSkillsDir
                 # Two extras come from apps/skills/extra (not duplicated into apps/kiro-cli/skills).
                 Copy-SkillIfPresent "apps\skills\extra\plannotator-setup-goal" $kiroSkillsDir
                 Copy-SkillIfPresent "apps\skills\extra\plannotator-visual-explainer" $kiroSkillsDir
@@ -739,12 +738,22 @@ if ($checkoutFailed) {
 # command file only once its replacement skill is actually on disk — running
 # AFTER the install above guarantees a failed or skipped skill install never
 # leaves users with neither the command nor the skill.
-foreach ($cmd in @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-archive")) {
+foreach ($cmd in @("plannotator-review", "plannotator-annotate", "plannotator-last")) {
     $cmdPath = Join-Path $claudeCommandsDir "$cmd.md"
     $skillPath = Join-Path $claudeSkillsDir $cmd
     if ((Test-Path $skillPath) -and (Test-Path $cmdPath)) {
         Write-Host "Removing stale Claude command $cmdPath (replaced by the $cmd skill)"
         Remove-Item -Force $cmdPath -ErrorAction SilentlyContinue
+    }
+}
+
+# plannotator-archive no longer ships as a skill. Remove any stale installed
+# copy from every skill scope so upgraders don't keep a dead skill around.
+foreach ($scope in @($claudeSkillsDir, $agentsSkillsDir, "$env:USERPROFILE\.kiro\skills")) {
+    $staleArchivePath = Join-Path $scope "plannotator-archive"
+    if (Test-Path $staleArchivePath) {
+        Write-Host "Removing stale plannotator-archive skill $staleArchivePath"
+        Remove-Item -Recurse -Force $staleArchivePath -ErrorAction SilentlyContinue
     }
 }
 
@@ -876,7 +885,7 @@ Write-Host "Add the plugin to your opencode.json:"
 Write-Host ""
 Write-Host '  "plugin": ["@plannotator/opencode@latest"]'
 Write-Host ""
-Write-Host "Then restart OpenCode. The /plannotator-review, /plannotator-annotate, /plannotator-last, and /plannotator-archive commands are ready!"
+Write-Host "Then restart OpenCode. The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready!"
 Write-Host ""
 Write-Host "=========================================="
 Write-Host "  PI USERS"
@@ -909,7 +918,7 @@ Write-Host ""
 Write-Host "Upgrading from an older version? Also run /plugin marketplace update"
 Write-Host "so the plugin drops its old plannotator:* command entries."
 Write-Host ""
-Write-Host "The /plannotator-review, /plannotator-annotate, /plannotator-last, and /plannotator-archive commands are ready to use after you restart Claude Code!"
+Write-Host "The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready to use after you restart Claude Code!"
 
 if ($extrasChoice -ne "yes") {
     Write-Host ""

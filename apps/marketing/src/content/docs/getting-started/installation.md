@@ -111,7 +111,7 @@ claude --plugin-dir ./apps/hook
 
 ### Slash commands
 
-Plannotator's slash commands (`/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`, `/plannotator-archive`) are installed as Claude Code skills in `~/.claude/skills` by the install script — Claude Code skills are user-invocable by directory name, so the command names are unchanged. There is no separate `~/.claude/commands` step.
+Plannotator's slash commands (`/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`) are installed as Claude Code skills in `~/.claude/skills` by the install script — Claude Code skills are user-invocable by directory name, so the command names are unchanged. There is no separate `~/.claude/commands` step.
 
 Upgrading from an older version? The installer removes the legacy `~/.claude/commands/plannotator-*.md` files automatically, but the marketplace plugin's old namespaced `plannotator:*` command entries are managed by Claude Code — run `/plugin marketplace update` once so they disappear from the `/` menu.
 
@@ -220,7 +220,7 @@ Notes:
 - Codex hooks are currently experimental.
 - The current official Codex hooks docs say hooks are disabled on Windows, so this flow is currently macOS/Linux/WSL only.
 
-The installer also copies Plannotator's core skills (`plannotator-review`, `plannotator-annotate`, `plannotator-last`, `plannotator-archive`) into `~/.agents/skills` — the official OpenAI agent skills path. Optional extra skills (compound planning, setup-goal, visual explainer) are not installed by default; add them with:
+The installer also copies Plannotator's core skills (`plannotator-review`, `plannotator-annotate`, `plannotator-last`) into `~/.agents/skills` — the official OpenAI agent skills path. Optional extra skills (compound planning, setup-goal, visual explainer) are not installed by default; add them with:
 
 ```bash
 npx skills add backnotprop/plannotator/apps/skills/extra
@@ -310,7 +310,6 @@ This adds the following slash commands:
 /plannotator-review
 /plannotator-annotate <file|folder|url>
 /plannotator-last
-/plannotator-archive
 ```
 
 Those commands open the browser-based Plannotator review UI and send the result back into the Droid session.

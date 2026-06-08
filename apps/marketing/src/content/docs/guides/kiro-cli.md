@@ -44,7 +44,6 @@ Kiro-specific skills (run with `PLANNOTATOR_ORIGIN=kiro-cli`):
 
 - `plannotator-review`
 - `plannotator-annotate`
-- `plannotator-archive`
 
 Shared extra skills (installed from Plannotator's canonical `apps/skills/extra/` set, not duplicated):
 
@@ -64,7 +63,6 @@ commands, and its prompt spells out which skill to use for which task:
 |-------|-----------|
 | `plannotator-review` | Review the current code changes or a pull request |
 | `plannotator-annotate` | Annotate a markdown/HTML file, folder, or URL |
-| `plannotator-archive` | Browse prior approved/denied plan decisions |
 | `plannotator-setup-goal` | Turn an idea into a structured goal package |
 | `plannotator-visual-explainer` | Generate a polished visual HTML explainer |
 

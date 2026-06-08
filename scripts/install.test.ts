@@ -13,13 +13,12 @@ import { join } from "node:path";
 
 const scriptsDir = import.meta.dir;
 
-// The four always-installed core skills (apps/skills/core/*). Single list so
+// The three always-installed core skills (apps/skills/core/*). Single list so
 // the copy assertions, sidecar checks, and frontmatter checks can't drift.
 const CORE_SKILLS = [
   "plannotator-review",
   "plannotator-annotate",
   "plannotator-last",
-  "plannotator-archive",
 ];
 
 describe("install.sh", () => {
@@ -171,7 +170,6 @@ describe("install.sh", () => {
     // Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
     expect(script).toContain('copy_skill_if_present apps/kiro-cli/skills/plannotator-review "$KIRO_SKILLS_DIR"');
     expect(script).toContain('copy_skill_if_present apps/kiro-cli/skills/plannotator-annotate "$KIRO_SKILLS_DIR"');
-    expect(script).toContain('copy_skill_if_present apps/kiro-cli/skills/plannotator-archive "$KIRO_SKILLS_DIR"');
     // The two extras Kiro keeps receiving come from apps/skills/extra.
     expect(script).toContain('copy_skill_if_present apps/skills/extra/plannotator-setup-goal "$KIRO_SKILLS_DIR"');
     expect(script).toContain('copy_skill_if_present apps/skills/extra/plannotator-visual-explainer "$KIRO_SKILLS_DIR"');
@@ -188,7 +186,7 @@ describe("install.sh", () => {
     // Claude Code commands are deprecated in favor of skills — remove the files.
     expect(script).toContain("CLAUDE_COMMANDS_DIR");
     expect(script).toContain(
-      "for cmd in plannotator-review plannotator-annotate plannotator-last plannotator-archive; do",
+      "for cmd in plannotator-review plannotator-annotate plannotator-last; do",
     );
     // The legacy ~/.agents cleanup block (review/annotate/last) is GONE —
     // core skills now intentionally live in ~/.agents/skills.
@@ -201,6 +199,12 @@ describe("install.sh", () => {
     );
     // Extras stop being managed in the Claude and shared-agent scopes.
     expect(script).toContain("plannotator-compound plannotator-setup-goal plannotator-visual-explainer");
+    // plannotator-archive no longer ships as a skill — a stale installed copy
+    // is removed unconditionally from every skill scope.
+    expect(script).toContain(
+      'for scope in "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR" "$KIRO_SKILLS_DIR"; do',
+    );
+    expect(script).toContain('rm -rf "$scope/plannotator-archive"');
   });
 
   test("suggests installing extras via npx skills add", () => {
@@ -352,7 +356,7 @@ describe("install.ps1", () => {
     // (PowerShell's Copy-Item -Recurse into an existing dir nests).
     expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\claude\\$skill" $claudeSkillsDir');
     expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\core\\$skill" $agentsSkillsDir');
-    expect(script).toContain('"plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-archive"');
+    expect(script).toContain('"plannotator-review", "plannotator-annotate", "plannotator-last"');
     // Copy-SkillIfPresent pre-removes the destination to avoid nesting on upgrade.
     expect(script).toContain("if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }");
     // No Codex skills install.
@@ -384,6 +388,12 @@ describe("install.ps1", () => {
     expect(script).toContain('"plannotator-compound", "plannotator-setup-goal", "plannotator-visual-explainer"');
     expect(script).toContain("2026-06-extras-default-install-removed");
     expect(script).toContain("if (-not (Test-Path $extrasMigration))");
+    // plannotator-archive no longer ships as a skill — a stale installed copy
+    // is removed unconditionally from every skill scope.
+    expect(script).toContain(
+      'foreach ($scope in @($claudeSkillsDir, $agentsSkillsDir, "$env:USERPROFILE\\.kiro\\skills"))',
+    );
+    expect(script).toContain('Join-Path $scope "plannotator-archive"');
   });
 
   test("does not treat a skills-only Codex home as configured", () => {
@@ -475,7 +485,7 @@ describe("install.cmd", () => {
     // agent (Codex) scope reads the prose skills (apps\skills\core).
     expect(script).toContain('xcopy /s /i /y /q "apps\\skills\\claude\\%%S" "!CLAUDE_SKILLS_DIR!\\%%S\\"');
     expect(script).toContain('xcopy /s /i /y /q "apps\\skills\\core\\%%S" "!AGENTS_SKILLS_DIR!\\%%S\\"');
-    expect(script).toContain("for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator-archive) do");
+    expect(script).toContain("for %%S in (plannotator-review plannotator-annotate plannotator-last) do");
     // No Codex skills install — only the cleanup loop references CODEX skills.
     expect(script).not.toContain('xcopy /s /i /y /q "apps\\skills\\core\\%%S" "!CODEX_SKILLS_DIR!\\%%S\\"');
     // Missing git is a hard failure with an actionable message (parity with sh/ps1).
@@ -503,6 +513,12 @@ describe("install.cmd", () => {
     expect(script).toContain("for %%S in (plannotator-compound plannotator-setup-goal plannotator-visual-explainer) do");
     expect(script).toContain("2026-06-extras-default-install-removed");
     expect(script).toContain('if not exist "!EXTRAS_MIGRATION!"');
+    // plannotator-archive no longer ships as a skill — a stale installed copy
+    // is removed unconditionally from every skill scope.
+    expect(script).toContain(
+      'for %%D in ("!CLAUDE_SKILLS_DIR!" "!AGENTS_SKILLS_DIR!" "!KIRO_SKILLS_DIR!") do',
+    );
+    expect(script).toContain('rmdir /s /q "%%~D\\plannotator-archive"');
   });
 
   test("does not treat a skills-only Codex home as configured", () => {
@@ -598,8 +614,8 @@ describe("Core Plannotator skills", () => {
         checked++;
       }
     }
-    // 4 core + 3 extra + 3 kiro — bump when adding skills, never below.
-    expect(checked).toBeGreaterThanOrEqual(10);
+    // 3 core + 3 extra + 2 kiro — bump when adding skills, never below.
+    expect(checked).toBeGreaterThanOrEqual(8);
   });
 });
 

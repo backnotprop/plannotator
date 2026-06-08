@@ -566,20 +566,6 @@ export async function handleCliCommand(input: {
       return;
     }
 
-    if (input.command === "plannotator-archive") {
-      const result = await runPlannotatorCli({
-        client: input.client,
-        args: ["archive"],
-        cwd: input.cwd,
-        readyLabel: "archive",
-        bridge: input.bridge,
-      });
-      if (result.exitCode !== 0) {
-        log(input.client, "error", result.stderr.trim() || `Plannotator CLI exited with code ${result.exitCode}`);
-      } else {
-        logCliWarnings(input.client, result.stderr);
-      }
-    }
   } catch (error) {
     log(input.client, "error", `[Plannotator] ${error instanceof Error ? error.message : String(error)}`);
   }

@@ -279,7 +279,6 @@ This Droid plugin is commands-only. It adds:
 /plannotator-review
 /plannotator-annotate <file|folder|url>
 /plannotator-last
-/plannotator-archive
 ```
 
 It does not currently intercept Droid's planning flow.

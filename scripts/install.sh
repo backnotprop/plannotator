@@ -699,7 +699,7 @@ fi
 # --reconfigure re-opens the wizard; --non-interactive forces silence; piped
 # CI runs without a terminal never prompt. CLI flags win over everything.
 PREFS_FILE="$_config_dir/install-prefs"
-CORE_SKILL_NAMES="plannotator-review plannotator-annotate plannotator-last plannotator-archive"
+CORE_SKILL_NAMES="plannotator-review plannotator-annotate plannotator-last"
 EXTRA_SKILL_NAMES="plannotator-compound plannotator-setup-goal plannotator-visual-explainer"
 
 saved_extras=""
@@ -1024,7 +1024,6 @@ checkout_failed=0
         copy_skill_if_present apps/skills/claude/plannotator-review "$CLAUDE_SKILLS_DIR"
         copy_skill_if_present apps/skills/claude/plannotator-annotate "$CLAUDE_SKILLS_DIR"
         copy_skill_if_present apps/skills/claude/plannotator-last "$CLAUDE_SKILLS_DIR"
-        copy_skill_if_present apps/skills/claude/plannotator-archive "$CLAUDE_SKILLS_DIR"
         echo "Installed Claude Code skills to ${CLAUDE_SKILLS_DIR}/"
     else
         echo "Tag ${latest_tag} predates the per-agent skill layout — skipping Claude Code skill install"
@@ -1034,7 +1033,6 @@ checkout_failed=0
         copy_skill_if_present apps/skills/core/plannotator-review "$AGENTS_SKILLS_DIR"
         copy_skill_if_present apps/skills/core/plannotator-annotate "$AGENTS_SKILLS_DIR"
         copy_skill_if_present apps/skills/core/plannotator-last "$AGENTS_SKILLS_DIR"
-        copy_skill_if_present apps/skills/core/plannotator-archive "$AGENTS_SKILLS_DIR"
         echo "Installed shared agent skills to ${AGENTS_SKILLS_DIR}/"
     else
         echo "Tag ${latest_tag} predates the core/extra skill layout — skipping shared agent skill install"
@@ -1060,7 +1058,6 @@ checkout_failed=0
         # Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
         copy_skill_if_present apps/kiro-cli/skills/plannotator-review "$KIRO_SKILLS_DIR"
         copy_skill_if_present apps/kiro-cli/skills/plannotator-annotate "$KIRO_SKILLS_DIR"
-        copy_skill_if_present apps/kiro-cli/skills/plannotator-archive "$KIRO_SKILLS_DIR"
         # Extras come from apps/skills/extra (not duplicated into apps/kiro-cli/skills).
         copy_skill_if_present apps/skills/extra/plannotator-setup-goal "$KIRO_SKILLS_DIR"
         copy_skill_if_present apps/skills/extra/plannotator-visual-explainer "$KIRO_SKILLS_DIR"
@@ -1086,10 +1083,19 @@ fi
 # AFTER the install above guarantees a failed or skipped skill install never
 # leaves users with neither the command nor the skill.
 CLAUDE_COMMANDS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/commands"
-for cmd in plannotator-review plannotator-annotate plannotator-last plannotator-archive; do
+for cmd in plannotator-review plannotator-annotate plannotator-last; do
     if [ -d "$CLAUDE_SKILLS_DIR/$cmd" ] && [ -f "$CLAUDE_COMMANDS_DIR/$cmd.md" ]; then
         rm -f "$CLAUDE_COMMANDS_DIR/$cmd.md"
         echo "Removed legacy Claude command ${CLAUDE_COMMANDS_DIR}/$cmd.md (replaced by the $cmd skill)"
+    fi
+done
+
+# plannotator-archive no longer ships as a skill. Remove any stale installed
+# copy from every skill scope so upgraders don't keep a dead skill around.
+for scope in "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR" "$KIRO_SKILLS_DIR"; do
+    if [ -d "$scope/plannotator-archive" ]; then
+        rm -rf "$scope/plannotator-archive"
+        echo "Removed stale plannotator-archive skill from ${scope}/plannotator-archive"
     fi
 done
 
@@ -1216,7 +1222,7 @@ echo "Add the plugin to your opencode.json:"
 echo ""
 echo '  "plugin": ["@plannotator/opencode@latest"]'
 echo ""
-echo "Then restart OpenCode. The /plannotator-review, /plannotator-annotate, /plannotator-last, and /plannotator-archive commands are ready!"
+echo "Then restart OpenCode. The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready!"
 echo ""
 echo "=========================================="
 echo "  PI USERS"
@@ -1251,7 +1257,6 @@ if [ "$codex_available" -eq 1 ]; then
     echo "  \$plannotator-review"
     echo "  \$plannotator-annotate <file|url|folder>"
     echo "  \$plannotator-last"
-    echo "  \$plannotator-archive"
 else
     echo "Codex was not detected. After installing Codex, rerun this installer to add"
     echo "the Stop hook."
@@ -1280,7 +1285,7 @@ echo ""
 echo "Upgrading from an older version? Also run /plugin marketplace update"
 echo "so the plugin drops its old plannotator:* command entries."
 echo ""
-echo "The /plannotator-review, /plannotator-annotate, /plannotator-last, and /plannotator-archive commands are ready to use after you restart Claude Code!"
+echo "The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready to use after you restart Claude Code!"
 
 if [ "$extras_choice" != "yes" ]; then
     echo ""

@@ -1,5 +1,0 @@
-interface:
-  display_name: "Plannotator Archive"
-  short_description: "Browse saved plan decisions in Plannotator's read-only archive."
-policy:
-  allow_implicit_invocation: false

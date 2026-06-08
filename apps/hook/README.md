@@ -113,7 +113,6 @@ Plannotator's slash commands are installed as Claude Code skills in `~/.claude/s
 | `/plannotator-review [--git]` | Open code review UI for current changes or a GitHub PR; `--git` forces Git in JJ workspaces |
 | `/plannotator-annotate <file.md>` | Annotate any markdown file |
 | `/plannotator-last` | Annotate the agent's last message |
-| `/plannotator-archive` | Browse saved plan decisions in the read-only archive UI |
 
 ## Obsidian Integration
 
