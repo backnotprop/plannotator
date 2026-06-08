@@ -645,6 +645,9 @@ describe("install shared behavior", () => {
     expect(sh).toContain("wizard_timed_out=0");
     expect(sh).toContain("|| wizard_timed_out=1");
     expect(sh).toMatch(/echo "no"\s+return 1/);
+    // The bounded read stays in a tested context (`|| rc=$?`) so `set -e` never
+    // aborts ask_yes_no on a timeout/EOF, regardless of how it's called.
+    expect(sh).toContain('< /dev/tty || rc=$?');
     expect(ps).toContain("if ($runWizard -or $Extras -or $NoExtras -or $ModelInvocable -or $Glimpse -or $NoGlimpse)");
     expect(cmdScript).toContain('if "!DO_PERSIST!"=="1"');
     // Glimpse question: detect-on-PATH skip + global npm install in all three.

@@ -772,10 +772,16 @@ ask_yes_no() {
     # timeout/EOF with nobody there (read fails -> use the SAFE "no", never the
     # default). Otherwise a prompt whose default is "yes" (Glimpse) would
     # silently install software on an unattended terminal.
+    # Keep the read in a tested context (`|| rc=$?`) so the read itself never
+    # trips `set -e` (active at the top of this script), without relying on the
+    # subtle rule that -e is suppressed inside a function called in a tested
+    # context. ask_yes_no still returns non-zero on timeout/EOF to signal "no
+    # human", so every caller consumes it with `|| wizard_timed_out=1`.
+    rc=0
     if [ "$PROMPT_TIMEOUT" -gt 0 ]; then
-        IFS= read -r -t "$PROMPT_TIMEOUT" answer < /dev/tty; rc=$?
+        IFS= read -r -t "$PROMPT_TIMEOUT" answer < /dev/tty || rc=$?
     else
-        IFS= read -r answer < /dev/tty; rc=$?
+        IFS= read -r answer < /dev/tty || rc=$?
     fi
     if [ "$rc" -ne 0 ]; then
         printf '\n' > /dev/tty
