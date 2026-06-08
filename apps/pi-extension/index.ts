@@ -393,21 +393,6 @@ export default function plannotator(pi: ExtensionAPI): void {
 		},
 	});
 
-	pi.registerCommand("plannotator-status", {
-		description: "Show plannotator status",
-		handler: async (_args, ctx) => {
-			const parts = [`Phase: ${phase}`];
-			if (lastSubmittedPath) {
-				parts.push(`Plan file: ${lastSubmittedPath}`);
-			}
-			if (checklistItems.length > 0) {
-				const done = checklistItems.filter((t) => t.completed).length;
-				parts.push(`Progress: ${done}/${checklistItems.length}`);
-			}
-			ctx.ui.notify(parts.join("\n"), "info");
-		},
-	});
-
 	pi.registerCommand("plannotator-review", {
 		description: "Open interactive code review for current changes or a PR URL; pass --git to force Git in JJ workspaces",
 		handler: async (args, ctx) => {
