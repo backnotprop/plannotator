@@ -780,7 +780,7 @@ ask_yes_no() {
     if [ "$rc" -ne 0 ]; then
         printf '\n' > /dev/tty
         echo "no"
-        return
+        return 1
     fi
     case "$answer" in
         y|Y|yes|YES|Yes) echo "yes" ;;
@@ -842,6 +842,9 @@ select_skills_checkbox() {
 extras_choice=""
 invocable_choice=""
 glimpse_choice=""
+# Set if any wizard prompt times out / hits EOF (no human answered). A run whose
+# answers are synthetic timeout fallbacks must not be persisted as install-prefs.
+wizard_timed_out=0
 
 if [ "$run_wizard" -eq 1 ]; then
     {
@@ -858,7 +861,7 @@ if [ "$run_wizard" -eq 1 ]; then
         # Flag already answered this question — don't ask and then ignore.
         extras_choice="$EXTRAS_FLAG"
     else
-        extras_choice=$(ask_yes_no "Install the extra skills (compound planning, setup-goal, visual explainer)?" "${saved_extras:-no}")
+        extras_choice=$(ask_yes_no "Install the extra skills (compound planning, setup-goal, visual explainer)?" "${saved_extras:-no}") || wizard_timed_out=1
     fi
     invocable_list="$CORE_SKILL_NAMES"
     if [ "$extras_choice" = "yes" ]; then
@@ -868,7 +871,7 @@ if [ "$run_wizard" -eq 1 ]; then
         # Flag already answered this question — don't ask and then ignore.
         invocable_choice="$MODEL_INVOCABLE_FLAG"
     else
-        want_invocable=$(ask_yes_no "Make any skills callable by the model (instead of user-invoked only)?" "no")
+        want_invocable=$(ask_yes_no "Make any skills callable by the model (instead of user-invoked only)?" "no") || wizard_timed_out=1
         if [ "$want_invocable" = "yes" ]; then
             invocable_choice=$(select_skills_checkbox "$invocable_list" "$saved_invocable")
         else
@@ -882,7 +885,7 @@ if [ "$run_wizard" -eq 1 ]; then
         # Flag already answered this question — don't ask and then ignore.
         glimpse_choice="$GLIMPSE_FLAG"
     else
-        glimpse_choice=$(ask_yes_no "Install Glimpse so Plannotator opens in a native window instead of a browser tab? (npm i -g glimpseui)" "${saved_glimpse:-yes}")
+        glimpse_choice=$(ask_yes_no "Install Glimpse so Plannotator opens in a native window instead of a browser tab? (npm i -g glimpseui)" "${saved_glimpse:-yes}") || wizard_timed_out=1
     fi
 fi
 
@@ -894,9 +897,11 @@ fi
 [ -z "$invocable_choice" ] && invocable_choice="${saved_invocable:-none}"
 [ -z "$glimpse_choice" ] && glimpse_choice="${saved_glimpse:-no}"
 
-# Persist only when the wizard ran or a flag set something — silent re-runs
-# must not clobber saved answers with defaults.
-if [ "$run_wizard" -eq 1 ] || [ -n "$EXTRAS_FLAG" ] || [ -n "$MODEL_INVOCABLE_FLAG" ] || [ -n "$GLIMPSE_FLAG" ]; then
+# Persist only when the wizard ran with real answers, or a flag set something.
+# Silent re-runs must not clobber saved answers with defaults, and a wizard that
+# timed out to synthetic fallbacks (unattended /dev/tty) must not become sticky
+# prefs that suppress the wizard on a later genuine interactive install.
+if [ "$wizard_timed_out" -eq 0 ] && { [ "$run_wizard" -eq 1 ] || [ -n "$EXTRAS_FLAG" ] || [ -n "$MODEL_INVOCABLE_FLAG" ] || [ -n "$GLIMPSE_FLAG" ]; }; then
     mkdir -p "$_config_dir"
     {
         echo "extras=$extras_choice"

@@ -637,8 +637,14 @@ describe("install shared behavior", () => {
     expect(cmdScript).toContain("timeout /t 0");
     expect(cmdScript).toContain('if "!CAN_PROMPT!"=="1"');
     expect(cmdScript).toContain("set /p");
-    // Silent re-runs must not clobber saved answers with defaults.
-    expect(sh).toContain('if [ "$run_wizard" -eq 1 ] || [ -n "$EXTRAS_FLAG" ] || [ -n "$MODEL_INVOCABLE_FLAG" ] || [ -n "$GLIMPSE_FLAG" ]');
+    // Silent re-runs must not clobber saved answers with defaults, and a wizard
+    // that timed out to synthetic fallbacks (unattended /dev/tty) must not be
+    // persisted — ask_yes_no returns non-zero on timeout/EOF, each prompt ORs
+    // that into wizard_timed_out, and the prefs write is gated on it.
+    expect(sh).toContain('if [ "$wizard_timed_out" -eq 0 ] && { [ "$run_wizard" -eq 1 ] || [ -n "$EXTRAS_FLAG" ] || [ -n "$MODEL_INVOCABLE_FLAG" ] || [ -n "$GLIMPSE_FLAG" ]; }');
+    expect(sh).toContain("wizard_timed_out=0");
+    expect(sh).toContain("|| wizard_timed_out=1");
+    expect(sh).toMatch(/echo "no"\s+return 1/);
     expect(ps).toContain("if ($runWizard -or $Extras -or $NoExtras -or $ModelInvocable -or $Glimpse -or $NoGlimpse)");
     expect(cmdScript).toContain('if "!DO_PERSIST!"=="1"');
     // Glimpse question: detect-on-PATH skip + global npm install in all three.
