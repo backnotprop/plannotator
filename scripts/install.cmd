@@ -818,6 +818,12 @@ for %%D in ("!CLAUDE_SKILLS_DIR!" "!AGENTS_SKILLS_DIR!" "!KIRO_SKILLS_DIR!") do 
     )
 )
 
+REM The /plannotator-archive OpenCode command was removed too — sweep the stub.
+if exist "!OPENCODE_COMMANDS_DIR!\plannotator-archive.md" (
+    del /q "!OPENCODE_COMMANDS_DIR!\plannotator-archive.md" >nul 2>&1
+    echo Removed stale plannotator-archive command from !OPENCODE_COMMANDS_DIR!
+)
+
 REM Codex no longer hosts core skills (they live in %%USERPROFILE%%\.agents\skills).
 REM Core skills are removed only once their replacement exists; the stale
 REM shared-agent extras were never Codex's and are removed unconditionally.

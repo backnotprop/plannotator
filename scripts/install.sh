@@ -1098,6 +1098,12 @@ for scope in "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR" "$KIRO_SKILLS_DIR"; do
         echo "Removed stale plannotator-archive skill from ${scope}/plannotator-archive"
     fi
 done
+# The /plannotator-archive OpenCode command was removed too — sweep the stub
+# (only npm-plugin-postinstall users ever had it written here).
+if [ -f "$OPENCODE_COMMANDS_DIR/plannotator-archive.md" ]; then
+    rm -f "$OPENCODE_COMMANDS_DIR/plannotator-archive.md"
+    echo "Removed stale plannotator-archive command from ${OPENCODE_COMMANDS_DIR}/"
+fi
 
 # Codex no longer hosts core skills (they now live in ~/.agents/skills).
 # Core skills are removed only once their replacement exists; the stale

@@ -451,11 +451,49 @@ if (-not $NonInteractive) {
 
 $runWizard = $canPrompt -and ($Reconfigure -or -not (Test-Path $prefsFile))
 
+# Bound interactive prompts so an unattended-but-attached console (e.g. a
+# PsExec / provisioner first-run) can't hang the install. Override with
+# PLANNOTATOR_PROMPT_TIMEOUT (0 = wait forever); non-numeric/negative -> 30.
+$script:promptTimeout = 30
+if ($env:PLANNOTATOR_PROMPT_TIMEOUT) {
+    $parsed = 0
+    if ([int]::TryParse($env:PLANNOTATOR_PROMPT_TIMEOUT, [ref]$parsed) -and $parsed -ge 0) {
+        $script:promptTimeout = $parsed
+    }
+}
+
+# Read a line with a timeout (seconds); $null if no input arrives in time.
+# 0 waits indefinitely. Echoes typed chars since ReadKey($true) intercepts them.
+function Read-LineWithTimeout {
+    param([int]$TimeoutSeconds)
+    if ($TimeoutSeconds -le 0) { return [Console]::ReadLine() }
+    $line = ""
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($sw.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
+        if ([Console]::KeyAvailable) {
+            $key = [Console]::ReadKey($true)
+            if ($key.Key -eq "Enter") { Write-Host ""; return $line }
+            elseif ($key.Key -eq "Backspace") {
+                if ($line.Length -gt 0) { $line = $line.Substring(0, $line.Length - 1); Write-Host "`b `b" -NoNewline }
+            }
+            else { $line += $key.KeyChar; Write-Host $key.KeyChar -NoNewline }
+        }
+        else { Start-Sleep -Milliseconds 50 }
+    }
+    return $null
+}
+
 function Read-YesNo {
     param([string]$Prompt, [string]$Default)
     $suffix = if ($Default -eq "yes") { "[Y/n]" } else { "[y/N]" }
     Write-Host "$Prompt $suffix " -NoNewline
-    $answer = [Console]::ReadLine()
+    # On timeout nobody is there -> return the SAFE "no", never $Default, so a
+    # yes-default prompt (Glimpse) can't auto-run unattended.
+    $answer = Read-LineWithTimeout $script:promptTimeout
+    if ($null -eq $answer) {
+        Write-Host ""
+        return "no"
+    }
     switch -regex ($answer) {
         '^(y|yes)$' { return "yes" }
         '^(n|no)$'  { return "no" }
@@ -755,6 +793,12 @@ foreach ($scope in @($claudeSkillsDir, $agentsSkillsDir, "$env:USERPROFILE\.kiro
         Write-Host "Removing stale plannotator-archive skill $staleArchivePath"
         Remove-Item -Recurse -Force $staleArchivePath -ErrorAction SilentlyContinue
     }
+}
+# The /plannotator-archive OpenCode command was removed too — sweep the stub.
+$staleOpencodeArchive = "$env:USERPROFILE\.config\opencode\commands\plannotator-archive.md"
+if (Test-Path $staleOpencodeArchive) {
+    Write-Host "Removing stale plannotator-archive command $staleOpencodeArchive"
+    Remove-Item -Force $staleOpencodeArchive -ErrorAction SilentlyContinue
 }
 
 # Codex no longer hosts core skills (they now live in ~/.agents/skills).

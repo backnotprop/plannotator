@@ -205,6 +205,8 @@ describe("install.sh", () => {
       'for scope in "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR" "$KIRO_SKILLS_DIR"; do',
     );
     expect(script).toContain('rm -rf "$scope/plannotator-archive"');
+    // The removed /plannotator-archive OpenCode command stub is swept too.
+    expect(script).toContain('rm -f "$OPENCODE_COMMANDS_DIR/plannotator-archive.md"');
   });
 
   test("suggests installing extras via npx skills add", () => {
@@ -394,6 +396,8 @@ describe("install.ps1", () => {
       'foreach ($scope in @($claudeSkillsDir, $agentsSkillsDir, "$env:USERPROFILE\\.kiro\\skills"))',
     );
     expect(script).toContain('Join-Path $scope "plannotator-archive"');
+    // The removed /plannotator-archive OpenCode command stub is swept too.
+    expect(script).toContain('Removing stale plannotator-archive command');
   });
 
   test("does not treat a skills-only Codex home as configured", () => {
@@ -519,6 +523,8 @@ describe("install.cmd", () => {
       'for %%D in ("!CLAUDE_SKILLS_DIR!" "!AGENTS_SKILLS_DIR!" "!KIRO_SKILLS_DIR!") do',
     );
     expect(script).toContain('rmdir /s /q "%%~D\\plannotator-archive"');
+    // The removed /plannotator-archive OpenCode command stub is swept too.
+    expect(script).toContain('del /q "!OPENCODE_COMMANDS_DIR!\\plannotator-archive.md"');
   });
 
   test("does not treat a skills-only Codex home as configured", () => {
@@ -643,6 +649,12 @@ describe("install shared behavior", () => {
     expect(sh).toContain("--non-interactive");
     expect(ps).toContain("[switch]$NonInteractive");
     expect(cmdScript).toContain('"%~1"=="--non-interactive"');
+    // Prompts are bounded so an attached-but-unattended console can't hang:
+    // sh via read -t / PROMPT_TIMEOUT, ps1 via a timed Read-LineWithTimeout,
+    // both overridable with PLANNOTATOR_PROMPT_TIMEOUT.
+    expect(sh).toContain("PLANNOTATOR_PROMPT_TIMEOUT");
+    expect(ps).toContain("Read-LineWithTimeout");
+    expect(ps).toContain("PLANNOTATOR_PROMPT_TIMEOUT");
     // The wizard only runs with a real terminal/console attached.
     expect(sh).toContain("{ : < /dev/tty; } 2>/dev/null");
     expect(ps).toContain("[Console]::IsInputRedirected");
