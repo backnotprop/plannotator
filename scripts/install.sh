@@ -732,15 +732,16 @@ fi
 
 # A wizard needs a real human at the keyboard. Piped installs (curl | bash)
 # still have a terminal at /dev/tty even though stdin is the pipe; CI and
-# scripts do not. But some automated contexts (docker run -t, devcontainer
-# and provisioner shells) DO expose an openable /dev/tty with nobody behind
-# it — opening /dev/tty succeeds, yet a read would block forever. So we also
-# skip the wizard when a CI marker is set, and every prompt below carries a
-# timeout (see PROMPT_TIMEOUT / ask_yes_no) so a mis-detected terminal can
-# never wedge the install: it falls through to the safe non-interactive
-# defaults (extras=no, model-invocable=none, glimpse=no) instead.
+# scripts do not. Some automated contexts (docker run -t, devcontainer and
+# provisioner shells) DO expose an openable /dev/tty with nobody behind it —
+# opening /dev/tty succeeds, yet a read would block forever. The per-prompt
+# timeout below (see PROMPT_TIMEOUT / ask_yes_no) handles that: a mis-detected
+# terminal falls through to the safe non-interactive defaults (extras=no,
+# model-invocable=none, glimpse=no) instead of wedging. We deliberately do NOT
+# gate on $CI here — an exported CI var must not silently suppress an explicit
+# --reconfigure or --extras in an otherwise interactive shell.
 can_prompt=0
-if [ "$NON_INTERACTIVE" -eq 0 ] && [ -z "${CI:-}" ] && { : < /dev/tty; } 2>/dev/null; then
+if [ "$NON_INTERACTIVE" -eq 0 ] && { : < /dev/tty; } 2>/dev/null; then
     can_prompt=1
 fi
 
