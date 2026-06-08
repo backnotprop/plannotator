@@ -3,10 +3,12 @@
  */
 
 import { $ } from "bun";
+import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { loadConfig, resolveUseGlimpse } from "@plannotator/shared/config";
 
 const IPC_REGISTRY = path.join(getPlannotatorDataDir(), "vscode-ipc.json");
 
@@ -102,9 +104,90 @@ export function shouldTryRemoteBrowserFallback(isRemote: boolean): boolean {
   return !hasRealHandler;
 }
 
+function buildGlimpseHtml(url: string): string {
+  const encodedUrl = JSON.stringify(url);
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Plannotator</title>
+    <style>
+      html, body { width: 100%; height: 100%; margin: 0; }
+      body { overflow: hidden; background: #0f1115; }
+    </style>
+  </head>
+  <body>
+    <script>
+      location.replace(${encodedUrl});
+    </script>
+  </body>
+</html>`;
+}
+
+async function openGlimpse(url: string): Promise<boolean> {
+  const glimpseCli = Bun.which("glimpseui");
+  if (!glimpseCli) return false;
+
+  const args = [
+    "--width",
+    String(Number(process.env.PLANNOTATOR_GLIMPSE_WIDTH || 1280)),
+    "--height",
+    String(Number(process.env.PLANNOTATOR_GLIMPSE_HEIGHT || 900)),
+    "--title",
+    "Plannotator",
+    "--open-links",
+  ];
+  const html = buildGlimpseHtml(url);
+
+  // On Windows, `glimpseui` resolves to an npm script shim, not an exe, which
+  // spawn() can't launch without a shell. `shell: true` would break the stdin
+  // HTML pipe below, so run the package entry with node directly instead.
+  let command = glimpseCli;
+  let spawnArgs = args;
+  if (process.platform === "win32" && !/\.exe$/i.test(glimpseCli)) {
+    const node = Bun.which("node");
+    const entry = path.join(
+      path.dirname(glimpseCli),
+      "node_modules",
+      "glimpseui",
+      "bin",
+      "glimpse.mjs"
+    );
+    if (node && fs.existsSync(entry)) {
+      command = node;
+      spawnArgs = [entry, ...args];
+    }
+  }
+
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    let successTimer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (opened: boolean) => {
+      if (settled) return;
+      settled = true;
+      if (successTimer) clearTimeout(successTimer);
+      resolve(opened);
+    };
+
+    const child = spawn(command, spawnArgs, {
+      detached: true,
+      stdio: ["pipe", "ignore", "ignore"],
+    });
+    successTimer = setTimeout(() => {
+      child.unref();
+      finish(true);
+    }, 750);
+
+    child.once("error", () => finish(false));
+    child.once("exit", () => finish(false));
+    child.stdin.once("error", () => finish(false));
+    child.stdin.end(html);
+  });
+}
+
 export async function openBrowser(
   url: string,
-  options?: { isRemote?: boolean }
+  options?: { isRemote?: boolean; useGlimpse?: boolean }
 ): Promise<boolean> {
   try {
     const rawPlannotatorBrowser = process.env.PLANNOTATOR_BROWSER;
@@ -114,9 +197,17 @@ export async function openBrowser(
       : rawPlannotatorBrowser;
     const envBrowser = isNoOpBrowserSentinel(rawBrowser) ? undefined : rawBrowser;
     const browser = plannotatorBrowser || envBrowser;
-    if (shouldTryRemoteBrowserFallback(options?.isRemote ?? false)) {
+    const isRemote = options?.isRemote ?? false;
+    if (shouldTryRemoteBrowserFallback(isRemote)) {
       const openedViaIpc = await tryVscodeIpc(url);
       if (openedViaIpc) {
+        return true;
+      }
+    }
+
+    if (options?.useGlimpse && !browser && !isRemote && resolveUseGlimpse(loadConfig())) {
+      const openedViaGlimpse = await openGlimpse(url);
+      if (openedViaGlimpse) {
         return true;
       }
     }

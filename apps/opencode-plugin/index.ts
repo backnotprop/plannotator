@@ -16,45 +16,10 @@
  */
 
 import { type Plugin, tool } from "@opencode-ai/plugin";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
-import path from "path";
-import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
-
-// OpenCode's @hono/node-server patches global.Response with a polyfill that
-// Bun.serve() doesn't accept (it checks native type tags, not instanceof).
-// This happens in "opencode web" and "opencode serve" modes, where
-// createAdaptorServer() runs before plugins load. Recover the native Response
-// from the polyfill's prototype chain — hono sets up:
-//   Object.setPrototypeOf(Response2.prototype, GlobalResponse.prototype)
-// so the parent prototype's constructor IS the original native Response.
-const _proto = Object.getPrototypeOf(Response.prototype);
-if (_proto?.constructor && _proto.constructor !== Response && _proto.constructor !== Object) {
-  globalThis.Response = _proto.constructor;
-  // Also fix Request — hono patches both with the same pattern
-  const _reqProto = Object.getPrototypeOf(Request.prototype);
-  if (_reqProto?.constructor && _reqProto.constructor !== Request && _reqProto.constructor !== Object) {
-    globalThis.Request = _reqProto.constructor;
-  }
-}
-import {
-  startPlannotatorServer,
-  handleServerReady,
-} from "@plannotator/server";
-import {
-  startReviewServer,
-  handleReviewServerReady,
-} from "@plannotator/server/review";
-import {
-  startAnnotateServer,
-  handleAnnotateServerReady,
-} from "@plannotator/server/annotate";
-import {
-  handleReviewCommand,
-  handleAnnotateCommand,
-  handleAnnotateLastCommand,
-  handleArchiveCommand,
-  type CommandDeps,
-} from "./commands";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   getPlanDeniedPrompt,
   getPlanApprovedPrompt,
@@ -79,19 +44,33 @@ import {
   shouldModifyPrompts,
   shouldRegisterSubmitPlan,
   shouldRejectSubmitPlanForAgent,
+  type RuntimeMode,
   type PlannotatorOpenCodeOptions,
 } from "./workflow";
+import {
+  applyEdits,
+  formatWithLineNumbers,
+  getPlanBackingPath,
+  validateEdits,
+} from "./plan-edits";
+import {
+  handleCliCommand,
+  runCliPlanReview,
+  type OpenCodeBridgeContext,
+  type OpenCodePlanReviewResult,
+} from "./cli-bridge";
 
 // Lazy-load HTML at first use instead of embedding in the bundle.
 // The two SPA files are ~20 MB combined — inlining them as string literals
 // adds ~160ms to module parse time (see GitHub issue #410).
 let _planHtml: string | null = null;
 let _reviewHtml: string | null = null;
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
 function resolveBundledHtmlPath(filename: string): string {
   const candidates = [
-    path.join(import.meta.dir, filename),
-    path.join(import.meta.dir, "..", filename),
+    path.join(moduleDir, filename),
+    path.join(moduleDir, "..", filename),
   ];
 
   for (const candidate of candidates) {
@@ -119,112 +98,6 @@ function getReviewHtml(): string {
 
 const DEFAULT_PLAN_TIMEOUT_SECONDS = 345_600; // 96 hours
 const MAX_PLAN_SIZE = 5 * 1024 * 1024; // 5MB
-
-// ── Edit-based plan management ────────────────────────────────────────────
-
-interface PlanEdit {
-  start: number;
-  end?: number | null;
-  content: string;
-}
-
-/**
- * Backing file for the current plan. Stored outside the workspace in
- * `~/.plannotator/active/{project}/_active-plan.md` so it never appears
- * in git status or editor file trees. Managed entirely by the plugin;
- * the agent never sees or touches this file directly.
- */
-export function getPlanBackingPath(project: string): string {
-  return path.join(getPlannotatorDataDir(), "active", project, "_active-plan.md");
-}
-
-/**
- * Apply line-range edits to a plan stored as an array of lines.
- *
- * Edit semantics:
- *   - start/end are 1-indexed line numbers (inclusive)
- *   - end omitted or null: replace from start through end of file
- *     (on first call with start=1, this writes the entire plan)
- *   - content="" with start/end: delete those lines
- *   - edits are applied in order; line numbers refer to the document
- *     state BEFORE any edits in this batch (offsets are adjusted internally)
- */
-export function applyEdits(existingLines: string[], edits: PlanEdit[]): string[] {
-  // Sort by start ascending so offset adjustment works correctly
-  const sorted = [...edits].sort((a, b) => a.start - b.start);
-  const lines = [...existingLines];
-  let offset = 0;
-
-  for (const edit of sorted) {
-    const start = edit.start - 1 + offset; // convert to 0-indexed + adjust
-    const end = edit.end != null
-      ? edit.end + offset   // end is inclusive, so this becomes the exclusive upper bound
-      : lines.length;       // null/omitted = through end of file
-
-    const newLines = edit.content ? edit.content.split("\n") : [];
-    const removedCount = end - start;
-    lines.splice(start, removedCount, ...newLines);
-    offset += newLines.length - removedCount;
-  }
-
-  return lines;
-}
-
-/**
- * Validate a batch of edits against the current file state.
- * Returns an error string if invalid, or null if all edits are acceptable.
- */
-export function validateEdits(existingLines: string[], edits: PlanEdit[]): string | null {
-  const lineCount = existingLines.length;
-
-  for (const edit of edits) {
-    if (!Number.isInteger(edit.start) || edit.start < 1) {
-      return `start must be a positive integer >= 1, got ${edit.start}`;
-    }
-    if (edit.start > lineCount + 1) {
-      return `start (${edit.start}) exceeds file length + 1 (${lineCount + 1})`;
-    }
-    if (edit.end != null) {
-      if (!Number.isInteger(edit.end) || edit.end < edit.start) {
-        return `end (${edit.end}) must be >= start (${edit.start})`;
-      }
-      // On an empty file (lineCount === 0) every edit is a pure insert;
-      // end is semantically meaningless and applyEdits handles it via splice
-      // clamping. Rejecting here breaks first-call payloads where the agent
-      // or framework includes end (see #742).
-      if (edit.end > lineCount && lineCount > 0) {
-        return `end (${edit.end}) exceeds file length (${lineCount})`;
-      }
-    }
-  }
-
-  // Check for overlapping ranges (sorted by start ascending)
-  const sorted = [...edits].sort((a, b) => a.start - b.start);
-  for (let i = 1; i < sorted.length; i++) {
-    const prev = sorted[i - 1];
-    const curr = sorted[i];
-    // Appending edits (start > lineCount) have no range that can overlap
-    if (prev.start > lineCount) continue;
-    const prevEnd = prev.end ?? lineCount;
-    if (curr.start <= prevEnd) {
-      return `edits overlap: [${prev.start},${prevEnd}] and [${curr.start},${curr.end ?? "end"}]`;
-    }
-  }
-
-  return null;
-}
-
-/**
- * Format the plan content with line numbers for the agent's reference.
- * Returned in the tool response so the agent can track line positions.
- */
-export function formatWithLineNumbers(content: string): string {
-  const lines = content.split("\n");
-  const width = String(lines.length).length;
-  return lines
-    .map((line, i) => `${String(i + 1).padStart(width)}| ${line}`)
-    .join("\n");
-}
 
 // ── Planning prompt ───────────────────────────────────────────────────────
 
@@ -294,12 +167,122 @@ function getLastUserAgentFromMessages(messages: any[] | undefined): string | und
   return undefined;
 }
 
-export const PlannotatorPlugin: Plugin = async (ctx, rawOptions?: PlannotatorOpenCodeOptions) => {
+function getBunRuntime(): { serve?: unknown; sleep?: (ms: number) => Promise<void> } | undefined {
+  return (globalThis as typeof globalThis & {
+    Bun?: { serve?: unknown; sleep?: (ms: number) => Promise<void> };
+  }).Bun;
+}
+
+function hasEmbeddedRuntime(): boolean {
+  return typeof getBunRuntime()?.serve === "function";
+}
+
+function shouldUseEmbeddedRuntime(runtime: RuntimeMode): boolean {
+  return runtime !== "cli" && hasEmbeddedRuntime();
+}
+
+function getEmbeddedRuntimeError(): string {
+  return "runtime \"embedded\" requires a Bun-hosted OpenCode plugin runtime. Use runtime \"auto\" or \"cli\" with this OpenCode host.";
+}
+
+function logPlannotatorReady(client: any, label: string, url: string): void {
+  try {
+    void client.app.log({ level: "info", message: `[Plannotator] Open ${label}: ${url}` });
+  } catch {
+    // OpenCode logging is best-effort.
+  }
+}
+
+type EmbeddedRuntimeModule = {
+  runEmbeddedPlanReview: (input: {
+    client: any;
+    planContent: string;
+    sharingEnabled: boolean;
+    shareBaseUrl?: string;
+    pasteApiUrl?: string;
+    htmlContent: string;
+    timeoutSeconds: number | null;
+    logReady: (url: string, isRemote: boolean, port: number) => void;
+  }) => Promise<OpenCodePlanReviewResult>;
+  handleEmbeddedCommand: (
+    command: string,
+    event: any,
+    deps: {
+      client: any;
+      htmlContent: string;
+      reviewHtmlContent: string;
+      getSharingEnabled: () => Promise<boolean>;
+      getShareBaseUrl: () => string | undefined;
+      getPasteApiUrl: () => string | undefined;
+      directory?: string;
+    },
+  ) => Promise<{ feedback?: string | null }>;
+};
+
+async function importEmbeddedRuntime(): Promise<EmbeddedRuntimeModule> {
+  const builtPath = path.join(moduleDir, "embedded.js");
+  if (existsSync(builtPath)) {
+    return await import(pathToFileURL(builtPath).href) as EmbeddedRuntimeModule;
+  }
+  const sourceSpecifier = "./embedded";
+  return await import(sourceSpecifier) as EmbeddedRuntimeModule;
+}
+
+async function runPlanReview(input: {
+  client: any;
+  runtime: RuntimeMode;
+  planContent: string;
+  sharingEnabled: boolean;
+  shareBaseUrl?: string;
+  pasteApiUrl?: string;
+  htmlContent: string;
+  timeoutSeconds: number | null;
+  cwd?: string;
+  bridge: OpenCodeBridgeContext;
+}): Promise<OpenCodePlanReviewResult> {
+  if (input.runtime === "embedded" && !hasEmbeddedRuntime()) {
+    throw new Error(getEmbeddedRuntimeError());
+  }
+
+  if (shouldUseEmbeddedRuntime(input.runtime)) {
+    try {
+      const embedded = await importEmbeddedRuntime();
+      return await embedded.runEmbeddedPlanReview({
+        client: input.client,
+        planContent: input.planContent,
+        sharingEnabled: input.sharingEnabled,
+        shareBaseUrl: input.shareBaseUrl,
+        pasteApiUrl: input.pasteApiUrl,
+        htmlContent: input.htmlContent,
+        timeoutSeconds: input.timeoutSeconds,
+        logReady: (url) => logPlannotatorReady(input.client, "plan review", url),
+      });
+    } catch (error) {
+      if (input.runtime === "embedded") throw error;
+      try {
+        void input.client.app.log({
+          level: "error",
+          message: `[Plannotator] Embedded runtime unavailable; falling back to CLI: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      } catch {}
+    }
+  }
+
+  return await runCliPlanReview({
+    client: input.client,
+    planContent: input.planContent,
+    cwd: input.cwd,
+    timeoutSeconds: input.timeoutSeconds,
+    bridge: input.bridge,
+  });
+}
+
+const PlannotatorPlugin: Plugin = async (ctx, rawOptions?: PlannotatorOpenCodeOptions) => {
   const workflowOptions = normalizeWorkflowOptions(rawOptions);
 
   // Preload HTML in background — populates the sync cache before first use
-  Bun.file(resolveBundledHtmlPath("plannotator.html")).text().then(h => { _planHtml = h; });
-  Bun.file(resolveBundledHtmlPath("review-editor.html")).text().then(h => { _reviewHtml = h; });
+  readFile(resolveBundledHtmlPath("plannotator.html"), "utf-8").then(h => { _planHtml = h; }).catch(() => {});
+  readFile(resolveBundledHtmlPath("review-editor.html"), "utf-8").then(h => { _reviewHtml = h; }).catch(() => {});
 
   let cachedAgents: any[] | null = null;
 
@@ -323,6 +306,29 @@ export const PlannotatorPlugin: Plugin = async (ctx, rawOptions?: PlannotatorOpe
 
   function getPasteApiUrl(): string | undefined {
     return process.env.PLANNOTATOR_PASTE_URL || undefined;
+  }
+
+  async function getOpenCodeAgents(): Promise<any[] | undefined> {
+    try {
+      if (!cachedAgents) {
+        const response = await ctx.client.app.agents({
+          query: { directory: ctx.directory },
+        });
+        cachedAgents = response.data ?? [];
+      }
+      return cachedAgents;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async function getBridgeContext(): Promise<OpenCodeBridgeContext> {
+    return {
+      sharingEnabled: await getSharingEnabled(),
+      shareBaseUrl: getShareBaseUrl(),
+      pasteApiUrl: getPasteApiUrl(),
+      agents: await getOpenCodeAgents(),
+    };
   }
 
   function getPlanTimeoutSeconds(): number | null {
@@ -496,44 +502,70 @@ Do NOT proceed with implementation until your plan is approved.`);
 
       output.parts.length = 0;
 
-      const deps: CommandDeps = {
-        client: ctx.client,
-        htmlContent: getPlanHtml(),
-        reviewHtmlContent: getReviewHtml(),
-        getSharingEnabled,
-        getShareBaseUrl,
-        getPasteApiUrl,
-        directory: ctx.directory,
-      };
       // input.arguments is the raw tail string from OpenCode's command dispatcher —
-      // needed so --gate / --json reach the handlers' parseAnnotateArgs (#570).
+      // needed so --gate / --json reach the handlers' parseAnnotateArgs.
       const event = {
         properties: { sessionID: input.sessionID, arguments: input.arguments },
       };
 
-      if (cmd === "plannotator-last") {
-        const feedback = await handleAnnotateLastCommand(event, deps);
-        if (feedback) {
-          try {
-            await ctx.client.session.prompt({
-              path: { id: input.sessionID },
-              body: {
-                parts: [{
-                  type: "text",
-                  text: getAnnotateMessageFeedbackPrompt("opencode", undefined, { feedback }),
-                }],
-              },
-            });
-          } catch {
-            // Session may not be available
+      if (shouldUseEmbeddedRuntime(workflowOptions.runtime)) {
+        try {
+          const embedded = await importEmbeddedRuntime();
+          const deps = {
+            client: ctx.client,
+            htmlContent: getPlanHtml(),
+            reviewHtmlContent: getReviewHtml(),
+            getSharingEnabled,
+            getShareBaseUrl,
+            getPasteApiUrl,
+            directory: ctx.directory,
+          };
+          const result = await embedded.handleEmbeddedCommand(cmd, event, deps);
+          if (cmd === "plannotator-last" && result.feedback) {
+            try {
+              await ctx.client.session.prompt({
+                path: { id: input.sessionID },
+                body: {
+                  parts: [{
+                    type: "text",
+                    text: getAnnotateMessageFeedbackPrompt("opencode", undefined, { feedback: result.feedback }),
+                  }],
+                },
+              });
+            } catch {
+              // Session may not be available
+            }
           }
+          return;
+        } catch (error) {
+          if (workflowOptions.runtime === "embedded") throw error;
+          try {
+            void ctx.client.app.log({
+              level: "error",
+              message: `[Plannotator] Embedded runtime unavailable; falling back to CLI: ${error instanceof Error ? error.message : String(error)}`,
+            });
+          } catch {}
         }
+      }
+
+      if (workflowOptions.runtime === "embedded" && !hasEmbeddedRuntime()) {
+        try {
+          void ctx.client.app.log({
+            level: "error",
+            message: `[Plannotator] ${getEmbeddedRuntimeError()}`,
+          });
+        } catch {}
         return;
       }
 
-      if (cmd === "plannotator-annotate") return handleAnnotateCommand(event, deps);
-      if (cmd === "plannotator-review") return handleReviewCommand(event, deps);
-      if (cmd === "plannotator-archive") return handleArchiveCommand(event, deps);
+      await handleCliCommand({
+        command: cmd,
+        client: ctx.client,
+        sessionId: input.sessionID,
+        rawArgs: input.arguments ?? "",
+        cwd: ctx.directory,
+        bridge: await getBridgeContext(),
+      });
     },
   };
 
@@ -603,45 +635,24 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
           // Write backing file
           writeFileSync(backingPath, planContent, "utf-8");
 
-          const sharingEnabled = await getSharingEnabled();
-          const server = await startPlannotatorServer({
-            plan: planContent,
-            origin: "opencode",
-            sharingEnabled,
-            shareBaseUrl: getShareBaseUrl(),
-            pasteApiUrl: getPasteApiUrl(),
-            htmlContent: getPlanHtml(),
-            opencodeClient: ctx.client,
-            onReady: async (url, isRemote, port) => {
-              handleServerReady(url, isRemote, port);
-              if (isRemote) {
-                ctx.client.app.log({ level: "info", message: `[Plannotator] Open in browser: ${url}` });
-              }
-            },
-          });
-
           const timeoutSeconds = getPlanTimeoutSeconds();
-          const timeoutMs = timeoutSeconds === null ? null : timeoutSeconds * 1000;
-
-          const result = timeoutMs === null
-            ? await server.waitForDecision()
-            : await new Promise<Awaited<ReturnType<typeof server.waitForDecision>>>((resolve) => {
-                const timeoutId = setTimeout(
-                  () =>
-                    resolve({
-                      approved: false,
-                      feedback: `[Plannotator] No response within ${timeoutSeconds} seconds. Port released automatically. Please call submit_plan again.`,
-                    }),
-                  timeoutMs
-                );
-
-                server.waitForDecision().then((r) => {
-                  clearTimeout(timeoutId);
-                  resolve(r);
-                });
-              });
-          await Bun.sleep(1500);
-          server.stop();
+          let result: OpenCodePlanReviewResult;
+          try {
+            result = await runPlanReview({
+              client: ctx.client,
+              runtime: workflowOptions.runtime,
+              planContent,
+              sharingEnabled: await getSharingEnabled(),
+              shareBaseUrl: getShareBaseUrl(),
+              pasteApiUrl: getPasteApiUrl(),
+              htmlContent: getPlanHtml(),
+              timeoutSeconds,
+              cwd: ctx.directory,
+              bridge: await getBridgeContext(),
+            });
+          } catch (error) {
+            return `[Plannotator] Failed to open plan review: ${error instanceof Error ? error.message : String(error)}`;
+          }
 
           if (result.approved) {
             // Clean up backing file after approval

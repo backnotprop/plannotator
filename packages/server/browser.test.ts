@@ -44,7 +44,7 @@ describe("shouldTryRemoteBrowserFallback", () => {
     expect(shouldTryRemoteBrowserFallback(true)).toBe(false);
   });
 
-  test("true for remote sessions when BROWSER is a no-op sentinel (e.g. agent view)", () => {
+  test("true for remote sessions when BROWSER is a no-op sentinel", () => {
     clearEnv();
     process.env.BROWSER = "true";
     expect(shouldTryRemoteBrowserFallback(true)).toBe(true);
@@ -58,20 +58,30 @@ describe("shouldTryRemoteBrowserFallback", () => {
 });
 
 describe("isNoOpBrowserSentinel", () => {
-  test("returns false for undefined / empty", () => {
+  test("returns false for undefined and empty values", () => {
     expect(isNoOpBrowserSentinel(undefined)).toBe(false);
     expect(isNoOpBrowserSentinel("")).toBe(false);
   });
 
-  test("recognises the documented no-op values, case- and whitespace-insensitive", () => {
-    for (const v of ["true", "false", "none", ":", "0", "1", "TRUE", "  none  "]) {
-      expect(isNoOpBrowserSentinel(v)).toBe(true);
+  test("recognizes no-op values case- and whitespace-insensitively", () => {
+    for (const value of [
+      "true",
+      "false",
+      "none",
+      ":",
+      "0",
+      "1",
+      "TRUE",
+      "  none  ",
+    ]) {
+      expect(isNoOpBrowserSentinel(value)).toBe(true);
     }
   });
 
-  test("does not flag real browser handlers", () => {
+  test("does not flag real browser handlers or explicit command paths", () => {
     expect(isNoOpBrowserSentinel("/usr/bin/firefox")).toBe(false);
     expect(isNoOpBrowserSentinel("Google Chrome")).toBe(false);
     expect(isNoOpBrowserSentinel("open")).toBe(false);
+    expect(isNoOpBrowserSentinel("/usr/bin/true")).toBe(false);
   });
 });

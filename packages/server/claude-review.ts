@@ -205,7 +205,7 @@ export function buildClaudeCommand(prompt: string, model: string = "claude-opus-
     "Bash(git show:*)", "Bash(git blame:*)", "Bash(git branch:*)",
     "Bash(git grep:*)", "Bash(git ls-remote:*)", "Bash(git ls-tree:*)",
     "Bash(git merge-base:*)", "Bash(git remote:*)", "Bash(git rev-parse:*)",
-    "Bash(git show-ref:*)",
+    "Bash(git show-ref:*)", "Bash(git -C:*)",
     // JJ (read-only)
     "Bash(jj status:*)", "Bash(jj diff:*)", "Bash(jj log:*)",
     "Bash(jj show:*)", "Bash(jj file show:*)", "Bash(jj cat:*)",
@@ -282,6 +282,7 @@ export function transformClaudeFindings(
   findings: ClaudeFinding[],
   source: string,
   cwd?: string,
+  pathTransform?: (path: string) => string,
 ): Array<{
   source: string;
   filePath: string;
@@ -299,7 +300,9 @@ export function transformClaudeFindings(
     .filter(f => f.file && typeof f.line === "number")
     .map(f => ({
       source,
-      filePath: toRelativePath(f.file, cwd),
+      filePath: pathTransform
+        ? pathTransform(toRelativePath(f.file, cwd))
+        : toRelativePath(f.file, cwd),
       lineStart: f.line,
       lineEnd: f.end_line ?? f.line,
       type: "comment",

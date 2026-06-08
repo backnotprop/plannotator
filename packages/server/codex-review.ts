@@ -293,6 +293,7 @@ export function transformReviewFindings(
   source: string,
   cwd?: string,
   author?: string,
+  pathTransform?: (path: string) => string,
 ): ReviewAnnotationInput[] {
   const annotations = findings
     .filter((f) =>
@@ -302,7 +303,9 @@ export function transformReviewFindings(
     )
     .map((f) => ({
       source,
-      filePath: toRelativePath(f.code_location.absolute_file_path, cwd),
+      filePath: pathTransform
+        ? pathTransform(toRelativePath(f.code_location.absolute_file_path, cwd))
+        : toRelativePath(f.code_location.absolute_file_path, cwd),
       lineStart: f.code_location.line_range.start,
       lineEnd: f.code_location.line_range.end,
       type: "comment",

@@ -44,6 +44,11 @@ export interface CachedDocState {
   isConverted?: boolean;
 }
 
+export interface LinkedDocSessionState {
+  root: SavedPlanState;
+  docs: Map<string, CachedDocState>;
+}
+
 export interface UseLinkedDocReturn {
   /** Whether a linked doc is currently active */
   isActive: boolean;
@@ -61,6 +66,10 @@ export interface UseLinkedDocReturn {
   dismissError: () => void;
   /** All linked doc annotations including the active doc's live state (keyed by filepath) */
   getDocAnnotations: () => Map<string, CachedDocState>;
+  /** Snapshot the root document plus linked-doc cache for cross-document session swaps */
+  snapshotSession: () => LinkedDocSessionState;
+  /** Restore a root document plus linked-doc cache, closing any active linked document */
+  restoreSession: (state: LinkedDocSessionState) => void;
   /** Reactive count of annotations on non-active documents (updates on open() and back()) */
   docAnnotationCount: number;
 }
@@ -263,6 +272,66 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
 
   const dismissError = useCallback(() => setError(null), []);
 
+  const snapshotSession = useCallback((): LinkedDocSessionState => {
+    const docs = new Map(docCache.current);
+    if (linkedDoc) {
+      docs.set(linkedDoc.filepath, {
+        annotations: [...annotations],
+        globalAttachments: [...globalAttachments],
+        markdown: linkedDoc.markdown,
+        isConverted: linkedDoc.isConverted,
+      });
+    }
+
+    const root = savedPlanState.current
+      ? {
+          markdown: savedPlanState.current.markdown,
+          annotations: [...savedPlanState.current.annotations],
+          selectedAnnotationId: savedPlanState.current.selectedAnnotationId,
+          globalAttachments: [...savedPlanState.current.globalAttachments],
+        }
+      : {
+          markdown,
+          annotations: [...annotations],
+          selectedAnnotationId,
+          globalAttachments: [...globalAttachments],
+        };
+
+    return { root, docs };
+  }, [linkedDoc, annotations, globalAttachments, markdown, selectedAnnotationId]);
+
+  const restoreSession = useCallback((state: LinkedDocSessionState) => {
+    viewerRef.current?.clearAllHighlights();
+
+    savedPlanState.current = null;
+    docCache.current = new Map(state.docs);
+    let total = 0;
+    for (const cached of docCache.current.values()) {
+      total += cached.annotations.length + cached.globalAttachments.length;
+    }
+    setDocAnnotationCount(total);
+
+    setMarkdown(state.root.markdown);
+    setAnnotations([...state.root.annotations]);
+    setGlobalAttachments([...state.root.globalAttachments]);
+    setSelectedAnnotationId(state.root.selectedAnnotationId);
+    setLinkedDoc(null);
+    setError(null);
+
+    if (state.root.annotations.length) {
+      setTimeout(() => {
+        viewerRef.current?.clearAllHighlights();
+        viewerRef.current?.applySharedAnnotations(state.root.annotations);
+      }, HIGHLIGHT_REAPPLY_DELAY);
+    }
+  }, [
+    setMarkdown,
+    setAnnotations,
+    setSelectedAnnotationId,
+    setGlobalAttachments,
+    viewerRef,
+  ]);
+
   const getDocAnnotations = useCallback((): Map<string, CachedDocState> => {
     const result = new Map(docCache.current);
     // Include stashed original-file annotations when viewing a linked doc
@@ -294,6 +363,8 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     back,
     dismissError,
     getDocAnnotations,
+    snapshotSession,
+    restoreSession,
     docAnnotationCount,
   };
 }

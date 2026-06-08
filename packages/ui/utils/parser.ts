@@ -725,3 +725,87 @@ export const exportCodeFileAnnotations = (annotations: CodeAnnotation[]): string
   output += `---\n`;
   return output;
 };
+
+export interface MessageAnnotationEntry {
+  messageId: string;
+  text: string;
+  timestamp?: string;
+  annotations: Annotation[];
+  globalAttachments: ImageAttachment[];
+  blocks?: Block[];
+  linkedDocs?: Map<string, LinkedDocAnnotationEntry>;
+  codeAnnotations?: CodeAnnotation[];
+}
+
+const MESSAGE_EXCERPT_MAX_CHARS = 1200;
+
+const excerptMessageText = (text: string): string => {
+  const trimmed = text.trim();
+  if (trimmed.length <= MESSAGE_EXCERPT_MAX_CHARS) return trimmed;
+  return `${trimmed.slice(0, MESSAGE_EXCERPT_MAX_CHARS).trimEnd()}...`;
+};
+
+const fencedBlock = (text: string, language = ''): string => {
+  let fence = '```';
+  while (text.includes(fence)) fence += '`';
+  return `${fence}${language}\n${text}\n${fence}\n`;
+};
+
+export const exportMessageAnnotations = (entries: MessageAnnotationEntry[]): string => {
+  const nonEmpty = entries.filter((entry) => {
+    const linkedDocCount = entry.linkedDocs
+      ? Array.from(entry.linkedDocs.values()).reduce(
+          (sum, doc) => sum + doc.annotations.length + doc.globalAttachments.length,
+          0
+        )
+      : 0;
+    return (
+      entry.annotations.length > 0 ||
+      entry.globalAttachments.length > 0 ||
+      (entry.codeAnnotations?.length ?? 0) > 0 ||
+      linkedDocCount > 0
+    );
+  });
+
+  if (nonEmpty.length === 0) {
+    return 'User reviewed the messages and has no feedback.';
+  }
+
+  let output = `# Message Feedback\n\nThe following feedback spans ${nonEmpty.length} assistant message${nonEmpty.length === 1 ? '' : 's'}. Each section includes an excerpt of the message it applies to.\n\n`;
+
+  nonEmpty.forEach((entry, index) => {
+    const label = entry.timestamp ? ` (${entry.timestamp})` : '';
+    output += `## Message ${index + 1}${label}\n\n`;
+    output += `Message excerpt:\n`;
+    output += fencedBlock(excerptMessageText(entry.text), 'markdown');
+    output += '\n';
+
+    if (entry.annotations.length > 0 || entry.globalAttachments.length > 0) {
+      output += exportAnnotations(
+        entry.blocks ?? parseMarkdownToBlocks(entry.text),
+        entry.annotations,
+        entry.globalAttachments,
+        `Feedback for Message ${index + 1}`,
+        'message',
+      );
+      output += '\n';
+    }
+
+    const hasLinkedDocFeedback = entry.linkedDocs
+      ? Array.from(entry.linkedDocs.values()).some(
+          (doc) => doc.annotations.length > 0 || doc.globalAttachments.length > 0
+        )
+      : false;
+    if (entry.linkedDocs && hasLinkedDocFeedback) {
+      output += exportLinkedDocAnnotations(entry.linkedDocs);
+      output += '\n';
+    }
+
+    if (entry.codeAnnotations?.length) {
+      output += exportCodeFileAnnotations(entry.codeAnnotations);
+      output += '\n';
+    }
+  });
+
+  return output.trimEnd();
+};

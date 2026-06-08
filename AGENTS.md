@@ -7,14 +7,13 @@ A plan review UI for Claude Code that intercepts `ExitPlanMode` via hooks, letti
 ```
 plannotator/
 ├── apps/
-│   ├── hook/                     # Claude Code plugin
+│   ├── hook/                     # Claude Code plugin (no commands/ — core skills installed to ~/.claude/skills act as slash commands)
 │   │   ├── .claude-plugin/plugin.json
-│   │   ├── commands/             # Slash commands (plannotator-review.md, plannotator-annotate.md)
 │   │   ├── hooks/hooks.json      # PermissionRequest hook config
 │   │   ├── server/index.ts       # Entry point (plan + review + annotate + archive subcommands)
 │   │   └── dist/                 # Built single-file apps (index.html, review.html)
 │   ├── opencode-plugin/          # OpenCode plugin
-│   │   ├── commands/             # Slash commands (plannotator-review.md, plannotator-annotate.md)
+│   │   ├── commands/             # Slash command stubs (review, annotate, last, archive — plugin intercepts execution)
 │   │   ├── index.ts              # Plugin entry with submit_plan tool + review/annotate event handlers
 │   │   ├── plannotator.html      # Built plan review app
 │   │   └── review-editor.html    # Built code review app
@@ -27,6 +26,9 @@ plannotator/
 │   │   └── lib/                  # Shared command wrapper helpers
 │   ├── marketing/                # Marketing site, docs, and blog (plannotator.ai)
 │   │   └── astro.config.mjs      # Astro 5 static site with content collections
+│   ├── kiro-cli/                 # Kiro CLI integration source (consumed by scripts/install.sh; auto-detected via ~/.kiro)
+│   │   ├── agents/plannotator.json   # Example Kiro custom agent
+│   │   └── skills/               # Kiro-specific skill packages (review, annotate, archive); setup-goal + visual-explainer install from apps/skills/extra
 │   ├── paste-service/            # Paste service for short URL sharing
 │   │   ├── core/                 # Platform-agnostic logic (handler, storage interface, cors)
 │   │   ├── stores/               # Storage backends (fs, kv, s3)
@@ -40,12 +42,15 @@ plannotator/
 │   │   ├── src/                   # extension.ts, cookie-proxy.ts, ipc-server.ts, panel-manager.ts, editor-annotations.ts, vscode-theme.ts
 │   │   └── package.json           # Extension manifest (publisher: backnotprop)
 │   └── skills/                    # Agent skills (agentskills.io format)
-│       ├── plannotator-review/          # Lightweight: opens review UI
-│       ├── plannotator-annotate/        # Lightweight: opens annotate UI
-│       ├── plannotator-last/            # Lightweight: annotates last message
-│       ├── plannotator-compound/        # Research analysis agent (map-reduce over denied plans)
-│       ├── plannotator-setup-goal/      # Goal package scaffolder for /goal workflows
-│       └── plannotator-visual-explainer/ # Visual HTML generator (plans, diagrams, PR explainers) with Plannotator theming
+│       ├── core/                  # CORE skills (single-sourced) — installed to ~/.claude/skills and ~/.agents/skills (Codex)
+│       │   ├── plannotator-review/    # Lightweight: opens review UI
+│       │   ├── plannotator-annotate/  # Lightweight: opens annotate UI
+│       │   ├── plannotator-last/      # Lightweight: annotates last message
+│       │   └── plannotator-archive/   # Lightweight: opens read-only archive UI
+│       └── extra/                 # EXTRA skills — NOT default-installed (except Kiro); add via `npx skills add backnotprop/plannotator/apps/skills/extra`
+│           ├── plannotator-compound/        # Research analysis agent (map-reduce over denied plans)
+│           ├── plannotator-setup-goal/      # Goal package scaffolder for /goal workflows
+│           └── plannotator-visual-explainer/ # Visual HTML generator (plans, diagrams, PR explainers) with Plannotator theming
 ├── packages/
 │   ├── server/                   # Shared server implementation
 │   │   ├── index.ts              # startPlannotatorServer(), handleServerReady()
@@ -128,10 +133,13 @@ claude --plugin-dir ./apps/hook
 | `PLANNOTATOR_SHARE` | Set to `disabled` to turn off URL sharing entirely. Default: enabled. |
 | `PLANNOTATOR_SHARE_URL` | Custom base URL for share links (self-hosted portal). Default: `https://share.plannotator.ai`. |
 | `PLANNOTATOR_PASTE_URL` | Base URL of the paste service API for short URL sharing. Default: `https://plannotator-paste.plannotator.workers.dev`. |
-| `PLANNOTATOR_ORIGIN` | Explicit agent-origin override at the top of the detection chain. Valid values: `claude-code`, `amp`, `droid`, `opencode`, `codex`, `copilot-cli`, `gemini-cli`, `pi`. Invalid values silently fall through to env-based detection. Unset by default. |
+| `PLANNOTATOR_ORIGIN` | Explicit agent-origin override at the top of the detection chain. Valid values: `claude-code`, `amp`, `droid`, `opencode`, `codex`, `copilot-cli`, `gemini-cli`, `kiro-cli`, `pi`. Invalid values silently fall through to env-based detection. Unset by default. |
 | `PLANNOTATOR_JINA` | Set to `0` / `false` to disable Jina Reader for URL annotation, or `1` / `true` to enable. Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "jina": false }`) or per-invocation via `--no-jina`. |
 | `JINA_API_KEY` | Optional Jina Reader API key for higher rate limits (500 RPM vs 20 RPM unauthenticated). Free keys include 10M tokens. |
 | `PLANNOTATOR_DATA_DIR` | Override the base data directory. Supports `~` expansion. Default: `~/.plannotator`. All data (plans, history, drafts, config, hooks, sessions, debug logs, IPC registry) is stored under this directory. |
+| `PLANNOTATOR_GLIMPSE` | Set to `0` / `false` to disable the Glimpse native window even when `glimpseui` is installed. Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "glimpse": false }`). |
+| `PLANNOTATOR_GLIMPSE_WIDTH` | Width in pixels for the Glimpse native window. Default: `1280`. |
+| `PLANNOTATOR_GLIMPSE_HEIGHT` | Height in pixels for the Glimpse native window. Default: `900`. |
 | `PLANNOTATOR_VERIFY_ATTESTATION` | **Read by the install scripts only**, not by the runtime binary. Set to `1` / `true` to have `scripts/install.sh` / `install.ps1` / `install.cmd` run `gh attestation verify` on every install. Off by default. Can also be set persistently via `~/.plannotator/config.json` (`{ "verifyAttestation": true }`) or per-invocation via `--verify-attestation`. Requires `gh` installed and authenticated. |
 
 **Config-only settings (`~/.plannotator/config.json`)**: Some settings have no env-var equivalent and are toggled by editing the config file directly:
@@ -171,7 +179,9 @@ User runs /plannotator-review command
 Claude Code: plannotator review subcommand runs
 OpenCode: event handler intercepts command
         ↓
-VCS diff captures local changes (git diff or jj diff)
+VCS diff captures local changes (git diff or jj diff). When review runs from a
+non-VCS parent that contains nested Git repos, child diffs are combined with
+folder-prefixed paths.
         ↓
 Review server starts, opens browser with diff viewer
         ↓
@@ -276,7 +286,7 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 
 | Endpoint              | Method | Purpose                                    |
 | --------------------- | ------ | ------------------------------------------ |
-| `/api/diff`           | GET    | Returns `{ rawPatch, gitRef, origin, diffType, base, hideWhitespace, gitContext }` |
+| `/api/diff`           | GET    | Returns `{ rawPatch, gitRef, origin, mode?, diffType, base, hideWhitespace, gitContext, agentCwd? }`. Workspace mode returns `mode: "workspace"` with folder-prefixed paths and no `gitContext`. |
 | `/api/diff/switch`    | POST   | Switch diff type, base branch, or whitespace mode (body: `{ diffType, base?, hideWhitespace? }`) |
 | `/api/file-content`   | GET    | Returns `{ oldContent, newContent }` for expandable diff context (`?path=&oldPath=&base=`) |
 | `/api/git-add`        | POST   | Stage/unstage a file (body: `{ filePath, undo? }`) |

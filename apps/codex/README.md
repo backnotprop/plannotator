@@ -12,8 +12,9 @@ Plan review uses Codex's experimental `Stop` hook. This is a post-render review 
 curl -fsSL https://plannotator.ai/install.sh | bash
 ```
 
-The installer adds the `plannotator` binary and, when Codex is installed or `~/.codex` already exists, enables Codex
-Stop hooks automatically.
+The installer adds the `plannotator` binary and, when Codex is installed or the Codex home already exists, enables Codex
+Stop hooks automatically. The Codex home is `$CODEX_HOME` when set, falling back to `~/.codex` — both the installer and the
+`plannotator` binary (e.g. `plannotator last` reading Codex sessions) respect it ([docs](https://developers.openai.com/codex/config-advanced#config-and-state-locations)).
 
 **Windows PowerShell:**
 

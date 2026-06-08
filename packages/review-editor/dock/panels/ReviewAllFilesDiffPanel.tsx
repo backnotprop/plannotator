@@ -24,6 +24,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       lineDiffType={state.lineDiffType}
       disableLineNumbers={state.disableLineNumbers}
       disableBackground={state.disableBackground}
+      expandUnchanged={state.expandUnchanged}
       fontFamily={state.fontFamily}
       fontSize={state.fontSize}
       viewedFiles={state.viewedFiles}

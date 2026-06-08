@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { createServer } from "node:http";
 import os from "node:os";
+import { basename } from "node:path";
 
 import { contentHash, deleteDraft } from "../generated/draft.js";
 import { loadConfig, saveConfig, detectGitUser, getServerConfig } from "../generated/config.js";
@@ -75,7 +76,7 @@ import {
 	parseCodexOutput,
 	transformReviewFindings,
 } from "../generated/codex-review.js";
-import { buildAgentReviewUserMessage } from "../generated/agent-review-message.js";
+import { buildAgentReviewUserMessage, buildAgentReviewUserMessageForTarget, type WorkspaceReviewPromptContext } from "../generated/agent-review-message.js";
 import {
 	CLAUDE_REVIEW_PROMPT,
 	buildClaudeCommand,
@@ -83,6 +84,10 @@ import {
 	transformClaudeFindings,
 } from "../generated/claude-review.js";
 import { createTourSession, TOUR_EMPTY_OUTPUT_ERROR } from "../generated/tour-review.js";
+import {
+	WorkspaceReviewSession,
+	type WorkspaceDiffType,
+} from "../generated/review-workspace.js";
 import {
 	type CodeNavRequest,
 	type CodeNavRuntime,
@@ -166,7 +171,7 @@ export async function startReviewServer(options: {
 	gitRef: string;
 	htmlContent: string;
 	origin?: string;
-	diffType?: DiffType;
+	diffType?: DiffType | WorkspaceDiffType;
 	gitContext?: GitContext;
 	/**
 	 * Initial base branch the caller used to compute `rawPatch`. When a caller
@@ -183,6 +188,8 @@ export async function startReviewServer(options: {
 	prMetadata?: PRMetadata;
 	/** Working directory for agent processes (e.g., --local worktree). Independent of diff pipeline. */
 	agentCwd?: string;
+	/** Local parent directory containing multiple child VCS repositories. */
+	workspace?: WorkspaceReviewSession;
 	/** Per-PR worktree pool. When set, pr-switch creates worktrees instead of checking out. */
 	worktreePool?: WorktreePool;
 	/** Cleanup callback invoked when server stops (e.g., remove temp worktree) */
@@ -194,6 +201,8 @@ export async function startReviewServer(options: {
 	let draftKey = contentHash(options.rawPatch);
 	let prMeta = options.prMetadata;
 	const isPRMode = !!prMeta;
+	const workspace = options.workspace;
+	const isWorkspaceMode = !!workspace;
 	const hasLocalAccess = !!options.gitContext;
 	const sessionVcsType = options.gitContext?.vcsType;
 	const isRemote = isRemoteSession();
@@ -245,13 +254,15 @@ export async function startReviewServer(options: {
 				display: getDisplayRepo(prMeta),
 				branch: `${getMRLabel(prMeta)} ${getMRNumberLabel(prMeta)}`,
 			}
+		: workspace
+			? { display: basename(workspace.root), branch: "Workspace" }
 		: getRepoInfo();
 	const editorAnnotations = createEditorAnnotationHandler();
 	const externalAnnotations = createExternalAnnotationHandler("review");
 
 	let currentPatch = options.rawPatch;
 	let currentGitRef = options.gitRef;
-	let currentDiffType: DiffType = options.diffType || "uncommitted";
+	let currentDiffType: DiffType | WorkspaceDiffType = options.diffType || workspace?.diffType || "uncommitted";
 	let currentError = options.error;
 	let currentHideWhitespace = loadConfig().diffOptions?.hideWhitespace ?? false;
 	let originalPRPatch = options.rawPatch;
@@ -277,12 +288,17 @@ export async function startReviewServer(options: {
 	// Agent jobs — background process manager (late-binds serverUrl via getter)
 	let serverUrl = "";
 	function resolveAgentCwd(): string {
+		if (workspace) return workspace.root;
 		if (options.worktreePool && prMeta) {
 			const poolPath = options.worktreePool.resolve(prMeta.url);
 			if (poolPath) return poolPath;
 		}
 		if (options.agentCwd) return options.agentCwd;
-		return resolveVcsCwd(currentDiffType, options.gitContext?.cwd) ?? process.cwd();
+		return resolveVcsCwd(currentDiffType as DiffType, options.gitContext?.cwd) ?? process.cwd();
+	}
+	function getWorkspacePromptContext(): WorkspaceReviewPromptContext | undefined {
+		if (!workspace) return undefined;
+		return workspace.getPromptContext();
 	}
 	const tour = createTourSession();
 
@@ -293,18 +309,26 @@ export async function startReviewServer(options: {
 
 		async buildCommand(provider, config) {
 			const cwd = resolveAgentCwd();
-			const hasAgentLocalAccess = !!options.worktreePool || !!options.agentCwd || !!options.gitContext;
-			const userMessageOptions = { defaultBranch: currentBase, hasLocalAccess: hasAgentLocalAccess, prDiffScope: currentPRDiffScope };
+			const workspacePrompt = getWorkspacePromptContext();
+			const hasAgentLocalAccess = !!workspacePrompt || !!options.worktreePool || !!options.agentCwd || !!options.gitContext;
+			const userMessageOptions = {
+				defaultBranch: currentBase,
+				hasLocalAccess: hasAgentLocalAccess,
+				prDiffScope: currentPRDiffScope,
+				...(workspacePrompt && { workspace: workspacePrompt }),
+			};
 
 			// Snapshot the diff context at launch (see review.ts buildCommand
 			// for the rationale — keeps downstream "Copy All" honest across
 			// subsequent context switches).
-			const worktreeParts = currentDiffType.startsWith("worktree:")
-				? parseWorktreeDiffType(currentDiffType)
+			const worktreeParts = String(currentDiffType).startsWith("worktree:")
+				? parseWorktreeDiffType(currentDiffType as DiffType)
 				: null;
 			const launchPrUrl = prMeta?.url;
 			const launchDiffScope = isPRMode ? currentPRDiffScope : undefined;
-			const diffContext: AgentJobInfo["diffContext"] | undefined = prMeta
+			const diffContext: AgentJobInfo["diffContext"] | undefined = workspacePrompt
+				? { mode: String(currentDiffType), worktreePath: null }
+				: prMeta
 				? undefined
 				: {
 						mode: (worktreeParts?.subType ?? currentDiffType) as string,
@@ -316,7 +340,7 @@ export async function startReviewServer(options: {
 				const built = await tour.buildCommand({
 					cwd,
 					patch: currentPatch,
-					diffType: currentDiffType,
+					diffType: currentDiffType as DiffType,
 					options: userMessageOptions,
 					prMetadata: prMeta,
 					config,
@@ -324,7 +348,14 @@ export async function startReviewServer(options: {
 				return built ? { ...built, prUrl: launchPrUrl, diffScope: launchDiffScope, diffContext } : built;
 			}
 
-			const userMessage = buildAgentReviewUserMessage(currentPatch, currentDiffType, userMessageOptions, prMeta);
+			const userMessage = workspacePrompt
+				? buildAgentReviewUserMessageForTarget({
+						kind: "workspace",
+						patch: currentPatch,
+						workspace: workspacePrompt,
+					})
+				: buildAgentReviewUserMessage(currentPatch, currentDiffType as DiffType, userMessageOptions, prMeta);
+			const jobLabel = workspacePrompt ? "Workspace Review" : "Code Review";
 
 			if (provider === "codex") {
 				const model = typeof config?.model === "string" && config.model ? config.model : undefined;
@@ -333,7 +364,7 @@ export async function startReviewServer(options: {
 				const outputPath = generateOutputPath();
 				const prompt = CODEX_REVIEW_SYSTEM_PROMPT + "\n\n---\n\n" + userMessage;
 				const command = await buildCodexCommand({ cwd, outputPath, prompt, model, reasoningEffort, fastMode });
-				return { command, outputPath, prompt, cwd, label: "Code Review", model, reasoningEffort, fastMode: fastMode || undefined, prUrl: launchPrUrl, diffScope: launchDiffScope, diffContext };
+				return { command, outputPath, prompt, cwd, label: jobLabel, model, reasoningEffort, fastMode: fastMode || undefined, prUrl: launchPrUrl, diffScope: launchDiffScope, diffContext };
 			}
 
 			if (provider === "claude") {
@@ -341,7 +372,7 @@ export async function startReviewServer(options: {
 				const effort = typeof config?.effort === "string" && config.effort ? config.effort : undefined;
 				const prompt = CLAUDE_REVIEW_PROMPT + "\n\n---\n\n" + userMessage;
 				const { command, stdinPrompt } = buildClaudeCommand(prompt, model, effort);
-				return { command, stdinPrompt, prompt, cwd, label: "Code Review", captureStdout: true, model, effort, prUrl: launchPrUrl, diffScope: launchDiffScope, diffContext };
+				return { command, stdinPrompt, prompt, cwd, label: jobLabel, captureStdout: true, model, effort, prUrl: launchPrUrl, diffScope: launchDiffScope, diffContext };
 			}
 
 			return null;
@@ -371,7 +402,13 @@ export async function startReviewServer(options: {
 				};
 
 				if (output.findings.length > 0) {
-					const annotations = transformReviewFindings(output.findings, job.source, cwd, "Codex")
+					const annotations = transformReviewFindings(
+						output.findings,
+						job.source,
+						cwd,
+						"Codex",
+						workspace ? (filePath) => workspace.normalizeAnnotationPath(filePath) : undefined,
+					)
 						.map(a => ({ ...a, ...jobPrContext, ...(jobDiffScope && { diffScope: jobDiffScope }) }));
 					const result = externalAnnotations.addAnnotations({ annotations });
 					if ("error" in result) console.error(`[codex-review] addAnnotations error:`, result.error);
@@ -394,7 +431,12 @@ export async function startReviewServer(options: {
 				};
 
 				if (output.findings.length > 0) {
-					const annotations = transformClaudeFindings(output.findings, job.source, cwd)
+					const annotations = transformClaudeFindings(
+						output.findings,
+						job.source,
+						cwd,
+						workspace ? (filePath) => workspace.normalizeAnnotationPath(filePath) : undefined,
+					)
 						.map(a => ({ ...a, ...jobPrContext, ...(jobDiffScope && { diffScope: jobDiffScope }) }));
 					const result = externalAnnotations.addAnnotations({ annotations });
 					if ("error" in result) console.error(`[claude-review] addAnnotations error:`, result.error);
@@ -476,11 +518,13 @@ export async function startReviewServer(options: {
 				rawPatch: currentPatch,
 				gitRef: currentGitRef,
 				origin: options.origin ?? "pi",
-				diffType: hasLocalAccess ? currentDiffType : undefined,
+				mode: isWorkspaceMode ? "workspace" : undefined,
+				diffType: hasLocalAccess || isWorkspaceMode ? currentDiffType : undefined,
 				// Echo the active base so page refresh/reconnect rehydrates the
 				// picker to what the server is actually using, not the detected default.
 				base: hasLocalAccess ? currentBase : undefined,
 				hideWhitespace: currentHideWhitespace,
+				...(workspace && { diffOptions: workspace.diffOptions }),
 				gitContext: hasLocalAccess ? options.gitContext : undefined,
 				sharingEnabled,
 				shareBaseUrl,
@@ -488,6 +532,7 @@ export async function startReviewServer(options: {
 				repoInfo,
 				isWSL: wslFlag,
 				...(options.agentCwd && { agentCwd: options.agentCwd }),
+				...(workspace && { agentCwd: workspace.root }),
 				...(isPRMode && {
 					prMetadata: prMeta,
 					platformUser,
@@ -501,13 +546,13 @@ export async function startReviewServer(options: {
 				serverConfig: getServerConfig(gitUser),
 			});
 		} else if (url.pathname === "/api/diff/switch" && req.method === "POST") {
-			if (!hasLocalAccess) {
+			if (!hasLocalAccess && !workspace) {
 				json(res, { error: "Not available without local file access" }, 400);
 				return;
 			}
 			try {
 				const body = await parseBody(req);
-				const newType = body.diffType as DiffType;
+				const newType = body.diffType as DiffType | WorkspaceDiffType;
 				if (!newType) {
 					json(res, { error: "Missing diffType" }, 400);
 					return;
@@ -515,13 +560,34 @@ export async function startReviewServer(options: {
 				if (typeof body.hideWhitespace === "boolean") {
 					currentHideWhitespace = body.hideWhitespace;
 				}
+				if (workspace) {
+					const snapshot = await workspace.rebuild({
+						diffType: newType,
+						hideWhitespace: currentHideWhitespace,
+					});
+					currentPatch = snapshot.rawPatch;
+					currentGitRef = snapshot.gitRef;
+					currentDiffType = workspace.diffType;
+					currentError = snapshot.error;
+					draftKey = contentHash(currentPatch);
+
+					json(res, {
+						rawPatch: currentPatch,
+						gitRef: currentGitRef,
+						diffType: currentDiffType,
+						diffOptions: workspace.diffOptions,
+						hideWhitespace: currentHideWhitespace,
+						...(currentError ? { error: currentError } : {}),
+					});
+					return;
+				}
 				const detectedBase = detectedCompareTarget();
 				const base = resolveBaseBranch(
 					typeof body.base === "string" ? body.base : undefined,
 					detectedBase,
 				);
 				const defaultCwd = options.gitContext?.cwd;
-				const result = await runVcsDiff(newType, base, defaultCwd, {
+				const result = await runVcsDiff(newType as DiffType, base, defaultCwd, {
 					hideWhitespace: currentHideWhitespace,
 				});
 				currentPatch = result.patch;
@@ -537,7 +603,7 @@ export async function startReviewServer(options: {
 				let updatedContext: GitContext | undefined;
 				if (options.gitContext) {
 					try {
-						const effectiveCwd = resolveVcsCwd(newType, options.gitContext.cwd);
+						const effectiveCwd = resolveVcsCwd(newType as DiffType, options.gitContext.cwd);
 						updatedContext = await getVcsContext(effectiveCwd, sessionVcsType);
 					} catch {
 						/* best-effort */
@@ -821,6 +887,20 @@ export async function startReviewServer(options: {
 				}
 			}
 
+			if (workspace) {
+				try {
+					const result = await workspace.getFileContents(filePath, oldPath);
+					json(res, result);
+				} catch (error) {
+					json(
+						res,
+						{ error: error instanceof Error ? error.message : "No file access available" },
+						400,
+					);
+				}
+				return;
+			}
+
 			const fileContentCwd = (options.worktreePool && prMeta) ? options.worktreePool.resolve(prMeta.url) : options.agentCwd;
 			if (
 				isPRMode &&
@@ -858,7 +938,7 @@ export async function startReviewServer(options: {
 				);
 				const defaultCwd = options.gitContext?.cwd;
 				const result = await getVcsFileContentsForDiff(
-					currentDiffType,
+					currentDiffType as DiffType,
 					base,
 					filePath,
 					oldPath,
@@ -894,7 +974,7 @@ export async function startReviewServer(options: {
 
 			json(res, { error: "No file access available" }, 400);
 		} else if (url.pathname === "/api/code-nav/resolve" && req.method === "POST") {
-			const hasCodeNavAccess = !!options.gitContext || !!options.agentCwd || !!options.worktreePool;
+			const hasCodeNavAccess = !!workspace || !!options.gitContext || !!options.agentCwd || !!options.worktreePool;
 			if (!hasCodeNavAccess) {
 				json(res, { error: "Code navigation requires local access" }, 400);
 				return;
@@ -914,7 +994,7 @@ export async function startReviewServer(options: {
 				json(res, { error: err instanceof Error ? err.message : "Code navigation failed" }, 500);
 			}
 		} else if (url.pathname === "/api/code-nav/file" && req.method === "GET") {
-			const hasCodeNavAccess = !!options.gitContext || !!options.agentCwd || !!options.worktreePool;
+			const hasCodeNavAccess = !!workspace || !!options.gitContext || !!options.agentCwd || !!options.worktreePool;
 			if (!hasCodeNavAccess) {
 				json(res, { error: "Code navigation requires local access" }, 400);
 				return;
@@ -954,22 +1034,45 @@ export async function startReviewServer(options: {
 		} else if (url.pathname === "/api/agents" && req.method === "GET") {
 			json(res, { agents: [] });
 		} else if (url.pathname === "/api/git-add" && req.method === "POST") {
-			const stageCwd = resolveVcsCwd(currentDiffType, options.gitContext?.cwd);
-			if (isPRMode || !(await canStageFiles(currentDiffType, stageCwd))) {
-				json(res, { error: "Staging not available" }, 400);
-				return;
-			}
 			try {
 				const body = await parseBody(req);
 				const filePath = body.filePath as string | undefined;
-				if (!filePath) {
+				if (typeof filePath !== "string" || !filePath) {
 					json(res, { error: "Missing filePath" }, 400);
 					return;
 				}
-				if (body.undo) {
-					await unstageFile(currentDiffType, filePath, stageCwd);
+				try {
+					validateFilePath(filePath);
+				} catch {
+					json(res, { error: "Invalid path" }, 400);
+					return;
+				}
+				const undo = body.undo === true;
+
+				if (workspace) {
+					try {
+						await workspace.stageFile(filePath, undo);
+						json(res, { ok: true });
+					} catch (error) {
+						json(
+							res,
+							{ error: error instanceof Error ? error.message : "Failed to stage file" },
+							400,
+						);
+					}
+					return;
+				}
+
+				const stageCwd = resolveVcsCwd(currentDiffType as DiffType, options.gitContext?.cwd);
+				if (isPRMode || !(await canStageFiles(currentDiffType as DiffType, stageCwd))) {
+					json(res, { error: "Staging not available" }, 400);
+					return;
+				}
+
+				if (undo) {
+					await unstageFile(currentDiffType as DiffType, filePath, stageCwd);
 				} else {
-					await stageFile(currentDiffType, filePath, stageCwd);
+					await stageFile(currentDiffType as DiffType, filePath, stageCwd);
 				}
 				json(res, { ok: true });
 			} catch (err) {

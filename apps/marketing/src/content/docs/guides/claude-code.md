@@ -69,7 +69,7 @@ If you want to approve with minor notes, use "Send Feedback" — Claude will see
 
 ## Slash commands
 
-The plugin registers three slash commands that work inside your Claude Code session:
+Plannotator's slash commands are installed as Claude Code skills in `~/.claude/skills` by the install script (the canonical source is `apps/skills/core/`). Claude Code skills are user-invocable by directory name, so these work like slash commands inside your session:
 
 ### `/plannotator-review`
 
@@ -88,6 +88,16 @@ Opens any markdown file in the annotation UI. See the [annotate docs](/docs/comm
 ### `/plannotator-last`
 
 Annotates the agent's most recent message. See the [annotate last docs](/docs/commands/annotate-last/) for details.
+
+### `/plannotator-archive`
+
+Opens the read-only archive UI to browse your saved approved/denied plan decisions.
+
+Optional extra skills (compound planning, setup-goal, visual explainer) are not installed by default. Add them with:
+
+```bash
+npx skills add backnotprop/plannotator/apps/skills/extra
+```
 
 ## Plugin installation
 

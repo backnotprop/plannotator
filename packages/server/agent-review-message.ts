@@ -5,6 +5,9 @@ import {
   type DiffType,
 } from "./vcs";
 import type { PRMetadata } from "./pr";
+import type { WorkspaceReviewPromptContext } from "@plannotator/shared/review-workspace";
+
+export type { WorkspaceReviewPromptContext } from "@plannotator/shared/review-workspace";
 
 export interface AgentReviewUserMessageOptions {
   defaultBranch?: string;
@@ -12,9 +15,80 @@ export interface AgentReviewUserMessageOptions {
   prDiffScope?: string;
 }
 
+export type AgentReviewTarget =
+  | {
+      kind: "local";
+      patch: string;
+      diffType: DiffType;
+      options?: AgentReviewUserMessageOptions;
+    }
+  | {
+      kind: "pr";
+      patch: string;
+      diffType: DiffType;
+      options?: AgentReviewUserMessageOptions;
+      prMetadata: PRMetadata;
+    }
+  | {
+      kind: "workspace";
+      patch: string;
+      workspace: WorkspaceReviewPromptContext;
+    };
+
 export interface LocalDiffInstruction {
   target: string;
   inspect: string;
+}
+
+export function buildWorkspacePromptContextLines(
+  workspace: WorkspaceReviewPromptContext,
+  options: { includeReportingInstruction?: boolean } = {},
+): string[] {
+  const repoList = workspace.repos.length > 0
+    ? workspace.repos
+      .map((repo) => {
+        const status = repo.changed ? "changed" : "failed";
+        const details = [repo.vcsType, status].filter(Boolean).join(", ");
+        return `- ${repo.label}/${details ? ` [${details}]` : ""} -> ${repo.cwd}${repo.gitRef ? ` (${repo.gitRef})` : ""}${repo.error ? ` - ${repo.changed ? "warning" : "error"}: ${repo.error}` : ""}`;
+      })
+      .join("\n")
+    : "- No changed child repositories were detected.";
+
+  const lines = [
+    `You are starting in the workspace root: ${workspace.root}`,
+    "The workspace root is not itself the VCS repository for these changes.",
+    "Each changed path in the diff is prefixed with the child repository folder, such as `api/src/file.ts`.",
+    "If any repository is marked failed, treat this as a partial workspace review and say so.",
+    "For Git child repos, inspect with `git -C <child-repo-folder> ...` from the workspace root.",
+    "For JJ child repos, treat the inline diff and prefixed files as authoritative review context.",
+  ];
+
+  if (options.includeReportingInstruction) {
+    lines.push(
+      "When reporting findings, the file path must exactly match the path shown in the diff.",
+      "Use the child repo prefix, such as `api/src/file.ts` or `web/src/file.ts`.",
+      "Do not use bare repo-relative paths like `src/file.ts`, and do not use absolute filesystem paths.",
+    );
+  }
+
+  return [
+    ...lines,
+    "",
+    "Repositories:",
+    repoList,
+  ];
+}
+
+export function buildAgentReviewUserMessageForTarget(target: AgentReviewTarget): string {
+  if (target.kind === "workspace") {
+    return buildWorkspaceReviewUserMessage(target.patch, target.workspace);
+  }
+  return buildAgentReviewUserMessage(
+    target.patch,
+    target.diffType,
+    target.options,
+    target.kind === "pr" ? target.prMetadata : undefined,
+  );
 }
 
 /** Build the dynamic user message shared by local Claude and Codex review jobs. */
@@ -56,6 +130,21 @@ export function buildAgentReviewUserMessage(
 
   return [
     "Review the following code changes and provide prioritized findings.",
+    "",
+    "```diff",
+    patch,
+    "```",
+  ].join("\n");
+}
+
+function buildWorkspaceReviewUserMessage(
+  patch: string,
+  workspace: WorkspaceReviewPromptContext,
+): string {
+  return [
+    "Review the local workspace changes across multiple nested VCS repositories.",
+    "",
+    ...buildWorkspacePromptContextLines(workspace, { includeReportingInstruction: true }),
     "",
     "```diff",
     patch,

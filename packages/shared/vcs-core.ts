@@ -64,6 +64,7 @@ export type VcsSelection = "auto" | "git" | "jj" | "p4";
 
 export interface VcsApi {
   detectVcs(cwd?: string): Promise<VcsProvider>;
+  detectManagedVcs(cwd?: string, vcsType?: VcsSelection): Promise<VcsProvider | null>;
   getVcsContext(cwd?: string, vcsType?: VcsSelection): Promise<GitContext>;
   detectRemoteDefaultCompareTarget(cwd?: string, vcsType?: VcsSelection): Promise<string | null>;
   prepareLocalReviewDiff(options: PrepareLocalReviewDiffOptions): Promise<PreparedLocalReviewDiff>;
@@ -230,18 +231,16 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
   const providerList = [...providers];
   const defaultProvider = providerList.find((provider) => provider.id === "git") ?? providerList[0];
   const vcsCache = new Map<string, VcsProvider>();
+  const managedVcsCache = new Map<string, VcsProvider>();
 
   if (!defaultProvider) {
     throw new Error("createVcsApi requires at least one provider");
   }
 
-  async function detectVcs(cwd?: string): Promise<VcsProvider> {
-    const key = cwd ?? process.cwd();
-    const cached = vcsCache.get(key);
-    if (cached) return cached;
-
+  async function collectDetectedProviders(cwd?: string): Promise<Array<{ provider: VcsProvider; root: string | null; order: number }>> {
     const candidates: Array<{ provider: VcsProvider; root: string | null; order: number }> = [];
-    for (const provider of providerList) {
+    for (let index = 0; index < providerList.length; index++) {
+      const provider = providerList[index];
       let root: string | null = null;
       let detected = false;
       try {
@@ -255,11 +254,42 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
         continue;
       }
       if (detected) {
-        candidates.push({ provider, root, order: candidates.length });
+        candidates.push({ provider, root, order: index });
       }
     }
+    return candidates;
+  }
 
-    const detected = selectNearestProvider(candidates, cwd) ?? defaultProvider;
+  async function detectManagedVcs(cwd?: string, vcsType?: VcsSelection): Promise<VcsProvider | null> {
+    const key = `${vcsType ?? "auto"}:${cwd ?? process.cwd()}`;
+    const cached = managedVcsCache.get(key);
+    if (cached) return cached;
+
+    if (vcsType && vcsType !== "auto") {
+      const provider = getProviderById(vcsType);
+      let detected = false;
+      try {
+        detected = provider ? await provider.detect(cwd) : false;
+      } catch {
+        detected = false;
+      }
+      const result = detected ? provider : null;
+      if (result) managedVcsCache.set(key, result);
+      return result;
+    }
+
+    const candidates = await collectDetectedProviders(cwd);
+    const detected = selectNearestProvider(candidates, cwd);
+    if (detected) managedVcsCache.set(key, detected);
+    return detected;
+  }
+
+  async function detectVcs(cwd?: string): Promise<VcsProvider> {
+    const key = cwd ?? process.cwd();
+    const cached = vcsCache.get(key);
+    if (cached) return cached;
+
+    const detected = (await detectManagedVcs(cwd)) ?? defaultProvider;
     vcsCache.set(key, detected);
     return detected;
   }
@@ -348,6 +378,7 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
 
   return {
     detectVcs,
+    detectManagedVcs,
 
     async getVcsContext(cwd?: string, vcsType?: VcsSelection): Promise<GitContext> {
       return (await getContextWithProvider(cwd, vcsType)).gitContext;

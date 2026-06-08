@@ -6,7 +6,7 @@ import {
   formatWithLineNumbers,
   getPlanBackingPath,
   validateEdits,
-} from "./index";
+} from "./plan-edits";
 
 // ── applyEdits ─────────────────────────────────────────────────────────────
 

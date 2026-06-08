@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/pi-extension",
-  "version": "0.19.26",
+  "version": "0.19.27",
   "type": "module",
   "description": "Plannotator Pi extension - interactive plan review with annotations, annotate agent messages, and review code/PRs",
   "author": "backnotprop",
@@ -16,8 +16,7 @@
   },
   "keywords": ["pi-package", "plannotator", "plan-review", "ai-agent", "coding-agent"],
   "pi": {
-    "extensions": ["./"],
-    "skills": ["./skills"]
+    "extensions": ["./"]
   },
   "files": [
     "index.ts",
@@ -33,22 +32,22 @@
     "generated/",
     "README.md",
     "plannotator.html",
-    "review-editor.html",
-    "skills/"
+    "review-editor.html"
   ],
   "scripts": {
-    "build": "cp ../hook/dist/index.html plannotator.html && cp ../hook/dist/review.html review-editor.html && rm -rf skills && cp -r ../skills skills && bash vendor.sh",
+    "build": "cp ../hook/dist/index.html plannotator.html && cp ../hook/dist/review.html review-editor.html && bash vendor.sh",
     "prepublishOnly": "cd ../.. && bun run build:pi"
   },
   "dependencies": {
+    "@joplin/turndown-plugin-gfm": "^1.0.64",
     "@pierre/diffs": "^1.1.12",
-    "turndown": "^7.2.4",
-    "@joplin/turndown-plugin-gfm": "^1.0.64"
+    "turndown": "^7.2.4"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.74.0"
   },
   "devDependencies": {
+    "glimpseui": "^0.8.0",
     "@earendil-works/pi-coding-agent": ">=0.74.0",
     "@earendil-works/pi-agent-core": ">=0.74.0",
     "@earendil-works/pi-ai": ">=0.74.0",

@@ -35,6 +35,7 @@ interface PierreDiffContentProps {
   lineDiffType?: 'word-alt' | 'word' | 'char' | 'none';
   disableLineNumbers?: boolean;
   disableBackground?: boolean;
+  expandUnchanged?: boolean;
   mergedAnnotations: DiffLineAnnotation<DiffAnnotationMetadata>[];
   pendingSelection: SelectedLineRange | null;
   onLineSelectionEnd: (range: SelectedLineRange | null) => void;
@@ -55,6 +56,7 @@ const PierreDiffContent = React.memo(({
   lineDiffType,
   disableLineNumbers,
   disableBackground,
+  expandUnchanged,
   mergedAnnotations,
   pendingSelection,
   onLineSelectionEnd,
@@ -78,6 +80,7 @@ const PierreDiffContent = React.memo(({
         lineDiffType,
         disableLineNumbers,
         disableBackground,
+        expandUnchanged,
         hunkSeparators: 'line-info',
         enableLineSelection: true,
         enableGutterUtility: true,
@@ -105,6 +108,7 @@ const PierreDiffContent = React.memo(({
   prev.lineDiffType === next.lineDiffType &&
   prev.disableLineNumbers === next.disableLineNumbers &&
   prev.disableBackground === next.disableBackground &&
+  prev.expandUnchanged === next.expandUnchanged &&
   prev.mergedAnnotations === next.mergedAnnotations &&
   prev.pendingSelection === next.pendingSelection &&
   prev.onLineSelectionEnd === next.onLineSelectionEnd &&
@@ -131,6 +135,7 @@ interface DiffViewerProps {
   lineDiffType?: 'word-alt' | 'word' | 'char' | 'none';
   disableLineNumbers?: boolean;
   disableBackground?: boolean;
+  expandUnchanged?: boolean;
   fontFamily?: string;
   fontSize?: string;
   annotations: CodeAnnotation[];
@@ -180,6 +185,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   lineDiffType,
   disableLineNumbers,
   disableBackground,
+  expandUnchanged,
   fontFamily,
   fontSize,
   annotations,
@@ -408,7 +414,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     roots.forEach(root =>
       applySearchHighlights(root, query, matches, activeSearchMatchId)
     );
-  }, [searchQuery, searchMatches, filePath, diffStyle, diffOverflow, diffIndicators, lineDiffType, disableLineNumbers, disableBackground, augmentedDiff, viewport]);
+  }, [searchQuery, searchMatches, filePath, diffStyle, diffOverflow, diffIndicators, lineDiffType, disableLineNumbers, disableBackground, expandUnchanged, augmentedDiff, viewport]);
 
   // Swap active search highlight instantly when stepping between matches.
   // This avoids a full rebuild just to change two elements' background color.
@@ -421,7 +427,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   useEffect(() => {
     if (!activeSearchMatch || !containerRef.current) return;
     return retryScrollToSearchMatch(containerRef.current, activeSearchMatch);
-  }, [activeSearchMatch, filePath, diffStyle, diffOverflow, diffIndicators, lineDiffType, disableLineNumbers, disableBackground, viewport]);
+  }, [activeSearchMatch, filePath, diffStyle, diffOverflow, diffIndicators, lineDiffType, disableLineNumbers, disableBackground, expandUnchanged, viewport]);
 
   // Map annotations to @pierre/diffs format
   const lineAnnotations = useMemo(() => {
@@ -606,6 +612,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
               lineDiffType={lineDiffType}
               disableLineNumbers={disableLineNumbers}
               disableBackground={disableBackground}
+              expandUnchanged={expandUnchanged}
               mergedAnnotations={mergedAnnotations}
               pendingSelection={pendingSelection}
               onLineSelectionEnd={handlePierreLineSelectionEnd}

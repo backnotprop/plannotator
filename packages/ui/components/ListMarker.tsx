@@ -45,7 +45,7 @@ export const ListMarker: React.FC<ListMarkerProps> = ({
 
   return (
     <span
-      className={`select-none shrink-0 flex items-center gap-1${interactive ? ' cursor-pointer' : ''}`}
+      className={`select-none shrink-0 self-start flex items-center gap-1${interactive ? ' cursor-pointer' : ''}`}
       onClick={handleClick}
       role={interactive ? 'checkbox' : undefined}
       aria-checked={interactive ? checked : undefined}

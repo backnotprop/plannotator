@@ -13,6 +13,7 @@ import {
   isHumanPrompt,
   findAnchorIndex,
   extractLastRenderedMessage,
+  extractRecentRenderedMessages,
   findDroidSessionLogsForCwd,
   resolveDroidSessionLogForCwd,
   projectSlugFromCwd,
@@ -657,6 +658,84 @@ describe("extractLastRenderedMessage — edge cases", () => {
     const result = extractLastRenderedMessage(entries, anchor);
     expect(result).not.toBeNull();
     expect(result!.text).toBe("Here is my response.");
+  });
+});
+
+describe("extractRecentRenderedMessages (picker)", () => {
+  test("returns newest-first across turn boundaries", () => {
+    // Multiple turns — picker must surface assistant bubbles from all of them,
+    // not stop at the most recent turn boundary like extractLastRenderedMessage does.
+    const log = buildLog(
+      userPrompt("first"),
+      assistantText("msg_1", "First response"),
+      userPrompt("second"),
+      assistantText("msg_2", "Second response"),
+      userPrompt("third"),
+      assistantText("msg_3", "Third response"),
+    );
+    const entries = parseSessionLog(log);
+    const result = extractRecentRenderedMessages(entries, entries.length, 5);
+    expect(result.map((m) => m.text)).toEqual([
+      "Third response",
+      "Second response",
+      "First response",
+    ]);
+    expect(result.map((m) => m.messageId)).toEqual(["msg_3", "msg_2", "msg_1"]);
+  });
+
+  test("honors limit", () => {
+    const log = buildLog(
+      userPrompt("first"),
+      assistantText("a", "A"),
+      userPrompt("second"),
+      assistantText("b", "B"),
+      userPrompt("third"),
+      assistantText("c", "C"),
+    );
+    const entries = parseSessionLog(log);
+    const result = extractRecentRenderedMessages(entries, entries.length, 2);
+    expect(result).toHaveLength(2);
+    expect(result.map((m) => m.text)).toEqual(["C", "B"]);
+  });
+
+  test("first entry matches extractLastRenderedMessage default", () => {
+    // The picker's default selection (index 0) must match today's annotate-last
+    // behavior — otherwise the no-interaction case would silently change.
+    const log = buildLog(
+      userPrompt("first"),
+      assistantText("msg_1", "Old"),
+      userPrompt("second"),
+      assistantText("msg_2", "New"),
+    );
+    const entries = parseSessionLog(log);
+    const last = extractLastRenderedMessage(entries, entries.length)!;
+    const recent = extractRecentRenderedMessages(entries, entries.length, 5);
+    expect(recent[0].messageId).toBe(last.messageId);
+    expect(recent[0].text).toBe(last.text);
+  });
+
+  test("empty log → empty list", () => {
+    const result = extractRecentRenderedMessages([], 0, 5);
+    expect(result).toEqual([]);
+  });
+
+  test("limit of zero → empty list", () => {
+    const log = buildLog(userPrompt("first"), assistantText("a", "A"));
+    const entries = parseSessionLog(log);
+    expect(extractRecentRenderedMessages(entries, entries.length, 0)).toEqual([]);
+  });
+
+  test("skips assistant entries with no text (tool_use only)", () => {
+    const log = buildLog(
+      userPrompt("first"),
+      assistantText("msg_1", "Hello"),
+      assistantToolUse("msg_tool", "Bash"),
+      userPrompt("second"),
+      assistantText("msg_2", "World"),
+    );
+    const entries = parseSessionLog(log);
+    const result = extractRecentRenderedMessages(entries, entries.length, 5);
+    expect(result.map((m) => m.text)).toEqual(["World", "Hello"]);
   });
 });
 

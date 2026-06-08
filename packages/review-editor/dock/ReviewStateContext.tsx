@@ -26,6 +26,7 @@ export interface ReviewState {
   lineDiffType?: 'word-alt' | 'word' | 'char' | 'none';
   disableLineNumbers?: boolean;
   disableBackground?: boolean;
+  expandUnchanged?: boolean;
   fontFamily?: string;
   fontSize?: string;
   /** User-selected base branch; feeds the `base` query param on file-content fetches. */
