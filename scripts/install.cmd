@@ -716,20 +716,30 @@ if !ERRORLEVEL! equ 0 (
     pushd "!SKILLS_TMP!\repo"
     git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands >nul 2>&1
 
-    REM Core skills -> Claude + shared agent scope (all 4, copy-if-present).
-    if exist "apps\skills\core" (
+    REM Claude Code reads apps\skills\claude\* (injection `!`plannotator … $ARGUMENTS``
+    REM + allowed-tools, so /plannotator-* run with no permission prompt); Codex
+    REM reads apps\skills\core\* (prose). The `!`…`` injection is Claude-Code-only,
+    REM so the two are sourced separately. Replace rather than merge on each run.
+    if exist "apps\skills\claude" (
         if not exist "!CLAUDE_SKILLS_DIR!" mkdir "!CLAUDE_SKILLS_DIR!"
+        for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator-archive) do (
+            if exist "apps\skills\claude\%%S" (
+                if exist "!CLAUDE_SKILLS_DIR!\%%S" rmdir /s /q "!CLAUDE_SKILLS_DIR!\%%S" >nul 2>&1
+                xcopy /s /i /y /q "apps\skills\claude\%%S" "!CLAUDE_SKILLS_DIR!\%%S\" >nul 2>&1
+            )
+        )
+        echo Installed Claude Code skills to !CLAUDE_SKILLS_DIR!\
+    )
+    if exist "apps\skills\core" (
         if not exist "!AGENTS_SKILLS_DIR!" mkdir "!AGENTS_SKILLS_DIR!"
         for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator-archive) do (
             if exist "apps\skills\core\%%S" (
                 REM Replace rather than merge so files removed upstream don't linger.
-                if exist "!CLAUDE_SKILLS_DIR!\%%S" rmdir /s /q "!CLAUDE_SKILLS_DIR!\%%S" >nul 2>&1
                 if exist "!AGENTS_SKILLS_DIR!\%%S" rmdir /s /q "!AGENTS_SKILLS_DIR!\%%S" >nul 2>&1
-                xcopy /s /i /y /q "apps\skills\core\%%S" "!CLAUDE_SKILLS_DIR!\%%S\" >nul 2>&1
                 xcopy /s /i /y /q "apps\skills\core\%%S" "!AGENTS_SKILLS_DIR!\%%S\" >nul 2>&1
             )
         )
-        echo Installed core skills to !CLAUDE_SKILLS_DIR!\ and !AGENTS_SKILLS_DIR!\
+        echo Installed shared agent skills to !AGENTS_SKILLS_DIR!\
     ) else (
         echo Tag !TAG! predates the core/extra skill layout — skipping core skill install
     )

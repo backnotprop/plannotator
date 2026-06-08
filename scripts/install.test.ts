@@ -78,9 +78,12 @@ describe("install.sh", () => {
     expect(script).toContain("AGENTS_SKILLS_DIR");
     expect(script).toContain("$HOME/.agents/skills");
     expect(script).toContain("copy_skill_if_present");
-    // Core skills (all 4) -> Claude Code and the official OpenAI shared-agent path.
+    // Claude Code reads the injection-form skills from apps/skills/claude;
+    // the OpenAI shared-agent (Codex) path reads the prose skills from
+    // apps/skills/core. Sourced separately because `!`…`` injection is a
+    // Claude-Code-only extension.
     for (const skill of CORE_SKILLS) {
-      expect(script).toContain(`copy_skill_if_present apps/skills/core/${skill} "$CLAUDE_SKILLS_DIR"`);
+      expect(script).toContain(`copy_skill_if_present apps/skills/claude/${skill} "$CLAUDE_SKILLS_DIR"`);
       expect(script).toContain(`copy_skill_if_present apps/skills/core/${skill} "$AGENTS_SKILLS_DIR"`);
     }
     // Codex no longer receives a skills install (core skills live in ~/.agents/skills).
@@ -100,7 +103,7 @@ describe("install.sh", () => {
     // fetch or an old pinned tag never deletes commands without replacement.
     expect(script).toContain('if [ -d "$CLAUDE_SKILLS_DIR/$cmd" ] && [ -f "$CLAUDE_COMMANDS_DIR/$cmd.md" ]');
     const cleanupIndex = script.indexOf('Removed legacy Claude command');
-    const installIndex = script.indexOf('copy_skill_if_present apps/skills/core/plannotator-review');
+    const installIndex = script.indexOf('copy_skill_if_present apps/skills/claude/plannotator-review');
     expect(installIndex).toBeGreaterThan(0);
     expect(cleanupIndex).toBeGreaterThan(installIndex);
   });
@@ -343,10 +346,11 @@ describe("install.ps1", () => {
     expect(script).toContain("agentsSkillsDir");
     expect(script).toContain("$env:USERPROFILE\\.agents\\skills");
     expect(script).toContain("Copy-SkillIfPresent");
-    // Core skills (all 4) copied verbatim to both Claude and the shared-agent
-    // scope, per-skill via Copy-SkillIfPresent so re-runs replace rather than
-    // nest (PowerShell's Copy-Item -Recurse into an existing dir nests).
-    expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\core\\$skill" $claudeSkillsDir');
+    // Claude Code reads injection-form skills (apps\skills\claude); the
+    // shared-agent (Codex) scope reads the prose skills (apps\skills\core).
+    // Per-skill via Copy-SkillIfPresent so re-runs replace rather than nest
+    // (PowerShell's Copy-Item -Recurse into an existing dir nests).
+    expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\claude\\$skill" $claudeSkillsDir');
     expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\core\\$skill" $agentsSkillsDir');
     expect(script).toContain('"plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-archive"');
     // Copy-SkillIfPresent pre-removes the destination to avoid nesting on upgrade.
@@ -467,8 +471,9 @@ describe("install.cmd", () => {
     expect(script).toContain("CLAUDE_SKILLS_DIR");
     expect(script).toContain("AGENTS_SKILLS_DIR");
     expect(script).toContain("%USERPROFILE%\\.agents\\skills");
-    // Core skills (all 4) copied to both Claude and shared-agent scope.
-    expect(script).toContain('xcopy /s /i /y /q "apps\\skills\\core\\%%S" "!CLAUDE_SKILLS_DIR!\\%%S\\"');
+    // Claude Code reads injection-form skills (apps\skills\claude); the shared
+    // agent (Codex) scope reads the prose skills (apps\skills\core).
+    expect(script).toContain('xcopy /s /i /y /q "apps\\skills\\claude\\%%S" "!CLAUDE_SKILLS_DIR!\\%%S\\"');
     expect(script).toContain('xcopy /s /i /y /q "apps\\skills\\core\\%%S" "!AGENTS_SKILLS_DIR!\\%%S\\"');
     expect(script).toContain("for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator-archive) do");
     // No Codex skills install — only the cleanup loop references CODEX skills.

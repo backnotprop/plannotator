@@ -644,20 +644,32 @@ try {
         try {
             git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands 2>$null
 
-            # Core skills -> ~/.claude/skills and ~/.agents/skills (all 4).
+            # Claude Code and Codex consume different skill bodies. Claude Code
+            # reads apps/skills/claude/* (dynamic-context injection
+            # `!`plannotator … $ARGUMENTS`` + allowed-tools, so /plannotator-*
+            # run with no permission prompt — like the old slash commands).
+            # Codex reads apps/skills/core/* (prose the model follows via its
+            # own shell). The `!`…`` injection is a Claude-Code-only extension,
+            # so the two are sourced separately rather than sharing one body.
             # Route each through Copy-SkillIfPresent (which pre-removes the
-            # existing target dir) so re-runs replace rather than nest,
-            # matching install.sh's per-skill structure.
-            if ((Test-Path "apps\skills\core") -and (Get-ChildItem "apps\skills\core" -ErrorAction SilentlyContinue)) {
+            # existing target dir) so re-runs replace rather than nest.
+            if ((Test-Path "apps\skills\claude") -and (Get-ChildItem "apps\skills\claude" -ErrorAction SilentlyContinue)) {
                 New-Item -ItemType Directory -Force -Path $claudeSkillsDir | Out-Null
+                foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-archive")) {
+                    Copy-SkillIfPresent "apps\skills\claude\$skill" $claudeSkillsDir
+                }
+                Write-Host "Installed Claude Code skills to $claudeSkillsDir\"
+            } else {
+                Write-Host "Tag $latestTag predates the per-agent skill layout — skipping Claude Code skill install"
+            }
+            if ((Test-Path "apps\skills\core") -and (Get-ChildItem "apps\skills\core" -ErrorAction SilentlyContinue)) {
                 New-Item -ItemType Directory -Force -Path $agentsSkillsDir | Out-Null
                 foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-archive")) {
-                    Copy-SkillIfPresent "apps\skills\core\$skill" $claudeSkillsDir
                     Copy-SkillIfPresent "apps\skills\core\$skill" $agentsSkillsDir
                 }
-                Write-Host "Installed core skills to $claudeSkillsDir\ and $agentsSkillsDir\"
+                Write-Host "Installed shared agent skills to $agentsSkillsDir\"
             } else {
-                Write-Host "Tag $latestTag predates the core/extra skill layout — skipping core skill install"
+                Write-Host "Tag $latestTag predates the core/extra skill layout — skipping shared agent skill install"
             }
 
             # Kiro: hand-maintained skills (origin baked in) + two extras.
