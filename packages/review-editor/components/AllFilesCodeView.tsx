@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getSingularPatch } from '@pierre/diffs';
+import { getSingularPatch, processFile } from '@pierre/diffs';
 import type {
   CodeViewItem,
   CodeViewLineSelection,
   CodeViewOptions,
   DiffLineAnnotation,
+  FileDiffMetadata,
   LineAnnotation,
+  PostRenderPhase,
   SelectedLineRange,
 } from '@pierre/diffs';
 import { CodeView, type CodeViewHandle, useStableCallback } from '@pierre/diffs/react';
@@ -62,8 +64,30 @@ import type { AIChatEntry } from '../hooks/useAIChat';
  *    original-code extraction reads the correct file. Drafts-by-file/range and
  *    AI markers are preserved by ToolbarHost/useAnnotationToolbar unchanged.
  *
- * Full-content hunk expansion, search highlighting, and the worker pool remain
- * later phases.
+ * P5 (this phase) preserves lazy full-content hunk expansion through CodeView
+ * item updates instead of LazyFileDiff's per-mount IntersectionObserver fetch:
+ *
+ *  - Initial items use `getSingularPatch` (raw-patch context only) — CodeView
+ *    already virtualizes the visible window, so no full content is fetched up
+ *    front.
+ *  - When an item enters CodeView's rendered window (its `onPostRender` fires
+ *    with phase 'mount'/'update', the direct analogue of LazyFileDiff's
+ *    IntersectionObserver becoming visible), we fetch `/api/file-content` for
+ *    that file (path/oldPath preserved — workspace prefixes intact — plus the
+ *    review base), reparse with `processFile`, and swap `item.fileDiff` to the
+ *    augmented `FileDiffMetadata`. The augmented diff gets a NEW `cacheKey`
+ *    (contents changed!), `item.version++`, and `viewer.updateItem(item)`. This
+ *    enables the gutter's expand-unchanged controls in place, without
+ *    remounting the list.
+ *  - CodeView's `updateItem` re-measures the grown item and resolves the
+ *    captured scroll anchor, so the viewport stays put whether the augmented
+ *    item is above OR below the fold.
+ *  - Fetches are guarded (one per item) and cancellable (AbortController per
+ *    item, all aborted on unmount / diff switch), so there is no fetch storm and
+ *    no double-fetch. LazyFileDiff is no longer on the CodeView path (it remains
+ *    only for the legacy flag-off AllFilesDiffView).
+ *
+ * Search highlighting and the worker pool remain later phases.
  */
 interface AllFilesCodeViewProps {
   files: DiffFile[];
@@ -257,6 +281,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   annotations,
   selectedAnnotationId,
   pendingSelection,
+  reviewBase,
   onLineSelection,
   onAddAnnotationForFile,
   onEditAnnotation,
@@ -371,6 +396,17 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     () => identity.items.map((item) => item.id),
     [identity.items],
   );
+
+  // Path -> DiffFile lookup for the on-demand content augmentation (P5). The
+  // post-render callback resolves item.id -> path -> DiffFile to know which
+  // file's patch/oldPath to fetch + reparse.
+  const filesByPath = useMemo(() => {
+    const map = new Map<string, DiffFile>();
+    for (const file of files) {
+      if (!map.has(file.path)) map.set(file.path, file);
+    }
+    return map;
+  }, [files]);
 
   const activePatch = useMemo(
     () => (activeFilePath ? files.find((f) => f.path === activeFilePath)?.patch ?? '' : ''),
@@ -489,6 +525,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // Annotations are seeded into the remounted items at build time, so resync
     // the snapshot here to avoid a spurious full annotation refresh post-remount.
     prevAnnotationsRef.current = annotations;
+    // Abort any in-flight content fetches and clear the augmentation guard so
+    // the new diff's items re-fetch full content on their first render. (The old
+    // items are gone after the fileSetKey remount; their ids may also be reused
+    // by the new diff, so the guard must not leak across the switch.)
+    for (const { controller } of augmentRef.current.values()) controller.abort();
+    augmentRef.current.clear();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileSetKey]);
 
@@ -543,6 +585,148 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (handle == null || item == null) return;
     item.version = (item.version ?? 0) + 1;
     handle.updateItem(item);
+  }, []);
+
+  // --- Lazy full-content hunk expansion via CodeView item updates (P5) --------
+
+  // Per-item augmentation bookkeeping. `status` guards against double-fetch /
+  // fetch storms (an item can re-fire onPostRender on every scroll-driven
+  // remount of its element); `controller` lets us abort an in-flight fetch when
+  // the diff switches or the component unmounts. Keyed by CodeView item id.
+  const augmentRef = useRef<
+    Map<string, { status: 'pending' | 'done' | 'error'; controller: AbortController }>
+  >(new Map());
+  // reviewBase / filesByPath read through refs so the stable onPostRender
+  // callback always sees the latest values without changing identity (which
+  // would otherwise churn the CodeView options object).
+  const reviewBaseRef = useRef(reviewBase);
+  reviewBaseRef.current = reviewBase;
+  const filesByPathRef = useRef(filesByPath);
+  filesByPathRef.current = filesByPath;
+  const itemIdToFilePathRef = useRef(itemIdToFilePath);
+  itemIdToFilePathRef.current = itemIdToFilePath;
+
+  // Fetch full file contents for one item, reparse with processFile, and swap
+  // the item's fileDiff in place so hunk expansion (expand-unchanged gutter
+  // controls) works against the COMPLETE file. Mirrors LazyFileDiff's per-mount
+  // fetch, but updates the existing CodeView item instead of mounting a fresh
+  // FileDiff — so CodeView's own virtualization + element pool stay in charge.
+  const augmentItem = useCallback((itemId: string) => {
+    const handle = viewerRef.current;
+    if (handle == null) return;
+    const augmentState = augmentRef.current;
+    // One fetch per item: 'pending' or already-resolved means do nothing. (An
+    // item re-entering the rendered window re-fires onPostRender, so this guard
+    // is what prevents the fetch storm.)
+    if (augmentState.has(itemId)) return;
+
+    const filePath = itemIdToFilePathRef.current.get(itemId);
+    if (filePath == null) return;
+    const file = filesByPathRef.current.get(filePath);
+    if (file == null) return;
+
+    const controller = new AbortController();
+    augmentState.set(itemId, { status: 'pending', controller });
+
+    // Workspace-prefixed paths are passed through verbatim — /api/file-content
+    // resolves the prefix back to the owning repo (same contract LazyFileDiff /
+    // DiffViewer rely on).
+    const params = new URLSearchParams({ path: file.path });
+    if (file.oldPath) params.set('oldPath', file.oldPath);
+    const base = reviewBaseRef.current;
+    if (base) params.set('base', base);
+
+    fetch(`/api/file-content?${params}`, { signal: controller.signal })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { oldContent: string | null; newContent: string | null } | null) => {
+        if (!data || (data.oldContent == null && data.newContent == null)) {
+          // No content available (e.g. demo mode / binary): mark done so we do
+          // not retry on every subsequent render. The raw-patch context still
+          // shows; there is just nothing to expand.
+          augmentState.set(itemId, { status: 'done', controller });
+          return;
+        }
+
+        let augmented: FileDiffMetadata;
+        try {
+          const result = processFile(file.patch, {
+            oldFile:
+              data.oldContent != null
+                ? { name: file.oldPath || file.path, contents: data.oldContent }
+                : undefined,
+            newFile:
+              data.newContent != null ? { name: file.path, contents: data.newContent } : undefined,
+          });
+          if (!result) {
+            augmentState.set(itemId, { status: 'done', controller });
+            return;
+          }
+          augmented = result;
+        } catch {
+          augmentState.set(itemId, { status: 'error', controller });
+          return;
+        }
+
+        const liveHandle = viewerRef.current;
+        const item = liveHandle?.getItem(itemId);
+        // The item may have been torn down (diff switch) between fetch start and
+        // resolution; the diff-switch reset clears augmentRef + aborts, so this
+        // is a belt-and-suspenders guard.
+        if (liveHandle == null || item == null || item.type !== 'diff') {
+          augmentState.set(itemId, { status: 'done', controller });
+          return;
+        }
+
+        // cacheKey MUST change when fileDiff contents change (types.ts warning):
+        // otherwise the worker / highlight caches would serve the stale partial
+        // AST. Derive a fresh key from the augmented (now full-content) diff.
+        augmented.cacheKey = `${itemId}#full`;
+        item.fileDiff = augmented;
+        item.version = (item.version ?? 0) + 1;
+        // updateItem re-measures the (now taller) item and resolves the captured
+        // scroll anchor, so the viewport stays put whether this item is above or
+        // below the fold — no manual scroll correction needed.
+        liveHandle.updateItem(item);
+        augmentState.set(itemId, { status: 'done', controller });
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) {
+          // Aborted (unmount / diff switch): drop the entry so a future render of
+          // the same id can re-fetch if needed.
+          augmentState.delete(itemId);
+          return;
+        }
+        augmentState.set(itemId, { status: 'error', controller });
+        void err;
+      });
+  }, []);
+
+  // CodeView fires onPostRender for an item whenever it enters / updates within
+  // the rendered window. Phase 'mount' (and 'update' for the first paint of a
+  // freshly-seeded item) is the direct analogue of LazyFileDiff's
+  // IntersectionObserver firing — so we trigger augmentation there. We ride
+  // CodeView's existing virtualization rather than layering our own observer on
+  // top (which would double-virtualize and fight the element pool).
+  const handlePostRender = useStableCallback(
+    (
+      _node: HTMLElement,
+      _instance: unknown,
+      phase: PostRenderPhase,
+      context: CodeViewItem<DiffAnnotationMetadata>,
+    ) => {
+      if (phase === 'unmount') return;
+      if (context.type !== 'diff') return;
+      augmentItem(context.id);
+    },
+  );
+
+  // Abort all in-flight content fetches on unmount.
+  useEffect(() => {
+    const augmentState = augmentRef.current;
+    return () => {
+      for (const { controller } of augmentState.values()) controller.abort();
+      augmentState.clear();
+    };
   }, []);
 
   // --- Annotations through CodeView item state (P4) ---------------------------
@@ -987,6 +1171,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       onGutterUtilityClick(range, context) {
         handleGutterUtilityClick(range, context.item);
       },
+      // P5: lazily augment an item with full file content when it enters the
+      // rendered window. CodeView appends the item context as the final arg.
+      onPostRender(_node, _instance, phase, context) {
+        handlePostRender(_node, _instance, phase, context.item);
+      },
     }),
     [
       pierreTheme.type,
@@ -1001,6 +1190,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       expandUnchanged,
       handleLineSelectionEnd,
       handleGutterUtilityClick,
+      handlePostRender,
     ],
   );
 
