@@ -73,6 +73,10 @@ export interface ReviewState {
   activeFileSearchMatches: ReviewSearchMatch[];
   activeSearchMatchId: string | null;
   activeSearchMatch: ReviewSearchMatch | null;
+  // All-files (CodeView) search surface: the full match set + the unfiltered
+  // active match (activeSearchMatch above is filtered to the single-file panel).
+  searchMatches: ReviewSearchMatch[];
+  allFilesActiveSearchMatch: ReviewSearchMatch | null;
 
   // AI
   aiAvailable: boolean;

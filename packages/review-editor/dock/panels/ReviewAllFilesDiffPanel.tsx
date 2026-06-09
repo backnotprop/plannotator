@@ -41,6 +41,10 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
         stageError={state.stageError}
         prUrl={state.prMetadata?.url}
         prDiffScope={state.prDiffScope}
+        searchQuery={state.searchQuery}
+        searchMatches={state.searchMatches}
+        activeSearchMatchId={state.activeSearchMatchId}
+        activeSearchMatch={state.allFilesActiveSearchMatch}
         onVisibleFileChange={state.onAllFilesVisibleFileChange}
         isActive={state.isAllFilesActive}
         aiAvailable={state.aiAvailable}

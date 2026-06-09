@@ -130,6 +130,7 @@ const ReviewApp: React.FC = () => {
   const [openSettingsMenu, setOpenSettingsMenu] = useState(false);
   const [showNoAnnotationsDialog, setShowNoAnnotationsDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const allFilesCodeViewEnabled = useConfigValue('allFilesCodeView');
   const diffStyle = useConfigValue('diffStyle');
   const diffOverflow = useConfigValue('diffOverflow');
   const diffIndicators = useConfigValue('diffIndicators');
@@ -339,8 +340,26 @@ const ReviewApp: React.FC = () => {
   }, [dockApi, files]);
 
   const handleRevealSearchMatch = useCallback((match: ReviewSearchMatch) => {
+    // With the all-files CodeView surface active, keep search reveal IN that
+    // surface: ensure the All files panel is mounted + active and let
+    // AllFilesCodeView scroll to + highlight the active match (it reacts to the
+    // activeSearchMatch prop). Switching to the single-file panel instead would
+    // defeat the point of an all-files search.
+    if (allFilesCodeViewEnabled && dockApi) {
+      const existing = dockApi.getPanel(REVIEW_ALL_FILES_PANEL_ID);
+      if (existing) {
+        if (dockApi.activePanel?.id !== REVIEW_ALL_FILES_PANEL_ID) existing.api.setActive();
+      } else {
+        dockApi.addPanel({
+          id: REVIEW_ALL_FILES_PANEL_ID,
+          component: REVIEW_PANEL_TYPES.ALL_FILES,
+          title: 'All files',
+        });
+      }
+      return;
+    }
     openDiffFile(match.filePath);
-  }, [openDiffFile]);
+  }, [allFilesCodeViewEnabled, dockApi, openDiffFile]);
 
   const {
     searchQuery,
@@ -1524,6 +1543,8 @@ const ReviewApp: React.FC = () => {
     activeFileSearchMatches,
     activeSearchMatchId,
     activeSearchMatch: activeSearchMatch?.filePath === files[activeFileIndex]?.path ? activeSearchMatch : null,
+    searchMatches,
+    allFilesActiveSearchMatch: activeSearchMatch,
     aiAvailable,
     aiMessages,
     onAskAI: handleAskAI,
@@ -1561,7 +1582,7 @@ const ReviewApp: React.FC = () => {
     handleSelectAnnotation, handleDeleteAnnotation, viewedFiles,
     handleToggleViewed, stagedFiles, stagingFile, stageFile,
     canStageFiles, stageError, isSearchPending, debouncedSearchQuery,
-    activeFileSearchMatches, activeSearchMatchId, activeSearchMatch,
+    activeFileSearchMatches, activeSearchMatchId, activeSearchMatch, searchMatches,
     aiAvailable, aiMessages, aiIsCreatingSession, aiIsStreaming,
     handleAskAI, handleViewAIResponse, handleClickAIMarker,
     aiHistoryForSelection, agentJobs.jobs, prMetadata, prContext,

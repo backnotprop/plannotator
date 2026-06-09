@@ -155,6 +155,52 @@ export function applySearchHighlights(
   });
 }
 
+/**
+ * CodeView variant of {@link applySearchHighlights}.
+ *
+ * CodeView renders every file's diff into a single light-DOM scroll container,
+ * but each visible item is its own `<diffs-container>` with its own shadow root,
+ * and CodeView recycles those item elements as you scroll (element pool). A
+ * one-shot `<mark>` mutation would therefore disappear when an element is reused,
+ * or stick to a reused row that now shows a different file/line.
+ *
+ * The fix is to (re)apply marks per ITEM, hooked into CodeView's per-item render
+ * cycle (`onPostRender`). `itemNode` is the item's container element handed to
+ * `onPostRender`; `matchesForItem` are the search matches that belong to the
+ * file this item renders (already filtered by the caller via the
+ * filePath -> itemId map). We first clear any stale marks inside this item's
+ * shadow root(s) (defends against recycling: the element may previously have
+ * shown a different file), then apply fresh marks for this item's matches.
+ *
+ * Marks are inline `<mark>` wrappers with zero height delta, so they never alter
+ * the measured row height (which would desync CodeView's itemMetrics).
+ */
+export function applyItemSearchHighlights(
+  itemNode: HTMLElement,
+  query: string,
+  matchesForItem: ReviewSearchMatch[],
+  activeSearchMatchId: string | null,
+): void {
+  const roots = getSearchRoots(itemNode);
+  // Always clear first so a recycled element showing stale marks is reset, even
+  // when this item now has no matches.
+  for (const root of roots) clearSearchHighlights(root);
+
+  const trimmed = query.trim();
+  if (!trimmed || matchesForItem.length === 0) return;
+
+  for (const root of roots) {
+    applySearchHighlights(root, query, matchesForItem, activeSearchMatchId);
+  }
+}
+
+/** Clear all search marks inside a single CodeView item's element (used when an
+ * item leaves the rendered window so a future reuse starts clean). */
+export function clearItemSearchHighlights(itemNode: HTMLElement): void {
+  const roots = getSearchRoots(itemNode);
+  for (const root of roots) clearSearchHighlights(root);
+}
+
 export function swapActiveSearchHighlight(
   container: HTMLElement,
   newActiveId: string | null,

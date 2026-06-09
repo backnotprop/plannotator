@@ -28,6 +28,12 @@ import { FileHeader } from './FileHeader';
 import { InlineAnnotation } from './InlineAnnotation';
 import { detectLanguage } from '../utils/detectLanguage';
 import type { AIChatEntry } from '../hooks/useAIChat';
+import type { ReviewSearchMatch } from '../utils/reviewSearch';
+import {
+  applyItemSearchHighlights,
+  clearItemSearchHighlights,
+  swapActiveSearchHighlight,
+} from '../utils/reviewSearchHighlight';
 
 /**
  * AllFilesCodeView (migration phases P1 + P2 + P3 + P4)
@@ -87,7 +93,23 @@ import type { AIChatEntry } from '../hooks/useAIChat';
  *    no double-fetch. LazyFileDiff is no longer on the CodeView path (it remains
  *    only for the legacy flag-off AllFilesDiffView).
  *
- * Search highlighting and the worker pool remain later phases.
+ * P6 (this phase) makes search work over CodeView's recycled DOM:
+ *
+ *  - The raw-patch search INDEX is unchanged (App still owns useReviewSearch).
+ *    Only DOM application + navigation move here for the all-files surface.
+ *  - Navigation: when an active match changes, expand its owning file (if
+ *    collapsed) and `viewer.scrollTo({ type: 'line', id, lineNumber, side })` so
+ *    the line lands in view — robust against virtualization (no DOM dependency).
+ *  - Highlighting survives element recycling by re-applying `<mark>` per ITEM via
+ *    `onPostRender`: on mount/update we (re)apply that item's matches; on unmount
+ *    we clear its marks. CodeView reuses item elements from a pool, so a one-shot
+ *    mutation would stick to a reused row or vanish — re-applying on every render
+ *    keeps marks correct after scrolling far enough to recycle. A separate effect
+ *    re-applies across all currently-rendered items when the query/matches change
+ *    (no render is otherwise triggered), and an O(1) effect swaps just the active
+ *    match's styling when stepping between matches.
+ *
+ * The worker pool remains a later phase.
  */
 interface AllFilesCodeViewProps {
   files: DiffFile[];
@@ -140,6 +162,12 @@ interface AllFilesCodeViewProps {
   stageError?: string | null;
   prUrl?: string;
   prDiffScope?: string;
+  // Search (P6). The raw-patch index lives in App (useReviewSearch); these feed
+  // the per-item <mark> application + scrollTo navigation over the recycled DOM.
+  searchQuery?: string;
+  searchMatches?: ReviewSearchMatch[];
+  activeSearchMatchId?: string | null;
+  activeSearchMatch?: ReviewSearchMatch | null;
   // File-tree active-file highlight follows scroll.
   onVisibleFileChange?: (filePath: string | null) => void;
   // Only handle [/]/z/v/a/c/x keyboard nav when this surface is the active panel.
@@ -297,6 +325,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   stageError,
   prUrl,
   prDiffScope,
+  searchQuery = '',
+  searchMatches = [],
+  activeSearchMatchId = null,
+  activeSearchMatch = null,
   onVisibleFileChange,
   isActive = true,
   aiAvailable = false,
@@ -412,6 +444,33 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     () => (activeFilePath ? files.find((f) => f.path === activeFilePath)?.patch ?? '' : ''),
     [files, activeFilePath],
   );
+
+  // --- Search (P6) ------------------------------------------------------------
+  // Group search matches by the CodeView item id that owns the file, so each
+  // item's onPostRender (and the bulk reapply effect) can apply ONLY its own
+  // matches. Matches are file-keyed (filePath); resolve to itemId via the bridge.
+  const matchesByItemId = useMemo(() => {
+    const map = new Map<string, ReviewSearchMatch[]>();
+    if (searchMatches.length === 0) return map;
+    for (const match of searchMatches) {
+      const itemId = filePathToItemId.get(match.filePath);
+      if (itemId == null) continue;
+      const group = map.get(itemId);
+      if (group) group.push(match);
+      else map.set(itemId, [match]);
+    }
+    return map;
+  }, [searchMatches, filePathToItemId]);
+
+  // Read search state through refs so the stable onPostRender callback always
+  // sees the latest values without changing the CodeView options identity (which
+  // would churn the options object and reset CodeView).
+  const matchesByItemIdRef = useRef(matchesByItemId);
+  matchesByItemIdRef.current = matchesByItemId;
+  const searchQueryRef = useRef(searchQuery);
+  searchQueryRef.current = searchQuery;
+  const activeSearchMatchIdRef = useRef(activeSearchMatchId);
+  activeSearchMatchIdRef.current = activeSearchMatchId;
 
   // The CodeView callback context gives us the owning item directly, so file
   // identity comes from `item.id` instead of header-geometry inference. If the
@@ -701,22 +760,44 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       });
   }, []);
 
+  // (Re)apply search marks for ONE item's node. Called on every render of that
+  // item (onPostRender mount/update) so marks survive CodeView's element
+  // recycling — a recycled element is cleared and re-marked for whatever file it
+  // now shows. `node` is the item's `<diffs-container>` element. Reads search
+  // state through refs so the stable onPostRender callback stays identity-stable.
+  const applyItemHighlights = useCallback((node: HTMLElement, itemId: string) => {
+    const matches = matchesByItemIdRef.current.get(itemId) ?? [];
+    applyItemSearchHighlights(node, searchQueryRef.current, matches, activeSearchMatchIdRef.current);
+  }, []);
+
   // CodeView fires onPostRender for an item whenever it enters / updates within
   // the rendered window. Phase 'mount' (and 'update' for the first paint of a
   // freshly-seeded item) is the direct analogue of LazyFileDiff's
   // IntersectionObserver firing — so we trigger augmentation there. We ride
   // CodeView's existing virtualization rather than layering our own observer on
   // top (which would double-virtualize and fight the element pool).
+  //
+  // P6: the same per-item render cycle drives search-mark reconciliation. On
+  // mount/update we (re)apply this item's marks (defends against recycling); on
+  // unmount we clear them so a future reuse of the element starts clean. Marks
+  // are reapplied via rAF so they land after CodeView has (re)written the item's
+  // line DOM for this render — applying synchronously here could mark a tree
+  // that's about to be overwritten.
   const handlePostRender = useStableCallback(
     (
-      _node: HTMLElement,
+      node: HTMLElement,
       _instance: unknown,
       phase: PostRenderPhase,
       context: CodeViewItem<DiffAnnotationMetadata>,
     ) => {
-      if (phase === 'unmount') return;
       if (context.type !== 'diff') return;
+      if (phase === 'unmount') {
+        clearItemSearchHighlights(node);
+        return;
+      }
       augmentItem(context.id);
+      const itemId = context.id;
+      requestAnimationFrame(() => applyItemHighlights(node, itemId));
     },
   );
 
@@ -728,6 +809,69 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       augmentState.clear();
     };
   }, []);
+
+  // When the query or the match set changes (but no item re-render is triggered),
+  // re-apply marks across every currently-rendered item. onPostRender only fires
+  // when an item mounts/updates/recycles, so a pure query change wouldn't repaint
+  // existing rows without this. We read live rendered items from the viewer (each
+  // carries its `<diffs-container>` element) and apply each item's own matches.
+  // rAF defers one frame so any pending CodeView render settles first.
+  useEffect(() => {
+    const handle = viewerRef.current;
+    if (handle == null) return;
+    const raf = requestAnimationFrame(() => {
+      const viewer = viewerRef.current?.getInstance();
+      if (viewer == null) return;
+      for (const rendered of viewer.getRenderedItems()) {
+        if (rendered.type !== 'diff' || rendered.element == null) continue;
+        applyItemHighlights(rendered.element, rendered.id);
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [searchQuery, matchesByItemId, applyItemHighlights]);
+
+  // O(1) active-match swap when stepping between matches: recolor just the
+  // previously-active and newly-active marks across the whole container instead
+  // of rebuilding every item's marks. Mirrors DiffViewer's swap effect.
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (container == null) return;
+    swapActiveSearchHighlight(container, activeSearchMatchId);
+  }, [activeSearchMatchId]);
+
+  // Navigate to the active match: expand its owning file (if collapsed) and
+  // scrollTo the line. scrollTo is DOM-independent (resolves the line top from
+  // CodeView's layout model), so it works even when the target row is far
+  // outside the rendered window — the line's marks then paint via onPostRender as
+  // CodeView renders the row. rAF defers the scroll one frame so an expand's
+  // layout settles before resolving the line top.
+  useEffect(() => {
+    if (activeSearchMatch == null) return;
+    const itemId = filePathToItemId.get(activeSearchMatch.filePath);
+    if (itemId == null) return;
+    const handle = viewerRef.current;
+    if (handle == null) return;
+
+    const item = handle.getItem(itemId);
+    if (item != null && item.collapsed === true) {
+      item.collapsed = false;
+      item.version = (item.version ?? 0) + 1;
+      handle.updateItem(item);
+    }
+
+    // ReviewSearchSide: 'addition' -> additions, 'deletion' -> deletions,
+    // 'context' -> additions (context rows carry the NEW-side line number in the
+    // search index, so the additions side resolves the correct row).
+    const side: 'additions' | 'deletions' =
+      activeSearchMatch.side === 'deletion' ? 'deletions' : 'additions';
+    const lineNumber = activeSearchMatch.lineNumber;
+    const raf = requestAnimationFrame(() => {
+      const viewer = viewerRef.current;
+      if (viewer == null) return;
+      viewer.scrollTo({ type: 'line', id: itemId, lineNumber, side, align: 'center' });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [activeSearchMatch, filePathToItemId]);
 
   // --- Annotations through CodeView item state (P4) ---------------------------
 
@@ -1172,9 +1316,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         handleGutterUtilityClick(range, context.item);
       },
       // P5: lazily augment an item with full file content when it enters the
-      // rendered window. CodeView appends the item context as the final arg.
-      onPostRender(_node, _instance, phase, context) {
-        handlePostRender(_node, _instance, phase, context.item);
+      // rendered window. P6: (re)apply / clear search marks per item so they
+      // survive recycling. CodeView appends the item context as the final arg.
+      onPostRender(node, _instance, phase, context) {
+        handlePostRender(node, _instance, phase, context.item);
       },
     }),
     [
