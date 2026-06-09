@@ -1,10 +1,30 @@
 import React from 'react';
 import type { IDockviewPanelProps } from 'dockview-react';
+import { useConfigValue } from '@plannotator/ui/config';
 import { AllFilesDiffView } from '../../components/AllFilesDiffView';
+import { AllFilesCodeView } from '../../components/AllFilesCodeView';
 import { useReviewState } from '../ReviewStateContext';
 
 export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
   const state = useReviewState();
+  const useCodeView = useConfigValue('allFilesCodeView');
+
+  if (useCodeView) {
+    return (
+      <AllFilesCodeView
+        files={state.files}
+        diffStyle={state.diffStyle}
+        diffOverflow={state.diffOverflow}
+        diffIndicators={state.diffIndicators}
+        lineDiffType={state.lineDiffType}
+        disableLineNumbers={state.disableLineNumbers}
+        disableBackground={state.disableBackground}
+        expandUnchanged={state.expandUnchanged}
+        fontFamily={state.fontFamily}
+        fontSize={state.fontSize}
+      />
+    );
+  }
 
   return (
     <AllFilesDiffView

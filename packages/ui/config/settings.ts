@@ -51,6 +51,22 @@ export const SETTINGS = {
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 
+  /**
+   * Migration flag (P1): when enabled, the all-files review surface renders
+   * every changed file through a single Pierre CodeView (AllFilesCodeView)
+   * instead of the legacy per-file FileDiff list (AllFilesDiffView).
+   * Default OFF — legacy view stays the default until the migration lands.
+   */
+  allFilesCodeView: {
+    defaultValue: false as boolean,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-all-files-codeview');
+      return v === 'true' ? true : v === 'false' ? false : undefined;
+    },
+    toCookie: (v: boolean) => storage.setItem('plannotator-all-files-codeview', String(v)),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
   // --- Diff display options (namespaced under diffOptions in config.json) ---
 
   defaultDiffType: {
