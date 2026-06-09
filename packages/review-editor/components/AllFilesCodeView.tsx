@@ -225,6 +225,9 @@ interface ItemIdentity {
   filePathToItemId: Map<string, string>;
   /** Maps a CodeView item id back to the originating file path. */
   itemIdToFilePath: Map<string, string>;
+  /** Maps a CodeView item id to its originating DiffFile. Keyed by the unique
+   * item id (not path) so duplicate display paths resolve to the correct file. */
+  itemIdToFile: Map<string, DiffFile>;
 }
 
 // Project a file's line annotations into Pierre's DiffLineAnnotation shape. This
@@ -274,6 +277,7 @@ function buildItemIdentity(
   const items: CodeViewItem<DiffAnnotationMetadata>[] = [];
   const filePathToItemId = new Map<string, string>();
   const itemIdToFilePath = new Map<string, string>();
+  const itemIdToFile = new Map<string, DiffFile>();
   const usedIds = new Set<string>();
   const nextSuffixByBase = new Map<string, number>();
 
@@ -312,9 +316,10 @@ function buildItemIdentity(
       filePathToItemId.set(file.path, id);
     }
     itemIdToFilePath.set(id, file.path);
+    itemIdToFile.set(id, file);
   }
 
-  return { items, filePathToItemId, itemIdToFilePath };
+  return { items, filePathToItemId, itemIdToFilePath, itemIdToFile };
 }
 
 // Resolved pixel height of the custom header. Must equal FileHeader's fixed
@@ -488,7 +493,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [files, visualOrder, prUrl, prDiffScope],
   );
-  const { filePathToItemId, itemIdToFilePath } = identity;
+  const { filePathToItemId, itemIdToFilePath, itemIdToFile } = identity;
 
   // Stable identity of the current diff. Changes whenever the file set or any
   // file's patch content changes (diff type / base / whitespace / PR switch),
@@ -528,14 +533,6 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // Path -> DiffFile lookup for the on-demand content augmentation (P5). The
   // post-render callback resolves item.id -> path -> DiffFile to know which
   // file's patch/oldPath to fetch + reparse.
-  const filesByPath = useMemo(() => {
-    const map = new Map<string, DiffFile>();
-    for (const file of files) {
-      if (!map.has(file.path)) map.set(file.path, file);
-    }
-    return map;
-  }, [files]);
-
   const activePatch = useMemo(
     () => (activeFilePath ? files.find((f) => f.path === activeFilePath)?.patch ?? '' : ''),
     [files, activeFilePath],
@@ -751,15 +748,13 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const augmentRef = useRef<
     Map<string, { status: 'pending' | 'done' | 'error'; controller: AbortController }>
   >(new Map());
-  // reviewBase / filesByPath read through refs so the stable onPostRender
+  // reviewBase / itemIdToFile read through refs so the stable onPostRender
   // callback always sees the latest values without changing identity (which
   // would otherwise churn the CodeView options object).
   const reviewBaseRef = useRef(reviewBase);
   reviewBaseRef.current = reviewBase;
-  const filesByPathRef = useRef(filesByPath);
-  filesByPathRef.current = filesByPath;
-  const itemIdToFilePathRef = useRef(itemIdToFilePath);
-  itemIdToFilePathRef.current = itemIdToFilePath;
+  const itemIdToFileRef = useRef(itemIdToFile);
+  itemIdToFileRef.current = itemIdToFile;
 
   // Fetch full file contents for one item, reparse with processFile, and swap
   // the item's fileDiff in place so hunk expansion (expand-unchanged gutter
@@ -775,9 +770,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // is what prevents the fetch storm.)
     if (augmentState.has(itemId)) return;
 
-    const filePath = itemIdToFilePathRef.current.get(itemId);
-    if (filePath == null) return;
-    const file = filesByPathRef.current.get(filePath);
+    // Resolve the file by item id (NOT path) so duplicate display paths each
+    // augment with their own DiffFile content.
+    const file = itemIdToFileRef.current.get(itemId);
     if (file == null) return;
 
     const controller = new AbortController();
@@ -1012,12 +1007,13 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         if ((a.scope ?? 'line') !== 'line') continue;
         if (a.prUrl && prUrl && a.prUrl !== prUrl) continue;
         if (a.diffScope && prDiffScope && a.diffScope !== prDiffScope) continue;
-        const sig =
-          `${a.id} ${a.lineEnd} ${a.side} ${a.type} ` +
-          `${a.text ?? ''} ${a.suggestedCode ?? ''} ${a.originalCode ?? ''} ` +
-          `${a.conventionalLabel ?? ''} ${(a.decorations ?? []).join(',')} ` +
-          `${a.severity ?? ''} ${a.reasoning ?? ''} ${a.author ?? ''}`;
-        map.set(a.filePath, `${map.get(a.filePath) ?? ''}${sig}`);
+        const sig = JSON.stringify([
+          a.id, a.lineEnd, a.side, a.type,
+          a.text ?? '', a.suggestedCode ?? '', a.originalCode ?? '',
+          a.conventionalLabel ?? '', (a.decorations ?? []).join(','),
+          a.severity ?? '', a.reasoning ?? '', a.author ?? '',
+        ]);
+        map.set(a.filePath, `${map.get(a.filePath) ?? ''}${sig}\n`);
       }
       return map;
     };
@@ -1139,10 +1135,16 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // active file's FileDiff. Scoped by `activeFilePath` so the highlight only
   // paints on the file that owns the selection.
   useEffect(() => {
-    if (!activeFilePath || !pendingSelection) return;
-    const itemId = filePathToItemId.get(activeFilePath);
-    if (itemId == null) return;
-    setSelectedLines({ id: itemId, range: pendingSelection });
+    if (activeFilePath && pendingSelection) {
+      const itemId = filePathToItemId.get(activeFilePath);
+      if (itemId != null) {
+        setSelectedLines({ id: itemId, range: pendingSelection });
+        return;
+      }
+    }
+    // pendingSelection cleared (annotation submitted / cancelled / AI done):
+    // drop the highlight instead of leaving it stuck on the file.
+    setSelectedLines(null);
   }, [activeFilePath, pendingSelection, filePathToItemId]);
 
   const handleLineSelectionEnd = useStableCallback(
@@ -1411,6 +1413,16 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // inference. itemMetrics must reflect the custom header height and the
   // unsafeCSS-customized hunk separator height (see constants above), otherwise
   // CodeView's virtualization estimate drifts.
+  // usePierreTheme forces `line-height: 1.5` ONLY when a custom font size is
+  // set. In that case CodeView's pre-measure row-height estimate must match
+  // (fontPx * 1.5) or virtualization/scroll estimates drift. With no custom
+  // size, Pierre's default lineHeight estimate is correct — leave it unset.
+  const customLineHeight = useMemo(() => {
+    if (!fontSize) return undefined;
+    const px = parseFloat(fontSize);
+    return Number.isFinite(px) && px > 0 ? Math.round(px * 1.5) : undefined;
+  }, [fontSize]);
+
   const options = useMemo<CodeViewOptions<DiffAnnotationMetadata>>(
     () => ({
       themeType: pierreTheme.type,
@@ -1430,6 +1442,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       itemMetrics: {
         diffHeaderHeight: PANEL_HEADER_HEIGHT,
         hunkSeparatorHeight: HUNK_SEPARATOR_HEIGHT,
+        ...(customLineHeight != null && { lineHeight: customLineHeight }),
       },
       onLineSelectionEnd(range, context) {
         handleLineSelectionEnd(range, context.item);
@@ -1470,6 +1483,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       disableLineNumbers,
       disableBackground,
       expandUnchanged,
+      customLineHeight,
       handleLineSelectionEnd,
       handleGutterUtilityClick,
       onCodeNavRequest,
