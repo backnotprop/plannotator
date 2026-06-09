@@ -11,6 +11,7 @@ import type {
   SelectedLineRange,
 } from '@pierre/diffs';
 import { CodeView, type CodeViewHandle, useStableCallback } from '@pierre/diffs/react';
+import type { DiffTokenEventBaseProps } from '@pierre/diffs';
 import type {
   CodeAnnotation,
   CodeAnnotationType,
@@ -20,9 +21,11 @@ import type {
   TokenAnnotationMeta,
 } from '@plannotator/ui/types';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
+import { storage } from '@plannotator/ui/utils/storage';
 import { usePierreTheme } from '../hooks/usePierreTheme';
 import type { DiffFile } from '../types';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
+import { buildCodeNavRequest } from '../utils/buildCodeNavRequest';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import { FileHeader } from './FileHeader';
 import { InlineAnnotation } from './InlineAnnotation';
@@ -109,6 +112,34 @@ import {
  *    (no render is otherwise triggered), and an O(1) effect swaps just the active
  *    match's styling when stepping between matches.
  *
+ * P7 (this phase) finishes the edges so CodeView can be the DEFAULT all-files
+ * renderer (the `allFilesCodeView` flag now defaults ON):
+ *
+ *  - Center split dragger: the legacy single-file DiffViewer owns a per-file
+ *    split dragger; the legacy all-files view had none. With one CodeView
+ *    container we add a single dragger here. The `--split-left` / `--split-right`
+ *    CSS variables are set on the CodeView CONTAINER (light DOM) — they inherit
+ *    through every item's shadow root, so the existing usePierreTheme grid rule
+ *    (`[data-diff-type='split'][data-overflow='scroll']`) resizes every split
+ *    file's two columns uniformly. The drag overlay is a single vertical line
+ *    pinned to the container at `splitRatio` of its width; because it is
+ *    positioned relative to the (non-virtualized) container — not to any
+ *    individual item — it is unaffected by virtualization, sticky headers, or
+ *    CodeView's 12M-px paged scroll rebasing. Only shown in split + scroll mode.
+ *  - Token code navigation: Cmd/Ctrl-click a token routes through
+ *    `onCodeNavRequest` (parity with the single-file DiffViewer and the legacy
+ *    all-files view), with `pn-token-hover` / `pn-token-nav` affordances. File
+ *    identity comes from the CodeView callback context's owning item, never an
+ *    active-file side channel.
+ *  - Safari scroll guardian: NOT carried forward. The old DiffViewer guardian
+ *    targeted the OverlayScrollbars viewport wrapping many separate FileDiff
+ *    shadow nodes and restored scrollTop on a ">200 -> 0" jump heuristic.
+ *    CodeView owns its own scroll model and DELIBERATELY rebases the container's
+ *    DOM scrollTop into a bounded 12M-px paged window, so that heuristic would
+ *    misfire against CodeView's own rebasing. CodeView is the scroll authority
+ *    here; we rely on it rather than a guardian that would fight it. (See the
+ *    known-gaps note — needs real WebKit validation before legacy removal.)
+ *
  * The worker pool remains a later phase.
  */
 interface AllFilesCodeViewProps {
@@ -168,6 +199,8 @@ interface AllFilesCodeViewProps {
   searchMatches?: ReviewSearchMatch[];
   activeSearchMatchId?: string | null;
   activeSearchMatch?: ReviewSearchMatch | null;
+  // Token code navigation (P7). Cmd/Ctrl-click a token resolves symbol defs/refs.
+  onCodeNavRequest?: (request: import('@plannotator/shared/code-nav').CodeNavRequest) => void;
   // File-tree active-file highlight follows scroll.
   onVisibleFileChange?: (filePath: string | null) => void;
   // Only handle [/]/z/v/a/c/x keyboard nav when this surface is the active panel.
@@ -329,6 +362,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   searchMatches = [],
   activeSearchMatchId = null,
   activeSearchMatch = null,
+  onCodeNavRequest,
   onVisibleFileChange,
   isActive = true,
   aiAvailable = false,
@@ -346,6 +380,50 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const viewerRef = useRef<CodeViewHandle<DiffAnnotationMetadata> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const toolbarHostRef = useRef<ToolbarHostHandle>(null);
+
+  // --- Center split dragger (P7) ----------------------------------------------
+  // One dragger for the whole CodeView container. `--split-left` / `--split-right`
+  // are written on the container (light DOM); they inherit through every item's
+  // shadow root so usePierreTheme's split-grid rule resizes all split files'
+  // columns together. Shares the `review-split-ratio` storage key with the
+  // single-file DiffViewer so the chosen ratio is consistent across surfaces.
+  const showSplitDragger = diffStyle === 'split' && diffOverflow !== 'wrap';
+  const [splitRatio, setSplitRatio] = useState(() => {
+    const saved = storage.getItem('review-split-ratio');
+    const n = saved ? Number(saved) : NaN;
+    return !Number.isNaN(n) && n >= 0.2 && n <= 0.8 ? n : 0.5;
+  });
+  const splitRatioRef = useRef(splitRatio);
+  splitRatioRef.current = splitRatio;
+  const [isDraggingSplit, setIsDraggingSplit] = useState(false);
+
+  const handleSplitDragStart = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    const container = scrollRef.current;
+    if (container == null) return;
+    setIsDraggingSplit(true);
+
+    const onMove = (moveEvent: PointerEvent) => {
+      const rect = container.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      const ratio = (moveEvent.clientX - rect.left) / rect.width;
+      setSplitRatio(Math.min(0.8, Math.max(0.2, ratio)));
+    };
+    const onUp = () => {
+      setIsDraggingSplit(false);
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      storage.setItem('review-split-ratio', String(splitRatioRef.current));
+    };
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  }, []);
+
+  const resetSplitRatio = useCallback(() => {
+    setSplitRatio(0.5);
+    storage.setItem('review-split-ratio', '0.5');
+  }, []);
+
   // The file path CodeView currently reports as visible (active-file highlight).
   // Reset on diff switch so stepping/highlighting never anchors on an old file.
   const visibleFileRef = useRef<string | null>(null);
@@ -421,6 +499,24 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     () => `${files.length}:${files.map((f) => `${f.path}#${f.patch.length}`).join('|')}`,
     [files],
   );
+
+  // Push the split ratio onto the container as CSS vars (P7). Setting them on the
+  // scroll container (not per item) is what lets the vars inherit into every
+  // item's shadow DOM where usePierreTheme's split-grid rule lives. Cleared when
+  // not in split+scroll mode so unified / wrap fall back to Pierre's default 1fr
+  // columns. Re-runs on fileSetKey because the CodeView remount recreates the
+  // container element, dropping any previously-set inline vars.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el == null) return;
+    if (showSplitDragger) {
+      el.style.setProperty('--split-left', `${splitRatio}fr`);
+      el.style.setProperty('--split-right', `${1 - splitRatio}fr`);
+    } else {
+      el.style.removeProperty('--split-left');
+      el.style.removeProperty('--split-right');
+    }
+  }, [showSplitDragger, splitRatio, fileSetKey]);
 
   // Visual-order list of file paths (for [/] stepping). Derived from items so it
   // matches CodeView's rendered order exactly.
@@ -1067,6 +1163,32 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     },
   );
 
+  // --- Token code navigation (P7) ---------------------------------------------
+  // Cmd/Ctrl-click a token resolves symbol defs/refs (parity with DiffViewer and
+  // the legacy all-files view). File identity comes from the owning item, not an
+  // active-file side channel. Only wired when onCodeNavRequest is provided.
+  const handleTokenClick = useStableCallback(
+    (props: DiffTokenEventBaseProps, event: MouseEvent, item: CodeViewItem<DiffAnnotationMetadata>) => {
+      if (!onCodeNavRequest || item.type !== 'diff') return;
+      if (!(event.metaKey || event.ctrlKey)) return;
+      const filePath = itemIdToFilePath.get(item.id);
+      if (filePath == null) return;
+      onCodeNavRequest(buildCodeNavRequest(props, filePath));
+    },
+  );
+
+  const handleTokenEnter = useStableCallback(
+    (props: DiffTokenEventBaseProps, event: PointerEvent) => {
+      if (onCodeNavRequest && (event.metaKey || event.ctrlKey)) {
+        props.tokenElement.classList.add('pn-token-nav');
+      }
+    },
+  );
+
+  const handleTokenLeave = useStableCallback((props: DiffTokenEventBaseProps) => {
+    props.tokenElement.classList.remove('pn-token-nav');
+  });
+
   // --- Active-file tracking via CodeView rendered items (no header geometry) ---
 
   const reportVisibleFile = useStableCallback(() => {
@@ -1315,6 +1437,21 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       onGutterUtilityClick(range, context) {
         handleGutterUtilityClick(range, context.item);
       },
+      // P7: token code navigation. CodeView appends the owning-item context as
+      // the final arg to every shared callback (same as the selection/gutter
+      // callbacks), so file identity comes from context.item — no geometry or
+      // active-file inference. Only wired when onCodeNavRequest is provided.
+      ...(onCodeNavRequest && {
+        onTokenClick(props, event, context) {
+          handleTokenClick(props, event, context.item);
+        },
+        onTokenEnter(props, event, _context) {
+          handleTokenEnter(props, event);
+        },
+        onTokenLeave(props, _event, _context) {
+          handleTokenLeave(props);
+        },
+      }),
       // P5: lazily augment an item with full file content when it enters the
       // rendered window. P6: (re)apply / clear search marks per item so they
       // survive recycling. CodeView appends the item context as the final arg.
@@ -1335,12 +1472,16 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       expandUnchanged,
       handleLineSelectionEnd,
       handleGutterUtilityClick,
+      onCodeNavRequest,
+      handleTokenClick,
+      handleTokenEnter,
+      handleTokenLeave,
       handlePostRender,
     ],
   );
 
   return (
-    <>
+    <div className={`relative h-full ${isDraggingSplit ? 'select-none' : ''}`}>
       <CodeView<DiffAnnotationMetadata>
         // Remount on diff switch so uncontrolled `initialItems` re-seeds from
         // the freshly computed identity. Without this, switching diff
@@ -1358,6 +1499,23 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         renderCustomHeader={renderCustomHeader}
         renderAnnotation={renderAnnotation}
       />
+
+      {/* Center split dragger (P7) — one vertical line for the whole CodeView
+          container, pinned at `splitRatio` of its width. Positioned relative to
+          the container (not any virtualized item), so it is unaffected by
+          virtualization, sticky headers, or paged-scroll rebasing. The vars it
+          writes resize every split file's columns uniformly. */}
+      {showSplitDragger && (
+        <div
+          className="absolute top-0 bottom-0 z-20 cursor-col-resize group"
+          style={{ left: `${splitRatio * 100}%`, width: 9, marginLeft: -4 }}
+          onPointerDown={handleSplitDragStart}
+          onDoubleClick={resetSplitRatio}
+          title="Drag to resize columns (double-click to reset)"
+        >
+          <div className="pointer-events-none absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-border transition-[width,background-color] group-hover:w-0.5 group-hover:bg-primary/50 group-active:w-0.5 group-active:bg-primary/70" />
+        </div>
+      )}
 
       <ToolbarHost
         ref={toolbarHostRef}
@@ -1388,6 +1546,6 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           onClose={() => setFileCommentAnchor(null)}
         />
       )}
-    </>
+    </div>
   );
 };

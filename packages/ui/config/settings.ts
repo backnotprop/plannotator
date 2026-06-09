@@ -52,13 +52,19 @@ export const SETTINGS = {
   },
 
   /**
-   * Migration flag (P1): when enabled, the all-files review surface renders
-   * every changed file through a single Pierre CodeView (AllFilesCodeView)
-   * instead of the legacy per-file FileDiff list (AllFilesDiffView).
-   * Default OFF — legacy view stays the default until the migration lands.
+   * Migration flag: when enabled, the all-files review surface renders every
+   * changed file through a single Pierre CodeView (AllFilesCodeView) instead of
+   * the legacy per-file FileDiff list (AllFilesDiffView).
+   *
+   * Default ON as of P7 — CodeView is now the default all-files renderer with
+   * full feature parity (identity, navigation, header chrome, annotations, lazy
+   * hunk expansion, search, split dragger, token code-nav). The legacy
+   * AllFilesDiffView stays behind this flag as a rollback escape hatch (set the
+   * `plannotator-all-files-codeview` cookie to `false`) until reviewers confirm
+   * full-matrix parity, after which it can be removed.
    */
   allFilesCodeView: {
-    defaultValue: false as boolean,
+    defaultValue: true as boolean,
     fromCookie: () => {
       const v = storage.getItem('plannotator-all-files-codeview');
       return v === 'true' ? true : v === 'false' ? false : undefined;
