@@ -25,6 +25,16 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
         onLineSelection={state.onLineSelection}
         onAddAnnotationForFile={state.onAddAnnotationForFile}
         onEditAnnotation={state.onEditAnnotation}
+        onAddFileCommentForFile={state.onAddFileCommentForFile}
+        viewedFiles={state.viewedFiles}
+        onToggleViewed={state.onToggleViewed}
+        stagedFiles={state.stagedFiles}
+        onStage={state.onStage}
+        canStageFiles={state.canStageFiles}
+        stagingFile={state.stagingFile}
+        stageError={state.stageError}
+        prUrl={state.prMetadata?.url}
+        prDiffScope={state.prDiffScope}
         onVisibleFileChange={state.onAllFilesVisibleFileChange}
         isActive={state.isAllFilesActive}
         aiAvailable={state.aiAvailable}
