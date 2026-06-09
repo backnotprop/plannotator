@@ -4,13 +4,17 @@ import type {
   CodeViewItem,
   CodeViewLineSelection,
   CodeViewOptions,
+  DiffLineAnnotation,
+  LineAnnotation,
   SelectedLineRange,
 } from '@pierre/diffs';
 import { CodeView, type CodeViewHandle, useStableCallback } from '@pierre/diffs/react';
 import type {
+  CodeAnnotation,
   CodeAnnotationType,
   ConventionalDecoration,
   ConventionalLabel,
+  DiffAnnotationMetadata,
   TokenAnnotationMeta,
 } from '@plannotator/ui/types';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
@@ -19,10 +23,12 @@ import type { DiffFile } from '../types';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import { FileHeader } from './FileHeader';
+import { InlineAnnotation } from './InlineAnnotation';
+import { detectLanguage } from '../utils/detectLanguage';
 import type { AIChatEntry } from '../hooks/useAIChat';
 
 /**
- * AllFilesCodeView (migration phases P1 + P2 + P3)
+ * AllFilesCodeView (migration phases P1 + P2 + P3 + P4)
  *
  * Renders every changed file through ONE Pierre `CodeView` inside a single
  * scroll container, replacing the legacy per-file `FileDiff` list
@@ -30,28 +36,34 @@ import type { AIChatEntry } from '../hooks/useAIChat';
  *
  * P1 established the static, uncontrolled `initialItems` skeleton. P2 locked
  * down item identity and routed navigation + line selection through CodeView's
- * own APIs. P3 (this phase) moves collapse + the full Plannotator FileHeader
- * INTO CodeView via the `renderCustomHeader` render slot:
+ * own APIs. P3 moved collapse + the full Plannotator FileHeader INTO CodeView
+ * via the `renderCustomHeader` render slot.
  *
- *  - The full Plannotator `FileHeader` (Viewed toggle, Git Add/undo + stage
- *    error, file-scoped comment, Copy Diff, semantic badge, diff-options
- *    popover, responsive labels) renders inside CodeView's header slot. File
- *    identity (path / patch) is sourced from the `CodeViewItem` handed to the
- *    render slot, not from an external active-file side channel.
- *  - Collapse lives in CodeView item state: toggling sets `item.collapsed`,
- *    bumps `item.version`, and calls `viewer.updateItem(item)` (the Diffshub
- *    pattern). The Diffshub anchor fix keeps a collapsed file from jumping out
- *    of view: if the item's top is above the current scrollTop, we re-anchor it
- *    via `scrollTo({ type: 'item', align: 'start' })` after the update.
- *  - Because the custom header replaces Pierre's built-in header chrome,
- *    `itemMetrics.diffHeaderHeight` is pinned to the real header height
- *    (`--panel-header-h` = 33px) and `hunkSeparatorHeight` to the value our
- *    `usePierreTheme` unsafeCSS forces (24px height + 4px*2 margin = 32px), so
- *    CodeView's virtualization estimates stay accurate (no scroll drift /
- *    sticky-header misalignment).
+ * P4 (this phase) routes annotations through CodeView item state:
  *
- * Annotation rendering, full-content hunk expansion, search highlighting, and
- * the worker pool remain later phases.
+ *  - CodeView is typed with `<DiffAnnotationMetadata>` so each diff item's
+ *    `annotations: DiffLineAnnotation<DiffAnnotationMetadata>[]` and
+ *    `renderAnnotation(annotation, item)` are fully typed.
+ *  - Annotations are grouped per file (the same projection AllFilesDiffView
+ *    builds: side 'additions'/'deletions', lineNumber = ann.lineEnd, metadata =
+ *    DiffAnnotationMetadata) and seeded onto each item at build time. When the
+ *    `annotations` prop changes we rebuild ONLY the affected items' annotation
+ *    arrays, bump `item.version`, and call `viewer.updateItem(item)` — so a
+ *    single annotation add/edit/delete re-renders just its owning file.
+ *  - `renderAnnotation` renders the existing `InlineAnnotation` from
+ *    `annotation.metadata`, routing onSelect/onEdit/onDelete by the OWNING item
+ *    (no active-file side channel). Edit routes through the ToolbarHost handle.
+ *  - Selecting an annotation in the sidebar expands its owning file
+ *    (item.collapsed=false + version bump + updateItem) and
+ *    `scrollTo({ type: 'item' | 'range' })` to it.
+ *  - The annotation toolbar already flows through CodeView's
+ *    `onGutterUtilityClick` / `onLineSelectionEnd` callbacks (P2): file identity
+ *    comes from `context.item.id`, and ToolbarHost is fed that file's patch so
+ *    original-code extraction reads the correct file. Drafts-by-file/range and
+ *    AI markers are preserved by ToolbarHost/useAnnotationToolbar unchanged.
+ *
+ * Full-content hunk expansion, search highlighting, and the worker pool remain
+ * later phases.
  */
 interface AllFilesCodeViewProps {
   files: DiffFile[];
@@ -64,6 +76,12 @@ interface AllFilesCodeViewProps {
   expandUnchanged?: boolean;
   fontFamily?: string;
   fontSize?: string;
+  // Annotation state (P4). Mirrors AllFilesDiffView's annotation surface so
+  // line annotations render through CodeView item state.
+  annotations: CodeAnnotation[];
+  selectedAnnotationId: string | null;
+  pendingSelection: SelectedLineRange | null;
+  reviewBase?: string;
   // Annotation / toolbar wiring (P2). Mirrors AllFilesDiffView's surface so the
   // toolbar opens against the file CodeView reports for a selection.
   onLineSelection: (range: SelectedLineRange | null) => void;
@@ -85,6 +103,8 @@ interface AllFilesCodeViewProps {
     conventionalLabel?: ConventionalLabel | null,
     decorations?: ConventionalDecoration[],
   ) => void;
+  onSelectAnnotation: (id: string | null) => void;
+  onDeleteAnnotation: (id: string) => void;
   // Header actions (P3). Mirror AllFilesDiffView's header surface.
   onAddFileCommentForFile?: (filePath: string, text: string) => void;
   viewedFiles?: Set<string>;
@@ -115,15 +135,58 @@ interface AllFilesCodeViewProps {
 // breaking selection/scroll identity — so a per-base suffix disambiguates them
 // while still keeping a filePath <-> itemId map for the bridge.
 interface ItemIdentity {
-  items: CodeViewItem<undefined>[];
+  items: CodeViewItem<DiffAnnotationMetadata>[];
   /** Maps a file path to the CodeView item id that owns it. */
   filePathToItemId: Map<string, string>;
   /** Maps a CodeView item id back to the originating file path. */
   itemIdToFilePath: Map<string, string>;
 }
 
-function buildItemIdentity(files: DiffFile[], visualOrder: number[]): ItemIdentity {
-  const items: CodeViewItem<undefined>[] = [];
+// Project a file's line annotations into Pierre's DiffLineAnnotation shape. This
+// is the EXACT projection AllFilesDiffView builds (side, lineNumber = lineEnd,
+// metadata = DiffAnnotationMetadata) so the two surfaces render identically.
+// Filters to line-scoped annotations that belong to this file in the active
+// PR/diff-scope (file-scoped comments live in the header, not the gutter).
+function projectFileAnnotations(
+  annotations: CodeAnnotation[],
+  filePath: string,
+  prUrl: string | undefined,
+  prDiffScope: string | undefined,
+): DiffLineAnnotation<DiffAnnotationMetadata>[] {
+  return annotations
+    .filter(
+      (a) =>
+        a.filePath === filePath &&
+        (a.scope ?? 'line') === 'line' &&
+        (!a.prUrl || !prUrl || a.prUrl === prUrl) &&
+        (!a.diffScope || !prDiffScope || a.diffScope === prDiffScope),
+    )
+    .map((ann) => ({
+      side: ann.side === 'new' ? ('additions' as const) : ('deletions' as const),
+      lineNumber: ann.lineEnd,
+      metadata: {
+        annotationId: ann.id,
+        type: ann.type,
+        text: ann.text,
+        suggestedCode: ann.suggestedCode,
+        originalCode: ann.originalCode,
+        author: ann.author,
+        severity: ann.severity,
+        reasoning: ann.reasoning,
+        conventionalLabel: ann.conventionalLabel,
+        decorations: ann.decorations,
+      } as DiffAnnotationMetadata,
+    }));
+}
+
+function buildItemIdentity(
+  files: DiffFile[],
+  visualOrder: number[],
+  annotations: CodeAnnotation[],
+  prUrl: string | undefined,
+  prDiffScope: string | undefined,
+): ItemIdentity {
+  const items: CodeViewItem<DiffAnnotationMetadata>[] = [];
   const filePathToItemId = new Map<string, string>();
   const itemIdToFilePath = new Map<string, string>();
   const usedIds = new Set<string>();
@@ -154,7 +217,10 @@ function buildItemIdentity(files: DiffFile[], visualOrder: number[]): ItemIdenti
     // two items share the same display path.
     const fileDiff = getSingularPatch(file.patch);
     fileDiff.cacheKey = id;
-    items.push({ id, type: 'diff', fileDiff, version: 0 });
+    // Seed annotations at build time so the first render (and any remount via
+    // fileSetKey) already paints existing annotations without an extra update.
+    const fileAnnotations = projectFileAnnotations(annotations, file.path, prUrl, prDiffScope);
+    items.push({ id, type: 'diff', fileDiff, version: 0, annotations: fileAnnotations });
     // First occurrence of a path wins the canonical lookup so the file tree
     // (keyed by path) navigates to the primary item for that path.
     if (!filePathToItemId.has(file.path)) {
@@ -188,9 +254,14 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   expandUnchanged,
   fontFamily,
   fontSize,
+  annotations,
+  selectedAnnotationId,
+  pendingSelection,
   onLineSelection,
   onAddAnnotationForFile,
   onEditAnnotation,
+  onSelectAnnotation,
+  onDeleteAnnotation,
   onAddFileCommentForFile,
   viewedFiles,
   onToggleViewed,
@@ -215,7 +286,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // way — we keep `true` to be explicit that the built-in title is irrelevant
   // here (our FileHeader owns all header chrome).
   const pierreTheme = usePierreTheme({ fontFamily, fontSize, showFileHeader: true });
-  const viewerRef = useRef<CodeViewHandle<undefined> | null>(null);
+  const viewerRef = useRef<CodeViewHandle<DiffAnnotationMetadata> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const toolbarHostRef = useRef<ToolbarHostHandle>(null);
   // The file path CodeView currently reports as visible (active-file highlight).
@@ -246,6 +317,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const prevStagedRef = useRef<Set<string> | undefined>(stagedFiles);
   const prevStagingRef = useRef<string | null | undefined>(stagingFile);
   const prevStageErrorRef = useRef<string | null | undefined>(stageError);
+  // Previous annotations snapshot for the per-item annotation-sync effect (P4).
+  const prevAnnotationsRef = useRef<CodeAnnotation[]>(annotations);
 
   // Order items by the current visual file-tree order — same ordering the
   // legacy all-files view uses, so the two surfaces present files identically.
@@ -264,9 +337,21 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // the new diff we remount it via `fileSetKey` (below), which re-runs the
   // `initialItems` seed against the freshly computed identity. This restores
   // the legacy AllFilesDiffView behavior (which reads `files` live).
+  // NOTE: `annotations` is intentionally NOT in the dep list. The identity (and
+  // the CodeView remount it drives via fileSetKey) must only change when the
+  // FILE SET changes — otherwise every annotation add/edit/delete would remount
+  // the whole CodeView and lose scroll/selection state. Existing annotations are
+  // seeded into items on (re)build via the captured `annotations` closure for
+  // the first paint; subsequent annotation changes are applied incrementally per
+  // item by the annotation-sync effect below (updateItem on only the changed
+  // file). We read the latest annotations through a ref at build time so a
+  // remount triggered by a file-set change still seeds current annotations.
+  const annotationsRef = useRef(annotations);
+  annotationsRef.current = annotations;
   const identity = useMemo<ItemIdentity>(
-    () => buildItemIdentity(files, visualOrder),
-    [files, visualOrder],
+    () => buildItemIdentity(files, visualOrder, annotationsRef.current, prUrl, prDiffScope),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [files, visualOrder, prUrl, prDiffScope],
   );
   const { filePathToItemId, itemIdToFilePath } = identity;
 
@@ -342,6 +427,47 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     [activeFilePath, onAddAnnotationForFile],
   );
 
+  // Edit routes through the ToolbarHost handle (same as AllFilesDiffView). The
+  // annotation's id resolves to the full CodeAnnotation so the toolbar opens
+  // pre-filled. ToolbarHost is keyed to the active file's patch; startEdit
+  // positions itself by last-known mouse position, so it works regardless of
+  // which file the clicked annotation belongs to.
+  const handleEditAnnotation = useCallback(
+    (id: string) => {
+      const ann = annotations.find((a) => a.id === id);
+      if (!ann) return;
+      toolbarHostRef.current?.startEdit(ann);
+    },
+    [annotations],
+  );
+
+  // Render a single annotation from item state. `renderAnnotation` receives both
+  // the LineAnnotation and DiffLineAnnotation union — guard `'side' in
+  // annotation && item.type === 'diff'` (the Diffshub pattern) so file-item
+  // annotations (none here) and metadata-less annotations are skipped. Actions
+  // route by the OWNING item, not an active-file side channel.
+  const renderAnnotation = useStableCallback(
+    (
+      annotation:
+        | DiffLineAnnotation<DiffAnnotationMetadata>
+        | LineAnnotation<DiffAnnotationMetadata>,
+      item: CodeViewItem<DiffAnnotationMetadata>,
+    ) => {
+      if (!('side' in annotation) || item.type !== 'diff') return null;
+      if (!annotation.metadata) return null;
+      const filePath = itemIdToFilePath.get(item.id);
+      return (
+        <InlineAnnotation
+          metadata={annotation.metadata}
+          language={filePath ? detectLanguage(filePath) : undefined}
+          onSelect={onSelectAnnotation}
+          onEdit={handleEditAnnotation}
+          onDelete={onDeleteAnnotation}
+        />
+      );
+    },
+  );
+
   // Reset to a fresh state when the file set changes (diff switch). CodeView
   // itself is remounted via `fileSetKey`; this clears the React-side toolbar /
   // selection / active-file / header state so nothing keys off a file from the
@@ -360,6 +486,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     prevStagedRef.current = stagedFiles;
     prevStagingRef.current = stagingFile;
     prevStageErrorRef.current = stageError;
+    // Annotations are seeded into the remounted items at build time, so resync
+    // the snapshot here to avoid a spurious full annotation refresh post-remount.
+    prevAnnotationsRef.current = annotations;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileSetKey]);
 
@@ -415,6 +544,75 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     item.version = (item.version ?? 0) + 1;
     handle.updateItem(item);
   }, []);
+
+  // --- Annotations through CodeView item state (P4) ---------------------------
+
+  // Set an item's annotations to the current per-file projection, bump version,
+  // and updateItem. Mirrors Diffshub's updateViewerDiffItem (getItem, mutate,
+  // version++, updateItem) but rebuilds the whole annotation array from the
+  // source-of-truth `annotations` rather than splicing a single entry — the diff
+  // is computed at the item granularity by the sync effect below, so only files
+  // whose annotation set actually changed get an updateItem.
+  const syncItemAnnotations = useCallback(
+    (filePath: string, itemId: string, allAnnotations: CodeAnnotation[]) => {
+      const handle = viewerRef.current;
+      const item = handle?.getItem(itemId);
+      if (handle == null || item == null || item.type !== 'diff') return;
+      item.annotations = projectFileAnnotations(allAnnotations, filePath, prUrl, prDiffScope);
+      item.version = (item.version ?? 0) + 1;
+      handle.updateItem(item);
+    },
+    [prUrl, prDiffScope],
+  );
+
+  // Whenever the `annotations` prop changes, re-project per file and updateItem
+  // ONLY on the files whose annotation set changed (so a single add/edit/delete
+  // re-renders just its owning file, never the whole CodeView). Diff is keyed on
+  // a per-file annotation signature so unrelated files are untouched. New diffs
+  // remount CodeView via fileSetKey and seed annotations at build time, so the
+  // diff-switch reset effect resynchronizes prevAnnotationsRef to avoid a
+  // spurious full refresh right after a remount.
+  useEffect(() => {
+    const handle = viewerRef.current;
+    const prev = prevAnnotationsRef.current;
+    prevAnnotationsRef.current = annotations;
+    if (handle == null || prev === annotations) return;
+
+    // Per-file annotation signature: id|line|side|content fingerprint. We only
+    // need to know whether a file's gutter annotations changed, so a stable
+    // string built from the fields that affect rendering is sufficient and far
+    // cheaper than deep-equality of the projected objects.
+    const signatures = (list: CodeAnnotation[]) => {
+      const map = new Map<string, string>();
+      for (const a of list) {
+        if ((a.scope ?? 'line') !== 'line') continue;
+        if (a.prUrl && prUrl && a.prUrl !== prUrl) continue;
+        if (a.diffScope && prDiffScope && a.diffScope !== prDiffScope) continue;
+        const sig =
+          `${a.id} ${a.lineEnd} ${a.side} ${a.type} ` +
+          `${a.text ?? ''} ${a.suggestedCode ?? ''} ${a.originalCode ?? ''} ` +
+          `${a.conventionalLabel ?? ''} ${(a.decorations ?? []).join(',')} ` +
+          `${a.severity ?? ''} ${a.reasoning ?? ''} ${a.author ?? ''}`;
+        map.set(a.filePath, `${map.get(a.filePath) ?? ''}${sig}`);
+      }
+      return map;
+    };
+
+    const nextSig = signatures(annotations);
+    const prevSig = signatures(prev);
+    const changedPaths = new Set<string>();
+    nextSig.forEach((sig, path) => {
+      if (prevSig.get(path) !== sig) changedPaths.add(path);
+    });
+    prevSig.forEach((_sig, path) => {
+      if (!nextSig.has(path)) changedPaths.add(path);
+    });
+
+    for (const path of changedPaths) {
+      const itemId = filePathToItemId.get(path);
+      if (itemId != null) syncItemAnnotations(path, itemId, annotations);
+    }
+  }, [annotations, prUrl, prDiffScope, filePathToItemId, syncItemAnnotations]);
 
   // --- Header actions ---------------------------------------------------------
 
@@ -511,8 +709,20 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     },
   );
 
+  // Reflect the App-level `pendingSelection` (the range the toolbar / AI is
+  // operating on) as CodeView's highlighted lines on the active file. Mirrors
+  // AllFilesDiffView, which passes `pendingSelection` as `selectedLines` to the
+  // active file's FileDiff. Scoped by `activeFilePath` so the highlight only
+  // paints on the file that owns the selection.
+  useEffect(() => {
+    if (!activeFilePath || !pendingSelection) return;
+    const itemId = filePathToItemId.get(activeFilePath);
+    if (itemId == null) return;
+    setSelectedLines({ id: itemId, range: pendingSelection });
+  }, [activeFilePath, pendingSelection, filePathToItemId]);
+
   const handleLineSelectionEnd = useStableCallback(
-    (range: SelectedLineRange | null, item: CodeViewItem<undefined>) => {
+    (range: SelectedLineRange | null, item: CodeViewItem<DiffAnnotationMetadata>) => {
       if (range == null || item.type !== 'diff') return;
       const filePath = itemIdToFilePath.get(item.id);
       if (filePath == null) return;
@@ -521,7 +731,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   );
 
   const handleGutterUtilityClick = useStableCallback(
-    (range: SelectedLineRange, item: CodeViewItem<undefined>) => {
+    (range: SelectedLineRange, item: CodeViewItem<DiffAnnotationMetadata>) => {
       if (item.type !== 'diff') return;
       const filePath = itemIdToFilePath.get(item.id);
       if (filePath == null) return;
@@ -574,6 +784,40 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (viewer == null) return;
     viewer.scrollTo({ type: 'item', id: itemId, align: 'start' });
   }, []);
+
+  // --- Selected-annotation navigation (P4) -----------------------------------
+
+  // Selecting an annotation in the sidebar must expand its owning file (if
+  // collapsed) and scroll to it. We expand via item state (collapsed=false +
+  // version bump + updateItem — the Diffshub pattern), then scrollTo the
+  // annotation's line range so it lands in view. rAF defers the scroll one frame
+  // so the expand's layout has settled before CodeView resolves the line top.
+  useEffect(() => {
+    if (!selectedAnnotationId) return;
+    const ann = annotations.find((a) => a.id === selectedAnnotationId);
+    if (!ann) return;
+    const itemId = filePathToItemId.get(ann.filePath);
+    if (itemId == null) return;
+    const handle = viewerRef.current;
+    if (handle == null) return;
+
+    const item = handle.getItem(itemId);
+    if (item != null && item.collapsed === true) {
+      item.collapsed = false;
+      item.version = (item.version ?? 0) + 1;
+      handle.updateItem(item);
+    }
+
+    const start = Math.min(ann.lineStart, ann.lineEnd);
+    const end = Math.max(ann.lineStart, ann.lineEnd);
+    const side = ann.side === 'new' ? ('additions' as const) : ('deletions' as const);
+    const raf = requestAnimationFrame(() => {
+      const viewer = viewerRef.current;
+      if (viewer == null) return;
+      viewer.scrollTo({ type: 'range', id: itemId, range: { start, end, side } });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [selectedAnnotationId, annotations, filePathToItemId]);
 
   useEffect(() => {
     if (!isActive) return;
@@ -664,7 +908,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
   // --- Custom header render slot (the full Plannotator FileHeader) -----------
 
-  const renderCustomHeader = useStableCallback((item: CodeViewItem<undefined>) => {
+  const renderCustomHeader = useStableCallback((item: CodeViewItem<DiffAnnotationMetadata>) => {
     if (item.type !== 'diff') return null;
     const filePath = itemIdToFilePath.get(item.id);
     if (filePath == null) return null;
@@ -717,7 +961,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // inference. itemMetrics must reflect the custom header height and the
   // unsafeCSS-customized hunk separator height (see constants above), otherwise
   // CodeView's virtualization estimate drifts.
-  const options = useMemo<CodeViewOptions<undefined>>(
+  const options = useMemo<CodeViewOptions<DiffAnnotationMetadata>>(
     () => ({
       themeType: pierreTheme.type,
       unsafeCSS: pierreTheme.css,
@@ -762,7 +1006,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
   return (
     <>
-      <CodeView<undefined>
+      <CodeView<DiffAnnotationMetadata>
         // Remount on diff switch so uncontrolled `initialItems` re-seeds from
         // the freshly computed identity. Without this, switching diff
         // type/base/whitespace/PR with the all-files panel open would keep the
@@ -777,6 +1021,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         onSelectedLinesChange={handleSelectedLinesChange}
         onScroll={handleScroll}
         renderCustomHeader={renderCustomHeader}
+        renderAnnotation={renderAnnotation}
       />
 
       <ToolbarHost

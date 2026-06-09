@@ -22,9 +22,15 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
         expandUnchanged={state.expandUnchanged}
         fontFamily={state.fontFamily}
         fontSize={state.fontSize}
+        annotations={state.allAnnotations}
+        selectedAnnotationId={state.selectedAnnotationId}
+        pendingSelection={state.pendingSelection}
+        reviewBase={state.reviewBase}
         onLineSelection={state.onLineSelection}
         onAddAnnotationForFile={state.onAddAnnotationForFile}
         onEditAnnotation={state.onEditAnnotation}
+        onSelectAnnotation={state.onSelectAnnotation}
+        onDeleteAnnotation={state.onDeleteAnnotation}
         onAddFileCommentForFile={state.onAddFileCommentForFile}
         viewedFiles={state.viewedFiles}
         onToggleViewed={state.onToggleViewed}
