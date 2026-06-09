@@ -130,7 +130,6 @@ const ReviewApp: React.FC = () => {
   const [openSettingsMenu, setOpenSettingsMenu] = useState(false);
   const [showNoAnnotationsDialog, setShowNoAnnotationsDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const allFilesCodeViewEnabled = useConfigValue('allFilesCodeView');
   const diffStyle = useConfigValue('diffStyle');
   const diffOverflow = useConfigValue('diffOverflow');
   const diffIndicators = useConfigValue('diffIndicators');
@@ -340,12 +339,11 @@ const ReviewApp: React.FC = () => {
   }, [dockApi, files]);
 
   const handleRevealSearchMatch = useCallback((match: ReviewSearchMatch) => {
-    // With the all-files CodeView surface active, keep search reveal IN that
-    // surface: ensure the All files panel is mounted + active and let
-    // AllFilesCodeView scroll to + highlight the active match (it reacts to the
-    // activeSearchMatch prop). Switching to the single-file panel instead would
-    // defeat the point of an all-files search.
-    if (allFilesCodeViewEnabled && dockApi) {
+    // Keep search reveal IN the all-files surface: ensure the All files panel is
+    // mounted + active and let AllFilesCodeView scroll to + highlight the active
+    // match (it reacts to the activeSearchMatch prop). Switching to the
+    // single-file panel instead would defeat the point of an all-files search.
+    if (dockApi) {
       const existing = dockApi.getPanel(REVIEW_ALL_FILES_PANEL_ID);
       if (existing) {
         if (dockApi.activePanel?.id !== REVIEW_ALL_FILES_PANEL_ID) existing.api.setActive();
@@ -359,7 +357,7 @@ const ReviewApp: React.FC = () => {
       return;
     }
     openDiffFile(match.filePath);
-  }, [allFilesCodeViewEnabled, dockApi, openDiffFile]);
+  }, [dockApi, openDiffFile]);
 
   const {
     searchQuery,
