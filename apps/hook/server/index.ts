@@ -108,7 +108,7 @@ import {
   hasMarkdownFiles,
 } from "@plannotator/shared/resolve-file";
 import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
-import { statSync, rmSync, realpathSync, existsSync } from "fs";
+import { statSync, rmSync, realpathSync, existsSync, readdirSync } from "fs";
 import { parseRemoteUrl } from "@plannotator/shared/repo";
 import {
   getReviewApprovedPrompt,
@@ -1339,6 +1339,49 @@ if (args[0] === "sessions") {
   // PLAN REVIEW MODE (default)
   // ============================================
 
+  /**
+   * Read the most recently modified .md file from CC's plansDirectory.
+   *
+   * CC's ExitPlanMode tool has no `plan` parameter — it writes the plan to
+   * disk and reads it back internally. The PermissionRequest hook therefore
+   * never receives plan content inline; the only reliable source is the file
+   * CC wrote. This is the intended path for CC, not a fallback shim.
+   */
+  async function readLatestCCPlanFile(): Promise<string> {
+    try {
+      const settingsPath = path.join(
+        process.env.HOME ?? "",
+        ".claude",
+        "settings.json",
+      );
+      if (!existsSync(settingsPath)) return "";
+      const settings: Record<string, any> = JSON.parse(
+        await Bun.file(settingsPath).text(),
+      );
+      const plansDir: string = settings.plansDirectory ?? "claude-code-plans";
+      const resolved = path.isAbsolute(plansDir)
+        ? plansDir
+        : path.join(process.cwd(), plansDir);
+      if (!existsSync(resolved)) return "";
+      const newest = readdirSync(resolved)
+        .filter((f) => f.endsWith(".md"))
+        .map((f) => {
+          // Tolerate broken symlinks / races: a single unreadable entry
+          // must not blank out the whole resolution. mtime -1 sorts last.
+          try {
+            return { f, mtime: statSync(path.join(resolved, f)).mtimeMs };
+          } catch {
+            return { f, mtime: -1 };
+          }
+        })
+        .filter((e) => e.mtime >= 0)
+        .sort((a, b) => b.mtime - a.mtime)[0];
+      return newest ? await Bun.file(path.join(resolved, newest.f)).text() : "";
+    } catch {
+      return "";
+    }
+  }
+
   // Read hook event from stdin
   const eventJson = await Bun.stdin.text();
   if (!eventJson.trim()) {
@@ -1432,7 +1475,7 @@ if (args[0] === "sessions") {
   let isGemini = false;
   let planFilename = "";
 
-  // Detect harness: Gemini sends plan_filename (file on disk), Claude Code sends plan (inline)
+  // Detect harness: Gemini sends plan_filename (file on disk), CC reads from plansDirectory
   planFilename =
     event.tool_input?.plan_filename || event.tool_input?.plan_path || "";
   isGemini = !!planFilename;
@@ -1450,7 +1493,11 @@ if (args[0] === "sessions") {
     );
     planContent = await Bun.file(planFilePath).text();
   } else {
-    planContent = event.tool_input?.plan || "";
+    // CC does not inline plan content in the PermissionRequest hook payload —
+    // ExitPlanMode has no `plan` parameter. Fall back to the most recently
+    // modified .md file in plansDirectory (relative to cwd, matching CC's
+    // own resolution of the plansDirectory setting).
+    planContent = event.tool_input?.plan || (await readLatestCCPlanFile());
   }
 
   permissionMode = event.permission_mode || "default";
