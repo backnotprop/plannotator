@@ -22,6 +22,16 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
         expandUnchanged={state.expandUnchanged}
         fontFamily={state.fontFamily}
         fontSize={state.fontSize}
+        onLineSelection={state.onLineSelection}
+        onAddAnnotationForFile={state.onAddAnnotationForFile}
+        onEditAnnotation={state.onEditAnnotation}
+        onVisibleFileChange={state.onAllFilesVisibleFileChange}
+        isActive={state.isAllFilesActive}
+        aiAvailable={state.aiAvailable}
+        onAskAI={state.onAskAI}
+        isAILoading={state.isAILoading}
+        onViewAIResponse={state.onViewAIResponse}
+        aiHistoryForSelection={state.aiHistoryForSelection}
       />
     );
   }
