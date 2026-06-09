@@ -22,7 +22,7 @@
   "dependencies": {
     "@fontsource-variable/geist-mono": "5.2.7",
     "@fontsource-variable/inter": "^5.2.8",
-    "@pierre/diffs": "1.1.20",
+    "@pierre/diffs": "1.2.8",
     "@plannotator/ai": "workspace:*",
     "@plannotator/shared": "workspace:*",
     "@plannotator/web-highlighter": "^0.8.1",

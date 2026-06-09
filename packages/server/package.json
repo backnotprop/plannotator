@@ -27,7 +27,7 @@
     "*.ts"
   ],
   "dependencies": {
-    "@pierre/diffs": "1.1.20",
+    "@pierre/diffs": "1.2.8",
     "@plannotator/ai": "workspace:*",
     "@plannotator/shared": "workspace:*"
   },
