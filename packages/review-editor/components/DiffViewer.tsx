@@ -13,6 +13,7 @@ import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea'
 import { useOverlayViewport } from '@plannotator/ui/hooks/useOverlayViewport';
 import { FileHeader } from './FileHeader';
 import { getLineNumberFromNode, getSideFromNode, getDiffSelection } from '../utils/diffSelection';
+import { isContentConsistentWithPatch } from '../utils/patchConsistency';
 import { InlineAnnotation } from './InlineAnnotation';
 import { InlineAIMarker } from './InlineAIMarker';
 import type { AIChatEntry } from '../hooks/useAIChat';
@@ -307,6 +308,16 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   // against the complete file (isPartial: false), enabling expansion.
   const augmentedDiff = useMemo(() => {
     if (!fileContents || fileContents.forPath !== filePath || (fileContents.old == null && fileContents.new == null)) return fileDiff;
+    // Stale-content guard (same as AllFilesCodeView): the file may have
+    // changed on disk since the diff was captured — augmenting with contents
+    // that don't reconcile with the patch breaks Pierre's line math. Fall back
+    // to the raw patch for this file.
+    if (!isContentConsistentWithPatch(patch, fileContents.old, fileContents.new)) {
+      console.warn(
+        `DiffViewer: skipping full-content expansion for ${filePath} — file changed since the diff was captured`,
+      );
+      return fileDiff;
+    }
     try {
       const result = processFile(patch, {
         oldFile: fileContents.old != null ? { name: oldPath || filePath, contents: fileContents.old } : undefined,

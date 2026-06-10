@@ -26,6 +26,7 @@ import type { DiffFile } from '../types';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
 import { buildCodeNavRequest } from '../utils/buildCodeNavRequest';
 import { getDiffSelection, getLineNumberFromNode, getSideFromNode } from '../utils/diffSelection';
+import { isContentConsistentWithPatch } from '../utils/patchConsistency';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import { FileHeader } from './FileHeader';
 import { InlineAnnotation } from './InlineAnnotation';
@@ -854,6 +855,21 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           // No content available (e.g. demo mode / binary): mark done so we do
           // not retry on every subsequent render. The raw-patch context still
           // shows; there is just nothing to expand.
+          augmentState.set(itemId, { status: 'done', controller, generation });
+          return;
+        }
+
+        // Stale-content guard: the file may have changed on disk since this
+        // diff was captured (an agent editing/committing mid-review is normal
+        // usage). Augmenting with contents that no longer reconcile with the
+        // patch produces an internally inconsistent FileDiffMetadata — Pierre's
+        // virtualization then fails layout estimation for the item ("trailing
+        // context mismatch", content disappearing while scrolling). Keep the
+        // raw-patch view for this file instead; a diff refresh re-augments.
+        if (!isContentConsistentWithPatch(file.patch, data.oldContent, data.newContent)) {
+          console.warn(
+            `AllFilesCodeView: skipping full-content expansion for ${file.path} — file changed since the diff was captured`,
+          );
           augmentState.set(itemId, { status: 'done', controller, generation });
           return;
         }
