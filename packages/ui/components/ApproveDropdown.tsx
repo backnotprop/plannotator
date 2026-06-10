@@ -15,6 +15,8 @@ interface ApproveDropdownProps {
   agents: Agent[];
   disabled?: boolean;
   isLoading?: boolean;
+  dimmed?: boolean;
+  title?: string;
   extraEntries?: ApproveExtraEntry[];
   showAgentSwitch?: boolean;
 }
@@ -45,6 +47,8 @@ export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
   agents,
   disabled = false,
   isLoading = false,
+  dimmed = false,
+  title,
   extraEntries = [],
   showAgentSwitch,
 }) => {
@@ -87,6 +91,8 @@ export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
 
   const baseClasses = disabled
     ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
+    : dimmed
+      ? 'bg-success/50 text-success-foreground/70 hover:bg-success hover:text-success-foreground'
     : 'bg-success text-success-foreground hover:opacity-90';
 
   const handleApproveClick = () => {
@@ -107,6 +113,7 @@ export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
         <button
           onClick={handleApproveClick}
           disabled={disabled}
+          title={title}
           className={`px-2 py-1 ${hasDropdownContent ? 'rounded-l-md' : 'rounded-md'} text-xs font-medium transition-all ${baseClasses}`}
         >
           {isLoading ? '...' : 'OK'}
@@ -130,6 +137,7 @@ export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
         <button
           onClick={handleApproveClick}
           disabled={disabled}
+          title={title}
           className={`px-2.5 py-1 rounded-l-md text-xs font-medium transition-all ${baseClasses}`}
         >
           {isLoading ? 'Approving...' : (

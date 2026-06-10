@@ -1,5 +1,5 @@
-import type { Origin } from '@plannotator/shared/agents';
-import type { PermissionMode } from '@plannotator/ui/utils/permissionMode';
+import type { Origin } from "@plannotator/shared/agents";
+import type { PermissionMode } from "@plannotator/ui/utils/permissionMode";
 
 export type ApprovalOverride = {
   permissionMode?: PermissionMode;
@@ -21,13 +21,12 @@ export interface ApprovalRequestBody {
 
 export function shouldEnableNativeClearBeforeApprove(options: {
   origin: Origin | null;
-  permissionMode: PermissionMode;
   toolName?: string;
   override?: ApprovalOverride;
 }): boolean {
   return (
-    options.origin === 'claude-code' &&
-    options.toolName === 'ExitPlanMode' &&
+    options.origin === "claude-code" &&
+    options.toolName === "ExitPlanMode" &&
     options.override?.deferToNativeForClear === true
   );
 }
@@ -40,30 +39,42 @@ export function buildApprovalRequestBody(options: {
   planSaveSettings: { enabled: boolean; customPath?: string | null };
   toolName?: string;
 }): ApprovalRequestBody {
-  const { origin, permissionMode, override = {}, effectiveAgent, planSaveSettings, toolName } = options;
+  const {
+    origin,
+    permissionMode,
+    override = {},
+    effectiveAgent,
+    planSaveSettings,
+    toolName,
+  } = options;
   const body: ApprovalRequestBody = {};
 
-  if (origin === 'claude-code') {
+  if (origin === "claude-code") {
     const effectivePermissionMode = override.permissionMode ?? permissionMode;
-    const wantsClearContext = effectivePermissionMode === 'bypassPermissionsClearReminder';
-    const useNativeClear = shouldEnableNativeClearBeforeApprove({ origin, permissionMode, toolName, override });
+    const useNativeClear = shouldEnableNativeClearBeforeApprove({
+      origin,
+      toolName,
+      override,
+    });
 
-    body.permissionMode = wantsClearContext ? 'bypassPermissions' : effectivePermissionMode;
+    body.permissionMode = effectivePermissionMode;
 
     if (useNativeClear) {
       body.deferToNativeForClear = true;
-    } else if (override.clearContextNudge || wantsClearContext) {
+    } else if (override.clearContextNudge) {
       body.clearContextNudge = true;
     }
   }
 
-  if (origin === 'opencode' && effectiveAgent) {
+  if (origin === "opencode" && effectiveAgent) {
     body.agentSwitch = effectiveAgent;
   }
 
   body.planSave = {
     enabled: planSaveSettings.enabled,
-    ...(planSaveSettings.customPath && { customPath: planSaveSettings.customPath }),
+    ...(planSaveSettings.customPath && {
+      customPath: planSaveSettings.customPath,
+    }),
   };
 
   return body;

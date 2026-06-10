@@ -52,10 +52,7 @@
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
  */
 
-import {
-  startPlannotatorServer,
-  handleServerReady,
-} from "@plannotator/server";
+import { startPlannotatorServer, handleServerReady } from "@plannotator/server";
 import {
   startReviewServer,
   handleReviewServerReady,
@@ -64,19 +61,54 @@ import {
   startAnnotateServer,
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
-import { type DiffType, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
-import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
+import {
+  type DiffType,
+  prepareLocalReviewDiff,
+  gitRuntime,
+} from "@plannotator/server/vcs";
+import {
+  loadConfig,
+  resolveDefaultDiffType,
+  resolveUseJina,
+} from "@plannotator/shared/config";
 import { parseReviewArgs } from "@plannotator/shared/review-args";
-import { stripAtPrefix, resolveAtReference } from "@plannotator/shared/at-reference";
+import {
+  stripAtPrefix,
+  resolveAtReference,
+} from "@plannotator/shared/at-reference";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
-import { urlToMarkdown, isConvertedSource } from "@plannotator/shared/url-to-markdown";
-import { fetchRef, createWorktree, removeWorktree, ensureObjectAvailable } from "@plannotator/shared/worktree";
-import { createWorktreePool, type WorktreePool } from "@plannotator/shared/worktree-pool";
-import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getCliInstallUrl, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
+import {
+  urlToMarkdown,
+  isConvertedSource,
+} from "@plannotator/shared/url-to-markdown";
+import {
+  fetchRef,
+  createWorktree,
+  removeWorktree,
+  ensureObjectAvailable,
+} from "@plannotator/shared/worktree";
+import {
+  createWorktreePool,
+  type WorktreePool,
+} from "@plannotator/shared/worktree-pool";
+import {
+  parsePRUrl,
+  checkPRAuth,
+  fetchPR,
+  getCliName,
+  getCliInstallUrl,
+  getMRLabel,
+  getMRNumberLabel,
+  getDisplayRepo,
+} from "@plannotator/server/pr";
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
-import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles } from "@plannotator/shared/resolve-file";
+import {
+  resolveMarkdownFile,
+  resolveUserPath,
+  hasMarkdownFiles,
+} from "@plannotator/shared/resolve-file";
 import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
-import { statSync, rmSync, realpathSync, existsSync } from "fs";
+import { statSync, rmSync, realpathSync, existsSync, readdirSync } from "fs";
 import { parseRemoteUrl } from "@plannotator/shared/repo";
 import {
   getReviewApprovedPrompt,
@@ -85,7 +117,11 @@ import {
   getPlanToolName,
   buildPlanFileRule,
 } from "@plannotator/shared/prompts";
-import { registerSession, unregisterSession, listSessions } from "@plannotator/server/sessions";
+import {
+  registerSession,
+  unregisterSession,
+  listSessions,
+} from "@plannotator/server/sessions";
 import { openBrowser } from "@plannotator/server/browser";
 import { detectProjectName } from "@plannotator/server/project";
 import { hostnameOrFallback } from "@plannotator/shared/project";
@@ -100,8 +136,16 @@ import {
   resolveSessionLogByCwdScan,
   type RenderedMessage,
 } from "./session-log";
-import { findCodexRolloutByThreadId, getLastCodexMessage, getLatestCodexPlan } from "./codex-session";
-import { findCopilotPlanContent, findCopilotSessionForCwd, getLastCopilotMessage } from "./copilot-session";
+import {
+  findCodexRolloutByThreadId,
+  getLastCodexMessage,
+  getLatestCodexPlan,
+} from "./codex-session";
+import {
+  findCopilotPlanContent,
+  findCopilotSessionForCwd,
+  getLastCopilotMessage,
+} from "./copilot-session";
 import {
   formatInteractiveNoArgClarification,
   formatTopLevelHelp,
@@ -112,6 +156,11 @@ import {
 } from "./cli";
 import { ensureClearContextSettingEnabled } from "./clearContextSetting";
 import { formatClaudePlanHookOutput, normalizeClaudeHookEventName } from "./hookDecision";
+import {
+  logInjectorDecision,
+  shouldFireInjector,
+  spawnKeystrokeInjector,
+} from "./keystrokeInjector";
 import path from "path";
 import { tmpdir } from "os";
 
@@ -185,7 +234,9 @@ function emitAnnotateOutcome(result: {
   if (hookFlag) {
     if (result.approved || result.exit) return;
     if (result.feedback) {
-      console.log(JSON.stringify({ decision: "block", reason: result.feedback }));
+      console.log(
+        JSON.stringify({ decision: "block", reason: result.feedback }),
+      );
     }
     return;
   }
@@ -195,7 +246,12 @@ function emitAnnotateOutcome(result: {
     } else if (result.exit) {
       console.log(JSON.stringify({ decision: "dismissed" }));
     } else {
-      console.log(JSON.stringify({ decision: "annotated", feedback: result.feedback || "" }));
+      console.log(
+        JSON.stringify({
+          decision: "annotated",
+          feedback: result.feedback || "",
+        }),
+      );
     }
     return;
   }
@@ -247,12 +303,17 @@ const pasteApiUrl = process.env.PLANNOTATOR_PASTE_URL || undefined;
 // packages/shared/agents.ts (see header comment there).
 const originOverride = process.env.PLANNOTATOR_ORIGIN as Origin | undefined;
 const detectedOrigin: Origin =
-  (originOverride && originOverride in AGENT_CONFIG) ? originOverride :
-  process.env.CODEX_THREAD_ID ? "codex" :
-  process.env.COPILOT_CLI ? "copilot-cli" :
-  process.env.OPENCODE ? "opencode" :
-  process.env.GEMINI_CLI ? "gemini-cli" :
-  "claude-code";
+  originOverride && originOverride in AGENT_CONFIG
+    ? originOverride
+    : process.env.CODEX_THREAD_ID
+      ? "codex"
+      : process.env.COPILOT_CLI
+        ? "copilot-cli"
+        : process.env.OPENCODE
+          ? "opencode"
+          : process.env.GEMINI_CLI
+            ? "gemini-cli"
+            : "claude-code";
 
 if (args[0] === "sessions") {
   // ============================================
@@ -262,7 +323,9 @@ if (args[0] === "sessions") {
   if (args.includes("--clean")) {
     // Force cleanup: list sessions (which auto-removes stale entries)
     const sessions = listSessions();
-    console.error(`Cleaned up stale sessions. ${sessions.length} active session(s) remain.`);
+    console.error(
+      `Cleaned up stale sessions. ${sessions.length} active session(s) remain.`,
+    );
     process.exit(0);
   }
 
@@ -280,7 +343,9 @@ if (args[0] === "sessions") {
     const n = nArg ? parseInt(nArg, 10) : 1;
     const session = sessions[n - 1];
     if (!session) {
-      console.error(`Session #${n} not found. ${sessions.length} active session(s).`);
+      console.error(
+        `Session #${n} not found. ${sessions.length} active session(s).`,
+      );
       process.exit(1);
     }
     await openBrowser(session.url);
@@ -292,13 +357,17 @@ if (args[0] === "sessions") {
   console.error("Active Plannotator sessions:\n");
   for (let i = 0; i < sessions.length; i++) {
     const s = sessions[i];
-    const age = Math.round((Date.now() - new Date(s.startedAt).getTime()) / 60000);
-    const ageStr = age < 60 ? `${age}m` : `${Math.floor(age / 60)}h ${age % 60}m`;
-    console.error(`  #${i + 1}  ${s.mode.padEnd(9)} ${s.project.padEnd(20)} ${s.url.padEnd(28)} ${ageStr} ago`);
+    const age = Math.round(
+      (Date.now() - new Date(s.startedAt).getTime()) / 60000,
+    );
+    const ageStr =
+      age < 60 ? `${age}m` : `${Math.floor(age / 60)}h ${age % 60}m`;
+    console.error(
+      `  #${i + 1}  ${s.mode.padEnd(9)} ${s.project.padEnd(20)} ${s.url.padEnd(28)} ${ageStr} ago`,
+    );
   }
   console.error(`\nReopen with: plannotator sessions --open [N]`);
   process.exit(0);
-
 } else if (args[0] === "review") {
   // ============================================
   // CODE REVIEW MODE
@@ -312,7 +381,9 @@ if (args[0] === "sessions") {
   let rawPatch: string;
   let gitRef: string;
   let diffError: string | undefined;
-  let gitContext: Awaited<ReturnType<typeof prepareLocalReviewDiff>>["gitContext"] | undefined;
+  let gitContext:
+    | Awaited<ReturnType<typeof prepareLocalReviewDiff>>["gitContext"]
+    | undefined;
   let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
   let initialDiffType: DiffType | undefined;
   let agentCwd: string | undefined;
@@ -326,7 +397,9 @@ if (args[0] === "sessions") {
       console.error(`Invalid PR/MR URL: ${urlArg}`);
       console.error("Supported formats:");
       console.error("  GitHub: https://github.com/owner/repo/pull/123");
-      console.error("  GitLab: https://gitlab.com/group/project/-/merge_requests/42");
+      console.error(
+        "  GitLab: https://gitlab.com/group/project/-/merge_requests/42",
+      );
       process.exit(1);
     }
 
@@ -338,7 +411,9 @@ if (args[0] === "sessions") {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("not found") || msg.includes("ENOENT")) {
-        console.error(`${cliName === "gh" ? "GitHub" : "GitLab"} CLI (${cliName}) is not installed.`);
+        console.error(
+          `${cliName === "gh" ? "GitHub" : "GitLab"} CLI (${cliName}) is not installed.`,
+        );
         console.error(`Install it from ${cliUrl}`);
       } else {
         console.error(msg);
@@ -346,7 +421,9 @@ if (args[0] === "sessions") {
       process.exit(1);
     }
 
-    console.error(`Fetching ${getMRLabel(prRef)} ${getMRNumberLabel(prRef)} from ${getDisplayRepo(prRef)}...`);
+    console.error(
+      `Fetching ${getMRLabel(prRef)} ${getMRNumberLabel(prRef)} from ${getDisplayRepo(prRef)}...`,
+    );
     try {
       const pr = await fetchPR(prRef);
       rawPatch = pr.rawPatch;
@@ -364,42 +441,68 @@ if (args[0] === "sessions") {
       let sessionDir: string | undefined;
       try {
         const repoDir = process.cwd();
-        const identifier = prMetadata.platform === "github"
-          ? `${prMetadata.owner}-${prMetadata.repo}-${prMetadata.number}`
-          : `${prMetadata.projectPath.replace(/\//g, "-")}-${prMetadata.iid}`;
+        const identifier =
+          prMetadata.platform === "github"
+            ? `${prMetadata.owner}-${prMetadata.repo}-${prMetadata.number}`
+            : `${prMetadata.projectPath.replace(/\//g, "-")}-${prMetadata.iid}`;
         const suffix = Math.random().toString(36).slice(2, 8);
         // Resolve tmpdir to its real path — on macOS, tmpdir() returns /var/folders/...
         // but processes report /private/var/folders/... which breaks path stripping.
-        sessionDir = path.join(realpathSync(tmpdir()), `plannotator-pr-${identifier}-${suffix}`);
-        const prNumber = prMetadata.platform === "github" ? prMetadata.number : prMetadata.iid;
+        sessionDir = path.join(
+          realpathSync(tmpdir()),
+          `plannotator-pr-${identifier}-${suffix}`,
+        );
+        const prNumber =
+          prMetadata.platform === "github" ? prMetadata.number : prMetadata.iid;
         localPath = path.join(sessionDir, "pool", `pr-${prNumber}`);
-        const fetchRefStr = prMetadata.platform === "github"
-          ? `refs/pull/${prMetadata.number}/head`
-          : `refs/merge-requests/${prMetadata.iid}/head`;
+        const fetchRefStr =
+          prMetadata.platform === "github"
+            ? `refs/pull/${prMetadata.number}/head`
+            : `refs/merge-requests/${prMetadata.iid}/head`;
 
         // Validate inputs from platform API to prevent git flag/path injection
-        if (prMetadata.baseBranch.includes('..') || prMetadata.baseBranch.startsWith('-')) throw new Error(`Invalid base branch: ${prMetadata.baseBranch}`);
-        if (!/^[0-9a-f]{40,64}$/i.test(prMetadata.baseSha)) throw new Error(`Invalid base SHA: ${prMetadata.baseSha}`);
+        if (
+          prMetadata.baseBranch.includes("..") ||
+          prMetadata.baseBranch.startsWith("-")
+        )
+          throw new Error(`Invalid base branch: ${prMetadata.baseBranch}`);
+        if (!/^[0-9a-f]{40,64}$/i.test(prMetadata.baseSha))
+          throw new Error(`Invalid base SHA: ${prMetadata.baseSha}`);
 
         // Detect same-repo vs cross-repo (must match both owner/repo AND host)
         let isSameRepo = false;
         try {
-          const remoteResult = await gitRuntime.runGit(["remote", "get-url", "origin"]);
+          const remoteResult = await gitRuntime.runGit([
+            "remote",
+            "get-url",
+            "origin",
+          ]);
           if (remoteResult.exitCode === 0) {
             const remoteUrl = remoteResult.stdout.trim();
             const currentRepo = parseRemoteUrl(remoteUrl);
-            const prRepo = prMetadata.platform === "github"
-              ? `${prMetadata.owner}/${prMetadata.repo}`
-              : prMetadata.projectPath;
-            const repoMatches = !!currentRepo && currentRepo.toLowerCase() === prRepo.toLowerCase();
+            const prRepo =
+              prMetadata.platform === "github"
+                ? `${prMetadata.owner}/${prMetadata.repo}`
+                : prMetadata.projectPath;
+            const repoMatches =
+              !!currentRepo &&
+              currentRepo.toLowerCase() === prRepo.toLowerCase();
             // Extract host from remote URL to avoid cross-instance false positives (GHE)
             const sshHost = remoteUrl.match(/^[^@]+@([^:]+):/)?.[1];
-            const httpsHost = (() => { try { return new URL(remoteUrl).hostname; } catch { return null; } })();
+            const httpsHost = (() => {
+              try {
+                return new URL(remoteUrl).hostname;
+              } catch {
+                return null;
+              }
+            })();
             const remoteHost = (sshHost || httpsHost || "").toLowerCase();
             const prHost = prMetadata.host.toLowerCase();
             isSameRepo = repoMatches && remoteHost === prHost;
           }
-        } catch { /* not in a git repo — cross-repo path */ }
+        } catch {
+          /* not in a git repo — cross-repo path */
+        }
 
         if (isSameRepo) {
           // ── Same-repo: fast worktree path ──
@@ -409,7 +512,9 @@ if (args[0] === "sessions") {
           // Both MUST happen before the PR head fetch since FETCH_HEAD is what
           // createWorktree uses — the PR head fetch must be last.
           await fetchRef(gitRuntime, prMetadata.baseBranch, { cwd: repoDir });
-          await ensureObjectAvailable(gitRuntime, prMetadata.baseSha, { cwd: repoDir });
+          await ensureObjectAvailable(gitRuntime, prMetadata.baseSha, {
+            cwd: repoDir,
+          });
           // Fetch PR head LAST — sets FETCH_HEAD to the PR tip for createWorktree.
           await fetchRef(gitRuntime, fetchRefStr, { cwd: repoDir });
 
@@ -422,41 +527,65 @@ if (args[0] === "sessions") {
 
           worktreeCleanup = async () => {
             if (worktreePool) await worktreePool.cleanup(gitRuntime);
-            try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
+            try {
+              rmSync(sessionDir, { recursive: true, force: true });
+            } catch {}
           };
           process.once("exit", () => {
             // Best-effort sync cleanup: remove each pool worktree from git, then rm session dir
             try {
               for (const entry of worktreePool?.entries() ?? []) {
-                Bun.spawnSync(["git", "worktree", "remove", "--force", entry.path], { cwd: repoDir });
+                Bun.spawnSync(
+                  ["git", "worktree", "remove", "--force", entry.path],
+                  { cwd: repoDir },
+                );
               }
             } catch {}
-            try { Bun.spawnSync(["rm", "-rf", sessionDir]); } catch {}
+            try {
+              Bun.spawnSync(["rm", "-rf", sessionDir]);
+            } catch {}
           });
         } else {
           // ── Cross-repo: shallow clone + fetch PR head ──
-          const prRepo = prMetadata.platform === "github"
-            ? `${prMetadata.owner}/${prMetadata.repo}`
-            : prMetadata.projectPath;
+          const prRepo =
+            prMetadata.platform === "github"
+              ? `${prMetadata.owner}/${prMetadata.repo}`
+              : prMetadata.projectPath;
           // Validate repo identifier to prevent flag injection via crafted URLs
-          if (/^-/.test(prRepo)) throw new Error(`Invalid repository identifier: ${prRepo}`);
+          if (/^-/.test(prRepo))
+            throw new Error(`Invalid repository identifier: ${prRepo}`);
           const cli = prMetadata.platform === "github" ? "gh" : "glab";
           const host = prMetadata.host;
           // gh/glab repo clone doesn't accept --hostname; set GH_HOST/GITLAB_HOST env instead
           const isDefaultHost = host === "github.com" || host === "gitlab.com";
-          const cloneEnv = isDefaultHost ? undefined : {
-            ...process.env,
-            ...(prMetadata.platform === "github" ? { GH_HOST: host } : { GITLAB_HOST: host }),
-          };
+          const cloneEnv = isDefaultHost
+            ? undefined
+            : {
+                ...process.env,
+                ...(prMetadata.platform === "github"
+                  ? { GH_HOST: host }
+                  : { GITLAB_HOST: host }),
+              };
 
           // Step 1: Fast skeleton clone (no checkout, depth 1 — minimal data transfer)
           console.error(`Cloning ${prRepo} (shallow)...`);
           const cloneResult = Bun.spawnSync(
-            [cli, "repo", "clone", prRepo, localPath, "--", "--depth=1", "--no-checkout"],
+            [
+              cli,
+              "repo",
+              "clone",
+              prRepo,
+              localPath,
+              "--",
+              "--depth=1",
+              "--no-checkout",
+            ],
             { stderr: "pipe", env: cloneEnv },
           );
           if (cloneResult.exitCode !== 0) {
-            throw new Error(`${cli} repo clone failed: ${new TextDecoder().decode(cloneResult.stderr).trim()}`);
+            throw new Error(
+              `${cli} repo clone failed: ${new TextDecoder().decode(cloneResult.stderr).trim()}`,
+            );
           }
 
           // Step 2: Fetch only the PR head ref (targeted, much faster than full fetch)
@@ -465,23 +594,54 @@ if (args[0] === "sessions") {
             ["git", "fetch", "--depth=200", "origin", fetchRefStr],
             { cwd: localPath, stderr: "pipe" },
           );
-          if (fetchResult.exitCode !== 0) throw new Error(`Failed to fetch PR head ref: ${new TextDecoder().decode(fetchResult.stderr).trim()}`);
+          if (fetchResult.exitCode !== 0)
+            throw new Error(
+              `Failed to fetch PR head ref: ${new TextDecoder().decode(fetchResult.stderr).trim()}`,
+            );
 
           // Step 3: Checkout PR head (critical — if this fails, worktree is empty)
-          const checkoutResult = Bun.spawnSync(["git", "checkout", "FETCH_HEAD"], { cwd: localPath, stderr: "pipe" });
+          const checkoutResult = Bun.spawnSync(
+            ["git", "checkout", "FETCH_HEAD"],
+            { cwd: localPath, stderr: "pipe" },
+          );
           if (checkoutResult.exitCode !== 0) {
-            throw new Error(`git checkout FETCH_HEAD failed: ${new TextDecoder().decode(checkoutResult.stderr).trim()}`);
+            throw new Error(
+              `git checkout FETCH_HEAD failed: ${new TextDecoder().decode(checkoutResult.stderr).trim()}`,
+            );
           }
 
           // Best-effort: create base refs so `git diff main...HEAD` and `git diff origin/main...HEAD` work
-          const baseFetch = Bun.spawnSync(["git", "fetch", "--depth=200", "origin", prMetadata.baseSha], { cwd: localPath, stderr: "pipe" });
-          if (baseFetch.exitCode !== 0) console.error("Warning: failed to fetch baseSha, agent diffs may be inaccurate");
-          Bun.spawnSync(["git", "branch", "--", prMetadata.baseBranch, prMetadata.baseSha], { cwd: localPath, stderr: "pipe" });
-          Bun.spawnSync(["git", "update-ref", `refs/remotes/origin/${prMetadata.baseBranch}`, prMetadata.baseSha], { cwd: localPath, stderr: "pipe" });
+          const baseFetch = Bun.spawnSync(
+            ["git", "fetch", "--depth=200", "origin", prMetadata.baseSha],
+            { cwd: localPath, stderr: "pipe" },
+          );
+          if (baseFetch.exitCode !== 0)
+            console.error(
+              "Warning: failed to fetch baseSha, agent diffs may be inaccurate",
+            );
+          Bun.spawnSync(
+            ["git", "branch", "--", prMetadata.baseBranch, prMetadata.baseSha],
+            { cwd: localPath, stderr: "pipe" },
+          );
+          Bun.spawnSync(
+            [
+              "git",
+              "update-ref",
+              `refs/remotes/origin/${prMetadata.baseBranch}`,
+              prMetadata.baseSha,
+            ],
+            { cwd: localPath, stderr: "pipe" },
+          );
 
-          worktreeCleanup = () => { try { rmSync(sessionDir, { recursive: true, force: true }); } catch {} };
+          worktreeCleanup = () => {
+            try {
+              rmSync(sessionDir, { recursive: true, force: true });
+            } catch {}
+          };
           process.once("exit", () => {
-            try { Bun.spawnSync(["rm", "-rf", sessionDir]); } catch {}
+            try {
+              Bun.spawnSync(["rm", "-rf", sessionDir]);
+            } catch {}
           });
         }
 
@@ -492,14 +652,22 @@ if (args[0] === "sessions") {
         // Create worktree pool with the initial PR as the first entry
         worktreePool = createWorktreePool(
           { sessionDir, repoDir, isSameRepo },
-          { path: localPath, prUrl: prMetadata.url, number: prNumber, ready: true },
+          {
+            path: localPath,
+            prUrl: prMetadata.url,
+            number: prNumber,
+            ready: true,
+          },
         );
 
         console.error(`Local checkout ready at ${localPath}`);
       } catch (err) {
         console.error(`Warning: --local failed, falling back to remote diff`);
         console.error(err instanceof Error ? err.message : String(err));
-        if (sessionDir) try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
+        if (sessionDir)
+          try {
+            rmSync(sessionDir, { recursive: true, force: true });
+          } catch {}
         agentCwd = undefined;
         worktreePool = undefined;
         worktreeCleanup = undefined;
@@ -541,7 +709,12 @@ if (args[0] === "sessions") {
       handleReviewServerReady(url, isRemote, port);
 
       if (isRemote && sharingEnabled && rawPatch) {
-        await writeRemoteShareLink(rawPatch, shareBaseUrl, "review changes", "diff only").catch(() => {});
+        await writeRemoteShareLink(
+          rawPatch,
+          shareBaseUrl,
+          "review changes",
+          "diff only",
+        ).catch(() => {});
       }
     },
   });
@@ -553,7 +726,9 @@ if (args[0] === "sessions") {
     mode: "review",
     project: reviewProject,
     startedAt: new Date().toISOString(),
-    label: isPRMode ? `${getMRLabel(prMetadata!).toLowerCase()}-review-${getDisplayRepo(prMetadata!)}${getMRNumberLabel(prMetadata!)}` : `review-${reviewProject}`,
+    label: isPRMode
+      ? `${getMRLabel(prMetadata!).toLowerCase()}-review-${getDisplayRepo(prMetadata!)}${getMRNumberLabel(prMetadata!)}`
+      : `review-${reviewProject}`,
   });
 
   // Wait for user feedback
@@ -577,7 +752,6 @@ if (args[0] === "sessions") {
     }
   }
   process.exit(0);
-
 } else if (args[0] === "annotate") {
   // ============================================
   // ANNOTATE MODE
@@ -585,7 +759,9 @@ if (args[0] === "sessions") {
 
   const rawFilePath = args[1];
   if (!rawFilePath) {
-    console.error("Usage: plannotator annotate <file.md | file.html | https://... | folder/>  [--no-jina] [--gate] [--json] [--hook]");
+    console.error(
+      "Usage: plannotator annotate <file.md | file.html | https://... | folder/>  [--no-jina] [--gate] [--json] [--hook]",
+    );
     process.exit(1);
   }
 
@@ -615,31 +791,46 @@ if (args[0] === "sessions") {
 
   if (isUrl) {
     const useJina = resolveUseJina(cliNoJina, loadConfig());
-    console.error(`Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}`);
+    console.error(
+      `Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}`,
+    );
     try {
       const result = await urlToMarkdown(filePath, { useJina });
       markdown = result.markdown;
       sourceConverted = isConvertedSource(result.source);
       if (process.env.PLANNOTATOR_DEBUG) {
-        console.error(`[DEBUG] Fetched via ${result.source} (${markdown.length} chars)`);
+        console.error(
+          `[DEBUG] Fetched via ${result.source} (${markdown.length} chars)`,
+        );
       }
     } catch (err) {
-      console.error(`Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}`);
+      console.error(
+        `Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}`,
+      );
       process.exit(1);
     }
     absolutePath = filePath; // Use URL as the "path" for display
-    sourceInfo = filePath;   // Full URL for source attribution
+    sourceInfo = filePath; // Full URL for source attribution
   } else {
     // Folder check with literal-@ fallback for scoped-package-style names.
     const folderCandidate = resolveAtReference(rawFilePath, (c) => {
-      try { return statSync(resolveUserPath(c, projectRoot)).isDirectory(); }
-      catch { return false; }
+      try {
+        return statSync(resolveUserPath(c, projectRoot)).isDirectory();
+      } catch {
+        return false;
+      }
     });
 
     if (folderCandidate !== null) {
       const resolvedArg = resolveUserPath(folderCandidate, projectRoot);
       // Folder annotation mode (markdown + HTML files)
-      if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED, /\.(mdx?|html?)$/i)) {
+      if (
+        !hasMarkdownFiles(
+          resolvedArg,
+          FILE_BROWSER_EXCLUDED,
+          /\.(mdx?|html?)$/i,
+        )
+      ) {
         console.error(`No markdown or HTML files found in ${resolvedArg}`);
         process.exit(1);
       }
@@ -659,7 +850,9 @@ if (args[0] === "sessions") {
         const resolvedArg = resolveUserPath(htmlCandidate, projectRoot);
         const htmlFile = Bun.file(resolvedArg);
         if (htmlFile.size > 10 * 1024 * 1024) {
-          console.error(`File too large (${Math.round(htmlFile.size / 1024 / 1024)}MB, max 10MB): ${resolvedArg}`);
+          console.error(
+            `File too large (${Math.round(htmlFile.size / 1024 / 1024)}MB, max 10MB): ${resolvedArg}`,
+          );
           process.exit(1);
         }
         const html = await htmlFile.text();
@@ -672,7 +865,9 @@ if (args[0] === "sessions") {
         }
         absolutePath = resolvedArg;
         sourceInfo = path.basename(resolvedArg);
-        console.error(`${renderHtmlFlag ? "Raw HTML" : "Converted"}: ${absolutePath}`);
+        console.error(
+          `${renderHtmlFlag ? "Raw HTML" : "Converted"}: ${absolutePath}`,
+        );
       } else {
         // Single markdown file annotation mode
         // Strip-first with literal-@ fallback (scoped-package-style names).
@@ -682,7 +877,9 @@ if (args[0] === "sessions") {
         }
 
         if (resolved.kind === "ambiguous") {
-          console.error(`Ambiguous filename "${resolved.input}" — found ${resolved.matches.length} matches:`);
+          console.error(
+            `Ambiguous filename "${resolved.input}" — found ${resolved.matches.length} matches:`,
+          );
           for (const match of resolved.matches) {
             console.error(`  ${match}`);
           }
@@ -722,7 +919,12 @@ if (args[0] === "sessions") {
       handleAnnotateServerReady(url, isRemote, port);
 
       if (isRemote && sharingEnabled && markdown) {
-        await writeRemoteShareLink(markdown, shareBaseUrl, "annotate", "document only").catch(() => {});
+        await writeRemoteShareLink(
+          markdown,
+          shareBaseUrl,
+          "annotate",
+          "document only",
+        ).catch(() => {});
       }
     },
   });
@@ -751,7 +953,6 @@ if (args[0] === "sessions") {
   // Output feedback (captured by slash command)
   emitAnnotateOutcome(result);
   process.exit(0);
-
 } else if (args[0] === "annotate-last" || args[0] === "last") {
   // ============================================
   // ANNOTATE LAST MESSAGE MODE
@@ -775,7 +976,11 @@ if (args[0] === "sessions") {
       }
       const msg = getLastCodexMessage(rolloutPath);
       if (msg) {
-        lastMessage = { messageId: codexThreadId, text: msg.text, lineNumbers: [] };
+        lastMessage = {
+          messageId: codexThreadId,
+          text: msg.text,
+          lineNumbers: [],
+        };
       }
     }
   } else {
@@ -805,7 +1010,9 @@ if (args[0] === "sessions") {
       if (lastMessage) return;
       const paths = getPaths();
       if (process.env.PLANNOTATOR_DEBUG) {
-        console.error(`[DEBUG] ${label}: ${paths.length ? paths.join(", ") : "(none)"}`);
+        console.error(
+          `[DEBUG] ${label}: ${paths.length ? paths.join(", ") : "(none)"}`,
+        );
       }
       for (const logPath of paths) {
         lastMessage = getLastRenderedMessage(logPath);
@@ -815,17 +1022,25 @@ if (args[0] === "sessions") {
 
     // 1. Walk ancestor PIDs for a matching session metadata file
     const ancestorLog = resolveSessionLogByAncestorPids();
-    tryLogCandidates("Ancestor PID session metadata", () => ancestorLog ? [ancestorLog] : []);
+    tryLogCandidates("Ancestor PID session metadata", () =>
+      ancestorLog ? [ancestorLog] : [],
+    );
 
     // 2. Scan all session metadata files for one whose cwd matches
     const cwdScanLog = resolveSessionLogByCwdScan({ cwd: projectRoot });
-    tryLogCandidates("Cwd-scan session metadata", () => cwdScanLog ? [cwdScanLog] : []);
+    tryLogCandidates("Cwd-scan session metadata", () =>
+      cwdScanLog ? [cwdScanLog] : [],
+    );
 
     // 3. Fall back to CWD slug match (mtime-based)
-    tryLogCandidates("CWD slug match (mtime)", () => findSessionLogsForCwd(projectRoot));
+    tryLogCandidates("CWD slug match (mtime)", () =>
+      findSessionLogsForCwd(projectRoot),
+    );
 
     // 4. Fall back to ancestor directory walk
-    tryLogCandidates("Directory ancestor walk", () => findSessionLogsByAncestorWalk(projectRoot));
+    tryLogCandidates("Directory ancestor walk", () =>
+      findSessionLogsByAncestorWalk(projectRoot),
+    );
   }
 
   if (!lastMessage) {
@@ -834,7 +1049,9 @@ if (args[0] === "sessions") {
   }
 
   if (process.env.PLANNOTATOR_DEBUG) {
-    console.error(`[DEBUG] Found message ${lastMessage.messageId} (${lastMessage.text.length} chars)`);
+    console.error(
+      `[DEBUG] Found message ${lastMessage.messageId} (${lastMessage.text.length} chars)`,
+    );
   }
 
   const annotateProject = (await detectProjectName()) ?? "_unknown";
@@ -853,7 +1070,12 @@ if (args[0] === "sessions") {
       handleAnnotateServerReady(url, isRemote, port);
 
       if (isRemote && sharingEnabled) {
-        await writeRemoteShareLink(lastMessage.text, shareBaseUrl, "annotate", "message only").catch(() => {});
+        await writeRemoteShareLink(
+          lastMessage.text,
+          shareBaseUrl,
+          "annotate",
+          "message only",
+        ).catch(() => {});
       }
     },
   });
@@ -876,7 +1098,6 @@ if (args[0] === "sessions") {
 
   emitAnnotateOutcome(result);
   process.exit(0);
-
 } else if (args[0] === "archive") {
   // ============================================
   // ARCHIVE BROWSER MODE
@@ -911,7 +1132,6 @@ if (args[0] === "sessions") {
   await Bun.sleep(500);
   server.stop();
   process.exit(0);
-
 } else if (args[0] === "copilot-plan") {
   // ============================================
   // COPILOT CLI PLAN INTERCEPTION MODE
@@ -922,7 +1142,13 @@ if (args[0] === "sessions") {
   // No output = allow the tool call to proceed.
 
   const eventJson = await Bun.stdin.text();
-  let event: { toolName: string; toolArgs: string; cwd: string; timestamp: number; sessionId?: string };
+  let event: {
+    toolName: string;
+    toolArgs: string;
+    cwd: string;
+    timestamp: number;
+    sessionId?: string;
+  };
 
   try {
     event = JSON.parse(eventJson);
@@ -957,7 +1183,12 @@ if (args[0] === "sessions") {
       handleServerReady(url, isRemote, port);
 
       if (isRemote && sharingEnabled) {
-        await writeRemoteShareLink(planContent, shareBaseUrl, "review the plan", "plan only").catch(() => {});
+        await writeRemoteShareLink(
+          planContent,
+          shareBaseUrl,
+          "review the plan",
+          "plan only",
+        ).catch(() => {});
       }
     },
   });
@@ -978,23 +1209,26 @@ if (args[0] === "sessions") {
 
   // Output Copilot CLI permission decision format
   if (result.approved) {
-    console.log(JSON.stringify({
-      permissionDecision: "allow",
-    }));
+    console.log(
+      JSON.stringify({
+        permissionDecision: "allow",
+      }),
+    );
   } else {
     const feedback = getPlanDeniedPrompt("copilot-cli", undefined, {
       toolName: getPlanToolName("copilot-cli"),
       planFileRule: "",
       feedback: result.feedback || "Plan changes requested",
     });
-    console.log(JSON.stringify({
-      permissionDecision: "deny",
-      permissionDecisionReason: feedback,
-    }));
+    console.log(
+      JSON.stringify({
+        permissionDecision: "deny",
+        permissionDecisionReason: feedback,
+      }),
+    );
   }
 
   process.exit(0);
-
 } else if (args[0] === "copilot-last") {
   // ============================================
   // COPILOT CLI ANNOTATE LAST MESSAGE MODE
@@ -1003,7 +1237,9 @@ if (args[0] === "sessions") {
   const projectRoot = process.env.PLANNOTATOR_CWD || process.cwd();
 
   if (process.env.PLANNOTATOR_DEBUG) {
-    console.error(`[DEBUG] Copilot CLI detected, finding session for CWD: ${projectRoot}`);
+    console.error(
+      `[DEBUG] Copilot CLI detected, finding session for CWD: ${projectRoot}`,
+    );
   }
 
   const sessionDir = findCopilotSessionForCwd(projectRoot);
@@ -1042,7 +1278,12 @@ if (args[0] === "sessions") {
       handleAnnotateServerReady(url, isRemote, port);
 
       if (isRemote && sharingEnabled) {
-        await writeRemoteShareLink(msg.text, shareBaseUrl, "annotate", "message only").catch(() => {});
+        await writeRemoteShareLink(
+          msg.text,
+          shareBaseUrl,
+          "annotate",
+          "message only",
+        ).catch(() => {});
       }
     },
   });
@@ -1063,7 +1304,6 @@ if (args[0] === "sessions") {
 
   emitAnnotateOutcome(result);
   process.exit(0);
-
 } else if (args[0] === "improve-context") {
   // ============================================
   // IMPROVEMENT HOOK CONTEXT INJECTION MODE
@@ -1086,19 +1326,63 @@ if (args[0] === "sessions") {
 
   if (context === null) process.exit(0);
 
-  console.log(JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      additionalContext: context,
-    },
-  }));
+  console.log(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        additionalContext: context,
+      },
+    }),
+  );
 
   process.exit(0);
-
 } else {
   // ============================================
   // PLAN REVIEW MODE (default)
   // ============================================
+
+  /**
+   * Read the most recently modified .md file from CC's plansDirectory.
+   *
+   * CC's ExitPlanMode tool has no `plan` parameter — it writes the plan to
+   * disk and reads it back internally. The PermissionRequest hook therefore
+   * never receives plan content inline; the only reliable source is the file
+   * CC wrote. This is the intended path for CC, not a fallback shim.
+   */
+  async function readLatestCCPlanFile(): Promise<string> {
+    try {
+      const settingsPath = path.join(
+        process.env.HOME ?? "",
+        ".claude",
+        "settings.json",
+      );
+      if (!existsSync(settingsPath)) return "";
+      const settings: Record<string, any> = JSON.parse(
+        await Bun.file(settingsPath).text(),
+      );
+      const plansDir: string = settings.plansDirectory ?? "claude-code-plans";
+      const resolved = path.isAbsolute(plansDir)
+        ? plansDir
+        : path.join(process.cwd(), plansDir);
+      if (!existsSync(resolved)) return "";
+      const newest = readdirSync(resolved)
+        .filter((f) => f.endsWith(".md"))
+        .map((f) => {
+          // Tolerate broken symlinks / races: a single unreadable entry
+          // must not blank out the whole resolution. mtime -1 sorts last.
+          try {
+            return { f, mtime: statSync(path.join(resolved, f)).mtimeMs };
+          } catch {
+            return { f, mtime: -1 };
+          }
+        })
+        .filter((e) => e.mtime >= 0)
+        .sort((a, b) => b.mtime - a.mtime)[0];
+      return newest ? await Bun.file(path.join(resolved, newest.f)).text() : "";
+    } catch {
+      return "";
+    }
+  }
 
   // Read hook event from stdin
   const eventJson = await Bun.stdin.text();
@@ -1146,7 +1430,12 @@ if (args[0] === "sessions") {
         handleServerReady(url, isRemote, port);
 
         if (isRemote && sharingEnabled) {
-          await writeRemoteShareLink(latestPlan.text, shareBaseUrl, "review the plan", "plan only").catch(() => {});
+          await writeRemoteShareLink(
+            latestPlan.text,
+            shareBaseUrl,
+            "review the plan",
+            "plan only",
+          ).catch(() => {});
         }
       },
     });
@@ -1176,7 +1465,7 @@ if (args[0] === "sessions") {
             planFileRule: "",
             feedback: result.feedback || "Plan changes requested",
           }),
-        })
+        }),
       );
     }
 
@@ -1188,8 +1477,9 @@ if (args[0] === "sessions") {
   let isGemini = false;
   let planFilename = "";
 
-  // Detect harness: Gemini sends plan_filename (file on disk), Claude Code sends plan (inline)
-  planFilename = event.tool_input?.plan_filename || event.tool_input?.plan_path || "";
+  // Detect harness: Gemini sends plan_filename (file on disk), CC reads from plansDirectory
+  planFilename =
+    event.tool_input?.plan_filename || event.tool_input?.plan_path || "";
   isGemini = !!planFilename;
 
   if (isGemini) {
@@ -1197,10 +1487,19 @@ if (args[0] === "sessions") {
     // transcript_path = <projectTempDir>/chats/session-...json
     // plan lives at   = <projectTempDir>/<session_id>/plans/<plan_filename>
     const projectTempDir = path.dirname(path.dirname(event.transcript_path));
-    const planFilePath = path.join(projectTempDir, event.session_id, "plans", planFilename);
+    const planFilePath = path.join(
+      projectTempDir,
+      event.session_id,
+      "plans",
+      planFilename,
+    );
     planContent = await Bun.file(planFilePath).text();
   } else {
-    planContent = event.tool_input?.plan || "";
+    // CC does not inline plan content in the PermissionRequest hook payload —
+    // ExitPlanMode has no `plan` parameter. Fall back to the most recently
+    // modified .md file in plansDirectory (relative to cwd, matching CC's
+    // own resolution of the plansDirectory setting).
+    planContent = event.tool_input?.plan || (await readLatestCCPlanFile());
   }
 
   permissionMode = event.permission_mode || "default";
@@ -1232,7 +1531,12 @@ if (args[0] === "sessions") {
       handleServerReady(url, isRemote, port);
 
       if (isRemote && sharingEnabled) {
-        await writeRemoteShareLink(planContent, shareBaseUrl, "review the plan", "plan only").catch(() => {});
+        await writeRemoteShareLink(
+          planContent,
+          shareBaseUrl,
+          "review the plan",
+          "plan only",
+        ).catch(() => {});
       }
     },
   });
@@ -1259,41 +1563,92 @@ if (args[0] === "sessions") {
   // Output decision in the appropriate format for the harness
   if (isGemini) {
     if (result.approved) {
-      console.log(result.feedback ? JSON.stringify({ systemMessage: result.feedback }) : "{}");
+      console.log(
+        result.feedback
+          ? JSON.stringify({ systemMessage: result.feedback })
+          : "{}",
+      );
     } else {
       console.log(
         JSON.stringify({
           decision: "deny",
           reason: getPlanDeniedPrompt("gemini-cli", undefined, {
             toolName: getPlanToolName("gemini-cli"),
-            planFileRule: buildPlanFileRule(getPlanToolName("gemini-cli"), planFilename),
+            planFileRule: buildPlanFileRule(
+              getPlanToolName("gemini-cli"),
+              planFilename,
+            ),
             feedback: result.feedback || "Plan changes requested",
           }),
-        })
+        }),
       );
     }
   } else {
     const hookEventName = normalizeClaudeHookEventName(event.hook_event_name);
     const nativeClearEnabled =
       result.approved &&
-      result.deferToNativeForClear &&
-      hookEventName === "PreToolUse" &&
-      toolName === "ExitPlanMode"
-        ? await ensureClearContextSettingEnabled()
-        : false;
+      toolName === "ExitPlanMode" &&
+      (result.deferToNativeForClear || result.permissionMode === "deferNative")
+    ) {
+      // Step aside: emit nothing so CC shows its own native plan dialog
+      // (which offers clear-context + bypass). behavior:"defer" is NOT valid
+      // here — it belongs on HookPermissionDecision (PreToolUse), not on
+      // PermissionRequestHookSpecificOutput.decision.
+      const nativeClearEnabled = await ensureClearContextSettingEnabled();
+      if (nativeClearEnabled) {
+        const fire = shouldFireInjector(result);
+        logInjectorDecision(result, fire);
+        if (fire) {
+          spawnKeystrokeInjector();
+        }
+        process.exit(0);
+      }
+      result.clearContextNudge = true;
+      result.permissionMode = "bypassPermissions";
+    }
 
-    console.log(
-      JSON.stringify(
-        formatClaudePlanHookOutput({
-          result,
-          hookEventName,
-          toolName,
-          detectedOrigin,
-          nativeClearEnabled,
-          planFilename,
-        })
-      )
-    );
+    if (result.approved) {
+      const updatedPermissions = [];
+      if (result.permissionMode) {
+        updatedPermissions.push({
+          type: "setMode",
+          mode: result.permissionMode,
+          destination: "session",
+        });
+      }
+
+      console.log(
+        JSON.stringify({
+          ...(result.clearContextNudge && {
+            systemMessage:
+              "Plannotator requested bypass mode. Hooks cannot clear context. Run /clear before continuing if you want a fresh implementation session.",
+          }),
+          hookSpecificOutput: {
+            hookEventName: "PermissionRequest",
+            decision: {
+              behavior: "allow",
+              ...(updatedPermissions.length > 0 && { updatedPermissions }),
+            },
+          },
+        }),
+      );
+    } else {
+      console.log(
+        JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: "PermissionRequest",
+            decision: {
+              behavior: "deny",
+              message: getPlanDeniedPrompt(detectedOrigin, undefined, {
+                toolName: getPlanToolName(detectedOrigin),
+                planFileRule: "",
+                feedback: result.feedback || "Plan changes requested",
+              }),
+            },
+          },
+        }),
+      );
+    }
   }
 
   process.exit(0);
