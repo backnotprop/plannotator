@@ -11,6 +11,7 @@ import {
   stripH1,
   buildHashtags,
   buildBearContent,
+  saveToObsidian,
 } from "./integrations";
 
 describe("extractTitle", () => {
@@ -168,5 +169,46 @@ describe("extractTags", () => {
   test("limits to 7 tags", async () => {
     const tags = await extractTags("# One Two Three Four\n\n```go\n```\n```python\n```\n```ruby\n```\n```swift\n```");
     expect(tags.length).toBeLessThanOrEqual(7);
+  });
+});
+
+describe("saveToObsidian", () => {
+  test("writes plan file to temp vault", async () => {
+    const { mkdtempSync } = await import("fs");
+    const { join } = await import("path");
+    const tmpDir = mkdtempSync("/tmp/plannotator-vault-");
+    try {
+      const result = await saveToObsidian({
+        vaultPath: tmpDir,
+        folder: "plannotator",
+        plan: "# Test Plan\n\nSome content",
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.path).toBeString();
+      expect(result.path).toContain(tmpDir);
+      expect(result.path).toContain("plannotator");
+
+      // File should exist and contain the plan
+      const exists = Bun.file(result.path!).size > 0;
+      expect(exists).toBe(true);
+
+      const content = await Bun.file(result.path!).text();
+      expect(content).toContain("# Test Plan");
+      expect(content).toContain("[[Plannotator Plans]]");
+    } finally {
+      const { rmSync } = await import("fs");
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test("fails when vault path does not exist", async () => {
+    const result = await saveToObsidian({
+      vaultPath: "/nonexistent/vault",
+      folder: "plannotator",
+      plan: "# Plan",
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toBeString();
   });
 });
