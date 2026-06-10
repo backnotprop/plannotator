@@ -5,6 +5,7 @@ import { AttachmentsButton } from './AttachmentsButton';
 import { submitHint } from '../utils/platform';
 import { useDraggable } from '../hooks/useDraggable';
 import { SparklesIcon } from './SparklesIcon';
+import { hasUnsavedContent } from '../utils/commentContent';
 
 export interface CommentAskAIContext {
   kind: 'general' | 'selection';
@@ -98,6 +99,8 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   const [position, setPosition] = useState<{ top: number; left: number; flipAbove: boolean; width: number } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const hasContentRef = useRef(false);
+  hasContentRef.current = hasUnsavedContent(text, allowImages ? images : []);
   const { dragPosition, dragHandleProps, wasDragged, reset: resetDrag } = useDraggable(popoverRef);
 
   useEffect(() => {
@@ -157,6 +160,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       // Don't close if clicking inside a child portal (AttachmentsButton, ImageAnnotator, etc.)
       const el = target as HTMLElement;
       if (el.closest?.('[data-popover-layer]')) return;
+      if (hasContentRef.current) return;
       onClose();
     };
 

@@ -316,6 +316,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               initialText={hook.commentPopover.initialText}
               isGlobal={false}
               onSubmit={hook.handleCommentSubmit}
+              onDraftChange={hook.handleCommentDraftChange}
               onClose={hook.handleCommentClose}
               onAskAI={onAskAI}
               askAIContext={{

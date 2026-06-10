@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, type RefObject } from "react"
 import { AnnotationType, type Annotation, type EditorMode, type ImageAttachment } from "../../types";
 import type { QuickLabel } from "../../utils/quickLabels";
 import { getIdentity } from "../../utils/identity";
+import { hasUnsavedContent } from "../../utils/commentContent";
 import type {
   ToolbarState,
   CommentPopoverState,
@@ -76,6 +77,7 @@ export function useHtmlAnnotation({
   commentPopoverRef.current = commentPopover;
   const quickLabelPickerRef = useRef(quickLabelPicker);
   quickLabelPickerRef.current = quickLabelPicker;
+  const commentDirtyRef = useRef(false);
 
   const onAddRef = useRef(onAddAnnotation);
   onAddRef.current = onAddAnnotation;
@@ -122,6 +124,7 @@ export function useHtmlAnnotation({
       const type = e.data.type;
 
       if (type === `${PREFIX}selection`) {
+        if (commentDirtyRef.current) return;
         const msg = e.data as BridgeSelectionMessage;
         pendingTextRef.current = msg.text;
         const anchor = positionAnchor(msg.rect);
@@ -298,13 +301,19 @@ export function useHtmlAnnotation({
         images,
       });
 
+      commentDirtyRef.current = false;
       setCommentPopover(null);
       pendingTextRef.current = "";
     },
     [iframeRef],
   );
 
+  const handleCommentDraftChange = useCallback((text: string, images?: ImageAttachment[]) => {
+    commentDirtyRef.current = hasUnsavedContent(text, images ?? []);
+  }, []);
+
   const handleCommentClose = useCallback(() => {
+    commentDirtyRef.current = false;
     setCommentPopover(null);
     pendingTextRef.current = "";
   }, []);
@@ -390,6 +399,7 @@ export function useHtmlAnnotation({
     handleToolbarClose,
     handleRequestComment,
     handleCommentSubmit,
+    handleCommentDraftChange,
     handleCommentClose,
     handleFloatingQuickLabel,
     handleQuickLabelPickerDismiss,

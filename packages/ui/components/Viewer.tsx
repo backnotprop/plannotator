@@ -241,6 +241,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     handleToolbarClose,
     handleRequestComment,
     handleCommentSubmit: hookCommentSubmit,
+    handleCommentDraftChange: hookCommentDraftChange,
     handleCommentClose: hookCommentClose,
     handleFloatingQuickLabel: hookFloatingQuickLabel,
     handleQuickLabelPickerDismiss: hookQuickLabelPickerDismiss,
@@ -840,6 +841,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               isGlobal={false}
               initialText={hookCommentPopover.initialText}
               onSubmit={hookCommentSubmit}
+              onDraftChange={hookCommentDraftChange}
               onClose={hookCommentClose}
               onAskAI={onAskAI}
               askAIContext={{

@@ -12,6 +12,7 @@ import { AnnotationType } from '../types';
 import type { QuickLabel } from '../utils/quickLabels';
 import { getIdentity } from '../utils/identity';
 import { transformPlainText } from '../utils/inlineTransforms';
+import { hasUnsavedContent } from '../utils/commentContent';
 
 // --- Exported state types ---
 
@@ -59,6 +60,7 @@ export interface UseAnnotationHighlighterReturn {
   handleToolbarClose: () => void;
   handleRequestComment: (initialChar?: string) => void;
   handleCommentSubmit: (text: string, images?: ImageAttachment[]) => void;
+  handleCommentDraftChange: (text: string, images?: ImageAttachment[]) => void;
   handleCommentClose: () => void;
   handleFloatingQuickLabel: (label: QuickLabel) => void;
   handleQuickLabelPickerDismiss: () => void;
@@ -82,6 +84,7 @@ export function useAnnotationHighlighter({
   const onAddAnnotationRef = useRef(onAddAnnotation);
   const onSelectAnnotationRef = useRef(onSelectAnnotation);
   const pendingSourceRef = useRef<any>(null);
+  const commentDirtyRef = useRef(false);
   const justCreatedIdRef = useRef<string | null>(null);
   const lastMousePosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
@@ -511,6 +514,7 @@ export function useAnnotationHighlighter({
             const sel = window.getSelection();
             if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
             if (!containerRef.current?.contains(sel.anchorNode)) return;
+            if (commentDirtyRef.current) return;
             highlighter.fromRange(sel.getRangeAt(0));
           }, 400);
         }
@@ -637,6 +641,13 @@ export function useAnnotationHighlighter({
     setToolbarState(null);
   };
 
+  const setCommentDirty = useCallback((dirty: boolean) => {
+    if (commentDirtyRef.current === dirty) return;
+    commentDirtyRef.current = dirty;
+    if (dirty) highlighterRef.current?.stop();
+    else highlighterRef.current?.run();
+  }, []);
+
   const handleCommentSubmit = (text: string, images?: ImageAttachment[]) => {
     if (!commentPopover) return;
     if (commentPopover.source && highlighterRef.current) {
@@ -647,10 +658,16 @@ export function useAnnotationHighlighter({
       pendingSourceRef.current = null;
       window.getSelection()?.removeAllRanges();
     }
+    setCommentDirty(false);
     setCommentPopover(null);
   };
 
+  const handleCommentDraftChange = useCallback((text: string, images?: ImageAttachment[]) => {
+    setCommentDirty(hasUnsavedContent(text, images ?? []));
+  }, [setCommentDirty]);
+
   const handleCommentClose = useCallback(() => {
+    setCommentDirty(false);
     setCommentPopover(prev => {
       if (prev?.source && highlighterRef.current) {
         highlighterRef.current.remove(prev.source.id);
@@ -659,7 +676,7 @@ export function useAnnotationHighlighter({
       return null;
     });
     window.getSelection()?.removeAllRanges();
-  }, []);
+  }, [setCommentDirty]);
 
   const handleFloatingQuickLabel = useCallback((label: QuickLabel) => {
     if (!quickLabelPicker?.source || !highlighterRef.current) return;
@@ -691,6 +708,7 @@ export function useAnnotationHighlighter({
     handleToolbarClose,
     handleRequestComment,
     handleCommentSubmit,
+    handleCommentDraftChange,
     handleCommentClose,
     handleFloatingQuickLabel,
     handleQuickLabelPickerDismiss,
