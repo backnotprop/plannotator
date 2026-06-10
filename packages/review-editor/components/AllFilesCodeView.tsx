@@ -21,7 +21,6 @@ import type {
   TokenAnnotationMeta,
 } from '@plannotator/ui/types';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
-import { storage } from '@plannotator/ui/utils/storage';
 import { usePierreTheme } from '../hooks/usePierreTheme';
 import type { DiffFile } from '../types';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
@@ -115,17 +114,11 @@ import {
  *
  * P7 finished the edges that made CodeView the sole all-files renderer:
  *
- *  - Center split dragger: the legacy single-file DiffViewer owns a per-file
- *    split dragger; the legacy all-files view had none. With one CodeView
- *    container we add a single dragger here. The `--split-left` / `--split-right`
- *    CSS variables are set on the CodeView CONTAINER (light DOM) — they inherit
- *    through every item's shadow root, so the existing usePierreTheme grid rule
- *    (`[data-diff-type='split'][data-overflow='scroll']`) resizes every split
- *    file's two columns uniformly. The drag overlay is a single vertical line
- *    pinned to the container at `splitRatio` of its width; because it is
- *    positioned relative to the (non-virtualized) container — not to any
- *    individual item — it is unaffected by virtualization, sticky headers, or
- *    CodeView's 12M-px paged scroll rebasing. Only shown in split + scroll mode.
+ *  - No center split dragger: the legacy all-files view never had one, and a
+ *    single global drag line across every file is noise on files where a
+ *    split is meaningless (new/deleted files). Split columns use Pierre's
+ *    default even 1fr/1fr layout; the single-file DiffViewer keeps its
+ *    per-file dragger.
  *  - Token code navigation: Cmd/Ctrl-click a token routes through
  *    `onCodeNavRequest` (parity with the single-file DiffViewer and the legacy
  *    all-files view), with the `pn-token-nav` affordance (the hover-only
@@ -424,48 +417,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const scrollRef = useRef<HTMLDivElement>(null);
   const toolbarHostRef = useRef<ToolbarHostHandle>(null);
 
-  // --- Center split dragger (P7) ----------------------------------------------
-  // One dragger for the whole CodeView container. `--split-left` / `--split-right`
-  // are written on the container (light DOM); they inherit through every item's
-  // shadow root so usePierreTheme's split-grid rule resizes all split files'
-  // columns together. Shares the `review-split-ratio` storage key with the
-  // single-file DiffViewer so the chosen ratio is consistent across surfaces.
-  const showSplitDragger = diffStyle === 'split' && diffOverflow !== 'wrap';
-  const [splitRatio, setSplitRatio] = useState(() => {
-    const saved = storage.getItem('review-split-ratio');
-    const n = saved ? Number(saved) : NaN;
-    return !Number.isNaN(n) && n >= 0.2 && n <= 0.8 ? n : 0.5;
-  });
-  const splitRatioRef = useRef(splitRatio);
-  splitRatioRef.current = splitRatio;
-  const [isDraggingSplit, setIsDraggingSplit] = useState(false);
-
-  const handleSplitDragStart = useCallback((e: React.PointerEvent) => {
-    e.preventDefault();
-    const container = scrollRef.current;
-    if (container == null) return;
-    setIsDraggingSplit(true);
-
-    const onMove = (moveEvent: PointerEvent) => {
-      const rect = container.getBoundingClientRect();
-      if (rect.width <= 0) return;
-      const ratio = (moveEvent.clientX - rect.left) / rect.width;
-      setSplitRatio(Math.min(0.8, Math.max(0.2, ratio)));
-    };
-    const onUp = () => {
-      setIsDraggingSplit(false);
-      document.removeEventListener('pointermove', onMove);
-      document.removeEventListener('pointerup', onUp);
-      storage.setItem('review-split-ratio', String(splitRatioRef.current));
-    };
-    document.addEventListener('pointermove', onMove);
-    document.addEventListener('pointerup', onUp);
-  }, []);
-
-  const resetSplitRatio = useCallback(() => {
-    setSplitRatio(0.5);
-    storage.setItem('review-split-ratio', '0.5');
-  }, []);
+  // NOTE: no center split dragger on this surface (parity with the legacy
+  // all-files view, which never had one). One global drag line spanning every
+  // file is noise on files where a split is meaningless (new/deleted files),
+  // and the columns default to Pierre's even 1fr/1fr split. The single-file
+  // DiffViewer keeps its per-file dragger.
 
   // The file path CodeView currently reports as visible (active-file highlight).
   // Reset on diff switch so stepping/highlighting never anchors on an old file.
@@ -549,24 +505,6 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     () => `${files.length}:${files.map((f, i) => `${f.path}#${patchHashes[i]}`).join('|')}`,
     [files, patchHashes],
   );
-
-  // Push the split ratio onto the container as CSS vars (P7). Setting them on the
-  // scroll container (not per item) is what lets the vars inherit into every
-  // item's shadow DOM where usePierreTheme's split-grid rule lives. Cleared when
-  // not in split+scroll mode so unified / wrap fall back to Pierre's default 1fr
-  // columns. Re-runs on fileSetKey because the CodeView remount recreates the
-  // container element, dropping any previously-set inline vars.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el == null) return;
-    if (showSplitDragger) {
-      el.style.setProperty('--split-left', `${splitRatio}fr`);
-      el.style.setProperty('--split-right', `${1 - splitRatio}fr`);
-    } else {
-      el.style.removeProperty('--split-left');
-      el.style.removeProperty('--split-right');
-    }
-  }, [showSplitDragger, splitRatio, fileSetKey]);
 
   // Visual-order list of file paths (for [/] stepping). Derived from items so it
   // matches CodeView's rendered order exactly.
@@ -1771,7 +1709,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   );
 
   return (
-    <div className={`relative h-full ${isDraggingSplit ? 'select-none' : ''}`}>
+    <div className="relative h-full">
       <CodeView<DiffAnnotationMetadata>
         // Remount on diff switch so uncontrolled `initialItems` re-seeds from
         // the freshly computed identity. Without this, switching diff
@@ -1789,23 +1727,6 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         renderCustomHeader={renderCustomHeader}
         renderAnnotation={renderAnnotation}
       />
-
-      {/* Center split dragger (P7) — one vertical line for the whole CodeView
-          container, pinned at `splitRatio` of its width. Positioned relative to
-          the container (not any virtualized item), so it is unaffected by
-          virtualization, sticky headers, or paged-scroll rebasing. The vars it
-          writes resize every split file's columns uniformly. */}
-      {showSplitDragger && (
-        <div
-          className="absolute top-0 bottom-0 z-20 cursor-col-resize group"
-          style={{ left: `${splitRatio * 100}%`, width: 9, marginLeft: -4 }}
-          onPointerDown={handleSplitDragStart}
-          onDoubleClick={resetSplitRatio}
-          title="Drag to resize columns (double-click to reset)"
-        >
-          <div className="pointer-events-none absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-border transition-[width,background-color] group-hover:w-0.5 group-hover:bg-primary/50 group-active:w-0.5 group-active:bg-primary/70" />
-        </div>
-      )}
 
       <ToolbarHost
         ref={toolbarHostRef}

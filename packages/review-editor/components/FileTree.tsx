@@ -233,24 +233,16 @@ export const FileTree: React.FC<FileTreeProps> = ({
 
   return (
     <aside className="border-r border-border/50 bg-card/30 flex flex-col flex-shrink-0 overflow-hidden" style={{ width: width ?? 256 }}>
-      {/* Header */}
+      {/* Header — controls only, right-aligned (no panel label). The viewed
+          counter sits directly beside the hide-viewed eye toggle it relates to. */}
       <div className="px-3 flex items-center border-b border-border/50" style={{ height: 'var(--panel-header-h)' }}>
-        <div className="w-full flex items-center justify-between">
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-            {searchQuery.trim() ? 'Results' : 'Files'}
-          </span>
+        <div className="w-full flex items-center justify-end">
           <div className="flex items-center gap-1.5">
             {stagedFiles && stagedFiles.size > 0 && (
-              <>
-                <span className="text-xs text-primary font-medium">
-                  {stagedFiles.size} added
-                </span>
-                <span className="text-muted-foreground/40">·</span>
-              </>
+              <span className="text-xs text-primary font-medium">
+                {stagedFiles.size} added
+              </span>
             )}
-            <span className="text-xs text-muted-foreground">
-              {viewedFiles.size}/{files.length}
-            </span>
             {onOpenSearch && (
               <button
                 onClick={onOpenSearch}
@@ -280,6 +272,9 @@ export const FileTree: React.FC<FileTreeProps> = ({
                 </svg>
               )}
             </button>
+            <span className="text-xs text-muted-foreground">
+              {viewedFiles.size}/{files.length}
+            </span>
             {onToggleHideViewed && (
               <button
                 onClick={onToggleHideViewed}
