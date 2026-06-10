@@ -5,6 +5,7 @@ describe("permission mode options", () => {
   test("includes all supported permission modes shown in Settings", () => {
     expect(PERMISSION_MODE_OPTIONS.map((option) => option.value)).toEqual([
       "acceptEdits",
+      "auto",
       "bypassPermissions",
       "default",
       "deferNative",

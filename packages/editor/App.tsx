@@ -51,7 +51,6 @@ import { useActiveSection } from "@plannotator/ui/hooks/useActiveSection";
 import { storage } from "@plannotator/ui/utils/storage";
 import { configStore } from "@plannotator/ui/config";
 import { CompletionOverlay } from "@plannotator/ui/components/CompletionOverlay";
-import { UpdateBanner } from "@plannotator/ui/components/UpdateBanner";
 import {
   getObsidianSettings,
   getEffectiveVaultPath,
@@ -2920,9 +2919,6 @@ const App: React.FC = () => {
             }
             agentLabel={agentName}
           />
-
-          {/* Update notification */}
-          <UpdateBanner origin={origin} isWSL={isWSL} />
 
           {showClearContextBanner && (
             <div
