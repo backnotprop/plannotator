@@ -1112,18 +1112,21 @@ const ReviewApp: React.FC = () => {
     ));
   }, [updateExternalAnnotation, externalAnnotations]);
 
+  // selectedAnnotationId is cleared via a functional update (not a captured
+  // value): this handler is captured by Pierre slot portals (inline annotation
+  // delete buttons) that only republish on item version bumps — a closure over
+  // the state value goes stale and would leave a dangling selection id after
+  // deleting the currently-selected annotation.
   const handleDeleteAnnotation = useCallback((id: string) => {
     const ann = allAnnotationsRef.current.find(a => a.id === id);
     if (ann?.source && externalAnnotations.some(e => e.id === id)) {
       deleteExternalAnnotation(id);
-      if (selectedAnnotationId === id) setSelectedAnnotationId(null);
+      setSelectedAnnotationId(prev => (prev === id ? null : prev));
       return;
     }
     setAnnotations(prev => prev.filter(a => a.id !== id));
-    if (selectedAnnotationId === id) {
-      setSelectedAnnotationId(null);
-    }
-  }, [selectedAnnotationId, deleteExternalAnnotation, externalAnnotations]);
+    setSelectedAnnotationId(prev => (prev === id ? null : prev));
+  }, [deleteExternalAnnotation, externalAnnotations]);
 
   // Handle identity change - update author on existing annotations
   const handleIdentityChange = useCallback((oldIdentity: string, newIdentity: string) => {
@@ -1317,6 +1320,10 @@ const ReviewApp: React.FC = () => {
           setActiveFileIndex(0);
           openDiffFile(nextFiles[0].path);
         }
+        // Line numbers can shift when whitespace handling changes, so a
+        // selection anchored to the old patch is stale — clear it (the
+        // non-preserve branch below already does).
+        setPendingSelection(null);
       } else {
         dockApi?.getPanel(REVIEW_DIFF_PANEL_ID)?.api.close();
         needsInitialDiffPanel.current = true;
@@ -1434,6 +1441,14 @@ const ReviewApp: React.FC = () => {
     fetchDiffSwitch(diffType, selectedBase, { preserveFile: true });
   }, [diffHideWhitespace, origin, reviewMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // isAllFilesActive must be read at CALL time, not captured: this handler is
+  // baked into Pierre slot portals (inline annotation select), which only
+  // republish on item version bumps. A closure captured while the single-file
+  // panel was active would otherwise yank the user out of the all-files tab
+  // into the single-file panel when they click an annotation there.
+  const isAllFilesActiveRef = useRef(isAllFilesActive);
+  isAllFilesActiveRef.current = isAllFilesActive;
+
   // Select annotation - switches file if needed and scrolls to it
   const handleSelectAnnotation = useCallback((id: string | null) => {
     if (!id) {
@@ -1442,7 +1457,7 @@ const ReviewApp: React.FC = () => {
     }
 
     // Find the annotation
-    const annotation = allAnnotations.find(a => a.id === id);
+    const annotation = allAnnotationsRef.current.find(a => a.id === id);
     if (!annotation) {
       setSelectedAnnotationId(id);
       return;
@@ -1450,7 +1465,7 @@ const ReviewApp: React.FC = () => {
 
     // In all-files mode, just set the selection — the panel's scroll-to-annotation
     // effect handles expanding and scrolling. In single-file mode, switch to the file.
-    if (!isAllFilesActive) {
+    if (!isAllFilesActiveRef.current) {
       const fileIndex = files.findIndex(f => f.path === annotation.filePath);
       if (fileIndex !== -1) {
         handleFileSwitch(fileIndex);
@@ -1458,7 +1473,7 @@ const ReviewApp: React.FC = () => {
     }
 
     setSelectedAnnotationId(id);
-  }, [allAnnotations, files, isAllFilesActive, handleFileSwitch]);
+  }, [files, handleFileSwitch]);
 
   // Diff context bundled into local-mode feedback headers so the receiving
   // agent knows which diff the annotations are anchored to. Uses committedBase

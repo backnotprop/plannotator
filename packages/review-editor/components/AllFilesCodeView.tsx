@@ -26,6 +26,7 @@ import { usePierreTheme } from '../hooks/usePierreTheme';
 import type { DiffFile } from '../types';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
 import { buildCodeNavRequest } from '../utils/buildCodeNavRequest';
+import { getDiffSelection, getLineNumberFromNode, getSideFromNode } from '../utils/diffSelection';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import { FileHeader } from './FileHeader';
 import { InlineAnnotation } from './InlineAnnotation';
@@ -42,8 +43,9 @@ import {
  * AllFilesCodeView (migration phases P1 + P2 + P3 + P4)
  *
  * Renders every changed file through ONE Pierre `CodeView` inside a single
- * scroll container, replacing the legacy per-file `FileDiff` list
- * (`AllFilesDiffView`). Gated behind the `allFilesCodeView` config flag.
+ * scroll container. This IS the all-files surface — the legacy per-file
+ * `FileDiff` list (`AllFilesDiffView` + `LazyFileDiff`) and its
+ * `allFilesCodeView` config flag were deleted once the migration completed.
  *
  * P1 established the static, uncontrolled `initialItems` skeleton. P2 locked
  * down item identity and routed navigation + line selection through CodeView's
@@ -91,10 +93,9 @@ import {
  *  - CodeView's `updateItem` re-measures the grown item and resolves the
  *    captured scroll anchor, so the viewport stays put whether the augmented
  *    item is above OR below the fold.
- *  - Fetches are guarded (one per item) and cancellable (AbortController per
- *    item, all aborted on unmount / diff switch), so there is no fetch storm and
- *    no double-fetch. LazyFileDiff is no longer on the CodeView path (it remains
- *    only for the legacy flag-off AllFilesDiffView).
+ *  - Fetches are guarded (one per item per diff generation) and cancellable
+ *    (AbortController per item, all aborted on unmount / diff switch), so there
+ *    is no fetch storm and no double-fetch.
  *
  * P6 (this phase) makes search work over CodeView's recycled DOM:
  *
@@ -112,8 +113,7 @@ import {
  *    (no render is otherwise triggered), and an O(1) effect swaps just the active
  *    match's styling when stepping between matches.
  *
- * P7 (this phase) finishes the edges so CodeView can be the DEFAULT all-files
- * renderer (the `allFilesCodeView` flag now defaults ON):
+ * P7 finished the edges that made CodeView the sole all-files renderer:
  *
  *  - Center split dragger: the legacy single-file DiffViewer owns a per-file
  *    split dragger; the legacy all-files view had none. With one CodeView
@@ -128,17 +128,18 @@ import {
  *    CodeView's 12M-px paged scroll rebasing. Only shown in split + scroll mode.
  *  - Token code navigation: Cmd/Ctrl-click a token routes through
  *    `onCodeNavRequest` (parity with the single-file DiffViewer and the legacy
- *    all-files view), with `pn-token-hover` / `pn-token-nav` affordances. File
- *    identity comes from the CodeView callback context's owning item, never an
- *    active-file side channel.
+ *    all-files view), with the `pn-token-nav` affordance (the hover-only
+ *    `pn-token-hover` class is a single-file DiffViewer extra, here as in the
+ *    legacy all-files view). File identity comes from the CodeView callback
+ *    context's owning item, never an active-file side channel.
  *  - Safari scroll guardian: NOT carried forward. The old DiffViewer guardian
  *    targeted the OverlayScrollbars viewport wrapping many separate FileDiff
  *    shadow nodes and restored scrollTop on a ">200 -> 0" jump heuristic.
  *    CodeView owns its own scroll model and DELIBERATELY rebases the container's
  *    DOM scrollTop into a bounded 12M-px paged window, so that heuristic would
  *    misfire against CodeView's own rebasing. CodeView is the scroll authority
- *    here; we rely on it rather than a guardian that would fight it. (See the
- *    known-gaps note — needs real WebKit validation before legacy removal.)
+ *    here; we rely on it rather than a guardian that would fight it. (Still
+ *    needs real WebKit validation.)
  *
  * The worker pool remains a later phase.
  */
@@ -300,12 +301,24 @@ function buildItemIdentity(
   for (const index of visualOrder) {
     const file = files[index];
     if (!file) continue;
+    // getSingularPatch throws when a patch doesn't parse to exactly one file.
+    // The legacy per-file surface isolated such failures to one FileDiff; here
+    // one bad patch must not take down the whole all-files surface — skip the
+    // file (it remains reachable via the tree / single-file panel).
+    let fileDiff: FileDiffMetadata;
+    try {
+      fileDiff = getSingularPatch(file.patch);
+    } catch (err) {
+      console.warn(`AllFilesCodeView: skipping unparseable patch for ${file.path}`, err);
+      continue;
+    }
     const id = allocateId(file.path);
-    // fileDiff.cacheKey is seeded from the (stable) item id so worker
-    // highlighting (a later phase) caches by a unique per-item key even when
-    // two items share the same display path.
-    const fileDiff = getSingularPatch(file.patch);
-    fileDiff.cacheKey = id;
+    // cacheKey seeds worker highlighting (a later phase), whose cache is a
+    // singleton that SURVIVES fileSetKey remounts — so the key must be unique
+    // per item (duplicate display paths) AND per diff content (the same path
+    // across a base/whitespace/PR switch carries different contents). Patch
+    // length is the same cheap content proxy fileSetKey uses.
+    fileDiff.cacheKey = `${id}#${file.patch.length}`;
     // Seed annotations at build time so the first render (and any remount via
     // fileSetKey) already paints existing annotations without an extra update.
     const fileAnnotations = projectFileAnnotations(annotations, file.path, prUrl, prDiffScope);
@@ -330,7 +343,9 @@ function buildItemIdentity(
 const PANEL_HEADER_HEIGHT = 33; // --panel-header-h
 // Hunk separator height forced by usePierreTheme unsafeCSS:
 //   [data-separator='line-info'] { height: 24px; margin-block: 4px; }
-// => 24 + 4*2 = 32. Pierre's default differs, so omitting this drifts.
+// => 24 + 4*2 = 32. Pierre's own 'line-info' default metric is also 32, so
+// passing it is redundant today — kept explicit so the metric stays pinned to
+// OUR unsafeCSS rule rather than silently tracking a library default.
 const HUNK_SEPARATOR_HEIGHT = 32;
 
 export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
@@ -447,7 +462,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // header DOM (CodeView reuses header elements, so a DOM lookup is unreliable).
   const [fileCommentAnchor, setFileCommentAnchor] = useState<{ el: HTMLElement; filePath: string } | null>(null);
   // Per-file-comment-button ref map so the `c` keyboard shortcut can anchor the
-  // popover without DOM querying. Populated by FileHeader's onFileComment ref.
+  // popover without DOM querying. Eagerly populated/cleared by FileHeader's
+  // fileCommentButtonRef callback as header slots mount/unmount (clicking also
+  // refreshes the entry via handleFileComment).
   const fileCommentButtonRefs = useRef<Map<string, HTMLElement>>(new Map());
 
   // Previous snapshots of header-driving props (see the header-refresh effect
@@ -576,9 +593,23 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       } else {
         pendingToolbarRange.current = range;
         setActiveFilePath(filePath);
+        // Paint the highlight on the TARGET item directly. The mirror effect
+        // below can't be trusted to do this: it no-ops on value-equal ranges
+        // (so a text-drag selecting the same line numbers as the previous
+        // file's selection would leave the highlight stranded there), and it
+        // pairs pendingSelection with activeFilePath, which hasn't committed
+        // yet.
+        const itemId = filePathToItemId.get(filePath);
+        if (itemId != null) setSelectedLines({ id: itemId, range });
+        // Publish the new range alongside the new active file so the
+        // pendingSelection mirror effect never sees the PREVIOUS file's range
+        // paired with the new activeFilePath (one-frame wrong highlight).
+        // openToolbar re-publishes the same range when the deferred flush
+        // runs — harmless duplicate.
+        onLineSelection(range);
       }
     },
-    [activeFilePath],
+    [activeFilePath, onLineSelection, filePathToItemId],
   );
 
   // Once ToolbarHost has remounted against the newly-active file, flush the
@@ -620,14 +651,15 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // pre-filled. ToolbarHost is keyed to the active file's patch; startEdit
   // positions itself by last-known mouse position, so it works regardless of
   // which file the clicked annotation belongs to.
-  const handleEditAnnotation = useCallback(
-    (id: string) => {
-      const ann = annotations.find((a) => a.id === id);
-      if (!ann) return;
-      toolbarHostRef.current?.startEdit(ann);
-    },
-    [annotations],
-  );
+  // useStableCallback + ref read: this handler is baked into slot-portal
+  // elements (InlineAnnotation onEdit) that only republish on version bumps,
+  // so it must resolve the annotation at CALL time, never from a captured
+  // closure.
+  const handleEditAnnotation = useStableCallback((id: string) => {
+    const ann = annotationsRef.current.find((a) => a.id === id);
+    if (!ann) return;
+    toolbarHostRef.current?.startEdit(ann);
+  });
 
   // Render a single annotation from item state. `renderAnnotation` receives both
   // the LineAnnotation and DiffLineAnnotation union — guard `'side' in
@@ -677,12 +709,20 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // Annotations are seeded into the remounted items at build time, so resync
     // the snapshot here to avoid a spurious full annotation refresh post-remount.
     prevAnnotationsRef.current = annotations;
-    // Abort any in-flight content fetches and clear the augmentation guard so
-    // the new diff's items re-fetch full content on their first render. (The old
-    // items are gone after the fileSetKey remount; their ids may also be reused
-    // by the new diff, so the guard must not leak across the switch.)
-    for (const { controller } of augmentRef.current.values()) controller.abort();
-    augmentRef.current.clear();
+    // Garbage-collect STALE-generation content fetches. Generation-aware on
+    // purpose: this passive effect runs AFTER the remounted CodeView's seed
+    // layout effect has already fired the new diff's first postRender wave —
+    // augmentItem has started the NEW generation's fetches by the time we get
+    // here, and a blanket abort+clear would kill our own generation's work
+    // (re-fetch storm at best; an unaugmented initial window if the rAF
+    // second wave loses the race). Stale generations are already inert — the
+    // dedup guard ignores them and isStale() blocks their writes — so this
+    // sweep is pure cleanup.
+    for (const [itemId, entry] of augmentRef.current) {
+      if (entry.generation === fileSetKey) continue;
+      entry.controller.abort();
+      augmentRef.current.delete(itemId);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileSetKey]);
 
@@ -745,16 +785,27 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // fetch storms (an item can re-fire onPostRender on every scroll-driven
   // remount of its element); `controller` lets us abort an in-flight fetch when
   // the diff switches or the component unmounts. Keyed by CodeView item id.
+  // `generation` is the fileSetKey at fetch start. It makes stale entries
+  // self-invalidating across diff switches: the remounted CodeView's first
+  // postRender wave fires BEFORE the diff-switch reset effect can clear this
+  // map (layout vs passive effect timing), so an entry from the previous diff
+  // must not satisfy the dedup guard — and a fetch from the previous diff must
+  // never write into the new diff's (same-id) item.
   const augmentRef = useRef<
-    Map<string, { status: 'pending' | 'done' | 'error'; controller: AbortController }>
+    Map<
+      string,
+      { status: 'pending' | 'done' | 'error'; controller: AbortController; generation: string }
+    >
   >(new Map());
-  // reviewBase / itemIdToFile read through refs so the stable onPostRender
-  // callback always sees the latest values without changing identity (which
-  // would otherwise churn the CodeView options object).
+  // reviewBase / itemIdToFile / fileSetKey read through refs so the stable
+  // onPostRender callback always sees the latest values without changing
+  // identity (which would otherwise churn the CodeView options object).
   const reviewBaseRef = useRef(reviewBase);
   reviewBaseRef.current = reviewBase;
   const itemIdToFileRef = useRef(itemIdToFile);
   itemIdToFileRef.current = itemIdToFile;
+  const fileSetKeyRef = useRef(fileSetKey);
+  fileSetKeyRef.current = fileSetKey;
 
   // Fetch full file contents for one item, reparse with processFile, and swap
   // the item's fileDiff in place so hunk expansion (expand-unchanged gutter
@@ -762,13 +813,26 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // fetch, but updates the existing CodeView item instead of mounting a fresh
   // FileDiff — so CodeView's own virtualization + element pool stay in charge.
   const augmentItem = useCallback((itemId: string) => {
-    const handle = viewerRef.current;
-    if (handle == null) return;
+    // NOTE: deliberately no viewerRef check here. The FIRST onPostRender wave
+    // (every initially visible item) fires synchronously inside CodeView's seed
+    // layout effect, which runs BEFORE useImperativeHandle assigns the handle —
+    // so viewerRef.current is still null at that point. Bailing on a null
+    // handle would make the initial window depend entirely on CodeView's
+    // second (rAF `fitPerfectly`) render wave for augmentation — a library
+    // implementation detail we'd rather not lean on. The handle is only needed
+    // at fetch RESOLUTION, where it is re-read fresh from the ref.
     const augmentState = augmentRef.current;
-    // One fetch per item: 'pending' or already-resolved means do nothing. (An
-    // item re-entering the rendered window re-fires onPostRender, so this guard
-    // is what prevents the fetch storm.)
-    if (augmentState.has(itemId)) return;
+    const generation = fileSetKeyRef.current;
+    // One fetch per item PER DIFF: a same-generation entry ('pending' or
+    // resolved) means do nothing — an item re-entering the rendered window
+    // re-fires onPostRender, and this guard is what prevents the fetch storm.
+    // An entry from a PREVIOUS diff (stale generation) does not count: abort it
+    // and fetch fresh for the new diff's content.
+    const existing = augmentState.get(itemId);
+    if (existing) {
+      if (existing.generation === generation) return;
+      existing.controller.abort();
+    }
 
     // Resolve the file by item id (NOT path) so duplicate display paths each
     // augment with their own DiffFile content.
@@ -776,7 +840,17 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (file == null) return;
 
     const controller = new AbortController();
-    augmentState.set(itemId, { status: 'pending', controller });
+    augmentState.set(itemId, { status: 'pending', controller, generation });
+
+    // A resolution stage is stale when its fetch was aborted (unmount / diff
+    // switch) or the diff generation moved on while the response was in flight
+    // (abort() is a no-op on an already-settled fetch, and the remounted
+    // CodeView reuses path-derived item ids — without the generation check the
+    // OLD diff's content would be written into the NEW diff's item). Stale
+    // stages must not touch augmentState either: it now belongs to the new
+    // generation.
+    const isStale = () =>
+      controller.signal.aborted || fileSetKeyRef.current !== generation;
 
     // Workspace-prefixed paths are passed through verbatim — /api/file-content
     // resolves the prefix back to the owning repo (same contract LazyFileDiff /
@@ -789,11 +863,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     fetch(`/api/file-content?${params}`, { signal: controller.signal })
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { oldContent: string | null; newContent: string | null } | null) => {
+        if (isStale()) return;
         if (!data || (data.oldContent == null && data.newContent == null)) {
           // No content available (e.g. demo mode / binary): mark done so we do
           // not retry on every subsequent render. The raw-patch context still
           // shows; there is just nothing to expand.
-          augmentState.set(itemId, { status: 'done', controller });
+          augmentState.set(itemId, { status: 'done', controller, generation });
           return;
         }
 
@@ -808,45 +883,51 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
               data.newContent != null ? { name: file.path, contents: data.newContent } : undefined,
           });
           if (!result) {
-            augmentState.set(itemId, { status: 'done', controller });
+            augmentState.set(itemId, { status: 'done', controller, generation });
             return;
           }
           augmented = result;
         } catch {
-          augmentState.set(itemId, { status: 'error', controller });
+          augmentState.set(itemId, { status: 'error', controller, generation });
           return;
         }
 
+        // Re-check right before the write: processFile above is synchronous but
+        // an abort / diff switch could have landed since the first check.
+        if (isStale()) return;
         const liveHandle = viewerRef.current;
         const item = liveHandle?.getItem(itemId);
-        // The item may have been torn down (diff switch) between fetch start and
-        // resolution; the diff-switch reset clears augmentRef + aborts, so this
-        // is a belt-and-suspenders guard.
+        // The item may have been torn down between fetch start and resolution;
+        // belt-and-suspenders on top of the staleness check above.
         if (liveHandle == null || item == null || item.type !== 'diff') {
-          augmentState.set(itemId, { status: 'done', controller });
+          augmentState.set(itemId, { status: 'done', controller, generation });
           return;
         }
 
         // cacheKey MUST change when fileDiff contents change (types.ts warning):
         // otherwise the worker / highlight caches would serve the stale partial
-        // AST. Derive a fresh key from the augmented (now full-content) diff.
-        augmented.cacheKey = `${itemId}#full`;
+        // AST. Derive a fresh key from the augmented (now full-content) diff,
+        // scoped by generation so the same item id across diff switches never
+        // collides in a (future) cross-mount worker cache.
+        augmented.cacheKey = `${generation}::${itemId}#full`;
         item.fileDiff = augmented;
         item.version = (item.version ?? 0) + 1;
         // updateItem re-measures the (now taller) item and resolves the captured
         // scroll anchor, so the viewport stays put whether this item is above or
         // below the fold — no manual scroll correction needed.
         liveHandle.updateItem(item);
-        augmentState.set(itemId, { status: 'done', controller });
+        augmentState.set(itemId, { status: 'done', controller, generation });
       })
       .catch((err) => {
-        if (controller.signal.aborted) {
-          // Aborted (unmount / diff switch): drop the entry so a future render of
-          // the same id can re-fetch if needed.
-          augmentState.delete(itemId);
+        if (isStale()) {
+          // Aborted (unmount / diff switch) or superseded: drop the entry only
+          // if it is still ours — a newer generation may already own this id.
+          if (augmentState.get(itemId)?.controller === controller) {
+            augmentState.delete(itemId);
+          }
           return;
         }
-        augmentState.set(itemId, { status: 'error', controller });
+        augmentState.set(itemId, { status: 'error', controller, generation });
         void err;
       });
   }, []);
@@ -874,6 +955,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // are reapplied via rAF so they land after CodeView has (re)written the item's
   // line DOM for this render — applying synchronously here could mark a tree
   // that's about to be overwritten.
+  // Element -> owning item id, maintained by onPostRender below. CodeView
+  // recycles <diffs-container> elements across items, so this is re-registered
+  // on every mount/update and dropped on unmount.
+  const nodeToItemIdRef = useRef(new WeakMap<HTMLElement, string>());
+
   const handlePostRender = useStableCallback(
     (
       node: HTMLElement,
@@ -884,13 +970,65 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       if (context.type !== 'diff') return;
       if (phase === 'unmount') {
         clearItemSearchHighlights(node);
+        nodeToItemIdRef.current.delete(node);
         return;
       }
+      // Track which item currently owns this <diffs-container> element so the
+      // text-drag selection handler can resolve file identity from the
+      // selection's shadow-root host. Registered on every mount/update because
+      // CodeView recycles elements across items.
+      nodeToItemIdRef.current.set(node, context.id);
       augmentItem(context.id);
       const itemId = context.id;
       requestAnimationFrame(() => applyItemHighlights(node, itemId));
     },
   );
+
+  // Parity with DiffViewer: dragging a text selection across multiple lines of
+  // diff CONTENT (not the line-number gutter) opens the annotation toolbar for
+  // that range. CodeView's enableLineSelection only starts drags from the
+  // number column, so without this the all-files surface would silently lose
+  // the select-code-text-to-annotate interaction the single-file panel has.
+  // The owning file comes from the selection's shadow-root host element (each
+  // item renders into its own <diffs-container>), mapped via nodeToItemIdRef.
+  const handleContentTextSelection = useStableCallback(() => {
+    requestAnimationFrame(() => {
+      const root = scrollRef.current;
+      const selection = getDiffSelection(root);
+      if (!selection || selection.isCollapsed || !selection.toString().trim()) return;
+      const anchorLine = getLineNumberFromNode(selection.anchorNode);
+      const focusLine = getLineNumberFromNode(selection.focusNode);
+      if (anchorLine == null || focusLine == null) return;
+      // Single-line drags keep native copy behavior (same rule as DiffViewer).
+      if (anchorLine === focusLine) return;
+      const rootNode = selection.anchorNode?.getRootNode();
+      const host = rootNode instanceof ShadowRoot ? rootNode.host : null;
+      const itemId = host instanceof HTMLElement ? nodeToItemIdRef.current.get(host) : undefined;
+      if (itemId == null) return;
+      const filePath = itemIdToFilePath.get(itemId);
+      if (filePath == null) return;
+      routeSelectionToToolbar(
+        {
+          start: Math.min(anchorLine, focusLine),
+          end: Math.max(anchorLine, focusLine),
+          side: getSideFromNode(selection.anchorNode),
+        },
+        filePath,
+      );
+      selection.removeAllRanges();
+    });
+  });
+
+  // (Re)attach on fileSetKey: the CodeView remount recreates the container
+  // element scrollRef points at, dropping any previously-attached listener.
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (!root) return;
+    const handler = () => handleContentTextSelection();
+    root.addEventListener('mouseup', handler, true);
+    return () => root.removeEventListener('mouseup', handler, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileSetKey]);
 
   // Abort all in-flight content fetches on unmount.
   useEffect(() => {
@@ -1129,22 +1267,45 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     },
   );
 
-  // Reflect the App-level `pendingSelection` (the range the toolbar / AI is
-  // operating on) as CodeView's highlighted lines on the active file. Mirrors
-  // AllFilesDiffView, which passes `pendingSelection` as `selectedLines` to the
-  // active file's FileDiff. Scoped by `activeFilePath` so the highlight only
-  // paints on the file that owns the selection.
+  // Mirror ref so the pendingSelection effect below can compare against the
+  // live CodeView selection without re-running on every drag delta.
+  const selectedLinesRef = useRef(selectedLines);
+  selectedLinesRef.current = selectedLines;
+
+  // Reconcile the App-level `pendingSelection` (the range the toolbar / AI is
+  // operating on) with CodeView's highlighted lines. CodeView selection is
+  // CONTROLLED here, and `onSelectedLinesChange` fires on EVERY drag delta —
+  // each delta already paints `selectedLines` on the owning item (correct id)
+  // AND publishes the range to App. So when pendingSelection matches the live
+  // selection, this effect must do NOTHING: re-deriving the highlight from
+  // `activeFilePath` mid-drag would clear it (activeFilePath only updates at
+  // pointer-up) or paint it on the previously-active file. It only acts on:
+  //   1. pendingSelection cleared (annotation submitted / cancelled / AI done)
+  //      → drop the highlight instead of leaving it stuck on the file.
+  //   2. A toolbar-originated range CodeView doesn't know about (gutter-utility
+  //      click on a not-yet-active file, draft restore) → paint it on the
+  //      active file's item.
   useEffect(() => {
-    if (activeFilePath && pendingSelection) {
+    if (pendingSelection == null) {
+      setSelectedLines(null);
+      return;
+    }
+    const current = selectedLinesRef.current;
+    if (
+      current != null &&
+      current.range.start === pendingSelection.start &&
+      current.range.end === pendingSelection.end &&
+      current.range.side === pendingSelection.side
+    ) {
+      // Selection originated inside CodeView — already on the right item.
+      return;
+    }
+    if (activeFilePath) {
       const itemId = filePathToItemId.get(activeFilePath);
       if (itemId != null) {
         setSelectedLines({ id: itemId, range: pendingSelection });
-        return;
       }
     }
-    // pendingSelection cleared (annotation submitted / cancelled / AI done):
-    // drop the highlight instead of leaving it stuck on the file.
-    setSelectedLines(null);
   }, [activeFilePath, pendingSelection, filePathToItemId]);
 
   const handleLineSelectionEnd = useStableCallback(
@@ -1244,9 +1405,14 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // version bump + updateItem — the Diffshub pattern), then scrollTo the
   // annotation's line range so it lands in view. rAF defers the scroll one frame
   // so the expand's layout has settled before CodeView resolves the line top.
+  // `annotations` is read through the ref, NOT the dep list: this must fire only
+  // when the SELECTION changes. With `annotations` as a dep, any annotation
+  // change while one is selected (add/edit/delete elsewhere, an external SSE
+  // annotation arriving) re-runs the effect and yanks the viewport back to the
+  // selected annotation with zero user action.
   useEffect(() => {
     if (!selectedAnnotationId) return;
-    const ann = annotations.find((a) => a.id === selectedAnnotationId);
+    const ann = annotationsRef.current.find((a) => a.id === selectedAnnotationId);
     if (!ann) return;
     const itemId = filePathToItemId.get(ann.filePath);
     if (itemId == null) return;
@@ -1269,7 +1435,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       viewer.scrollTo({ type: 'range', id: itemId, range: { start, end, side } });
     });
     return () => cancelAnimationFrame(raf);
-  }, [selectedAnnotationId, annotations, filePathToItemId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAnnotationId, filePathToItemId]);
 
   useEffect(() => {
     if (!isActive) return;
@@ -1307,11 +1474,14 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         return;
       }
 
-      // c — open the file-scoped comment popover for the current file.
+      // c — open the file-scoped comment popover for the current file. The
+      // anchor element comes from the eager fileCommentButtonRef registration;
+      // isConnected guards against an element whose header was recycled out of
+      // the rendered window between registration and keypress.
       if (e.key === 'c' && currentPath && onAddFileCommentForFile) {
         e.preventDefault();
         const btn = fileCommentButtonRefs.current.get(currentPath);
-        if (btn) setFileCommentAnchor({ el: btn, filePath: currentPath });
+        if (btn?.isConnected) setFileCommentAnchor({ el: btn, filePath: currentPath });
         return;
       }
 
@@ -1364,7 +1534,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (item.type !== 'diff') return null;
     const filePath = itemIdToFilePath.get(item.id);
     if (filePath == null) return null;
-    const file = files.find((f) => f.path === filePath);
+    // Resolve by item id (NOT files.find by path): duplicate display paths each
+    // have their own DiffFile, and a path lookup would render the FIRST file's
+    // stats on every duplicate's header.
+    const file = itemIdToFile.get(item.id);
     if (file == null) return null;
 
     const collapsed = item.collapsed === true;
@@ -1381,6 +1554,18 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         canStage={canStageFiles}
         stageError={stagingFile === filePath ? stageError : null}
         onFileComment={onAddFileCommentForFile ? (anchorEl) => handleFileComment(filePath, anchorEl) : undefined}
+        // Eager registration so the `c` shortcut can anchor the popover for a
+        // file whose button was never clicked. Detach (null) deletes the entry
+        // — React detaches the old ref before attaching the new one in the
+        // same commit, so a slot republish never leaves the map stale.
+        fileCommentButtonRef={
+          onAddFileCommentForFile
+            ? (el) => {
+                if (el) fileCommentButtonRefs.current.set(filePath, el);
+                else fileCommentButtonRefs.current.delete(filePath);
+              }
+            : undefined
+        }
         collapseToggle={
           <button
             onClick={(e) => {
