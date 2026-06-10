@@ -229,7 +229,10 @@ export function swapActiveSearchHighlight(
       decorateSearchMatch(prev, false);
     }
     if (newActiveId) {
-      const next = root.querySelector(`mark[data-review-search-match="${newActiveId}"]`) as HTMLElement | null;
+      // Match ids embed file paths — CSS.escape so a path character that is
+      // special inside an attribute selector can't throw from querySelector
+      // and silently abort the active-match swap.
+      const next = root.querySelector(`mark[data-review-search-match="${CSS.escape(newActiveId)}"]`) as HTMLElement | null;
       if (next) {
         decorateSearchMatch(next, true);
       }
@@ -274,7 +277,7 @@ export function scrollToSearchMatch(
   const lineEl = root.querySelector(getLineSelector(match)) as HTMLElement | null;
   if (!lineEl) return false;
 
-  const mark = root.querySelector(`mark[data-review-search-match="${match.id}"]`) as HTMLElement | null;
+  const mark = root.querySelector(`mark[data-review-search-match="${CSS.escape(match.id)}"]`) as HTMLElement | null;
   scrollSearchTargetIntoContainer(scrollContainer, mark ?? lineEl);
   mark?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
   return true;

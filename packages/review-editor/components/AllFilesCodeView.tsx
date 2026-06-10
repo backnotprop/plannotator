@@ -642,12 +642,17 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
   // Once ToolbarHost has remounted against the newly-active file, flush the
   // deferred selection so the toolbar opens with the correct file + range.
+  // Keyed on activeFilePath AND activePatch: two different files can carry
+  // byte-identical patch text (two empty new files, the same one-line change),
+  // in which case switching the active file does NOT change activePatch — and
+  // a patch-only dependency would never flush, silently swallowing the
+  // selection.
   useEffect(() => {
     if (pendingToolbarRange.current && activePatch) {
       toolbarHostRef.current?.handleLineSelectionEnd(pendingToolbarRange.current);
       pendingToolbarRange.current = null;
     }
-  }, [activePatch]);
+  }, [activeFilePath, activePatch]);
 
   const handleAddAnnotation = useCallback(
     (
@@ -1117,7 +1122,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // outside the rendered window — the line's marks then paint via onPostRender as
   // CodeView renders the row. rAF defers the scroll one frame so an expand's
   // layout settles before resolving the line top.
+  // Gated on isActive (also a dep): scrolling while this panel is HIDDEN
+  // resolves layout against a display:none container and there is no retry —
+  // bail instead, and the isActive flip re-runs this effect so a match
+  // selected while the panel was hidden scrolls once the panel is shown.
   useEffect(() => {
+    if (!isActive) return;
     if (activeSearchMatch == null) return;
     const itemId = filePathToItemId.get(activeSearchMatch.filePath);
     if (itemId == null) return;
@@ -1143,7 +1153,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       viewer.scrollTo({ type: 'line', id: itemId, lineNumber, side, align: 'center' });
     });
     return () => cancelAnimationFrame(raf);
-  }, [activeSearchMatch, filePathToItemId]);
+  }, [activeSearchMatch, filePathToItemId, isActive]);
 
   // --- Annotations through CodeView item state (P4) ---------------------------
 
@@ -1419,6 +1429,18 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       if (top == null) continue;
       if (top <= scrollTop + 50) bestId = renderedItem.id;
     }
+    // At-bottom override (legacy parity): a short final file pinned at the
+    // container bottom never gets its top above scrollTop+threshold, so the
+    // loop would leave an earlier file active while the user reads the last
+    // one. DOM scrollTop/scrollHeight are consistent with each other even
+    // under CodeView's paged scroll rebasing, so this check is safe.
+    const container = scrollRef.current;
+    if (
+      container != null &&
+      container.scrollTop + container.clientHeight >= container.scrollHeight - 2
+    ) {
+      bestId = rendered[rendered.length - 1].id;
+    }
     const path = itemIdToFilePath.get(bestId) ?? null;
     if (path !== visibleFileRef.current) {
       visibleFileRef.current = path;
@@ -1692,6 +1714,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         hunkSeparatorHeight: HUNK_SEPARATOR_HEIGHT,
         ...(customLineHeight != null && { lineHeight: customLineHeight }),
       },
+      // Dev-only safety net for the hand-maintained itemMetrics above: Pierre
+      // compares its virtualization estimates against measured DOM heights and
+      // warns on drift. Doubly gated — the option only takes effect when the
+      // library itself runs a development build (NODE_ENV), so it is inert in
+      // production even if the flag leaks through.
+      ...(import.meta.env.DEV && { __devOnlyValidateItemHeights: true }),
       onLineSelectionEnd(range, context) {
         handleLineSelectionEnd(range, context.item);
       },

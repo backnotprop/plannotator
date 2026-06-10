@@ -120,6 +120,11 @@ const ReviewApp: React.FC = () => {
   const [annotations, setAnnotations] = useState<CodeAnnotation[]>([]);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [isAllFilesActive, setIsAllFilesActive] = useState(false);
+  // Mirror ref: handlers captured by Pierre slot portals (which only republish
+  // on item version bumps) and early-declared callbacks read the CURRENT value
+  // at call time instead of a stale closure capture.
+  const isAllFilesActiveRef = useRef(isAllFilesActive);
+  isAllFilesActiveRef.current = isAllFilesActive;
   const [isSemanticDiffActive, setIsSemanticDiffActive] = useState(false);
   const [semanticDiffAvailable, setSemanticDiffAvailable] = useState(false);
   const [isDiffPanelActive, setIsDiffPanelActive] = useState(false);
@@ -339,25 +344,14 @@ const ReviewApp: React.FC = () => {
   }, [dockApi, files]);
 
   const handleRevealSearchMatch = useCallback((match: ReviewSearchMatch) => {
-    // Keep search reveal IN the all-files surface: ensure the All files panel is
-    // mounted + active and let AllFilesCodeView scroll to + highlight the active
-    // match (it reacts to the activeSearchMatch prop). Switching to the
-    // single-file panel instead would defeat the point of an all-files search.
-    if (dockApi) {
-      // Mirrors openAllFilesPanel (declared later, so not callable here):
-      // explicitly opening this surface cancels any pending semantic-diff
-      // auto-fallback, same as a manual tab switch.
-      semanticDiffAutoFallbackPending.current = false;
-      const existing = dockApi.getPanel(REVIEW_ALL_FILES_PANEL_ID);
-      if (existing) {
-        if (dockApi.activePanel?.id !== REVIEW_ALL_FILES_PANEL_ID) existing.api.setActive();
-      } else {
-        dockApi.addPanel({
-          id: REVIEW_ALL_FILES_PANEL_ID,
-          component: REVIEW_PANEL_TYPES.ALL_FILES,
-          title: 'All files',
-        });
-      }
+    // Respect the surface the user is in. When the all-files panel is active,
+    // reveal IN PLACE — AllFilesCodeView scrolls to + highlights the active
+    // match via the activeSearchMatch prop. When a single-file panel is active
+    // (or there's no dock yet), open the match's file there instead (legacy
+    // behavior). Unconditionally activating the all-files panel here would
+    // teleport the user out of their tab just for typing a query (reveal also
+    // fires on first-match auto-activation, not only on explicit clicks).
+    if (dockApi && isAllFilesActiveRef.current) {
       return;
     }
     openDiffFile(match.filePath);
@@ -1464,15 +1458,11 @@ const ReviewApp: React.FC = () => {
     fetchDiffSwitch(diffType, selectedBase, { preserveFile: true });
   }, [diffHideWhitespace, origin, reviewMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // isAllFilesActive must be read at CALL time, not captured: this handler is
-  // baked into Pierre slot portals (inline annotation select), which only
-  // republish on item version bumps. A closure captured while the single-file
-  // panel was active would otherwise yank the user out of the all-files tab
-  // into the single-file panel when they click an annotation there.
-  const isAllFilesActiveRef = useRef(isAllFilesActive);
-  isAllFilesActiveRef.current = isAllFilesActive;
-
-  // Select annotation - switches file if needed and scrolls to it
+  // Select annotation - switches file if needed and scrolls to it.
+  // isAllFilesActive is read through the ref (declared with the state): this
+  // handler is baked into Pierre slot portals, which only republish on item
+  // version bumps — a stale captured value would yank the user out of the
+  // all-files tab into the single-file panel when they click an annotation.
   const handleSelectAnnotation = useCallback((id: string | null) => {
     if (!id) {
       setSelectedAnnotationId(null);
