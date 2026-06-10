@@ -11,6 +11,13 @@ import type {
 
 const PREFIX = "plannotator-bridge-";
 
+// Collision-proof annotation ids. `Date.now()` alone repeats within a millisecond,
+// so two quick annotations could share a data-bind-id and clobber each other.
+let htmlAnnSeq = 0;
+function nextHtmlAnnId(): string {
+  return `html-ann-${Date.now().toString(36)}-${(htmlAnnSeq++).toString(36)}`;
+}
+
 interface BridgeSelectionMessage {
   type: `${typeof PREFIX}selection`;
   text: string;
@@ -59,6 +66,16 @@ export function useHtmlAnnotation({
   const pendingTextRef = useRef<string>("");
   const modeRef = useRef(mode);
   modeRef.current = mode;
+  // Mirror toolbar visibility into a ref so the (stable) message handler can gate
+  // type-to-comment on "the markup toolbar is showing", like AnnotationToolbar does.
+  const toolbarStateRef = useRef(toolbarState);
+  toolbarStateRef.current = toolbarState;
+  // Mirror the open comment/quick-label state so the selection-clear handler can
+  // tell whether the user is mid-compose and must keep the captured text alive.
+  const commentPopoverRef = useRef(commentPopover);
+  commentPopoverRef.current = commentPopover;
+  const quickLabelPickerRef = useRef(quickLabelPicker);
+  quickLabelPickerRef.current = quickLabelPicker;
 
   const onAddRef = useRef(onAddAnnotation);
   onAddRef.current = onAddAnnotation;
@@ -85,6 +102,11 @@ export function useHtmlAnnotation({
       const iframe = iframeRef.current;
       if (!iframe) return null;
       const iframeRect = iframe.getBoundingClientRect();
+      // Fresh anchor per selection. The toolbar/popover recompute position only
+      // when their `element` node identity changes, so reusing one anchor div
+      // leaves them pinned to the previous selection. Drop the old one first.
+      if (anchorRef.current) anchorRef.current.remove();
+      anchorRef.current = null;
       const anchor = getOrCreateAnchor();
       anchor.style.top = `${iframeRect.top + bridgeRect.top}px`;
       anchor.style.left = `${iframeRect.left + bridgeRect.left + bridgeRect.width / 2}px`;
@@ -108,7 +130,7 @@ export function useHtmlAnnotation({
         const currentMode = modeRef.current;
 
         if (currentMode === "redline") {
-          const id = `html-ann-${Date.now()}`;
+          const id = nextHtmlAnnId();
           postToIframe(iframeRef.current, { type: `${PREFIX}create-mark`, id, annotationType: "deletion" });
           onAddRef.current?.({
             id,
@@ -122,6 +144,9 @@ export function useHtmlAnnotation({
           });
           pendingTextRef.current = "";
         } else if (currentMode === "comment") {
+          // Release iframe focus so the popover's textarea autofocus lands in the
+          // parent (otherwise the iframe keeps focus and swallows further keys).
+          iframeRef.current?.blur();
           setCommentPopover({
             anchorEl: anchor,
             contextText: msg.text,
@@ -143,7 +168,42 @@ export function useHtmlAnnotation({
 
       if (type === `${PREFIX}selection-clear`) {
         setToolbarState(null);
-        pendingTextRef.current = "";
+        // Keep the captured text alive while a comment/quick-label is open: the user
+        // is composing, and the selection collapsing or scrolling out of view must
+        // not drop the annotation on submit. It's overwritten on the next selection.
+        if (!commentPopoverRef.current && !quickLabelPickerRef.current) {
+          pendingTextRef.current = "";
+        }
+      }
+
+      if (type === `${PREFIX}selection-rect`) {
+        // The iframe content scrolled — move the anchor to the selection's new
+        // position and nudge the toolbar/popover (which listen to window scroll) to
+        // recompute, so they stay attached to the selection.
+        const iframe = iframeRef.current;
+        const anchor = anchorRef.current;
+        if (!iframe || !anchor) return;
+        const r = (e.data as unknown as { rect: { top: number; left: number; width: number; height: number } }).rect;
+        const iframeRect = iframe.getBoundingClientRect();
+        anchor.style.top = `${iframeRect.top + r.top}px`;
+        anchor.style.left = `${iframeRect.left + r.left + r.width / 2}px`;
+        window.dispatchEvent(new Event("scroll"));
+      }
+
+      if (type === `${PREFIX}keytype`) {
+        // Type-to-comment: only when the markup toolbar is showing (matches the
+        // markdown path, where AnnotationToolbar owns this keydown). Open a comment
+        // pre-filled with the typed char.
+        if (!toolbarStateRef.current) return;
+        const key = (e.data as { key?: string }).key;
+        const text = pendingTextRef.current;
+        if (!key || !text) return;
+        const anchor = anchorRef.current ?? getOrCreateAnchor();
+        // Release iframe focus so the popover textarea can take it (and the rest of
+        // the typing) — otherwise the iframe keeps focus and the bridge eats keys.
+        iframeRef.current?.blur();
+        setToolbarState(null);
+        setCommentPopover({ anchorEl: anchor, contextText: text, selectedText: text, initialText: key });
       }
 
       if (type === `${PREFIX}mark-click`) {
@@ -165,7 +225,7 @@ export function useHtmlAnnotation({
         anchorRef.current = null;
       }
     };
-  }, [iframeRef, positionAnchor, onResize]);
+  }, [iframeRef, positionAnchor, onResize, getOrCreateAnchor]);
 
   useEffect(() => {
     if (selectedAnnotationId) {
@@ -186,7 +246,7 @@ export function useHtmlAnnotation({
       const text = pendingTextRef.current;
       if (!text || type !== AnnotationType.DELETION) return;
 
-      const id = `html-ann-${Date.now()}`;
+      const id = nextHtmlAnnId();
       postToIframe(iframeRef.current, { type: `${PREFIX}create-mark`, id, annotationType: "deletion" });
       onAddRef.current?.({
         id,
@@ -218,10 +278,12 @@ export function useHtmlAnnotation({
 
   const handleCommentSubmit = useCallback(
     (comment: string, images?: ImageAttachment[]) => {
-      const text = pendingTextRef.current;
+      // Prefer the text captured when the popover opened — it can't be clobbered by
+      // a later selection change or clear while the user is composing the comment.
+      const text = commentPopoverRef.current?.selectedText || pendingTextRef.current;
       if (!text) return;
 
-      const id = `html-ann-${Date.now()}`;
+      const id = nextHtmlAnnId();
       postToIframe(iframeRef.current, { type: `${PREFIX}create-mark`, id, annotationType: "comment" });
       onAddRef.current?.({
         id,
@@ -256,7 +318,7 @@ export function useHtmlAnnotation({
     (label: QuickLabel, clearState: () => void) => {
       const text = pendingTextRef.current;
       if (!text) return;
-      const id = `html-ann-${Date.now()}`;
+      const id = nextHtmlAnnId();
       postToIframe(iframeRef.current, { type: `${PREFIX}create-mark`, id, annotationType: "comment" });
       onAddRef.current?.({
         id,

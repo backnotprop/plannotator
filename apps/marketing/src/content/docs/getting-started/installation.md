@@ -28,13 +28,12 @@ irm https://plannotator.ai/install.ps1 | iex
 
 ### Guided install
 
-When run in a terminal for the first time, the installer asks three questions:
+When run in a terminal for the first time, the installer asks two questions:
 
 1. **Install the extra skills?** (compound planning, setup-goal, visual explainer) — answering yes launches `npx skills add` so you pick which agents get them in its UI. Skipped automatically if the extras are already installed.
 2. **Make any skills callable by the model?** — answering yes opens a picker (space toggles on macOS/Linux/PowerShell; numbered toggles in the cmd installer). Chosen skills have `disable-model-invocation` removed from their *installed* copies (and the Codex sidecar flipped to match); everything else stays user-invoked only.
-3. **Install Glimpse?** — [`glimpseui`](https://github.com/hazat/glimpse) gives Plannotator a native window instead of a browser tab. Yes runs `npm install -g glimpseui`; the Plannotator runtime auto-detects it on PATH from then on. Skipped automatically if Glimpse is already installed. Disable later anytime with `PLANNOTATOR_GLIMPSE=0`.
 
-Answers are saved to `<data dir>/install-prefs` and reused silently on re-runs — pass `--reconfigure` to change them. **Automated installs are unaffected**: runs without a terminal (CI, scripts) never prompt and keep the defaults (no extras, nothing model-invocable). Automation can opt in explicitly with `--extras` / `--no-extras` / `--model-invocable <list>` / `--glimpse` / `--no-glimpse` / `--non-interactive`.
+Answers are saved to `<data dir>/install-prefs` and reused silently on re-runs — pass `--reconfigure` to change them. **Automated installs are unaffected**: runs without a terminal (CI, scripts) never prompt and keep the defaults (no extras, nothing model-invocable). Automation can opt in explicitly with `--extras` / `--no-extras` / `--model-invocable <list>` / `--non-interactive`.
 
 **Windows CMD:**
 
@@ -111,7 +110,7 @@ claude --plugin-dir ./apps/hook
 
 ### Slash commands
 
-Plannotator's slash commands (`/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`, `/plannotator-archive`) are installed as Claude Code skills in `~/.claude/skills` by the install script — Claude Code skills are user-invocable by directory name, so the command names are unchanged. There is no separate `~/.claude/commands` step.
+Plannotator's slash commands (`/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`) are installed as Claude Code skills in `~/.claude/skills` by the install script — Claude Code skills are user-invocable by directory name, so the command names are unchanged. There is no separate `~/.claude/commands` step.
 
 Upgrading from an older version? The installer removes the legacy `~/.claude/commands/plannotator-*.md` files automatically, but the marketplace plugin's old namespaced `plannotator:*` command entries are managed by Claude Code — run `/plugin marketplace update` once so they disappear from the `/` menu.
 
@@ -220,7 +219,7 @@ Notes:
 - Codex hooks are currently experimental.
 - The current official Codex hooks docs say hooks are disabled on Windows, so this flow is currently macOS/Linux/WSL only.
 
-The installer also copies Plannotator's core skills (`plannotator-review`, `plannotator-annotate`, `plannotator-last`, `plannotator-archive`) into `~/.agents/skills` — the official OpenAI agent skills path. Optional extra skills (compound planning, setup-goal, visual explainer) are not installed by default; add them with:
+The installer also copies Plannotator's core skills (`plannotator-review`, `plannotator-annotate`, `plannotator-last`) into `~/.agents/skills` — the official OpenAI agent skills path. Optional extra skills (compound planning, setup-goal, visual explainer) are not installed by default; add them with:
 
 ```bash
 npx skills add backnotprop/plannotator/apps/skills/extra
@@ -310,7 +309,6 @@ This adds the following slash commands:
 /plannotator-review
 /plannotator-annotate <file|folder|url>
 /plannotator-last
-/plannotator-archive
 ```
 
 Those commands open the browser-based Plannotator review UI and send the result back into the Droid session.

@@ -8,7 +8,7 @@ type PRItem = PRListItem;
 
 const stateColors: Record<PRItem['state'], string> = {
   open: 'text-success',
-  merged: 'text-accent',
+  merged: 'text-annotation-comment',
   closed: 'text-muted-foreground/60',
 };
 
@@ -112,7 +112,7 @@ export function PRSelector({ mrNumberLabel, prTitle, currentNumber, onSelect, di
         <button
           type="button"
           disabled={disabled}
-          className="text-xs text-accent/80 hover:text-accent inline-flex items-center gap-1 truncate max-w-[340px] rounded px-1 -mx-1 transition-colors hover:bg-muted/20 disabled:opacity-60 disabled:cursor-wait"
+          className="text-xs text-annotation-comment/80 hover:text-annotation-comment inline-flex items-center gap-1 truncate max-w-[340px] rounded px-1 -mx-1 transition-colors hover:bg-muted/20 disabled:opacity-60 disabled:cursor-wait"
           title={prTitle}
         >
           <PullRequestIcon className="w-3 h-3 flex-shrink-0" />

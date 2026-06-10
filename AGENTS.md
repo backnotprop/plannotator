@@ -13,7 +13,7 @@ plannotator/
 │   │   ├── server/index.ts       # Entry point (plan + review + annotate + archive subcommands)
 │   │   └── dist/                 # Built single-file apps (index.html, review.html)
 │   ├── opencode-plugin/          # OpenCode plugin
-│   │   ├── commands/             # Slash command stubs (review, annotate, last, archive — plugin intercepts execution)
+│   │   ├── commands/             # Slash command stubs (review, annotate, last — plugin intercepts execution)
 │   │   ├── index.ts              # Plugin entry with submit_plan tool + review/annotate event handlers
 │   │   ├── plannotator.html      # Built plan review app
 │   │   └── review-editor.html    # Built code review app
@@ -28,7 +28,7 @@ plannotator/
 │   │   └── astro.config.mjs      # Astro 5 static site with content collections
 │   ├── kiro-cli/                 # Kiro CLI integration source (consumed by scripts/install.sh; auto-detected via ~/.kiro)
 │   │   ├── agents/plannotator.json   # Example Kiro custom agent
-│   │   └── skills/               # Kiro-specific skill packages (review, annotate, archive); setup-goal + visual-explainer install from apps/skills/extra
+│   │   └── skills/               # Kiro-specific skill packages (review, annotate); setup-goal + visual-explainer install from apps/skills/extra
 │   ├── paste-service/            # Paste service for short URL sharing
 │   │   ├── core/                 # Platform-agnostic logic (handler, storage interface, cors)
 │   │   ├── stores/               # Storage backends (fs, kv, s3)
@@ -45,8 +45,7 @@ plannotator/
 │       ├── core/                  # CORE skills (single-sourced) — installed to ~/.claude/skills and ~/.agents/skills (Codex)
 │       │   ├── plannotator-review/    # Lightweight: opens review UI
 │       │   ├── plannotator-annotate/  # Lightweight: opens annotate UI
-│       │   ├── plannotator-last/      # Lightweight: annotates last message
-│       │   └── plannotator-archive/   # Lightweight: opens read-only archive UI
+│       │   └── plannotator-last/      # Lightweight: annotates last message
 │       └── extra/                 # EXTRA skills — NOT default-installed (except Kiro); add via `npx skills add backnotprop/plannotator/apps/skills/extra`
 │           ├── plannotator-compound/        # Research analysis agent (map-reduce over denied plans)
 │           ├── plannotator-setup-goal/      # Goal package scaffolder for /goal workflows
@@ -232,7 +231,7 @@ Send Annotations → feedback sent to agent session
 ## Archive Flow
 
 ```
-User runs plannotator archive (CLI) or /plannotator-archive (Pi)
+User runs plannotator archive (CLI)
         ↓
 Server starts in mode:"archive", reads ~/.plannotator/plans/
         ↓
@@ -286,8 +285,9 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 
 | Endpoint              | Method | Purpose                                    |
 | --------------------- | ------ | ------------------------------------------ |
-| `/api/diff`           | GET    | Returns `{ rawPatch, gitRef, origin, mode?, diffType, base, hideWhitespace, gitContext, agentCwd? }`. Workspace mode returns `mode: "workspace"` with folder-prefixed paths and no `gitContext`. |
-| `/api/diff/switch`    | POST   | Switch diff type, base branch, or whitespace mode (body: `{ diffType, base?, hideWhitespace? }`) |
+| `/api/diff`           | GET    | Returns `{ rawPatch, gitRef, origin, mode?, diffType, base, hideWhitespace, gitContext, agentCwd?, semanticDiff? }`. Workspace mode returns `mode: "workspace"` with folder-prefixed paths and no `gitContext`. |
+| `/api/diff/switch`    | POST   | Switch diff type, base branch, or whitespace mode (body: `{ diffType, base?, hideWhitespace? }`). Response includes `semanticDiff?`. |
+| `/api/semantic-diff`  | GET    | Runs semantic diff for the active patch and returns parsed sem output or an unavailable/error response (`?fileExt=` / `?fileExts=` optional). |
 | `/api/file-content`   | GET    | Returns `{ oldContent, newContent }` for expandable diff context (`?path=&oldPath=&base=`) |
 | `/api/git-add`        | POST   | Stage/unstage a file (body: `{ filePath, undo? }`) |
 | `/api/feedback`       | POST   | Submit review (body: feedback, annotations, agentSwitch) |
@@ -313,9 +313,9 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/agents/jobs` | POST | Launch an agent job (body: `{ provider, command, label }`) |
 | `/api/agents/jobs` | DELETE | Kill all running agent jobs |
 | `/api/agents/jobs/:id` | DELETE | Kill a specific agent job |
-| `/api/pr-diff-scope` | POST | Switch between layer and full-stack diff scope |
+| `/api/pr-diff-scope` | POST | Switch between layer and full-stack diff scope. Response includes `semanticDiff?`. |
 | `/api/pr-list` | GET | List PRs for the current repo (cached 30s) |
-| `/api/pr-switch` | POST | Switch to a different PR in-place (body: `{ url }`) |
+| `/api/pr-switch` | POST | Switch to a different PR in-place (body: `{ url }`). Response includes `semanticDiff?`. |
 | `/api/tour/:jobId` | GET | Fetch Code Tour result (greeting, stops, checklist) for a completed tour job |
 | `/api/tour/:jobId/checklist` | PUT | Persist checklist item state for a Code Tour |
 | `/api/code-nav/resolve` | POST | Search for symbol definitions and references via ripgrep (body: `{ symbol, filePath, line, charStart, side, language? }`) |

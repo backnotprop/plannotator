@@ -151,7 +151,7 @@ export function StackedPRLabel({
           type="button"
           disabled={isSwitchingScope}
           title={`Stack: comparing vs ${scopeTarget}`}
-          className="text-[10px] text-accent/70 hover:text-accent inline-flex items-center gap-1 whitespace-nowrap transition-colors rounded px-1.5 py-0.5 hover:bg-muted/20 disabled:opacity-60 disabled:cursor-wait"
+          className="text-[10px] text-annotation-comment/70 hover:text-annotation-comment inline-flex items-center gap-1 whitespace-nowrap transition-colors rounded px-1.5 py-0.5 hover:bg-muted/20 disabled:opacity-60 disabled:cursor-wait"
         >
           <svg className="w-[18px] h-[18px] flex-shrink-0" viewBox="0 0 500 400" fill="none" stroke="currentColor" strokeWidth={28} strokeLinejoin="round" strokeLinecap="round">
             <polygon points="250,30 470,160 250,290 30,160" />
@@ -223,7 +223,7 @@ export function StackedPRLabel({
                         </span>
                       )}
                       <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                        node.isCurrent ? 'bg-accent' : node.isDefaultBranch ? 'bg-muted-foreground/30' : merged ? 'bg-muted-foreground/20' : 'bg-muted-foreground/40'
+                        node.isCurrent ? 'bg-annotation-comment' : node.isDefaultBranch ? 'bg-muted-foreground/30' : merged ? 'bg-muted-foreground/20' : 'bg-muted-foreground/40'
                       }`} />
                     </div>
                     <button
@@ -233,19 +233,19 @@ export function StackedPRLabel({
                       title={tooltip}
                       className={`flex items-center gap-1.5 min-w-0 text-xs leading-6 ml-1.5 rounded px-1 -mx-0.5 transition-colors ${
                         node.isCurrent
-                          ? 'text-accent font-medium cursor-default'
+                          ? 'text-annotation-comment font-medium cursor-default'
                           : merged
                             ? 'text-muted-foreground/40 cursor-default'
                             : disabled
                               ? 'text-muted-foreground/40 cursor-not-allowed'
                               : action.kind === 'navigate'
                                 ? 'text-muted-foreground hover:text-foreground hover:bg-muted/30 cursor-pointer'
-                                : 'text-muted-foreground hover:text-accent hover:bg-muted/30 cursor-pointer'
+                                : 'text-muted-foreground hover:text-annotation-comment hover:bg-muted/30 cursor-pointer'
                       }`}
                     >
                       <span className={`truncate ${merged ? 'line-through' : ''}`}>{nodeLabel(node)}</span>
                       {node.isCurrent && (
-                        <span className="text-[9px] text-accent/60 whitespace-nowrap">reviewing</span>
+                        <span className="text-[9px] text-annotation-comment/60 whitespace-nowrap">reviewing</span>
                       )}
                       {merged && (
                         <span className="text-[9px] text-muted-foreground/40 whitespace-nowrap border border-muted-foreground/20 rounded px-0.5 leading-tight">merged</span>

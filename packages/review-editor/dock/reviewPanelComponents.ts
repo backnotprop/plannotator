@@ -4,6 +4,7 @@ import { ReviewAgentJobDetailPanel } from './panels/ReviewAgentJobDetailPanel';
 import { ReviewPRSummaryPanel } from './panels/ReviewPRSummaryPanel';
 import { ReviewPRCommentsPanel } from './panels/ReviewPRCommentsPanel';
 import { ReviewPRChecksPanel } from './panels/ReviewPRChecksPanel';
+import { ReviewSemanticDiffPanel } from './panels/ReviewSemanticDiffPanel';
 import { ReviewAllFilesDiffPanel } from './panels/ReviewAllFilesDiffPanel';
 import { ReviewCodeNavPanel } from './panels/ReviewCodeNavPanel';
 
@@ -17,6 +18,7 @@ export const reviewPanelComponents = {
   [REVIEW_PANEL_TYPES.PR_SUMMARY]: ReviewPRSummaryPanel,
   [REVIEW_PANEL_TYPES.PR_COMMENTS]: ReviewPRCommentsPanel,
   [REVIEW_PANEL_TYPES.PR_CHECKS]: ReviewPRChecksPanel,
+  [REVIEW_PANEL_TYPES.SEMANTIC_DIFF]: ReviewSemanticDiffPanel,
   [REVIEW_PANEL_TYPES.ALL_FILES]: ReviewAllFilesDiffPanel,
   [REVIEW_PANEL_TYPES.CODE_NAV]: ReviewCodeNavPanel,
 } as const;

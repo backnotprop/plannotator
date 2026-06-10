@@ -41,7 +41,7 @@ Restart OpenCode. By default, the `submit_plan` tool is available to OpenCode's 
 Plannotator supports four OpenCode workflows:
 
 - **`plan-agent`** (default): `submit_plan` is available to OpenCode's built-in `plan` agent plus any extra agents listed in `planningAgents`. This keeps Plannotator integrated with OpenCode plan mode without nudging `build` to call it.
-- **`manual`**: `submit_plan` is not registered. Use `/plannotator-last`, `/plannotator-annotate`, `/plannotator-review`, and `/plannotator-archive` when you want Plannotator.
+- **`manual`**: `submit_plan` is not registered. Use `/plannotator-last`, `/plannotator-annotate`, and `/plannotator-review` when you want Plannotator.
 - **`user-managed`**: `submit_plan` is registered but no prompts or agent permissions are modified. You manage which agents can call `submit_plan` via OpenCode's native agent configuration.
 - **`all-agents`**: legacy broad behavior. Primary agents can see and call `submit_plan`.
 

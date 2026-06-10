@@ -66,6 +66,8 @@ interface ViewerProps {
   onRemoveGlobalAttachment?: (path: string) => void;
   repoInfo?: { display: string; branch?: string; host?: string } | null;
   stickyActions?: boolean;
+  /** Render the plan as a floating card on a grid background (shadow/border/padding). Default false. */
+  gridEnabled?: boolean;
   onOpenLinkedDoc?: (path: string) => void;
   onOpenCodeFile?: (path: string) => void;
   imageBaseDir?: string;
@@ -162,6 +164,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   onRemoveGlobalAttachment,
   repoInfo,
   stickyActions = true,
+  gridEnabled = false,
   planDiffStats,
   isPlanDiffActive,
   onPlanDiffToggle,
@@ -532,12 +535,12 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       <article
         ref={containerRef}
         data-print-region="article"
-        className={`w-full bg-card rounded-xl shadow-xl p-5 md:p-8 lg:p-10 xl:p-12 relative border border-border/50 ${inputMethod === 'pinpoint' ? 'cursor-crosshair' : ''}`}
+        className={`w-full bg-card rounded-xl py-5 md:py-8 lg:py-10 xl:py-12 relative ${gridEnabled ? 'px-5 md:px-8 lg:px-10 xl:px-12 shadow-xl border border-border/50' : ''} ${inputMethod === 'pinpoint' ? 'cursor-crosshair' : ''}`}
         style={{ WebkitTouchCallout: 'none' } as React.CSSProperties}
       >
         {/* Repo info + plan diff badge + demo badge + linked doc badge + archive badge - top left */}
         {(repoInfo || hasPreviousVersion || showDemoBadge || linkedDocInfo || archiveInfo || sourceInfo) && (
-          <div data-print-hide className="absolute top-3 left-3 md:top-4 md:left-5">
+          <div data-print-hide className={`absolute top-3 md:top-4 ${gridEnabled ? 'left-3 md:left-5' : 'left-0'}`}>
             <DocBadges
               layout="column"
               repoInfo={repoInfo}
@@ -557,7 +560,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         {stickyActions && <div ref={stickySentinelRef} className="h-0 w-0 float-right" aria-hidden="true" />}
 
         {/* Header buttons - top right */}
-        <div data-print-hide data-sticky-actions className={`${stickyActions ? 'sticky top-3' : ''} z-30 float-right flex items-start gap-1 md:gap-2 rounded-lg p-1 md:p-2 transition-colors duration-150 ${isStuck ? 'bg-card/95 backdrop-blur-sm shadow-sm' : ''} -mr-3 mt-6 md:-mr-5 md:-mt-5 lg:-mr-7 lg:-mt-7 xl:-mr-9 xl:-mt-9`}>
+        <div data-print-hide data-sticky-actions className={`${stickyActions ? 'sticky top-3' : ''} z-30 float-right flex items-start gap-1 md:gap-2 rounded-lg p-1 md:p-2 transition-colors duration-150 ${isStuck ? 'bg-card/95 backdrop-blur-sm shadow-sm' : ''} ${gridEnabled ? '-mr-3 md:-mr-5 lg:-mr-7 xl:-mr-9' : '-mr-1 md:-mr-2'} mt-6 md:-mt-5 lg:-mt-7 xl:-mt-9`}>
           {messagePickerInfo && (
             <button
               onClick={messagePickerInfo.onOpen}

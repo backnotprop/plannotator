@@ -57,7 +57,6 @@ import {
 	hasPlanBrowserHtml,
 	hasReviewBrowserHtml,
 	getStartupErrorMessage,
-	openArchiveBrowserAction,
 	startCodeReviewBrowserSession,
 	startLastMessageAnnotationSession,
 	startMarkdownAnnotationSession,
@@ -393,21 +392,6 @@ export default function plannotator(pi: ExtensionAPI): void {
 		},
 	});
 
-	pi.registerCommand("plannotator-status", {
-		description: "Show plannotator status",
-		handler: async (_args, ctx) => {
-			const parts = [`Phase: ${phase}`];
-			if (lastSubmittedPath) {
-				parts.push(`Plan file: ${lastSubmittedPath}`);
-			}
-			if (checklistItems.length > 0) {
-				const done = checklistItems.filter((t) => t.completed).length;
-				parts.push(`Progress: ${done}/${checklistItems.length}`);
-			}
-			ctx.ui.notify(parts.join("\n"), "info");
-		},
-	});
-
 	pi.registerCommand("plannotator-review", {
 		description: "Open interactive code review for current changes or a PR URL; pass --git to force Git in JJ workspaces",
 		handler: async (args, ctx) => {
@@ -722,31 +706,6 @@ export default function plannotator(pi: ExtensionAPI): void {
 			} catch (err) {
 				ctx.ui.notify(
 					`Failed to start annotation UI: ${getStartupErrorMessage(err)}`,
-					"error",
-				);
-			}
-		},
-	});
-
-	pi.registerCommand("plannotator-archive", {
-		description: "Browse saved plan decisions",
-		handler: async (_args, ctx) => {
-			if (!hasPlanBrowserHtml()) {
-				ctx.ui.notify(
-					"Archive UI not available. Run 'bun run build' in the pi-extension directory.",
-					"error",
-				);
-				return;
-			}
-
-			ctx.ui.notify("Opening plan archive...", "info");
-
-			try {
-				await openArchiveBrowserAction(ctx);
-				ctx.ui.notify("Archive browser closed.", "info");
-			} catch (err) {
-				ctx.ui.notify(
-					`Failed to start archive: ${getStartupErrorMessage(err)}`,
 					"error",
 				);
 			}

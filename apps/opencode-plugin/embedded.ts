@@ -87,7 +87,6 @@ export async function handleEmbeddedCommand(
     handleReviewCommand,
     handleAnnotateCommand,
     handleAnnotateLastCommand,
-    handleArchiveCommand,
   } = await loadCommandHandlers();
 
   if (command === "plannotator-last") {
@@ -101,11 +100,6 @@ export async function handleEmbeddedCommand(
 
   if (command === "plannotator-review") {
     await handleReviewCommand(event, deps);
-    return {};
-  }
-
-  if (command === "plannotator-archive") {
-    await handleArchiveCommand(event, deps);
     return {};
   }
 

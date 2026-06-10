@@ -96,6 +96,16 @@ import {
 	extractChangedFiles,
 } from "../generated/code-nav.js";
 import {
+	createDefaultSemanticDiffRuntime,
+	getSemanticDiffAvailability,
+	getSemanticDiffScratchCwd,
+	runSemanticDiff,
+	semanticDiffCacheKey,
+	semanticDiffFileExtsFromSearchParams,
+	SemanticDiffResponseCache,
+} from "../generated/semantic-diff.js";
+import type { SemanticDiffAvailability, SemanticDiffResponse } from "../generated/semantic-diff-types.js";
+import {
 	canStageFiles,
 	detectRemoteDefaultCompareTarget,
 	getVcsContext,
@@ -301,6 +311,69 @@ export async function startReviewServer(options: {
 		return workspace.getPromptContext();
 	}
 	const tour = createTourSession();
+	const semanticDiffScratchCwd = getSemanticDiffScratchCwd();
+	function resolveSemanticDiffCwd(): string {
+		if (workspace) return workspace.root;
+		if (options.worktreePool && prMeta) {
+			const poolPath = options.worktreePool.resolve(prMeta.url);
+			if (poolPath) return poolPath;
+		}
+		if (options.agentCwd) return options.agentCwd;
+		if (options.gitContext) {
+			const vcsCwd = resolveVcsCwd(currentDiffType as DiffType, options.gitContext.cwd);
+			if (vcsCwd) return vcsCwd;
+			if (options.gitContext.cwd) return options.gitContext.cwd;
+		}
+		return semanticDiffScratchCwd;
+	}
+	const semanticDiffCache = new SemanticDiffResponseCache();
+	const semanticDiffAvailabilityCache = new Map<string, Promise<SemanticDiffAvailability>>();
+
+	function createSemanticDiffRuntime(cwd: string) {
+		return {
+			...createDefaultSemanticDiffRuntime(),
+			cwd,
+		};
+	}
+
+	function getSemanticDiffAvailabilityForCwd(cwd: string): Promise<SemanticDiffAvailability> {
+		const cached = semanticDiffAvailabilityCache.get(cwd);
+		if (cached) return cached;
+
+		const next: Promise<SemanticDiffAvailability> = getSemanticDiffAvailability(createSemanticDiffRuntime(cwd)).catch((error) => ({
+			available: false,
+			reason: "sem-probe-failed",
+			message: error instanceof Error ? error.message : String(error),
+		}));
+		semanticDiffAvailabilityCache.set(cwd, next);
+		return next;
+	}
+
+	async function getSemanticDiffAdvert() {
+		const availability = await getSemanticDiffAvailabilityForCwd(resolveSemanticDiffCwd());
+		return {
+			available: availability.available,
+			...(availability.semVersion ? { semVersion: availability.semVersion } : {}),
+			...(availability.semSource ? { semSource: availability.semSource } : {}),
+		};
+	}
+
+	async function getSemanticDiff(url: URL): Promise<SemanticDiffResponse> {
+		const cwd = resolveSemanticDiffCwd();
+		const fileExts = semanticDiffFileExtsFromSearchParams(url.searchParams);
+		const cacheKey = semanticDiffCacheKey({ rawPatch: currentPatch, cwd, fileExts });
+		const cached = semanticDiffCache.get(cacheKey, currentPatch);
+		if (cached) return cached;
+
+		const result = await runSemanticDiff(
+			{ rawPatch: currentPatch, cwd, fileExts },
+			createSemanticDiffRuntime(cwd),
+		);
+		if (result.status === "ok") {
+			semanticDiffCache.set(cacheKey, currentPatch, result);
+		}
+		return result;
+	}
 
 	const agentJobs = createAgentJobHandler({
 		mode: "review",
@@ -543,8 +616,11 @@ export async function startReviewServer(options: {
 				}),
 				...(isPRMode && initialViewedFiles.length > 0 && { viewedFiles: initialViewedFiles }),
 				...(currentError && { error: currentError }),
+				semanticDiff: await getSemanticDiffAdvert(),
 				serverConfig: getServerConfig(gitUser),
 			});
+		} else if (url.pathname === "/api/semantic-diff" && req.method === "GET") {
+			json(res, await getSemanticDiff(url));
 		} else if (url.pathname === "/api/diff/switch" && req.method === "POST") {
 			if (!hasLocalAccess && !workspace) {
 				json(res, { error: "Not available without local file access" }, 400);
@@ -578,6 +654,7 @@ export async function startReviewServer(options: {
 						diffOptions: workspace.diffOptions,
 						hideWhitespace: currentHideWhitespace,
 						...(currentError ? { error: currentError } : {}),
+						semanticDiff: await getSemanticDiffAdvert(),
 					});
 					return;
 				}
@@ -622,6 +699,7 @@ export async function startReviewServer(options: {
 					hideWhitespace: currentHideWhitespace,
 					...(updatedContext ? { gitContext: updatedContext } : {}),
 					...(currentError ? { error: currentError } : {}),
+					semanticDiff: await getSemanticDiffAdvert(),
 				});
 			} catch (err) {
 				const message = err instanceof Error ? err.message : "Failed to switch diff";
@@ -649,6 +727,7 @@ export async function startReviewServer(options: {
 						gitRef: currentGitRef,
 						prDiffScope: currentPRDiffScope,
 						...(currentError ? { error: currentError } : {}),
+						semanticDiff: await getSemanticDiffAdvert(),
 					});
 					return;
 				}
@@ -675,6 +754,7 @@ export async function startReviewServer(options: {
 					rawPatch: currentPatch,
 					gitRef: currentGitRef,
 					prDiffScope: currentPRDiffScope,
+					semanticDiff: await getSemanticDiffAdvert(),
 				});
 			} catch (err) {
 				const message = err instanceof Error ? err.message : "Failed to switch PR diff scope";
@@ -756,6 +836,7 @@ export async function startReviewServer(options: {
 					repoInfo,
 					...(switchedViewedFiles.length > 0 && { viewedFiles: switchedViewedFiles }),
 					...(currentError ? { error: currentError } : {}),
+					semanticDiff: await getSemanticDiffAdvert(),
 				});
 			} catch (err) {
 				return json(res, { error: err instanceof Error ? err.message : "Failed to switch PR" }, 500);

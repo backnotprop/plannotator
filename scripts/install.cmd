@@ -16,7 +16,6 @@ REM Guided-install answers. Precedence: CLI flags > wizard (interactive, first
 REM run or --reconfigure) > saved prefs from a previous run > defaults.
 set "EXTRAS_FLAG="
 set "MODEL_INVOCABLE_FLAG="
-set "GLIMPSE_FLAG="
 set "NON_INTERACTIVE=0"
 set "RECONFIGURE=0"
 
@@ -78,16 +77,6 @@ if /i "%~1"=="--model-invocable" (
     shift
     goto parse_args
 )
-if /i "%~1"=="--glimpse" (
-    set "GLIMPSE_FLAG=yes"
-    shift
-    goto parse_args
-)
-if /i "%~1"=="--no-glimpse" (
-    set "GLIMPSE_FLAG=no"
-    shift
-    goto parse_args
-)
 if /i "%~1"=="--non-interactive" (
     set "NON_INTERACTIVE=1"
     shift
@@ -117,7 +106,7 @@ REM unquoted arg containing `&` would re-trigger metacharacter interpretation.
 set "CURRENT_ARG=%~1"
 if "!CURRENT_ARG:~0,1!"=="-" (
     echo Unknown option: "%~1" >&2
-    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--glimpse ^| --no-glimpse] [--non-interactive] [--reconfigure] >&2
+    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--non-interactive] [--reconfigure] >&2
     exit /b 1
 )
 REM Positional form: install.cmd vX.Y.Z (legacy interface).
@@ -134,6 +123,8 @@ goto parse_args
 :args_done
 
 set "REPO=backnotprop/plannotator"
+set "SEM_REPO=Ataraxy-Labs/sem"
+set "SEM_VERSION=v0.8.0"
 set "INSTALL_DIR=%USERPROFILE%\.local\bin"
 
 REM First plannotator release that carries SLSA build-provenance attestations.
@@ -397,6 +388,8 @@ move /y "!TEMP_FILE!" "!INSTALL_PATH!" >nul
 echo.
 echo plannotator !TAG! installed to !INSTALL_PATH!
 
+call :InstallSemSidecar
+
 REM Check if install directory is in PATH
 echo !PATH! | findstr /i /c:"!INSTALL_DIR!" >nul
 if !ERRORLEVEL! neq 0 (
@@ -580,20 +573,12 @@ REM No checkbox UI in batch — the skill picker uses numbered toggles instead.
 set "PREFS_FILE=!_CONFIG_DIR!\install-prefs"
 set "SAVED_EXTRAS="
 set "SAVED_INVOCABLE="
-set "SAVED_GLIMPSE="
 if exist "!PREFS_FILE!" (
     for /f "usebackq tokens=1,* delims==" %%A in ("!PREFS_FILE!") do (
         if /i "%%A"=="extras" set "SAVED_EXTRAS=%%B"
         if /i "%%A"=="model_invocable" set "SAVED_INVOCABLE=%%B"
-        if /i "%%A"=="glimpse" set "SAVED_GLIMPSE=%%B"
     )
 )
-
-REM Glimpse (glimpseui) gives Plannotator a native window instead of a browser
-REM tab; the runtime auto-detects it on PATH. Skip the question when installed.
-set "GLIMPSE_PRESENT=0"
-where glimpseui >nul 2>&1
-if !ERRORLEVEL! equ 0 set "GLIMPSE_PRESENT=1"
 
 REM Extras already on disk? Then the extras question is moot — they still
 REM count toward the picker list, and we never launch the npx flow over them.
@@ -606,7 +591,7 @@ for %%S in (plannotator-compound plannotator-setup-goal plannotator-visual-expla
 REM A wizard needs a real console. `timeout` exits non-zero when stdin is
 REM redirected ("Input redirection is not supported"), making it a reliable
 REM console probe — CI and redirected runs never see the wizard and never
-REM trigger the wizard-only installs (npx extras, Glimpse). The set /p
+REM trigger the wizard-only installs (npx extras). The set /p
 REM EOF-fallthrough remains as a second line of defense.
 set "CAN_PROMPT=0"
 timeout /t 0 >nul 2>&1
@@ -620,21 +605,16 @@ if "!CAN_PROMPT!"=="1" (
 
 set "EXTRAS_CHOICE="
 set "INVOCABLE_CHOICE="
-set "GLIMPSE_CHOICE="
 if "!RUN_WIZARD!"=="1" call :guided_wizard
 
 REM Flags override the wizard and saved answers; otherwise saved, then defaults.
 if defined EXTRAS_FLAG set "EXTRAS_CHOICE=!EXTRAS_FLAG!"
 if defined MODEL_INVOCABLE_FLAG set "INVOCABLE_CHOICE=!MODEL_INVOCABLE_FLAG!"
-if defined GLIMPSE_FLAG set "GLIMPSE_CHOICE=!GLIMPSE_FLAG!"
 if not defined EXTRAS_CHOICE (
     if defined SAVED_EXTRAS (set "EXTRAS_CHOICE=!SAVED_EXTRAS!") else (set "EXTRAS_CHOICE=no")
 )
 if not defined INVOCABLE_CHOICE (
     if defined SAVED_INVOCABLE (set "INVOCABLE_CHOICE=!SAVED_INVOCABLE!") else (set "INVOCABLE_CHOICE=none")
-)
-if not defined GLIMPSE_CHOICE (
-    if defined SAVED_GLIMPSE (set "GLIMPSE_CHOICE=!SAVED_GLIMPSE!") else (set "GLIMPSE_CHOICE=no")
 )
 
 REM Persist only when the wizard ran or a flag set something — silent re-runs
@@ -643,36 +623,11 @@ set "DO_PERSIST=0"
 if "!RUN_WIZARD!"=="1" set "DO_PERSIST=1"
 if defined EXTRAS_FLAG set "DO_PERSIST=1"
 if defined MODEL_INVOCABLE_FLAG set "DO_PERSIST=1"
-if defined GLIMPSE_FLAG set "DO_PERSIST=1"
 if "!DO_PERSIST!"=="1" (
     if not exist "!_CONFIG_DIR!" mkdir "!_CONFIG_DIR!" >nul 2>&1
     > "!PREFS_FILE!" (
         echo extras=!EXTRAS_CHOICE!
         echo model_invocable=!INVOCABLE_CHOICE!
-        echo glimpse=!GLIMPSE_CHOICE!
-    )
-)
-
-REM Glimpse install (global npm package; the runtime auto-detects it on PATH).
-REM Wizard or explicit flag only — silent re-runs never install software.
-set "DO_GLIMPSE_INSTALL=0"
-if "!RUN_WIZARD!"=="1" set "DO_GLIMPSE_INSTALL=1"
-if defined GLIMPSE_FLAG set "DO_GLIMPSE_INSTALL=1"
-if "!GLIMPSE_CHOICE!"=="yes" if "!GLIMPSE_PRESENT!"=="0" if "!DO_GLIMPSE_INSTALL!"=="1" (
-    where npm >nul 2>&1
-    if !ERRORLEVEL! equ 0 (
-        echo Installing Glimpse ^(npm install -g glimpseui^)...
-        call npm install -g glimpseui
-        if not !ERRORLEVEL! equ 0 echo Glimpse install failed — install later with: npm install -g glimpseui
-    ) else (
-        where bun >nul 2>&1
-        if !ERRORLEVEL! equ 0 (
-            echo Installing Glimpse ^(bun install -g glimpseui^)...
-            call bun install -g glimpseui
-            if not !ERRORLEVEL! equ 0 echo Glimpse install failed — install later with: bun install -g glimpseui
-        ) else (
-            echo npm/bun not found — install Node.js, then: npm install -g glimpseui
-        )
     )
 )
 
@@ -716,20 +671,30 @@ if !ERRORLEVEL! equ 0 (
     pushd "!SKILLS_TMP!\repo"
     git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands >nul 2>&1
 
-    REM Core skills -> Claude + shared agent scope (all 4, copy-if-present).
-    if exist "apps\skills\core" (
+    REM Claude Code reads apps\skills\claude\* (injection `!`plannotator … $ARGUMENTS``
+    REM + allowed-tools, so /plannotator-* run with no permission prompt); Codex
+    REM reads apps\skills\core\* (prose). The `!`…`` injection is Claude-Code-only,
+    REM so the two are sourced separately. Replace rather than merge on each run.
+    if exist "apps\skills\claude" (
         if not exist "!CLAUDE_SKILLS_DIR!" mkdir "!CLAUDE_SKILLS_DIR!"
+        for %%S in (plannotator-review plannotator-annotate plannotator-last) do (
+            if exist "apps\skills\claude\%%S" (
+                if exist "!CLAUDE_SKILLS_DIR!\%%S" rmdir /s /q "!CLAUDE_SKILLS_DIR!\%%S" >nul 2>&1
+                xcopy /s /i /y /q "apps\skills\claude\%%S" "!CLAUDE_SKILLS_DIR!\%%S\" >nul 2>&1
+            )
+        )
+        echo Installed Claude Code skills to !CLAUDE_SKILLS_DIR!\
+    )
+    if exist "apps\skills\core" (
         if not exist "!AGENTS_SKILLS_DIR!" mkdir "!AGENTS_SKILLS_DIR!"
-        for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator-archive) do (
+        for %%S in (plannotator-review plannotator-annotate plannotator-last) do (
             if exist "apps\skills\core\%%S" (
                 REM Replace rather than merge so files removed upstream don't linger.
-                if exist "!CLAUDE_SKILLS_DIR!\%%S" rmdir /s /q "!CLAUDE_SKILLS_DIR!\%%S" >nul 2>&1
                 if exist "!AGENTS_SKILLS_DIR!\%%S" rmdir /s /q "!AGENTS_SKILLS_DIR!\%%S" >nul 2>&1
-                xcopy /s /i /y /q "apps\skills\core\%%S" "!CLAUDE_SKILLS_DIR!\%%S\" >nul 2>&1
                 xcopy /s /i /y /q "apps\skills\core\%%S" "!AGENTS_SKILLS_DIR!\%%S\" >nul 2>&1
             )
         )
-        echo Installed core skills to !CLAUDE_SKILLS_DIR!\ and !AGENTS_SKILLS_DIR!\
+        echo Installed shared agent skills to !AGENTS_SKILLS_DIR!\
     ) else (
         echo Tag !TAG! predates the core/extra skill layout — skipping core skill install
     )
@@ -752,7 +717,7 @@ if !ERRORLEVEL! equ 0 (
     if "!KIRO_AVAILABLE!"=="1" if exist "apps\kiro-cli\skills" (
         if not exist "!KIRO_SKILLS_DIR!" mkdir "!KIRO_SKILLS_DIR!"
         REM Kiro-specific skills with origin baked in come from apps\kiro-cli\skills.
-        for %%S in (plannotator-review plannotator-annotate plannotator-archive) do (
+        for %%S in (plannotator-review plannotator-annotate) do (
             if exist "apps\kiro-cli\skills\%%S" (
                 if exist "!KIRO_SKILLS_DIR!\%%S" rmdir /s /q "!KIRO_SKILLS_DIR!\%%S" >nul 2>&1
                 xcopy /s /i /y /q "apps\kiro-cli\skills\%%S" "!KIRO_SKILLS_DIR!\%%S\" >nul 2>&1
@@ -792,11 +757,26 @@ REM Claude Code commands are deprecated in favor of skills. Remove a legacy
 REM command file only once its replacement skill is actually on disk — running
 REM AFTER the install above guarantees a failed or skipped skill install never
 REM leaves users with neither the command nor the skill.
-for %%C in (plannotator-review plannotator-annotate plannotator-last plannotator-archive) do (
+for %%C in (plannotator-review plannotator-annotate plannotator-last) do (
     if exist "!CLAUDE_SKILLS_DIR!\%%C" if exist "!CLAUDE_COMMANDS_DIR!\%%C.md" (
         del /q "!CLAUDE_COMMANDS_DIR!\%%C.md" >nul 2>&1
         echo Removed deprecated Claude command !CLAUDE_COMMANDS_DIR!\%%C.md ^(replaced by the %%C skill^)
     )
+)
+
+REM plannotator-archive no longer ships as a skill. Remove any stale installed
+REM copy from every skill scope so upgraders don't keep a dead skill around.
+for %%D in ("!CLAUDE_SKILLS_DIR!" "!AGENTS_SKILLS_DIR!" "!KIRO_SKILLS_DIR!") do (
+    if exist "%%~D\plannotator-archive" (
+        rmdir /s /q "%%~D\plannotator-archive" >nul 2>&1
+        echo Removed stale plannotator-archive skill from %%~D\plannotator-archive
+    )
+)
+
+REM The /plannotator-archive OpenCode command was removed too — sweep the stub.
+if exist "!OPENCODE_COMMANDS_DIR!\plannotator-archive.md" (
+    del /q "!OPENCODE_COMMANDS_DIR!\plannotator-archive.md" >nul 2>&1
+    echo Removed stale plannotator-archive command from !OPENCODE_COMMANDS_DIR!
 )
 
 REM Codex no longer hosts core skills (they live in %%USERPROFILE%%\.agents\skills).
@@ -945,7 +925,7 @@ echo.
 echo Upgrading from an older version? Also run /plugin marketplace update
 echo so the plugin drops its old plannotator:* command entries.
 echo.
-echo The /plannotator-review, /plannotator-annotate, /plannotator-last, and /plannotator-archive skills are ready to use!
+echo The /plannotator-review, /plannotator-annotate, and /plannotator-last skills are ready to use!
 if not "!EXTRAS_CHOICE!"=="yes" (
     echo.
     echo Optional skills ^(compound planning, setup-goal, visual explainer^):
@@ -979,6 +959,110 @@ echo.
 exit /b 0
 
 REM ======================================================================
+REM Optional semantic diff sidecar install. Non-fatal: Plannotator remains
+REM installed if sem download, checksum, or extraction fails.
+REM ======================================================================
+:InstallSemSidecar
+if /i "!PLANNOTATOR_SKIP_SEM_INSTALL!"=="1" (
+    echo Skipping semantic diff sidecar install ^(PLANNOTATOR_SKIP_SEM_INSTALL is set^)
+    goto :eof
+)
+if /i "!PLANNOTATOR_SKIP_SEM_INSTALL!"=="true" (
+    echo Skipping semantic diff sidecar install ^(PLANNOTATOR_SKIP_SEM_INSTALL is set^)
+    goto :eof
+)
+if /i "!PLANNOTATOR_SKIP_SEM_INSTALL!"=="yes" (
+    echo Skipping semantic diff sidecar install ^(PLANNOTATOR_SKIP_SEM_INSTALL is set^)
+    goto :eof
+)
+
+set "SEM_ASSET="
+if /i "!PLATFORM!"=="win32-x64" set "SEM_ASSET=sem-windows-x86_64.zip"
+if not defined SEM_ASSET (
+    echo Skipping semantic diff sidecar install ^(sem does not publish !PLATFORM!^)
+    goto :eof
+)
+
+set "SEM_DIR=!_CONFIG_DIR!\vendor\sem\!SEM_VERSION!"
+set "SEM_PATH=!SEM_DIR!\sem.exe"
+if exist "!SEM_PATH!" (
+    "!SEM_PATH!" --version 2>nul | findstr /r /c:"^sem " >nul 2>&1
+    if !ERRORLEVEL! equ 0 (
+        echo Semantic diff sidecar already installed at !SEM_PATH!
+        goto :eof
+    )
+)
+
+set "SEM_BASE_URL=https://github.com/!SEM_REPO!/releases/download/!SEM_VERSION!"
+set "SEM_ARCHIVE=%TEMP%\plannotator-sem-%RANDOM%.zip"
+set "SEM_CHECKSUMS=%TEMP%\plannotator-sem-checksums-%RANDOM%.txt"
+set "SEM_EXTRACT=%TEMP%\plannotator-sem-%RANDOM%"
+mkdir "!SEM_EXTRACT!" >nul 2>&1
+
+REM Bounded so a slow/hung download of this optional sidecar can't wedge an
+REM install where plannotator already landed. Opt out with PLANNOTATOR_SKIP_SEM_INSTALL=1.
+curl -fsSL --connect-timeout 10 --max-time 120 "!SEM_BASE_URL!/!SEM_ASSET!" -o "!SEM_ARCHIVE!"
+if !ERRORLEVEL! neq 0 (
+    echo Skipping semantic diff sidecar install ^(download failed^)
+    goto :sem_cleanup
+)
+
+curl -fsSL --connect-timeout 10 --max-time 60 "!SEM_BASE_URL!/checksums.txt" -o "!SEM_CHECKSUMS!"
+if !ERRORLEVEL! neq 0 (
+    echo Skipping semantic diff sidecar install ^(checksum download failed^)
+    goto :sem_cleanup
+)
+
+set "EXPECTED_SEM_CHECKSUM="
+for /f "usebackq tokens=1,2" %%i in ("!SEM_CHECKSUMS!") do (
+    if "%%j"=="!SEM_ASSET!" set "EXPECTED_SEM_CHECKSUM=%%i"
+)
+if not defined EXPECTED_SEM_CHECKSUM (
+    echo Skipping semantic diff sidecar install ^(checksum missing for !SEM_ASSET!^)
+    goto :sem_cleanup
+)
+
+set "ACTUAL_SEM_CHECKSUM="
+for /f "skip=1 tokens=*" %%i in ('certutil -hashfile "!SEM_ARCHIVE!" SHA256') do (
+    if not defined ACTUAL_SEM_CHECKSUM (
+        set "ACTUAL_SEM_CHECKSUM=%%i"
+        set "ACTUAL_SEM_CHECKSUM=!ACTUAL_SEM_CHECKSUM: =!"
+    )
+)
+if /i "!ACTUAL_SEM_CHECKSUM!" neq "!EXPECTED_SEM_CHECKSUM!" (
+    echo Skipping semantic diff sidecar install ^(checksum mismatch^)
+    goto :sem_cleanup
+)
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Force -Path $env:SEM_ARCHIVE -DestinationPath $env:SEM_EXTRACT"
+if !ERRORLEVEL! neq 0 (
+    echo Skipping semantic diff sidecar install ^(extract failed^)
+    goto :sem_cleanup
+)
+set "EXTRACTED_SEM="
+for /f "usebackq delims=" %%i in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -Path $env:SEM_EXTRACT -Filter sem.exe -Recurse -File | Select-Object -First 1 -ExpandProperty FullName"`) do (
+    set "EXTRACTED_SEM=%%i"
+)
+if not defined EXTRACTED_SEM (
+    echo Skipping semantic diff sidecar install ^(binary missing from archive^)
+    goto :sem_cleanup
+)
+
+if not exist "!SEM_DIR!" mkdir "!SEM_DIR!"
+copy /y "!EXTRACTED_SEM!" "!SEM_PATH!" >nul
+if !ERRORLEVEL! equ 0 (
+    echo Semantic diff sidecar installed to !SEM_PATH!
+) else (
+    echo Skipping semantic diff sidecar install ^(copy failed^)
+)
+
+:sem_cleanup
+if exist "!SEM_ARCHIVE!" del "!SEM_ARCHIVE!"
+if exist "!SEM_CHECKSUMS!" del "!SEM_CHECKSUMS!"
+if exist "!SEM_EXTRACT!" rmdir /s /q "!SEM_EXTRACT!"
+goto :eof
+
+REM ======================================================================
 REM Guided-install wizard (called only on interactive first runs or with
 REM --reconfigure). Sets EXTRAS_CHOICE and INVOCABLE_CHOICE.
 REM ======================================================================
@@ -1007,7 +1091,7 @@ if "!EXTRAS_PRESENT!"=="1" (
 if defined MODEL_INVOCABLE_FLAG (
     REM Flag already answered this question — don't ask and then ignore.
     set "INVOCABLE_CHOICE=!MODEL_INVOCABLE_FLAG!"
-    goto :glimpse_question
+    goto :eof
 )
 set "ANSWER="
 set /p "ANSWER=Make any skills callable by the model (instead of user-invoked only)? [y/N] "
@@ -1016,18 +1100,17 @@ if /i "!ANSWER!"=="y" set "WANT_INVOCABLE=yes"
 if /i "!ANSWER!"=="yes" set "WANT_INVOCABLE=yes"
 if "!WANT_INVOCABLE!"=="no" (
     set "INVOCABLE_CHOICE=none"
-    goto :glimpse_question
+    goto :eof
 )
-set "SKILL_COUNT=4"
+set "SKILL_COUNT=3"
 set "SKILL_1=plannotator-review"
 set "SKILL_2=plannotator-annotate"
 set "SKILL_3=plannotator-last"
-set "SKILL_4=plannotator-archive"
 if "!EXTRAS_CHOICE!"=="yes" (
-    set "SKILL_COUNT=7"
-    set "SKILL_5=plannotator-compound"
-    set "SKILL_6=plannotator-setup-goal"
-    set "SKILL_7=plannotator-visual-explainer"
+    set "SKILL_COUNT=6"
+    set "SKILL_4=plannotator-compound"
+    set "SKILL_5=plannotator-setup-goal"
+    set "SKILL_6=plannotator-visual-explainer"
 )
 REM Preselect previously chosen skills. NOTE: no pipes here — each side of a
 REM cmd pipe runs in a child without delayed expansion, so !vars! would pass
@@ -1067,24 +1150,4 @@ for /l %%I in (1,1,!SKILL_COUNT!) do (
     )
 )
 if not defined INVOCABLE_CHOICE set "INVOCABLE_CHOICE=none"
-:glimpse_question
-if "!GLIMPSE_PRESENT!"=="1" (
-    echo Glimpse already installed — Plannotator will open in its native window.
-    set "GLIMPSE_CHOICE=yes"
-    goto :eof
-)
-if defined GLIMPSE_FLAG (
-    REM Flag already answered this question — don't ask and then ignore.
-    set "GLIMPSE_CHOICE=!GLIMPSE_FLAG!"
-    goto :eof
-)
-set "DEF_GLIMPSE=yes"
-if defined SAVED_GLIMPSE set "DEF_GLIMPSE=!SAVED_GLIMPSE!"
-set "ANSWER="
-set /p "ANSWER=Install Glimpse so Plannotator opens in a native window instead of a browser tab? (npm i -g glimpseui) [Y/n] "
-set "GLIMPSE_CHOICE=!DEF_GLIMPSE!"
-if /i "!ANSWER!"=="y" set "GLIMPSE_CHOICE=yes"
-if /i "!ANSWER!"=="yes" set "GLIMPSE_CHOICE=yes"
-if /i "!ANSWER!"=="n" set "GLIMPSE_CHOICE=no"
-if /i "!ANSWER!"=="no" set "GLIMPSE_CHOICE=no"
 goto :eof

@@ -11,6 +11,11 @@ import type { UIPreferences } from '@plannotator/ui/utils/uiPreferences';
 import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
 
 interface AppHeaderProps {
+  /** HTML annotate surface: show a Hide/Show annotation-tools toggle in the header,
+   *  so hiding leaves the rendered HTML completely free of overlay controls. */
+  htmlSurface?: boolean;
+  htmlToolsHidden?: boolean;
+  onToggleHtmlTools?: () => void;
   // Mode flags (stable after mount)
   isApiMode: boolean;
   annotateMode: boolean;
@@ -86,6 +91,9 @@ interface AppHeaderProps {
 }
 
 export const AppHeader = React.memo<AppHeaderProps>(({
+  htmlSurface,
+  htmlToolsHidden,
+  onToggleHtmlTools,
   isApiMode,
   annotateMode,
   archiveMode,
@@ -150,7 +158,19 @@ export const AppHeader = React.memo<AppHeaderProps>(({
 }) => {
   return (
     <header data-app-header="true" className="h-12 flex items-center justify-between px-2 md:px-4 border-b border-border/50 bg-card/50 backdrop-blur-xl sticky top-0 z-[50]">
-      <AppHeaderLogo />
+      <div className="flex items-center gap-2">
+        <AppHeaderLogo />
+        {htmlSurface && onToggleHtmlTools && (
+          <button
+            type="button"
+            onClick={onToggleHtmlTools}
+            className="ml-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors px-1.5 py-1 rounded cursor-pointer"
+            title={htmlToolsHidden ? 'Show annotation tools' : 'Hide annotation tools'}
+          >
+            {htmlToolsHidden ? 'Show tools' : 'Hide tools'}
+          </button>
+        )}
+      </div>
 
       <div className="flex items-center gap-1 md:gap-2">
         {/* Bot callback buttons — only shown when ?cb=&ct= params are present */}

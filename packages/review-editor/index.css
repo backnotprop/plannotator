@@ -1,5 +1,9 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/geist-mono";
 @import "tailwindcss";
 @import "dockview-react/dist/styles/dockview.css";
+
+@plugin "tailwindcss-animate";
 
 /* Tell Tailwind where to scan for classes */
 @source "../ui/components/**/*.tsx";
@@ -288,6 +292,238 @@ diffs-container {
 
 .file-tree-item.staged.active {
   background: oklch(from var(--primary) l c h / 0.3);
+}
+
+/* Semantic diff terminal view */
+.semantic-diff-panel {
+  height: 100%;
+  min-width: 0;
+  overflow: auto;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Centered terminal column — capped width, auto margins */
+.semantic-diff-terminal {
+  width: 100%;
+  max-width: 56rem;
+  margin: 0 auto;
+  padding: 1.5rem;
+  font-family: var(--diff-font-override, var(--font-mono));
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  font-variant-numeric: tabular-nums;
+}
+
+/* File section — flat, no box; grouping comes from a quiet underlined header */
+.semantic-diff-file {
+  margin: 0 0 1.5rem;
+}
+
+.semantic-diff-file-header {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  padding: 0 0.5rem 0.375rem;
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid oklch(from var(--border) l c h / 0.7);
+}
+
+.semantic-diff-path {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.semantic-diff-path-dir {
+  color: var(--muted-foreground);
+}
+
+.semantic-diff-path-name {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.semantic-diff-rows {
+  padding: 0;
+}
+
+.semantic-diff-loading,
+.semantic-diff-empty,
+.semantic-diff-error,
+.semantic-diff-summary {
+  color: var(--muted-foreground);
+}
+
+.semantic-diff-error {
+  color: var(--destructive);
+}
+
+/* Entity row — grid-aligned, full-width, rounded hover target */
+.semantic-diff-row {
+  display: grid;
+  grid-template-columns: 2ch 9ch minmax(0, 1fr) max-content;
+  column-gap: 1ch;
+  align-items: baseline;
+  width: 100%;
+  min-height: 1.75rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 0.1875rem 0.5rem;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.semantic-diff-retry {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.75rem;
+  margin-top: 0.5rem;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.semantic-diff-row:focus-visible,
+.semantic-diff-retry:focus-visible {
+  outline: 1px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) {
+  .semantic-diff-row:hover,
+  .semantic-diff-retry:hover {
+    background: oklch(from var(--foreground) l c h / 0.045);
+  }
+}
+
+/* Nudge the add/remove glyphs up slightly so they read at the weight of the
+   modified triangle; line-height pinned so the larger size doesn't grow rows. */
+.semantic-diff-symbol-added,
+.semantic-diff-symbol-deleted {
+  font-size: 1.15em;
+  line-height: 1;
+}
+
+.semantic-diff-symbol-added {
+  color: var(--success);
+}
+
+.semantic-diff-symbol-deleted {
+  color: var(--destructive);
+}
+
+.semantic-diff-symbol-modified,
+.semantic-diff-symbol-renamed,
+.semantic-diff-symbol-moved,
+.semantic-diff-symbol-reordered {
+  color: var(--primary);
+}
+
+.semantic-diff-kind,
+.semantic-diff-status {
+  color: var(--muted-foreground);
+}
+
+.semantic-diff-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.semantic-diff-status {
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.semantic-diff-summary {
+  margin-top: 0.5rem;
+  padding: 0 0.5rem;
+}
+
+/* "sem · N" pill in a diff file header */
+.semantic-file-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  height: 1.5rem;
+  padding: 0 0.4375rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.semantic-file-badge:hover,
+.semantic-file-badge[data-state="open"] {
+  color: var(--foreground);
+  background: var(--muted);
+}
+
+.semantic-file-badge:focus-visible {
+  outline: 1px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.semantic-file-badge-label {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.semantic-file-badge-count {
+  padding: 0.0625rem 0.3125rem;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: oklch(from var(--primary) l c h / 0.14);
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Hover popover — same terminal rows as the panel, shadcn surface */
+.semantic-diff-popover {
+  width: min(30rem, 90vw);
+  max-height: min(24rem, 70vh);
+  overflow: auto;
+  padding: 0.375rem;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  font-family: var(--diff-font-override, var(--font-mono));
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+}
+
+.semantic-diff-popover-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem 0.375rem;
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+}
+
+.semantic-diff-popover-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--foreground);
 }
 
 /* =====================================================

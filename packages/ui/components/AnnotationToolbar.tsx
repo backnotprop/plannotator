@@ -227,7 +227,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           onClick={() => handleTypeSelect(AnnotationType.COMMENT)}
           icon={<CommentIcon />}
           label="Comment"
-          className="text-accent hover:bg-accent/10"
+          className="text-annotation-comment hover:bg-annotation-comment/10"
         />
         {onQuickLabel && (
           <>

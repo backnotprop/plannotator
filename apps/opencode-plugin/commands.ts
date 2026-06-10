@@ -1,15 +1,10 @@
 /**
  * Command Handlers for OpenCode Plugin
  *
- * Handles /plannotator-review, /plannotator-annotate, /plannotator-last,
- * and /plannotator-archive slash commands. Extracted from the event hook
- * for modularity.
+ * Handles /plannotator-review, /plannotator-annotate, and /plannotator-last
+ * slash commands. Extracted from the event hook for modularity.
  */
 
-import {
-  startPlannotatorServer,
-  handleServerReady,
-} from "@plannotator/server";
 import {
   startReviewServer,
   handleReviewServerReady,
@@ -445,33 +440,4 @@ export async function handleAnnotateLastCommand(
   }
 
   return result.feedback || null;
-}
-
-export async function handleArchiveCommand(
-  event: any,
-  deps: CommandDeps
-) {
-  const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl } = deps;
-
-  client.app.log({ level: "info", message: "Opening plan archive..." });
-
-  const server = await startPlannotatorServer({
-    plan: "",
-    origin: "opencode",
-    mode: "archive",
-    sharingEnabled: await getSharingEnabled(),
-    shareBaseUrl: getShareBaseUrl(),
-    pasteApiUrl: getPasteApiUrl(),
-    htmlContent,
-    onReady: (url, isRemote, port) => {
-      handleServerReady(url, isRemote, port);
-      client.app.log({ level: "info", message: `[Plannotator] Open archive: ${url}` });
-    },
-  });
-
-  if (server.waitForDone) {
-    await server.waitForDone();
-  }
-  await Bun.sleep(1500);
-  server.stop();
 }

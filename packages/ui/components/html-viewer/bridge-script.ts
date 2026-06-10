@@ -35,6 +35,16 @@ export const ANNOTATION_HIGHLIGHT_CSS = `
 .annotation-highlight:hover {
   filter: brightness(1.2);
 }
+.plannotator-pinpoint-hover {
+  outline: 2px solid var(--focus-highlight, #4493f8) !important;
+  outline-offset: 1px;
+  cursor: crosshair !important;
+}
+/* SVG nodes can't take a CSS outline — stroke their shapes instead. */
+.plannotator-pinpoint-hover rect, .plannotator-pinpoint-hover path,
+.plannotator-pinpoint-hover circle, .plannotator-pinpoint-hover ellipse, .plannotator-pinpoint-hover polygon {
+  stroke: var(--focus-highlight, #4493f8) !important; stroke-width: 2.5px !important;
+}
 `;
 
 export const BRIDGE_SCRIPT = `(function() {
@@ -66,8 +76,16 @@ export const BRIDGE_SCRIPT = `(function() {
 
   // --- Selection ---
   var pendingSelection = null;
+  var pendingRange = null; // live range for the pending selection (scroll tracking)
+  var currentInputMethod = 'drag'; // 'drag' = text selection, 'pinpoint' = click an element
+  var pinpointHover = null;
+  // A plain click on an element-annotation target opens the toolbar, but the same
+  // click's mouseup schedules a handleSelection() that would see an empty selection
+  // and immediately clear it. This flag suppresses that one trailing clear.
+  var skipNextClear = false;
 
   document.addEventListener('mouseup', function(e) {
+    if (currentInputMethod === 'pinpoint') return; // pinpoint uses click, not drag-select
     if (e.target && e.target.closest && e.target.closest('.annotation-highlight')) return;
     setTimeout(handleSelection, 10);
   });
@@ -75,17 +93,22 @@ export const BRIDGE_SCRIPT = `(function() {
   function handleSelection() {
     var sel = window.getSelection();
     if (!sel || sel.isCollapsed || !sel.rangeCount) {
+      // Trailing clear from a plain-click element annotation — consume it once.
+      if (skipNextClear) { skipNextClear = false; return; }
       if (pendingSelection) {
         parent.postMessage({ type: PREFIX + 'selection-clear' }, '*');
         pendingSelection = null;
+        pendingRange = null;
       }
       return;
     }
+    skipNextClear = false; // a real text selection happened
     var range = sel.getRangeAt(0);
     var text = sel.toString().trim();
     if (!text) return;
 
     var rect = range.getBoundingClientRect();
+    pendingRange = range;
     pendingSelection = {
       text: text,
       startContainerPath: getNodePath(range.startContainer),
@@ -101,6 +124,29 @@ export const BRIDGE_SCRIPT = `(function() {
     }, '*');
   }
 
+  // Keep the toolbar/popover attached while the iframe content scrolls: re-post the
+  // pending selection's live rect (parent has no way to see an in-iframe scroll).
+  // Capture phase so inner scroll containers count too.
+  var scrollRaf = 0;
+  function postSelectionRect() {
+    scrollRaf = 0;
+    if (!pendingSelection || !pendingRange) return;
+    var r = pendingRange.getBoundingClientRect();
+    if (r.bottom < 0 || r.top > window.innerHeight) {
+      // Selection scrolled out of view — close the toolbar (matches markdown).
+      parent.postMessage({ type: PREFIX + 'selection-clear' }, '*');
+      return;
+    }
+    parent.postMessage({
+      type: PREFIX + 'selection-rect',
+      rect: { top: r.top, left: r.left, width: r.width, height: r.height }
+    }, '*');
+  }
+  window.addEventListener('scroll', function() {
+    if (!pendingSelection) return;
+    if (!scrollRaf) scrollRaf = requestAnimationFrame(postSelectionRect);
+  }, true);
+
   // --- Mark Creation ---
   window.addEventListener('message', function(e) {
     if (!e.data || !e.data.type) return;
@@ -110,8 +156,12 @@ export const BRIDGE_SCRIPT = `(function() {
       var id = e.data.id;
       var annType = e.data.annotationType || 'comment';
       if (pendingSelection) {
-        applyMark(id, annType, pendingSelection);
+        // Text selections wrap a <mark>; element pinpoints (e.g. SVG nodes) carry
+        // no range, so there's no inline mark to apply — the annotation is still
+        // captured on the parent side from the posted text.
+        if (pendingSelection.startContainerPath) applyMark(id, annType, pendingSelection);
         pendingSelection = null;
+        pendingRange = null;
         window.getSelection().removeAllRanges();
       }
     }
@@ -151,6 +201,131 @@ export const BRIDGE_SCRIPT = `(function() {
         if (target) target.classList.add('focused');
       }
     }
+
+    else if (type === PREFIX + 'set-input-method') {
+      currentInputMethod = e.data.method === 'pinpoint' ? 'pinpoint' : 'drag';
+      if (currentInputMethod !== 'pinpoint') {
+        if (pinpointHover) { pinpointHover.classList.remove('plannotator-pinpoint-hover'); pinpointHover = null; }
+        if (pinpointLabelEl) pinpointLabelEl.style.display = 'none';
+      }
+    }
+  });
+
+  // --- Pinpoint: hover to outline a whole element, click to select its text ---
+  // Reuses the normal selection pipeline — a pinpoint click just sets the iframe
+  // selection over the element's text, then runs handleSelection() like a drag.
+  var PINPOINT_SKIP = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, HTML: 1, BODY: 1, HEAD: 1 };
+  var PINPOINT_INLINE = { A: 1, SPAN: 1, EM: 1, STRONG: 1, B: 1, I: 1, CODE: 1, SMALL: 1, LABEL: 1, MARK: 1, SUP: 1, SUB: 1, U: 1, ABBR: 1, TIME: 1 };
+
+  function resolvePinpointEl(node) {
+    var el = node;
+    while (el && el.nodeType === 3) el = el.parentNode; // text node -> parent
+    if (!el || el.nodeType !== 1) return null;
+    // SVG: a click on a shape/text leaf (rect, path, text) resolves to the whole
+    // node group, so clicking anywhere on an SVG node — not just its label — picks it.
+    if (el.ownerSVGElement && el.closest) {
+      var g = el.closest('g');
+      if (g && g.textContent && g.textContent.trim()) el = g;
+    }
+    if (PINPOINT_SKIP[el.tagName]) return null;
+    // Climb out of inline elements to their containing block.
+    while (el.parentElement && PINPOINT_INLINE[el.tagName] && !PINPOINT_SKIP[el.parentElement.tagName]) {
+      el = el.parentElement;
+    }
+    if (PINPOINT_SKIP[el.tagName]) return null;
+    if (!el.textContent || !el.textContent.trim()) return null; // need text to annotate
+    return el;
+  }
+
+  // Floating label naming the element under the cursor (like the markdown overlay).
+  var PINPOINT_LABELS = { H1:'Heading', H2:'Heading', H3:'Heading', H4:'Heading', H5:'Heading', H6:'Heading', P:'Paragraph', UL:'List', OL:'List', LI:'List item', A:'Link', BUTTON:'Button', IMG:'Image', TABLE:'Table', THEAD:'Table', TBODY:'Table', TR:'Row', TD:'Cell', TH:'Header cell', SECTION:'Section', NAV:'Navigation', HEADER:'Header', FOOTER:'Footer', ARTICLE:'Article', ASIDE:'Sidebar', BLOCKQUOTE:'Quote', PRE:'Code', CODE:'Code', FIGURE:'Figure', FIGCAPTION:'Caption', MAIN:'Main', FORM:'Form', INPUT:'Input', LABEL:'Label' };
+  var pinpointLabelEl = null;
+  function getPinpointLabelEl() {
+    if (!pinpointLabelEl) {
+      pinpointLabelEl = document.createElement('div');
+      pinpointLabelEl.setAttribute('data-plannotator-pinpoint-label', '');
+      pinpointLabelEl.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;display:none;font:600 11px/1.3 system-ui,-apple-system,sans-serif;padding:2px 7px;border-radius:5px;background:var(--focus-highlight,#4493f8);color:#fff;white-space:nowrap;box-shadow:0 1px 5px rgba(0,0,0,.35);';
+      document.body.appendChild(pinpointLabelEl);
+    }
+    return pinpointLabelEl;
+  }
+  function hidePinpointLabel() { if (pinpointLabelEl) pinpointLabelEl.style.display = 'none'; }
+
+  document.addEventListener('mousemove', function(e) {
+    if (currentInputMethod !== 'pinpoint') return;
+    var el = resolvePinpointEl(e.target);
+    if (el !== pinpointHover) {
+      if (pinpointHover) pinpointHover.classList.remove('plannotator-pinpoint-hover');
+      pinpointHover = el;
+      if (el) el.classList.add('plannotator-pinpoint-hover');
+    }
+    if (!el) { hidePinpointLabel(); return; }
+    var r = el.getBoundingClientRect();
+    var lbl = getPinpointLabelEl();
+    lbl.textContent = PINPOINT_LABELS[el.tagName] || el.tagName.toLowerCase();
+    lbl.style.display = 'block';
+    var top = r.top - 22;
+    lbl.style.top = (top < 2 ? r.top + 2 : top) + 'px';
+    lbl.style.left = Math.max(2, r.left) + 'px';
+  });
+
+  // Pop the toolbar for a whole element: select its text if possible (so a <mark>
+  // can wrap it), else post its text + box directly so the toolbar still anchors
+  // (e.g. an SVG node, whose <text> doesn't select like HTML text).
+  function annotateElement(el) {
+    if (!el) return;
+    if (pinpointHover) { pinpointHover.classList.remove('plannotator-pinpoint-hover'); pinpointHover = null; }
+    hidePinpointLabel();
+    // SVG content can't hold an HTML <mark> wrapper — wrapping an SVG <text> in a
+    // <mark> un-renders it (the text disappears). So never text-wrap SVG: treat it
+    // as a whole-element annotation (post its text + box, no mark). HTML elements
+    // still try a real text selection first so a <mark> can highlight the words.
+    var txt = '';
+    if (!el.ownerSVGElement) {
+      try {
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        var range = document.createRange();
+        range.selectNodeContents(el);
+        sel.addRange(range);
+        txt = (sel.toString() || '').trim();
+      } catch (ex) {}
+    }
+    if (txt) { handleSelection(); return; }
+    var elText = (el.textContent || '').trim();
+    if (!elText) return;
+    var r = el.getBoundingClientRect();
+    pendingSelection = { element: true };
+    pendingRange = null;
+    skipNextClear = true; // don't let this click's mouseup clear the toolbar we just opened
+    parent.postMessage({ type: PREFIX + 'selection', text: elText,
+      rect: { top: r.top, left: r.left, width: r.width, height: r.height } }, '*');
+  }
+
+  document.addEventListener('click', function(e) {
+    if (currentInputMethod !== 'pinpoint') return;
+    // Existing marks are handled by the mark-click listener.
+    if (e.target && e.target.closest && e.target.closest('.annotation-highlight[data-bind-id]')) return;
+    var el = resolvePinpointEl(e.target);
+    if (!el) return;
+    // Suppress the page's own behavior (links, buttons) — we're annotating.
+    e.preventDefault();
+    e.stopPropagation();
+    annotateElement(el);
+  }, true);
+
+  // Author opt-in: a plain click on any element tagged [data-annotate] pops the
+  // toolbar — no pinpoint mode. Lets an HTML doc (e.g. a flow graph) wire its own
+  // nodes to Plannotator's toolbar. Bubble phase so the page's own click handlers
+  // run first; an active text selection is respected, not clobbered.
+  document.addEventListener('click', function(e) {
+    if (currentInputMethod === 'pinpoint') return; // pinpoint handler covers this
+    var t = e.target && e.target.closest && e.target.closest('[data-annotate]');
+    if (!t) return;
+    if (e.target.closest('.annotation-highlight[data-bind-id]')) return;
+    var s = window.getSelection();
+    if (s && !s.isCollapsed && (s.toString() || '').trim()) return; // respect a drag-selection
+    annotateElement(t);
   });
 
   // --- Mark Click ---
@@ -163,6 +338,24 @@ export const BRIDGE_SCRIPT = `(function() {
         id: mark.getAttribute('data-bind-id')
       }, '*');
     }
+  });
+
+  // --- Type-to-comment ---
+  // While a selection is pending, focus is inside this iframe, so the parent's
+  // toolbar keydown listener never sees the keystroke. Forward a single printable
+  // char to the parent so it can open a comment pre-filled with it.
+  document.addEventListener('keydown', function(e) {
+    if (!pendingSelection) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (!e.key || e.key.length !== 1) return; // single printable char only
+    e.preventDefault();
+    parent.postMessage({ type: PREFIX + 'keytype', key: e.key }, '*');
+    // Hand keyboard focus back to the parent window so the comment textarea can
+    // take it. Blurring the <iframe> from the parent isn't enough — the inner
+    // document keeps focus — so the iframe must relinquish it. parent.focus() is
+    // allowed cross-origin (like postMessage); also drop the active element.
+    try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (ex) {}
+    try { parent.focus(); } catch (ex) {}
   });
 
   // --- Helpers ---

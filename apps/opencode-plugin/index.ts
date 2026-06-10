@@ -496,8 +496,7 @@ Do NOT proceed with implementation until your plan is approved.`);
       if (
         cmd !== "plannotator-last" &&
         cmd !== "plannotator-annotate" &&
-        cmd !== "plannotator-review" &&
-        cmd !== "plannotator-archive"
+        cmd !== "plannotator-review"
       ) return;
 
       output.parts.length = 0;

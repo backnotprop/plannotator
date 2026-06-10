@@ -44,7 +44,9 @@
     "./annotate-args": "./annotate-args.ts",
     "./at-reference": "./at-reference.ts",
     "./code-nav": "./code-nav.ts",
-    "./goal-setup": "./goal-setup.ts"
+    "./goal-setup": "./goal-setup.ts",
+    "./semantic-diff": "./semantic-diff.ts",
+    "./semantic-diff-types": "./semantic-diff-types.ts"
   },
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.64",

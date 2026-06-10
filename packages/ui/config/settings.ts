@@ -39,6 +39,18 @@ export const SETTINGS = {
     toServer: (v: string) => ({ displayName: v }),
   },
 
+  gridEnabled: {
+    // Default ON: plans open in the classic grid / floating-card look. The UI 2.0
+    // flat look is offered as an opt-in via the look-and-feel chooser dialog.
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-grid-enabled');
+      return v === 'true' ? true : v === 'false' ? false : undefined;
+    },
+    toCookie: (v: boolean) => storage.setItem('plannotator-grid-enabled', String(v)),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
   // --- Diff display options (namespaced under diffOptions in config.json) ---
 
   defaultDiffType: {

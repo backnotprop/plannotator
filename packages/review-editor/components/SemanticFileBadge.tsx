@@ -1,0 +1,98 @@
+import React, { useRef, useState } from 'react';
+import * as Popover from '@radix-ui/react-popover';
+import type {
+  SemanticDiffBinaryChange,
+  SemanticDiffChange,
+} from '@plannotator/shared/semantic-diff-types';
+import { useReviewStateOptional } from '../dock/ReviewStateContext';
+import { useFileSemanticChanges } from '../hooks/useFileSemanticChanges';
+import { SemanticDiffRows, lineSelectionForChange } from '../dock/panels/semanticDiffShared';
+
+const CLOSE_DELAY_MS = 140;
+
+/**
+ * A compact "sem · N" pill shown in a file header. On hover it opens a popover
+ * with that file's semantic changes — the same terminal rows as the semantic
+ * panel. Renders nothing unless sem is available and the file has named changes.
+ */
+export const SemanticFileBadge: React.FC<{ filePath: string }> = ({ filePath }) => {
+  const state = useReviewStateOptional();
+  const available = state?.semanticDiffAvailable === true;
+  const { loading, changes, binaryChanges } = useFileSemanticChanges(
+    filePath,
+    state?.rawPatch ?? '',
+    available,
+  );
+
+  const [open, setOpen] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelClose = () => {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  };
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimer.current = setTimeout(() => setOpen(false), CLOSE_DELAY_MS);
+  };
+
+  const count = changes.length + binaryChanges.length;
+  if (!state || !available || loading || count === 0) return null;
+
+  const openChange = (change: SemanticDiffChange) => {
+    state.openDiffFile(change.filePath);
+    state.onLineSelection(lineSelectionForChange(change));
+    setOpen(false);
+  };
+  const openBinary = (change: SemanticDiffBinaryChange) => {
+    state.openDiffFile(change.filePath);
+    state.onLineSelection(null);
+    setOpen(false);
+  };
+
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <button
+          type="button"
+          className="semantic-file-badge"
+          onMouseEnter={() => {
+            cancelClose();
+            setOpen(true);
+          }}
+          onMouseLeave={scheduleClose}
+          title={`${count} semantic change${count === 1 ? '' : 's'} in this file`}
+          aria-label={`Semantic changes for ${filePath}`}
+        >
+          <span className="semantic-file-badge-label">sem</span>
+          <span className="semantic-file-badge-count">{count}</span>
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          align="end"
+          sideOffset={6}
+          className="semantic-diff-popover shadow-lg z-[100] popover-enter"
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          onMouseEnter={cancelClose}
+          onMouseLeave={scheduleClose}
+        >
+          <div className="semantic-diff-popover-header">
+            <span className="semantic-file-badge-label">sem</span>
+            <span className="semantic-diff-popover-path" title={filePath}>{filePath}</span>
+          </div>
+          <div className="semantic-diff-popover-rows">
+            <SemanticDiffRows
+              changes={changes}
+              binaryChanges={binaryChanges}
+              onOpenChange={openChange}
+              onOpenBinary={openBinary}
+            />
+          </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+};

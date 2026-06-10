@@ -1,6 +1,20 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import {
+  Bot,
+  Play,
+  X,
+  Square,
+  Loader2,
+  CheckCircle2,
+  AlertTriangle,
+  Skull,
+  ExternalLink,
+  ChevronDown,
+  Zap,
+} from 'lucide-react';
 import type { AgentJobInfo, AgentCapabilities } from '../types';
 import { isTerminalStatus } from '@plannotator/shared/agent-jobs';
+import { cn } from '../lib/utils';
 import { ReviewAgentsIcon } from './ReviewAgentsIcon';
 import { useAgentSettings } from '../hooks/useAgentSettings';
 import type { AgentEngine, AgentMode } from '../hooks/useAgentSettings';
@@ -8,6 +22,9 @@ import type { AgentEngine, AgentMode } from '../hooks/useAgentSettings';
 // --- Agent option catalogs (shared across review + tour engine dropdowns) ---
 
 const CLAUDE_MODELS: Array<{ value: string; label: string }> = [
+  { value: 'claude-fable-5', label: 'Fable 5' },
+  { value: 'claude-opus-4-8', label: 'Opus 4.8' },
+  { value: 'claude-opus-4-8[1m]', label: 'Opus 4.8 (1M)' },
   { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
   { value: 'claude-sonnet-4-6[1m]', label: 'Sonnet 4.6 (1M)' },
   { value: 'claude-opus-4-7', label: 'Opus 4.7' },
@@ -90,50 +107,35 @@ function ElapsedTime({ startedAt }: { startedAt: number }) {
   return <>{formatDuration(Date.now() - startedAt)}</>;
 }
 
-// --- Status badge ---
+// --- Status square (colored tile + lucide glyph, matches the prototype) ---
 
-function StatusBadge({ status }: { status: AgentJobInfo['status'] }) {
-  switch (status) {
-    case 'starting':
-    case 'running':
-      return (
-        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-primary">
-          <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
-          {status === 'starting' ? 'Starting' : 'Running'}
-        </span>
-      );
-    case 'done':
-      return (
-        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-success">
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-          </svg>
-          Done
-        </span>
-      );
-    case 'failed':
-      return (
-        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-destructive">
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-          Failed
-        </span>
-      );
-    case 'killed':
-      return (
-        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 10a1 1 0 011-1h4a1 1 0 110 2h-4a1 1 0 01-1-1z" />
-          </svg>
-          Killed
-        </span>
-      );
-  }
+const JOB_STATUS_BG: Record<AgentJobInfo['status'], string> = {
+  starting: 'bg-muted-foreground/10',
+  running: 'bg-primary/10',
+  done: 'bg-green-500/10',
+  failed: 'bg-red-500/10',
+  killed: 'bg-orange-500/10',
+};
+
+const JOB_STATUS_ICON: Record<AgentJobInfo['status'], React.ReactNode> = {
+  starting: <Loader2 className="animate-spin text-muted-foreground" size={10} />,
+  running: <Loader2 className="animate-spin text-primary" size={10} />,
+  done: <CheckCircle2 className="text-green-600 dark:text-green-400" size={10} />,
+  failed: <AlertTriangle className="text-red-600 dark:text-red-400" size={10} />,
+  killed: <Skull className="text-orange-600 dark:text-orange-400" size={10} />,
+};
+
+function StatusSquare({ status }: { status: AgentJobInfo['status'] }) {
+  return (
+    <div
+      className={cn(
+        'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md',
+        JOB_STATUS_BG[status],
+      )}
+    >
+      {JOB_STATUS_ICON[status]}
+    </div>
+  );
 }
 
 // --- Provider badge ---
@@ -157,36 +159,113 @@ function formatReasoning(value: string): string {
   return catalogLabel(CODEX_REASONING, value);
 }
 
-function ProviderBadge({ provider, engine, model, effort, reasoningEffort, fastMode }: { provider: string; engine?: string; model?: string; effort?: string; reasoningEffort?: string; fastMode?: boolean }) {
-  let label: string;
-  if (provider === 'tour') {
-    const engineLabel = engine === 'codex' ? 'Codex' : 'Claude';
-    const parts = [`Tour · ${engineLabel}`];
-    if (model) parts.push(formatModel(provider, engine, model));
-    if (engine === 'claude' && effort) parts.push(formatEffort(effort));
-    if (engine === 'codex' && reasoningEffort) parts.push(formatReasoning(reasoningEffort));
-    if (fastMode) parts.push('Fast');
-    label = parts.join(' · ');
-  } else if (provider === 'codex') {
-    const parts = ['Codex'];
-    if (model) parts.push(formatModel(provider, engine, model));
-    if (reasoningEffort) parts.push(formatReasoning(reasoningEffort));
-    if (fastMode) parts.push('Fast');
-    label = parts.join(' · ');
-  } else if (provider === 'claude') {
-    const parts = ['Claude'];
-    if (model) parts.push(formatModel(provider, engine, model));
-    if (effort) parts.push(formatEffort(effort));
-    label = parts.join(' · ');
-  } else {
-    label = 'Shell';
+// --- Launch-control primitives (ported from the prototype's sidebar) ---
+
+// A labelled config row. Inline (label left, control right) by default; pass
+// `stacked` to put a full-width control under the label — used for the model
+// dropdown and the effort/reasoning segmented pickers, which need the room.
+function ConfigRow({ label, stacked, children }: { label: string; stacked?: boolean; children: React.ReactNode }) {
+  if (stacked) {
+    return (
+      <div className="space-y-1">
+        <span className="block text-[10px] text-muted-foreground/50">{label}</span>
+        {children}
+      </div>
+    );
   }
   return (
-    <span className={`text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-      provider === 'tour' ? 'bg-accent/10 text-accent' : 'bg-muted text-muted-foreground'
-    }`}>
-      {label}
-    </span>
+    <div className="flex items-center justify-between gap-2">
+      <span className="shrink-0 text-[10px] text-muted-foreground/50">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+// Pill selector for small option sets (effort, reasoning, tour engine).
+function SegmentedPicker({ options, value, onChange }: { options: Array<{ value: string; label: string }>; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="flex items-center gap-px rounded-lg bg-surface-1/50 p-0.5">
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          onClick={() => onChange(opt.value)}
+          className={cn(
+            'flex-1 rounded-md px-2 py-1 font-medium text-[9px] transition-colors',
+            value === opt.value
+              ? 'bg-card text-foreground shadow-sm'
+              : 'text-muted-foreground/50 hover:text-muted-foreground',
+          )}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Animated on/off switch (fast mode).
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      className={cn('relative h-5 w-9 shrink-0 rounded-full transition-colors', checked ? 'bg-primary' : 'bg-border/50')}
+    >
+      <span
+        className={cn(
+          'absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform',
+          checked && 'translate-x-4',
+        )}
+      />
+    </button>
+  );
+}
+
+// Dropdown button + downward popover. Reused for the provider selector and the
+// model picker (whose 7–9 options rule out a segmented control). The popover
+// opens downward (`top-full`) because the launch panel is pinned to the top of
+// the tab.
+function SelectMenu({ value, options, onChange, icon, placeholder }: { value: string; options: Array<{ value: string; label: string }>; onChange: (v: string) => void; icon?: React.ReactNode; placeholder?: string }) {
+  const [open, setOpen] = useState(false);
+  const current = options.find((o) => o.value === value);
+  return (
+    <div className="relative w-full">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 rounded-lg border border-border/30 bg-surface-1/30 px-2.5 py-1.5 text-left transition-colors hover:bg-surface-1/50"
+      >
+        {icon}
+        <span className="min-w-0 flex-1 truncate text-[11px] text-foreground/80">{current?.label ?? placeholder}</span>
+        <ChevronDown className={cn('shrink-0 text-muted-foreground/30 transition-transform', open && 'rotate-180')} size={10} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full left-0 z-20 mt-1 max-h-56 overflow-y-auto rounded-xl bg-card p-1 shadow-[var(--card-shadow)] ring-1 ring-border/20">
+            {options.map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                onClick={() => {
+                  onChange(o.value);
+                  setOpen(false);
+                }}
+                className={cn(
+                  'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-[11px] transition-colors',
+                  value === o.value
+                    ? 'bg-surface-1 text-foreground'
+                    : 'text-muted-foreground hover:bg-surface-1/50 hover:text-foreground',
+                )}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -211,57 +290,62 @@ function JobCard({
 
   return (
     <div
-      className={`group relative p-2.5 rounded border transition-all cursor-pointer ${
-        expanded
-          ? 'bg-muted/30 border-border/50'
-          : 'border-transparent hover:bg-muted/30 hover:border-border/50'
-      }`}
+      className={cn(
+        'group relative rounded-lg px-2.5 py-2 transition-colors cursor-pointer hover:bg-surface-1/50',
+        expanded && 'bg-surface-1/40',
+      )}
       onClick={onViewDetails ? () => onViewDetails() : (isTerminal ? onToggle : undefined)}
     >
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <ProviderBadge provider={job.provider} engine={job.engine} model={job.model} effort={job.effort} reasoningEffort={job.reasoningEffort} fastMode={job.fastMode} />
-          <span className="text-xs text-foreground/80 truncate">{job.label}</span>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {annotationCount > 0 && (
-            <span className="text-[10px] font-mono bg-primary/10 text-primary px-1.5 py-0.5 rounded">
-              {annotationCount}
+      <div className="flex items-start gap-2.5">
+        <StatusSquare status={job.status} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <span className="truncate font-medium text-[12px] text-foreground">{job.label}</span>
+            {onViewDetails && <ExternalLink className="shrink-0 text-muted-foreground/30" size={9} />}
+          </div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[9px] text-muted-foreground/50">
+            <span className="rounded bg-surface-1 px-1 py-px">{job.provider}</span>
+            {job.model && (
+              <span className="rounded bg-surface-1 px-1 py-px font-mono">{formatModel(job.provider, job.engine, job.model)}</span>
+            )}
+            {job.effort && <span className="rounded bg-surface-1 px-1 py-px">{formatEffort(job.effort)}</span>}
+            {job.reasoningEffort && <span className="rounded bg-surface-1 px-1 py-px">{formatReasoning(job.reasoningEffort)}</span>}
+            {job.fastMode && (
+              <span className="rounded bg-amber-500/10 px-1 py-px text-amber-600 dark:text-amber-400">
+                <Zap className="inline" size={7} /> fast
+              </span>
+            )}
+            <span className="text-muted-foreground/30">·</span>
+            <span className="tabular-nums">
+              {isTerminal && job.endedAt ? formatDuration(job.endedAt - job.startedAt) : <ElapsedTime startedAt={job.startedAt} />}
             </span>
-          )}
-          <span className="text-[10px] text-muted-foreground/60 font-mono">
-            {isTerminal && job.endedAt
-              ? formatDuration(job.endedAt - job.startedAt)
-              : <ElapsedTime startedAt={job.startedAt} />
-            }
-          </span>
+            {annotationCount > 0 && (
+              <>
+                <span className="text-muted-foreground/30">·</span>
+                <span className="tabular-nums">{annotationCount} finding{annotationCount !== 1 ? 's' : ''}</span>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
-      <div className="flex items-center justify-between mt-1.5">
-        <StatusBadge status={job.status} />
-        <div className="flex items-center gap-1">
-          {!isTerminal && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onKill();
-              }}
-              className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
-              title="Kill agent"
-            >
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-        </div>
-      </div>
+      {!isTerminal && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onKill();
+          }}
+          className="absolute top-1.5 right-1.5 rounded p-1 text-muted-foreground opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+          title="Kill agent"
+        >
+          <X size={12} />
+        </button>
+      )}
 
-      {/* Error details — fallback for when dockview detail panel is not available */}
+      {/* Error details — fallback for when the dockview detail panel is not available */}
       {!onViewDetails && job.status === 'failed' && job.error && expanded && (
-        <div className="mt-2 p-2 rounded bg-destructive/5 border border-destructive/20">
-          <pre className="text-[10px] text-destructive/80 whitespace-pre-wrap break-all font-mono leading-relaxed max-h-24 overflow-y-auto">
+        <div className="mt-2 rounded bg-destructive/5 border border-destructive/20 p-2">
+          <pre className="max-h-24 overflow-y-auto whitespace-pre-wrap break-all font-mono text-[10px] leading-relaxed text-destructive/80">
             {job.error}
           </pre>
         </div>
@@ -326,7 +410,7 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
   const availableModes = useMemo<AgentMode[]>(() => {
     const modes: AgentMode[] = [];
     if (availableEngines.length > 0) modes.push('review');
-    if (tourAvailable) modes.push('tour');
+    if (tourAvailable && availableEngines.length > 0) modes.push('tour');
     return modes;
   }, [availableEngines.length, tourAvailable]);
 
@@ -415,195 +499,136 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
     onLaunch(selectedMode === 'review' ? buildReviewLaunch(reviewEngine) : buildTourLaunch());
   };
 
-  const renderEngineSelect = (value: AgentEngine, onChange: (engine: AgentEngine) => void) => (
-    <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-      <span className="font-medium w-14">Engine</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value as AgentEngine)}
-        disabled={availableEngines.length <= 1}
-        className="flex-1 text-[10px] px-1.5 py-0.5 rounded bg-muted/50 border border-border/40 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/30 disabled:opacity-70 disabled:cursor-default"
-      >
-        {availableEngines.map((engine) => (
-          <option key={engine} value={engine}>{ENGINE_LABEL[engine]}</option>
-        ))}
-      </select>
+  const modeOptions = availableModes.map((mode) => ({ value: mode, label: MODE_LABEL[mode] }));
+  const engineOptions = availableEngines.map((engine) => ({ value: engine, label: ENGINE_LABEL[engine] }));
+  const renderStaticChoice = (label: string, icon?: React.ReactNode) => (
+    <div className="flex items-center gap-2 rounded-lg border border-border/30 bg-surface-1/30 px-2.5 py-1.5">
+      {icon}
+      <span className="text-[11px] text-foreground/80">{label}</span>
     </div>
+  );
+
+  const renderEngineSelect = (value: AgentEngine, onChange: (engine: AgentEngine) => void) => (
+    <ConfigRow label="Engine" stacked>
+      {availableEngines.length > 1 ? (
+        <SelectMenu
+          value={value}
+          options={engineOptions}
+          onChange={(next) => onChange(next as AgentEngine)}
+        />
+      ) : (
+        renderStaticChoice(engineOptions[0]?.label ?? ENGINE_LABEL[value])
+      )}
+    </ConfigRow>
   );
 
   return (
     <div className="flex flex-col h-full">
-      {/* Launch bar */}
+      {/* Launch panel (pinned to the top) */}
       {availableModes.length > 0 && (
-        <div className="p-2 border-b border-border/30">
-          <div className="flex items-center gap-1.5">
-            {availableModes.length > 1 ? (
-              <select
-                value={selectedMode ?? availableModes[0] ?? ''}
-                onChange={(e) => setSelectedMode(e.target.value as AgentMode)}
-                className="flex-1 text-xs px-2 py-1.5 rounded bg-muted/50 border border-border/50 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/30"
-              >
-                {availableModes.map((mode) => (
-                  <option key={mode} value={mode}>
-                    {MODE_LABEL[mode]}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <span className="flex-1 text-xs px-2 py-1.5 text-muted-foreground">
-                {availableModes[0] ? MODE_LABEL[availableModes[0]] : ''}
-              </span>
-            )}
-            <button
-              onClick={handleLaunch}
-              disabled={!canLaunch}
-              className="shrink-0 whitespace-nowrap px-3 py-1.5 rounded text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              Run
-            </button>
+        <div className="border-b border-border/40 p-3">
+          <div className="mb-2 font-medium text-[9px] uppercase tracking-wider text-muted-foreground/40">
+            Launch agent
           </div>
 
-          {selectedMode === 'review' && (
-            <div className="mt-2 space-y-1.5">
-              {renderEngineSelect(reviewEngine, setReviewEngine)}
-              {reviewEngine === 'claude' && (
-                <>
-                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                    <span className="font-medium w-14">Model</span>
-                    <select
-                      value={claudeModel}
-                      onChange={(e) => setClaudeModel(e.target.value)}
-                      className="flex-1 text-[10px] px-1.5 py-0.5 rounded bg-muted/50 border border-border/40 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/30"
-                    >
-                      {CLAUDE_MODELS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>
-                  </div>
-                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                    <span className="font-medium w-14">Effort</span>
-                    <select
-                      value={claudeEffort}
-                      onChange={(e) => setClaudeEffort(e.target.value)}
-                      className="flex-1 text-[10px] px-1.5 py-0.5 rounded bg-muted/50 border border-border/40 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/30"
-                    >
-                      {CLAUDE_EFFORT.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>
-                  </div>
-                </>
-              )}
-              {reviewEngine === 'codex' && (
-                <>
-                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                    <span className="font-medium w-14">Model</span>
-                    <select
-                      value={codexModel}
-                      onChange={(e) => setCodexModel(e.target.value)}
-                      className="flex-1 text-[10px] px-1.5 py-0.5 rounded bg-muted/50 border border-border/40 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/30"
-                    >
-                      {CODEX_MODELS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>
-                  </div>
-                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                    <span className="font-medium w-14">Reasoning</span>
-                    <select
-                      value={codexReasoning}
-                      onChange={(e) => setCodexReasoning(e.target.value)}
-                      className="flex-1 text-[10px] px-1.5 py-0.5 rounded bg-muted/50 border border-border/40 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/30"
-                    >
-                      {CODEX_REASONING.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>
-                  </div>
-                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                    <span className="font-medium w-14">Fast</span>
-                    <label className="flex items-center gap-1.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={codexFast}
-                        onChange={(e) => setCodexFast(e.target.checked)}
-                        className="w-3 h-3 accent-primary"
-                      />
-                      <span className={codexFast ? 'text-foreground' : ''}>Fast mode</span>
-                    </label>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
+          <div className="space-y-2">
+            {availableModes.length > 1 ? (
+              <SelectMenu
+                value={selectedMode ?? ''}
+                options={modeOptions}
+                onChange={(next) => setSelectedMode(next as AgentMode)}
+                icon={<Bot className="shrink-0 text-muted-foreground/50" size={12} />}
+                placeholder="Select mode"
+              />
+            ) : (
+              renderStaticChoice(
+                availableModes[0] ? MODE_LABEL[availableModes[0]] : '',
+                <Bot className="shrink-0 text-muted-foreground/50" size={12} />,
+              )
+            )}
 
-          {selectedMode === 'tour' && (
-            <div className="mt-2 space-y-1.5">
-              {renderEngineSelect(tourEngine, setTourEngine)}
-              <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                <span className="font-medium w-14">Model</span>
-                <select
-                  value={tourEngine === 'claude' ? tourClaudeModel : tourCodexModel}
-                  onChange={(e) => (tourEngine === 'claude' ? setTourClaudeModel(e.target.value) : setTourCodexModel(e.target.value))}
-                  className="flex-1 text-[10px] px-1.5 py-0.5 rounded bg-muted/50 border border-border/40 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/30"
-                >
-                  {(tourEngine === 'claude' ? TOUR_CLAUDE_MODELS : CODEX_MODELS).map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-              </div>
+            {selectedMode === 'review' && (
+              <>
+                {renderEngineSelect(reviewEngine, setReviewEngine)}
+                {reviewEngine === 'claude' && (
+                  <>
+                    <ConfigRow label="Model" stacked>
+                      <SelectMenu value={claudeModel} options={CLAUDE_MODELS} onChange={setClaudeModel} />
+                    </ConfigRow>
+                    <ConfigRow label="Effort" stacked>
+                      <SegmentedPicker options={CLAUDE_EFFORT} value={claudeEffort} onChange={setClaudeEffort} />
+                    </ConfigRow>
+                  </>
+                )}
+                {reviewEngine === 'codex' && (
+                  <>
+                    <ConfigRow label="Model" stacked>
+                      <SelectMenu value={codexModel} options={CODEX_MODELS} onChange={setCodexModel} />
+                    </ConfigRow>
+                    <ConfigRow label="Reasoning" stacked>
+                      <SegmentedPicker options={CODEX_REASONING} value={codexReasoning} onChange={setCodexReasoning} />
+                    </ConfigRow>
+                    <ConfigRow label="Fast mode">
+                      <Toggle checked={codexFast} onChange={setCodexFast} />
+                    </ConfigRow>
+                  </>
+                )}
+              </>
+            )}
 
-              {/* Claude-only: effort level */}
-              {tourEngine === 'claude' && (
-                <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                  <span className="font-medium w-14">Effort</span>
-                  <select
-                    value={tourClaudeEffort}
-                    onChange={(e) => setTourClaudeEffort(e.target.value)}
-                    className="flex-1 text-[10px] px-1.5 py-0.5 rounded bg-muted/50 border border-border/40 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/30"
-                  >
-                    {CLAUDE_EFFORT.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                </div>
-              )}
+            {selectedMode === 'tour' && (
+              <>
+                {renderEngineSelect(tourEngine, setTourEngine)}
+                <ConfigRow label="Model" stacked>
+                  <SelectMenu
+                    value={tourEngine === 'claude' ? tourClaudeModel : tourCodexModel}
+                    options={tourEngine === 'claude' ? TOUR_CLAUDE_MODELS : CODEX_MODELS}
+                    onChange={tourEngine === 'claude' ? setTourClaudeModel : setTourCodexModel}
+                  />
+                </ConfigRow>
 
-              {/* Codex-only: reasoning effort + fast mode */}
-              {tourEngine === 'codex' && (
-                <>
-                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                    <span className="font-medium w-14">Reasoning</span>
-                    <select
-                      value={tourCodexReasoning}
-                      onChange={(e) => setTourCodexReasoning(e.target.value)}
-                      className="flex-1 text-[10px] px-1.5 py-0.5 rounded bg-muted/50 border border-border/40 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/30"
-                    >
-                      {CODEX_REASONING.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>
-                  </div>
-                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                    <span className="font-medium w-14">Fast</span>
-                    <label className="flex items-center gap-1.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={tourCodexFast}
-                        onChange={(e) => setTourCodexFast(e.target.checked)}
-                        className="w-3 h-3 accent-primary"
-                      />
-                      <span className={tourCodexFast ? 'text-foreground' : ''}>Fast mode</span>
-                    </label>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
+                {/* Claude-only: effort level */}
+                {tourEngine === 'claude' && (
+                  <ConfigRow label="Effort" stacked>
+                    <SegmentedPicker options={CLAUDE_EFFORT} value={tourClaudeEffort} onChange={setTourClaudeEffort} />
+                  </ConfigRow>
+                )}
+
+                {/* Codex-only: reasoning effort + fast mode */}
+                {tourEngine === 'codex' && (
+                  <>
+                    <ConfigRow label="Reasoning" stacked>
+                      <SegmentedPicker options={CODEX_REASONING} value={tourCodexReasoning} onChange={setTourCodexReasoning} />
+                    </ConfigRow>
+                    <ConfigRow label="Fast mode">
+                      <Toggle checked={tourCodexFast} onChange={setTourCodexFast} />
+                    </ConfigRow>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+
+          <button
+            onClick={handleLaunch}
+            disabled={!canLaunch}
+            className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary py-2 font-medium text-[12px] text-primary-foreground transition-colors hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Play size={11} />
+            Run
+          </button>
         </div>
       )}
 
-      {/* Job list */}
+      {/* Job list (scrolls; launch controls are pinned above) */}
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {sortedJobs.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-40 text-center px-4">
-            <div className="w-10 h-10 rounded-full bg-muted/50 flex items-center justify-center mb-3">
-              <ReviewAgentsIcon className="w-5 h-5 text-muted-foreground" />
+          <div className="flex flex-col items-center py-10 text-center">
+            <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-surface-1/50">
+              <ReviewAgentsIcon className="h-4 w-4 text-muted-foreground/40" />
             </div>
-            <p className="text-xs text-muted-foreground">
-              No agent jobs yet
-            </p>
-            <p className="text-[10px] text-muted-foreground/60 mt-1">
-              Launch an agent to get automated review findings
-            </p>
+            <p className="text-[11px] text-muted-foreground/40">No agent jobs</p>
+            <p className="mt-0.5 text-[10px] text-muted-foreground/35">Launch an agent above</p>
           </div>
         ) : (
           sortedJobs.map((job) => (
@@ -620,17 +645,15 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
         )}
       </div>
 
-      {/* Kill All footer */}
+      {/* Kill all — pinned at the bottom */}
       {runningCount >= 2 && (
-        <div className="p-2 border-t border-border/50">
+        <div className="px-3 pb-2 pt-1">
           <button
             onClick={onKillAll}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded text-xs font-medium text-destructive hover:bg-destructive/10 transition-all"
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/5 py-1.5 font-medium text-[10px] text-red-600 transition-colors hover:bg-red-500/10 dark:text-red-400"
           >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-            Kill All ({runningCount})
+            <Square size={8} />
+            Kill all ({runningCount})
           </button>
         </div>
       )}

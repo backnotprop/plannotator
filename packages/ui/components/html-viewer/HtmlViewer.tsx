@@ -8,7 +8,7 @@ import React, {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import type { Annotation, EditorMode, ImageAttachment } from "../../types";
+import type { Annotation, EditorMode, ImageAttachment, InputMethod } from "../../types";
 import { AnnotationType } from "../../types";
 import { getIdentity } from "../../utils/identity";
 import { AnnotationToolbar } from "../AnnotationToolbar";
@@ -71,10 +71,18 @@ export interface HtmlViewerProps {
   onSelectAnnotation: (id: string | null) => void;
   selectedAnnotationId: string | null;
   mode: EditorMode;
+  /** Input method: 'drag' = text selection, 'pinpoint' = click an element. */
+  inputMethod: InputMethod;
   globalAttachments?: ImageAttachment[];
   onAddGlobalAttachment?: (image: ImageAttachment) => void;
   onRemoveGlobalAttachment?: (path: string) => void;
   maxWidth?: number | null;
+  /** Render edge-to-edge: fill the viewport, drop the card chrome + action bar,
+   *  and let the iframe own the full height instead of auto-resizing to content. */
+  fullViewport?: boolean;
+  /** Hide the floating doc-level controls (attachments + global comment) in
+   *  full-viewport mode, so the user can read the page unobstructed. */
+  hideControls?: boolean;
   onAskAI?: (question: string, context: CommentAskAIContext) => void;
 }
 
@@ -87,10 +95,13 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onSelectAnnotation,
       selectedAnnotationId,
       mode,
+      inputMethod,
       globalAttachments = [],
       onAddGlobalAttachment,
       onRemoveGlobalAttachment,
       maxWidth,
+      fullViewport,
+      hideControls,
       onAskAI,
     },
     ref,
@@ -152,6 +163,16 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       }
     }, [iframeReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // Tell the bridge the current input method (drag vs pinpoint). Re-posts on
+    // ready (fresh iframe) and whenever the user switches it in the toolstrip.
+    useEffect(() => {
+      if (!iframeReady) return;
+      iframeRef.current?.contentWindow?.postMessage(
+        { type: `${PREFIX}set-input-method`, method: inputMethod },
+        "*",
+      );
+    }, [iframeReady, inputMethod]);
+
     useEffect(() => {
       if (!iframeReady) return;
       function sendTheme() {
@@ -195,51 +216,73 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       [onAddAnnotation],
     );
 
+    // Document-level controls (attachments + global comment). Shared between the
+    // normal layout (bar above the card) and full-viewport (floating overlay), so
+    // edge-to-edge HTML keeps these affordances rather than dropping them.
+    const actionButtons = (
+      <>
+        {onAddGlobalAttachment && onRemoveGlobalAttachment && (
+          <AttachmentsButton
+            images={globalAttachments}
+            onAdd={onAddGlobalAttachment}
+            onRemove={onRemoveGlobalAttachment}
+            variant="toolbar"
+          />
+        )}
+        <button
+          ref={globalCommentButtonRef}
+          onClick={() => {
+            setGlobalCommentPopover({
+              anchorEl: globalCommentButtonRef.current!,
+              contextText: "",
+            });
+          }}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors cursor-pointer"
+          title="Add global comment"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 011.037-.443 48.282 48.282 0 005.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+          </svg>
+          <span>Comment</span>
+        </button>
+      </>
+    );
+
     return (
       <>
         <div
-          className="relative w-full"
-          style={{ maxWidth: maxWidth ?? undefined }}
+          className={`relative w-full${fullViewport ? " h-full flex flex-col" : ""}`}
+          style={fullViewport ? undefined : { maxWidth: maxWidth ?? undefined }}
         >
-          {/* Action bar — positioned above the iframe, outside overflow:hidden */}
-          <div data-print-hide className="flex justify-end gap-1 md:gap-2 mb-2">
-            {onAddGlobalAttachment && onRemoveGlobalAttachment && (
-              <AttachmentsButton
-                images={globalAttachments}
-                onAdd={onAddGlobalAttachment}
-                onRemove={onRemoveGlobalAttachment}
-                variant="toolbar"
-              />
-            )}
-            <button
-              ref={globalCommentButtonRef}
-              onClick={() => {
-                setGlobalCommentPopover({
-                  anchorEl: globalCommentButtonRef.current!,
-                  contextText: "",
-                });
-              }}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors cursor-pointer"
-              title="Add global comment"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 011.037-.443 48.282 48.282 0 005.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
-              </svg>
-              <span>Comment</span>
-            </button>
-          </div>
+          {/* Action bar — above the iframe in normal mode (outside overflow:hidden). */}
+          {!fullViewport && (
+            <div data-print-hide className="flex justify-end gap-1 md:gap-2 mb-2">
+              {actionButtons}
+            </div>
+          )}
 
           <article
             data-print-region="article"
-            className="relative bg-card rounded-xl shadow-xl overflow-hidden w-full"
+            className={fullViewport ? "relative overflow-hidden w-full flex-1" : "relative bg-card rounded-xl shadow-xl overflow-hidden w-full"}
           >
+            {/* Full-viewport mode has no card chrome, so float the same controls
+                over the top-right of the iframe (with a backdrop so they read over
+                any HTML). The selection toolbar is portaled separately. */}
+            {fullViewport && !hideControls && (
+              <div
+                data-print-hide
+                className="absolute top-3 right-3 z-10 flex items-center gap-1 md:gap-2 rounded-lg border border-border/50 bg-background/80 px-1.5 py-1 shadow-md backdrop-blur-sm"
+              >
+                {actionButtons}
+              </div>
+            )}
             <iframe
             ref={iframeRef}
             srcDoc={srcdoc}
             sandbox="allow-scripts"
             style={{
               width: "100%",
-              height: `${iframeHeight}px`,
+              height: fullViewport ? "100%" : `${iframeHeight}px`,
               border: "none",
               display: "block",
               colorScheme: "auto",

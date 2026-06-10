@@ -2,6 +2,8 @@
 set -e
 
 REPO="backnotprop/plannotator"
+SEM_REPO="Ataraxy-Labs/sem"
+SEM_VERSION="v0.8.0"
 INSTALL_DIR="$HOME/.local/bin"
 
 # First plannotator release that carries SLSA build-provenance attestations.
@@ -36,7 +38,6 @@ VERIFY_ATTESTATION_FLAG=-1
 # nothing model-invocable). Empty string = not set by a flag.
 EXTRAS_FLAG=""
 MODEL_INVOCABLE_FLAG=""
-GLIMPSE_FLAG=""
 NON_INTERACTIVE=0
 RECONFIGURE=0
 
@@ -62,9 +63,6 @@ Options:
   --model-invocable <l>  Comma-separated skill names to make model-invocable
                          (e.g. plannotator-review,plannotator-compound), or
                          "none". Skills are user-invoked-only by default.
-  --glimpse              Install Glimpse (glimpseui, npm -g) so Plannotator
-                         opens in a native window instead of a browser tab.
-  --no-glimpse           Skip the Glimpse install without asking.
   --non-interactive      Never prompt, even in a terminal. Uses flags, then
                          saved answers from a previous run, then the defaults
                          (no extras, nothing model-invocable).
@@ -73,9 +71,9 @@ Options:
   -h, --help             Show this help and exit.
 
 Guided install: when run in a terminal for the first time (or with
---reconfigure), the installer asks whether to install the extra skills,
-whether any skills should be callable by the model, and whether to install
-Glimpse (native window). Answers are saved to <data dir>/install-prefs and
+--reconfigure), the installer asks whether to install the extra skills and
+whether any skills should be callable by the model. Answers are saved to
+<data dir>/install-prefs and
 reused silently on re-runs. Piped/CI runs (no terminal) never prompt and
 keep the defaults.
 
@@ -83,6 +81,11 @@ Provenance verification is off by default. Enable it by any of:
   - passing --verify-attestation
   - exporting PLANNOTATOR_VERIFY_ATTESTATION=1
   - setting { "verifyAttestation": true } in ~/.plannotator/config.json
+
+The optional semantic-diff sidecar (the 'sem' binary, used by code review) is
+installed after Plannotator itself. Skip it by exporting
+PLANNOTATOR_SKIP_SEM_INSTALL=1. Its download is time-bounded, so a slow network
+never blocks an otherwise-complete install.
 
 Examples:
   curl -fsSL https://plannotator.ai/install.sh | bash
@@ -171,14 +174,6 @@ while [ $# -gt 0 ]; do
                 usage >&2
                 exit 1
             fi
-            shift
-            ;;
-        --glimpse)
-            GLIMPSE_FLAG="yes"
-            shift
-            ;;
-        --no-glimpse)
-            GLIMPSE_FLAG="no"
             shift
             ;;
         --non-interactive|--yes)
@@ -378,6 +373,109 @@ chmod +x "$INSTALL_DIR/plannotator"
 
 echo ""
 echo "plannotator ${latest_tag} installed to ${INSTALL_DIR}/plannotator"
+
+sem_asset_for_platform() {
+    case "$platform" in
+        darwin-arm64) echo "sem-darwin-arm64.tar.gz" ;;
+        linux-arm64)  echo "sem-linux-arm64.tar.gz" ;;
+        linux-x64)    echo "sem-linux-x86_64.tar.gz" ;;
+        *)            return 1 ;;
+    esac
+}
+
+install_sem_sidecar() {
+    case "${PLANNOTATOR_SKIP_SEM_INSTALL:-}" in
+        1|true|yes|TRUE|YES|True|Yes)
+            echo "Skipping semantic diff sidecar install (PLANNOTATOR_SKIP_SEM_INSTALL is set)"
+            return 0
+            ;;
+    esac
+
+    sem_asset="$(sem_asset_for_platform 2>/dev/null || true)"
+    if [ -z "$sem_asset" ]; then
+        echo "Skipping semantic diff sidecar install (sem does not publish ${platform})"
+        return 0
+    fi
+
+    sem_dir="${_config_dir}/vendor/sem/${SEM_VERSION}"
+    sem_bin="${sem_dir}/sem"
+    if [ -x "$sem_bin" ] && "$sem_bin" --version 2>/dev/null | grep -q '^sem '; then
+        echo "Semantic diff sidecar already installed at ${sem_bin}"
+        return 0
+    fi
+
+    tmp_sem_dir="$(mktemp -d)"
+    sem_archive="${tmp_sem_dir}/${sem_asset}"
+    sem_checksums="${tmp_sem_dir}/checksums.txt"
+    sem_base_url="https://github.com/${SEM_REPO}/releases/download/${SEM_VERSION}"
+
+    # Bounded so a slow/hung download of this optional sidecar can't wedge an
+    # install where plannotator itself already landed. On timeout curl fails and
+    # we skip gracefully. Opt out entirely with PLANNOTATOR_SKIP_SEM_INSTALL=1.
+    if ! curl -fsSL --connect-timeout 10 --max-time 120 -o "$sem_archive" "${sem_base_url}/${sem_asset}"; then
+        echo "Skipping semantic diff sidecar install (download failed)"
+        rm -rf "$tmp_sem_dir"
+        return 0
+    fi
+    if ! curl -fsSL --connect-timeout 10 --max-time 60 -o "$sem_checksums" "${sem_base_url}/checksums.txt"; then
+        echo "Skipping semantic diff sidecar install (checksum download failed)"
+        rm -rf "$tmp_sem_dir"
+        return 0
+    fi
+
+    expected_sem_checksum="$(awk -v name="$sem_asset" '$2 == name { print $1 }' "$sem_checksums")"
+    if [ -z "$expected_sem_checksum" ]; then
+        echo "Skipping semantic diff sidecar install (checksum missing for ${sem_asset})"
+        rm -rf "$tmp_sem_dir"
+        return 0
+    fi
+
+    if [ "$(uname -s)" = "Darwin" ]; then
+        actual_sem_checksum="$(shasum -a 256 "$sem_archive" | cut -d' ' -f1)"
+    else
+        actual_sem_checksum="$(sha256sum "$sem_archive" | cut -d' ' -f1)"
+    fi
+
+    if [ "$actual_sem_checksum" != "$expected_sem_checksum" ]; then
+        echo "Skipping semantic diff sidecar install (checksum mismatch)"
+        rm -rf "$tmp_sem_dir"
+        return 0
+    fi
+
+    if ! tar -xzf "$sem_archive" -C "$tmp_sem_dir"; then
+        echo "Skipping semantic diff sidecar install (extract failed)"
+        rm -rf "$tmp_sem_dir"
+        return 0
+    fi
+
+    extracted_sem="$(find "$tmp_sem_dir" -type f -name sem -print -quit)"
+    if [ -z "$extracted_sem" ]; then
+        echo "Skipping semantic diff sidecar install (binary missing from archive)"
+        rm -rf "$tmp_sem_dir"
+        return 0
+    fi
+
+    if ! mkdir -p "$sem_dir"; then
+        echo "Skipping semantic diff sidecar install (directory creation failed)"
+        rm -rf "$tmp_sem_dir"
+        return 0
+    fi
+    if ! cp "$extracted_sem" "$sem_bin"; then
+        echo "Skipping semantic diff sidecar install (copy failed)"
+        rm -rf "$tmp_sem_dir"
+        return 0
+    fi
+    if ! chmod +x "$sem_bin"; then
+        echo "Skipping semantic diff sidecar install (chmod failed)"
+        rm -f "$sem_bin"
+        rm -rf "$tmp_sem_dir"
+        return 0
+    fi
+    rm -rf "$tmp_sem_dir"
+    echo "Semantic diff sidecar installed to ${sem_bin}"
+}
+
+install_sem_sidecar
 
 if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
     echo ""
@@ -699,16 +797,14 @@ fi
 # --reconfigure re-opens the wizard; --non-interactive forces silence; piped
 # CI runs without a terminal never prompt. CLI flags win over everything.
 PREFS_FILE="$_config_dir/install-prefs"
-CORE_SKILL_NAMES="plannotator-review plannotator-annotate plannotator-last plannotator-archive"
+CORE_SKILL_NAMES="plannotator-review plannotator-annotate plannotator-last"
 EXTRA_SKILL_NAMES="plannotator-compound plannotator-setup-goal plannotator-visual-explainer"
 
 saved_extras=""
 saved_invocable=""
-saved_glimpse=""
 if [ -f "$PREFS_FILE" ]; then
     saved_extras=$(sed -n 's/^extras=//p' "$PREFS_FILE" | head -1)
     saved_invocable=$(sed -n 's/^model_invocable=//p' "$PREFS_FILE" | head -1)
-    saved_glimpse=$(sed -n 's/^glimpse=//p' "$PREFS_FILE" | head -1)
 fi
 
 # Extras already on disk (pre-existing or previously npx-installed)? Then the
@@ -722,20 +818,28 @@ for skill in $EXTRA_SKILL_NAMES; do
     fi
 done
 
-# Glimpse (glimpseui) gives Plannotator a native window instead of a browser
-# tab; the runtime auto-detects it on PATH, so installing it globally is all
-# that's needed. Skip the question when it's already installed.
-glimpse_present=0
-if command -v glimpseui >/dev/null 2>&1; then
-    glimpse_present=1
-fi
-
-# A wizard needs a real keyboard. Piped installs (curl | bash) still have a
-# terminal at /dev/tty even though stdin is the pipe; CI and scripts do not.
+# A wizard needs a real human at the keyboard. Piped installs (curl | bash)
+# still have a terminal at /dev/tty even though stdin is the pipe; CI and
+# scripts do not. Some automated contexts (docker run -t, devcontainer and
+# provisioner shells) DO expose an openable /dev/tty with nobody behind it —
+# opening /dev/tty succeeds, yet a read would block forever. The per-prompt
+# timeout below (see PROMPT_TIMEOUT / ask_yes_no) handles that: a mis-detected
+# terminal falls through to the safe non-interactive defaults (extras=no,
+# model-invocable=none) instead of wedging. We deliberately do NOT
+# gate on $CI here — an exported CI var must not silently suppress an explicit
+# --reconfigure or --extras in an otherwise interactive shell.
 can_prompt=0
 if [ "$NON_INTERACTIVE" -eq 0 ] && { : < /dev/tty; } 2>/dev/null; then
     can_prompt=1
 fi
+
+# Bound every interactive read so an unattended-but-open /dev/tty auto-takes
+# the default rather than hanging. Set PLANNOTATOR_PROMPT_TIMEOUT=0 to wait
+# indefinitely (restores the old unbounded behavior); non-numeric falls to 30.
+PROMPT_TIMEOUT="${PLANNOTATOR_PROMPT_TIMEOUT:-30}"
+case "$PROMPT_TIMEOUT" in
+    ''|*[!0-9]*) PROMPT_TIMEOUT=30 ;;
+esac
 
 run_wizard=0
 if [ "$can_prompt" -eq 1 ]; then
@@ -746,11 +850,32 @@ fi
 
 # Ask a y/n question on the terminal. $1 prompt, $2 default (yes/no).
 ask_yes_no() {
-    local prompt="$1" default="$2" answer suffix
+    local prompt="$1" default="$2" answer suffix rc
     suffix="[y/N]"
     [ "$default" = "yes" ] && suffix="[Y/n]"
     printf '%s %s ' "$prompt" "$suffix" > /dev/tty
-    IFS= read -r answer < /dev/tty || answer=""
+    # Bounded read so an unattended-but-open /dev/tty (e.g. docker run -t with
+    # no human) can't hang the install. Distinguish a human pressing Enter
+    # (read succeeds with an empty answer -> use the prompt's $default) from a
+    # timeout/EOF with nobody there (read fails -> use the SAFE "no", never the
+    # default). Otherwise a prompt whose default is "yes" could
+    # silently install software on an unattended terminal.
+    # Keep the read in a tested context (`|| rc=$?`) so the read itself never
+    # trips `set -e` (active at the top of this script), without relying on the
+    # subtle rule that -e is suppressed inside a function called in a tested
+    # context. ask_yes_no still returns non-zero on timeout/EOF to signal "no
+    # human", so every caller consumes it with `|| wizard_timed_out=1`.
+    rc=0
+    if [ "$PROMPT_TIMEOUT" -gt 0 ]; then
+        IFS= read -r -t "$PROMPT_TIMEOUT" answer < /dev/tty || rc=$?
+    else
+        IFS= read -r answer < /dev/tty || rc=$?
+    fi
+    if [ "$rc" -ne 0 ]; then
+        printf '\n' > /dev/tty
+        echo "no"
+        return 1
+    fi
     case "$answer" in
         y|Y|yes|YES|Yes) echo "yes" ;;
         n|N|no|NO|No)    echo "no" ;;
@@ -810,7 +935,9 @@ select_skills_checkbox() {
 
 extras_choice=""
 invocable_choice=""
-glimpse_choice=""
+# Set if any wizard prompt times out / hits EOF (no human answered). A run whose
+# answers are synthetic timeout fallbacks must not be persisted as install-prefs.
+wizard_timed_out=0
 
 if [ "$run_wizard" -eq 1 ]; then
     {
@@ -827,7 +954,7 @@ if [ "$run_wizard" -eq 1 ]; then
         # Flag already answered this question — don't ask and then ignore.
         extras_choice="$EXTRAS_FLAG"
     else
-        extras_choice=$(ask_yes_no "Install the extra skills (compound planning, setup-goal, visual explainer)?" "${saved_extras:-no}")
+        extras_choice=$(ask_yes_no "Install the extra skills (compound planning, setup-goal, visual explainer)?" "${saved_extras:-no}") || wizard_timed_out=1
     fi
     invocable_list="$CORE_SKILL_NAMES"
     if [ "$extras_choice" = "yes" ]; then
@@ -837,57 +964,31 @@ if [ "$run_wizard" -eq 1 ]; then
         # Flag already answered this question — don't ask and then ignore.
         invocable_choice="$MODEL_INVOCABLE_FLAG"
     else
-        want_invocable=$(ask_yes_no "Make any skills callable by the model (instead of user-invoked only)?" "no")
+        want_invocable=$(ask_yes_no "Make any skills callable by the model (instead of user-invoked only)?" "no") || wizard_timed_out=1
         if [ "$want_invocable" = "yes" ]; then
             invocable_choice=$(select_skills_checkbox "$invocable_list" "$saved_invocable")
         else
             invocable_choice="none"
         fi
     fi
-    if [ "$glimpse_present" -eq 1 ]; then
-        echo "Glimpse already installed — Plannotator will open in its native window." > /dev/tty
-        glimpse_choice="yes"
-    elif [ -n "$GLIMPSE_FLAG" ]; then
-        # Flag already answered this question — don't ask and then ignore.
-        glimpse_choice="$GLIMPSE_FLAG"
-    else
-        glimpse_choice=$(ask_yes_no "Install Glimpse so Plannotator opens in a native window instead of a browser tab? (npm i -g glimpseui)" "${saved_glimpse:-yes}")
-    fi
 fi
 
 # Flags override the wizard and saved answers; otherwise saved, then defaults.
 [ -n "$EXTRAS_FLAG" ] && extras_choice="$EXTRAS_FLAG"
 [ -n "$MODEL_INVOCABLE_FLAG" ] && invocable_choice="$MODEL_INVOCABLE_FLAG"
-[ -n "$GLIMPSE_FLAG" ] && glimpse_choice="$GLIMPSE_FLAG"
 [ -z "$extras_choice" ] && extras_choice="${saved_extras:-no}"
 [ -z "$invocable_choice" ] && invocable_choice="${saved_invocable:-none}"
-[ -z "$glimpse_choice" ] && glimpse_choice="${saved_glimpse:-no}"
 
-# Persist only when the wizard ran or a flag set something — silent re-runs
-# must not clobber saved answers with defaults.
-if [ "$run_wizard" -eq 1 ] || [ -n "$EXTRAS_FLAG" ] || [ -n "$MODEL_INVOCABLE_FLAG" ] || [ -n "$GLIMPSE_FLAG" ]; then
+# Persist only when the wizard ran with real answers, or a flag set something.
+# Silent re-runs must not clobber saved answers with defaults, and a wizard that
+# timed out to synthetic fallbacks (unattended /dev/tty) must not become sticky
+# prefs that suppress the wizard on a later genuine interactive install.
+if [ "$wizard_timed_out" -eq 0 ] && { [ "$run_wizard" -eq 1 ] || [ -n "$EXTRAS_FLAG" ] || [ -n "$MODEL_INVOCABLE_FLAG" ]; }; then
     mkdir -p "$_config_dir"
     {
         echo "extras=$extras_choice"
         echo "model_invocable=$invocable_choice"
-        echo "glimpse=$glimpse_choice"
     } > "$PREFS_FILE"
-fi
-
-# Glimpse install (global npm package; the runtime auto-detects it on PATH).
-# Wizard or explicit flag only — silent re-runs never install software.
-if [ "$glimpse_choice" = "yes" ] && [ "$glimpse_present" -eq 0 ]; then
-    if [ "$run_wizard" -eq 1 ] || [ -n "$GLIMPSE_FLAG" ]; then
-        if command -v npm >/dev/null 2>&1; then
-            echo "Installing Glimpse (npm install -g glimpseui)..."
-            npm install -g glimpseui || echo "Glimpse install failed — install later with: npm install -g glimpseui"
-        elif command -v bun >/dev/null 2>&1; then
-            echo "Installing Glimpse (bun install -g glimpseui)..."
-            bun install -g glimpseui || echo "Glimpse install failed — install later with: bun install -g glimpseui"
-        else
-            echo "npm/bun not found — install Node.js, then: npm install -g glimpseui"
-        fi
-    fi
 fi
 
 # Extras install is delegated to the skills CLI (its UI picks the agents).
@@ -969,19 +1070,31 @@ checkout_failed=0
     # via --version may predate the core/extra layout — skip core skills
     # but keep installing the command files below (matches install.ps1 and
     # install.cmd, which guard each block independently).
+    # Claude Code and Codex consume different skill bodies. Claude Code reads
+    # the apps/skills/claude/* copies, which use dynamic-context injection
+    # (`!`plannotator … $ARGUMENTS``) + allowed-tools so /plannotator-* run the
+    # binary directly with no permission prompt — matching the old slash
+    # commands. Codex (the OpenAI shared-agent path) reads apps/skills/core/*,
+    # whose prose bodies the model follows via its own shell; the `!`…``
+    # injection is a Claude-Code-only extension, so the two are sourced
+    # separately rather than sharing one body.
+    if [ -d "apps/skills/claude" ] && [ -n "$(ls -A apps/skills/claude 2>/dev/null)" ]; then
+        mkdir -p "$CLAUDE_SKILLS_DIR"
+        copy_skill_if_present apps/skills/claude/plannotator-review "$CLAUDE_SKILLS_DIR"
+        copy_skill_if_present apps/skills/claude/plannotator-annotate "$CLAUDE_SKILLS_DIR"
+        copy_skill_if_present apps/skills/claude/plannotator-last "$CLAUDE_SKILLS_DIR"
+        echo "Installed Claude Code skills to ${CLAUDE_SKILLS_DIR}/"
+    else
+        echo "Tag ${latest_tag} predates the per-agent skill layout — skipping Claude Code skill install"
+    fi
     if [ -d "apps/skills/core" ] && [ -n "$(ls -A apps/skills/core 2>/dev/null)" ]; then
-        mkdir -p "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR"
-        copy_skill_if_present apps/skills/core/plannotator-review "$CLAUDE_SKILLS_DIR"
-        copy_skill_if_present apps/skills/core/plannotator-annotate "$CLAUDE_SKILLS_DIR"
-        copy_skill_if_present apps/skills/core/plannotator-last "$CLAUDE_SKILLS_DIR"
-        copy_skill_if_present apps/skills/core/plannotator-archive "$CLAUDE_SKILLS_DIR"
+        mkdir -p "$AGENTS_SKILLS_DIR"
         copy_skill_if_present apps/skills/core/plannotator-review "$AGENTS_SKILLS_DIR"
         copy_skill_if_present apps/skills/core/plannotator-annotate "$AGENTS_SKILLS_DIR"
         copy_skill_if_present apps/skills/core/plannotator-last "$AGENTS_SKILLS_DIR"
-        copy_skill_if_present apps/skills/core/plannotator-archive "$AGENTS_SKILLS_DIR"
-        echo "Installed core skills to ${CLAUDE_SKILLS_DIR}/ and shared agent skills to ${AGENTS_SKILLS_DIR}/"
+        echo "Installed shared agent skills to ${AGENTS_SKILLS_DIR}/"
     else
-        echo "Tag ${latest_tag} predates the core/extra skill layout — skipping core skill install"
+        echo "Tag ${latest_tag} predates the core/extra skill layout — skipping shared agent skill install"
     fi
 
     # OpenCode slash command stubs (the plugin intercepts execution) —
@@ -1004,7 +1117,6 @@ checkout_failed=0
         # Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
         copy_skill_if_present apps/kiro-cli/skills/plannotator-review "$KIRO_SKILLS_DIR"
         copy_skill_if_present apps/kiro-cli/skills/plannotator-annotate "$KIRO_SKILLS_DIR"
-        copy_skill_if_present apps/kiro-cli/skills/plannotator-archive "$KIRO_SKILLS_DIR"
         # Extras come from apps/skills/extra (not duplicated into apps/kiro-cli/skills).
         copy_skill_if_present apps/skills/extra/plannotator-setup-goal "$KIRO_SKILLS_DIR"
         copy_skill_if_present apps/skills/extra/plannotator-visual-explainer "$KIRO_SKILLS_DIR"
@@ -1030,12 +1142,27 @@ fi
 # AFTER the install above guarantees a failed or skipped skill install never
 # leaves users with neither the command nor the skill.
 CLAUDE_COMMANDS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/commands"
-for cmd in plannotator-review plannotator-annotate plannotator-last plannotator-archive; do
+for cmd in plannotator-review plannotator-annotate plannotator-last; do
     if [ -d "$CLAUDE_SKILLS_DIR/$cmd" ] && [ -f "$CLAUDE_COMMANDS_DIR/$cmd.md" ]; then
         rm -f "$CLAUDE_COMMANDS_DIR/$cmd.md"
         echo "Removed legacy Claude command ${CLAUDE_COMMANDS_DIR}/$cmd.md (replaced by the $cmd skill)"
     fi
 done
+
+# plannotator-archive no longer ships as a skill. Remove any stale installed
+# copy from every skill scope so upgraders don't keep a dead skill around.
+for scope in "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR" "$KIRO_SKILLS_DIR"; do
+    if [ -d "$scope/plannotator-archive" ]; then
+        rm -rf "$scope/plannotator-archive"
+        echo "Removed stale plannotator-archive skill from ${scope}/plannotator-archive"
+    fi
+done
+# The /plannotator-archive OpenCode command was removed too — sweep the stub
+# (only npm-plugin-postinstall users ever had it written here).
+if [ -f "$OPENCODE_COMMANDS_DIR/plannotator-archive.md" ]; then
+    rm -f "$OPENCODE_COMMANDS_DIR/plannotator-archive.md"
+    echo "Removed stale plannotator-archive command from ${OPENCODE_COMMANDS_DIR}/"
+fi
 
 # Codex no longer hosts core skills (they now live in ~/.agents/skills).
 # Core skills are removed only once their replacement exists; the stale
@@ -1160,7 +1287,7 @@ echo "Add the plugin to your opencode.json:"
 echo ""
 echo '  "plugin": ["@plannotator/opencode@latest"]'
 echo ""
-echo "Then restart OpenCode. The /plannotator-review, /plannotator-annotate, /plannotator-last, and /plannotator-archive commands are ready!"
+echo "Then restart OpenCode. The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready!"
 echo ""
 echo "=========================================="
 echo "  PI USERS"
@@ -1195,7 +1322,6 @@ if [ "$codex_available" -eq 1 ]; then
     echo "  \$plannotator-review"
     echo "  \$plannotator-annotate <file|url|folder>"
     echo "  \$plannotator-last"
-    echo "  \$plannotator-archive"
 else
     echo "Codex was not detected. After installing Codex, rerun this installer to add"
     echo "the Stop hook."
@@ -1224,7 +1350,7 @@ echo ""
 echo "Upgrading from an older version? Also run /plugin marketplace update"
 echo "so the plugin drops its old plannotator:* command entries."
 echo ""
-echo "The /plannotator-review, /plannotator-annotate, /plannotator-last, and /plannotator-archive commands are ready to use after you restart Claude Code!"
+echo "The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready to use after you restart Claude Code!"
 
 if [ "$extras_choice" != "yes" ]; then
     echo ""

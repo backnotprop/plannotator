@@ -6,8 +6,6 @@ param(
     [switch]$Extras,
     [switch]$NoExtras,
     [string]$ModelInvocable = "",
-    [switch]$Glimpse,
-    [switch]$NoGlimpse,
     [switch]$NonInteractive,
     [switch]$Reconfigure
 )
@@ -25,12 +23,9 @@ if ($Extras -and $NoExtras) {
     [Console]::Error.WriteLine("-Extras and -NoExtras are mutually exclusive. Pass one or the other.")
     exit 1
 }
-if ($Glimpse -and $NoGlimpse) {
-    [Console]::Error.WriteLine("-Glimpse and -NoGlimpse are mutually exclusive. Pass one or the other.")
-    exit 1
-}
-
 $repo = "backnotprop/plannotator"
+$semRepo = "Ataraxy-Labs/sem"
+$semVersion = "v0.8.0"
 $installDir = "$env:LOCALAPPDATA\plannotator"
 
 # First plannotator release that carries SLSA build-provenance attestations.
@@ -114,6 +109,74 @@ if ($configDir -eq "~") {
 } elseif ($configDir.StartsWith("~/") -or $configDir.StartsWith('~\')) {
     $configDir = Join-Path $env:USERPROFILE ($configDir.Substring(2))
 }
+
+function Install-SemSidecar {
+    if ($env:PLANNOTATOR_SKIP_SEM_INSTALL -match '^(1|true|yes)$') {
+        Write-Host "Skipping semantic diff sidecar install (PLANNOTATOR_SKIP_SEM_INSTALL is set)"
+        return
+    }
+
+    $semAsset = if ($platform -eq "win32-x64") { "sem-windows-x86_64.zip" } else { $null }
+    if (-not $semAsset) {
+        Write-Host "Skipping semantic diff sidecar install (sem does not publish $platform)"
+        return
+    }
+
+    $semDir = Join-Path $configDir "vendor\sem\$semVersion"
+    $semPath = Join-Path $semDir "sem.exe"
+    if (Test-Path $semPath) {
+        try {
+            $versionText = & $semPath --version 2>$null
+            if ($LASTEXITCODE -eq 0 -and $versionText -match '^sem ') {
+                Write-Host "Semantic diff sidecar already installed at $semPath"
+                return
+            }
+        } catch {
+            # Replace invalid stale sidecar below.
+        }
+    }
+
+    $tmpSemDir = Join-Path ([System.IO.Path]::GetTempPath()) "plannotator-sem-$([System.Guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Force -Path $tmpSemDir | Out-Null
+
+    try {
+        $semBaseUrl = "https://github.com/$semRepo/releases/download/$semVersion"
+        $semArchive = Join-Path $tmpSemDir $semAsset
+        $semChecksums = Join-Path $tmpSemDir "checksums.txt"
+        # Bounded so a slow/hung download of this optional sidecar can't wedge an
+        # install where plannotator already landed; the catch below skips it.
+        Invoke-WebRequest -Uri "$semBaseUrl/$semAsset" -OutFile $semArchive -UseBasicParsing -TimeoutSec 120
+        Invoke-WebRequest -Uri "$semBaseUrl/checksums.txt" -OutFile $semChecksums -UseBasicParsing -TimeoutSec 60
+
+        $expected = (Get-Content $semChecksums | Where-Object { $_ -match "\s$([regex]::Escape($semAsset))$" } | ForEach-Object { ($_ -split '\s+')[0] } | Select-Object -First 1)
+        if (-not $expected) {
+            Write-Host "Skipping semantic diff sidecar install (checksum missing for $semAsset)"
+            return
+        }
+
+        $actual = (Get-FileHash -Path $semArchive -Algorithm SHA256).Hash.ToLower()
+        if ($actual -ne $expected.ToLower()) {
+            Write-Host "Skipping semantic diff sidecar install (checksum mismatch)"
+            return
+        }
+
+        Expand-Archive -Force -Path $semArchive -DestinationPath $tmpSemDir
+        $extracted = Get-ChildItem -Path $tmpSemDir -Filter "sem.exe" -Recurse | Select-Object -First 1
+        if (-not $extracted) {
+            Write-Host "Skipping semantic diff sidecar install (binary missing from archive)"
+            return
+        }
+
+        New-Item -ItemType Directory -Force -Path $semDir | Out-Null
+        Copy-Item -Force $extracted.FullName $semPath
+        Write-Host "Semantic diff sidecar installed to $semPath"
+    } catch {
+        Write-Host "Skipping semantic diff sidecar install ($($_.Exception.Message))"
+    } finally {
+        Remove-Item -Recurse -Force $tmpSemDir -ErrorAction SilentlyContinue
+    }
+}
+
 $configPath = Join-Path $configDir "config.json"
 if (Test-Path $configPath) {
     try {
@@ -249,6 +312,8 @@ Move-Item -Force $tmpFile "$installDir\plannotator.exe"
 
 Write-Host ""
 Write-Host "plannotator $latestTag installed to $installDir\plannotator.exe"
+
+Install-SemSidecar
 
 # Add to PATH if not already there
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -409,23 +474,17 @@ if (-not (Test-Path $extrasMigration)) {
 # re-runs. -Reconfigure re-opens the wizard; -NonInteractive forces silence;
 # redirected/CI runs never prompt. Flags win over everything.
 $prefsFile = Join-Path $configDir "install-prefs"
-$coreSkillNames = @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-archive")
+$coreSkillNames = @("plannotator-review", "plannotator-annotate", "plannotator-last")
 $extraSkillNames = @("plannotator-compound", "plannotator-setup-goal", "plannotator-visual-explainer")
 
 $savedExtras = ""
 $savedInvocable = ""
-$savedGlimpse = ""
 if (Test-Path $prefsFile) {
     foreach ($line in Get-Content $prefsFile) {
         if ($line -match '^extras=(.*)$') { $savedExtras = $Matches[1] }
         if ($line -match '^model_invocable=(.*)$') { $savedInvocable = $Matches[1] }
-        if ($line -match '^glimpse=(.*)$') { $savedGlimpse = $Matches[1] }
     }
 }
-
-# Glimpse (glimpseui) gives Plannotator a native window instead of a browser
-# tab; the runtime auto-detects it on PATH. Skip the question when installed.
-$glimpsePresent = [bool](Get-Command glimpseui -ErrorAction SilentlyContinue)
 
 # Extras already on disk (pre-existing or previously npx-installed)? Then the
 # extras question is moot — they still count toward the checkbox list, and we
@@ -451,11 +510,49 @@ if (-not $NonInteractive) {
 
 $runWizard = $canPrompt -and ($Reconfigure -or -not (Test-Path $prefsFile))
 
+# Bound interactive prompts so an unattended-but-attached console (e.g. a
+# PsExec / provisioner first-run) can't hang the install. Override with
+# PLANNOTATOR_PROMPT_TIMEOUT (0 = wait forever); non-numeric/negative -> 30.
+$script:promptTimeout = 30
+if ($env:PLANNOTATOR_PROMPT_TIMEOUT) {
+    $parsed = 0
+    if ([int]::TryParse($env:PLANNOTATOR_PROMPT_TIMEOUT, [ref]$parsed) -and $parsed -ge 0) {
+        $script:promptTimeout = $parsed
+    }
+}
+
+# Read a line with a timeout (seconds); $null if no input arrives in time.
+# 0 waits indefinitely. Echoes typed chars since ReadKey($true) intercepts them.
+function Read-LineWithTimeout {
+    param([int]$TimeoutSeconds)
+    if ($TimeoutSeconds -le 0) { return [Console]::ReadLine() }
+    $line = ""
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($sw.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
+        if ([Console]::KeyAvailable) {
+            $key = [Console]::ReadKey($true)
+            if ($key.Key -eq "Enter") { Write-Host ""; return $line }
+            elseif ($key.Key -eq "Backspace") {
+                if ($line.Length -gt 0) { $line = $line.Substring(0, $line.Length - 1); Write-Host "`b `b" -NoNewline }
+            }
+            else { $line += $key.KeyChar; Write-Host $key.KeyChar -NoNewline }
+        }
+        else { Start-Sleep -Milliseconds 50 }
+    }
+    return $null
+}
+
 function Read-YesNo {
     param([string]$Prompt, [string]$Default)
     $suffix = if ($Default -eq "yes") { "[Y/n]" } else { "[y/N]" }
     Write-Host "$Prompt $suffix " -NoNewline
-    $answer = [Console]::ReadLine()
+    # On timeout nobody is there -> return the SAFE "no", never $Default, so a
+    # yes-default prompt can't auto-run unattended.
+    $answer = Read-LineWithTimeout $script:promptTimeout
+    if ($null -eq $answer) {
+        Write-Host ""
+        return "no"
+    }
     switch -regex ($answer) {
         '^(y|yes)$' { return "yes" }
         '^(n|no)$'  { return "no" }
@@ -501,7 +598,6 @@ function Select-SkillsCheckbox {
 
 $extrasChoice = ""
 $invocableChoice = ""
-$glimpseChoice = ""
 
 if ($runWizard) {
     Write-Host ""
@@ -532,49 +628,20 @@ if ($runWizard) {
             $invocableChoice = "none"
         }
     }
-    if ($glimpsePresent) {
-        Write-Host "Glimpse already installed — Plannotator will open in its native window."
-        $glimpseChoice = "yes"
-    } elseif ($Glimpse -or $NoGlimpse) {
-        # Flag already answered this question — don't ask and then ignore.
-        $glimpseChoice = if ($Glimpse) { "yes" } else { "no" }
-    } else {
-        $defaultGlimpse = if ($savedGlimpse) { $savedGlimpse } else { "yes" }
-        $glimpseChoice = Read-YesNo "Install Glimpse so Plannotator opens in a native window instead of a browser tab? (npm i -g glimpseui)" $defaultGlimpse
-    }
 }
 
 # Flags override the wizard and saved answers; otherwise saved, then defaults.
 if ($Extras) { $extrasChoice = "yes" }
 if ($NoExtras) { $extrasChoice = "no" }
 if ($ModelInvocable) { $invocableChoice = $ModelInvocable }
-if ($Glimpse) { $glimpseChoice = "yes" }
-if ($NoGlimpse) { $glimpseChoice = "no" }
 if (-not $extrasChoice) { $extrasChoice = if ($savedExtras) { $savedExtras } else { "no" } }
 if (-not $invocableChoice) { $invocableChoice = if ($savedInvocable) { $savedInvocable } else { "none" } }
-if (-not $glimpseChoice) { $glimpseChoice = if ($savedGlimpse) { $savedGlimpse } else { "no" } }
 
 # Persist only when the wizard ran or a flag set something — silent re-runs
 # must not clobber saved answers with defaults.
-if ($runWizard -or $Extras -or $NoExtras -or $ModelInvocable -or $Glimpse -or $NoGlimpse) {
+if ($runWizard -or $Extras -or $NoExtras -or $ModelInvocable) {
     New-Item -ItemType Directory -Force -Path $configDir | Out-Null
-    @("extras=$extrasChoice", "model_invocable=$invocableChoice", "glimpse=$glimpseChoice") | Set-Content $prefsFile
-}
-
-# Glimpse install (global npm package; the runtime auto-detects it on PATH).
-# Wizard or explicit flag only — silent re-runs never install software.
-if (($glimpseChoice -eq "yes") -and (-not $glimpsePresent) -and ($runWizard -or $Glimpse)) {
-    if (Get-Command npm -ErrorAction SilentlyContinue) {
-        Write-Host "Installing Glimpse (npm install -g glimpseui)..."
-        npm install -g glimpseui
-        if ($LASTEXITCODE -ne 0) { Write-Host "Glimpse install failed — install later with: npm install -g glimpseui" }
-    } elseif (Get-Command bun -ErrorAction SilentlyContinue) {
-        Write-Host "Installing Glimpse (bun install -g glimpseui)..."
-        bun install -g glimpseui
-        if ($LASTEXITCODE -ne 0) { Write-Host "Glimpse install failed — install later with: bun install -g glimpseui" }
-    } else {
-        Write-Host "npm/bun not found — install Node.js, then: npm install -g glimpseui"
-    }
+    @("extras=$extrasChoice", "model_invocable=$invocableChoice") | Set-Content $prefsFile
 }
 
 # Extras install is delegated to the skills CLI (its UI picks the agents).
@@ -644,20 +711,32 @@ try {
         try {
             git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands 2>$null
 
-            # Core skills -> ~/.claude/skills and ~/.agents/skills (all 4).
+            # Claude Code and Codex consume different skill bodies. Claude Code
+            # reads apps/skills/claude/* (dynamic-context injection
+            # `!`plannotator … $ARGUMENTS`` + allowed-tools, so /plannotator-*
+            # run with no permission prompt — like the old slash commands).
+            # Codex reads apps/skills/core/* (prose the model follows via its
+            # own shell). The `!`…`` injection is a Claude-Code-only extension,
+            # so the two are sourced separately rather than sharing one body.
             # Route each through Copy-SkillIfPresent (which pre-removes the
-            # existing target dir) so re-runs replace rather than nest,
-            # matching install.sh's per-skill structure.
-            if ((Test-Path "apps\skills\core") -and (Get-ChildItem "apps\skills\core" -ErrorAction SilentlyContinue)) {
+            # existing target dir) so re-runs replace rather than nest.
+            if ((Test-Path "apps\skills\claude") -and (Get-ChildItem "apps\skills\claude" -ErrorAction SilentlyContinue)) {
                 New-Item -ItemType Directory -Force -Path $claudeSkillsDir | Out-Null
+                foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last")) {
+                    Copy-SkillIfPresent "apps\skills\claude\$skill" $claudeSkillsDir
+                }
+                Write-Host "Installed Claude Code skills to $claudeSkillsDir\"
+            } else {
+                Write-Host "Tag $latestTag predates the per-agent skill layout — skipping Claude Code skill install"
+            }
+            if ((Test-Path "apps\skills\core") -and (Get-ChildItem "apps\skills\core" -ErrorAction SilentlyContinue)) {
                 New-Item -ItemType Directory -Force -Path $agentsSkillsDir | Out-Null
-                foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-archive")) {
-                    Copy-SkillIfPresent "apps\skills\core\$skill" $claudeSkillsDir
+                foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last")) {
                     Copy-SkillIfPresent "apps\skills\core\$skill" $agentsSkillsDir
                 }
-                Write-Host "Installed core skills to $claudeSkillsDir\ and $agentsSkillsDir\"
+                Write-Host "Installed shared agent skills to $agentsSkillsDir\"
             } else {
-                Write-Host "Tag $latestTag predates the core/extra skill layout — skipping core skill install"
+                Write-Host "Tag $latestTag predates the core/extra skill layout — skipping shared agent skill install"
             }
 
             # Kiro: hand-maintained skills (origin baked in) + two extras.
@@ -667,7 +746,6 @@ try {
                 # Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
                 Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-review" $kiroSkillsDir
                 Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-annotate" $kiroSkillsDir
-                Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-archive" $kiroSkillsDir
                 # Two extras come from apps/skills/extra (not duplicated into apps/kiro-cli/skills).
                 Copy-SkillIfPresent "apps\skills\extra\plannotator-setup-goal" $kiroSkillsDir
                 Copy-SkillIfPresent "apps\skills\extra\plannotator-visual-explainer" $kiroSkillsDir
@@ -727,13 +805,29 @@ if ($checkoutFailed) {
 # command file only once its replacement skill is actually on disk — running
 # AFTER the install above guarantees a failed or skipped skill install never
 # leaves users with neither the command nor the skill.
-foreach ($cmd in @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-archive")) {
+foreach ($cmd in @("plannotator-review", "plannotator-annotate", "plannotator-last")) {
     $cmdPath = Join-Path $claudeCommandsDir "$cmd.md"
     $skillPath = Join-Path $claudeSkillsDir $cmd
     if ((Test-Path $skillPath) -and (Test-Path $cmdPath)) {
         Write-Host "Removing stale Claude command $cmdPath (replaced by the $cmd skill)"
         Remove-Item -Force $cmdPath -ErrorAction SilentlyContinue
     }
+}
+
+# plannotator-archive no longer ships as a skill. Remove any stale installed
+# copy from every skill scope so upgraders don't keep a dead skill around.
+foreach ($scope in @($claudeSkillsDir, $agentsSkillsDir, "$env:USERPROFILE\.kiro\skills")) {
+    $staleArchivePath = Join-Path $scope "plannotator-archive"
+    if (Test-Path $staleArchivePath) {
+        Write-Host "Removing stale plannotator-archive skill $staleArchivePath"
+        Remove-Item -Recurse -Force $staleArchivePath -ErrorAction SilentlyContinue
+    }
+}
+# The /plannotator-archive OpenCode command was removed too — sweep the stub.
+$staleOpencodeArchive = "$env:USERPROFILE\.config\opencode\commands\plannotator-archive.md"
+if (Test-Path $staleOpencodeArchive) {
+    Write-Host "Removing stale plannotator-archive command $staleOpencodeArchive"
+    Remove-Item -Force $staleOpencodeArchive -ErrorAction SilentlyContinue
 }
 
 # Codex no longer hosts core skills (they now live in ~/.agents/skills).
@@ -864,7 +958,7 @@ Write-Host "Add the plugin to your opencode.json:"
 Write-Host ""
 Write-Host '  "plugin": ["@plannotator/opencode@latest"]'
 Write-Host ""
-Write-Host "Then restart OpenCode. The /plannotator-review, /plannotator-annotate, /plannotator-last, and /plannotator-archive commands are ready!"
+Write-Host "Then restart OpenCode. The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready!"
 Write-Host ""
 Write-Host "=========================================="
 Write-Host "  PI USERS"
@@ -897,7 +991,7 @@ Write-Host ""
 Write-Host "Upgrading from an older version? Also run /plugin marketplace update"
 Write-Host "so the plugin drops its old plannotator:* command entries."
 Write-Host ""
-Write-Host "The /plannotator-review, /plannotator-annotate, /plannotator-last, and /plannotator-archive commands are ready to use after you restart Claude Code!"
+Write-Host "The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready to use after you restart Claude Code!"
 
 if ($extrasChoice -ne "yes") {
     Write-Host ""

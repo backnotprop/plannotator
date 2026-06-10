@@ -260,7 +260,7 @@ jobs:
           # NEW contract: a fresh install must not create plannotator command
           # files.
           $cmdDir = "$env:USERPROFILE\.claude\commands"
-          foreach ($file in @("plannotator-review.md", "plannotator-annotate.md", "plannotator-last.md", "plannotator-archive.md")) {
+          foreach ($file in @("plannotator-review.md", "plannotator-annotate.md", "plannotator-last.md")) {
             $path = Join-Path $cmdDir $file
             if (Test-Path $path) {
               throw "Installer wrote a deprecated Claude command file: $path. Commands were replaced by skills; the installer must not generate them."

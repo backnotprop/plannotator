@@ -1,5 +1,5 @@
 name: plannotator
-version: 0.19.27
+version: 0.20.0
 description: Annotate Claude Code and other agent plans and review code visually. Share with your team, and send feedback to your agent with one click
 author: backnotprop
 license: MIT/Apache2.0
