@@ -3,6 +3,7 @@ import type { Origin } from '@plannotator/shared/agents';
 import type { Agent } from '@plannotator/ui/hooks/useAgents';
 import { FeedbackButton, ApproveButton, ExitButton } from '@plannotator/ui/components/ToolbarButtons';
 import { ApproveDropdown } from '@plannotator/ui/components/ApproveDropdown';
+import type { ApproveExtraEntry } from '@plannotator/ui/components/ApproveDropdown';
 import { Settings } from '@plannotator/ui/components/Settings';
 import { PlanHeaderMenu } from '@plannotator/ui/components/PlanHeaderMenu';
 import type { CallbackConfig } from '@plannotator/ui/utils/callback';
@@ -27,6 +28,7 @@ interface AppHeaderProps {
   canShareCurrentSession: boolean;
   agentName: string;
   availableAgents: Agent[];
+  approveExtraEntries?: ApproveExtraEntry[];
   showAnnotationsWarning: boolean;
 
   // Callback config (null when no bot callback)
@@ -87,6 +89,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   canShareCurrentSession,
   agentName,
   availableAgents,
+  approveExtraEntries = [],
   showAnnotationsWarning,
   callbackConfig,
   taterMode,
@@ -122,6 +125,22 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   bearConfigured,
   octarineConfigured,
 }) => {
+  const showApproveWarning = !annotateMode
+    && (origin === 'claude-code' || origin === 'gemini-cli')
+    && showAnnotationsWarning;
+  const showAgentSwitch = origin === 'opencode' && !annotateMode && availableAgents.length > 0;
+  const showApproveExtraEntries = !annotateMode && approveExtraEntries.length > 0;
+  const showApproveDropdown = (!annotateMode || gate)
+    && (showAgentSwitch || showApproveExtraEntries);
+
+  const approveWarningTooltip = showApproveWarning && (
+    <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
+      <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
+      <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
+      {agentName} doesn't support feedback on approval. Your annotations won't be seen.
+    </div>
+  );
+
   return (
     <header data-app-header="true" className="h-12 flex items-center justify-between px-2 md:px-4 border-b border-border/50 bg-card/50 backdrop-blur-xl sticky top-0 z-[50]">
       <AppHeaderLogo />
@@ -198,29 +217,30 @@ export const AppHeader = React.memo<AppHeaderProps>(({
             )}
 
             {(!annotateMode || gate) && (
-              origin === 'opencode' && !annotateMode && availableAgents.length > 0 ? (
-                <ApproveDropdown
-                  onApprove={onApprove}
-                  agents={availableAgents}
-                  disabled={isSubmitting}
-                  isLoading={isSubmitting}
-                />
+              showApproveDropdown ? (
+                <div className="relative group/approve">
+                  <ApproveDropdown
+                    onApprove={onApprove}
+                    agents={showAgentSwitch ? availableAgents : []}
+                    disabled={isSubmitting}
+                    isLoading={isSubmitting}
+                    dimmed={showApproveWarning}
+                    title={annotateMode ? 'Approve — no changes requested' : undefined}
+                    extraEntries={showApproveExtraEntries ? approveExtraEntries : []}
+                    showAgentSwitch={showAgentSwitch}
+                  />
+                  {approveWarningTooltip}
+                </div>
               ) : (
                 <div className="relative group/approve">
                   <ApproveButton
                     onClick={onApprove}
                     disabled={isSubmitting || (annotateMode && isExiting)}
                     isLoading={isSubmitting}
-                    dimmed={!annotateMode && (origin === 'claude-code' || origin === 'gemini-cli') && showAnnotationsWarning}
+                    dimmed={showApproveWarning}
                     title={annotateMode ? 'Approve — no changes requested' : undefined}
                   />
-                  {!annotateMode && (origin === 'claude-code' || origin === 'gemini-cli') && showAnnotationsWarning && (
-                    <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
-                      <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
-                      <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
-                      {agentName} doesn't support feedback on approval. Your annotations won't be seen.
-                    </div>
-                  )}
+                  {approveWarningTooltip}
                 </div>
               )
             )}

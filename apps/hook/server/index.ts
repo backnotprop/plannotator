@@ -156,7 +156,8 @@ import {
 } from "./cli";
 import { ensureClearContextSettingEnabled } from "./clearContextSetting";
 import {
-  shouldAutoSelectNativeClear,
+  logInjectorDecision,
+  shouldFireInjector,
   spawnKeystrokeInjector,
 } from "./keystrokeInjector";
 import path from "path";
@@ -1594,7 +1595,9 @@ if (args[0] === "sessions") {
       // PermissionRequestHookSpecificOutput.decision.
       const nativeClearEnabled = await ensureClearContextSettingEnabled();
       if (nativeClearEnabled) {
-        if (shouldAutoSelectNativeClear()) {
+        const fire = shouldFireInjector(result);
+        logInjectorDecision(result, fire);
+        if (fire) {
           spawnKeystrokeInjector();
         }
         process.exit(0);

@@ -231,6 +231,10 @@ const App: React.FC = () => {
   const [origin, setOrigin] = useState<Origin | null>(null);
   const [pendingToolName, setPendingToolName] = useState<string | undefined>();
   const [showClearContextBanner, setShowClearContextBanner] = useState(false);
+  // Once the user has Enabled or Skipped the native clear-on-accept consent,
+  // we must not re-show the banner on subsequent Approve clicks. This guards
+  // against the consent prompt re-triggering indefinitely.
+  const clearContextConsentResolvedRef = useRef(false);
   const [pendingApprovalOverride, setPendingApprovalOverride] =
     useState<ApprovalOverride>({});
   const [gitUser, setGitUser] = useState<string | undefined>();
@@ -1285,17 +1289,30 @@ const App: React.FC = () => {
       const shouldUseNativeClear =
         origin === "claude-code" &&
         pendingToolName === "ExitPlanMode" &&
-        (override.deferToNativeForClear ||
-          effectiveMode === "bypassPermissionsClearReminder" ||
-          effectiveMode === "deferNative");
-      if (shouldUseNativeClear) {
+        (override.deferToNativeForClear || effectiveMode === "deferNative");
+      if (shouldUseNativeClear && !clearContextConsentResolvedRef.current) {
+        // Native clear writes to the user's Claude Code settings, so it needs
+        // a one-time consent. Try to enable silently; if that fails, PAUSE the
+        // approval and surface the consent banner instead of proceeding. The
+        // banner's Enable/Skip buttons resolve consent and resume the approval,
+        // so the prompt is shown at most once rather than on every Approve.
+        let enabled = false;
         try {
           const response = await fetch("/api/enable-clear-context", {
             method: "POST",
           });
-          if (response.ok) setShowClearContextBanner(false);
+          enabled = response.ok;
         } catch {
+          enabled = false;
+        }
+        if (enabled) {
+          clearContextConsentResolvedRef.current = true;
+          setShowClearContextBanner(false);
+        } else {
+          setPendingApprovalOverride(override);
           setShowClearContextBanner(true);
+          setIsSubmitting(false);
+          return;
         }
       }
 
@@ -1426,19 +1443,7 @@ const App: React.FC = () => {
         },
       ];
     }
-    return [
-      {
-        id: "approve-bypass-clear-reminder",
-        label: "Approve + Bypass + /clear Reminder",
-        description:
-          "Requests bypass mode and reminds you to run /clear. Hooks cannot clear context directly outside plan acceptance.",
-        onSelect: () =>
-          approveWithClaudeCodeWarning({
-            permissionMode: "bypassPermissions",
-            clearContextNudge: true,
-          }),
-      },
-    ];
+    return [];
   }, [approveWithClaudeCodeWarning, origin, pendingToolName]);
 
   // Annotate mode handler — sends feedback via /api/feedback
@@ -2952,7 +2957,11 @@ const App: React.FC = () => {
               >
                 <button
                   type="button"
-                  onClick={() => setShowClearContextBanner(false)}
+                  onClick={() => {
+                    setShowClearContextBanner(false);
+                    clearContextConsentResolvedRef.current = true;
+                    handleApprove(pendingApprovalOverride);
+                  }}
                   style={{ padding: "4px 10px", cursor: "pointer" }}
                 >
                   Skip
@@ -2960,17 +2969,20 @@ const App: React.FC = () => {
                 <button
                   type="button"
                   onClick={async () => {
+                    // Always dismiss and mark consent resolved first, so the
+                    // banner can never get stuck regardless of the request
+                    // outcome. Then attempt the write and resume the approval.
+                    setShowClearContextBanner(false);
+                    clearContextConsentResolvedRef.current = true;
                     try {
-                      const response = await fetch(
-                        "/api/enable-clear-context",
-                        { method: "POST" },
-                      );
-                      if (response.ok) {
-                        setShowClearContextBanner(false);
-                      }
+                      await fetch("/api/enable-clear-context", {
+                        method: "POST",
+                      });
                     } catch {
-                      setShowClearContextBanner(false);
+                      // Writing the setting failed, but the user consented —
+                      // resume the approval rather than trapping them here.
                     }
+                    handleApprove(pendingApprovalOverride);
                   }}
                   style={{
                     padding: "4px 10px",

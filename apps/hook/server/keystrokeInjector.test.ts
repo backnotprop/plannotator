@@ -7,7 +7,42 @@ import {
   beforeEach,
   afterEach,
 } from "bun:test";
-import { shouldAutoSelectNativeClear, spawnKeystrokeInjector } from "./keystrokeInjector";
+import {
+  shouldAutoSelectNativeClear,
+  shouldFireInjector,
+  spawnKeystrokeInjector,
+} from "./keystrokeInjector";
+
+describe("shouldFireInjector", () => {
+  const noEnv = {} as NodeJS.ProcessEnv;
+
+  it("fires for one-shot deferToNativeForClear", () => {
+    expect(shouldFireInjector({ deferToNativeForClear: true }, noEnv)).toBe(
+      true,
+    );
+  });
+
+  it("fires for persistent permissionMode deferNative", () => {
+    expect(shouldFireInjector({ permissionMode: "deferNative" }, noEnv)).toBe(
+      true,
+    );
+  });
+
+  it("fires when env override is set", () => {
+    expect(
+      shouldFireInjector({}, {
+        PLANNOTATOR_AUTO_SELECT_NATIVE_CLEAR: "1",
+      } as NodeJS.ProcessEnv),
+    ).toBe(true);
+  });
+
+  it("does not fire without flag, mode, or env", () => {
+    expect(
+      shouldFireInjector({ permissionMode: "bypassPermissions" }, noEnv),
+    ).toBe(false);
+    expect(shouldFireInjector({}, noEnv)).toBe(false);
+  });
+});
 
 describe("shouldAutoSelectNativeClear", () => {
   it("defaults to false", () => {
@@ -86,6 +121,16 @@ describe("spawnKeystrokeInjector", () => {
     expect(script).toContain("Terminal");
     expect(script).toContain('keystroke "1"');
     expect(script).not.toContain("tmux send-keys");
+    // Accessibility self-check
+    expect(script).toContain("UI elements enabled");
+    expect(script).toContain("accessibility-not-enabled");
+    expect(script).toContain('log "accessibility=true"');
+    // Warp timing hardening
+    expect(script).toContain("delay 0.30");
+    expect(script).toContain("delay 0.15");
+    // Positive observability markers
+    expect(script).toContain("start");
+    expect(script).toContain('log "injected"');
   });
 
   it("no-op on linux without tmux", () => {
