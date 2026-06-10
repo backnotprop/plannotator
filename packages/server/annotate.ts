@@ -15,6 +15,8 @@ import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
 import { getRepoInfo } from "./repo";
 import type { Origin } from "@plannotator/shared/agents";
 import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon } from "./shared-handlers";
+import { saveToObsidian, saveToBear, saveToOctarine } from "./integrations";
+import type { ObsidianConfig, BearConfig, OctarineConfig, IntegrationResult } from "./integrations";
 import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc } from "./reference-handlers";
 import { warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash, deleteDraft } from "./draft";
@@ -495,6 +497,52 @@ export async function startAnnotateServer(
                   : "Failed to process feedback";
               return Response.json({ error: message }, { status: 500 });
             }
+          }
+
+          // API: Save notes to external integrations (Obsidian, Bear, Octarine)
+          if (url.pathname === "/api/save-notes" && req.method === "POST") {
+            const results: {
+              obsidian?: IntegrationResult;
+              bear?: IntegrationResult;
+              octarine?: IntegrationResult;
+            } = {};
+            try {
+              const body = (await req.json()) as {
+                obsidian?: ObsidianConfig;
+                bear?: BearConfig;
+                octarine?: OctarineConfig;
+              };
+              const promises: Promise<void>[] = [];
+              if (body.obsidian?.vaultPath && body.obsidian?.plan) {
+                promises.push(
+                  saveToObsidian(body.obsidian).then((r) => {
+                    results.obsidian = r;
+                  }),
+                );
+              }
+              if (body.bear?.plan) {
+                promises.push(
+                  saveToBear(body.bear).then((r) => {
+                    results.bear = r;
+                  }),
+                );
+              }
+              if (body.octarine?.plan && body.octarine?.workspace) {
+                promises.push(
+                  saveToOctarine(body.octarine).then((r) => {
+                    results.octarine = r;
+                  }),
+                );
+              }
+              await Promise.allSettled(promises);
+              for (const [name, result] of Object.entries(results)) {
+                if (!result?.success && result)
+                  console.error(`[${name}] Save failed: ${result.error}`);
+              }
+            } catch (err) {
+              console.error("[Integration] Error:", err);
+            }
+            return Response.json({ ok: true, results });
           }
 
           // Favicon

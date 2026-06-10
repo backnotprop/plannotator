@@ -34,6 +34,15 @@ import {
 	handleObsidianDocRequest,
 } from "./reference.js";
 import { warmFileListCache } from "../generated/resolve-file.js";
+import {
+	type BearConfig,
+	type IntegrationResult,
+	type ObsidianConfig,
+	type OctarineConfig,
+	saveToBear,
+	saveToObsidian,
+	saveToOctarine,
+} from "./integrations.js";
 import { createExternalAnnotationHandler } from "./external-annotations.js";
 import {
 	HTML_ASSET_ROUTE_PREFIX,
@@ -442,6 +451,50 @@ export async function startAnnotateServer(options: {
 				const message = err instanceof Error ? err.message : "Failed to process feedback";
 				json(res, { error: message }, 500);
 			}
+		} else if (url.pathname === "/api/save-notes" && req.method === "POST") {
+			const results: {
+				obsidian?: IntegrationResult;
+				bear?: IntegrationResult;
+				octarine?: IntegrationResult;
+			} = {};
+			try {
+				const body = await parseBody(req);
+				const promises: Promise<void>[] = [];
+				const obsConfig = body.obsidian as ObsidianConfig | undefined;
+				const bearConfig = body.bear as BearConfig | undefined;
+				const octConfig = body.octarine as OctarineConfig | undefined;
+				if (obsConfig?.vaultPath && obsConfig?.plan) {
+					promises.push(
+						saveToObsidian(obsConfig).then((r) => {
+							results.obsidian = r;
+						}),
+					);
+				}
+				if (bearConfig?.plan) {
+					promises.push(
+						saveToBear(bearConfig).then((r) => {
+							results.bear = r;
+						}),
+					);
+				}
+				if (octConfig?.plan && octConfig?.workspace) {
+					promises.push(
+						saveToOctarine(octConfig).then((r) => {
+							results.octarine = r;
+						}),
+					);
+				}
+				await Promise.allSettled(promises);
+				for (const [name, result] of Object.entries(results)) {
+					if (!result?.success && result)
+						console.error(`[${name}] Save failed: ${result.error}`);
+			}
+			} catch (err) {
+				console.error(`[Save Notes] Error:`, err);
+				json(res, { error: "Save failed" }, 500);
+				return;
+			}
+			json(res, { ok: true, results });
 		} else {
 			html(res, options.htmlContent);
 		}
