@@ -8,6 +8,7 @@ on:
       - 'apps/marketing/**'
       - 'apps/portal/**'
       - 'apps/paste-service/**'
+      - 'apps/waitlist-service/**'
       - 'packages/**'
   workflow_dispatch:
     inputs:
@@ -21,6 +22,7 @@ on:
           - marketing
           - portal
           - paste
+          - waitlist
 
 permissions:
   contents: read
@@ -32,6 +34,7 @@ jobs:
       marketing: ${{ steps.changes.outputs.marketing }}
       portal: ${{ steps.changes.outputs.portal }}
       paste: ${{ steps.changes.outputs.paste }}
+      waitlist: ${{ steps.changes.outputs.waitlist }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -54,6 +57,11 @@ jobs:
             else
               echo "paste=false" >> $GITHUB_OUTPUT
             fi
+            if [[ "${{ inputs.target }}" == "all" || "${{ inputs.target }}" == "waitlist" ]]; then
+              echo "waitlist=true" >> $GITHUB_OUTPUT
+            else
+              echo "waitlist=false" >> $GITHUB_OUTPUT
+            fi
           else
             # For push events, check what changed
             git fetch origin ${{ github.event.before }} --depth=1 2>/dev/null || true
@@ -61,6 +69,7 @@ jobs:
             MARKETING_CHANGED=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} 2>/dev/null | grep -E '^(apps/marketing/|packages/)' || true)
             PORTAL_CHANGED=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} 2>/dev/null | grep -E '^(apps/portal/|packages/)' || true)
             PASTE_CHANGED=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} 2>/dev/null | grep -E '^apps/paste-service/' || true)
+            WAITLIST_CHANGED=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} 2>/dev/null | grep -E '^apps/waitlist-service/' || true)
 
             if [[ -n "$MARKETING_CHANGED" ]]; then
               echo "marketing=true" >> $GITHUB_OUTPUT
@@ -78,6 +87,12 @@ jobs:
               echo "paste=true" >> $GITHUB_OUTPUT
             else
               echo "paste=false" >> $GITHUB_OUTPUT
+            fi
+
+            if [[ -n "$WAITLIST_CHANGED" ]]; then
+              echo "waitlist=true" >> $GITHUB_OUTPUT
+            else
+              echo "waitlist=false" >> $GITHUB_OUTPUT
             fi
           fi
 
@@ -174,6 +189,30 @@ jobs:
 
       - name: Deploy to Cloudflare
         working-directory: apps/paste-service
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+  deploy-waitlist:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.waitlist == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    environment: production
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Deploy to Cloudflare
+        working-directory: apps/waitlist-service
         run: npx wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

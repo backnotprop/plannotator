@@ -19,6 +19,11 @@ import type {
 	PiSDKConfig,
 } from "../types.ts";
 import { registerProviderFactory } from "../provider.ts";
+import {
+	buildWindowsCommandScriptSpawnCommand,
+	killWindowsProcessTree,
+	resolveWindowsCommandShim,
+} from "./command-path.ts";
 
 // Re-export mapPiEvent from shared (runtime-agnostic)
 export { mapPiEvent } from "./pi-events.ts";
@@ -46,24 +51,65 @@ class PiProcessNode {
 	private _alive = false;
 
 	async spawn(piPath: string, cwd: string): Promise<void> {
-		this.proc = spawn(piPath, ["--mode", "rpc"], {
-			cwd,
-			stdio: ["pipe", "pipe", "pipe"],
-		});
-		this._alive = true;
+		const commandPath = resolveWindowsCommandShim(piPath);
+		const command =
+			buildWindowsCommandScriptSpawnCommand(commandPath, ["--mode", "rpc"]) ?? [
+				commandPath,
+				"--mode",
+				"rpc",
+			];
+		let proc: ChildProcess;
+		try {
+			const [file, ...args] = command;
+			proc = spawn(file, args, {
+				cwd,
+				stdio: ["pipe", "pipe", "pipe"],
+			});
+		} catch (err) {
+			const error = err instanceof Error ? err : new Error(String(err));
+			this.handleProcessEnd(error);
+			throw error;
+		}
 
-		this.readStream();
-
-		this.proc.on("exit", () => {
-			this._alive = false;
-			for (const [, pending] of this.pendingRequests) {
-				pending.reject(new Error("Pi process exited unexpectedly"));
-			}
-			this.pendingRequests.clear();
-			for (const listener of this.listeners) {
-				listener({ type: "process_exited" });
-			}
+		this.proc = proc;
+		proc.once("exit", () => {
+			this.handleProcessEnd(new Error("Pi process exited unexpectedly"));
 		});
+
+		await new Promise<void>((resolve, reject) => {
+			const cleanup = () => {
+				proc.off("spawn", onSpawn);
+				proc.off("error", onError);
+			};
+			const onSpawn = () => {
+				cleanup();
+				this._alive = true;
+				this.readStream();
+				resolve();
+			};
+			const onError = (err: Error) => {
+				cleanup();
+				this.handleProcessEnd(err);
+				reject(err);
+			};
+
+			proc.once("spawn", onSpawn);
+			proc.once("error", onError);
+		});
+	}
+
+	private handleProcessEnd(error: Error): void {
+		if (!this.proc && this.pendingRequests.size === 0) return;
+
+		this._alive = false;
+		this.proc = null;
+		for (const [, pending] of this.pendingRequests) {
+			pending.reject(error);
+		}
+		this.pendingRequests.clear();
+		for (const listener of this.listeners) {
+			listener({ type: "process_exited" });
+		}
 	}
 
 	private readStream(): void {
@@ -135,9 +181,12 @@ class PiProcessNode {
 
 	kill(): void {
 		this._alive = false;
-		if (this.proc) {
-			this.proc.kill();
-			this.proc = null;
+		const proc = this.proc;
+		this.proc = null;
+		if (proc) {
+			if (!killWindowsProcessTree(proc.pid)) {
+				proc.kill();
+			}
 		}
 		this.listeners.length = 0;
 		for (const [, pending] of this.pendingRequests) {

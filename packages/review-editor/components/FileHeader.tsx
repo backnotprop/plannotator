@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { DiffOptionsPopover } from './DiffOptionsPopover';
+import { SemanticFileBadge } from './SemanticFileBadge';
 
 interface FileHeaderProps {
   filePath: string;
@@ -202,6 +203,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             </>
           )}
         </button>
+        <SemanticFileBadge filePath={filePath} />
         <DiffOptionsPopover />
       </div>
     </div>

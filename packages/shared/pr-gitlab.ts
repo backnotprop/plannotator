@@ -5,11 +5,11 @@
  * Self-hosted instances are supported via the --hostname flag.
  */
 
-import { homedir } from "os";
 import { join } from "path";
 import { mkdirSync, writeFileSync } from "fs";
 import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, CommandResult } from "./pr-types";
 import { encodeApiFilePath } from "./pr-types";
+import { getPlannotatorDataDir } from "./data-dir";
 
 // GitLab-specific MRRef shape (used internally)
 interface GlMRRef {
@@ -170,17 +170,12 @@ export async function fetchGlMR(
 ): Promise<{ metadata: PRMetadata; rawPatch: string }> {
   const encoded = encodeProject(ref.projectPath);
 
-  // Fetch diff and metadata in parallel via glab api (supports --hostname for self-hosted)
+  // Primary: raw_diffs — preserves Git's binary-marker shape and includes
+  // collapsed/generated file contents that the JSON diffs API can omit.
   const [diffResult, viewResult] = await Promise.all([
-    runtime.runCommand("glab", apiArgs(ref.host, `projects/${encoded}/merge_requests/${ref.iid}/diffs?per_page=100`, ["--paginate"])),
+    runtime.runCommand("glab", apiArgs(ref.host, `projects/${encoded}/merge_requests/${ref.iid}/raw_diffs`)),
     runtime.runCommand("glab", apiArgs(ref.host, `projects/${encoded}/merge_requests/${ref.iid}`)),
   ]);
-
-  if (diffResult.exitCode !== 0) {
-    throw new Error(
-      `Failed to fetch MR diff: ${diffResult.stderr.trim() || `exit code ${diffResult.exitCode}`}`,
-    );
-  }
 
   if (viewResult.exitCode !== 0) {
     throw new Error(
@@ -188,9 +183,30 @@ export async function fetchGlMR(
     );
   }
 
-  // Reconstruct unified patch from structured API response
-  const diffs = parsePaginatedArray<GitLabDiffEntry>(diffResult.stdout);
-  const rawPatch = reconstructPatch(diffs);
+  // Fall back to the paginated JSON diffs API when raw_diffs is unavailable
+  // (older self-hosted GitLab that doesn't expose the raw_diffs endpoint) or
+  // returns empty (very large MRs that exceed its safety limit). Reconstruct a
+  // unified patch from the JSON entries — the long-standing pre-raw_diffs path.
+  let rawPatch: string;
+  if (diffResult.exitCode === 0 && diffResult.stdout.trim()) {
+    rawPatch = diffResult.stdout;
+  } else {
+    const fallback = await runtime.runCommand(
+      "glab",
+      apiArgs(ref.host, `projects/${encoded}/merge_requests/${ref.iid}/diffs?per_page=100`, ["--paginate"]),
+    );
+    if (fallback.exitCode !== 0) {
+      const rawErr = diffResult.stderr.trim() || `exit code ${diffResult.exitCode}`;
+      const fbErr = fallback.stderr.trim() || `exit code ${fallback.exitCode}`;
+      throw new Error(`Failed to fetch MR diff (raw_diffs: ${rawErr}; diffs: ${fbErr}).`);
+    }
+    rawPatch = reconstructPatch(parsePaginatedArray<GitLabDiffEntry>(fallback.stdout));
+    if (!rawPatch.trim()) {
+      throw new Error(
+        "MR diff is empty — the diff may be too large to fetch via the GitLab API. Review it on the GitLab web UI.",
+      );
+    }
+  }
 
   const raw = JSON.parse(viewResult.stdout) as {
     title: string;
@@ -562,7 +578,7 @@ export async function submitGlMRReview(
         .filter((c): c is PRReviewFileComment => c !== null);
       let savedTo: string | null = null;
       try {
-        const dir = join(homedir(), ".plannotator", "failed-comments");
+        const dir = join(getPlannotatorDataDir(), "failed-comments");
         mkdirSync(dir, { recursive: true });
         const slug = `${ref.host}-${ref.projectPath.replace(/\//g, "_")}-mr${ref.iid}-${Date.now()}`;
         savedTo = join(dir, `${slug}.json`);

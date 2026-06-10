@@ -4,15 +4,22 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { createWorktreePool, type WorktreePool } from "./generated/worktree-pool.js";
 import { fileURLToPath } from "node:url";
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	prepareLocalReviewDiff,
 	reviewRuntime,
+	detectManagedVcs,
+	getVcsContext,
+	getVcsFileContentsForDiff,
+	canStageFiles,
+	runVcsDiff,
+	stageFile,
 	startAnnotateServer,
 	startPlanReviewServer,
 	startReviewServer,
 	type DiffType,
 	type VcsSelection,
+	unstageFile,
 } from "./server.js";
 import { openBrowser, isRemoteSession } from "./server/network.js";
 import { parsePRUrl, checkPRAuth, fetchPR } from "./server/pr.js";
@@ -26,6 +33,10 @@ import {
 import { parseRemoteUrl } from "./generated/repo.js";
 import { fetchRef, createWorktree, removeWorktree, ensureObjectAvailable } from "./generated/worktree.js";
 import { loadConfig, resolveDefaultDiffType } from "./generated/config.js";
+import {
+	WorkspaceReviewSession,
+	type WorkspaceDiffType,
+} from "./generated/review-workspace.js";
 export { getLastAssistantMessageText } from "./assistant-message.js";
 
 export type AnnotateMode = "annotate" | "annotate-folder" | "annotate-last";
@@ -35,7 +46,6 @@ export interface PlanReviewDecision {
 	savedPath?: string;
 	agentSwitch?: string;
 	permissionMode?: string;
-	clearContextNudge?: boolean;
 }
 
 export interface BrowserDecisionSession<T> {
@@ -81,8 +91,8 @@ export function getStartupErrorMessage(err: unknown): string {
 	return err instanceof Error ? err.message : "Unknown error";
 }
 
-function openBrowserForServer(serverUrl: string, ctx: ExtensionContext): void {
-	const browserResult = openBrowser(serverUrl);
+async function openBrowserForServer(serverUrl: string, ctx: ExtensionContext): Promise<void> {
+	const browserResult = await openBrowser(serverUrl);
 	if (isRemoteSession()) {
 		ctx.ui.notify(`[Plannotator] ${serverUrl}`, "info");
 	} else if (!browserResult.opened) {
@@ -90,12 +100,26 @@ function openBrowserForServer(serverUrl: string, ctx: ExtensionContext): void {
 	}
 }
 
+async function buildLocalWorkspaceReview(
+	root: string,
+	options: { requestedDiffType?: DiffType | WorkspaceDiffType; configuredDiffType?: DiffType; hideWhitespace?: boolean } = {},
+): Promise<WorkspaceReviewSession> {
+	return WorkspaceReviewSession.create({
+		getVcsContext,
+		runVcsDiff,
+		getVcsFileContentsForDiff,
+		canStageFiles,
+		stageFile,
+		unstageFile,
+	}, root, options);
+}
+
 async function openBrowserAndWait<T>(
 	server: { url: string; stop: () => void },
 	ctx: ExtensionContext,
 	waitForResult: () => Promise<T>,
 ): Promise<T> {
-	openBrowserForServer(server.url, ctx);
+	await openBrowserForServer(server.url, ctx);
 	return waitForDecisionWithCleanup(server, waitForResult);
 }
 
@@ -227,12 +251,13 @@ export async function startCodeReviewBrowserSession(
 	let diffError: string | undefined;
 	let gitCtx: Awaited<ReturnType<typeof prepareLocalReviewDiff>>["gitContext"] | undefined;
 	let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
-	let diffType: DiffType | undefined;
+	let diffType: DiffType | WorkspaceDiffType | undefined;
 	let agentCwd: string | undefined;
 	let initialBase: string | undefined;
 	let worktreeCleanup: (() => void | Promise<void>) | undefined;
 	let worktreePool: WorktreePool | undefined;
 	let exitHandler: (() => void) | undefined;
+	let workspace: WorkspaceReviewSession | undefined;
 
 	if (isPRMode && urlArg) {
 		// --- PR Review Mode ---
@@ -400,23 +425,41 @@ export async function startCodeReviewBrowserSession(
 		// --- Local Review Mode ---
 		const cwd = options.cwd ?? ctx.cwd;
 		const config = loadConfig();
-		const result = await prepareLocalReviewDiff({
-			cwd,
-			vcsType: options.vcsType,
-			requestedDiffType: options.diffType,
-			requestedBase: options.defaultBranch,
-			configuredDiffType: resolveDefaultDiffType(config),
-			hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
-		});
-		gitCtx = result.gitContext;
-		diffType = result.diffType;
-		rawPatch = result.rawPatch;
-		gitRef = result.gitRef;
-		diffError = result.error;
-		// Remember which base the initial diff was computed against so it can
-		// be forwarded to the server below. Only matters when the caller
-		// overrode the detected default; otherwise it matches gitCtx already.
-		initialBase = result.base;
+		const managedVcs = await detectManagedVcs(cwd, options.vcsType);
+		const forcedVcs = !!options.vcsType && options.vcsType !== "auto";
+		if (managedVcs || forcedVcs) {
+			const result = await prepareLocalReviewDiff({
+				cwd,
+				vcsType: options.vcsType,
+				requestedDiffType: options.diffType,
+				requestedBase: options.defaultBranch,
+				configuredDiffType: resolveDefaultDiffType(config),
+				hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
+			});
+			gitCtx = result.gitContext;
+			diffType = result.diffType;
+			rawPatch = result.rawPatch;
+			gitRef = result.gitRef;
+			diffError = result.error;
+			// Remember which base the initial diff was computed against so it can
+			// be forwarded to the server below. Only matters when the caller
+			// overrode the detected default; otherwise it matches gitCtx already.
+			initialBase = result.base;
+		} else {
+			workspace = await buildLocalWorkspaceReview(cwd, {
+				requestedDiffType: options.diffType,
+				configuredDiffType: resolveDefaultDiffType(config),
+				hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
+			});
+			if (workspace.repos.length === 0) {
+				throw new Error("Not in a VCS repo and no nested Git/JJ repositories were found.");
+			}
+			rawPatch = workspace.rawPatch;
+			gitRef = workspace.gitRef;
+			diffError = workspace.error;
+			diffType = workspace.diffType;
+			agentCwd = workspace.root;
+		}
 	}
 
 	const server = await startReviewServer({
@@ -428,6 +471,7 @@ export async function startCodeReviewBrowserSession(
 		gitContext: gitCtx,
 		initialBase,
 		prMetadata,
+		workspace,
 		agentCwd,
 		worktreePool,
 		htmlContent: reviewHtmlContent,
@@ -449,7 +493,7 @@ export async function openMarkdownAnnotation(
 	sourceInfo?: string,
 	sourceConverted?: boolean,
 	gate?: boolean,
-): Promise<{ feedback: string; exit?: boolean; approved?: boolean }> {
+): Promise<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }> {
 	const session = await startMarkdownAnnotationSession(
 		ctx,
 		filePath,
@@ -472,13 +516,16 @@ export async function startMarkdownAnnotationSession(
 	sourceInfo?: string,
 	sourceConverted?: boolean,
 	gate?: boolean,
-): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean }>> {
+	rawHtml?: string,
+	renderHtml?: boolean,
+	recentMessages?: { messageId: string; text: string; timestamp?: string }[],
+): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>> {
 	if (!ctx.hasUI || !planHtmlContent) {
 		throw new Error("Plannotator annotation browser is unavailable in this session.");
 	}
 
 	let resolvedMarkdown = markdown;
-	if (!resolvedMarkdown.trim() && existsSync(filePath)) {
+	if (!renderHtml && !resolvedMarkdown.trim() && existsSync(filePath)) {
 		try {
 			const fileStat = statSync(filePath);
 			if (!fileStat.isDirectory()) {
@@ -495,9 +542,12 @@ export async function startMarkdownAnnotationSession(
 		origin: "pi",
 		mode,
 		folderPath,
+		recentMessages,
 		sourceInfo,
 		sourceConverted,
 		gate,
+		rawHtml,
+		renderHtml,
 		htmlContent: planHtmlContent,
 		sharingEnabled: process.env.PLANNOTATOR_SHARE !== "disabled",
 		shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
@@ -511,15 +561,18 @@ export async function openLastMessageAnnotation(
 	ctx: ExtensionContext,
 	lastText: string,
 	gate?: boolean,
-): Promise<{ feedback: string; exit?: boolean; approved?: boolean }> {
-	return openMarkdownAnnotation(ctx, "last-message", lastText, "annotate-last", undefined, undefined, undefined, gate);
+	recentMessages?: { messageId: string; text: string; timestamp?: string }[],
+): Promise<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }> {
+	const session = await startLastMessageAnnotationSession(ctx, lastText, gate, recentMessages);
+	return session.waitForDecision();
 }
 
 export async function startLastMessageAnnotationSession(
 	ctx: ExtensionContext,
 	lastText: string,
 	gate?: boolean,
-): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean }>> {
+	recentMessages?: { messageId: string; text: string; timestamp?: string }[],
+): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>> {
 	return startMarkdownAnnotationSession(
 		ctx,
 		"last-message",
@@ -529,6 +582,9 @@ export async function startLastMessageAnnotationSession(
 		undefined,
 		undefined,
 		gate,
+		undefined,
+		undefined,
+		recentMessages,
 	);
 }
 

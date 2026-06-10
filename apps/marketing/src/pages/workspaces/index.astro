@@ -1,0 +1,1207 @@
+---
+import Base from '../../layouts/Base.astro';
+import Nav from '../../components/Nav.astro';
+
+const waitlistUrl =
+  import.meta.env.PUBLIC_WAITLIST_URL ||
+  'https://plannotator-waitlist.plannotator.workers.dev';
+
+// Cloudflare Turnstile sitekey. Public by design — embedded in the rendered
+// HTML on every visit. Override at build time via PUBLIC_TURNSTILE_SITEKEY
+// if you spin up a separate widget. Set to '' to disable the widget locally.
+const turnstileSitekey =
+  import.meta.env.PUBLIC_TURNSTILE_SITEKEY ?? '0x4AAAAAADUgxk47fMzTYOZp';
+
+// Display strings shown in the UI; the slug is what we send to the worker.
+const teamSizes = [
+  { slug: 'solo',    label: 'Just me' },
+  { slug: '2-5',     label: '2–5' },
+  { slug: '6-20',    label: '6–20' },
+  { slug: '21-50',   label: '21–50' },
+  { slug: '50+',     label: '50+' },
+];
+---
+<Base
+  title="Plannotator Workspaces · Get notified"
+  description="Plannotator Workspaces is the hosted team layer for collaborating on agent plans, specs, code reviews, and verification standards. Plannotator core stays free and open source."
+>
+  <Fragment slot="head">
+    <!-- Page-scoped theme tokens. The page is now system-responsive: it
+         follows whatever theme the global Nav toggle has applied (Base.astro
+         adds `.light` on <html> for light/system+light, otherwise dark).
+         Light mode keeps the cleaner palette we previously force-pinned.
+         Dark mode gets a near-neutral, very-dark-gray palette specific to
+         this page — distinct from the standard plannotator dark theme used
+         everywhere else on the site. -->
+    <style>
+      /* Dark mode (default — applied when `.light` is NOT on <html>).
+         Uses the Plandromeda palette: Andromeda's soft darkness with
+         Plannotator's blue hue (oklch hue 260). */
+      .ws-page-scope {
+        --background: oklch(0.22 0.02 260);
+        --foreground: #d5ced9;
+        --card: oklch(0.26 0.025 260);
+        --card-foreground: #d5ced9;
+        --popover: oklch(0.27 0.025 260);
+        --popover-foreground: #d5ced9;
+        --primary: oklch(0.75 0.18 280);
+        --primary-foreground: oklch(0.22 0.02 260);
+        --secondary: oklch(0.65 0.15 180);
+        --secondary-foreground: oklch(0.22 0.02 260);
+        --muted: oklch(0.30 0.025 260);
+        --muted-foreground: #7a7686;
+        --accent: #c74ded;
+        --accent-foreground: oklch(0.22 0.02 260);
+        --destructive: #fc644d;
+        --destructive-foreground: oklch(0.22 0.02 260);
+        --border: oklch(0.34 0.025 260);
+        --input: oklch(0.30 0.025 260);
+        --ring: oklch(0.75 0.18 280);
+        --success: #96e072;
+        --success-foreground: oklch(0.22 0.02 260);
+        --warning: #ffe66d;
+        --warning-foreground: oklch(0.22 0.02 260);
+        --code-bg: oklch(0.27 0.025 260);
+        color-scheme: dark;
+      }
+
+      /* Light mode (applied when Base.astro / Nav toggle sets `.light`). */
+      :global(html.light) .ws-page-scope {
+        --background: oklch(0.97 0.005 260);
+        --foreground: oklch(0.18 0.02 260);
+        --card: oklch(1 0 0);
+        --card-foreground: oklch(0.18 0.02 260);
+        --popover: oklch(1 0 0);
+        --popover-foreground: oklch(0.18 0.02 260);
+        --primary: oklch(0.50 0.25 280);
+        --primary-foreground: oklch(1 0 0);
+        --secondary: oklch(0.50 0.18 180);
+        --secondary-foreground: oklch(1 0 0);
+        --muted: oklch(0.92 0.01 260);
+        --muted-foreground: oklch(0.40 0.02 260);
+        --accent: oklch(0.60 0.22 50);
+        --accent-foreground: oklch(0.18 0.02 260);
+        --destructive: oklch(0.50 0.25 25);
+        --destructive-foreground: oklch(1 0 0);
+        --border: oklch(0.88 0.01 260);
+        --input: oklch(0.92 0.01 260);
+        --ring: oklch(0.50 0.25 280);
+        --success: oklch(0.45 0.20 150);
+        --success-foreground: oklch(1 0 0);
+        --warning: oklch(0.55 0.18 85);
+        --warning-foreground: oklch(0.18 0.02 260);
+        --code-bg: oklch(0.92 0.01 260);
+        color-scheme: light;
+      }
+    </style>
+  </Fragment>
+
+  <div class="ws-page-scope min-h-screen bg-background text-foreground">
+    <Nav />
+
+    <!-- Two independent flex columns so the hero (top of left column) and
+         the form (top of right column) are true sibling-aligned blocks.
+         Each column flows on its own — info content stacks under hero on
+         the left, banners stack under form on the right.
+         On mobile the columns collapse via `display: contents`, exposing
+         their children to the parent flex flow so we can reorder to:
+         hero → form → info → banners (form lifted ahead of info). -->
+    <main class="ws-main">
+      <div class="ws-col-left">
+        <header class="ws-hero">
+          <p class="ws-eyebrow">Plannotator Workspaces · Waitlist</p>
+          <h1 class="ws-page-title">From review surfaces to standards your agents learn from.</h1>
+        </header>
+
+        <section class="ws-info">
+          <div class="ws-phases">
+          <div class="ws-phase">
+            <span class="ws-when">Today</span>
+            <span class="ws-what">You review agent artifacts (docs/specs) and code.</span>
+          </div>
+          <div class="ws-phase">
+            <span class="ws-when">Next</span>
+            <span class="ws-what">Artifacts and reviews become facts, requirements, and testable standards. Versioned and accessible to your agents and teammates.</span>
+          </div>
+          <div class="ws-phase">
+            <span class="ws-when">Compound</span>
+            <span class="ws-what">Those standards get checked before and after code lands. Additionally, Workspaces will offer enhanced gating for PRs and releases; achieving higher quality and faster verification.</span>
+          </div>
+        </div>
+
+        <p class="ws-intro">Plannotator Workspaces will offer:</p>
+
+        <ul class="ws-points">
+          <li>
+            <strong>Collaborative knowledge base for agent artifacts.</strong>
+            Share plans, specs, explainers, and reviews with your team
+            (and agents) in markdown or HTML, before and after agents
+            code.
+          </li>
+          <li>
+            <strong>Artifacts and annotations become standards.</strong>
+            Capture team artifacts and review comments as reusable
+            expectations for future agent work.
+          </li>
+          <li class="ws-points-feat">
+            <strong>
+              Manage golden standards.<span class="ws-star">✱</span>
+            </strong>
+            Workspaces extracts verification facts (simple, sourced claims
+            about your system) from specs and reviews, and accumulates
+            them into a golden set of rules your agents can rely on.
+          </li>
+          <li>
+            <strong>Feed standards back into agents.</strong>
+            Send accumulated team knowledge into planning and review
+            agents. Access rules from your own agents, or run them as
+            CI/CD-gated agents inside Workspaces.
+          </li>
+          <li>
+            <strong>Connect to CI/CD.</strong>
+            PR explainers with attached plans and review context, plus
+            verification against your team's standards.
+            </li>
+          </ul>
+        </section>
+      </div>
+
+      <div class="ws-col-right">
+        <form class="ws-form-card" id="signup-form" novalidate>
+          <header class="ws-form-head">
+            <h2 class="ws-form-title">Get notified</h2>
+          </header>
+
+          <div class="ws-form-body">
+            <!-- Honeypot — invisible to humans, attractive to bots. -->
+            <div class="ws-honeypot" aria-hidden="true">
+              <label>
+                Website
+                <input type="text" name="website" tabindex="-1" autocomplete="off" />
+              </label>
+            </div>
+
+            <div class="ws-row-2">
+              <div class="ws-field">
+                <label class="ws-label">Email</label>
+                <input type="email" name="email" placeholder="jane@company.com" autocomplete="email" maxlength="320" />
+              </div>
+              <div class="ws-field">
+                <label class="ws-label">
+                  Company <span class="ws-opt">optional</span>
+                </label>
+                <input type="text" name="company" placeholder="Acme Inc." autocomplete="organization" maxlength="160" />
+              </div>
+            </div>
+
+            <div class="ws-field">
+              <label class="ws-label">
+                Team size <span class="ws-opt">engineers + adjacent</span>
+              </label>
+              <div class="ws-pills" data-field="teamSize" data-single="1">
+                {teamSizes.map((t) => (
+                  <button type="button" class="ws-pill" data-v={t.slug}>{t.label}</button>
+                ))}
+              </div>
+            </div>
+
+            <div class="ws-field">
+              <label class="ws-label">
+                Anything else? <span class="ws-opt">optional</span>
+              </label>
+              <textarea
+                name="note"
+                placeholder="Wishes, blockers, or how you'd like to use Workspaces."
+                maxlength="1000"
+              ></textarea>
+            </div>
+
+            <div
+              class="ws-check-row"
+              id="contributor-toggle"
+              role="checkbox"
+              aria-checked="false"
+              tabindex="0"
+            >
+              <span class="ws-box" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </span>
+              <span>I've contributed to or maintain the Plannotator OSS core.</span>
+            </div>
+
+            <p class="ws-contrib-note">
+              ↑ Early contributors and meaningful early supporters receive
+              <span class="ws-accent">lifetime free access</span> to Workspaces.
+            </p>
+
+            <div class="ws-form-foot">
+              <button type="submit" class="ws-submit">
+                <span class="ws-submit-idle">
+                  <span>Join waitlist</span>
+                  <svg class="ws-arrow w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                  </svg>
+                </span>
+                <span class="ws-submit-busy" aria-hidden="true">
+                  <span class="ws-spinner"></span>
+                  <span class="ws-submit-busy-label">Submitting…</span>
+                </span>
+              </button>
+            </div>
+
+            {turnstileSitekey && (
+              <div
+                id="ws-turnstile"
+                class="cf-turnstile ws-turnstile"
+                data-sitekey={turnstileSitekey}
+                data-callback="onWsTurnstile"
+                data-expired-callback="onWsTurnstileExpired"
+                data-error-callback="onWsTurnstileError"
+                data-theme="auto"
+                data-retry="auto"
+              />
+            )}
+          </div>
+
+          <div class="ws-success">
+            <div class="ws-ok">
+              <span class="ws-dot" aria-hidden="true"></span>
+              <span id="ok-stamp">SIGNUP CONFIRMED</span>
+            </div>
+            <h3 class="ws-success-title">
+              You're on the list, <em id="ok-name">friend</em>.
+            </h3>
+            <p>
+              We'll email <strong id="ok-email">your address</strong> when the
+              next cohort opens. Expect a real note from a human, not a
+              marketing sequence.
+            </p>
+            <p id="ok-contrib-note">
+              Contributing meaningful PRs to the OSS core qualifies you for
+              lifetime free access on Teams.
+            </p>
+            <div class="ws-receipt" id="receipt"></div>
+          </div>
+        </form>
+
+        <aside class="ws-banners">
+          <div class="ws-commit-card">
+            <span class="ws-commit-tag">[ open source ]</span>
+            <p class="ws-commit-msg">
+              Plannotator core stays <em>free and open source</em>, always.
+              Workspaces is the hosted layer for teams and power users.
+            </p>
+          </div>
+
+          <div class="ws-oss-note">
+            <span class="ws-oss-note-label">↳ OSS contributors</span>
+            Early contributors and meaningful early supporters will receive
+            <span class="ws-accent">lifetime free access</span>. Flag yourself
+            in the form and we'll cross-reference with the contributor list.
+          </div>
+        </aside>
+      </div>
+    </main>
+  </div>
+
+  {turnstileSitekey && (
+    <script
+      is:inline
+      src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+      async
+      defer
+    />
+  )}
+
+  <script
+    is:inline
+    define:vars={{ waitlistUrl, turnstileEnabled: !!turnstileSitekey }}
+  >
+    (function () {
+      var form = document.getElementById('signup-form');
+      if (!form) return;
+
+      var turnstileEl = document.getElementById('ws-turnstile');
+      var turnstileToken = null;
+      var turnstileWaiters = [];
+      var isSubmitting = false;
+      var fields = { teamSize: '' };
+      var contributor = false;
+
+      window.onWsTurnstile = function (token) {
+        // Useful breadcrumb when debugging signup failures from devtools.
+        console.info('[waitlist] turnstile token received');
+        turnstileToken = token;
+        var waiters = turnstileWaiters;
+        turnstileWaiters = [];
+        waiters.forEach(function (resolve) { resolve(token); });
+      };
+      window.onWsTurnstileExpired = function () {
+        console.info('[waitlist] turnstile token expired');
+        turnstileToken = null;
+        if (window.turnstile && turnstileEl) {
+          try { window.turnstile.reset(turnstileEl); } catch (_) {}
+        }
+      };
+      window.onWsTurnstileError = function (err) {
+        console.warn('[waitlist] turnstile error:', err);
+        turnstileToken = null;
+      };
+
+      // Resolves with `{ token, reason }`. `reason` is null on success,
+      // 'no-script' if the Turnstile API never loaded (usually a content
+      // blocker), 'timeout' if it loaded but didn't issue a token in time.
+      function awaitTurnstileToken() {
+        if (!turnstileEnabled) return Promise.resolve({ token: null, reason: null });
+        if (turnstileToken) return Promise.resolve({ token: turnstileToken, reason: null });
+
+        if (!window.turnstile) {
+          // Script never executed — extension blocked it, or the user is
+          // offline. Surface a clear, actionable error instead of a generic
+          // "couldn't verify" 400 from the worker.
+          return Promise.resolve({ token: null, reason: 'no-script' });
+        }
+        if (turnstileEl) {
+          try { window.turnstile.execute(turnstileEl); } catch (_) {}
+        }
+        return new Promise(function (resolve) {
+          var done = false;
+          turnstileWaiters.push(function (token) {
+            if (done) return;
+            done = true;
+            resolve({ token: token, reason: null });
+          });
+          // 10s gives Turnstile plenty of time on slow networks. Most
+          // legit visitors get a token in well under 1s.
+          setTimeout(function () {
+            if (done) return;
+            done = true;
+            resolve({ token: null, reason: 'timeout' });
+          }, 10000);
+        });
+      }
+
+      // Pill picker
+      document.querySelectorAll('.ws-pills').forEach(function (group) {
+        var key = group.dataset.field;
+        var single = group.dataset.single === '1';
+        group.addEventListener('click', function (e) {
+          var p = e.target.closest('.ws-pill');
+          if (!p) return;
+          var v = p.dataset.v;
+          if (single) {
+            group.querySelectorAll('.ws-pill').forEach(function (x) {
+              x.classList.remove('on');
+              x.setAttribute('aria-pressed', 'false');
+            });
+            p.classList.add('on');
+            p.setAttribute('aria-pressed', 'true');
+            fields[key] = v;
+          }
+          clearErr(group);
+        });
+      });
+
+      // Contributor toggle (click + keyboard)
+      var contribEl = document.getElementById('contributor-toggle');
+      function toggleContributor() {
+        contributor = !contributor;
+        contribEl.classList.toggle('on', contributor);
+        contribEl.setAttribute('aria-checked', contributor ? 'true' : 'false');
+      }
+      if (contribEl) {
+        contribEl.addEventListener('click', toggleContributor);
+        contribEl.addEventListener('keydown', function (e) {
+          if (e.key === ' ' || e.key === 'Enter') {
+            e.preventDefault();
+            toggleContributor();
+          }
+        });
+      }
+
+      function clearErr(el) {
+        var f = el.closest('.ws-field');
+        if (!f) return;
+        var existing = f.querySelector('.ws-err');
+        if (existing) existing.remove();
+      }
+      function showErr(el, msg) {
+        clearErr(el);
+        var f = el.closest('.ws-field');
+        if (!f) return;
+        var e = document.createElement('div');
+        e.className = 'ws-err';
+        e.textContent = '↳ ' + msg;
+        f.appendChild(e);
+      }
+      function clearAllFormErrors() {
+        form.querySelectorAll('.ws-err').forEach(function (n) { n.remove(); });
+      }
+
+      form.querySelectorAll('input, textarea').forEach(function (el) {
+        el.addEventListener('input', function () { clearErr(el); });
+      });
+
+      function setBusy(busy, label) {
+        var btn = form.querySelector('.ws-submit');
+        if (!btn) return;
+        btn.disabled = busy;
+        btn.classList.toggle('is-loading', busy);
+        if (busy) {
+          var labelEl = btn.querySelector('.ws-submit-busy-label');
+          if (labelEl && label) labelEl.textContent = label;
+        }
+      }
+
+      function teamSizeLabel(slug) {
+        var pill = form.querySelector('[data-field="teamSize"] [data-v="' + slug + '"]');
+        return pill ? pill.textContent : slug;
+      }
+
+      function renderReceipt(data) {
+        var company = data.company;
+        // Derive a 2-letter sigil from email + company. Email gives the user's
+        // initial, company gives the org's. Avoids needing the user's name.
+        var emailInitial = (data.email.charAt(0) || 'X').toUpperCase();
+        var companyInitial = (company.charAt(0) || 'X').toUpperCase();
+        var id = 'WL-' + Math.floor(Math.random() * 9000 + 1000) + '-' +
+          emailInitial + companyInitial;
+        var pos = Math.floor(Math.random() * 240 + 380);
+
+        // Address by the email-local-part as a friendly fallback for "name".
+        var greeting = data.email.split('@')[0] || 'friend';
+        document.getElementById('ok-name').textContent = greeting;
+        document.getElementById('ok-email').textContent = data.email;
+        document.getElementById('ok-stamp').textContent =
+          'SIGNUP CONFIRMED · ' + new Date().toISOString().slice(0, 10);
+        if (data.is_contributor) {
+          document.getElementById('ok-contrib-note').textContent =
+            "Since you contribute to the core, you'll hear from us about lifetime access shortly.";
+        }
+
+        var receipt = document.getElementById('receipt');
+        var rows = [
+          ['ticket', id],
+          ['company', company],
+          ['team size', teamSizeLabel(data.team_size)],
+          ['cohort position', '~#' + pos],
+          ['oss contributor', data.is_contributor ? 'yes, flagged for review' : 'no'],
+        ];
+        receipt.innerHTML = rows.map(function (r) {
+          return '<div class="ws-r"><span class="ws-r-k">' + r[0] +
+            '</span><span class="ws-r-v">' + (r[1] || '-') + '</span></div>';
+        }).join('');
+      }
+
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        if (isSubmitting) return;
+        clearAllFormErrors();
+
+        var get = function (n) { return form.querySelector('[name="' + n + '"]'); };
+        var email = (get('email').value || '').trim();
+        var company = (get('company').value || '').trim();
+        var note = (get('note').value || '').trim();
+        var team_size = fields.teamSize;
+
+        var ok = true;
+        if (!email) { showErr(get('email'), 'Required'); ok = false; }
+        else if (!/^[^\s@]+@[^\s@.]+\.[^\s@]+$/.test(email)) {
+          showErr(get('email'), 'Looks invalid'); ok = false;
+        }
+        // Company is presented as optional in the UI. The worker still
+        // requires a non-empty value, so stub one here when the user
+        // leaves it blank — keeps the server contract untouched.
+        if (!company) company = '(not provided)';
+        if (!team_size) {
+          showErr(form.querySelector('[data-field="teamSize"]'), 'Pick one');
+          ok = false;
+        }
+        if (!ok) return;
+
+        var payload = {
+          email: email,
+          company: company,
+          team_size: team_size,
+          note: note || undefined,
+          is_contributor: contributor,
+          website: (get('website') && get('website').value) || '',
+        };
+
+        isSubmitting = true;
+        setBusy(true, turnstileEnabled ? 'Verifying…' : 'Submitting…');
+
+        awaitTurnstileToken()
+          .then(function (result) {
+            if (result.reason === 'no-script') {
+              showErr(get('email'),
+                "Couldn't load Cloudflare's verification. Try disabling your ad/content blocker for this site, then retry.");
+              return null;
+            }
+            if (result.reason === 'timeout') {
+              showErr(get('email'),
+                'Verification timed out. Refresh the page and try again.');
+              if (window.turnstile && turnstileEl) {
+                try { window.turnstile.reset(turnstileEl); } catch (_) {}
+              }
+              return null;
+            }
+            // Token may be null when Turnstile is disabled entirely; that's
+            // fine — the worker won't enforce verification in that mode.
+            if (result.token) payload.turnstile_token = result.token;
+            setBusy(true, 'Submitting…');
+            return fetch(waitlistUrl + '/signup', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+          })
+          .then(function (res) {
+            if (!res) return null; // Turnstile failure — already surfaced.
+            return res.json().then(function (body) { return { res: res, body: body }; });
+          })
+          .then(function (result) {
+            if (!result) return; // Turnstile failure path.
+            if (!result.res.ok) {
+              var msg = (result.body && result.body.error) || 'Something went wrong. Please try again.';
+              showErr(get('email'), msg);
+              if (turnstileEnabled && window.turnstile && turnstileEl) {
+                turnstileToken = null;
+                try { window.turnstile.reset(turnstileEl); } catch (_) {}
+              }
+              return;
+            }
+            renderReceipt(payload);
+            form.classList.add('ws-submitted');
+          })
+          .catch(function () {
+            showErr(get('email'), "Couldn't reach the waitlist server. Try again.");
+          })
+          .finally(function () {
+            isSubmitting = false;
+            setBusy(false);
+          });
+      });
+    })();
+  </script>
+
+  <style>
+    /* All tokens (--background, --foreground, --primary, --card, --border,
+       --muted, --muted-foreground, --secondary, --destructive, --radius,
+       --font-mono) come from packages/ui/theme.css and the marketing site
+       loads Instrument Sans / Inter / JetBrains Mono in Base.astro. */
+
+    /* ── Two independent column flow ──
+       Each column flows on its own — left column has hero on top with
+       info content below; right column has form on top with banners
+       below. Hero and form are top-aligned siblings since both columns
+       start at the top. (Grid-template-areas couldn't do this — shared
+       rows forced empty space below the shorter sibling.)
+
+       On mobile (≤ 980px) the columns "open up" via `display: contents`
+       so their children become flex items of `.ws-main`, which lets us
+       reorder to: hero → form → info → banners. Form is lifted ahead of
+       the long info content; banners drop to the very bottom.
+
+       Top padding stays at 80px on every breakpoint so the .ws-eyebrow
+       always clears the 48px fixed Nav with comfortable breathing room. */
+    .ws-main {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 80px 40px;
+      display: flex;
+      gap: 80px;
+      align-items: stretch;
+    }
+    .ws-col-left {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      /* Breathing room between the hero (eyebrow + h1) and the first
+         "Today" row of the phases list — without this the title's
+         descenders run into the dashed grid above "Today". */
+      gap: 32px;
+    }
+    .ws-col-right {
+      flex: 0 0 520px;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      /* Generous spacing between the form-card and the banners stack
+         so the form has clear visual breathing room as the CTA. */
+      gap: 32px;
+      /* Push the form-card down so its top edge lines up with the h1
+         next door, not the eyebrow above it. ~ eyebrow line-height
+         (15px × 1.55) + its 16px margin-bottom. */
+      padding-top: 40px;
+    }
+    .ws-banners {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    @media (max-width: 980px) {
+      .ws-main {
+        flex-direction: column;
+        gap: 40px;
+        padding: 80px 28px 56px;
+      }
+      /* Flatten the column wrappers so their children become direct flex
+         items of .ws-main — this is what makes the cross-column reorder
+         (hero → form → info → banners) possible. The desktop padding-top
+         on .ws-col-right is irrelevant here since the wrapper itself is
+         dissolved by display:contents. */
+      .ws-col-left,
+      .ws-col-right { display: contents; }
+      .ws-hero    { order: 1; }
+      .ws-form-card { order: 2; }
+      .ws-info    { order: 3; }
+      .ws-banners { order: 4; }
+    }
+    @media (max-width: 600px) {
+      .ws-main { padding: 80px 20px 56px; }
+    }
+
+    /* ── Hero block ── */
+    .ws-hero {
+      max-width: 760px;
+    }
+    .ws-eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.9375rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--primary);
+      margin: 0 0 16px;
+    }
+    .ws-page-title {
+      font-family: 'Instrument Sans', system-ui, sans-serif;
+      font-size: clamp(20px, 2.4vw, 26px);
+      font-weight: 600;
+      line-height: 1.18;
+      letter-spacing: -0.012em;
+      color: var(--foreground);
+      margin: 0;
+    }
+
+    /* ── Phases (Today / Next / Compound) ── */
+    .ws-phases {
+      display: grid;
+      grid-template-columns: 110px 1fr;
+      max-width: 560px;
+      margin-bottom: 4px;
+    }
+    .ws-phase { display: contents; }
+    .ws-phase .ws-when,
+    .ws-phase .ws-what {
+      padding: 12px 0;
+      border-top: 1px dashed oklch(from var(--border) l c h / 0.5);
+    }
+    .ws-phase:first-child .ws-when,
+    .ws-phase:first-child .ws-what { border-top: none; padding-top: 2px; }
+    .ws-when {
+      font-family: 'Instrument Sans', system-ui, sans-serif;
+      font-size: 0.9375rem;
+      font-weight: 600;
+      color: var(--secondary);
+      letter-spacing: -0.005em;
+      padding-left: 14px;
+    }
+    .ws-what {
+      font-size: 0.875rem;
+      line-height: 1.55;
+      color: oklch(from var(--foreground) l c h / 0.85);
+    }
+    @media (max-width: 700px) {
+      .ws-phases { grid-template-columns: 92px 1fr; }
+      .ws-when { padding-left: 8px; }
+    }
+
+    /* ── Intro lead ── */
+    .ws-intro {
+      font-family: 'Instrument Sans', system-ui, sans-serif;
+      margin: 24px 0 14px;
+      color: var(--foreground);
+      font-weight: 600;
+      font-size: 1.0625rem;
+      letter-spacing: -0.008em;
+      max-width: 540px;
+    }
+
+    /* ── Offering points ── */
+    .ws-points {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      max-width: 560px;
+      border-top: 1px solid var(--border);
+    }
+    .ws-points li {
+      position: relative;
+      padding: 14px 0 14px 20px;
+      border-bottom: 1px solid oklch(from var(--border) l c h / 0.5);
+      font-size: 0.875rem;
+      line-height: 1.55;
+      color: oklch(from var(--foreground) l c h / 0.78);
+    }
+    .ws-points li::before {
+      content: "·";
+      position: absolute;
+      left: 0;
+      top: 12px;
+      color: var(--primary);
+      font-size: 1.125rem;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+    .ws-points li strong {
+      display: block;
+      font-family: 'Instrument Sans', system-ui, sans-serif;
+      color: var(--foreground);
+      font-weight: 600;
+      font-size: 0.9375rem;
+      letter-spacing: -0.005em;
+      margin-bottom: 2px;
+    }
+    .ws-points-feat {
+      background: oklch(from var(--primary) l c h / 0.08);
+      margin-left: -14px;
+      padding-left: 28px !important;
+      padding-right: 14px;
+      border-bottom: none !important;
+    }
+    /* Restore the next sibling's top edge so dropping the feat's bottom
+       border doesn't leave it visually merged with the following item. */
+    .ws-points-feat + li {
+      border-top: 1px solid oklch(from var(--border) l c h / 0.3);
+    }
+    /* No bullet/bar on the highlighted item — the tinted background is
+       enough on its own. */
+    .ws-points-feat::before { display: none !important; }
+    .ws-star {
+      color: var(--primary);
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+      font-weight: 500;
+      margin-left: 6px;
+      vertical-align: 1px;
+    }
+
+    /* ── OSS contributors card ──
+       Wears the "branded stamp" treatment (was on commit-card): primary
+       background, primary-foreground text, offset-stack shadow. */
+    .ws-oss-note {
+      padding: 16px 18px;
+      background: var(--primary);
+      color: var(--primary-foreground);
+      border: 1px solid var(--primary);
+      border-radius: var(--radius);
+      font-family: var(--font-mono);
+      font-size: 0.8125rem;
+      line-height: 1.55;
+      letter-spacing: 0.01em;
+      max-width: 540px;
+      box-shadow:
+        10px 12px 0 -1px var(--muted),
+        11px 13px 0 -1px oklch(from var(--border) l c h / 0.5);
+    }
+    @media (max-width: 980px) {
+      .ws-oss-note {
+        box-shadow: 0 1px 0 oklch(from var(--border) l c h / 0.6);
+      }
+    }
+    .ws-oss-note-label {
+      display: block;
+      font-size: 0.6875rem;
+      color: oklch(from var(--primary-foreground) l c h / 0.7);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    /* Default accent across the page is primary; inside the colored OSS
+       stamp it would disappear into the bg, so override to the stamp's
+       text color with extra weight for emphasis instead. */
+    .ws-accent { color: var(--primary); }
+    .ws-oss-note .ws-accent {
+      color: var(--primary-foreground);
+      font-weight: 700;
+    }
+
+    /* ── Form card ── */
+    .ws-form-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px 32px 24px;
+      position: relative;
+      box-shadow:
+        10px 12px 0 -1px var(--muted),
+        11px 13px 0 -1px oklch(from var(--border) l c h / 0.5);
+    }
+    @media (max-width: 980px) {
+      .ws-form-card { box-shadow: 0 1px 0 oklch(from var(--border) l c h / 0.6); }
+    }
+
+    .ws-form-head {
+      padding-bottom: 16px;
+      margin-bottom: 22px;
+      border-bottom: 1px solid var(--border);
+    }
+    .ws-form-title {
+      font-family: 'Instrument Sans', system-ui, sans-serif;
+      font-weight: 600;
+      font-size: 1rem;
+      letter-spacing: -0.008em;
+      margin: 0;
+      color: var(--foreground);
+    }
+
+    .ws-honeypot {
+      position: absolute;
+      left: -9999px;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+    }
+
+    .ws-row-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 480px) { .ws-row-2 { grid-template-columns: 1fr; } }
+
+    .ws-field {
+      display: flex;
+      flex-direction: column;
+      margin-bottom: 14px;
+    }
+    .ws-label {
+      font-family: var(--font-mono);
+      font-size: 0.625rem;
+      color: var(--muted-foreground);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+    .ws-opt {
+      text-transform: none;
+      letter-spacing: 0;
+      color: oklch(from var(--muted-foreground) l c h / 0.7);
+      font-size: 0.625rem;
+      font-weight: 400;
+    }
+
+    .ws-field input,
+    .ws-field textarea {
+      width: 100%;
+      background: var(--background);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 9px 11px;
+      font-family: inherit;
+      font-size: 0.875rem;
+      color: var(--foreground);
+      outline: none;
+      transition: border-color 120ms ease, box-shadow 120ms ease;
+    }
+    .ws-field input::placeholder,
+    .ws-field textarea::placeholder {
+      color: oklch(from var(--muted-foreground) l c h / 0.55);
+    }
+    .ws-field input:focus,
+    .ws-field textarea:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px oklch(from var(--primary) l c h / 0.15);
+    }
+    .ws-field textarea {
+      resize: vertical;
+      min-height: 64px;
+      line-height: 1.5;
+    }
+    .ws-err {
+      color: var(--destructive);
+      font-family: var(--font-mono);
+      font-size: 0.625rem;
+      margin-top: 5px;
+      letter-spacing: 0.01em;
+    }
+
+    /* ── Pills ── */
+    .ws-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+    .ws-pill {
+      border: 1px solid var(--border);
+      background: var(--background);
+      color: oklch(from var(--foreground) l c h / 0.85);
+      padding: 7px 12px;
+      border-radius: 9999px;
+      font-family: inherit;
+      font-size: 0.8125rem;
+      cursor: pointer;
+      user-select: none;
+      transition: border-color 120ms ease, background 120ms ease, color 120ms ease, transform 100ms ease;
+    }
+    .ws-pill:hover {
+      border-color: oklch(from var(--primary) l c h / 0.5);
+      color: var(--foreground);
+    }
+    .ws-pill:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px oklch(from var(--primary) l c h / 0.18);
+    }
+    .ws-pill:active { transform: scale(0.97); }
+    .ws-pill.on {
+      background: var(--foreground);
+      border-color: var(--foreground);
+      color: var(--background);
+    }
+
+    /* ── Contributor checkbox ── */
+    .ws-check-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 12px 14px;
+      background: var(--background);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.8125rem;
+      color: oklch(from var(--foreground) l c h / 0.85);
+      line-height: 1.45;
+      user-select: none;
+      margin-bottom: 6px;
+      transition: border-color 140ms ease, background 140ms ease;
+    }
+    .ws-check-row:hover { border-color: oklch(from var(--primary) l c h / 0.5); }
+    .ws-check-row:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px oklch(from var(--primary) l c h / 0.18);
+    }
+    .ws-check-row.on {
+      background: oklch(from var(--primary) l c h / 0.1);
+      border-color: var(--primary);
+      color: var(--foreground);
+    }
+    .ws-check-row .ws-box {
+      width: 14px;
+      height: 14px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      border-radius: 2px;
+      flex-shrink: 0;
+      display: grid;
+      place-items: center;
+      color: transparent;
+      margin-top: 1px;
+    }
+    .ws-check-row .ws-box svg { width: 10px; height: 10px; }
+    .ws-check-row.on .ws-box {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: var(--primary-foreground);
+    }
+
+    .ws-contrib-note {
+      font-family: var(--font-mono);
+      font-size: 0.625rem;
+      color: oklch(from var(--muted-foreground) l c h / 0.85);
+      line-height: 1.5;
+      letter-spacing: 0.02em;
+      padding: 4px 14px 0;
+      margin: 0 0 14px;
+    }
+
+    /* ── Turnstile slot (almost always invisible) ── */
+    .ws-turnstile {
+      margin-top: 10px;
+      min-height: 0;
+      display: flex;
+      justify-content: center;
+    }
+    .ws-turnstile:empty { margin-top: 0; }
+
+    /* ── Submit ── */
+    .ws-form-foot {
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+      display: flex;
+    }
+    .ws-submit {
+      flex: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 20px;
+      background: var(--primary);
+      color: var(--primary-foreground);
+      border: 1px solid var(--primary);
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 0.9375rem;
+      font-weight: 600;
+      letter-spacing: -0.005em;
+      cursor: pointer;
+      transition: background 120ms ease, transform 100ms ease;
+      white-space: nowrap;
+    }
+    .ws-submit:hover { background: oklch(from var(--primary) l c h / 0.9); }
+    .ws-submit:active { transform: translateY(1px); }
+    .ws-submit:disabled { cursor: not-allowed; }
+    .ws-arrow { transition: transform 160ms ease; }
+    .ws-submit:hover .ws-arrow { transform: translateX(3px); }
+
+    /* Idle vs busy children — only one is visible at a time. The button
+       keeps its size both ways (idle layout determines the box). */
+    .ws-submit-idle,
+    .ws-submit-busy {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .ws-submit-busy {
+      display: none;
+      color: var(--primary-foreground);
+    }
+    .ws-submit.is-loading .ws-submit-idle { display: none; }
+    .ws-submit.is-loading .ws-submit-busy { display: inline-flex; }
+    .ws-submit.is-loading { background: oklch(from var(--primary) l c h / 0.85); }
+
+    .ws-spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid currentColor;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: ws-spin 0.65s linear infinite;
+    }
+    @keyframes ws-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ── Success state ── */
+    .ws-success { display: none; }
+    .ws-form-card.ws-submitted .ws-form-body { display: none; }
+    .ws-form-card.ws-submitted .ws-success {
+      display: block;
+      animation: ws-fade-up 0.35s cubic-bezier(0.23, 1, 0.32, 1);
+    }
+    @keyframes ws-fade-up {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .ws-ok {
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--primary);
+      margin-bottom: 18px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .ws-dot {
+      width: 7px;
+      height: 7px;
+      background: var(--primary);
+      border-radius: 50%;
+    }
+    .ws-success-title {
+      font-family: 'Instrument Sans', system-ui, sans-serif;
+      font-weight: 600;
+      font-size: 1.25rem;
+      line-height: 1.2;
+      letter-spacing: -0.01em;
+      margin: 0 0 10px;
+      color: var(--foreground);
+    }
+    .ws-success-title em { color: var(--primary); font-style: normal; }
+    .ws-success p {
+      font-size: 0.875rem;
+      color: oklch(from var(--foreground) l c h / 0.78);
+      line-height: 1.55;
+      margin: 0 0 12px;
+    }
+    .ws-success p strong { color: var(--foreground); font-weight: 500; }
+
+    .ws-receipt {
+      margin-top: 18px;
+      background: var(--background);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 12px 14px;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+    }
+    .ws-r {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 0;
+      border-bottom: 1px dashed oklch(from var(--border) l c h / 0.5);
+    }
+    .ws-r:last-child { border-bottom: none; }
+    .ws-r-k {
+      color: var(--muted-foreground);
+      text-transform: uppercase;
+      font-size: 0.625rem;
+      letter-spacing: 0.05em;
+    }
+    .ws-r-v {
+      color: var(--foreground);
+      max-width: 60%;
+      text-align: right;
+    }
+
+    /* ── Commitment card ──
+       Now the subtle bordered card (color pattern swapped with the OSS
+       contributors stamp above). bg-card on a thin border, foreground text
+       with primary highlights — sits quietly under the form. */
+    .ws-commit-card {
+      max-width: 560px;
+      background: var(--card);
+      color: oklch(from var(--foreground) l c h / 0.85);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px 26px 24px;
+    }
+    .ws-commit-tag {
+      display: block;
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--primary);
+      margin-bottom: 12px;
+    }
+    .ws-commit-msg {
+      font-family: 'Instrument Sans', system-ui, sans-serif;
+      font-size: 1.0625rem;
+      font-weight: 600;
+      line-height: 1.3;
+      letter-spacing: -0.012em;
+      color: var(--foreground);
+      margin: 0;
+    }
+    .ws-commit-msg em {
+      font-style: normal;
+      color: var(--primary);
+      font-weight: 600;
+    }
+  </style>
+</Base>

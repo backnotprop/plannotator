@@ -1,33 +1,46 @@
 import React from 'react';
 import type { EditorAnnotation } from '../types';
+import { cn } from '../lib/utils';
+
+// EditorAnnotationCard is SHARED across surfaces:
+//  - the plan/annotate AnnotationPanel (flat surface-1 cards), and
+//  - the code-review ReviewSidebar (bordered cards, sitting next to
+//    renderAnnotationCard's `p-2.5 rounded border border-transparent
+//    hover:bg-muted/30` code cards).
+// The `variant` prop keeps each surface visually cohesive:
+//  - 'plan'        → flat surface-1 hover (matches the plan AnnotationCard restyle)
+//  - 'code-review' → bordered + muted hover (matches code-review's code cards)
+type EditorAnnotationVariant = 'plan' | 'code-review';
 
 interface EditorAnnotationCardProps {
   annotation: EditorAnnotation;
   onDelete: () => void;
+  variant?: EditorAnnotationVariant;
 }
 
-export const EditorAnnotationCard: React.FC<EditorAnnotationCardProps> = ({ annotation, onDelete }) => {
+export const EditorAnnotationCard: React.FC<EditorAnnotationCardProps> = ({ annotation, onDelete, variant = 'plan' }) => {
   const lineRange = annotation.lineStart === annotation.lineEnd
     ? `L${annotation.lineStart}`
     : `L${annotation.lineStart}-${annotation.lineEnd}`;
 
   return (
-    <div className="group relative p-2.5 rounded-lg border border-transparent hover:bg-muted/50 hover:border-border/50 transition-all">
-      {/* File path + line range */}
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="p-1 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400">
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-          </span>
-          <span className="text-[10px] font-mono text-muted-foreground truncate" title={annotation.filePath}>
-            {annotation.filePath}:{lineRange}
-          </span>
-        </div>
+    <div
+      className={cn(
+        'group w-full text-left transition-colors duration-150',
+        variant === 'code-review'
+          ? 'relative p-2.5 rounded border border-transparent hover:bg-muted/30'
+          : 'rounded-lg px-3 py-2.5 hover:bg-surface-1/50',
+      )}
+    >
+      {/* Header: type word + file:line + delete */}
+      <div className="mb-1.5 flex items-center gap-1.5">
+        <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400">Editor</span>
+        <span className="text-[10px] font-mono text-muted-foreground/50 truncate" title={annotation.filePath}>
+          {annotation.filePath}:{lineRange}
+        </span>
         <button
           onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+          className="ml-auto relative rounded-md p-1.5 text-muted-foreground transition-colors before:absolute before:-inset-1.5 before:content-[''] opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:text-destructive"
           title="Delete annotation"
         >
           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -37,15 +50,15 @@ export const EditorAnnotationCard: React.FC<EditorAnnotationCardProps> = ({ anno
       </div>
 
       {/* Selected text */}
-      <div className="text-[11px] font-mono text-muted-foreground bg-muted/50 rounded px-2 py-1.5 whitespace-pre-wrap max-h-24 overflow-y-auto">
+      <p className="mb-1.5 line-clamp-2 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground/80">
         {annotation.selectedText}
-      </div>
+      </p>
 
       {/* Comment */}
       {annotation.comment && (
-        <div className="mt-2 text-xs text-foreground/90 pl-2 border-l-2 border-amber-500/50 whitespace-pre-wrap">
+        <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90">
           {annotation.comment}
-        </div>
+        </p>
       )}
     </div>
   );

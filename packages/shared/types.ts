@@ -21,3 +21,9 @@ export type {
   CompareTargetPickerCopy,
   RepositoryContext,
 } from "./review-core";
+
+export type {
+  WorkspaceDiffType,
+  WorkspaceRepoState,
+  WorkspaceReviewState,
+} from "./review-workspace";

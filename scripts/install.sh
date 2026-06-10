@@ -2,6 +2,8 @@
 set -e
 
 REPO="backnotprop/plannotator"
+SEM_REPO="Ataraxy-Labs/sem"
+SEM_VERSION="v0.8.0"
 INSTALL_DIR="$HOME/.local/bin"
 
 # First plannotator release that carries SLSA build-provenance attestations.
@@ -31,10 +33,19 @@ VERSION_EXPLICIT=0
 # Precedence: CLI flag > env var > ~/.plannotator/config.json > default (off).
 # -1 = flag not set yet (fall through to lower layers); 0 = disable; 1 = enable.
 VERIFY_ATTESTATION_FLAG=-1
+# Guided-install answers. Precedence: CLI flags > wizard (terminal, first run
+# or --reconfigure) > saved prefs from a previous run > defaults (no extras,
+# nothing model-invocable). Empty string = not set by a flag.
+EXTRAS_FLAG=""
+MODEL_INVOCABLE_FLAG=""
+NON_INTERACTIVE=0
+RECONFIGURE=0
 
 usage() {
     cat <<'USAGE'
-Usage: install.sh [--version <tag>] [--verify-attestation | --skip-attestation] [--help]
+Usage: install.sh [--version <tag>] [--verify-attestation | --skip-attestation]
+                  [--extras | --no-extras] [--model-invocable <list>|none]
+                  [--non-interactive] [--reconfigure] [--help]
        install.sh <tag>
 
 Options:
@@ -46,17 +57,40 @@ Options:
                          not available or the check does not pass.
   --skip-attestation     Force-skip provenance verification even if enabled
                          via env var or ~/.plannotator/config.json.
+  --extras               Install the extra skills (compound, setup-goal,
+                         visual-explainer) via `npx skills add` without asking.
+  --no-extras            Skip the extras without asking.
+  --model-invocable <l>  Comma-separated skill names to make model-invocable
+                         (e.g. plannotator-review,plannotator-compound), or
+                         "none". Skills are user-invoked-only by default.
+  --non-interactive      Never prompt, even in a terminal. Uses flags, then
+                         saved answers from a previous run, then the defaults
+                         (no extras, nothing model-invocable).
+  --reconfigure          Re-open the guided questions even if answers were
+                         saved by a previous run.
   -h, --help             Show this help and exit.
+
+Guided install: when run in a terminal for the first time (or with
+--reconfigure), the installer asks whether to install the extra skills and
+whether any skills should be callable by the model. Answers are saved to
+<data dir>/install-prefs and
+reused silently on re-runs. Piped/CI runs (no terminal) never prompt and
+keep the defaults.
 
 Provenance verification is off by default. Enable it by any of:
   - passing --verify-attestation
   - exporting PLANNOTATOR_VERIFY_ATTESTATION=1
   - setting { "verifyAttestation": true } in ~/.plannotator/config.json
 
+The optional semantic-diff sidecar (the 'sem' binary, used by code review) is
+installed after Plannotator itself. Skip it by exporting
+PLANNOTATOR_SKIP_SEM_INSTALL=1. Its download is time-bounded, so a slow network
+never blocks an otherwise-complete install.
+
 Examples:
   curl -fsSL https://plannotator.ai/install.sh | bash
   curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version vX.Y.Z
-  curl -fsSL https://plannotator.ai/install.sh | bash -s -- --verify-attestation
+  curl -fsSL https://plannotator.ai/install.sh | bash -s -- --no-extras --model-invocable none
   bash install.sh vX.Y.Z
 USAGE
 }
@@ -114,6 +148,40 @@ while [ $# -gt 0 ]; do
                 exit 1
             fi
             VERIFY_ATTESTATION_FLAG=0
+            shift
+            ;;
+        --extras)
+            EXTRAS_FLAG="yes"
+            shift
+            ;;
+        --no-extras)
+            EXTRAS_FLAG="no"
+            shift
+            ;;
+        --model-invocable)
+            if [ -z "${2:-}" ]; then
+                echo "--model-invocable requires a comma-separated skill list or 'none'" >&2
+                usage >&2
+                exit 1
+            fi
+            MODEL_INVOCABLE_FLAG="$2"
+            shift 2
+            ;;
+        --model-invocable=*)
+            MODEL_INVOCABLE_FLAG="${1#--model-invocable=}"
+            if [ -z "$MODEL_INVOCABLE_FLAG" ]; then
+                echo "--model-invocable requires a comma-separated skill list or 'none'" >&2
+                usage >&2
+                exit 1
+            fi
+            shift
+            ;;
+        --non-interactive|--yes)
+            NON_INTERACTIVE=1
+            shift
+            ;;
+        --reconfigure)
+            RECONFIGURE=1
             shift
             ;;
         -h|--help)
@@ -193,8 +261,16 @@ verify_attestation=0
 # Layer 3: config file (lowest precedence of the opt-in sources).
 # Crude grep against a flat boolean — PlannotatorConfig has no nested
 # verifyAttestation, so false positives are not a concern.
-if [ -f "$HOME/.plannotator/config.json" ]; then
-    if grep -q '"verifyAttestation"[[:space:]]*:[[:space:]]*true' "$HOME/.plannotator/config.json" 2>/dev/null; then
+# Resolve the data directory, expanding ~ the same way the runtime does.
+_raw_dir="${PLANNOTATOR_DATA_DIR:-}"
+case "$_raw_dir" in
+    "")      _config_dir="$HOME/.plannotator" ;;
+    "~")     _config_dir="$HOME" ;;
+    "~/"*)   _config_dir="$HOME/${_raw_dir#\~/}" ;;
+    *)       _config_dir="$_raw_dir" ;;
+esac
+if [ -f "$_config_dir/config.json" ]; then
+    if grep -q '"verifyAttestation"[[:space:]]*:[[:space:]]*true' "$_config_dir/config.json" 2>/dev/null; then
         verify_attestation=1
     fi
 fi
@@ -298,6 +374,109 @@ chmod +x "$INSTALL_DIR/plannotator"
 echo ""
 echo "plannotator ${latest_tag} installed to ${INSTALL_DIR}/plannotator"
 
+sem_asset_for_platform() {
+    case "$platform" in
+        darwin-arm64) echo "sem-darwin-arm64.tar.gz" ;;
+        linux-arm64)  echo "sem-linux-arm64.tar.gz" ;;
+        linux-x64)    echo "sem-linux-x86_64.tar.gz" ;;
+        *)            return 1 ;;
+    esac
+}
+
+install_sem_sidecar() {
+    case "${PLANNOTATOR_SKIP_SEM_INSTALL:-}" in
+        1|true|yes|TRUE|YES|True|Yes)
+            echo "Skipping semantic diff sidecar install (PLANNOTATOR_SKIP_SEM_INSTALL is set)"
+            return 0
+            ;;
+    esac
+
+    sem_asset="$(sem_asset_for_platform 2>/dev/null || true)"
+    if [ -z "$sem_asset" ]; then
+        echo "Skipping semantic diff sidecar install (sem does not publish ${platform})"
+        return 0
+    fi
+
+    sem_dir="${_config_dir}/vendor/sem/${SEM_VERSION}"
+    sem_bin="${sem_dir}/sem"
+    if [ -x "$sem_bin" ] && "$sem_bin" --version 2>/dev/null | grep -q '^sem '; then
+        echo "Semantic diff sidecar already installed at ${sem_bin}"
+        return 0
+    fi
+
+    tmp_sem_dir="$(mktemp -d)"
+    sem_archive="${tmp_sem_dir}/${sem_asset}"
+    sem_checksums="${tmp_sem_dir}/checksums.txt"
+    sem_base_url="https://github.com/${SEM_REPO}/releases/download/${SEM_VERSION}"
+
+    # Bounded so a slow/hung download of this optional sidecar can't wedge an
+    # install where plannotator itself already landed. On timeout curl fails and
+    # we skip gracefully. Opt out entirely with PLANNOTATOR_SKIP_SEM_INSTALL=1.
+    if ! curl -fsSL --connect-timeout 10 --max-time 120 -o "$sem_archive" "${sem_base_url}/${sem_asset}"; then
+        echo "Skipping semantic diff sidecar install (download failed)"
+        rm -rf "$tmp_sem_dir"
+        return 0
+    fi
+    if ! curl -fsSL --connect-timeout 10 --max-time 60 -o "$sem_checksums" "${sem_base_url}/checksums.txt"; then
+        echo "Skipping semantic diff sidecar install (checksum download failed)"
+        rm -rf "$tmp_sem_dir"
+        return 0
+    fi
+
+    expected_sem_checksum="$(awk -v name="$sem_asset" '$2 == name { print $1 }' "$sem_checksums")"
+    if [ -z "$expected_sem_checksum" ]; then
+        echo "Skipping semantic diff sidecar install (checksum missing for ${sem_asset})"
+        rm -rf "$tmp_sem_dir"
+        return 0
+    fi
+
+    if [ "$(uname -s)" = "Darwin" ]; then
+        actual_sem_checksum="$(shasum -a 256 "$sem_archive" | cut -d' ' -f1)"
+    else
+        actual_sem_checksum="$(sha256sum "$sem_archive" | cut -d' ' -f1)"
+    fi
+
+    if [ "$actual_sem_checksum" != "$expected_sem_checksum" ]; then
+        echo "Skipping semantic diff sidecar install (checksum mismatch)"
+        rm -rf "$tmp_sem_dir"
+        return 0
+    fi
+
+    if ! tar -xzf "$sem_archive" -C "$tmp_sem_dir"; then
+        echo "Skipping semantic diff sidecar install (extract failed)"
+        rm -rf "$tmp_sem_dir"
+        return 0
+    fi
+
+    extracted_sem="$(find "$tmp_sem_dir" -type f -name sem -print -quit)"
+    if [ -z "$extracted_sem" ]; then
+        echo "Skipping semantic diff sidecar install (binary missing from archive)"
+        rm -rf "$tmp_sem_dir"
+        return 0
+    fi
+
+    if ! mkdir -p "$sem_dir"; then
+        echo "Skipping semantic diff sidecar install (directory creation failed)"
+        rm -rf "$tmp_sem_dir"
+        return 0
+    fi
+    if ! cp "$extracted_sem" "$sem_bin"; then
+        echo "Skipping semantic diff sidecar install (copy failed)"
+        rm -rf "$tmp_sem_dir"
+        return 0
+    fi
+    if ! chmod +x "$sem_bin"; then
+        echo "Skipping semantic diff sidecar install (chmod failed)"
+        rm -f "$sem_bin"
+        rm -rf "$tmp_sem_dir"
+        return 0
+    fi
+    rm -rf "$tmp_sem_dir"
+    echo "Semantic diff sidecar installed to ${sem_bin}"
+}
+
+install_sem_sidecar
+
 if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
     echo ""
     echo "${INSTALL_DIR} is not in your PATH. Add it with:"
@@ -314,9 +493,13 @@ if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
 fi
 
 # --- Codex CLI / Desktop app support (only if Codex is installed or configured) ---
+# Codex stores config and state under $CODEX_HOME when set, falling back to
+# ~/.codex (https://developers.openai.com/codex/config-advanced).
+CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"
+
 codex_home_has_user_config() {
-    [ -d "$HOME/.codex" ] || return 1
-    [ -n "$(find "$HOME/.codex" -mindepth 1 -maxdepth 1 ! -name skills ! -name .DS_Store -print -quit 2>/dev/null)" ]
+    [ -d "$CODEX_DIR" ] || return 1
+    [ -n "$(find "$CODEX_DIR" -mindepth 1 -maxdepth 1 ! -name skills ! -name .DS_Store -print -quit 2>/dev/null)" ]
 }
 
 codex_available=0
@@ -324,8 +507,12 @@ if command -v codex >/dev/null 2>&1 || codex_home_has_user_config; then
     codex_available=1
 fi
 
+kiro_available=0
+if command -v kiro-cli >/dev/null 2>&1 || [ -d "$HOME/.kiro" ]; then
+    kiro_available=1
+fi
+
 if [ "$codex_available" -eq 1 ]; then
-    CODEX_DIR="$HOME/.codex"
     CODEX_CONFIG="$CODEX_DIR/config.toml"
     CODEX_HOOKS="$CODEX_DIR/hooks.json"
     PLANNOTATOR_BIN="${INSTALL_DIR}/plannotator"
@@ -546,78 +733,6 @@ rm -rf "$HOME/.cache/opencode/node_modules/@plannotator" "$HOME/.cache/opencode/
 # Clear Pi jiti cache to force fresh download on next run
 rm -rf /tmp/jiti 2>/dev/null || true
 
-plannotator_shared_agent_skills_available() {
-    local agents_skills_dir="$HOME/.agents/skills"
-
-    [ -f "$agents_skills_dir/plannotator-compound/SKILL.md" ] &&
-        [ -f "$agents_skills_dir/plannotator-setup-goal/SKILL.md" ] &&
-        [ -f "$agents_skills_dir/plannotator-visual-explainer/SKILL.md" ]
-}
-
-configure_pi_plannotator_package_filter() {
-    local pi_agent_dir="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
-    local pi_settings="$pi_agent_dir/settings.json"
-
-    if [ ! -f "$pi_settings" ]; then
-        return 0
-    fi
-
-    if ! command -v node &>/dev/null; then
-        echo "Skipping Pi settings update (node not found)"
-        return 0
-    fi
-
-    node - "$pi_settings" <<'NODE' || echo "Skipping Pi settings update (could not rewrite settings.json)"
-const fs = require("fs");
-
-const settingsPath = process.argv[2];
-const packagePattern = /^(?:npm:)?@plannotator\/pi-extension(?:@.+)?$/;
-
-let settings;
-try {
-  settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-} catch {
-  console.log("Skipping Pi settings update (could not parse settings.json)");
-  process.exit(0);
-}
-
-if (!settings || !Array.isArray(settings.packages)) {
-  process.exit(0);
-}
-
-let changed = false;
-settings.packages = settings.packages.map((entry) => {
-  if (typeof entry === "string" && packagePattern.test(entry)) {
-    changed = true;
-    return { source: entry, skills: [] };
-  }
-
-  if (
-    entry &&
-    typeof entry === "object" &&
-    typeof entry.source === "string" &&
-    packagePattern.test(entry.source)
-  ) {
-    if (!Array.isArray(entry.skills) || entry.skills.length !== 0) {
-      changed = true;
-      return { ...entry, skills: [] };
-    }
-  }
-
-  return entry;
-});
-
-if (!changed) {
-  process.exit(0);
-}
-
-const tmpPath = `${settingsPath}.${process.pid}.tmp`;
-fs.writeFileSync(tmpPath, `${JSON.stringify(settings, null, 2)}\n`);
-fs.renameSync(tmpPath, settingsPath);
-console.log("Configured Pi to use global Plannotator skills and skip bundled package skills.");
-NODE
-}
-
 update_pi_extension_if_present() {
     if ! command -v pi &>/dev/null; then
         return 0
@@ -625,204 +740,469 @@ update_pi_extension_if_present() {
 
     echo "Updating Pi extension..."
     if pi install npm:@plannotator/pi-extension; then
-        if plannotator_shared_agent_skills_available; then
-            configure_pi_plannotator_package_filter
-        else
-            echo "Leaving Pi bundled skills enabled (global Plannotator agent skills not found)."
-        fi
         echo "Pi extension updated."
     else
-        echo "Skipping Pi settings update (pi install failed)"
+        echo "Skipping Pi extension update (pi install failed)"
     fi
 }
 
-# Install /review slash command
-CLAUDE_COMMANDS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/commands"
-mkdir -p "$CLAUDE_COMMANDS_DIR"
+# --- Aggressive cleanup of skills/commands we no longer manage ---
+# Echo each removal; ignore missing entries.
 
-cat > "$CLAUDE_COMMANDS_DIR/plannotator-review.md" << 'COMMAND_EOF'
----
-description: Open interactive code review for current changes or a PR URL
-allowed-tools: Bash(plannotator:*)
----
+# NOTE: legacy Claude command cleanup happens AFTER the skill install below —
+# a command file is only removed once its replacement skill is on disk, so a
+# failed or skipped skill install never leaves users with neither.
 
-## Code Review Feedback
+# NOTE: Codex stale-skill cleanup happens AFTER the skill install below —
+# the core skills are only removed from the Codex home once their replacement
+# exists in ~/.agents/skills, so an old pinned tag never strips Codex users
+# of working skills without a successor.
+STALE_CODEX_SKILLS_DIR="$CODEX_DIR/skills"
 
-!`plannotator review $ARGUMENTS`
+# Old installers (pre core/extra split) ran `cp -r apps/skills/*` against a
+# new-layout tag and could leave junk `core`/`extra` directory copies in the
+# Claude skills scope. Never valid skill names — always safe to remove.
+for junk in core extra; do
+    if [ -d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/$junk" ]; then
+        rm -rf "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/$junk"
+        echo "Removed stale layout directory ~/.claude/skills/$junk (left by an older installer)"
+    fi
+done
 
-## Your task
-
-If the review above contains feedback or annotations, address them. If no changes were requested, acknowledge and continue.
-COMMAND_EOF
-
-echo "Installed /plannotator-review command to ${CLAUDE_COMMANDS_DIR}/plannotator-review.md"
-
-# Install /annotate slash command for Claude Code
-cat > "$CLAUDE_COMMANDS_DIR/plannotator-annotate.md" << 'COMMAND_EOF'
----
-description: Open interactive annotation UI for a markdown file
-allowed-tools: Bash(plannotator:*)
----
-
-## Markdown Annotations
-
-!`plannotator annotate $ARGUMENTS`
-
-## Your task
-
-Address the annotation feedback above. The user has reviewed the markdown file and provided specific annotations and comments.
-COMMAND_EOF
-
-echo "Installed /plannotator-annotate command to ${CLAUDE_COMMANDS_DIR}/plannotator-annotate.md"
-
-# Install /plannotator-last slash command for Claude Code
-cat > "$CLAUDE_COMMANDS_DIR/plannotator-last.md" << 'COMMAND_EOF'
----
-description: Annotate the last rendered assistant message
-allowed-tools: Bash(plannotator:*)
----
-
-## Message Annotations
-
-!`plannotator annotate-last`
-
-## Your task
-
-Address the annotation feedback above. The user has reviewed your last message and provided specific annotations and comments.
-COMMAND_EOF
-
-echo "Installed /plannotator-last command to ${CLAUDE_COMMANDS_DIR}/plannotator-last.md"
-
-# Install OpenCode slash command
-OPENCODE_COMMANDS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/command"
-mkdir -p "$OPENCODE_COMMANDS_DIR"
-
-cat > "$OPENCODE_COMMANDS_DIR/plannotator-review.md" << 'COMMAND_EOF'
----
-description: Open interactive code review for current changes
----
-
-The Plannotator Code Review has been triggered. Opening the review UI...
-Acknowledge "Opening code review..." and wait for the user's feedback.
-COMMAND_EOF
-
-echo "Installed /plannotator-review command to ${OPENCODE_COMMANDS_DIR}/plannotator-review.md"
-
-# Install /annotate slash command for OpenCode
-cat > "$OPENCODE_COMMANDS_DIR/plannotator-annotate.md" << 'COMMAND_EOF'
----
-description: Open interactive annotation UI for a markdown file
----
-
-The Plannotator Annotate has been triggered. Opening the annotation UI...
-Acknowledge "Opening annotation UI..." and wait for the user's feedback.
-COMMAND_EOF
-
-echo "Installed /plannotator-annotate command to ${OPENCODE_COMMANDS_DIR}/plannotator-annotate.md"
-
-# Install /plannotator-last slash command for OpenCode
-cat > "$OPENCODE_COMMANDS_DIR/plannotator-last.md" << 'COMMAND_EOF'
----
-description: Annotate the last assistant message
----
-COMMAND_EOF
-
-echo "Installed /plannotator-last command to ${OPENCODE_COMMANDS_DIR}/plannotator-last.md"
-
-# Remove legacy Codex-oriented skills from the older shared agent scope.
-LEGACY_AGENTS_SKILLS_DIR="$HOME/.agents/skills"
-legacy_skills_removed=0
-if [ -d "$LEGACY_AGENTS_SKILLS_DIR" ]; then
-    for skill in plannotator-review plannotator-annotate plannotator-last; do
-        if [ -d "$LEGACY_AGENTS_SKILLS_DIR/$skill" ]; then
-            rm -rf "$LEGACY_AGENTS_SKILLS_DIR/$skill"
-            legacy_skills_removed=1
-        fi
+# Extras are no longer installed by this script anywhere except Kiro. Remove
+# previously default-installed copies ONCE per machine — recorded in the
+# migrations ledger under the Plannotator data dir — because copies the user
+# reinstalls via `npx skills add` are byte-identical to ours and can only be
+# told apart by remembering that this cleanup already ran.
+CLAUDE_SKILLS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills"
+AGENTS_SKILLS_DIR="$HOME/.agents/skills"
+MIGRATIONS_DIR="$_config_dir/migrations"
+EXTRAS_MIGRATION="$MIGRATIONS_DIR/2026-06-extras-default-install-removed"
+if [ ! -f "$EXTRAS_MIGRATION" ]; then
+    for scope in "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR"; do
+        for skill in plannotator-compound plannotator-setup-goal plannotator-visual-explainer; do
+            if [ -d "$scope/$skill" ]; then
+                rm -rf "$scope/$skill"
+                echo "Removed extra Plannotator skill from ${scope}/$skill (reinstall via npx skills add)"
+            fi
+        done
     done
-fi
-if [ "$legacy_skills_removed" -eq 1 ]; then
-    echo "Removed legacy Plannotator skills from ${LEGACY_AGENTS_SKILLS_DIR}"
-fi
-
-# Remove Plannotator skills that belong in the shared agent scope from Codex.
-STALE_CODEX_SKILLS_DIR="$HOME/.codex/skills"
-stale_codex_skills_removed=0
-if [ -d "$STALE_CODEX_SKILLS_DIR" ]; then
-    for skill in plannotator-compound plannotator-setup-goal; do
-        if [ -d "$STALE_CODEX_SKILLS_DIR/$skill" ]; then
-            rm -rf "$STALE_CODEX_SKILLS_DIR/$skill"
-            stale_codex_skills_removed=1
-        fi
-    done
-fi
-if [ "$stale_codex_skills_removed" -eq 1 ]; then
-    echo "Removed shared-agent Plannotator skills from ${STALE_CODEX_SKILLS_DIR}"
+    mkdir -p "$MIGRATIONS_DIR"
+    : > "$EXTRAS_MIGRATION"
 fi
 
-# Install skills (requires git)
-if command -v git &>/dev/null; then
-    CLAUDE_SKILLS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills"
-    CODEX_SKILLS_DIR="$HOME/.codex/skills"
-    AGENTS_SKILLS_DIR="$HOME/.agents/skills"
-    skills_tmp=$(mktemp -d)
+# --- Guided install (interactive terminals only) ---
+# Two questions: install the extra skills? make any skills callable by the
+# model? Answers persist to $PREFS_FILE and are reused silently on re-runs.
+# --reconfigure re-opens the wizard; --non-interactive forces silence; piped
+# CI runs without a terminal never prompt. CLI flags win over everything.
+PREFS_FILE="$_config_dir/install-prefs"
+CORE_SKILL_NAMES="plannotator-review plannotator-annotate plannotator-last"
+EXTRA_SKILL_NAMES="plannotator-compound plannotator-setup-goal plannotator-visual-explainer"
 
-    copy_skill_if_present() {
-        local source_dir="$1"
-        local target_dir="$2"
+saved_extras=""
+saved_invocable=""
+if [ -f "$PREFS_FILE" ]; then
+    saved_extras=$(sed -n 's/^extras=//p' "$PREFS_FILE" | head -1)
+    saved_invocable=$(sed -n 's/^model_invocable=//p' "$PREFS_FILE" | head -1)
+fi
 
-        if [ -d "$source_dir" ]; then
-            cp -r "$source_dir" "$target_dir/"
-        fi
-    }
+# Extras already on disk (pre-existing or previously npx-installed)? Then the
+# extras question is moot — they still count toward the checkbox list, and we
+# never launch the npx flow over them.
+extras_present=0
+for skill in $EXTRA_SKILL_NAMES; do
+    if [ -d "$CLAUDE_SKILLS_DIR/$skill" ] || [ -d "$AGENTS_SKILLS_DIR/$skill" ]; then
+        extras_present=1
+        break
+    fi
+done
 
-    # Wrap the cd-bearing block in a subshell so any `cd` is scoped to
-    # the subshell and can't leave the parent script with a dangling CWD.
-    # Previous version chained `cd` inside an `&&` condition, and if
-    # sparse-checkout failed the else branch ran without restoring the
-    # directory — then `rm -rf "$skills_tmp"` below executed while the
-    # shell's CWD was still inside the directory being deleted. No
-    # production failure (subsequent code uses absolute paths) but
-    # structurally incorrect. install.ps1 and install.cmd use
-    # Push-Location/pushd for the same logic; a subshell is bash's
-    # equivalent — the parent shell's CWD is inherited in, and any
-    # cd inside the subshell disappears when the subshell exits.
-    if (
-        set -e
-        cd "$skills_tmp"
-        git clone --depth 1 --filter=blob:none --sparse \
-            "https://github.com/${REPO}.git" --branch "$latest_tag" repo 2>/dev/null
-        cd repo
-        git sparse-checkout set apps/skills 2>/dev/null
-        [ -d "apps/skills" ]
-        [ "$(ls -A apps/skills 2>/dev/null)" ]
-        mkdir -p "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR"
-        cp -r apps/skills/* "$CLAUDE_SKILLS_DIR/"
-        copy_skill_if_present apps/skills/plannotator-compound "$AGENTS_SKILLS_DIR"
-        copy_skill_if_present apps/skills/plannotator-setup-goal "$AGENTS_SKILLS_DIR"
-        if [ "$codex_available" -eq 1 ]; then
-            mkdir -p "$CODEX_SKILLS_DIR"
-            copy_skill_if_present apps/skills/plannotator-review "$CODEX_SKILLS_DIR"
-            copy_skill_if_present apps/skills/plannotator-annotate "$CODEX_SKILLS_DIR"
-            copy_skill_if_present apps/skills/plannotator-last "$CODEX_SKILLS_DIR"
-        fi
-    ); then
-        if [ "$codex_available" -eq 1 ]; then
-            echo "Installed skills to ${CLAUDE_SKILLS_DIR}/, Codex command skills to ${CODEX_SKILLS_DIR}/, and shared agent skills to ${AGENTS_SKILLS_DIR}/"
-        else
-            echo "Installed skills to ${CLAUDE_SKILLS_DIR}/ and shared agent skills to ${AGENTS_SKILLS_DIR}/"
-        fi
+# A wizard needs a real human at the keyboard. Piped installs (curl | bash)
+# still have a terminal at /dev/tty even though stdin is the pipe; CI and
+# scripts do not. Some automated contexts (docker run -t, devcontainer and
+# provisioner shells) DO expose an openable /dev/tty with nobody behind it —
+# opening /dev/tty succeeds, yet a read would block forever. The per-prompt
+# timeout below (see PROMPT_TIMEOUT / ask_yes_no) handles that: a mis-detected
+# terminal falls through to the safe non-interactive defaults (extras=no,
+# model-invocable=none) instead of wedging. We deliberately do NOT
+# gate on $CI here — an exported CI var must not silently suppress an explicit
+# --reconfigure or --extras in an otherwise interactive shell.
+can_prompt=0
+if [ "$NON_INTERACTIVE" -eq 0 ] && { : < /dev/tty; } 2>/dev/null; then
+    can_prompt=1
+fi
+
+# Bound every interactive read so an unattended-but-open /dev/tty auto-takes
+# the default rather than hanging. Set PLANNOTATOR_PROMPT_TIMEOUT=0 to wait
+# indefinitely (restores the old unbounded behavior); non-numeric falls to 30.
+PROMPT_TIMEOUT="${PLANNOTATOR_PROMPT_TIMEOUT:-30}"
+case "$PROMPT_TIMEOUT" in
+    ''|*[!0-9]*) PROMPT_TIMEOUT=30 ;;
+esac
+
+run_wizard=0
+if [ "$can_prompt" -eq 1 ]; then
+    if [ "$RECONFIGURE" -eq 1 ] || [ ! -f "$PREFS_FILE" ]; then
+        run_wizard=1
+    fi
+fi
+
+# Ask a y/n question on the terminal. $1 prompt, $2 default (yes/no).
+ask_yes_no() {
+    local prompt="$1" default="$2" answer suffix rc
+    suffix="[y/N]"
+    [ "$default" = "yes" ] && suffix="[Y/n]"
+    printf '%s %s ' "$prompt" "$suffix" > /dev/tty
+    # Bounded read so an unattended-but-open /dev/tty (e.g. docker run -t with
+    # no human) can't hang the install. Distinguish a human pressing Enter
+    # (read succeeds with an empty answer -> use the prompt's $default) from a
+    # timeout/EOF with nobody there (read fails -> use the SAFE "no", never the
+    # default). Otherwise a prompt whose default is "yes" could
+    # silently install software on an unattended terminal.
+    # Keep the read in a tested context (`|| rc=$?`) so the read itself never
+    # trips `set -e` (active at the top of this script), without relying on the
+    # subtle rule that -e is suppressed inside a function called in a tested
+    # context. ask_yes_no still returns non-zero on timeout/EOF to signal "no
+    # human", so every caller consumes it with `|| wizard_timed_out=1`.
+    rc=0
+    if [ "$PROMPT_TIMEOUT" -gt 0 ]; then
+        IFS= read -r -t "$PROMPT_TIMEOUT" answer < /dev/tty || rc=$?
     else
-        echo "Skipping skills install (git sparse-checkout failed or apps/skills empty)"
+        IFS= read -r answer < /dev/tty || rc=$?
+    fi
+    if [ "$rc" -ne 0 ]; then
+        printf '\n' > /dev/tty
+        echo "no"
+        return 1
+    fi
+    case "$answer" in
+        y|Y|yes|YES|Yes) echo "yes" ;;
+        n|N|no|NO|No)    echo "no" ;;
+        *)               echo "$default" ;;
+    esac
+}
+
+# Space-toggle checkbox over the skill names in $1 (space-separated), with
+# the names in $2 (comma-separated) preselected. Echoes the chosen names as
+# a comma list, or "none". Up/down (or j/k) moves, space toggles, enter
+# confirms. All I/O goes to /dev/tty so piped stdout is unaffected.
+select_skills_checkbox() {
+    local names=($1) pre=",$2," idx=0 count key seq i mark cursor
+    count=${#names[@]}
+    local sel=()
+    for ((i = 0; i < count; i++)); do
+        case "$pre" in
+            *",${names[$i]},"*) sel[i]=1 ;;
+            *)                  sel[i]=0 ;;
+        esac
+    done
+    printf 'Space toggles, enter confirms, up/down or j/k moves:\n' > /dev/tty
+    while true; do
+        for ((i = 0; i < count; i++)); do
+            mark=" "; [ "${sel[$i]}" -eq 1 ] && mark="x"
+            cursor="  "; [ "$i" -eq "$idx" ] && cursor="> "
+            printf '%s[%s] %s\033[K\n' "$cursor" "$mark" "${names[$i]}" > /dev/tty
+        done
+        IFS= read -rsn1 key < /dev/tty || key=""
+        if [ -z "$key" ]; then
+            break # enter
+        fi
+        case "$key" in
+            " ") sel[idx]=$((1 - sel[idx])) ;;
+            j)   [ "$idx" -lt $((count - 1)) ] && idx=$((idx + 1)) ;;
+            k)   [ "$idx" -gt 0 ] && idx=$((idx - 1)) ;;
+            $'\x1b')
+                seq=""
+                IFS= read -rsn2 -t 1 seq < /dev/tty || seq=""
+                case "$seq" in
+                    '[A') [ "$idx" -gt 0 ] && idx=$((idx - 1)) ;;
+                    '[B') [ "$idx" -lt $((count - 1)) ] && idx=$((idx + 1)) ;;
+                esac
+                ;;
+        esac
+        printf '\033[%dA' "$count" > /dev/tty
+    done
+    local out=""
+    for ((i = 0; i < count; i++)); do
+        if [ "${sel[$i]}" -eq 1 ]; then
+            [ -n "$out" ] && out="$out,"
+            out="$out${names[$i]}"
+        fi
+    done
+    echo "${out:-none}"
+}
+
+extras_choice=""
+invocable_choice=""
+# Set if any wizard prompt times out / hits EOF (no human answered). A run whose
+# answers are synthetic timeout fallbacks must not be persisted as install-prefs.
+wizard_timed_out=0
+
+if [ "$run_wizard" -eq 1 ]; then
+    {
+        echo ""
+        echo "=========================================="
+        echo "  PLANNOTATOR GUIDED INSTALL"
+        echo "=========================================="
+        echo ""
+    } > /dev/tty
+    if [ "$extras_present" -eq 1 ]; then
+        echo "Extra skills already installed — keeping them." > /dev/tty
+        extras_choice="yes"
+    elif [ -n "$EXTRAS_FLAG" ]; then
+        # Flag already answered this question — don't ask and then ignore.
+        extras_choice="$EXTRAS_FLAG"
+    else
+        extras_choice=$(ask_yes_no "Install the extra skills (compound planning, setup-goal, visual explainer)?" "${saved_extras:-no}") || wizard_timed_out=1
+    fi
+    invocable_list="$CORE_SKILL_NAMES"
+    if [ "$extras_choice" = "yes" ]; then
+        invocable_list="$CORE_SKILL_NAMES $EXTRA_SKILL_NAMES"
+    fi
+    if [ -n "$MODEL_INVOCABLE_FLAG" ]; then
+        # Flag already answered this question — don't ask and then ignore.
+        invocable_choice="$MODEL_INVOCABLE_FLAG"
+    else
+        want_invocable=$(ask_yes_no "Make any skills callable by the model (instead of user-invoked only)?" "no") || wizard_timed_out=1
+        if [ "$want_invocable" = "yes" ]; then
+            invocable_choice=$(select_skills_checkbox "$invocable_list" "$saved_invocable")
+        else
+            invocable_choice="none"
+        fi
+    fi
+fi
+
+# Flags override the wizard and saved answers; otherwise saved, then defaults.
+[ -n "$EXTRAS_FLAG" ] && extras_choice="$EXTRAS_FLAG"
+[ -n "$MODEL_INVOCABLE_FLAG" ] && invocable_choice="$MODEL_INVOCABLE_FLAG"
+[ -z "$extras_choice" ] && extras_choice="${saved_extras:-no}"
+[ -z "$invocable_choice" ] && invocable_choice="${saved_invocable:-none}"
+
+# Persist only when the wizard ran with real answers, or a flag set something.
+# Silent re-runs must not clobber saved answers with defaults, and a wizard that
+# timed out to synthetic fallbacks (unattended /dev/tty) must not become sticky
+# prefs that suppress the wizard on a later genuine interactive install.
+if [ "$wizard_timed_out" -eq 0 ] && { [ "$run_wizard" -eq 1 ] || [ -n "$EXTRAS_FLAG" ] || [ -n "$MODEL_INVOCABLE_FLAG" ]; }; then
+    mkdir -p "$_config_dir"
+    {
+        echo "extras=$extras_choice"
+        echo "model_invocable=$invocable_choice"
+    } > "$PREFS_FILE"
+fi
+
+# Extras install is delegated to the skills CLI (its UI picks the agents).
+# Interactive only — the CLI needs the keyboard, so silent runs and CI get
+# the printed command instead. Never runs when the extras already exist.
+if [ "$extras_choice" = "yes" ] && [ "$extras_present" -eq 0 ]; then
+    if [ "$can_prompt" -eq 1 ] && command -v npx >/dev/null 2>&1; then
+        echo "Launching the skills CLI for the extras (pick your agents in its UI)..."
+        npx skills add backnotprop/plannotator/apps/skills/extra < /dev/tty || \
+            echo "skills CLI did not complete — install later with: npx skills add backnotprop/plannotator/apps/skills/extra"
+    else
+        echo "Install the extras with: npx skills add backnotprop/plannotator/apps/skills/extra"
+    fi
+fi
+
+# Install skills and slash commands from a sparse checkout (requires git).
+# Hard requirement: without git we cannot install the /plannotator-* skills,
+# so fail loudly instead of leaving a partial install. Hook/config writing
+# above has already run by this point; the Pi update and Gemini config below
+# are skipped on failure and complete when the user re-runs the installer.
+if ! command -v git &>/dev/null; then
+    echo "Error: git is required to install Plannotator's skills and slash commands." >&2
+    echo "Install git, then run this installer again." >&2
+    exit 1
+fi
+
+KIRO_SKILLS_DIR="$HOME/.kiro/skills"
+OPENCODE_COMMANDS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/commands"
+GEMINI_COMMANDS_DIR="$HOME/.gemini/commands"
+skills_tmp=$(mktemp -d)
+
+copy_skill_if_present() {
+    local source_dir="$1"
+    local target_dir="$2"
+
+    if [ -d "$source_dir" ]; then
+        # Remove any existing copy first so re-runs replace rather than
+        # nest (cp -r dir dest/dir would otherwise create dest/dir/dir).
+        rm -rf "$target_dir/$(basename "$source_dir")"
+        cp -r "$source_dir" "$target_dir/"
+    fi
+}
+
+# Copy every command file in a directory if the source dir exists.
+# Used for OpenCode (.md stubs) and Gemini (.toml) commands, both of
+# which are checked out from the repo rather than generated by heredocs.
+copy_commands_if_present() {
+    local source_dir="$1"
+    local target_dir="$2"
+
+    if [ -d "$source_dir" ] && [ -n "$(ls -A "$source_dir" 2>/dev/null)" ]; then
+        mkdir -p "$target_dir"
+        cp "$source_dir"/* "$target_dir/"
+    fi
+}
+
+# Wrap the cd-bearing block in a subshell so any `cd` is scoped to
+# the subshell and can't leave the parent script with a dangling CWD.
+# Previous version chained `cd` inside an `&&` condition, and if
+# sparse-checkout failed the else branch ran without restoring the
+# directory — then `rm -rf "$skills_tmp"` below executed while the
+# shell's CWD was still inside the directory being deleted. No
+# production failure (subsequent code uses absolute paths) but
+# structurally incorrect. install.ps1 and install.cmd use
+# Push-Location/pushd for the same logic; a subshell is bash's
+# equivalent — the parent shell's CWD is inherited in, and any
+# cd inside the subshell disappears when the subshell exits.
+checkout_failed=0
+(
+    set -e
+    cd "$skills_tmp"
+    git clone --depth 1 --filter=blob:none --sparse \
+        "https://github.com/${REPO}.git" --branch "$latest_tag" repo 2>/dev/null
+    cd repo
+    git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands 2>/dev/null
+
+    # Core skills -> Claude Code (also serve as /plannotator-* slash commands)
+    # and the official OpenAI shared-agent path. SOFT guard: a tag pinned
+    # via --version may predate the core/extra layout — skip core skills
+    # but keep installing the command files below (matches install.ps1 and
+    # install.cmd, which guard each block independently).
+    # Claude Code and Codex consume different skill bodies. Claude Code reads
+    # the apps/skills/claude/* copies, which use dynamic-context injection
+    # (`!`plannotator … $ARGUMENTS``) + allowed-tools so /plannotator-* run the
+    # binary directly with no permission prompt — matching the old slash
+    # commands. Codex (the OpenAI shared-agent path) reads apps/skills/core/*,
+    # whose prose bodies the model follows via its own shell; the `!`…``
+    # injection is a Claude-Code-only extension, so the two are sourced
+    # separately rather than sharing one body.
+    if [ -d "apps/skills/claude" ] && [ -n "$(ls -A apps/skills/claude 2>/dev/null)" ]; then
+        mkdir -p "$CLAUDE_SKILLS_DIR"
+        copy_skill_if_present apps/skills/claude/plannotator-review "$CLAUDE_SKILLS_DIR"
+        copy_skill_if_present apps/skills/claude/plannotator-annotate "$CLAUDE_SKILLS_DIR"
+        copy_skill_if_present apps/skills/claude/plannotator-last "$CLAUDE_SKILLS_DIR"
+        echo "Installed Claude Code skills to ${CLAUDE_SKILLS_DIR}/"
+    else
+        echo "Tag ${latest_tag} predates the per-agent skill layout — skipping Claude Code skill install"
+    fi
+    if [ -d "apps/skills/core" ] && [ -n "$(ls -A apps/skills/core 2>/dev/null)" ]; then
+        mkdir -p "$AGENTS_SKILLS_DIR"
+        copy_skill_if_present apps/skills/core/plannotator-review "$AGENTS_SKILLS_DIR"
+        copy_skill_if_present apps/skills/core/plannotator-annotate "$AGENTS_SKILLS_DIR"
+        copy_skill_if_present apps/skills/core/plannotator-last "$AGENTS_SKILLS_DIR"
+        echo "Installed shared agent skills to ${AGENTS_SKILLS_DIR}/"
+    else
+        echo "Tag ${latest_tag} predates the core/extra skill layout — skipping shared agent skill install"
     fi
 
-    rm -rf "$skills_tmp"
-else
-    echo "Skipping skills install (git not found)"
+    # OpenCode slash command stubs (the plugin intercepts execution) —
+    # always installed when the checkout provides them. Guard the echo on
+    # the same condition as the copy so old pinned tags don't report a
+    # success that never happened (ps1/cmd already gate this way).
+    if [ -d "apps/opencode-plugin/commands" ] && [ -n "$(ls -A apps/opencode-plugin/commands 2>/dev/null)" ]; then
+        copy_commands_if_present apps/opencode-plugin/commands "$OPENCODE_COMMANDS_DIR"
+        echo "Installed OpenCode commands to ${OPENCODE_COMMANDS_DIR}/"
+    fi
+
+    # Gemini native TOML commands — only when Gemini is present.
+    if [ -d "$HOME/.gemini" ] && [ -d "apps/gemini/commands" ] && [ -n "$(ls -A apps/gemini/commands 2>/dev/null)" ]; then
+        copy_commands_if_present apps/gemini/commands "$GEMINI_COMMANDS_DIR"
+        echo "Installed Gemini commands to ${GEMINI_COMMANDS_DIR}/"
+    fi
+
+    if [ "$kiro_available" -eq 1 ] && [ -d "apps/kiro-cli/skills" ] && [ -n "$(ls -A apps/kiro-cli/skills 2>/dev/null)" ]; then
+        mkdir -p "$KIRO_SKILLS_DIR"
+        # Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
+        copy_skill_if_present apps/kiro-cli/skills/plannotator-review "$KIRO_SKILLS_DIR"
+        copy_skill_if_present apps/kiro-cli/skills/plannotator-annotate "$KIRO_SKILLS_DIR"
+        # Extras come from apps/skills/extra (not duplicated into apps/kiro-cli/skills).
+        copy_skill_if_present apps/skills/extra/plannotator-setup-goal "$KIRO_SKILLS_DIR"
+        copy_skill_if_present apps/skills/extra/plannotator-visual-explainer "$KIRO_SKILLS_DIR"
+        # Plannotator custom agent — don't clobber a user's existing one.
+        if [ ! -f "$HOME/.kiro/agents/plannotator.json" ] && [ -f "apps/kiro-cli/agents/plannotator.json" ]; then
+            mkdir -p "$HOME/.kiro/agents"
+            cp apps/kiro-cli/agents/plannotator.json "$HOME/.kiro/agents/plannotator.json"
+        fi
+        echo "Installed Kiro skills to ${KIRO_SKILLS_DIR}/ and agent to ~/.kiro/agents/plannotator.json"
+    fi
+) || checkout_failed=1
+
+rm -rf "$skills_tmp"
+
+if [ "${checkout_failed:-0}" -eq 1 ]; then
+    echo "Error: unable to fetch ${REPO} at ${latest_tag} (network or git error)." >&2
+    echo "Something went wrong — run the installer again." >&2
+    exit 1
 fi
 
-# Update Pi extension if pi is installed. When global shared skills are
-# available, keep the extension commands but disable its bundled skill copy to
-# avoid duplicate Pi skill warnings.
+# Claude Code commands are deprecated in favor of skills. Remove a legacy
+# command file only once its replacement skill is actually on disk — running
+# AFTER the install above guarantees a failed or skipped skill install never
+# leaves users with neither the command nor the skill.
+CLAUDE_COMMANDS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/commands"
+for cmd in plannotator-review plannotator-annotate plannotator-last; do
+    if [ -d "$CLAUDE_SKILLS_DIR/$cmd" ] && [ -f "$CLAUDE_COMMANDS_DIR/$cmd.md" ]; then
+        rm -f "$CLAUDE_COMMANDS_DIR/$cmd.md"
+        echo "Removed legacy Claude command ${CLAUDE_COMMANDS_DIR}/$cmd.md (replaced by the $cmd skill)"
+    fi
+done
+
+# plannotator-archive no longer ships as a skill. Remove any stale installed
+# copy from every skill scope so upgraders don't keep a dead skill around.
+for scope in "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR" "$KIRO_SKILLS_DIR"; do
+    if [ -d "$scope/plannotator-archive" ]; then
+        rm -rf "$scope/plannotator-archive"
+        echo "Removed stale plannotator-archive skill from ${scope}/plannotator-archive"
+    fi
+done
+# The /plannotator-archive OpenCode command was removed too — sweep the stub
+# (only npm-plugin-postinstall users ever had it written here).
+if [ -f "$OPENCODE_COMMANDS_DIR/plannotator-archive.md" ]; then
+    rm -f "$OPENCODE_COMMANDS_DIR/plannotator-archive.md"
+    echo "Removed stale plannotator-archive command from ${OPENCODE_COMMANDS_DIR}/"
+fi
+
+# Codex no longer hosts core skills (they now live in ~/.agents/skills).
+# Core skills are removed only once their replacement exists; the stale
+# shared-agent extras were never Codex's and are removed unconditionally.
+for skill in plannotator-review plannotator-annotate plannotator-last plannotator-compound plannotator-setup-goal; do
+    if [ -d "$STALE_CODEX_SKILLS_DIR/$skill" ]; then
+        case "$skill" in
+            plannotator-review|plannotator-annotate|plannotator-last)
+                [ -d "$AGENTS_SKILLS_DIR/$skill" ] || continue
+                ;;
+        esac
+        rm -rf "$STALE_CODEX_SKILLS_DIR/$skill"
+        echo "Removed Plannotator skill from ${STALE_CODEX_SKILLS_DIR}/$skill"
+    fi
+done
+
+# Apply the saved model-invocation choices. Installed skill copies always
+# arrive locked (disable-model-invocation: true in SKILL.md); for each chosen
+# skill we unlock the INSTALLED copy by removing that line, and flip the Codex
+# sidecar's allow_implicit_invocation to match. Re-applied on every run
+# because installs replace the skill folders wholesale. Source files in the
+# repo never change.
+if [ -n "$invocable_choice" ] && [ "$invocable_choice" != "none" ]; then
+    for skill in $(echo "$invocable_choice" | tr ',' ' '); do
+        for scope in "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR"; do
+            skill_md="$scope/$skill/SKILL.md"
+            if [ -f "$skill_md" ] && grep -q '^disable-model-invocation: true$' "$skill_md"; then
+                grep -v '^disable-model-invocation: true$' "$skill_md" > "$skill_md.tmp" && mv "$skill_md.tmp" "$skill_md"
+                echo "Enabled model invocation: ${scope}/${skill}"
+            fi
+            sidecar="$scope/$skill/agents/openai.yaml"
+            if [ -f "$sidecar" ] && grep -q 'allow_implicit_invocation: false' "$sidecar"; then
+                sed 's/allow_implicit_invocation: false/allow_implicit_invocation: true/' "$sidecar" > "$sidecar.tmp" && mv "$sidecar.tmp" "$sidecar"
+            fi
+        done
+    done
+fi
+
+# Update Pi extension if pi is installed. The pi-extension no longer bundles
+# skills; Pi keeps its extension commands and the plannotator_submit_plan tool.
 update_pi_extension_if_present
 
 # --- Gemini CLI support (only if Gemini is installed) ---
@@ -894,37 +1274,8 @@ GEMINI_SETTINGS_EOF
         echo "Created Gemini settings at ${GEMINI_SETTINGS}"
     fi
 
-    # Install slash commands
-    GEMINI_COMMANDS_DIR="$HOME/.gemini/commands"
-    mkdir -p "$GEMINI_COMMANDS_DIR"
-
-    cat > "$GEMINI_COMMANDS_DIR/plannotator-review.toml" << 'GEMINI_CMD_EOF'
-description = "Open interactive code review for current changes or a PR URL"
-prompt = """
-## Code Review Feedback
-
-!{plannotator review {{args}}}
-
-## Your task
-
-If the review above contains feedback or annotations, address them. If no changes were requested, acknowledge and continue.
-"""
-GEMINI_CMD_EOF
-
-    cat > "$GEMINI_COMMANDS_DIR/plannotator-annotate.toml" << 'GEMINI_CMD_EOF'
-description = "Open interactive annotation UI for a markdown file or folder"
-prompt = """
-## Markdown Annotations
-
-!{plannotator annotate {{args}}}
-
-## Your task
-
-Address the annotation feedback above. The user has reviewed the markdown file and provided specific annotations and comments.
-"""
-GEMINI_CMD_EOF
-
-    echo "Installed Gemini slash commands to ${GEMINI_COMMANDS_DIR}/"
+    # Gemini slash commands (.toml) are installed from the sparse checkout in
+    # the skills/commands install block above (apps/gemini/commands).
 fi
 
 echo ""
@@ -967,13 +1318,25 @@ if [ "$codex_available" -eq 1 ]; then
     echo "Restart Codex Desktop or CLI after installing."
     echo "Plan review is configured through the Codex Stop hook."
     echo ""
-    echo "Codex skills are also installed:"
+    echo "Core skills are installed to ~/.agents/skills/:"
     echo "  \$plannotator-review"
     echo "  \$plannotator-annotate <file|url|folder>"
     echo "  \$plannotator-last"
 else
     echo "Codex was not detected. After installing Codex, rerun this installer to add"
-    echo "the Stop hook and Codex skills."
+    echo "the Stop hook."
+fi
+echo ""
+echo "=========================================="
+echo "  KIRO CLI USERS"
+echo "=========================================="
+echo ""
+if [ "$kiro_available" -eq 1 ]; then
+    echo "Kiro skills are installed to ~/.kiro/skills/"
+    echo "The Plannotator agent is installed to ~/.kiro/agents/plannotator.json"
+    echo "Launch it: kiro-cli chat --agent plannotator"
+else
+    echo "Kiro was not detected. After installing Kiro, rerun this installer to add Kiro skills."
 fi
 echo ""
 echo "=========================================="
@@ -984,7 +1347,16 @@ echo "Install the Claude Code plugin:"
 echo "  /plugin marketplace add backnotprop/plannotator"
 echo "  /plugin install plannotator@plannotator"
 echo ""
+echo "Upgrading from an older version? Also run /plugin marketplace update"
+echo "so the plugin drops its old plannotator:* command entries."
+echo ""
 echo "The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready to use after you restart Claude Code!"
+
+if [ "$extras_choice" != "yes" ]; then
+    echo ""
+    echo "Optional skills (compound planning, setup-goal, visual explainer):"
+    echo "  npx skills add backnotprop/plannotator/apps/skills/extra"
+fi
 
 # Warn if plannotator is configured in both settings.json hooks AND the plugin (causes double execution)
 # Only warn when the plugin is installed — manual-only users won't have overlap

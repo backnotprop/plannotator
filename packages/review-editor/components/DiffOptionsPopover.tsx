@@ -95,6 +95,7 @@ export const DiffOptionsPopover: React.FC = () => {
   const diffShowLineNumbers = useConfigValue('diffShowLineNumbers');
   const diffShowBackground = useConfigValue('diffShowBackground');
   const diffHideWhitespace = useConfigValue('diffHideWhitespace');
+  const diffExpandUnchanged = useConfigValue('diffExpandUnchanged');
   const diffTabSize = useConfigValue('diffTabSize');
   const diffLineBgIntensity = useConfigValue('diffLineBgIntensity');
 
@@ -151,6 +152,7 @@ export const DiffOptionsPopover: React.FC = () => {
                   <CompactSegmented options={LINE_BG_INTENSITY_OPTIONS} value={diffLineBgIntensity} onChange={(v) => configStore.set('diffLineBgIntensity', v)} />
                 </div>
               )}
+              <CompactToggle checked={diffExpandUnchanged} onChange={(v) => configStore.set('diffExpandUnchanged', v)} label="Full file context" />
               <CompactToggle checked={diffHideWhitespace} onChange={(v) => configStore.set('diffHideWhitespace', v)} label="Hide whitespace" />
               <CompactStepper
                 label="Tab size"

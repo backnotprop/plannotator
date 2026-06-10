@@ -1,7 +1,7 @@
 /**
  * Copilot CLI Session Parser
  *
- * Extracts the last rendered assistant message from a Copilot CLI session.
+ * Extracts recent assistant messages and plan content from a Copilot CLI session.
  * Copilot CLI stores sessions at ~/.copilot/session-state/<uuid>/
  *
  * Detection: The COPILOT_CLI=1 environment variable is set in Copilot CLI sessions.
@@ -153,23 +153,21 @@ export function findCopilotPlanContent(sessionId?: string): string | null {
 // --- Message Extraction ---
 
 /**
- * Extract the last assistant message from a Copilot CLI session.
- *
- * Walks backward through events.jsonl, finds the last `assistant.message`
- * event with non-empty content. Accumulates content from multiple events
- * in the same turn (identified by interactionId) if needed.
+ * Walk backward through events.jsonl, returning up to `limit` recent
+ * `assistant.message` events with non-empty content (newest first).
  */
-export function getLastCopilotMessage(
+export function getRecentCopilotMessages(
   sessionDir: string,
-): { text: string } | null {
+  limit: number,
+): { messageId: string; text: string; timestamp?: string }[] {
   const eventsPath = join(sessionDir, "events.jsonl");
-  if (!existsSync(eventsPath)) return null;
+  if (!existsSync(eventsPath)) return [];
 
   const content = readFileSync(eventsPath, "utf-8");
   const lines = content.trim().split("\n");
 
-  // Walk backward to find the last assistant message with content
-  for (let i = lines.length - 1; i >= 0; i--) {
+  const out: { messageId: string; text: string; timestamp?: string }[] = [];
+  for (let i = lines.length - 1; i >= 0 && out.length < limit; i--) {
     let event: CopilotEvent;
     try {
       event = JSON.parse(lines[i]);
@@ -180,8 +178,11 @@ export function getLastCopilotMessage(
     if (event.type !== "assistant.message") continue;
     if (!event.data.content?.trim()) continue;
 
-    return { text: event.data.content };
+    out.push({
+      messageId: event.data.messageId || event.id,
+      text: event.data.content,
+      timestamp: event.timestamp,
+    });
   }
-
-  return null;
+  return out;
 }

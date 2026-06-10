@@ -18,6 +18,7 @@ import type { FeedbackDiffContext } from '../utils/exportFeedback';
 export interface ReviewState {
   // Files & diff
   files: DiffFile[];
+  rawPatch: string;
   focusedFileIndex: number;
   focusedFilePath: string | null;
   diffStyle: 'split' | 'unified';
@@ -26,6 +27,7 @@ export interface ReviewState {
   lineDiffType?: 'word-alt' | 'word' | 'char' | 'none';
   disableLineNumbers?: boolean;
   disableBackground?: boolean;
+  expandUnchanged?: boolean;
   fontFamily?: string;
   fontSize?: string;
   /** User-selected base branch; feeds the `base` query param on file-content fetches. */
@@ -96,6 +98,11 @@ export interface ReviewState {
   openDiffFile: (filePath: string) => void;
   onAllFilesVisibleFileChange: (filePath: string | null) => void;
   isAllFilesActive: boolean;
+  isSemanticDiffActive: boolean;
+  semanticDiffAvailable: boolean;
+  onSemanticDiffUnavailable: () => void;
+  onSemanticDiffLoadError: () => boolean;
+  onSemanticDiffLoadSuccess: () => void;
 
   // Tour
   openTourPanel: (jobId: string) => void;
@@ -127,4 +134,9 @@ export function useReviewState(): ReviewState {
   const ctx = useContext(ReviewStateContext);
   if (!ctx) throw new Error('useReviewState must be used within ReviewStateProvider');
   return ctx;
+}
+
+/** Like useReviewState but returns null instead of throwing — for components that may render outside the provider. */
+export function useReviewStateOptional(): ReviewState | null {
+  return useContext(ReviewStateContext);
 }

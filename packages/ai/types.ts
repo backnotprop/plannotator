@@ -35,6 +35,10 @@ export interface PlanContext {
   previousPlan?: string;
   /** The version number in the plan's history. */
   version?: number;
+  /** Total number of versions in the plan's history. */
+  totalVersions?: number;
+  /** Project/repository label used for plan history. */
+  project?: string;
   /** Annotations the user has made so far (serialised for the prompt). */
   annotations?: string;
 }
@@ -65,6 +69,12 @@ export interface AnnotateContext {
   content: string;
   /** Path to the file on disk. */
   filePath: string;
+  /** Source attribution shown in the UI, such as an original URL or filename. */
+  sourceInfo?: string;
+  /** True when the document was converted from HTML or a remote reader result. */
+  sourceConverted?: boolean;
+  /** Render mode for the annotated content. */
+  renderAs?: "markdown" | "html";
   /** Summary of annotations the user has made. */
   annotations?: string;
 }

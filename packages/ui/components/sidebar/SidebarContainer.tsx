@@ -14,13 +14,15 @@ import { TableOfContents } from "../TableOfContents";
 import { VersionBrowser } from "./VersionBrowser";
 import { FileBrowser } from "./FileBrowser";
 import { ArchiveBrowser, type ArchivedPlan } from "./ArchiveBrowser";
+import { MessagesBrowser, type PickerMessage } from "./MessagesBrowser";
+import { MessagesIcon } from "../icons/MessagesIcon";
 import { OverlayScrollArea } from "../OverlayScrollArea";
 
 interface SidebarContainerProps {
   activeTab: SidebarTab;
   onTabChange: (tab: SidebarTab) => void;
   onClose: () => void;
-  width: number;
+  width: number | string;
   // TOC props
   blocks: Block[];
   annotations: Annotation[];
@@ -58,6 +60,11 @@ interface SidebarContainerProps {
   selectedArchiveFile: string | null;
   onArchiveSelect: (filename: string) => void;
   isLoadingArchive: boolean;
+  showMessagesTab?: boolean;
+  messages?: PickerMessage[];
+  selectedMessageId?: string | null;
+  onSelectMessage?: (messageId: string) => void;
+  messageAnnotationCounts?: Map<string, number>;
 }
 
 export const SidebarContainer: React.FC<SidebarContainerProps> = ({
@@ -97,14 +104,19 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
   selectedArchiveFile,
   onArchiveSelect,
   isLoadingArchive,
+  showMessagesTab,
+  messages,
+  selectedMessageId,
+  onSelectMessage,
+  messageAnnotationCounts,
 }) => {
   return (
     <aside
-      className="hidden lg:flex flex-col sticky top-12 h-[calc(100vh-3rem)] flex-shrink-0 bg-card/50 backdrop-blur-sm border-r border-border"
+      className="hidden lg:flex flex-col sticky top-12 h-[calc(100vh-3rem)] flex-shrink-0 bg-card border-r border-border"
       style={{ width }}
     >
       {/* Tab bar */}
-      <div className="flex items-center border-b border-border/50 px-1 py-1 gap-0.5 flex-shrink-0 overflow-hidden min-w-0">
+      <div className="flex h-10 items-center border-b border-border/50 px-2 gap-0.5 flex-shrink-0 overflow-hidden min-w-0">
         <TabButton
           active={activeTab === "toc"}
           onClick={() => onTabChange("toc")}
@@ -145,6 +157,15 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
               </svg>
             }
             label="Versions"
+          />
+        )}
+        {showMessagesTab && (
+          <TabButton
+            active={activeTab === "messages"}
+            onClick={() => onTabChange("messages")}
+            icon={<MessagesIcon className="w-3 h-3" />}
+            label="Messages"
+            badge={messageAnnotationCounts !== undefined && messageAnnotationCounts.size > 0}
           />
         )}
         {showFilesTab && (
@@ -192,26 +213,8 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
             label="Archive"
           />
         )}
-        <div className="flex-1 min-w-0" />
-        <button
-          onClick={onClose}
-          className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
-          title="Close sidebar"
-        >
-          <svg
-            className="w-3 h-3"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M15 19l-7-7 7-7"
-            />
-          </svg>
-        </button>
+        {/* No header close button — the sidebar collapses via the resize-handle
+            hover button (see ResizeHandle onCollapse). */}
       </div>
 
       {/* Content area */}
@@ -266,6 +269,14 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
             isLoading={isLoadingArchive}
           />
         )}
+        {activeTab === "messages" && showMessagesTab && messages && onSelectMessage && (
+          <MessagesBrowser
+            messages={messages}
+            selectedMessageId={selectedMessageId ?? null}
+            onSelect={onSelectMessage}
+            annotationCounts={messageAnnotationCounts}
+          />
+        )}
       </OverlayScrollArea>
     </aside>
   );
@@ -280,7 +291,7 @@ const TabButton: React.FC<{
 }> = ({ active, onClick, icon, label, badge }) => (
   <button
     onClick={onClick}
-    className={`relative flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors min-w-0 shrink-0 ${
+    className={`relative flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors min-w-0 shrink-0 ${
       active
         ? "bg-primary/10 text-primary"
         : "text-muted-foreground hover:text-foreground hover:bg-muted/50"

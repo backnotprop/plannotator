@@ -10,6 +10,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -21,6 +22,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -32,6 +34,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -43,6 +46,7 @@ describe("parseAnnotateArgs", () => {
       json: true,
       hook: false,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -54,6 +58,7 @@ describe("parseAnnotateArgs", () => {
       json: true,
       hook: false,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -65,6 +70,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -82,6 +88,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -93,6 +100,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -104,6 +112,7 @@ describe("parseAnnotateArgs", () => {
       json: true,
       hook: false,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -115,6 +124,31 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      noJina: false,
+    });
+  });
+
+  test("--no-jina is stripped from URL args", () => {
+    expect(parseAnnotateArgs("https://example.com/docs --no-jina --gate")).toEqual({
+      filePath: "https://example.com/docs",
+      rawFilePath: "https://example.com/docs",
+      gate: true,
+      json: false,
+      hook: false,
+      renderHtml: false,
+      noJina: true,
+    });
+  });
+
+  test("--no-jina before path is stripped", () => {
+    expect(parseAnnotateArgs("--no-jina https://example.com/docs")).toEqual({
+      filePath: "https://example.com/docs",
+      rawFilePath: "https://example.com/docs",
+      gate: false,
+      json: false,
+      hook: false,
+      renderHtml: false,
+      noJina: true,
     });
   });
 
@@ -126,6 +160,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -137,6 +172,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -148,6 +184,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -159,6 +196,7 @@ describe("parseAnnotateArgs", () => {
       json: true,
       hook: false,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -176,6 +214,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -187,6 +226,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -198,6 +238,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -209,6 +250,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -225,6 +267,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -236,6 +279,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -247,6 +291,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -258,6 +303,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -274,6 +320,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: true,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -285,6 +332,7 @@ describe("parseAnnotateArgs", () => {
       json: true,
       hook: true,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -296,6 +344,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: true,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -307,6 +356,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: true,
       renderHtml: false,
+      noJina: false,
     });
   });
 
@@ -318,6 +368,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: true,
+      noJina: false,
     });
   });
 
@@ -329,6 +380,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: true,
+      noJina: false,
     });
   });
 });

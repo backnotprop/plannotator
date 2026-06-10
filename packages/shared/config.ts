@@ -5,8 +5,8 @@
  * Runtime-agnostic: uses only node:fs, node:os, node:child_process.
  */
 
-import { homedir } from "os";
 import { join } from "path";
+import { getPlannotatorDataDir } from "./data-dir";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { execSync } from "child_process";
 
@@ -24,6 +24,7 @@ export interface DiffOptions {
   fontSize?: string;
   tabSize?: number;
   hideWhitespace?: boolean;
+  expandUnchanged?: boolean;
   defaultDiffType?: DefaultDiffType;
   lineBgIntensity?: DiffLineBgIntensity;
 }
@@ -39,6 +40,9 @@ export type PromptSectionOverrides = Record<string, string | undefined>;
 
 export type PromptRuntime =
   | "claude-code"
+  | "amp"
+  | "droid"
+  | "kiro-cli"
   | "opencode"
   | "copilot-cli"
   | "pi"
@@ -124,9 +128,16 @@ export interface PlannotatorConfig {
    * Read by the `improve-context` PreToolUse handler. Default: false.
    */
   pfmReminder?: boolean;
+  /**
+   * Open Plannotator in a Glimpse native window when available.
+   * When true (default), the server spawns `glimpseui` if it is on PATH,
+   * no explicit browser is configured, and the session is local.
+   * Set to false to always use the system browser even when Glimpse is installed.
+   */
+  glimpse?: boolean;
 }
 
-const CONFIG_DIR = join(homedir(), ".plannotator");
+const CONFIG_DIR = getPlannotatorDataDir();
 const CONFIG_PATH = join(CONFIG_DIR, "config.json");
 
 /**
@@ -210,6 +221,21 @@ export function resolveDefaultDiffType(cfg?: PlannotatorConfig): DefaultDiffType
   const v = cfg?.diffOptions?.defaultDiffType as string | undefined;
   if (v === 'branch') return 'merge-base';
   return v === 'uncommitted' || v === 'unstaged' || v === 'staged' || v === 'merge-base' || v === 'all' ? v : 'unstaged';
+}
+
+/**
+ * Resolve whether to use Glimpse native window.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_GLIMPSE env var  →  config.glimpse  →  default true
+ */
+export function resolveUseGlimpse(config: PlannotatorConfig): boolean {
+  const envVal = process.env.PLANNOTATOR_GLIMPSE;
+  if (envVal !== undefined) {
+    return envVal === "1" || envVal.toLowerCase() === "true";
+  }
+  if (config.glimpse !== undefined) return config.glimpse;
+  return true;
 }
 
 /**

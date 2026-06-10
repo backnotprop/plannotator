@@ -39,6 +39,18 @@ export const SETTINGS = {
     toServer: (v: string) => ({ displayName: v }),
   },
 
+  gridEnabled: {
+    // Default ON: plans open in the classic grid / floating-card look. The UI 2.0
+    // flat look is offered as an opt-in via the look-and-feel chooser dialog.
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-grid-enabled');
+      return v === 'true' ? true : v === 'false' ? false : undefined;
+    },
+    toCookie: (v: boolean) => storage.setItem('plannotator-grid-enabled', String(v)),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
   // --- Diff display options (namespaced under diffOptions in config.json) ---
 
   defaultDiffType: {
@@ -173,6 +185,21 @@ export const SETTINGS = {
       return typeof v === 'boolean' ? v : undefined;
     },
     toServer: (v: boolean) => ({ diffOptions: { hideWhitespace: v } }),
+  },
+
+  diffExpandUnchanged: {
+    defaultValue: false as boolean,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-expand-unchanged');
+      return v === 'true' ? true : v === 'false' ? false : undefined;
+    },
+    toCookie: (v: boolean) => storage.setItem('plannotator-diff-expand-unchanged', String(v)),
+    serverKey: 'diffOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = (sc.diffOptions as Record<string, unknown> | undefined)?.expandUnchanged;
+      return typeof v === 'boolean' ? v : undefined;
+    },
+    toServer: (v: boolean) => ({ diffOptions: { expandUnchanged: v } }),
   },
 
   diffFontSize: {

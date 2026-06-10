@@ -1,8 +1,8 @@
 /**
  * Parse CLI-style args arriving as a single whitespace-delimited string.
  *
- * Extracts the `--gate`, `--json`, and `--hook` flags (issue #570)
- * from the remainder, which is treated as the target path. Leading `@` is
+ * Extracts known annotate flags from the remainder, which is treated as the
+ * target path. Leading `@` is
  * stripped via the shared at-reference helper — reference-mode is primary.
  * Scoped-package-style literal `@` paths are handled by a fallback that the
  * downstream resolver opts into (see at-reference.ts).
@@ -44,6 +44,7 @@ export interface ParsedAnnotateArgs {
   json: boolean;
   hook: boolean;
   renderHtml: boolean;
+  noJina: boolean;
 }
 
 type Segment = { type: "ws" | "tok"; text: string };
@@ -53,11 +54,12 @@ const FLAG_MAP = {
   "--json": "json",
   "--hook": "hook",
   "--render-html": "renderHtml",
+  "--no-jina": "noJina",
 } as const satisfies Record<string, keyof Omit<ParsedAnnotateArgs, "filePath" | "rawFilePath">>;
 
 export function parseAnnotateArgs(raw: string): ParsedAnnotateArgs {
   const s = (raw ?? "").trim();
-  const flags = { gate: false, json: false, hook: false, renderHtml: false };
+  const flags = { gate: false, json: false, hook: false, renderHtml: false, noJina: false };
 
   const segments: Segment[] = [];
   for (let i = 0; i < s.length;) {

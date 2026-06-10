@@ -2,7 +2,12 @@
 param(
     [string]$Version = "latest",
     [switch]$VerifyAttestation,
-    [switch]$SkipAttestation
+    [switch]$SkipAttestation,
+    [switch]$Extras,
+    [switch]$NoExtras,
+    [string]$ModelInvocable = "",
+    [switch]$NonInteractive,
+    [switch]$Reconfigure
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,8 +19,13 @@ if ($VerifyAttestation -and $SkipAttestation) {
     [Console]::Error.WriteLine("-VerifyAttestation and -SkipAttestation are mutually exclusive. Pass one or the other.")
     exit 1
 }
-
+if ($Extras -and $NoExtras) {
+    [Console]::Error.WriteLine("-Extras and -NoExtras are mutually exclusive. Pass one or the other.")
+    exit 1
+}
 $repo = "backnotprop/plannotator"
+$semRepo = "Ataraxy-Labs/sem"
+$semVersion = "v0.8.0"
 $installDir = "$env:LOCALAPPDATA\plannotator"
 
 # First plannotator release that carries SLSA build-provenance attestations.
@@ -93,7 +103,81 @@ Write-Host "Installing plannotator $latestTag..."
 $verifyAttestationResolved = $false
 
 # Layer 3: config file (lowest precedence of the opt-in sources).
-$configPath = "$env:USERPROFILE\.plannotator\config.json"
+$configDir = if ($env:PLANNOTATOR_DATA_DIR) { $env:PLANNOTATOR_DATA_DIR.Trim() } else { Join-Path $env:USERPROFILE ".plannotator" }
+if ($configDir -eq "~") {
+    $configDir = $env:USERPROFILE
+} elseif ($configDir.StartsWith("~/") -or $configDir.StartsWith('~\')) {
+    $configDir = Join-Path $env:USERPROFILE ($configDir.Substring(2))
+}
+
+function Install-SemSidecar {
+    if ($env:PLANNOTATOR_SKIP_SEM_INSTALL -match '^(1|true|yes)$') {
+        Write-Host "Skipping semantic diff sidecar install (PLANNOTATOR_SKIP_SEM_INSTALL is set)"
+        return
+    }
+
+    $semAsset = if ($platform -eq "win32-x64") { "sem-windows-x86_64.zip" } else { $null }
+    if (-not $semAsset) {
+        Write-Host "Skipping semantic diff sidecar install (sem does not publish $platform)"
+        return
+    }
+
+    $semDir = Join-Path $configDir "vendor\sem\$semVersion"
+    $semPath = Join-Path $semDir "sem.exe"
+    if (Test-Path $semPath) {
+        try {
+            $versionText = & $semPath --version 2>$null
+            if ($LASTEXITCODE -eq 0 -and $versionText -match '^sem ') {
+                Write-Host "Semantic diff sidecar already installed at $semPath"
+                return
+            }
+        } catch {
+            # Replace invalid stale sidecar below.
+        }
+    }
+
+    $tmpSemDir = Join-Path ([System.IO.Path]::GetTempPath()) "plannotator-sem-$([System.Guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Force -Path $tmpSemDir | Out-Null
+
+    try {
+        $semBaseUrl = "https://github.com/$semRepo/releases/download/$semVersion"
+        $semArchive = Join-Path $tmpSemDir $semAsset
+        $semChecksums = Join-Path $tmpSemDir "checksums.txt"
+        # Bounded so a slow/hung download of this optional sidecar can't wedge an
+        # install where plannotator already landed; the catch below skips it.
+        Invoke-WebRequest -Uri "$semBaseUrl/$semAsset" -OutFile $semArchive -UseBasicParsing -TimeoutSec 120
+        Invoke-WebRequest -Uri "$semBaseUrl/checksums.txt" -OutFile $semChecksums -UseBasicParsing -TimeoutSec 60
+
+        $expected = (Get-Content $semChecksums | Where-Object { $_ -match "\s$([regex]::Escape($semAsset))$" } | ForEach-Object { ($_ -split '\s+')[0] } | Select-Object -First 1)
+        if (-not $expected) {
+            Write-Host "Skipping semantic diff sidecar install (checksum missing for $semAsset)"
+            return
+        }
+
+        $actual = (Get-FileHash -Path $semArchive -Algorithm SHA256).Hash.ToLower()
+        if ($actual -ne $expected.ToLower()) {
+            Write-Host "Skipping semantic diff sidecar install (checksum mismatch)"
+            return
+        }
+
+        Expand-Archive -Force -Path $semArchive -DestinationPath $tmpSemDir
+        $extracted = Get-ChildItem -Path $tmpSemDir -Filter "sem.exe" -Recurse | Select-Object -First 1
+        if (-not $extracted) {
+            Write-Host "Skipping semantic diff sidecar install (binary missing from archive)"
+            return
+        }
+
+        New-Item -ItemType Directory -Force -Path $semDir | Out-Null
+        Copy-Item -Force $extracted.FullName $semPath
+        Write-Host "Semantic diff sidecar installed to $semPath"
+    } catch {
+        Write-Host "Skipping semantic diff sidecar install ($($_.Exception.Message))"
+    } finally {
+        Remove-Item -Recurse -Force $tmpSemDir -ErrorAction SilentlyContinue
+    }
+}
+
+$configPath = Join-Path $configDir "config.json"
 if (Test-Path $configPath) {
     try {
         $cfg = Get-Content $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -229,6 +313,8 @@ Move-Item -Force $tmpFile "$installDir\plannotator.exe"
 Write-Host ""
 Write-Host "plannotator $latestTag installed to $installDir\plannotator.exe"
 
+Install-SemSidecar
+
 # Add to PATH if not already there
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($userPath -notlike "*$installDir*") {
@@ -279,9 +365,11 @@ if (Test-Path $pluginHooks) {
 }
 
 # Codex hooks on Windows are still experimental upstream. Do not mutate
-# $env:USERPROFILE\.codex automatically from the Windows installer until that
+# the Codex home automatically from the Windows installer until that
 # path is verified end-to-end.
-$codexDir = "$env:USERPROFILE\.codex"
+# Codex stores config and state under $env:CODEX_HOME when set, falling back
+# to ~\.codex (https://developers.openai.com/codex/config-advanced). (#852)
+$codexDir = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { "$env:USERPROFILE\.codex" }
 $codexHomeHasUserConfig = $false
 if (Test-Path $codexDir) {
     $codexHomeHasUserConfig = [bool](Get-ChildItem -Force $codexDir -ErrorAction SilentlyContinue |
@@ -289,6 +377,8 @@ if (Test-Path $codexDir) {
         Select-Object -First 1)
 }
 $codexAvailable = [bool](Get-Command codex -ErrorAction SilentlyContinue) -or $codexHomeHasUserConfig
+# Kiro is auto-detected like Codex/Gemini: PATH executable or an existing ~/.kiro.
+$kiroAvailable = [bool](Get-Command kiro-cli -ErrorAction SilentlyContinue) -or (Test-Path "$env:USERPROFILE\.kiro")
 
 if ($codexAvailable) {
     $codexExePath = "$installDir\plannotator.exe"
@@ -296,12 +386,12 @@ if ($codexAvailable) {
     Write-Host "Codex detected."
     Write-Host "Codex plan review hooks are experimental on Windows. To try them manually:"
     Write-Host ""
-    Write-Host "  1. Add this to $env:USERPROFILE\.codex\config.toml:"
+    Write-Host "  1. Add this to $codexDir\config.toml:"
     Write-Host ""
     Write-Host "     [features]"
     Write-Host "     hooks = true"
     Write-Host ""
-    Write-Host "  2. Add a Stop hook in $env:USERPROFILE\.codex\hooks.json that runs:"
+    Write-Host "  2. Add a Stop hook in $codexDir\hooks.json that runs:"
     Write-Host ""
     Write-Host "     $codexExePath"
 }
@@ -314,85 +404,6 @@ Remove-Item -Recurse -Force "$env:USERPROFILE\.bun\install\cache\@plannotator" -
 # Clear Pi jiti cache to force fresh download on next run
 Remove-Item -Recurse -Force "$env:TEMP\jiti" -ErrorAction SilentlyContinue
 
-function Test-PlannotatorSharedAgentSkillsAvailable {
-    $agentsSkillsDir = "$env:USERPROFILE\.agents\skills"
-    return (Test-Path (Join-Path $agentsSkillsDir "plannotator-compound\SKILL.md")) -and
-        (Test-Path (Join-Path $agentsSkillsDir "plannotator-setup-goal\SKILL.md")) -and
-        (Test-Path (Join-Path $agentsSkillsDir "plannotator-visual-explainer\SKILL.md"))
-}
-
-function Configure-PiPlannotatorPackageFilter {
-    $piAgentDir = if ($env:PI_CODING_AGENT_DIR) { $env:PI_CODING_AGENT_DIR } else { "$env:USERPROFILE\.pi\agent" }
-    $piSettings = Join-Path $piAgentDir "settings.json"
-
-    if (-not (Test-Path $piSettings)) {
-        return
-    }
-
-    try {
-        $settings = Get-Content -Path $piSettings -Raw -ErrorAction Stop | ConvertFrom-Json
-    } catch {
-        Write-Host "Skipping Pi settings update (could not parse settings.json)"
-        return
-    }
-
-    if ($null -eq $settings -or $null -eq $settings.packages) {
-        return
-    }
-
-    $packagePattern = "^(?:npm:)?@plannotator/pi-extension(?:@.+)?$"
-    $changed = $false
-    $packages = @()
-
-    foreach ($entry in @($settings.packages)) {
-        if ($entry -is [string] -and $entry -match $packagePattern) {
-            $packages += [pscustomobject]@{
-                source = $entry
-                skills = @()
-            }
-            $changed = $true
-            continue
-        }
-
-        $sourceProperty = $null
-        if ($entry -and $entry.PSObject) {
-            $sourceProperty = $entry.PSObject.Properties["source"]
-        }
-
-        if ($sourceProperty -and $sourceProperty.Value -is [string] -and $sourceProperty.Value -match $packagePattern) {
-            $skillsProperty = $entry.PSObject.Properties["skills"]
-            if (-not $skillsProperty -or @($skillsProperty.Value).Count -ne 0) {
-                if ($skillsProperty) {
-                    $entry.skills = @()
-                } else {
-                    $entry | Add-Member -NotePropertyName "skills" -NotePropertyValue @()
-                }
-                $changed = $true
-            }
-        }
-
-        $packages += $entry
-    }
-
-    if (-not $changed) {
-        return
-    }
-
-    $settings.packages = @($packages)
-    $tmpPath = [System.IO.Path]::GetTempFileName()
-
-    try {
-        $json = ($settings | ConvertTo-Json -Depth 20) + "`n"
-        $utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
-        [System.IO.File]::WriteAllText($tmpPath, $json, $utf8NoBom)
-        Move-Item -Force $tmpPath $piSettings
-        Write-Host "Configured Pi to use global Plannotator skills and skip bundled package skills."
-    } catch {
-        Write-Host "Skipping Pi settings update (could not rewrite settings.json)"
-        Remove-Item -Force $tmpPath -ErrorAction SilentlyContinue
-    }
-}
-
 function Update-PiExtensionIfPresent {
     if (-not (Get-Command pi -ErrorAction SilentlyContinue)) {
         return
@@ -401,208 +412,467 @@ function Update-PiExtensionIfPresent {
     Write-Host "Updating Pi extension..."
     pi install npm:@plannotator/pi-extension
     if ($LASTEXITCODE -eq 0) {
-        if (Test-PlannotatorSharedAgentSkillsAvailable) {
-            Configure-PiPlannotatorPackageFilter
-        } else {
-            Write-Host "Leaving Pi bundled skills enabled (global Plannotator agent skills not found)."
-        }
         Write-Host "Pi extension updated."
     } else {
-        Write-Host "Skipping Pi settings update (pi install failed)"
+        Write-Host "Skipping Pi extension update (pi install failed)"
     }
 }
 
-# Install Claude Code slash command
+# Aggressive cleanup of stale install locations from prior versions.
+# Echo each removal and ignore anything that is already gone.
+
+# NOTE: legacy Claude command cleanup happens AFTER the skill install below —
+# a command file is only removed once its replacement skill is on disk, so a
+# failed or skipped skill install never leaves users with neither.
 $claudeCommandsDir = if ($env:CLAUDE_CONFIG_DIR) { "$env:CLAUDE_CONFIG_DIR\commands" } else { "$env:USERPROFILE\.claude\commands" }
-New-Item -ItemType Directory -Force -Path $claudeCommandsDir | Out-Null
 
-@'
----
-description: Open interactive code review for current changes or a PR URL
-allowed-tools: Bash(plannotator:*)
----
+# NOTE: Codex stale-skill cleanup happens AFTER the skill install below — the
+# core skills are only removed from the Codex home once their replacement
+# exists in ~/.agents/skills, so an old pinned tag never strips Codex users
+# of working skills without a successor.
+$staleCodexSkillsDir = Join-Path $codexDir "skills"
 
-## Code Review Feedback
-
-!`plannotator review $ARGUMENTS`
-
-## Your task
-
-If the review above contains feedback or annotations, address them. If no changes were requested, acknowledge and continue.
-'@ | Set-Content -Path "$claudeCommandsDir\plannotator-review.md"
-
-Write-Host "Installed /plannotator-review command to $claudeCommandsDir\plannotator-review.md"
-
-# Install Claude Code /annotate slash command
-@'
----
-description: Open interactive annotation UI for a markdown file
-allowed-tools: Bash(plannotator:*)
----
-
-## Markdown Annotations
-
-!`plannotator annotate $ARGUMENTS`
-
-## Your task
-
-Address the annotation feedback above. The user has reviewed the markdown file and provided specific annotations and comments.
-'@ | Set-Content -Path "$claudeCommandsDir\plannotator-annotate.md"
-
-Write-Host "Installed /plannotator-annotate command to $claudeCommandsDir\plannotator-annotate.md"
-
-# Install Claude Code /plannotator-last slash command
-@'
----
-description: Annotate the last rendered assistant message
-allowed-tools: Bash(plannotator:*)
----
-
-## Message Annotations
-
-!`plannotator annotate-last`
-
-## Your task
-
-Address the annotation feedback above. The user has reviewed your last message and provided specific annotations and comments.
-'@ | Set-Content -Path "$claudeCommandsDir\plannotator-last.md"
-
-Write-Host "Installed /plannotator-last command to $claudeCommandsDir\plannotator-last.md"
-
-# Install OpenCode slash command
-$opencodeCommandsDir = "$env:USERPROFILE\.config\opencode\command"
-New-Item -ItemType Directory -Force -Path $opencodeCommandsDir | Out-Null
-
-@"
----
-description: Open interactive code review for current changes
----
-
-The Plannotator Code Review has been triggered. Opening the review UI...
-Acknowledge "Opening code review..." and wait for the user's feedback.
-"@ | Set-Content -Path "$opencodeCommandsDir\plannotator-review.md"
-
-Write-Host "Installed /plannotator-review command to $opencodeCommandsDir\plannotator-review.md"
-
-# Install OpenCode /annotate slash command
-@"
----
-description: Open interactive annotation UI for a markdown file
----
-
-The Plannotator Annotate has been triggered. Opening the annotation UI...
-Acknowledge "Opening annotation UI..." and wait for the user's feedback.
-"@ | Set-Content -Path "$opencodeCommandsDir\plannotator-annotate.md"
-
-Write-Host "Installed /plannotator-annotate command to $opencodeCommandsDir\plannotator-annotate.md"
-
-# Install OpenCode /plannotator-last slash command
-@"
----
-description: Annotate the last assistant message
----
-"@ | Set-Content -Path "$opencodeCommandsDir\plannotator-last.md"
-
-Write-Host "Installed /plannotator-last command to $opencodeCommandsDir\plannotator-last.md"
-
-# Remove legacy Codex-oriented skills from the older shared agent scope.
-$legacyAgentsSkillsDir = "$env:USERPROFILE\.agents\skills"
-$legacySkillsRemoved = $false
-foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last")) {
-    $legacySkillPath = Join-Path $legacyAgentsSkillsDir $skill
-    if (Test-Path $legacySkillPath) {
-        Remove-Item -Recurse -Force $legacySkillPath -ErrorAction SilentlyContinue
-        $legacySkillsRemoved = $true
+# Old installers (pre core/extra split) ran a wholesale skills copy against a
+# new-layout tag and could leave junk `core`/`extra` directory copies in the
+# Claude skills scope. Never valid skill names — always safe to remove.
+$claudeSkillsScope = if ($env:CLAUDE_CONFIG_DIR) { "$env:CLAUDE_CONFIG_DIR\skills" } else { "$env:USERPROFILE\.claude\skills" }
+foreach ($junk in @("core", "extra")) {
+    $junkPath = Join-Path $claudeSkillsScope $junk
+    if (Test-Path $junkPath) {
+        Write-Host "Removing stale layout directory $junkPath (left by an older installer)"
+        Remove-Item -Recurse -Force $junkPath -ErrorAction SilentlyContinue
     }
 }
-if ($legacySkillsRemoved) {
-    Write-Host "Removed legacy Plannotator skills from $legacyAgentsSkillsDir"
-}
 
-# Remove Plannotator skills that belong in the shared agent scope from Codex.
-$staleCodexSkillsDir = "$env:USERPROFILE\.codex\skills"
-$staleCodexSkillsRemoved = $false
-foreach ($skill in @("plannotator-compound", "plannotator-setup-goal")) {
-    $staleSkillPath = Join-Path $staleCodexSkillsDir $skill
-    if (Test-Path $staleSkillPath) {
-        Remove-Item -Recurse -Force $staleSkillPath -ErrorAction SilentlyContinue
-        $staleCodexSkillsRemoved = $true
-    }
-}
-if ($staleCodexSkillsRemoved) {
-    Write-Host "Removed shared-agent Plannotator skills from $staleCodexSkillsDir"
-}
-
-# Install skills (requires git)
-if (Get-Command git -ErrorAction SilentlyContinue) {
-    $claudeSkillsDir = if ($env:CLAUDE_CONFIG_DIR) { "$env:CLAUDE_CONFIG_DIR\skills" } else { "$env:USERPROFILE\.claude\skills" }
-    $codexSkillsDir = "$env:USERPROFILE\.codex\skills"
-    $agentsSkillsDir = "$env:USERPROFILE\.agents\skills"
-    $skillsTmp = Join-Path ([System.IO.Path]::GetTempPath()) "plannotator-skills-$(Get-Random)"
-    New-Item -ItemType Directory -Force -Path $skillsTmp | Out-Null
-
-    function Copy-SkillIfPresent {
-        param(
-            [string]$SourceDir,
-            [string]$TargetDir
-        )
-
-        if (Test-Path $SourceDir) {
-            Copy-Item -Recurse -Force $SourceDir $TargetDir
-        }
-    }
-
-    try {
-        git clone --depth 1 --filter=blob:none --sparse "https://github.com/$repo.git" --branch $latestTag "$skillsTmp\repo" 2>$null
-        # git is a native executable — it does not throw under
-        # $ErrorActionPreference=Stop on non-zero exit. Guard with
-        # Test-Path so we only Push-Location if the clone actually
-        # produced a repo directory.
-        if (Test-Path "$skillsTmp\repo") {
-            Push-Location "$skillsTmp\repo"
-            # Inner try/finally guarantees Pop-Location runs exactly once
-            # after a successful Push-Location, regardless of whether the
-            # copy operations below throw. The naive pattern (Pop-Location
-            # only on the success path) leaks the location stack if a
-            # PS-native cmdlet (Copy-Item etc.) throws under Stop.
-            try {
-                git sparse-checkout set apps/skills 2>$null
-
-                if (Test-Path "apps\skills") {
-                    $items = Get-ChildItem "apps\skills" -ErrorAction SilentlyContinue
-                    if ($items) {
-                        New-Item -ItemType Directory -Force -Path $claudeSkillsDir | Out-Null
-                        New-Item -ItemType Directory -Force -Path $agentsSkillsDir | Out-Null
-                        Copy-Item -Recurse -Force "apps\skills\*" $claudeSkillsDir
-                        Copy-SkillIfPresent "apps\skills\plannotator-compound" $agentsSkillsDir
-                        Copy-SkillIfPresent "apps\skills\plannotator-setup-goal" $agentsSkillsDir
-                        if ($codexAvailable) {
-                            New-Item -ItemType Directory -Force -Path $codexSkillsDir | Out-Null
-                            Copy-SkillIfPresent "apps\skills\plannotator-review" $codexSkillsDir
-                            Copy-SkillIfPresent "apps\skills\plannotator-annotate" $codexSkillsDir
-                            Copy-SkillIfPresent "apps\skills\plannotator-last" $codexSkillsDir
-                            Write-Host "Installed skills to $claudeSkillsDir\, Codex command skills to $codexSkillsDir\, and shared agent skills to $agentsSkillsDir\"
-                        } else {
-                            Write-Host "Installed skills to $claudeSkillsDir\ and shared agent skills to $agentsSkillsDir\"
-                        }
-                    }
-                }
-            } finally {
-                Pop-Location
+# Extras (compound / setup-goal / visual-explainer) are no longer managed in
+# the Claude or shared-agent skill scopes. Remove previously default-installed
+# copies ONCE per machine — recorded in the migrations ledger under the
+# Plannotator data dir — because copies the user reinstalls via `npx skills
+# add` are byte-identical to ours and can only be told apart by remembering
+# that this cleanup already ran.
+$claudeSkillsDir = if ($env:CLAUDE_CONFIG_DIR) { "$env:CLAUDE_CONFIG_DIR\skills" } else { "$env:USERPROFILE\.claude\skills" }
+$agentsSkillsDir = "$env:USERPROFILE\.agents\skills"
+$migrationsDir = Join-Path $configDir "migrations"
+$extrasMigration = Join-Path $migrationsDir "2026-06-extras-default-install-removed"
+if (-not (Test-Path $extrasMigration)) {
+    foreach ($skill in @("plannotator-compound", "plannotator-setup-goal", "plannotator-visual-explainer")) {
+        foreach ($scopeDir in @($claudeSkillsDir, $agentsSkillsDir)) {
+            $extraSkillPath = Join-Path $scopeDir $skill
+            if (Test-Path $extraSkillPath) {
+                Write-Host "Removing unmanaged extra skill $extraSkillPath (reinstall via npx skills add)"
+                Remove-Item -Recurse -Force $extraSkillPath -ErrorAction SilentlyContinue
             }
         }
-    } catch {
-        Write-Host "Skipping skills install (git sparse-checkout failed)"
     }
-
-    Remove-Item -Recurse -Force $skillsTmp -ErrorAction SilentlyContinue
-} else {
-    Write-Host "Skipping skills install (git not found)"
+    New-Item -ItemType Directory -Force -Path $migrationsDir | Out-Null
+    New-Item -ItemType File -Force -Path $extrasMigration | Out-Null
 }
 
-# Update Pi extension if pi is installed. When global shared skills are
-# available, keep the extension commands but disable its bundled skill copy to
-# avoid duplicate Pi skill warnings.
+# --- Guided install (interactive consoles only) ---
+# Mirrors install.sh: two questions (extras? model-invocable skills?), answers
+# persisted to install-prefs in the Plannotator data dir and reused silently on
+# re-runs. -Reconfigure re-opens the wizard; -NonInteractive forces silence;
+# redirected/CI runs never prompt. Flags win over everything.
+$prefsFile = Join-Path $configDir "install-prefs"
+$coreSkillNames = @("plannotator-review", "plannotator-annotate", "plannotator-last")
+$extraSkillNames = @("plannotator-compound", "plannotator-setup-goal", "plannotator-visual-explainer")
+
+$savedExtras = ""
+$savedInvocable = ""
+if (Test-Path $prefsFile) {
+    foreach ($line in Get-Content $prefsFile) {
+        if ($line -match '^extras=(.*)$') { $savedExtras = $Matches[1] }
+        if ($line -match '^model_invocable=(.*)$') { $savedInvocable = $Matches[1] }
+    }
+}
+
+# Extras already on disk (pre-existing or previously npx-installed)? Then the
+# extras question is moot — they still count toward the checkbox list, and we
+# never launch the npx flow over them.
+$extrasPresent = $false
+foreach ($skill in $extraSkillNames) {
+    if ((Test-Path (Join-Path $claudeSkillsDir $skill)) -or (Test-Path (Join-Path $agentsSkillsDir $skill))) {
+        $extrasPresent = $true
+        break
+    }
+}
+
+# A wizard needs a real console. `irm | iex` keeps the console attached;
+# CI and redirected runs do not.
+$canPrompt = $false
+if (-not $NonInteractive) {
+    try {
+        $canPrompt = (-not [Console]::IsInputRedirected) -and (-not [Console]::IsOutputRedirected)
+    } catch {
+        $canPrompt = $false
+    }
+}
+
+$runWizard = $canPrompt -and ($Reconfigure -or -not (Test-Path $prefsFile))
+
+# Bound interactive prompts so an unattended-but-attached console (e.g. a
+# PsExec / provisioner first-run) can't hang the install. Override with
+# PLANNOTATOR_PROMPT_TIMEOUT (0 = wait forever); non-numeric/negative -> 30.
+$script:promptTimeout = 30
+if ($env:PLANNOTATOR_PROMPT_TIMEOUT) {
+    $parsed = 0
+    if ([int]::TryParse($env:PLANNOTATOR_PROMPT_TIMEOUT, [ref]$parsed) -and $parsed -ge 0) {
+        $script:promptTimeout = $parsed
+    }
+}
+
+# Read a line with a timeout (seconds); $null if no input arrives in time.
+# 0 waits indefinitely. Echoes typed chars since ReadKey($true) intercepts them.
+function Read-LineWithTimeout {
+    param([int]$TimeoutSeconds)
+    if ($TimeoutSeconds -le 0) { return [Console]::ReadLine() }
+    $line = ""
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($sw.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
+        if ([Console]::KeyAvailable) {
+            $key = [Console]::ReadKey($true)
+            if ($key.Key -eq "Enter") { Write-Host ""; return $line }
+            elseif ($key.Key -eq "Backspace") {
+                if ($line.Length -gt 0) { $line = $line.Substring(0, $line.Length - 1); Write-Host "`b `b" -NoNewline }
+            }
+            else { $line += $key.KeyChar; Write-Host $key.KeyChar -NoNewline }
+        }
+        else { Start-Sleep -Milliseconds 50 }
+    }
+    return $null
+}
+
+function Read-YesNo {
+    param([string]$Prompt, [string]$Default)
+    $suffix = if ($Default -eq "yes") { "[Y/n]" } else { "[y/N]" }
+    Write-Host "$Prompt $suffix " -NoNewline
+    # On timeout nobody is there -> return the SAFE "no", never $Default, so a
+    # yes-default prompt can't auto-run unattended.
+    $answer = Read-LineWithTimeout $script:promptTimeout
+    if ($null -eq $answer) {
+        Write-Host ""
+        return "no"
+    }
+    switch -regex ($answer) {
+        '^(y|yes)$' { return "yes" }
+        '^(n|no)$'  { return "no" }
+        default     { return $Default }
+    }
+}
+
+# Space-toggle checkbox. Up/down (or j/k) moves, space toggles, enter
+# confirms. Returns the chosen names as a comma list, or "none".
+function Select-SkillsCheckbox {
+    param([string[]]$Names, [string]$Preselected)
+    $pre = ",$Preselected,"
+    $sel = @()
+    foreach ($n in $Names) { $sel += ($pre -like "*,$n,*") }
+    $idx = 0
+    Write-Host "Space toggles, enter confirms, up/down or j/k moves:"
+    $top = [Console]::CursorTop
+    while ($true) {
+        [Console]::SetCursorPosition(0, $top)
+        for ($i = 0; $i -lt $Names.Count; $i++) {
+            $mark = if ($sel[$i]) { "x" } else { " " }
+            $cursor = if ($i -eq $idx) { "> " } else { "  " }
+            Write-Host ("{0}[{1}] {2}    " -f $cursor, $mark, $Names[$i])
+        }
+        $key = [Console]::ReadKey($true)
+        switch ($key.Key) {
+            "Spacebar"  { $sel[$idx] = -not $sel[$idx] }
+            "UpArrow"   { if ($idx -gt 0) { $idx-- } }
+            "DownArrow" { if ($idx -lt $Names.Count - 1) { $idx++ } }
+            "K"         { if ($idx -gt 0) { $idx-- } }
+            "J"         { if ($idx -lt $Names.Count - 1) { $idx++ } }
+            "Enter"     {
+                $chosen = @()
+                for ($i = 0; $i -lt $Names.Count; $i++) {
+                    if ($sel[$i]) { $chosen += $Names[$i] }
+                }
+                if ($chosen.Count -eq 0) { return "none" }
+                return ($chosen -join ",")
+            }
+        }
+    }
+}
+
+$extrasChoice = ""
+$invocableChoice = ""
+
+if ($runWizard) {
+    Write-Host ""
+    Write-Host "=========================================="
+    Write-Host "  PLANNOTATOR GUIDED INSTALL"
+    Write-Host "=========================================="
+    Write-Host ""
+    if ($extrasPresent) {
+        Write-Host "Extra skills already installed — keeping them."
+        $extrasChoice = "yes"
+    } elseif ($Extras -or $NoExtras) {
+        # Flag already answered this question — don't ask and then ignore.
+        $extrasChoice = if ($Extras) { "yes" } else { "no" }
+    } else {
+        $defaultExtras = if ($savedExtras) { $savedExtras } else { "no" }
+        $extrasChoice = Read-YesNo "Install the extra skills (compound planning, setup-goal, visual explainer)?" $defaultExtras
+    }
+    $invocableList = $coreSkillNames
+    if ($extrasChoice -eq "yes") { $invocableList = $coreSkillNames + $extraSkillNames }
+    if ($ModelInvocable) {
+        # Flag already answered this question — don't ask and then ignore.
+        $invocableChoice = $ModelInvocable
+    } else {
+        $wantInvocable = Read-YesNo "Make any skills callable by the model (instead of user-invoked only)?" "no"
+        if ($wantInvocable -eq "yes") {
+            $invocableChoice = Select-SkillsCheckbox -Names $invocableList -Preselected $savedInvocable
+        } else {
+            $invocableChoice = "none"
+        }
+    }
+}
+
+# Flags override the wizard and saved answers; otherwise saved, then defaults.
+if ($Extras) { $extrasChoice = "yes" }
+if ($NoExtras) { $extrasChoice = "no" }
+if ($ModelInvocable) { $invocableChoice = $ModelInvocable }
+if (-not $extrasChoice) { $extrasChoice = if ($savedExtras) { $savedExtras } else { "no" } }
+if (-not $invocableChoice) { $invocableChoice = if ($savedInvocable) { $savedInvocable } else { "none" } }
+
+# Persist only when the wizard ran or a flag set something — silent re-runs
+# must not clobber saved answers with defaults.
+if ($runWizard -or $Extras -or $NoExtras -or $ModelInvocable) {
+    New-Item -ItemType Directory -Force -Path $configDir | Out-Null
+    @("extras=$extrasChoice", "model_invocable=$invocableChoice") | Set-Content $prefsFile
+}
+
+# Extras install is delegated to the skills CLI (its UI picks the agents).
+# Interactive only — silent runs and CI get the printed command instead.
+# Never runs when the extras already exist.
+if (($extrasChoice -eq "yes") -and (-not $extrasPresent)) {
+    if ($canPrompt -and (Get-Command npx -ErrorAction SilentlyContinue)) {
+        Write-Host "Launching the skills CLI for the extras (pick your agents in its UI)..."
+        npx skills add backnotprop/plannotator/apps/skills/extra
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "skills CLI did not complete — install later with: npx skills add backnotprop/plannotator/apps/skills/extra"
+        }
+    } else {
+        Write-Host "Install the extras with: npx skills add backnotprop/plannotator/apps/skills/extra"
+    }
+}
+
+# Install skills and command stubs (requires git).
+#
+# Core skills, Kiro skills/extras, OpenCode command stubs, and Gemini TOML
+# commands are all copied verbatim from a sparse checkout of the release tag.
+# copy-if-present means older pinned tags that lack a given path simply skip it
+# rather than failing. Hard requirement: without git we cannot install the
+# /plannotator-* skills, so fail loudly instead of leaving a partial install.
+# Hook/config writing above has already run; the Pi update and Gemini config
+# below are skipped on failure and complete when the user re-runs.
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    Write-Host "Error: git is required to install Plannotator's skills and slash commands."
+    Write-Host "Install git, then run this installer again."
+    exit 1
+}
+
+$checkoutFailed = $false
+$skillsTmp = Join-Path ([System.IO.Path]::GetTempPath()) "plannotator-skills-$(Get-Random)"
+New-Item -ItemType Directory -Force -Path $skillsTmp | Out-Null
+
+function Copy-SkillIfPresent {
+    param(
+        [string]$SourceDir,
+        [string]$TargetDir
+    )
+
+    if (Test-Path $SourceDir) {
+        # Remove any existing copy first so re-runs replace rather than
+        # nest. PowerShell's `Copy-Item -Recurse` into an existing target
+        # dir copies the source INSIDE it (dest\skill\skill); mirror
+        # install.sh's `rm -rf` guard so upgrades stay clean.
+        $dest = Join-Path $TargetDir (Split-Path $SourceDir -Leaf)
+        if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+        Copy-Item -Recurse -Force $SourceDir $TargetDir
+    }
+}
+
+try {
+    git clone --depth 1 --filter=blob:none --sparse "https://github.com/$repo.git" --branch $latestTag "$skillsTmp\repo" 2>$null
+    # git is a native executable — it does not throw under
+    # $ErrorActionPreference=Stop on non-zero exit. Guard with
+    # Test-Path so we only Push-Location if the clone actually
+    # produced a repo directory.
+    if (Test-Path "$skillsTmp\repo") {
+        Push-Location "$skillsTmp\repo"
+        # Inner try/finally guarantees Pop-Location runs exactly once
+        # after a successful Push-Location, regardless of whether the
+        # copy operations below throw. The naive pattern (Pop-Location
+        # only on the success path) leaks the location stack if a
+        # PS-native cmdlet (Copy-Item etc.) throws under Stop.
+        try {
+            git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands 2>$null
+
+            # Claude Code and Codex consume different skill bodies. Claude Code
+            # reads apps/skills/claude/* (dynamic-context injection
+            # `!`plannotator … $ARGUMENTS`` + allowed-tools, so /plannotator-*
+            # run with no permission prompt — like the old slash commands).
+            # Codex reads apps/skills/core/* (prose the model follows via its
+            # own shell). The `!`…`` injection is a Claude-Code-only extension,
+            # so the two are sourced separately rather than sharing one body.
+            # Route each through Copy-SkillIfPresent (which pre-removes the
+            # existing target dir) so re-runs replace rather than nest.
+            if ((Test-Path "apps\skills\claude") -and (Get-ChildItem "apps\skills\claude" -ErrorAction SilentlyContinue)) {
+                New-Item -ItemType Directory -Force -Path $claudeSkillsDir | Out-Null
+                foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last")) {
+                    Copy-SkillIfPresent "apps\skills\claude\$skill" $claudeSkillsDir
+                }
+                Write-Host "Installed Claude Code skills to $claudeSkillsDir\"
+            } else {
+                Write-Host "Tag $latestTag predates the per-agent skill layout — skipping Claude Code skill install"
+            }
+            if ((Test-Path "apps\skills\core") -and (Get-ChildItem "apps\skills\core" -ErrorAction SilentlyContinue)) {
+                New-Item -ItemType Directory -Force -Path $agentsSkillsDir | Out-Null
+                foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last")) {
+                    Copy-SkillIfPresent "apps\skills\core\$skill" $agentsSkillsDir
+                }
+                Write-Host "Installed shared agent skills to $agentsSkillsDir\"
+            } else {
+                Write-Host "Tag $latestTag predates the core/extra skill layout — skipping shared agent skill install"
+            }
+
+            # Kiro: hand-maintained skills (origin baked in) + two extras.
+            if ($kiroAvailable -and (Test-Path "apps\kiro-cli\skills")) {
+                $kiroSkillsDir = "$env:USERPROFILE\.kiro\skills"
+                New-Item -ItemType Directory -Force -Path $kiroSkillsDir | Out-Null
+                # Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
+                Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-review" $kiroSkillsDir
+                Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-annotate" $kiroSkillsDir
+                # Two extras come from apps/skills/extra (not duplicated into apps/kiro-cli/skills).
+                Copy-SkillIfPresent "apps\skills\extra\plannotator-setup-goal" $kiroSkillsDir
+                Copy-SkillIfPresent "apps\skills\extra\plannotator-visual-explainer" $kiroSkillsDir
+                # Plannotator custom agent — don't clobber a user's existing one.
+                $kiroAgentsDir = "$env:USERPROFILE\.kiro\agents"
+                if (-not (Test-Path "$kiroAgentsDir\plannotator.json") -and (Test-Path "apps\kiro-cli\agents\plannotator.json")) {
+                    New-Item -ItemType Directory -Force -Path $kiroAgentsDir | Out-Null
+                    Copy-Item -Force "apps\kiro-cli\agents\plannotator.json" "$kiroAgentsDir\plannotator.json"
+                }
+                Write-Host "Installed Kiro skills to $kiroSkillsDir\ and agent to $kiroAgentsDir\plannotator.json"
+            }
+
+            # OpenCode command stubs -> ~/.config/opencode/commands (always).
+            # The plugin intercepts execution; these stubs just register the
+            # slash commands in OpenCode.
+            if (Test-Path "apps\opencode-plugin\commands") {
+                $opencodeCommandsDir = "$env:USERPROFILE\.config\opencode\commands"
+                $opencodeCmds = Get-ChildItem "apps\opencode-plugin\commands\*.md" -ErrorAction SilentlyContinue
+                if ($opencodeCmds) {
+                    New-Item -ItemType Directory -Force -Path $opencodeCommandsDir | Out-Null
+                    Copy-Item -Force "apps\opencode-plugin\commands\*.md" $opencodeCommandsDir
+                    Write-Host "Installed OpenCode commands to $opencodeCommandsDir\"
+                }
+            }
+
+            # Gemini TOML commands -> ~/.gemini/commands (only when ~/.gemini exists).
+            # These are Gemini's native command format.
+            if ((Test-Path "$env:USERPROFILE\.gemini") -and (Test-Path "apps\gemini\commands")) {
+                $geminiCommandsDir = "$env:USERPROFILE\.gemini\commands"
+                $geminiCmds = Get-ChildItem "apps\gemini\commands\*.toml" -ErrorAction SilentlyContinue
+                if ($geminiCmds) {
+                    New-Item -ItemType Directory -Force -Path $geminiCommandsDir | Out-Null
+                    Copy-Item -Force "apps\gemini\commands\*.toml" $geminiCommandsDir
+                    Write-Host "Installed Gemini slash commands to $geminiCommandsDir\"
+                }
+            }
+        } finally {
+            Pop-Location
+        }
+    } else {
+        $checkoutFailed = $true
+    }
+} catch {
+    Write-Host "Command/skill install failed: $($_.Exception.Message)"
+    $checkoutFailed = $true
+}
+
+Remove-Item -Recurse -Force $skillsTmp -ErrorAction SilentlyContinue
+
+if ($checkoutFailed) {
+    Write-Host "Error: unable to fetch $repo at $latestTag (network or git error)."
+    Write-Host "Something went wrong — run the installer again."
+    exit 1
+}
+
+# Claude Code commands are deprecated in favor of skills. Remove a legacy
+# command file only once its replacement skill is actually on disk — running
+# AFTER the install above guarantees a failed or skipped skill install never
+# leaves users with neither the command nor the skill.
+foreach ($cmd in @("plannotator-review", "plannotator-annotate", "plannotator-last")) {
+    $cmdPath = Join-Path $claudeCommandsDir "$cmd.md"
+    $skillPath = Join-Path $claudeSkillsDir $cmd
+    if ((Test-Path $skillPath) -and (Test-Path $cmdPath)) {
+        Write-Host "Removing stale Claude command $cmdPath (replaced by the $cmd skill)"
+        Remove-Item -Force $cmdPath -ErrorAction SilentlyContinue
+    }
+}
+
+# plannotator-archive no longer ships as a skill. Remove any stale installed
+# copy from every skill scope so upgraders don't keep a dead skill around.
+foreach ($scope in @($claudeSkillsDir, $agentsSkillsDir, "$env:USERPROFILE\.kiro\skills")) {
+    $staleArchivePath = Join-Path $scope "plannotator-archive"
+    if (Test-Path $staleArchivePath) {
+        Write-Host "Removing stale plannotator-archive skill $staleArchivePath"
+        Remove-Item -Recurse -Force $staleArchivePath -ErrorAction SilentlyContinue
+    }
+}
+# The /plannotator-archive OpenCode command was removed too — sweep the stub.
+$staleOpencodeArchive = "$env:USERPROFILE\.config\opencode\commands\plannotator-archive.md"
+if (Test-Path $staleOpencodeArchive) {
+    Write-Host "Removing stale plannotator-archive command $staleOpencodeArchive"
+    Remove-Item -Force $staleOpencodeArchive -ErrorAction SilentlyContinue
+}
+
+# Codex no longer hosts core skills (they now live in ~/.agents/skills).
+# Core skills are removed only once their replacement exists; the stale
+# shared-agent extras were never Codex's and are removed unconditionally.
+foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-compound", "plannotator-setup-goal")) {
+    $staleSkillPath = Join-Path $staleCodexSkillsDir $skill
+    if (Test-Path $staleSkillPath) {
+        $isCore = $skill -in @("plannotator-review", "plannotator-annotate", "plannotator-last")
+        if ($isCore -and -not (Test-Path (Join-Path $agentsSkillsDir $skill))) { continue }
+        Write-Host "Removing stale Codex skill $staleSkillPath"
+        Remove-Item -Recurse -Force $staleSkillPath -ErrorAction SilentlyContinue
+    }
+}
+
+# Apply the saved model-invocation choices. Installed skill copies always
+# arrive locked (disable-model-invocation: true in SKILL.md); for each chosen
+# skill we unlock the INSTALLED copy by removing that line, and flip the Codex
+# sidecar's allow_implicit_invocation to match. Re-applied on every run
+# because installs replace the skill folders wholesale. Repo sources never
+# change.
+if ($invocableChoice -and ($invocableChoice -ne "none")) {
+    foreach ($skill in ($invocableChoice -split ",")) {
+        foreach ($scope in @($claudeSkillsDir, $agentsSkillsDir)) {
+            $skillMd = Join-Path $scope (Join-Path $skill "SKILL.md")
+            if (Test-Path $skillMd) {
+                $content = Get-Content $skillMd
+                if ($content -contains "disable-model-invocation: true") {
+                    $content | Where-Object { $_ -ne "disable-model-invocation: true" } | Set-Content $skillMd
+                    Write-Host "Enabled model invocation: $scope\$skill"
+                }
+            }
+            $sidecar = Join-Path $scope (Join-Path $skill "agents\openai.yaml")
+            if (Test-Path $sidecar) {
+                $yaml = Get-Content $sidecar -Raw
+                if ($yaml -match "allow_implicit_invocation: false") {
+                    ($yaml -replace "allow_implicit_invocation: false", "allow_implicit_invocation: true") | Set-Content $sidecar -NoNewline
+                }
+            }
+        }
+    }
+}
+
+# Update Pi extension if pi is installed. Pi keeps its extension commands and
+# the plannotator_submit_plan tool; it no longer bundles skills.
 Update-PiExtensionIfPresent
 
 # --- Gemini CLI support (only if Gemini is installed) ---
@@ -675,37 +945,8 @@ fs.writeFileSync('$($geminiSettings.Replace('\','/'))', JSON.stringify(settings,
         Write-Host "Created Gemini settings at $geminiSettings"
     }
 
-    # Install slash commands
-    $geminiCommandsDir = "$geminiDir\commands"
-    New-Item -ItemType Directory -Force -Path $geminiCommandsDir | Out-Null
-
-    @'
-description = "Open interactive code review for current changes or a PR URL"
-prompt = """
-## Code Review Feedback
-
-!{plannotator review {{args}}}
-
-## Your task
-
-If the review above contains feedback or annotations, address them. If no changes were requested, acknowledge and continue.
-"""
-'@ | Set-Content -Path "$geminiCommandsDir\plannotator-review.toml"
-
-    @'
-description = "Open interactive annotation UI for a markdown file or folder"
-prompt = """
-## Markdown Annotations
-
-!{plannotator annotate {{args}}}
-
-## Your task
-
-Address the annotation feedback above. The user has reviewed the markdown file and provided specific annotations and comments.
-"""
-'@ | Set-Content -Path "$geminiCommandsDir\plannotator-annotate.toml"
-
-    Write-Host "Installed Gemini slash commands to $geminiCommandsDir\"
+    # Gemini slash command TOMLs are copied from the sparse checkout
+    # (apps/gemini/commands) in the git-gated skills/commands install above.
 }
 
 Write-Host ""
@@ -728,6 +969,18 @@ Write-Host ""
 Write-Host "  pi install npm:@plannotator/pi-extension"
 Write-Host ""
 Write-Host "=========================================="
+Write-Host "  KIRO CLI USERS"
+Write-Host "=========================================="
+Write-Host ""
+if ($kiroAvailable) {
+    Write-Host "Kiro skills are installed to $env:USERPROFILE\.kiro\skills\"
+    Write-Host "The Plannotator agent is installed to $env:USERPROFILE\.kiro\agents\plannotator.json"
+    Write-Host "Launch it: kiro-cli chat --agent plannotator"
+} else {
+    Write-Host "Kiro was not detected. After installing Kiro, rerun this installer to add Kiro skills."
+}
+Write-Host ""
+Write-Host "=========================================="
 Write-Host "  CLAUDE CODE USERS: YOU ARE ALL SET!"
 Write-Host "=========================================="
 Write-Host ""
@@ -735,7 +988,16 @@ Write-Host "Install the Claude Code plugin:"
 Write-Host "  /plugin marketplace add backnotprop/plannotator"
 Write-Host "  /plugin install plannotator@plannotator"
 Write-Host ""
+Write-Host "Upgrading from an older version? Also run /plugin marketplace update"
+Write-Host "so the plugin drops its old plannotator:* command entries."
+Write-Host ""
 Write-Host "The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready to use after you restart Claude Code!"
+
+if ($extrasChoice -ne "yes") {
+    Write-Host ""
+    Write-Host "Optional skills (compound planning, setup-goal, visual explainer):"
+    Write-Host "  npx skills add backnotprop/plannotator/apps/skills/extra"
+}
 
 # Warn if plannotator is configured in both settings.json hooks AND the plugin (causes double execution)
 # Only warn when the plugin is installed — manual-only users won't have overlap

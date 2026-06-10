@@ -30,6 +30,16 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     },
   },
   {
+    id: 'simple',
+    name: 'Simple',
+    builtIn: true,
+    modeSupport: 'both',
+    colors: {
+      dark: { primary: 'oklch(0.985 0 0)', secondary: 'oklch(0.274 0.006 286.033)', accent: 'oklch(0.274 0.006 286.033)', background: 'oklch(0.141 0.005 285.823)', foreground: 'oklch(0.985 0 0)' },
+      light: { primary: 'oklch(0.21 0.006 285.885)', secondary: 'oklch(0.967 0.001 286.375)', accent: 'oklch(0.967 0.001 286.375)', background: 'oklch(1 0 0)', foreground: 'oklch(0.141 0.005 285.823)' },
+    },
+  },
+  {
     id: 'claude-plus',
     name: 'Absolutely',
     builtIn: true,
@@ -542,6 +552,16 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     colors: {
       dark: { primary: '#4d9375', secondary: '#191919', accent: '#6394bf', background: '#000000', foreground: '#dbd7ca' },
       light: { primary: '#4d9375', secondary: '#191919', accent: '#6394bf', background: '#000000', foreground: '#dbd7ca' },
+    },
+  },
+  {
+    id: 'neutral',
+    name: 'Neutral',
+    builtIn: true,
+    modeSupport: 'both',
+    colors: {
+      dark: { primary: 'oklch(0.985 0 0)', secondary: 'oklch(0.274 0.006 286.033)', accent: 'oklch(0.274 0.006 286.033)', background: 'oklch(0.141 0.005 285.823)', foreground: 'oklch(0.985 0 0)' },
+      light: { primary: 'oklch(0.21 0.006 285.885)', secondary: 'oklch(0.967 0.001 286.375)', accent: 'oklch(0.967 0.001 286.375)', background: 'oklch(1 0 0)', foreground: 'oklch(0.141 0.005 285.823)' },
     },
   },
 ];

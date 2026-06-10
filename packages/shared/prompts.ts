@@ -16,6 +16,9 @@ export function resolveTemplate(
 
 export const PLAN_TOOL_NAMES: Record<PromptRuntime, string> = {
   "claude-code": "ExitPlanMode",
+  amp: "ExitPlanMode",
+  droid: "ExitPlanMode",
+  "kiro-cli": "ExitPlanMode",
   opencode: "submit_plan",
   "copilot-cli": "exit_plan_mode",
   pi: "plannotator_submit_plan",

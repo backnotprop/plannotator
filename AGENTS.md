@@ -7,19 +7,28 @@ A plan review UI for Claude Code that intercepts `ExitPlanMode` via hooks, letti
 ```
 plannotator/
 ├── apps/
-│   ├── hook/                     # Claude Code plugin
+│   ├── hook/                     # Claude Code plugin (no commands/ — core skills installed to ~/.claude/skills act as slash commands)
 │   │   ├── .claude-plugin/plugin.json
-│   │   ├── commands/             # Slash commands (plannotator-review.md, plannotator-annotate.md)
 │   │   ├── hooks/hooks.json      # PermissionRequest hook config
 │   │   ├── server/index.ts       # Entry point (plan + review + annotate + archive subcommands)
 │   │   └── dist/                 # Built single-file apps (index.html, review.html)
 │   ├── opencode-plugin/          # OpenCode plugin
-│   │   ├── commands/             # Slash commands (plannotator-review.md, plannotator-annotate.md)
+│   │   ├── commands/             # Slash command stubs (review, annotate, last — plugin intercepts execution)
 │   │   ├── index.ts              # Plugin entry with submit_plan tool + review/annotate event handlers
 │   │   ├── plannotator.html      # Built plan review app
 │   │   └── review-editor.html    # Built code review app
+│   ├── amp-plugin/               # Amp plugin
+│   │   ├── plannotator.ts        # Native Amp command-palette integration
+│   │   └── README.md             # Install and local development notes
+│   ├── droid-plugin/             # Droid plugin
+│   │   ├── .factory-plugin/plugin.json
+│   │   ├── commands/             # Slash command entrypoints
+│   │   └── lib/                  # Shared command wrapper helpers
 │   ├── marketing/                # Marketing site, docs, and blog (plannotator.ai)
 │   │   └── astro.config.mjs      # Astro 5 static site with content collections
+│   ├── kiro-cli/                 # Kiro CLI integration source (consumed by scripts/install.sh; auto-detected via ~/.kiro)
+│   │   ├── agents/plannotator.json   # Example Kiro custom agent
+│   │   └── skills/               # Kiro-specific skill packages (review, annotate); setup-goal + visual-explainer install from apps/skills/extra
 │   ├── paste-service/            # Paste service for short URL sharing
 │   │   ├── core/                 # Platform-agnostic logic (handler, storage interface, cors)
 │   │   ├── stores/               # Storage backends (fs, kv, s3)
@@ -33,12 +42,14 @@ plannotator/
 │   │   ├── src/                   # extension.ts, cookie-proxy.ts, ipc-server.ts, panel-manager.ts, editor-annotations.ts, vscode-theme.ts
 │   │   └── package.json           # Extension manifest (publisher: backnotprop)
 │   └── skills/                    # Agent skills (agentskills.io format)
-│       ├── plannotator-review/          # Lightweight: opens review UI
-│       ├── plannotator-annotate/        # Lightweight: opens annotate UI
-│       ├── plannotator-last/            # Lightweight: annotates last message
-│       ├── plannotator-compound/        # Research analysis agent (map-reduce over denied plans)
-│       ├── plannotator-setup-goal/      # Goal package scaffolder for /goal workflows
-│       └── plannotator-visual-explainer/ # Visual HTML generator (plans, diagrams, PR explainers) with Plannotator theming
+│       ├── core/                  # CORE skills (single-sourced) — installed to ~/.claude/skills and ~/.agents/skills (Codex)
+│       │   ├── plannotator-review/    # Lightweight: opens review UI
+│       │   ├── plannotator-annotate/  # Lightweight: opens annotate UI
+│       │   └── plannotator-last/      # Lightweight: annotates last message
+│       └── extra/                 # EXTRA skills — NOT default-installed (except Kiro); add via `npx skills add backnotprop/plannotator/apps/skills/extra`
+│           ├── plannotator-compound/        # Research analysis agent (map-reduce over denied plans)
+│           ├── plannotator-setup-goal/      # Goal package scaffolder for /goal workflows
+│           └── plannotator-visual-explainer/ # Visual HTML generator (plans, diagrams, PR explainers) with Plannotator theming
 ├── packages/
 │   ├── server/                   # Shared server implementation
 │   │   ├── index.ts              # startPlannotatorServer(), handleServerReady()
@@ -121,9 +132,13 @@ claude --plugin-dir ./apps/hook
 | `PLANNOTATOR_SHARE` | Set to `disabled` to turn off URL sharing entirely. Default: enabled. |
 | `PLANNOTATOR_SHARE_URL` | Custom base URL for share links (self-hosted portal). Default: `https://share.plannotator.ai`. |
 | `PLANNOTATOR_PASTE_URL` | Base URL of the paste service API for short URL sharing. Default: `https://plannotator-paste.plannotator.workers.dev`. |
-| `PLANNOTATOR_ORIGIN` | Explicit agent-origin override at the top of the detection chain. Valid values: `claude-code`, `opencode`, `codex`, `copilot-cli`, `gemini-cli`. Invalid values silently fall through to env-based detection. Unset by default. |
+| `PLANNOTATOR_ORIGIN` | Explicit agent-origin override at the top of the detection chain. Valid values: `claude-code`, `amp`, `droid`, `opencode`, `codex`, `copilot-cli`, `gemini-cli`, `kiro-cli`, `pi`. Invalid values silently fall through to env-based detection. Unset by default. |
 | `PLANNOTATOR_JINA` | Set to `0` / `false` to disable Jina Reader for URL annotation, or `1` / `true` to enable. Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "jina": false }`) or per-invocation via `--no-jina`. |
 | `JINA_API_KEY` | Optional Jina Reader API key for higher rate limits (500 RPM vs 20 RPM unauthenticated). Free keys include 10M tokens. |
+| `PLANNOTATOR_DATA_DIR` | Override the base data directory. Supports `~` expansion. Default: `~/.plannotator`. All data (plans, history, drafts, config, hooks, sessions, debug logs, IPC registry) is stored under this directory. |
+| `PLANNOTATOR_GLIMPSE` | Set to `0` / `false` to disable the Glimpse native window even when `glimpseui` is installed. Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "glimpse": false }`). |
+| `PLANNOTATOR_GLIMPSE_WIDTH` | Width in pixels for the Glimpse native window. Default: `1280`. |
+| `PLANNOTATOR_GLIMPSE_HEIGHT` | Height in pixels for the Glimpse native window. Default: `900`. |
 | `PLANNOTATOR_VERIFY_ATTESTATION` | **Read by the install scripts only**, not by the runtime binary. Set to `1` / `true` to have `scripts/install.sh` / `install.ps1` / `install.cmd` run `gh attestation verify` on every install. Off by default. Can also be set persistently via `~/.plannotator/config.json` (`{ "verifyAttestation": true }`) or per-invocation via `--verify-attestation`. Requires `gh` installed and authenticated. |
 
 **Config-only settings (`~/.plannotator/config.json`)**: Some settings have no env-var equivalent and are toggled by editing the config file directly:
@@ -163,7 +178,9 @@ User runs /plannotator-review command
 Claude Code: plannotator review subcommand runs
 OpenCode: event handler intercepts command
         ↓
-VCS diff captures local changes (git diff or jj diff)
+VCS diff captures local changes (git diff or jj diff). When review runs from a
+non-VCS parent that contains nested Git repos, child diffs are combined with
+folder-prefixed paths.
         ↓
 Review server starts, opens browser with diff viewer
         ↓
@@ -172,6 +189,23 @@ User annotates code, provides feedback
 Send Feedback → feedback sent to agent session
 Approve → "LGTM" sent to agent session
 ```
+
+## Ask AI Provider Defaults
+
+Ask AI providers are detected independently from installed/authenticated local CLIs, then the UI picks a default from the detected Plannotator origin. The mapping lives in `packages/shared/agents.ts` and is applied by `packages/ui/utils/aiProvider.ts`:
+
+| Origin | Preferred Ask AI provider |
+|--------|---------------------------|
+| `claude-code` | `claude-agent-sdk` |
+| `amp` | no dedicated provider; fallback to saved/server default |
+| `droid` | no dedicated provider; fallback to saved/server default |
+| `codex` | `codex-sdk` |
+| `opencode` | `opencode-sdk` |
+| `pi` | `pi-sdk` |
+| `copilot-cli` | no dedicated provider; fallback to saved/server default |
+| `gemini-cli` | no dedicated provider; fallback to saved/server default |
+
+Per-origin choices are persisted in cookies, so a user can override the automatic match for one agent without changing the default for another.
 
 ## Annotate Flow
 
@@ -197,7 +231,7 @@ Send Annotations → feedback sent to agent session
 ## Archive Flow
 
 ```
-User runs plannotator archive (CLI) or /plannotator-archive (Pi)
+User runs plannotator archive (CLI)
         ↓
 Server starts in mode:"archive", reads ~/.plannotator/plans/
         ↓
@@ -235,6 +269,12 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/draft`          | GET/POST/DELETE | Auto-save annotation drafts to survive server crashes |
 | `/api/editor-annotations` | GET | List editor annotations (VS Code only) |
 | `/api/editor-annotation` | POST/DELETE | Add or remove an editor annotation (VS Code only) |
+| `/api/ai/capabilities` | GET | Check if AI features are available |
+| `/api/ai/session` | POST | Create or fork an AI session |
+| `/api/ai/query` | POST | Send a message and stream the response (SSE) |
+| `/api/ai/abort` | POST | Abort the current query |
+| `/api/ai/permission` | POST | Respond to a permission request |
+| `/api/ai/sessions` | GET | List active sessions |
 | `/api/external-annotations/stream` | GET | SSE stream for real-time external annotations |
 | `/api/external-annotations` | GET | Snapshot of external annotations (polling fallback, `?since=N` for version gating) |
 | `/api/external-annotations` | POST | Add external annotations (single or batch `{ annotations: [...] }`) |
@@ -245,8 +285,9 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 
 | Endpoint              | Method | Purpose                                    |
 | --------------------- | ------ | ------------------------------------------ |
-| `/api/diff`           | GET    | Returns `{ rawPatch, gitRef, origin, diffType, base, hideWhitespace, gitContext }` |
-| `/api/diff/switch`    | POST   | Switch diff type, base branch, or whitespace mode (body: `{ diffType, base?, hideWhitespace? }`) |
+| `/api/diff`           | GET    | Returns `{ rawPatch, gitRef, origin, mode?, diffType, base, hideWhitespace, gitContext, agentCwd?, semanticDiff? }`. Workspace mode returns `mode: "workspace"` with folder-prefixed paths and no `gitContext`. |
+| `/api/diff/switch`    | POST   | Switch diff type, base branch, or whitespace mode (body: `{ diffType, base?, hideWhitespace? }`). Response includes `semanticDiff?`. |
+| `/api/semantic-diff`  | GET    | Runs semantic diff for the active patch and returns parsed sem output or an unavailable/error response (`?fileExt=` / `?fileExts=` optional). |
 | `/api/file-content`   | GET    | Returns `{ oldContent, newContent }` for expandable diff context (`?path=&oldPath=&base=`) |
 | `/api/git-add`        | POST   | Stage/unstage a file (body: `{ filePath, undo? }`) |
 | `/api/feedback`       | POST   | Submit review (body: feedback, annotations, agentSwitch) |
@@ -272,9 +313,9 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/agents/jobs` | POST | Launch an agent job (body: `{ provider, command, label }`) |
 | `/api/agents/jobs` | DELETE | Kill all running agent jobs |
 | `/api/agents/jobs/:id` | DELETE | Kill a specific agent job |
-| `/api/pr-diff-scope` | POST | Switch between layer and full-stack diff scope |
+| `/api/pr-diff-scope` | POST | Switch between layer and full-stack diff scope. Response includes `semanticDiff?`. |
 | `/api/pr-list` | GET | List PRs for the current repo (cached 30s) |
-| `/api/pr-switch` | POST | Switch to a different PR in-place (body: `{ url }`) |
+| `/api/pr-switch` | POST | Switch to a different PR in-place (body: `{ url }`). Response includes `semanticDiff?`. |
 | `/api/tour/:jobId` | GET | Fetch Code Tour result (greeting, stops, checklist) for a completed tour job |
 | `/api/tour/:jobId/checklist` | PUT | Persist checklist item state for a Code Tour |
 | `/api/code-nav/resolve` | POST | Search for symbol definitions and references via ripgrep (body: `{ symbol, filePath, line, charStart, side, language? }`) |
@@ -293,6 +334,12 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/doc`            | GET    | Serve linked .md/.mdx/.html file or code file (`?path=<path>&base=<dir>`) |
 | `/api/doc/exists`     | POST   | Batch-validate code-file paths (body: `{ paths: string[], base?: string }`) |
 | `/api/draft`          | GET/POST/DELETE | Auto-save annotation drafts to survive server crashes |
+| `/api/ai/capabilities` | GET | Check if AI features are available |
+| `/api/ai/session` | POST | Create or fork an AI session |
+| `/api/ai/query` | POST | Send a message and stream the response (SSE) |
+| `/api/ai/abort` | POST | Abort the current query |
+| `/api/ai/permission` | POST | Respond to a permission request |
+| `/api/ai/sessions` | GET | List active sessions |
 | `/api/external-annotations/stream` | GET | SSE stream for real-time external annotations |
 | `/api/external-annotations` | GET | Snapshot of external annotations (polling fallback, `?since=N` for version gating) |
 | `/api/external-annotations` | POST | Add external annotations (single or batch `{ annotations: [...] }`) |

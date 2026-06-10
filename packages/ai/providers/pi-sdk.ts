@@ -16,6 +16,11 @@ import type {
 	CreateSessionOptions,
 	PiSDKConfig,
 } from "../types.ts";
+import {
+	buildWindowsCommandScriptSpawnCommand,
+	killWindowsProcessTree,
+	resolveWindowsCommandShim,
+} from "./command-path.ts";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -44,27 +49,47 @@ class PiProcess {
 	private _alive = false;
 
 	async spawn(piPath: string, cwd: string): Promise<void> {
-		this.proc = Bun.spawn([piPath, "--mode", "rpc"], {
-			cwd,
-			stdin: "pipe",
-			stdout: "pipe",
-			stderr: "pipe",
-		});
+		const commandPath = resolveWindowsCommandShim(piPath);
+		const command =
+			buildWindowsCommandScriptSpawnCommand(commandPath, ["--mode", "rpc"]) ?? [
+				commandPath,
+				"--mode",
+				"rpc",
+			];
+		try {
+			this.proc = Bun.spawn(command, {
+				cwd,
+				stdin: "pipe",
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+		} catch (err) {
+			const error = err instanceof Error ? err : new Error(String(err));
+			this.handleProcessEnd(error);
+			throw error;
+		}
 		this._alive = true;
 
 		this.readStream();
 
 		this.proc.exited.then(() => {
-			this._alive = false;
-			for (const [, pending] of this.pendingRequests) {
-				pending.reject(new Error("Pi process exited unexpectedly"));
-			}
-			this.pendingRequests.clear();
-			// Signal active query listeners so the drain loop exits with an error
-			for (const listener of this.listeners) {
-				listener({ type: "process_exited" });
-			}
+			this.handleProcessEnd(new Error("Pi process exited unexpectedly"));
 		});
+	}
+
+	private handleProcessEnd(error: Error): void {
+		if (!this.proc && this.pendingRequests.size === 0) return;
+
+		this._alive = false;
+		this.proc = null;
+		for (const [, pending] of this.pendingRequests) {
+			pending.reject(error);
+		}
+		this.pendingRequests.clear();
+		// Signal active query listeners so the drain loop exits with an error
+		for (const listener of this.listeners) {
+			listener({ type: "process_exited" });
+		}
 	}
 
 	private async readStream(): Promise<void> {
@@ -153,9 +178,12 @@ class PiProcess {
 
 	kill(): void {
 		this._alive = false;
-		if (this.proc) {
-			this.proc.kill();
-			this.proc = null;
+		const proc = this.proc;
+		this.proc = null;
+		if (proc) {
+			if (!killWindowsProcessTree(proc.pid)) {
+				proc.kill();
+			}
 		}
 		this.listeners.length = 0;
 		for (const [, pending] of this.pendingRequests) {

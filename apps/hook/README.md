@@ -106,7 +106,7 @@ Host your-server
 
 ## Slash Commands
 
-The plugin registers three slash commands:
+Plannotator's slash commands are installed as Claude Code skills in `~/.claude/skills` by the install script (the canonical source is `apps/skills/core/`). Claude Code skills are user-invocable by directory name, so these three work like slash commands inside your session:
 
 | Command | Description |
 |---------|-------------|

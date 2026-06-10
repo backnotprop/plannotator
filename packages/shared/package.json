@@ -6,9 +6,12 @@
     "./agents": "./agents.ts",
     "./compress": "./compress.ts",
     "./crypto": "./crypto.ts",
+    "./diff-paths": "./diff-paths.ts",
     "./feedback-templates": "./feedback-templates.ts",
     "./jj-core": "./jj-core.ts",
     "./review-core": "./review-core.ts",
+    "./review-workspace": "./review-workspace.ts",
+    "./review-workspace-node": "./review-workspace-node.ts",
     "./review-args": "./review-args.ts",
     "./vcs-core": "./vcs-core.ts",
     "./checklist": "./checklist.ts",
@@ -29,6 +32,7 @@
     "./external-annotation": "./external-annotation.ts",
     "./agent-jobs": "./agent-jobs.ts",
     "./config": "./config.ts",
+    "./data-dir": "./data-dir.ts",
     "./prompts": "./prompts.ts",
     "./improvement-hooks": "./improvement-hooks.ts",
     "./pfm-reminder": "./pfm-reminder.ts",
@@ -39,7 +43,10 @@
     "./tour": "./tour.ts",
     "./annotate-args": "./annotate-args.ts",
     "./at-reference": "./at-reference.ts",
-    "./code-nav": "./code-nav.ts"
+    "./code-nav": "./code-nav.ts",
+    "./goal-setup": "./goal-setup.ts",
+    "./semantic-diff": "./semantic-diff.ts",
+    "./semantic-diff-types": "./semantic-diff-types.ts"
   },
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.64",

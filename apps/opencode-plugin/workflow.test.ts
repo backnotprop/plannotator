@@ -25,6 +25,13 @@ describe("normalizeWorkflowOptions", () => {
     expect(options.workflow).toBe("plan-agent");
   });
 
+  test("defaults runtime to auto and accepts explicit runtime modes", () => {
+    expect(normalizeWorkflowOptions(undefined).runtime).toBe("auto");
+    expect(normalizeWorkflowOptions({ runtime: "cli" }).runtime).toBe("cli");
+    expect(normalizeWorkflowOptions({ runtime: "embedded" }).runtime).toBe("embedded");
+    expect(normalizeWorkflowOptions({ runtime: "wat" }).runtime).toBe("auto");
+  });
+
   test("always includes plan and adds trimmed unique planning agents", () => {
     const options = normalizeWorkflowOptions({
       workflow: "plan-agent",
@@ -132,6 +139,34 @@ describe("applyWorkflowConfig", () => {
     expect(config.agent.plan.permission.submit_plan).toBe("allow");
     expect(config.agent.plan.permission.edit).toEqual({ "*.md": "allow" });
     expect(config.agent.build.permission.submit_plan).toBe("deny");
+  });
+
+  test("plan-agent mode ignores malformed primary_tools instead of spreading it", () => {
+    const config: any = {
+      experimental: {
+        primary_tools: "bash",
+        other: true,
+      },
+    };
+
+    applyWorkflowConfig(config, normalizeWorkflowOptions(undefined), false);
+
+    expect(config.experimental).toEqual({
+      primary_tools: ["submit_plan"],
+      other: true,
+    });
+  });
+
+  test("plan-agent mode filters and deduplicates primary_tools", () => {
+    const config: any = {
+      experimental: {
+        primary_tools: [" bash ", "bash", "", 123, "submit_plan"],
+      },
+    };
+
+    applyWorkflowConfig(config, normalizeWorkflowOptions(undefined), false);
+
+    expect(config.experimental.primary_tools).toEqual(["bash", "submit_plan"]);
   });
 
   test("plan-agent mode preserves user agent fields and adds custom planning agents", () => {

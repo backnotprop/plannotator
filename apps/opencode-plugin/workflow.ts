@@ -1,20 +1,25 @@
 import { normalizeEditPermission } from "./plan-mode";
 
 export type WorkflowMode = "manual" | "user-managed" | "plan-agent" | "all-agents";
+export type RuntimeMode = "auto" | "embedded" | "cli";
 
 export interface PlannotatorOpenCodeOptions {
   workflow?: unknown;
   planningAgents?: unknown;
+  runtime?: unknown;
 }
 
 export interface NormalizedWorkflowOptions {
   workflow: WorkflowMode;
   planningAgents: string[];
   planningAgentSet: Set<string>;
+  runtime: RuntimeMode;
 }
 
 const WORKFLOWS = new Set<WorkflowMode>(["manual", "user-managed", "plan-agent", "all-agents"]);
+const RUNTIMES = new Set<RuntimeMode>(["auto", "embedded", "cli"]);
 const DEFAULT_WORKFLOW: WorkflowMode = "plan-agent";
+const DEFAULT_RUNTIME: RuntimeMode = "auto";
 const DEFAULT_PLANNING_AGENTS = ["plan"];
 const BUILTIN_PLAN_AGENT = "plan";
 
@@ -26,7 +31,7 @@ type AgentConfig = {
 
 type OpenCodeConfig = {
   experimental?: {
-    primary_tools?: string[];
+    primary_tools?: unknown;
     [key: string]: any;
   };
   agent?: Record<string, AgentConfig>;
@@ -44,11 +49,20 @@ export function normalizeWorkflowOptions(
     : DEFAULT_WORKFLOW;
 
   const planningAgents = normalizePlanningAgents(rawOptions?.planningAgents);
+  const runtime = normalizeRuntime(rawOptions?.runtime);
   return {
     workflow,
     planningAgents,
     planningAgentSet: new Set(planningAgents),
+    runtime,
   };
+}
+
+function normalizeRuntime(value: unknown): RuntimeMode {
+  const rawRuntime = typeof value === "string" ? value.trim() : "";
+  return RUNTIMES.has(rawRuntime as RuntimeMode)
+    ? rawRuntime as RuntimeMode
+    : DEFAULT_RUNTIME;
 }
 
 function normalizePlanningAgents(value: unknown): string[] {
@@ -67,6 +81,22 @@ function normalizePlanningAgents(value: unknown): string[] {
   }
 
   return agents;
+}
+
+function normalizePrimaryTools(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+
+  const seen = new Set<string>();
+  const tools: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const trimmed = item.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    tools.push(trimmed);
+  }
+
+  return tools;
 }
 
 export function isPlanningAgent(
@@ -121,13 +151,13 @@ export function applyWorkflowConfig(
   if (options.workflow === "manual" || options.workflow === "user-managed") return;
 
   if (!allowSubagents) {
-    const existingPrimaryTools = opencodeConfig.experimental?.primary_tools ?? [];
-    if (!existingPrimaryTools.includes("submit_plan")) {
-      opencodeConfig.experimental = {
-        ...opencodeConfig.experimental,
-        primary_tools: [...existingPrimaryTools, "submit_plan"],
-      };
-    }
+    const existingPrimaryTools = normalizePrimaryTools(opencodeConfig.experimental?.primary_tools);
+    opencodeConfig.experimental = {
+      ...opencodeConfig.experimental,
+      primary_tools: existingPrimaryTools.includes("submit_plan")
+        ? existingPrimaryTools
+        : [...existingPrimaryTools, "submit_plan"],
+    };
   }
 
   opencodeConfig.agent ??= {};

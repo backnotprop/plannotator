@@ -1,9 +1,10 @@
 import { join } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { mkdir, writeFile, readFile, unlink } from "node:fs/promises";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import type { DiffType } from "../vcs";
 import type { PRMetadata } from "../pr";
-import { getLocalDiffInstruction } from "../agent-review-message";
+import { buildWorkspacePromptContextLines, getLocalDiffInstruction, type WorkspaceReviewPromptContext } from "../agent-review-message";
 import type {
   CodeTourOutput,
   TourDiffAnchor,
@@ -288,9 +289,13 @@ callouts. The primary question is "what does this change do and why?" not
 export function buildTourUserMessage(
   patch: string,
   diffType: DiffType,
-  options?: { defaultBranch?: string; hasLocalAccess?: boolean; prDiffScope?: string },
+  options?: { defaultBranch?: string; hasLocalAccess?: boolean; prDiffScope?: string; workspace?: WorkspaceReviewPromptContext },
   prMetadata?: PRMetadata,
 ): string {
+  if (options?.workspace) {
+    return buildWorkspaceTourUserMessage(patch, options.workspace);
+  }
+
   if (prMetadata) {
     if (options?.prDiffScope === "full-stack") {
       return [
@@ -332,6 +337,21 @@ export function buildTourUserMessage(
   ].join("\n");
 }
 
+function buildWorkspaceTourUserMessage(
+  patch: string,
+  workspace: WorkspaceReviewPromptContext,
+): string {
+  return [
+    "Walk the reviewer through the local workspace changes across multiple nested VCS repositories.",
+    "",
+    ...buildWorkspacePromptContextLines(workspace),
+    "",
+    "```diff",
+    patch,
+    "```",
+  ].join("\n");
+}
+
 export interface TourClaudeCommandResult {
   command: string[];
   stdinPrompt: string;
@@ -344,7 +364,7 @@ export function buildTourClaudeCommand(prompt: string, model: string = "sonnet",
     "Bash(git show:*)", "Bash(git blame:*)", "Bash(git branch:*)",
     "Bash(git grep:*)", "Bash(git ls-remote:*)", "Bash(git ls-tree:*)",
     "Bash(git merge-base:*)", "Bash(git remote:*)", "Bash(git rev-parse:*)",
-    "Bash(git show-ref:*)",
+    "Bash(git show-ref:*)", "Bash(git -C:*)",
     "Bash(jj status:*)", "Bash(jj diff:*)", "Bash(jj log:*)",
     "Bash(jj show:*)", "Bash(jj file show:*)", "Bash(jj cat:*)",
     "Bash(jj bookmark list:*)",
@@ -383,7 +403,7 @@ export function buildTourClaudeCommand(prompt: string, model: string = "sonnet",
   };
 }
 
-const TOUR_SCHEMA_DIR = join(homedir(), ".plannotator");
+const TOUR_SCHEMA_DIR = getPlannotatorDataDir();
 const TOUR_SCHEMA_FILE = join(TOUR_SCHEMA_DIR, "tour-schema.json");
 let tourSchemaMaterialized = false;
 
@@ -474,7 +494,7 @@ export interface TourSessionBuildCommandOptions {
   cwd: string;
   patch: string;
   diffType: DiffType;
-  options?: { defaultBranch?: string; hasLocalAccess?: boolean };
+  options?: { defaultBranch?: string; hasLocalAccess?: boolean; prDiffScope?: string; workspace?: WorkspaceReviewPromptContext };
   prMetadata?: PRMetadata;
   config?: Record<string, unknown>;
 }

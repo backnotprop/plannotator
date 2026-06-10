@@ -5,6 +5,38 @@ import { ImageThumbnail } from './ImageThumbnail';
 import { EditorAnnotationCard } from './EditorAnnotationCard';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { OverlayScrollArea } from './OverlayScrollArea';
+import { Button } from './ui/button';
+import { cn } from '../lib/utils';
+
+// Card type-word colors. Deletion uses `destructive` (reliably red on every
+// theme, matching the in-document .deletion highlight). Comment uses the
+// `annotation-comment` token, which defaults to each theme's --accent (so it
+// stays consistent with the .comment highlight) but is overridden to a legible
+// blue in neutral themes whose accent is a low-contrast gray (e.g. "simple").
+// Global has no in-document highlight, so it uses a fixed legible purple.
+const TYPE_COLOR: Record<AnnotationType, string> = {
+  [AnnotationType.DELETION]: 'text-destructive',
+  [AnnotationType.COMMENT]: 'text-annotation-comment',
+  [AnnotationType.GLOBAL_COMMENT]: 'text-purple-500',
+};
+
+const TYPE_LABEL: Record<AnnotationType, string> = {
+  [AnnotationType.DELETION]: 'Deletion',
+  [AnnotationType.COMMENT]: 'Comment',
+  [AnnotationType.GLOBAL_COMMENT]: 'Global',
+};
+
+const PencilIcon = () => (
+  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+  </svg>
+);
+
+const TrashCardIcon = () => (
+  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+  </svg>
+);
 
 interface PanelProps {
   isOpen: boolean;
@@ -19,7 +51,7 @@ interface PanelProps {
   onDeleteCodeAnnotation?: (id: string) => void;
   onEditCodeAnnotation?: (id: string, updates: Partial<CodeAnnotation>) => void;
   sharingEnabled?: boolean;
-  width?: number;
+  width?: number | string;
   editorAnnotations?: EditorAnnotation[];
   onDeleteEditorAnnotation?: (id: string) => void;
   onClose?: () => void;
@@ -76,38 +108,42 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   const panel = (
     <aside
       data-annotation-panel="true"
-      className={`border-l border-border/50 bg-card/30 backdrop-blur-sm flex flex-col flex-shrink-0 ${
+      data-plan-sidebar="right"
+      className={`border-l border-border/50 bg-card flex flex-col flex-shrink-0 ${
         isMobile ? 'fixed top-12 bottom-0 right-0 z-[60] w-full max-w-sm shadow-2xl bg-card' : ''
       }`}
       style={isMobile ? undefined : { width: width ?? 288 }}
     >
       {/* Header */}
-      <div className="p-3 border-b border-border/50">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            Annotations
-          </h2>
+      <div className="border-b border-border/50">
+        <div className="flex h-10 items-center justify-between px-3">
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-              {totalCount}
-            </span>
-            {isMobile && onClose && (
-              <button
-                onClick={onClose}
-                className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                title="Close panel"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+            <h2 className="text-xs font-medium text-foreground">
+              Annotations
+            </h2>
+            {totalCount > 0 && (
+              <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary/10 px-1 font-mono text-[10px] font-medium tabular-nums text-primary">
+                {totalCount}
+              </span>
             )}
           </div>
+          {isMobile && onClose && (
+            <button
+              onClick={onClose}
+              className="relative rounded-md p-1.5 text-muted-foreground transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:text-foreground md:hidden"
+              title="Close panel"
+              aria-label="Close panel"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
         </div>
         {otherFileAnnotations && otherFileAnnotations.count > 0 && (
           <button
             onClick={onOtherFileAnnotationsClick}
-            className="mt-1.5 text-[10px] text-primary/70 hover:text-primary transition-colors cursor-pointer"
+            className="px-3 pb-2 text-[10px] text-primary/70 hover:text-primary transition-colors cursor-pointer"
             title="Show annotated files in sidebar"
           >
             +{otherFileAnnotations.count} in {otherFileAnnotations.files} other file{otherFileAnnotations.files === 1 ? '' : 's'}
@@ -117,16 +153,14 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
 
       {/* List */}
       <OverlayScrollArea className="flex-1 min-h-0">
-        <div ref={listRef} className="p-2 space-y-1.5">
+        <div ref={listRef} className="p-2 flex flex-col gap-1.5">
         {totalCount === 0 ? (
-          <div className="flex flex-col items-center justify-center h-40 text-center px-4">
-            <div className="w-10 h-10 rounded-full bg-muted/50 flex items-center justify-center mb-3">
-              <svg className="w-5 h-5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-              </svg>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Select text or code lines to add annotations
+          <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
+            <p className="text-xs text-muted-foreground/60">
+              No annotations yet
+            </p>
+            <p className="mt-1 text-[11px] text-muted-foreground/40">
+              Select text to annotate
             </p>
           </div>
         ) : (
@@ -137,6 +171,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                   key={entry.annotation.id}
                   annotation={entry.annotation}
                   isSelected={selectedId === entry.annotation.id}
+                  isMe={isCurrentUser(entry.annotation.author)}
                   onSelect={() => onSelect(entry.annotation.id)}
                   onDelete={() => onDelete(entry.annotation.id)}
                   onEdit={onEdit ? (updates: Partial<Annotation>) => onEdit(entry.annotation.id, updates) : undefined}
@@ -146,6 +181,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                   key={entry.annotation.id}
                   annotation={entry.annotation}
                   isSelected={selectedId === entry.annotation.id}
+                  isMe={isCurrentUser(entry.annotation.author)}
                   onSelect={() => onSelectCodeAnnotation?.(entry.annotation.id)}
                   onDelete={() => onDeleteCodeAnnotation?.(entry.annotation.id)}
                   onEdit={onEditCodeAnnotation ? (updates: Partial<CodeAnnotation>) => onEditCodeAnnotation(entry.annotation.id, updates) : undefined}
@@ -178,7 +214,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
 
       {/* Quick Actions Footer */}
       {totalCount > 0 && (
-        <div className="p-2 border-t border-border/50 flex gap-1.5">
+        <div className="border-t border-border/50 px-3 py-2 flex gap-1.5">
           {onQuickCopy && (
             <button
               onClick={async () => {
@@ -186,7 +222,9 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                 setCopiedText(true);
                 setTimeout(() => setCopiedText(false), 2000);
               }}
-              className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all text-muted-foreground hover:text-foreground hover:bg-muted/50"
+              className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-medium transition-colors ${
+                copiedText ? 'text-green-500' : 'text-muted-foreground hover:bg-surface-1 hover:text-foreground'
+              }`}
             >
               {copiedText ? (
                 <>
@@ -208,7 +246,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
           {sharingEnabled && onShare && (
             <button
               onClick={onShare}
-              className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all text-muted-foreground hover:text-foreground hover:bg-muted/50"
+              className="flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-medium transition-colors text-muted-foreground hover:bg-surface-1 hover:text-foreground"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
@@ -255,10 +293,11 @@ function formatTimestamp(ts: number): string {
 const AnnotationCard: React.FC<{
   annotation: Annotation;
   isSelected: boolean;
+  isMe: boolean;
   onSelect: () => void;
   onDelete: () => void;
   onEdit?: (updates: Partial<Annotation>) => void;
-}> = ({ annotation, isSelected, onSelect, onDelete, onEdit }) => {
+}> = ({ annotation, isSelected, isMe, onSelect, onDelete, onEdit }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(annotation.text || '');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -305,196 +344,105 @@ const AnnotationCard: React.FC<{
     }
   };
 
-  const typeConfig = {
-    [AnnotationType.DELETION]: {
-      label: 'Delete',
-      color: 'text-destructive',
-      bg: 'bg-destructive/10',
-      icon: (
-        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-        </svg>
-      )
-    },
-    [AnnotationType.COMMENT]: {
-      label: 'Comment',
-      color: 'text-accent',
-      bg: 'bg-accent/10',
-      icon: (
-        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-        </svg>
-      )
-    },
-    [AnnotationType.GLOBAL_COMMENT]: {
-      label: 'Global',
-      color: 'text-secondary',
-      bg: 'bg-secondary/10',
-      icon: (
-        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
-        </svg>
-      )
-    }
-  };
+  const typeColor = TYPE_COLOR[annotation.type] ?? 'text-muted-foreground';
+  const typeLabel = TYPE_LABEL[annotation.type] ?? 'Note';
+  const isGlobal = annotation.type === AnnotationType.GLOBAL_COMMENT;
 
-  // Fallback for unknown types (forward compatibility)
-  const config = typeConfig[annotation.type] || {
-    label: 'Note',
-    color: 'text-muted-foreground',
-    bg: 'bg-muted/50',
-    icon: (
-      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
-    )
-  };
+  // Shared edit textarea — matches the prototype composer primitive
+  const editComposer = (
+    <div onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+      <textarea
+        ref={textareaRef}
+        value={editText}
+        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setEditText(e.target.value)}
+        onKeyDown={handleKeyDown}
+        placeholder="Add your comment..."
+        aria-label="Annotation comment"
+        className="w-full resize-none rounded-lg border border-border/50 bg-card px-2.5 py-2 text-base leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 focus:border-primary/40 focus:ring-1 focus:ring-primary/20"
+        style={{ fieldSizing: 'content', minHeight: 44 } as React.CSSProperties}
+      />
+      <div className="mt-1.5 flex justify-end gap-1.5">
+        <Button variant="ghost" size="xxs" onClick={handleCancelEdit}>Cancel</Button>
+        <Button size="xxs" disabled={!editText.trim()} onClick={handleSaveEdit}>Save</Button>
+      </div>
+    </div>
+  );
 
   return (
     <div
       data-annotation-id={annotation.id}
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
-      className={`
-        group relative p-2.5 rounded-lg border cursor-pointer transition-all
-        ${isSelected
-          ? 'bg-primary/5 border-primary/30 shadow-sm'
-          : 'border-transparent hover:bg-muted/50 hover:border-border/50'
+      onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
+        if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
+          e.preventDefault();
+          onSelect();
         }
-      `}
-    >
-      {/* Author */}
-      {annotation.author && (
-        <div className={`flex items-center gap-1.5 text-[10px] font-mono truncate mb-1.5 ${isCurrentUser(annotation.author) ? 'text-muted-foreground/60' : 'text-muted-foreground'}`}>
-          <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-          </svg>
-          <span className="truncate">{annotation.author}{isCurrentUser(annotation.author) && ' (me)'}</span>
-        </div>
+      }}
+      className={cn(
+        'group w-full cursor-pointer rounded-lg px-3 py-2.5 text-left transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+        isSelected ? 'bg-surface-1 ring-1 ring-border/50' : 'hover:bg-surface-1/50',
       )}
-
-      {/* Type Badge + Timestamp + Actions */}
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <div className={`flex items-center gap-1.5 ${config.color}`}>
-            <span className={`p-1 rounded ${config.bg}`}>
-              {config.icon}
-            </span>
-            <span className="text-[10px] font-semibold uppercase tracking-wide">
-              {config.label}
-            </span>
-          </div>
-          {annotation.diffContext && (
-            <span className="text-[9px] px-1.5 py-0.5 rounded font-medium bg-muted text-muted-foreground">
-              diff
-            </span>
-          )}
-          <span className="text-[10px] text-muted-foreground/50">
-            {formatTimestamp(annotation.createdA)}
+    >
+      {/* Header: type word + author · time + actions */}
+      <div className="mb-1.5 flex items-center gap-1.5">
+        <span className={cn('text-[11px] font-medium', typeColor)}>{typeLabel}</span>
+        {annotation.diffContext && (
+          <span className="text-[9px] px-1.5 py-0.5 rounded font-medium bg-muted text-muted-foreground">
+            diff
           </span>
-        </div>
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-all">
+        )}
+        <span className="text-[10px] text-muted-foreground/50 truncate">
+          {annotation.author ? `${annotation.author}${isMe ? ' (me)' : ''} · ` : ''}{formatTimestamp(annotation.createdA)}
+        </span>
+        <div className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 [@media(hover:none)]:opacity-100">
           {onEdit && annotation.type !== AnnotationType.DELETION && !isEditing && (
             <button
+              type="button"
               onClick={handleStartEdit}
-              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-all"
+              className="relative rounded-md p-1.5 text-muted-foreground transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:text-foreground"
               title="Edit annotation"
             >
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-              </svg>
+              <PencilIcon />
             </button>
           )}
           <button
+            type="button"
             onClick={(e: React.MouseEvent<HTMLButtonElement>) => { e.stopPropagation(); onDelete(); }}
-            className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+            className="relative rounded-md p-1.5 text-muted-foreground transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:text-destructive"
             title="Delete annotation"
           >
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <TrashCardIcon />
           </button>
         </div>
       </div>
 
       {/* Global Comment - show text directly */}
-      {annotation.type === AnnotationType.GLOBAL_COMMENT ? (
+      {isGlobal ? (
         isEditing ? (
-          <div className="space-y-2">
-            <textarea
-              ref={textareaRef}
-              value={editText}
-              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setEditText(e.target.value)}
-              onKeyDown={handleKeyDown}
-              onClick={(e: React.MouseEvent<HTMLTextAreaElement>) => e.stopPropagation()}
-              className="w-full text-xs text-foreground/90 pl-2 border-l-2 border-purple-500/50 bg-background border border-border rounded px-2 py-1.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary/50"
-              rows={Math.min(editText.split('\n').length + 1, 8)}
-            />
-            <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-              <span>Press Cmd+Enter to save, Esc to cancel</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={(e: React.MouseEvent<HTMLButtonElement>) => { e.stopPropagation(); handleSaveEdit(); }}
-                className="px-2 py-1 text-[10px] font-medium rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-              >
-                Save
-              </button>
-              <button
-                onClick={(e: React.MouseEvent<HTMLButtonElement>) => { e.stopPropagation(); handleCancelEdit(); }}
-                className="px-2 py-1 text-[10px] font-medium rounded bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
+          editComposer
         ) : (
-          <div className="text-xs text-foreground/90 pl-2 border-l-2 border-purple-500/50 whitespace-pre-wrap">
+          <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90">
             {annotation.text}
-          </div>
+          </p>
         )
       ) : (
         <>
-          {/* Original Text */}
-          <div className="text-[11px] font-mono text-muted-foreground bg-muted/50 rounded px-2 py-1.5 whitespace-pre-wrap max-h-24 overflow-y-auto">
+          {/* Quote — the annotated text */}
+          <p className="mb-1.5 line-clamp-2 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground/80">
             "{annotation.originalText}"
-          </div>
+          </p>
 
           {/* Comment/Replacement Text */}
           {annotation.type !== AnnotationType.DELETION && (
             isEditing ? (
-              <div className="mt-2 space-y-2">
-                <textarea
-                  ref={textareaRef}
-                  value={editText}
-                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setEditText(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  onClick={(e: React.MouseEvent<HTMLTextAreaElement>) => e.stopPropagation()}
-                  className="w-full text-xs text-foreground/90 pl-2 border-l-2 border-primary/50 bg-background border border-border rounded px-2 py-1.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary/50"
-                  rows={Math.min(editText.split('\n').length + 1, 8)}
-                />
-                <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                  <span>Press Cmd+Enter to save, Esc to cancel</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={(e: React.MouseEvent<HTMLButtonElement>) => { e.stopPropagation(); handleSaveEdit(); }}
-                    className="px-2 py-1 text-[10px] font-medium rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-                  >
-                    Save
-                  </button>
-                  <button
-                    onClick={(e: React.MouseEvent<HTMLButtonElement>) => { e.stopPropagation(); handleCancelEdit(); }}
-                    className="px-2 py-1 text-[10px] font-medium rounded bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
+              editComposer
             ) : (
               annotation.text && (
-                <div className="mt-2 text-xs text-foreground/90 pl-2 border-l-2 border-primary/50 whitespace-pre-wrap">
+                <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90">
                   {annotation.text}
-                </div>
+                </p>
               )
             )
           )}
@@ -523,10 +471,11 @@ const AnnotationCard: React.FC<{
 const CodeAnnotationCard: React.FC<{
   annotation: CodeAnnotation;
   isSelected: boolean;
+  isMe: boolean;
   onSelect: () => void;
   onDelete: () => void;
   onEdit?: (updates: Partial<CodeAnnotation>) => void;
-}> = ({ annotation, isSelected, onSelect, onDelete, onEdit }) => {
+}> = ({ annotation, isSelected, isMe, onSelect, onDelete, onEdit }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(annotation.text || '');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -552,79 +501,69 @@ const CodeAnnotationCard: React.FC<{
     : `lines ${annotation.lineStart}-${annotation.lineEnd}`;
   const fileName = annotation.filePath.split('/').pop() || annotation.filePath;
 
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEditText(annotation.text || '');
+  };
+
   return (
     <div
       data-annotation-id={annotation.id}
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
-      className={`group relative p-2.5 rounded-lg border cursor-pointer transition-all ${
-        isSelected
-          ? 'bg-primary/5 border-primary/30 shadow-sm'
-          : 'border-transparent hover:bg-muted/50 hover:border-border/50'
-      }`}
-    >
-      {annotation.author && (
-        <div className={`flex items-center gap-1.5 text-[10px] font-mono truncate mb-1.5 ${isCurrentUser(annotation.author) ? 'text-muted-foreground/60' : 'text-muted-foreground'}`}>
-          <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-          </svg>
-          <span className="truncate">{annotation.author}{isCurrentUser(annotation.author) && ' (me)'}</span>
-        </div>
+      onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
+        if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      className={cn(
+        'group w-full cursor-pointer rounded-lg px-3 py-2.5 text-left transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+        isSelected ? 'bg-surface-1 ring-1 ring-border/50' : 'hover:bg-surface-1/50',
       )}
-
-      <div className="flex items-center justify-between mb-2">
-        <div className="min-w-0 flex items-center gap-2">
-          <div className="flex items-center gap-1.5 text-primary">
-            <span className="p-1 rounded bg-primary/10">
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-              </svg>
-            </span>
-            <span className="text-[10px] font-semibold uppercase tracking-wide">Code</span>
-          </div>
-          <span className="text-[10px] text-muted-foreground/50">{formatTimestamp(annotation.createdAt)}</span>
-        </div>
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-all">
+    >
+      {/* Header: type word + author · time + actions */}
+      <div className="mb-1.5 flex items-center gap-1.5">
+        <span className="text-[11px] font-medium text-primary">Code</span>
+        <span className="text-[10px] text-muted-foreground/50 truncate">
+          {annotation.author ? `${annotation.author}${isMe ? ' (me)' : ''} · ` : ''}{formatTimestamp(annotation.createdAt)}
+        </span>
+        <div className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 [@media(hover:none)]:opacity-100">
           {onEdit && !isEditing && (
             <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsEditing(true);
-              }}
-              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-all"
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
+              className="relative rounded-md p-1.5 text-muted-foreground transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:text-foreground"
               title="Edit annotation"
             >
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-              </svg>
+              <PencilIcon />
             </button>
           )}
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-            className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            className="relative rounded-md p-1.5 text-muted-foreground transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:text-destructive"
             title="Delete annotation"
           >
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <TrashCardIcon />
           </button>
         </div>
       </div>
 
-      <div className="text-[11px] font-mono text-muted-foreground bg-muted/50 rounded px-2 py-1.5 truncate" title={annotation.filePath}>
+      {/* File / line meta */}
+      <div className="rounded px-2 py-1 bg-surface-1 font-mono text-[11px] text-muted-foreground truncate" title={annotation.filePath}>
         {fileName} · {lineRange}
       </div>
 
       {annotation.originalCode && (
-        <div className="mt-1.5 text-[11px] font-mono text-muted-foreground bg-muted/30 rounded px-2 py-1.5 whitespace-pre-wrap max-h-24 overflow-y-auto">
+        <p className="mt-1.5 line-clamp-2 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground/80">
           {annotation.originalCode}
-        </div>
+        </p>
       )}
 
       {isEditing ? (
-        <div className="mt-2 space-y-2">
+        <div className="mt-1.5" onClick={(e) => e.stopPropagation()}>
           <textarea
             ref={textareaRef}
             value={editText}
@@ -635,41 +574,24 @@ const CodeAnnotationCard: React.FC<{
                 handleSaveEdit();
               } else if (e.key === 'Escape') {
                 e.preventDefault();
-                setIsEditing(false);
-                setEditText(annotation.text || '');
+                handleCancelEdit();
               }
             }}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full text-xs text-foreground/90 pl-2 border-l-2 border-primary/50 bg-background border border-border rounded px-2 py-1.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary/50"
-            rows={Math.min(editText.split('\n').length + 1, 8)}
+            placeholder="Add your comment..."
+            aria-label="Annotation comment"
+            className="w-full resize-none rounded-lg border border-border/50 bg-card px-2.5 py-2 text-base leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 focus:border-primary/40 focus:ring-1 focus:ring-primary/20"
+            style={{ fieldSizing: 'content', minHeight: 44 } as React.CSSProperties}
           />
-          <div className="flex items-center gap-2">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                handleSaveEdit();
-              }}
-              className="px-2 py-1 text-[10px] font-medium rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-            >
-              Save
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsEditing(false);
-                setEditText(annotation.text || '');
-              }}
-              className="px-2 py-1 text-[10px] font-medium rounded bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
-            >
-              Cancel
-            </button>
+          <div className="mt-1.5 flex justify-end gap-1.5">
+            <Button variant="ghost" size="xxs" onClick={handleCancelEdit}>Cancel</Button>
+            <Button size="xxs" disabled={!editText.trim()} onClick={handleSaveEdit}>Save</Button>
           </div>
         </div>
       ) : (
         annotation.text && (
-          <div className="mt-2 text-xs text-foreground/90 pl-2 border-l-2 border-primary/50 whitespace-pre-wrap">
+          <p className="mt-1.5 whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90">
             {annotation.text}
-          </div>
+          </p>
         )
       )}
 

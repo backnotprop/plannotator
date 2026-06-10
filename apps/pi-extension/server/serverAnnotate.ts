@@ -11,6 +11,7 @@ import {
 	handleUploadRequest,
 } from "./handlers.js";
 import { html, json, parseBody, requestUrl } from "./helpers.js";
+import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.js";
 
 import { listenOnPort } from "./network.js";
 
@@ -30,7 +31,7 @@ export interface AnnotateServerResult {
 	port: number;
 	portSource: "env" | "remote-default" | "random";
 	url: string;
-	waitForDecision: () => Promise<{ feedback: string; annotations: unknown[]; exit?: boolean; approved?: boolean }>;
+	waitForDecision: () => Promise<{ feedback: string; annotations: unknown[]; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>;
 	stop: () => void;
 }
 
@@ -41,6 +42,7 @@ export async function startAnnotateServer(options: {
 	origin?: string;
 	mode?: string;
 	folderPath?: string;
+	recentMessages?: { messageId: string; text: string; timestamp?: string }[];
 	sharingEnabled?: boolean;
 	shareBaseUrl?: string;
 	pasteApiUrl?: string;
@@ -65,12 +67,16 @@ export async function startAnnotateServer(options: {
 		annotations: unknown[];
 		exit?: boolean;
 		approved?: boolean;
+		selectedMessageId?: string;
+		feedbackScope?: "message" | "messages";
 	}) => void;
 	const decisionPromise = new Promise<{
 		feedback: string;
 		annotations: unknown[];
 		exit?: boolean;
 		approved?: boolean;
+		selectedMessageId?: string;
+		feedbackScope?: "message" | "messages";
 	}>((r) => {
 		resolveDecision = r;
 	});
@@ -86,11 +92,13 @@ export async function startAnnotateServer(options: {
 	const repoInfo = getRepoInfo();
 
 	const externalAnnotations = createExternalAnnotationHandler("plan");
+	const aiRuntime = await createPiAIRuntime();
 
 	const server = createServer(async (req, res) => {
 		const url = requestUrl(req);
 
 		if (await externalAnnotations.handle(req, res, url)) return;
+		if (url.pathname.startsWith("/api/ai/") && await handlePiAIRequest(req, res, url, aiRuntime)) return;
 
 		if (url.pathname === "/api/plan" && req.method === "GET") {
 			json(res, {
@@ -109,6 +117,7 @@ export async function startAnnotateServer(options: {
 				repoInfo,
 				projectRoot: options.folderPath || process.cwd(),
 				serverConfig: getServerConfig(gitUser),
+				...(options.recentMessages ? { recentMessages: options.recentMessages } : {}),
 			});
 		} else if (url.pathname === "/api/config" && req.method === "POST") {
 			try {
@@ -162,6 +171,8 @@ export async function startAnnotateServer(options: {
 				resolveDecision({
 					feedback: (body.feedback as string) || "",
 					annotations: (body.annotations as unknown[]) || [],
+					selectedMessageId: typeof body.selectedMessageId === "string" ? body.selectedMessageId : undefined,
+					feedbackScope: body.feedbackScope === "messages" ? "messages" : body.feedbackScope === "message" ? "message" : undefined,
 				});
 				json(res, { ok: true });
 			} catch (err) {
@@ -180,6 +191,9 @@ export async function startAnnotateServer(options: {
 		portSource,
 		url: `http://localhost:${port}`,
 		waitForDecision: () => decisionPromise,
-		stop: () => server.close(),
+		stop: () => {
+			aiRuntime?.dispose();
+			server.close();
+		},
 	};
 }

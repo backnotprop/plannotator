@@ -6,7 +6,7 @@ import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
 import { Settings } from '@plannotator/ui/components/Settings';
 import { FeedbackButton, ApproveButton, ExitButton } from '@plannotator/ui/components/ToolbarButtons';
 import { AgentReviewActions } from './components/AgentReviewActions';
-import { UpdateBanner } from '@plannotator/ui/components/UpdateBanner';
+import { useUpdateCheck } from '@plannotator/ui/hooks/useUpdateCheck';
 import { storage } from '@plannotator/ui/utils/storage';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { GitHubIcon } from '@plannotator/ui/components/GitHubIcon';
@@ -14,14 +14,23 @@ import { GitLabIcon } from '@plannotator/ui/components/GitLabIcon';
 import { RepoIcon } from '@plannotator/ui/components/RepoIcon';
 import { PullRequestIcon } from '@plannotator/ui/components/PullRequestIcon';
 import { getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo } from '@plannotator/shared/pr-types';
+import type { SemanticDiffAdvert } from '@plannotator/shared/semantic-diff-types';
 import { configStore, useConfigValue } from '@plannotator/ui/config';
 import { loadDiffFont } from '@plannotator/ui/utils/diffFonts';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
-import { getAIProviderSettings, saveAIProviderSettings, getPreferredModel } from '@plannotator/ui/utils/aiProvider';
-import { AISetupDialog } from '@plannotator/ui/components/AISetupDialog';
-import { needsAISetup } from '@plannotator/ui/utils/aiSetup';
+import {
+  getAIProviderSettings,
+  resolveAIModelForProvider,
+  resolveAIProviderSelection,
+  saveAIProviderSelection,
+} from '@plannotator/ui/utils/aiProvider';
 import { DiffTypeSetupDialog } from '@plannotator/ui/components/DiffTypeSetupDialog';
 import { needsDiffTypeSetup } from '@plannotator/ui/utils/diffTypeSetup';
+import { LookAndFeelAnnouncementDialog } from '@plannotator/ui/components/LookAndFeelAnnouncementDialog';
+import {
+  markLookAndFeelAnnouncementSeen,
+  needsLookAndFeelAnnouncement,
+} from '@plannotator/ui/utils/lookAndFeelAnnouncement';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/types';
 import { useResizablePanel } from '@plannotator/ui/hooks/useResizablePanel';
 import { useCodeAnnotationDraft } from '@plannotator/ui/hooks/useCodeAnnotationDraft';
@@ -37,11 +46,12 @@ import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotat
 import { useAgentJobs } from '@plannotator/ui/hooks/useAgentJobs';
 import { exportEditorAnnotations } from '@plannotator/ui/utils/parser';
 import { ResizeHandle } from '@plannotator/ui/components/ResizeHandle';
+import { FolderTree } from 'lucide-react';
 import { DockviewReact, type DockviewReadyEvent, type DockviewApi } from 'dockview-react';
 import { ReviewHeaderMenu } from './components/ReviewHeaderMenu';
 import { ReviewSidebar } from './components/ReviewSidebar';
 import type { ReviewSidebarTab } from './components/ReviewSidebar';
-import { SparklesIcon } from './components/SparklesIcon';
+import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
 import { ReviewAgentsIcon } from '@plannotator/ui/components/ReviewAgentsIcon';
 import { useSidebar } from '@plannotator/ui/hooks/useSidebar';
 import { FileTree } from './components/FileTree';
@@ -53,6 +63,7 @@ import { usePRSession, type PRSessionUpdate } from './hooks/usePRSession';
 import { useAnnotationFactory } from './hooks/useAnnotationFactory';
 import { DEMO_DIFF } from './demoData';
 import { exportReviewFeedback } from './utils/exportFeedback';
+import { parseDiffToFiles } from './utils/diffParser';
 import { ReviewSubmissionDialog, buildReviewSubmission, type ReviewSubmission, type SubmissionTarget } from './components/ReviewSubmissionDialog';
 import { ReviewStateProvider, type ReviewState } from './dock/ReviewStateContext';
 import { JobLogsProvider } from './dock/JobLogsContext';
@@ -68,6 +79,7 @@ import {
   REVIEW_PR_SUMMARY_PANEL_ID,
   REVIEW_PR_COMMENTS_PANEL_ID,
   REVIEW_PR_CHECKS_PANEL_ID,
+  REVIEW_SEMANTIC_DIFF_PANEL_ID,
   REVIEW_ALL_FILES_PANEL_ID,
   REVIEW_CODE_NAV_PANEL_ID,
 } from './dock/reviewPanelTypes';
@@ -88,43 +100,12 @@ interface DiffData {
   origin?: Origin;
   diffType?: string;
   gitContext?: GitContext;
+  diffOptions?: DiffOption[];
   sharingEnabled?: boolean;
   prStackInfo?: PRStackInfo | null;
   prDiffScope?: PRDiffScope;
   prDiffScopeOptions?: PRDiffScopeOption[];
-}
-
-// Simple diff parser to extract files from unified diff
-function parseDiffToFiles(rawPatch: string): DiffFile[] {
-  const files: DiffFile[] = [];
-  const fileChunks = rawPatch.split(/^diff --git /m).filter(Boolean);
-
-  for (const chunk of fileChunks) {
-    const lines = chunk.split('\n');
-    const headerMatch = lines[0]?.match(/a\/(.+) b\/(.+)/);
-    if (!headerMatch) continue;
-
-    const oldPath = headerMatch[1];
-    const newPath = headerMatch[2];
-
-    let additions = 0;
-    let deletions = 0;
-
-    for (const line of lines) {
-      if (line.startsWith('+') && !line.startsWith('+++')) additions++;
-      if (line.startsWith('-') && !line.startsWith('---')) deletions++;
-    }
-
-    files.push({
-      path: newPath,
-      oldPath: oldPath !== newPath ? oldPath : undefined,
-      patch: 'diff --git ' + chunk,
-      additions,
-      deletions,
-    });
-  }
-
-  return files;
+  semanticDiff?: SemanticDiffAdvert;
 }
 
 function getFileTabTitle(filePath: string): string {
@@ -139,6 +120,8 @@ const ReviewApp: React.FC = () => {
   const [annotations, setAnnotations] = useState<CodeAnnotation[]>([]);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [isAllFilesActive, setIsAllFilesActive] = useState(false);
+  const [isSemanticDiffActive, setIsSemanticDiffActive] = useState(false);
+  const [semanticDiffAvailable, setSemanticDiffAvailable] = useState(false);
   const [isDiffPanelActive, setIsDiffPanelActive] = useState(false);
   const [allFilesVisibleFile, setAllFilesVisibleFile] = useState<string | null>(null);
   const [pendingSelection, setPendingSelection] = useState<SelectedLineRange | null>(null);
@@ -154,9 +137,13 @@ const ReviewApp: React.FC = () => {
   const diffShowLineNumbers = useConfigValue('diffShowLineNumbers');
   const diffShowBackground = useConfigValue('diffShowBackground');
   const diffHideWhitespace = useConfigValue('diffHideWhitespace');
+  const diffExpandUnchanged = useConfigValue('diffExpandUnchanged');
   const diffFontFamily = useConfigValue('diffFontFamily');
   const diffFontSize = useConfigValue('diffFontSize');
   const diffTabSize = useConfigValue('diffTabSize');
+  // Global plan-look preference; surfaced here only by the shared 0.20.0
+  // look-and-feel announcement (the grid/clean chooser applies to plan review).
+  const gridEnabled = useConfigValue('gridEnabled');
 
   // Load custom diff font and override --font-mono for surrounding review elements
   useEffect(() => {
@@ -183,8 +170,10 @@ const ReviewApp: React.FC = () => {
   const [origin, setOrigin] = useState<Origin | null>(null);
   const [gitUser, setGitUser] = useState<string | undefined>();
   const [isWSL, setIsWSL] = useState(false);
+  const [reviewMode, setReviewMode] = useState<string | null>(null);
   const [diffType, setDiffType] = useState<string>('uncommitted');
   const [gitContext, setGitContext] = useState<GitContext | null>(null);
+  const [workspaceDiffOptions, setWorkspaceDiffOptions] = useState<DiffOption[] | null>(null);
   // Two bases:
   //   selectedBase  — what the picker is currently showing (UI intent).
   //                   Updates immediately when the user picks, so the chip
@@ -253,6 +242,22 @@ const ReviewApp: React.FC = () => {
   const mrNumberLabel = prMetadata ? getMRNumberLabel(prMetadata) : '';
   const displayRepo = prMetadata ? getDisplayRepo(prMetadata) : '';
   const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0';
+  const updateInfo = useUpdateCheck();
+  const updateToastShown = useRef(false);
+  useEffect(() => {
+    if (updateInfo?.updateAvailable && !updateInfo.dismissed && !updateToastShown.current) {
+      updateToastShown.current = true;
+      const t = setTimeout(() => {
+        toast('A new version of Plannotator is available', {
+          description: 'Open the Options menu to update.',
+          duration: 4000,
+          position: 'top-right',
+          classNames: { toast: '!w-auto', description: '!text-foreground/70' },
+        });
+      }, 1500);
+      return () => clearTimeout(t);
+    }
+  }, [updateInfo?.updateAvailable, updateInfo?.dismissed]);
 
   const identity = useConfigValue('displayName');
 
@@ -280,6 +285,7 @@ const ReviewApp: React.FC = () => {
   const filesRef = useRef(files);
   filesRef.current = files;
   const needsInitialDiffPanel = useRef(true);
+  const semanticDiffAutoFallbackPending = useRef(false);
 
   // PR context (lifted from sidebar so center dock PR panels can access it)
   const { prContext, isLoading: isPRContextLoading, error: prContextError, fetchContext: fetchPRContext } = usePRContext(prMetadata ?? null);
@@ -289,6 +295,7 @@ const ReviewApp: React.FC = () => {
   const openDiffFile = useCallback((filePath: string) => {
     const file = files.find(candidate => candidate.path === filePath);
     if (!file) return;
+    semanticDiffAutoFallbackPending.current = false;
 
     if (!dockApi) {
       const fileIndex = files.findIndex(candidate => candidate.path === filePath);
@@ -361,6 +368,7 @@ const ReviewApp: React.FC = () => {
   const hasSearchableFiles = files.length > 0;
   const shouldShowFileTree =
     hasSearchableFiles ||
+    (reviewMode === 'workspace' && !!workspaceDiffOptions?.length) ||
     !!gitContext?.diffOptions?.length ||
     !!gitContext?.worktrees?.length;
 
@@ -405,6 +413,7 @@ const ReviewApp: React.FC = () => {
   // AI Chat
   const [aiAvailable, setAiAvailable] = useState(false);
   const [aiProviders, setAiProviders] = useState<Array<{ id: string; name: string; capabilities: Record<string, boolean>; models?: Array<{ id: string; label: string; default?: boolean }> }>>([]);
+  const [aiDefaultProvider, setAiDefaultProvider] = useState<string | null>(null);
   const [aiConfig, setAiConfig] = useState(() => {
     const saved = getAIProviderSettings();
     const pid = saved.providerId;
@@ -414,16 +423,32 @@ const ReviewApp: React.FC = () => {
       reasoningEffort: null as string | null,
     };
   });
-  const [showAISetup, setShowAISetup] = useState(false);
-  const [aiCheckComplete, setAiCheckComplete] = useState(false);
   const [showDiffTypeSetup, setShowDiffTypeSetup] = useState(false);
   const [diffTypeSetupPending, setDiffTypeSetupPending] = useState(false);
+  // The 0.20.0 release / look-and-feel announcement also runs in code review.
+  // Seen-state is a shared cookie (host-scoped), so dismissing it in either app
+  // suppresses it in the other — it appears once across both.
+  const [showLookAndFeel, setShowLookAndFeel] = useState(needsLookAndFeelAnnouncement);
+  const dismissLookAndFeel = useCallback(() => {
+    markLookAndFeelAnnouncementSeen();
+    setShowLookAndFeel(false);
+  }, []);
   const aiChat = useAIChat({
     patch: diffData?.rawPatch ?? '',
     providerId: aiConfig.providerId,
     model: aiConfig.model,
     reasoningEffort: aiConfig.reasoningEffort,
   });
+  const {
+    messages: aiMessages,
+    isCreatingSession: aiIsCreatingSession,
+    isStreaming: aiIsStreaming,
+    permissionRequests: aiPermissionRequests,
+    respondToPermission: respondToAIPermission,
+    ask: askAI,
+    resetSession: resetAISession,
+    sessionId: aiSessionId,
+  } = aiChat;
 
   const codeNav = useCodeNav();
 
@@ -442,7 +467,9 @@ const ReviewApp: React.FC = () => {
       existing.api.setTitle(`References: ${request.symbol}`);
       existing.api.setActive();
     } else {
-      const refPanel = isAllFilesActive
+      const refPanel = isSemanticDiffActive
+        ? REVIEW_SEMANTIC_DIFF_PANEL_ID
+        : isAllFilesActive
         ? REVIEW_ALL_FILES_PANEL_ID
         : REVIEW_DIFF_PANEL_ID;
       dockApi.addPanel({
@@ -453,7 +480,7 @@ const ReviewApp: React.FC = () => {
         initialHeight: 250,
       });
     }
-  }, [codeNav.resolve, dockApi, isAllFilesActive, gitContext, agentCwd]);
+  }, [codeNav.resolve, dockApi, isAllFilesActive, isSemanticDiffActive, gitContext, agentCwd]);
 
   // Check AI capabilities on mount
   useEffect(() => {
@@ -464,26 +491,49 @@ const ReviewApp: React.FC = () => {
           setAiAvailable(true);
           const providers = data.providers ?? [];
           setAiProviders(providers);
+          setAiDefaultProvider(data.defaultProvider ?? null);
         }
-        setAiCheckComplete(true);
       })
-      .catch(() => { setAiCheckComplete(true); });
+      .catch(() => {});
   }, []);
 
-  const handleAIConfigChange = useCallback((config: { providerId?: string | null; model?: string | null }) => {
+  useEffect(() => {
+    if (!aiAvailable || aiProviders.length === 0) return;
     setAiConfig(prev => {
-      const next = { ...prev, ...config };
-      // If provider changed, load that provider's preferred model
-      if (config.providerId !== undefined && config.providerId !== prev.providerId) {
-        next.model = config.providerId ? getPreferredModel(config.providerId) : null;
-      }
-      // Persist provider selection
       const saved = getAIProviderSettings();
-      saveAIProviderSettings({ ...saved, providerId: next.providerId });
+      const selection = resolveAIProviderSelection({
+        providers: aiProviders,
+        origin,
+        settings: saved,
+        serverDefaultProvider: aiDefaultProvider,
+      });
+
+      if (prev.providerId === selection.providerId && prev.model === selection.model) return prev;
+
+      return { ...prev, providerId: selection.providerId, model: selection.model };
+    });
+  }, [aiAvailable, aiProviders, aiDefaultProvider, origin]);
+
+  const handleAIConfigChange = useCallback((config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => {
+    setAiConfig(prev => {
+      const saved = getAIProviderSettings();
+      const providerId = config.providerId !== undefined ? config.providerId : prev.providerId;
+      const providerChanged = config.providerId !== undefined && config.providerId !== prev.providerId;
+      const provider = aiProviders.find(p => p.id === providerId) ?? null;
+      const model = providerChanged
+        ? (config.model !== undefined ? config.model : resolveAIModelForProvider(provider, saved.preferredModels))
+        : (config.model !== undefined ? config.model : prev.model);
+      const next = { ...prev, ...config, providerId, model };
+      saveAIProviderSelection({
+        providerId: next.providerId,
+        model: next.model,
+        origin,
+        settings: saved,
+      });
       return next;
     });
-    aiChat.resetSession();
-  }, [aiChat]);
+    resetAISession();
+  }, [aiProviders, origin, resetAISession]);
 
   const handleAskAI = useCallback((question: string) => {
     if (!pendingSelection || !files[activeFileIndex]) return;
@@ -492,7 +542,7 @@ const ReviewApp: React.FC = () => {
     const side = pendingSelection.side === 'additions' ? 'new' : 'old';
     const selectedCode = extractLinesFromPatch(files[activeFileIndex].patch, lineStart, lineEnd, side);
 
-    aiChat.ask({
+    askAI({
       prompt: question,
       filePath: files[activeFileIndex].path,
       lineStart,
@@ -500,7 +550,7 @@ const ReviewApp: React.FC = () => {
       side,
       selectedCode: selectedCode || undefined,
     });
-  }, [pendingSelection, files, activeFileIndex, aiChat]);
+  }, [activeFileIndex, askAI, files, pendingSelection]);
 
   const handleViewAIResponse = useCallback((questionId?: string) => {
     reviewSidebar.open('ai');
@@ -528,13 +578,13 @@ const ReviewApp: React.FC = () => {
     const selStart = Math.min(pendingSelection.start, pendingSelection.end);
     const selEnd = Math.max(pendingSelection.start, pendingSelection.end);
     const side = pendingSelection.side === 'additions' ? 'new' : 'old';
-    return aiChat.messages.filter(m => {
+    return aiMessages.filter(m => {
       const q = m.question;
       return q.filePath === filePath && q.side === side &&
         q.lineStart != null && q.lineEnd != null &&
         q.lineStart <= selEnd && q.lineEnd >= selStart;
     });
-  }, [pendingSelection, files, activeFileIndex, aiChat.messages]);
+  }, [pendingSelection, files, activeFileIndex, aiMessages]);
 
   // Click AI marker in diff → scroll sidebar to that Q&A
   const [scrollToQuestionId, setScrollToQuestionId] = useState<string | null>(null);
@@ -547,14 +597,18 @@ const ReviewApp: React.FC = () => {
 
   // General AI question from sidebar input
   const handleAskGeneral = useCallback((question: string) => {
-    aiChat.ask({ prompt: question });
-  }, [aiChat.ask]);
+    askAI({ prompt: question });
+  }, [askAI]);
 
   // Resizable panels
-  const panelResize = useResizablePanel({ storageKey: 'plannotator-review-panel-width' });
+  const panelResize = useResizablePanel({
+    storageKey: 'plannotator-review-panel-width',
+    onSnapClose: () => reviewSidebar.close(),
+  });
   const fileTreeResize = useResizablePanel({
     storageKey: 'plannotator-filetree-width',
     defaultWidth: 256, minWidth: 160, maxWidth: 400, side: 'left',
+    onSnapClose: () => setIsFileTreeOpen(false),
   });
   const isResizing = panelResize.isDragging || fileTreeResize.isDragging;
 
@@ -565,8 +619,14 @@ const ReviewApp: React.FC = () => {
 
     // Sync activeFileIndex when user switches between dock tabs
     event.api.onDidActivePanelChange((panel) => {
-      if (!panel) { setIsAllFilesActive(false); setIsDiffPanelActive(false); return; }
+      if (!panel) {
+        setIsAllFilesActive(false);
+        setIsSemanticDiffActive(false);
+        setIsDiffPanelActive(false);
+        return;
+      }
       setIsAllFilesActive(panel.id === REVIEW_ALL_FILES_PANEL_ID);
+      setIsSemanticDiffActive(panel.id === REVIEW_SEMANTIC_DIFF_PANEL_ID);
       setIsDiffPanelActive(isReviewDiffPanelId(panel.id));
       if (!isReviewDiffPanelId(panel.id)) return;
       const filePath = getReviewDiffPanelFilePath(panel.params);
@@ -585,7 +645,10 @@ const ReviewApp: React.FC = () => {
         event.api.totalPanels === 1 && event.api.groups.length === 1
           ? event.api.groups[0]?.panels[0]
           : undefined;
-      const hideHeaders = lonePanel?.id === REVIEW_DIFF_PANEL_ID || lonePanel?.id === REVIEW_ALL_FILES_PANEL_ID;
+      const hideHeaders =
+        lonePanel?.id === REVIEW_DIFF_PANEL_ID ||
+        lonePanel?.id === REVIEW_SEMANTIC_DIFF_PANEL_ID ||
+        lonePanel?.id === REVIEW_ALL_FILES_PANEL_ID;
       for (const group of event.api.groups) {
         group.header.hidden = hideHeaders;
       }
@@ -674,6 +737,7 @@ const ReviewApp: React.FC = () => {
 
   const openAllFilesPanel = useCallback(() => {
     if (!dockApi) return;
+    semanticDiffAutoFallbackPending.current = false;
     const existing = dockApi.getPanel(REVIEW_ALL_FILES_PANEL_ID);
     if (existing) { existing.api.setActive(); return; }
     dockApi.addPanel({
@@ -683,7 +747,59 @@ const ReviewApp: React.FC = () => {
     });
   }, [dockApi]);
 
-  // Open the all-files panel on first load.
+  const openSemanticDiffPanel = useCallback((options?: { autoFallbackOnError?: boolean }) => {
+    if (!dockApi) return;
+    semanticDiffAutoFallbackPending.current = options?.autoFallbackOnError === true;
+    if (!semanticDiffAvailable) {
+      openAllFilesPanel();
+      return;
+    }
+    const existing = dockApi.getPanel(REVIEW_SEMANTIC_DIFF_PANEL_ID);
+    if (existing) { existing.api.setActive(); return; }
+    dockApi.addPanel({
+      id: REVIEW_SEMANTIC_DIFF_PANEL_ID,
+      component: REVIEW_PANEL_TYPES.SEMANTIC_DIFF,
+      title: 'Semantic diff',
+    });
+  }, [dockApi, openAllFilesPanel, semanticDiffAvailable]);
+
+  const handleSemanticDiffUnavailable = useCallback(() => {
+    semanticDiffAutoFallbackPending.current = false;
+    setSemanticDiffAvailable(false);
+    dockApi?.getPanel(REVIEW_SEMANTIC_DIFF_PANEL_ID)?.api.close();
+    openAllFilesPanel();
+  }, [dockApi, openAllFilesPanel]);
+
+  const handleSemanticDiffLoadSuccess = useCallback(() => {
+    semanticDiffAutoFallbackPending.current = false;
+  }, []);
+
+  const handleSemanticDiffLoadError = useCallback(() => {
+    if (!semanticDiffAutoFallbackPending.current) return false;
+    if (dockApi?.activePanel?.id !== REVIEW_SEMANTIC_DIFF_PANEL_ID) {
+      // The user has already moved on; don't steal focus by auto-opening All files.
+      semanticDiffAutoFallbackPending.current = false;
+      return false;
+    }
+    semanticDiffAutoFallbackPending.current = false;
+    dockApi?.getPanel(REVIEW_SEMANTIC_DIFF_PANEL_ID)?.api.close();
+    openAllFilesPanel();
+    return true;
+  }, [dockApi, openAllFilesPanel]);
+
+  const applySemanticDiffAdvert = useCallback((semanticDiff?: SemanticDiffAdvert) => {
+    if (!semanticDiff) return;
+    const available = semanticDiff.available === true;
+    setSemanticDiffAvailable(available);
+    if (!available) {
+      semanticDiffAutoFallbackPending.current = false;
+      dockApi?.getPanel(REVIEW_SEMANTIC_DIFF_PANEL_ID)?.api.close();
+      if (isSemanticDiffActive) openAllFilesPanel();
+    }
+  }, [dockApi, isSemanticDiffActive, openAllFilesPanel]);
+
+  // Open the All files overview on first load. Semantic diff stays available via
+  // the file-tree nav entry, but it's no longer the default landing view.
   useEffect(() => {
     if (!dockApi || !needsInitialDiffPanel.current || files.length === 0) return;
     needsInitialDiffPanel.current = false;
@@ -756,9 +872,11 @@ const ReviewApp: React.FC = () => {
         rawPatch: string;
         gitRef: string;
         origin?: Origin;
+        mode?: string;
         diffType?: string;
         base?: string;
         gitContext?: GitContext;
+        diffOptions?: DiffOption[];
         agentCwd?: string;
         sharingEnabled?: boolean;
         repoInfo?: { display: string; branch?: string };
@@ -771,6 +889,7 @@ const ReviewApp: React.FC = () => {
         viewedFiles?: string[];
         error?: string;
         isWSL?: boolean;
+        semanticDiff?: SemanticDiffAdvert;
         serverConfig?: { displayName?: string; gitUser?: string };
       }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
@@ -785,9 +904,12 @@ const ReviewApp: React.FC = () => {
           origin: data.origin,
           diffType: data.diffType,
           gitContext: data.gitContext,
+          diffOptions: data.diffOptions,
           sharingEnabled: data.sharingEnabled,
         });
         setFiles(apiFiles);
+        setReviewMode(data.mode ?? null);
+        setWorkspaceDiffOptions(data.mode === 'workspace' ? (data.diffOptions ?? []) : null);
         if (data.origin) setOrigin(data.origin);
         if (data.diffType) setDiffType(data.diffType);
         if (data.gitContext) {
@@ -816,8 +938,9 @@ const ReviewApp: React.FC = () => {
         }
         if (data.error) setDiffError(data.error);
         if (data.isWSL) setIsWSL(true);
+        setSemanticDiffAvailable(data.semanticDiff?.available === true);
         // Mark diff type setup as pending on first run (local mode only)
-        if (data.diffType && !data.prMetadata && data.gitContext?.vcsType !== 'p4' && data.gitContext?.vcsType !== 'jj' && needsDiffTypeSetup()) {
+        if (data.diffType && data.mode !== 'workspace' && !data.prMetadata && data.gitContext && data.gitContext.vcsType !== 'p4' && data.gitContext.vcsType !== 'jj' && needsDiffTypeSetup()) {
           setDiffTypeSetupPending(true);
         }
       })
@@ -830,17 +953,19 @@ const ReviewApp: React.FC = () => {
           gitRef: 'demo',
         });
         setFiles(demoFiles);
+        setWorkspaceDiffOptions(null);
+        setSemanticDiffAvailable(false);
       })
       .finally(() => setIsLoading(false));
   }, []);
 
-  // Show diff type setup dialog only after AI setup dialog is dismissed (avoid stacking)
+  // Show diff type setup after the initial diff payload marks it pending.
   useEffect(() => {
-    if (diffTypeSetupPending && aiCheckComplete && !showAISetup) {
+    if (diffTypeSetupPending) {
       setDiffTypeSetupPending(false);
       setShowDiffTypeSetup(true);
     }
-  }, [diffTypeSetupPending, aiCheckComplete, showAISetup]);
+  }, [diffTypeSetupPending]);
 
   const handleDiffStyleChange = useCallback((style: 'split' | 'unified') => {
     configStore.set('diffStyle', style);
@@ -1062,7 +1187,8 @@ const ReviewApp: React.FC = () => {
     onFileViewed: handleFileViewedFromStage,
   });
   // Staging is never available in PR review mode — the server rejects it and the UI shouldn't offer it.
-  const canStageFiles = canStageRaw && !prMetadata;
+  const canStageInWorkspace = reviewMode !== 'workspace' || workspaceDiffOptions?.some((option) => option.id === 'workspace-staged');
+  const canStageFiles = canStageRaw && !prMetadata && canStageInWorkspace;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -1088,6 +1214,7 @@ const ReviewApp: React.FC = () => {
     rawPatch: string; gitRef: string;
     repoInfo?: { display: string; branch?: string };
     viewedFiles?: string[]; error?: string;
+    semanticDiff?: SemanticDiffAdvert;
   }) {
     const isPRSwitch = !!data.prMetadata;
     const nextFiles = parseDiffToFiles(data.rawPatch);
@@ -1115,6 +1242,7 @@ const ReviewApp: React.FC = () => {
       setViewedFiles(data.viewedFiles ? new Set(data.viewedFiles) : new Set());
     }
     setDiffError(data.error || null);
+    applySemanticDiffAdvert(data.semanticDiff);
     resetStagedFiles();
   }
 
@@ -1149,16 +1277,20 @@ const ReviewApp: React.FC = () => {
         diffType: string;
         base?: string;
         gitContext?: GitContext;
+        diffOptions?: DiffOption[];
         error?: string;
+        semanticDiff?: SemanticDiffAdvert;
       };
 
       const nextFiles = parseDiffToFiles(data.rawPatch);
+      applySemanticDiffAdvert(data.semanticDiff);
 
       if (options?.preserveFile) {
         // Whitespace toggle: update patch in-place, keep the active file.
         // If the current file was removed (whitespace-only), retarget the
         // dock panel to the first remaining file.
         setDiffData(prev => prev ? { ...prev, rawPatch: data.rawPatch, gitRef: data.gitRef } : prev);
+        if (data.diffOptions) setWorkspaceDiffOptions(data.diffOptions);
         setFiles(nextFiles);
         const currentPath = files[activeFileIndex]?.path;
         const nextIdx = currentPath ? nextFiles.findIndex(f => f.path === currentPath) : -1;
@@ -1174,6 +1306,7 @@ const ReviewApp: React.FC = () => {
         setDiffData(prev => prev ? { ...prev, rawPatch: data.rawPatch, gitRef: data.gitRef, diffType: data.diffType } : prev);
         setFiles(nextFiles);
         setDiffType(data.diffType);
+        if (data.diffOptions) setWorkspaceDiffOptions(data.diffOptions);
         if (data.base) {
           setSelectedBase(data.base);
           setCommittedBase(data.base);
@@ -1218,7 +1351,7 @@ const ReviewApp: React.FC = () => {
     } finally {
       setIsLoadingDiff(false);
     }
-  }, [dockApi, resetStagedFiles, selectedBase, diffHideWhitespace, files, activeFileIndex, openDiffFile]);
+  }, [dockApi, resetStagedFiles, selectedBase, diffHideWhitespace, files, activeFileIndex, openDiffFile, applySemanticDiffAdvert]);
 
   // Switch the base branch the current diff compares against.
   // Only triggers a refetch when the active mode actually uses a base.
@@ -1276,13 +1409,13 @@ const ReviewApp: React.FC = () => {
   // Preserves the active file since only whitespace hunks change.
   const hideWhitespaceInitialized = useRef(false);
   useEffect(() => {
-    if (!origin || !gitContext) return;
+    if (!origin || (!gitContext && reviewMode !== 'workspace')) return;
     if (!hideWhitespaceInitialized.current) {
       hideWhitespaceInitialized.current = true;
       return;
     }
     fetchDiffSwitch(diffType, selectedBase, { preserveFile: true });
-  }, [diffHideWhitespace, origin]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [diffHideWhitespace, origin, reviewMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Select annotation - switches file if needed and scrolls to it
   const handleSelectAnnotation = useCallback((id: string | null) => {
@@ -1341,6 +1474,7 @@ const ReviewApp: React.FC = () => {
   // Build ReviewState value for dock panel context
   const reviewStateValue = useMemo<ReviewState>(() => ({
     files,
+    rawPatch: diffData?.rawPatch ?? '',
     focusedFileIndex: activeFileIndex,
     focusedFilePath: files[activeFileIndex]?.path ?? null,
     diffStyle,
@@ -1349,6 +1483,7 @@ const ReviewApp: React.FC = () => {
     lineDiffType: diffLineDiffType,
     disableLineNumbers: !diffShowLineNumbers,
     disableBackground: !diffShowBackground,
+    expandUnchanged: diffExpandUnchanged,
     fontFamily: diffFontFamily || undefined,
     fontSize: diffFontSize || undefined,
     // Only propagate base for modes where it affects old/new content. Avoids
@@ -1390,9 +1525,9 @@ const ReviewApp: React.FC = () => {
     activeSearchMatchId,
     activeSearchMatch: activeSearchMatch?.filePath === files[activeFileIndex]?.path ? activeSearchMatch : null,
     aiAvailable,
-    aiMessages: aiChat.messages,
+    aiMessages,
     onAskAI: handleAskAI,
-    isAILoading: aiChat.isCreatingSession || aiChat.isStreaming,
+    isAILoading: aiIsCreatingSession || aiIsStreaming,
     onViewAIResponse: handleViewAIResponse,
     onClickAIMarker: handleClickAIMarker,
     aiHistoryForSelection,
@@ -1406,15 +1541,20 @@ const ReviewApp: React.FC = () => {
     openDiffFile,
     onAllFilesVisibleFileChange: setAllFilesVisibleFile,
     isAllFilesActive,
+    isSemanticDiffActive,
+    semanticDiffAvailable,
+    onSemanticDiffUnavailable: handleSemanticDiffUnavailable,
+    onSemanticDiffLoadError: handleSemanticDiffLoadError,
+    onSemanticDiffLoadSuccess: handleSemanticDiffLoadSuccess,
     openTourPanel: handleOpenTour,
     onCodeNavRequest: handleCodeNavRequest,
     codeNavResult: codeNav.result,
     codeNavIsLoading: codeNav.isLoading,
     codeNavActiveSymbol: codeNav.activeSymbol,
   }), [
-    files, activeFileIndex, diffStyle, diffOverflow, diffIndicators,
+    files, diffData?.rawPatch, activeFileIndex, diffStyle, diffOverflow, diffIndicators,
     diffLineDiffType, diffShowLineNumbers, diffShowBackground,
-    diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope,
+    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope,
     allAnnotations, externalAnnotations,
     selectedAnnotationId, pendingSelection, handleLineSelection,
     handleAddAnnotation, handleAddFileComment, handleAddFileCommentForFile, handleEditAnnotation,
@@ -1422,11 +1562,12 @@ const ReviewApp: React.FC = () => {
     handleToggleViewed, stagedFiles, stagingFile, stageFile,
     canStageFiles, stageError, isSearchPending, debouncedSearchQuery,
     activeFileSearchMatches, activeSearchMatchId, activeSearchMatch,
-    aiAvailable, aiChat.messages, aiChat.isCreatingSession, aiChat.isStreaming,
+    aiAvailable, aiMessages, aiIsCreatingSession, aiIsStreaming,
     handleAskAI, handleViewAIResponse, handleClickAIMarker,
     aiHistoryForSelection, agentJobs.jobs, prMetadata, prContext,
     isPRContextLoading, prContextError, fetchPRContext, platformUser, openDiffFile,
-    handleOpenTour, isAllFilesActive, handleAddAnnotationForFile,
+    handleOpenTour, isAllFilesActive, isSemanticDiffActive, semanticDiffAvailable,
+    handleSemanticDiffUnavailable, handleSemanticDiffLoadError, handleSemanticDiffLoadSuccess, handleAddAnnotationForFile,
     handleCodeNavRequest, codeNav.result, codeNav.isLoading, codeNav.activeSymbol,
   ]);
 
@@ -1780,9 +1921,7 @@ const ReviewApp: React.FC = () => {
                   }`}
                   title={isFileTreeOpen ? 'Hide file tree' : 'Show file tree'}
                 >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                  </svg>
+                  <FolderTree className="w-4 h-4" />
                 </button>
                 <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
               </>
@@ -1952,6 +2091,15 @@ const ReviewApp: React.FC = () => {
                   </div>
                 )}
 
+                {reviewMode === 'workspace' && diffError && (
+                  <div
+                    className="text-xs text-amber-700 dark:text-amber-300 px-2 py-1 bg-amber-500/10 rounded border border-amber-500/25 max-w-[240px] truncate"
+                    title={diffError}
+                  >
+                    {files.length > 0 ? 'Some workspace changes could not be loaded' : 'Workspace changes could not be loaded'}
+                  </div>
+                )}
+
                 {/* Agent mode: Close/SendFeedback flip + Approve */}
                 {!platformMode ? (
                   <AgentReviewActions
@@ -2036,18 +2184,6 @@ const ReviewApp: React.FC = () => {
 
             <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
 
-            <ReviewHeaderMenu
-              onOpenSettings={() => setOpenSettingsMenu(true)}
-              onOpenExport={() => setShowExportModal(true)}
-              onToggleFileTree={() => setIsFileTreeOpen(prev => !prev)}
-              onToggleSidebar={() => reviewSidebar.isOpen ? reviewSidebar.close() : reviewSidebar.open()}
-              isFileTreeOpen={isFileTreeOpen}
-              isSidebarOpen={reviewSidebar.isOpen}
-              appVersion={appVersion}
-            />
-
-            <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
-
             {/* Sidebar tab toggles */}
             <button
               onClick={() => reviewSidebar.toggleTab('annotations')}
@@ -2078,7 +2214,7 @@ const ReviewApp: React.FC = () => {
                 title="AI Chat"
               >
                 <SparklesIcon className="w-4 h-4" />
-                {aiChat.messages.length > 0 && !(reviewSidebar.isOpen && reviewSidebar.activeTab === 'ai') && (
+                {aiMessages.length > 0 && !(reviewSidebar.isOpen && reviewSidebar.activeTab === 'ai') && (
                   <span className="absolute top-0 right-0 w-1.5 h-1.5 rounded-full bg-primary" />
                 )}
               </button>
@@ -2099,16 +2235,34 @@ const ReviewApp: React.FC = () => {
                 )}
               </button>
             )}
+
+            <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
+
+            <ReviewHeaderMenu
+              onOpenSettings={() => setOpenSettingsMenu(true)}
+              onOpenExport={() => setShowExportModal(true)}
+              onToggleFileTree={() => setIsFileTreeOpen(prev => !prev)}
+              onToggleSidebar={() => reviewSidebar.isOpen ? reviewSidebar.close() : reviewSidebar.open()}
+              isFileTreeOpen={isFileTreeOpen}
+              isSidebarOpen={reviewSidebar.isOpen}
+              appVersion={appVersion}
+              updateInfo={updateInfo}
+              origin={origin}
+              isWSL={isWSL}
+            />
           </div>
         </header>
 
         {/* Main content */}
         <div className={`flex-1 flex overflow-hidden ${isResizing ? 'select-none' : ''}`}>
           {shouldShowFileTree && isFileTreeOpen && (
-            <>
+            <div className="contents group/sidebar">
               <FileTree
                 files={files}
                 activeFileIndex={activeFileIndex}
+                onSelectSemanticDiff={() => openSemanticDiffPanel()}
+                isSemanticDiffActive={isSemanticDiffActive}
+                semanticDiffAvailable={semanticDiffAvailable}
                 onSelectAllFiles={openAllFilesPanel}
                 isAllFilesActive={isAllFilesActive}
                 scrollHighlightIndex={isAllFilesActive && allFilesVisibleFile ? files.findIndex(f => f.path === allFilesVisibleFile) : undefined}
@@ -2120,7 +2274,7 @@ const ReviewApp: React.FC = () => {
                 hideViewedFiles={hideViewedFiles}
                 onToggleHideViewed={() => setHideViewedFiles(prev => !prev)}
                 enableKeyboardNav={!showExportModal && hasSearchableFiles}
-                diffOptions={gitContext?.diffOptions}
+                diffOptions={reviewMode === 'workspace' ? (workspaceDiffOptions ?? undefined) : gitContext?.diffOptions}
                 activeDiffType={activeDiffBase}
                 onSelectDiff={handleDiffSwitch}
                 isLoadingDiff={isLoadingDiff}
@@ -2156,8 +2310,8 @@ const ReviewApp: React.FC = () => {
                 onStepSearchMatch={hasSearchableFiles ? stepSearchMatch : undefined}
                 repoRoot={prMetadata ? null : (activeWorktreePath ?? agentCwd ?? gitContext?.cwd ?? null)}
               />
-              <ResizeHandle {...fileTreeResize.handleProps} side="left" />
-            </>
+              <ResizeHandle {...fileTreeResize.handleProps} className="z-10" side="left" onCollapse={() => setIsFileTreeOpen(false)} />
+            </div>
           )}
 
           {/* Center dock area */}
@@ -2215,6 +2369,10 @@ const ReviewApp: React.FC = () => {
                           {activeDiffBase === 'last-commit' && `No changes in the last commit${activeWorktreePath ? ' in this worktree' : ''}.`}
                           {activeDiffBase === 'jj-current' && "No changes in the current jj change."}
                           {activeDiffBase === 'jj-last' && "No changes in the last jj change."}
+                          {activeDiffBase === 'workspace-current' && "No current changes in the workspace repositories."}
+                          {activeDiffBase === 'workspace-staged' && "No staged changes in the workspace repositories."}
+                          {activeDiffBase === 'workspace-unstaged' && "No unstaged changes in the workspace repositories."}
+                          {activeDiffBase === 'workspace-last' && "No changes in the last change across workspace repositories."}
                           {activeDiffBase === 'jj-line' && `No changes in your line of work vs ${selectedBase || gitContext?.defaultBranch || '@-'}.`}
                           {activeDiffBase === 'jj-evolog' && `No changes since evolution ${selectedBase ? selectedBase.slice(0, 8) : 'previous'} — the change looks the same as before.`}
                           {activeDiffBase === 'jj-all' && "No files at the current jj change."}
@@ -2225,7 +2383,7 @@ const ReviewApp: React.FC = () => {
                       </>
                     )}
                   </div>
-                  {gitContext?.diffOptions && gitContext.diffOptions.length > 1 && (
+                  {((reviewMode === 'workspace' ? workspaceDiffOptions : gitContext?.diffOptions)?.length ?? 0) > 1 && (
                     <p className="text-xs text-muted-foreground/60">
                       Try selecting a different view from the dropdown.
                     </p>
@@ -2237,8 +2395,8 @@ const ReviewApp: React.FC = () => {
 
           {/* Resize Handle + Sidebar */}
           {reviewSidebar.isOpen && (
-            <>
-              <ResizeHandle {...panelResize.handleProps} side="right" />
+            <div className="contents group/sidebar">
+              <ResizeHandle {...panelResize.handleProps} className="z-10" side="right" onCollapse={() => reviewSidebar.close()} />
               <ReviewSidebar
                 isOpen
                 onClose={reviewSidebar.close}
@@ -2254,19 +2412,19 @@ const ReviewApp: React.FC = () => {
                 onDeleteEditorAnnotation={deleteEditorAnnotation}
                 prMetadata={prMetadata}
                 aiAvailable={aiAvailable}
-                aiMessages={aiChat.messages}
-                isAICreatingSession={aiChat.isCreatingSession}
-                isAIStreaming={aiChat.isStreaming}
+                aiMessages={aiMessages}
+                isAICreatingSession={aiIsCreatingSession}
+                isAIStreaming={aiIsStreaming}
                 onScrollToAILines={handleScrollToAILines}
                 activeFilePath={files[activeFileIndex]?.path}
                 scrollToQuestionId={scrollToQuestionId}
                 onAskGeneral={handleAskGeneral}
-                aiPermissionRequests={aiChat.permissionRequests}
-                onRespondToPermission={aiChat.respondToPermission}
+                aiPermissionRequests={aiPermissionRequests}
+                onRespondToPermission={respondToAIPermission}
                 aiProviders={aiProviders}
                 aiConfig={aiConfig}
                 onAIConfigChange={handleAIConfigChange}
-                hasAISession={!!aiChat.sessionId}
+                hasAISession={!!aiSessionId}
                 agentJobs={agentJobs.jobs}
                 agentCapabilities={agentJobs.capabilities}
                 onAgentLaunch={agentJobs.launchJob}
@@ -2276,7 +2434,7 @@ const ReviewApp: React.FC = () => {
                 onOpenJobDetail={handleOpenJobDetail}
                 onOpenPRPanel={handleOpenPRPanel}
               />
-            </>
+            </div>
           )}
         </div>
 
@@ -2400,18 +2558,18 @@ const ReviewApp: React.FC = () => {
           showCancel
         />
 
-        {/* AI setup dialog — first-run only */}
-        <AISetupDialog
-          isOpen={showAISetup}
-          providers={aiProviders}
-          onComplete={(providerId) => {
-            setShowAISetup(false);
-            handleAIConfigChange({ providerId });
-          }}
+        {/* 0.20.0 look-and-feel / release announcement. Shared with the plan
+            editor via a host-scoped cookie, so it shows once across both apps.
+            Takes precedence over the diff-type setup so the two never stack. */}
+        <LookAndFeelAnnouncementDialog
+          isOpen={showLookAndFeel}
+          gridEnabled={gridEnabled}
+          onToggleGrid={(v) => configStore.set('gridEnabled', v)}
+          onDismiss={dismissLookAndFeel}
         />
 
         {/* Diff type setup dialog — first-run only */}
-        {showDiffTypeSetup && (
+        {showDiffTypeSetup && !showLookAndFeel && (
           <DiffTypeSetupDialog
             onComplete={(selected) => {
               setShowDiffTypeSetup(false);
@@ -2441,9 +2599,6 @@ const ReviewApp: React.FC = () => {
           }
           agentLabel={getAgentName(origin)}
         />
-
-        {/* Update notification */}
-        <UpdateBanner origin={origin} isWSL={isWSL} />
 
         {/* GitHub general comment dialog */}
         <ReviewSubmissionDialog

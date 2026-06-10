@@ -18,13 +18,13 @@
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, resolve } from "node:path";
-import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
-import { Type } from "@mariozechner/pi-ai";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { Type } from "@earendil-works/pi-ai";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
-} from "@mariozechner/pi-coding-agent";
-import { Key } from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-coding-agent";
+import { Key } from "@earendil-works/pi-tui";
 import { buildPromptVariables, formatTodoList, loadPlannotatorConfig, renderTemplate, resolvePhaseProfile } from "./config.js";
 import {
 	type ChecklistItem,
@@ -57,7 +57,6 @@ import {
 	hasPlanBrowserHtml,
 	hasReviewBrowserHtml,
 	getStartupErrorMessage,
-	openArchiveBrowserAction,
 	startCodeReviewBrowserSession,
 	startLastMessageAnnotationSession,
 	startMarkdownAnnotationSession,
@@ -65,8 +64,10 @@ import {
 	registerPlannotatorEventListeners,
 } from "./plannotator-events.js";
 import {
+	findAssistantMessageByEntryId,
 	getAssistantMessageText,
 	getLastAssistantMessageSnapshot,
+	getRecentAssistantMessages,
 	hasSessionMovedPastEntry,
 } from "./assistant-message.js";
 import {
@@ -391,21 +392,6 @@ export default function plannotator(pi: ExtensionAPI): void {
 		},
 	});
 
-	pi.registerCommand("plannotator-status", {
-		description: "Show plannotator status",
-		handler: async (_args, ctx) => {
-			const parts = [`Phase: ${phase}`];
-			if (lastSubmittedPath) {
-				parts.push(`Plan file: ${lastSubmittedPath}`);
-			}
-			if (checklistItems.length > 0) {
-				const done = checklistItems.filter((t) => t.completed).length;
-				parts.push(`Progress: ${done}/${checklistItems.length}`);
-			}
-			ctx.ui.notify(parts.join("\n"), "info");
-		},
-	});
-
 	pi.registerCommand("plannotator-review", {
 		description: "Open interactive code review for current changes or a PR URL; pass --git to force Git in JJ workspaces",
 		handler: async (args, ctx) => {
@@ -489,13 +475,13 @@ export default function plannotator(pi: ExtensionAPI): void {
 	pi.registerCommand("plannotator-annotate", {
 		description: "Open markdown file or folder in annotation UI",
 		handler: async (args, ctx) => {
-			// #570: split --gate / --json from the path. --json is silently
+			// Split known annotate flags from the path. --json is silently
 			// accepted (Pi writes back via sendUserMessage, not stdout).
 			// `rawFilePath` keeps any leading `@` for the literal-@ fallback
 			// (scoped-package-style names).
-			const { filePath, rawFilePath, gate, renderHtml: renderHtmlFlag } = parseAnnotateArgs(args ?? "");
+			const { filePath, rawFilePath, gate, renderHtml: renderHtmlFlag, noJina } = parseAnnotateArgs(args ?? "");
 			if (!filePath) {
-				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.html | https://... | folder/> [--gate] [--json]", "error");
+				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.html | https://... | folder/> [--no-jina] [--gate] [--json]", "error");
 				return;
 			}
 			if (!hasPlanBrowserHtml()) {
@@ -519,7 +505,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			const isUrl = /^https?:\/\//i.test(filePath);
 
 			if (isUrl) {
-				const useJina = resolveUseJina(false, loadConfig());
+				const useJina = resolveUseJina(noJina, loadConfig());
 				ctx.ui.notify(`Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}...`, "info");
 				try {
 					const result = await urlToMarkdown(filePath, { useJina });
@@ -649,7 +635,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 	pi.registerCommand("plannotator-last", {
 		description: "Annotate the last assistant message",
 		handler: async (args, ctx) => {
-			// #570: support --gate on /plannotator-last for Stop-hook review gate.
+			// Support --gate on /plannotator-last for the Stop-hook review gate.
 			const { gate } = parseAnnotateArgs(args ?? "");
 
 			if (!hasPlanBrowserHtml()) {
@@ -669,10 +655,13 @@ export default function plannotator(pi: ExtensionAPI): void {
 				return;
 			}
 
+			const recent = getRecentAssistantMessages(ctx, 25);
+			const pickerMessages = recent.length > 1 ? recent : undefined;
+
 			ctx.ui.notify("Opening annotation UI for last message...", "info");
 
 			try {
-				const session = await startLastMessageAnnotationSession(ctx, snapshot.text, gate);
+				const session = await startLastMessageAnnotationSession(ctx, snapshot.text, gate, pickerMessages);
 				ctx.ui.notify("Last-message annotation opened. You can keep chatting while it runs.", "info");
 				void session
 					.waitForDecision()
@@ -690,9 +679,14 @@ export default function plannotator(pi: ExtensionAPI): void {
 								safeNotify(ctx, "Annotation closed (no feedback).", "info", origin);
 								return;
 							}
-							const feedback = shouldAnchorLastMessageFeedback(ctx, snapshot.entryId, origin)
-								? anchorMessageFeedback(result.feedback, snapshot.text)
-								: result.feedback;
+							// Picker may have changed which message the feedback targets; if so,
+							// look that one up in the current branch so the anchor quote matches.
+							const target = result.selectedMessageId && result.selectedMessageId !== snapshot.entryId
+								? findAssistantMessageByEntryId(ctx, result.selectedMessageId) ?? snapshot
+								: snapshot;
+								const feedback = result.feedbackScope !== "messages" && shouldAnchorLastMessageFeedback(ctx, target.entryId, origin)
+									? anchorMessageFeedback(result.feedback, target.text)
+									: result.feedback;
 							sendUserMessageWithCurrentSessionFallback(
 								pi,
 								getAnnotateMessageFeedbackPrompt("pi", loadConfig(), {
@@ -712,31 +706,6 @@ export default function plannotator(pi: ExtensionAPI): void {
 			} catch (err) {
 				ctx.ui.notify(
 					`Failed to start annotation UI: ${getStartupErrorMessage(err)}`,
-					"error",
-				);
-			}
-		},
-	});
-
-	pi.registerCommand("plannotator-archive", {
-		description: "Browse saved plan decisions",
-		handler: async (_args, ctx) => {
-			if (!hasPlanBrowserHtml()) {
-				ctx.ui.notify(
-					"Archive UI not available. Run 'bun run build' in the pi-extension directory.",
-					"error",
-				);
-				return;
-			}
-
-			ctx.ui.notify("Opening plan archive...", "info");
-
-			try {
-				await openArchiveBrowserAction(ctx);
-				ctx.ui.notify("Archive browser closed.", "info");
-			} catch (err) {
-				ctx.ui.notify(
-					`Failed to start archive: ${getStartupErrorMessage(err)}`,
 					"error",
 				);
 			}
@@ -1165,9 +1134,16 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 	pi.on("agent_end", async (_event, ctx) => {
 		if (phase === "executing" && justApprovedPlan) {
 			justApprovedPlan = false;
-			setTimeout(() => {
+			let attempts = 0;
+			const continueWhenIdle = (): void => {
+				if (!ctx.isIdle()) {
+					attempts += 1;
+					if (attempts <= 200) setTimeout(continueWhenIdle, 50);
+					return;
+				}
 				pi.sendUserMessage("Continue with the approved plan.");
-			}, 0);
+			};
+			setTimeout(continueWhenIdle, 0);
 			return;
 		}
 

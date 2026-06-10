@@ -14,7 +14,7 @@ interface UseGitAddReturn {
   stageError: string | null;
 }
 
-const STAGEABLE_DIFF_TYPES = new Set(['uncommitted', 'unstaged']);
+const STAGEABLE_DIFF_TYPES = new Set(['uncommitted', 'unstaged', 'workspace-current', 'workspace-unstaged']);
 
 export function useGitAdd({ activeDiffBase, onFileViewed }: UseGitAddOptions): UseGitAddReturn {
   const [stagedFiles, setStagedFiles] = useState<Set<string>>(new Set());

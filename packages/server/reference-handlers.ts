@@ -44,6 +44,9 @@ export async function handleDoc(req: Request): Promise<Response> {
 	// below (no base) retains its cwd-based containment check.
 	const base = url.searchParams.get("base");
 	const resolvedBase = base ? resolveUserPath(base) : null;
+	// HTML renders raw by default; `?convert=1` (set by the frontend when the session's
+	// --markdown preference is on) forces Turndown conversion instead.
+	const convert = url.searchParams.get("convert") === "1";
 	if (
 		resolvedBase &&
 		!isAbsoluteUserPath(requestedPath) &&
@@ -55,8 +58,11 @@ export async function handleDoc(req: Request): Promise<Response> {
 			if (await file.exists()) {
 				const raw = await file.text();
 				const isHtml = /\.html?$/i.test(requestedPath);
+				if (isHtml && !convert) {
+					return Response.json({ rawHtml: raw, renderAs: "html", filepath: fromBase });
+				}
 				const markdown = isHtml ? htmlToMarkdown(raw) : raw;
-				return Response.json({ markdown, filepath: fromBase, isConverted: isHtml });
+				return Response.json({ markdown, filepath: fromBase, isConverted: isHtml, renderAs: "markdown" });
 			}
 		} catch {
 			/* fall through to standard resolution */
@@ -74,8 +80,11 @@ export async function handleDoc(req: Request): Promise<Response> {
 			const file = Bun.file(resolvedHtml);
 			if (await file.exists()) {
 				const html = await file.text();
+				if (!convert) {
+					return Response.json({ rawHtml: html, renderAs: "html", filepath: resolvedHtml });
+				}
 				const markdown = htmlToMarkdown(html);
-				return Response.json({ markdown, filepath: resolvedHtml, isConverted: true });
+				return Response.json({ markdown, filepath: resolvedHtml, isConverted: true, renderAs: "markdown" });
 			}
 		} catch { /* fall through */ }
 		return Response.json({ error: `File not found: ${requestedPath}` }, { status: 404 });

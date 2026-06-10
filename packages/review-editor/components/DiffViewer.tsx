@@ -35,6 +35,7 @@ interface PierreDiffContentProps {
   lineDiffType?: 'word-alt' | 'word' | 'char' | 'none';
   disableLineNumbers?: boolean;
   disableBackground?: boolean;
+  expandUnchanged?: boolean;
   mergedAnnotations: DiffLineAnnotation<DiffAnnotationMetadata>[];
   pendingSelection: SelectedLineRange | null;
   onLineSelectionEnd: (range: SelectedLineRange | null) => void;
@@ -55,6 +56,7 @@ const PierreDiffContent = React.memo(({
   lineDiffType,
   disableLineNumbers,
   disableBackground,
+  expandUnchanged,
   mergedAnnotations,
   pendingSelection,
   onLineSelectionEnd,
@@ -78,6 +80,7 @@ const PierreDiffContent = React.memo(({
         lineDiffType,
         disableLineNumbers,
         disableBackground,
+        expandUnchanged,
         hunkSeparators: 'line-info',
         enableLineSelection: true,
         enableGutterUtility: true,
@@ -105,6 +108,7 @@ const PierreDiffContent = React.memo(({
   prev.lineDiffType === next.lineDiffType &&
   prev.disableLineNumbers === next.disableLineNumbers &&
   prev.disableBackground === next.disableBackground &&
+  prev.expandUnchanged === next.expandUnchanged &&
   prev.mergedAnnotations === next.mergedAnnotations &&
   prev.pendingSelection === next.pendingSelection &&
   prev.onLineSelectionEnd === next.onLineSelectionEnd &&
@@ -131,6 +135,7 @@ interface DiffViewerProps {
   lineDiffType?: 'word-alt' | 'word' | 'char' | 'none';
   disableLineNumbers?: boolean;
   disableBackground?: boolean;
+  expandUnchanged?: boolean;
   fontFamily?: string;
   fontSize?: string;
   annotations: CodeAnnotation[];
@@ -180,6 +185,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   lineDiffType,
   disableLineNumbers,
   disableBackground,
+  expandUnchanged,
   fontFamily,
   fontSize,
   annotations,
@@ -408,7 +414,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     roots.forEach(root =>
       applySearchHighlights(root, query, matches, activeSearchMatchId)
     );
-  }, [searchQuery, searchMatches, filePath, diffStyle, diffOverflow, diffIndicators, lineDiffType, disableLineNumbers, disableBackground, augmentedDiff, viewport]);
+  }, [searchQuery, searchMatches, filePath, diffStyle, diffOverflow, diffIndicators, lineDiffType, disableLineNumbers, disableBackground, expandUnchanged, augmentedDiff, viewport]);
 
   // Swap active search highlight instantly when stepping between matches.
   // This avoids a full rebuild just to change two elements' background color.
@@ -421,7 +427,48 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   useEffect(() => {
     if (!activeSearchMatch || !containerRef.current) return;
     return retryScrollToSearchMatch(containerRef.current, activeSearchMatch);
-  }, [activeSearchMatch, filePath, diffStyle, diffOverflow, diffIndicators, lineDiffType, disableLineNumbers, disableBackground, viewport]);
+  }, [activeSearchMatch, filePath, diffStyle, diffOverflow, diffIndicators, lineDiffType, disableLineNumbers, disableBackground, expandUnchanged, viewport]);
+
+  // Scroll to the selected line range — drives "jump to entity" from semantic-diff
+  // clicks and AI "scroll to lines". Mirrors the scroll-to-annotation behavior used
+  // by sidebar comments (center the target, smooth). pierre tags the selected rows
+  // with `[data-selected-line]` inside the diff shadow DOM once it applies
+  // `selectedLines`, so we retry across frames until it appears.
+  //
+  // Only scroll when the target is off-screen: a manual drag-select also sets
+  // pendingSelection, but its lines are by definition already visible, so we leave
+  // the view untouched and avoid yanking it on every selection.
+  useEffect(() => {
+    if (!pendingSelection || !containerRef.current) return;
+    const container = containerRef.current;
+    let cancelled = false;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 30;
+
+    const tryScroll = () => {
+      if (cancelled) return;
+      const target = getSearchRoots(container)
+        .map((root) => (root as ParentNode).querySelector?.('[data-selected-line]') ?? null)
+        .find((el): el is Element => el != null);
+      if (target) {
+        const targetRect = target.getBoundingClientRect();
+        const viewRect = container.getBoundingClientRect();
+        const fullyVisible = targetRect.top >= viewRect.top && targetRect.bottom <= viewRect.bottom;
+        if (!fullyVisible) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        }
+        return;
+      }
+      attempts += 1;
+      if (attempts < MAX_ATTEMPTS) requestAnimationFrame(tryScroll);
+    };
+
+    const raf = requestAnimationFrame(tryScroll);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
+  }, [pendingSelection, filePath, augmentedDiff, viewport]);
 
   // Map annotations to @pierre/diffs format
   const lineAnnotations = useMemo(() => {
@@ -606,6 +653,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
               lineDiffType={lineDiffType}
               disableLineNumbers={disableLineNumbers}
               disableBackground={disableBackground}
+              expandUnchanged={expandUnchanged}
               mergedAnnotations={mergedAnnotations}
               pendingSelection={pendingSelection}
               onLineSelectionEnd={handlePierreLineSelectionEnd}

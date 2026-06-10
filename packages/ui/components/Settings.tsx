@@ -61,7 +61,7 @@ import { KeyboardShortcuts } from './KeyboardShortcuts';
 import { type QuickLabel, getQuickLabels, saveQuickLabels, resetQuickLabels, DEFAULT_QUICK_LABELS, getLabelColors, LABEL_COLOR_MAP } from '../utils/quickLabels';
 import { ThemeTab } from './ThemeTab';
 import { isMac, modKey, altKey } from '../utils/platform';
-import { getAIProviderSettings } from '../utils/aiProvider';
+import { getAIProviderSettings, resolveAIProviderSelection } from '../utils/aiProvider';
 import { AISettingsTab } from './AISettingsTab';
 import { HooksTab } from './settings/HooksTab';
 import { OverlayScrollArea } from './OverlayScrollArea';
@@ -85,7 +85,7 @@ interface SettingsProps {
   externalOpen?: boolean;
   onExternalClose?: () => void;
   /** Available AI providers (from /api/ai/capabilities). */
-  aiProviders?: Array<{ id: string; name: string; capabilities: Record<string, boolean> }>;
+  aiProviders?: Array<{ id: string; name: string; capabilities: Record<string, boolean>; models?: Array<{ id: string; label: string; default?: boolean }> }>;
   /** Git user name from `git config user.name`, for quick identity set */
   gitUser?: string;
 }
@@ -238,6 +238,7 @@ const ReviewDisplayTab: React.FC = () => {
   const diffShowBackground = useConfigValue('diffShowBackground');
   const diffLineBgIntensity = useConfigValue('diffLineBgIntensity');
   const diffHideWhitespace = useConfigValue('diffHideWhitespace');
+  const diffExpandUnchanged = useConfigValue('diffExpandUnchanged');
   const diffFontFamily = useConfigValue('diffFontFamily');
   const diffFontSize = useConfigValue('diffFontSize');
 
@@ -381,6 +382,16 @@ const ReviewDisplayTab: React.FC = () => {
           <SegmentedControl options={LINE_BG_INTENSITY_OPTIONS} value={diffLineBgIntensity} onChange={(v) => configStore.set('diffLineBgIntensity', v)} />
         </div>
       )}
+
+      <div className="border-t border-border" />
+
+      {/* Expand Unchanged Regions */}
+      <ToggleSwitch
+        checked={diffExpandUnchanged}
+        onChange={(v) => configStore.set('diffExpandUnchanged', v)}
+        label="Expand Unchanged Regions"
+        description="Show full file content around changes by default"
+      />
 
       <div className="border-t border-border" />
 
@@ -613,6 +624,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
     return () => document.removeEventListener('keydown', handler);
   }, [themePreview]);
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+  const gridEnabled = useConfigValue('gridEnabled');
   const [identity, setIdentity] = useState('');
   const [obsidian, setObsidian] = useState<ObsidianSettings>({
     enabled: false,
@@ -697,7 +709,8 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       setAutoCloseDelayState(getAutoCloseDelay());
       setDefaultNotesApp(getDefaultNotesApp());
       setQuickLabelsState(getQuickLabels());
-      setAiProvider(getAIProviderSettings().providerId);
+      const aiSettings = getAIProviderSettings();
+      setAiProvider(resolveAIProviderSelection({ providers: aiProviders, origin, settings: aiSettings }).providerId);
       setFileBrowserSettings(getFileBrowserSettings());
 
       // Validate agent setting when dialog opens
@@ -705,7 +718,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
         setAgentWarning(getAgentWarning());
       }
     }
-  }, [showDialog, availableAgents, origin, getAgentWarning]);
+  }, [showDialog, availableAgents, origin, getAgentWarning, aiProviders.length]);
 
   useEffect(() => {
     if (!showDialog) return;
@@ -1190,6 +1203,21 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
 
                     <div className="border-t border-border" />
 
+                    {/* Grid Background */}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-sm font-medium">Grid Background</div>
+                        <div className="text-xs text-muted-foreground">Show the plan as a floating card on a grid</div>
+                      </div>
+                      <button role="switch" aria-checked={gridEnabled}
+                        onClick={() => configStore.set('gridEnabled', !gridEnabled)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${gridEnabled ? 'bg-primary' : 'bg-muted'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${gridEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                      </button>
+                    </div>
+
+                    <div className="border-t border-border" />
+
                     {/* Plan Width */}
                     <div className="space-y-3">
                       <div>
@@ -1325,7 +1353,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                         <div>
                           <div className="text-sm font-medium">Save Plans</div>
                           <div className="text-xs text-muted-foreground">
-                            Auto-save plans to ~/.plannotator/plans/
+                            Auto-save plans to the default data directory
                           </div>
                         </div>
                         <button
@@ -1351,7 +1379,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                             type="text"
                             value={planSave.customPath || ''}
                             onChange={(e) => handlePlanSaveChange({ customPath: e.target.value || null })}
-                            placeholder="~/.plannotator/plans/"
+                            placeholder="Leave empty for default"
                             className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
                           />
                           <div className="text-[10px] text-muted-foreground/70">
@@ -1467,8 +1495,8 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
 
                     <style>{`
                       @keyframes tip-slide-open {
-                        from { max-height: 0; opacity: 0; }
-                        to   { max-height: 60px; opacity: 1; }
+                        from { opacity: 0; transform: translateY(-4px); }
+                        to   { opacity: 1; transform: translateY(0); }
                       }
                     `}</style>
                     <div className="space-y-1.5">
@@ -1642,6 +1670,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                   <AISettingsTab
                     providers={aiProviders}
                     selectedProviderId={aiProvider}
+                    origin={origin}
                     onProviderChange={setAiProvider}
                   />
                 )}

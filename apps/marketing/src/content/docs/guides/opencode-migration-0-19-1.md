@@ -20,7 +20,7 @@ If you already use `@plannotator/opencode` and upgrade to `0.19.1` without addin
 - any agents you list in `planningAgents` are added alongside `plan`
 - `build` and other non-planning primary agents stop seeing or calling `submit_plan` by default
 - the broad reminder that nudged non-plan primary agents toward `submit_plan` goes away
-- `/plannotator-last`, `/plannotator-annotate`, `/plannotator-review`, and `/plannotator-archive` still work
+- `/plannotator-last`, `/plannotator-annotate`, and `/plannotator-review` still work
 
 This is the new omitted-config default:
 
@@ -89,7 +89,6 @@ In `manual` mode:
   - `/plannotator-last`
   - `/plannotator-annotate`
   - `/plannotator-review`
-  - `/plannotator-archive`
 
 ## Recommended upgrade path
 
