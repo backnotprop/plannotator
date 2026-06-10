@@ -471,11 +471,17 @@ diffs-container {
   transition: color 120ms ease, background 120ms ease;
 }
 
-/* Invisible spacer with the badge's exact footprint, rendered when sem is
-   available but a file has no named changes — keeps headers aligned. */
-.semantic-file-badge-ghost {
-  visibility: hidden;
-  pointer-events: none;
+/* Disabled "sem 0" badge for files with no semantic changes — same footprint
+   and structure as the live badge so every header looks consistent, but
+   grayed out and inert (no popover, no hover affordance). */
+.semantic-file-badge-disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.semantic-file-badge-disabled .semantic-file-badge-count {
+  background: var(--muted);
+  color: var(--muted-foreground);
 }
 
 .semantic-file-badge:hover,
