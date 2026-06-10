@@ -206,12 +206,15 @@ interface AllFilesCodeViewProps {
   onVisibleFileChange?: (filePath: string | null) => void;
   // Only handle [/]/z/v/a/c/x keyboard nav when this surface is the active panel.
   isActive?: boolean;
-  // AI props (optional — surfaced into the toolbar like AllFilesDiffView).
+  // AI props (optional — surfaced into the toolbar). File-aware variants: this
+  // surface owns which file the selection lives in (activeFilePath), so the
+  // index-based onAskAI/aiHistoryForSelection (which resolve the file from the
+  // single-file panel's focus) must not be used here.
   aiAvailable?: boolean;
-  onAskAI?: (question: string) => void;
+  onAskAIForFile?: (filePath: string, question: string) => void;
   isAILoading?: boolean;
   onViewAIResponse?: (questionId?: string) => void;
-  aiHistoryForSelection?: AIChatEntry[];
+  getAIHistoryForFile?: (filePath: string) => AIChatEntry[];
 }
 
 // Diffshub-style stable path-based id allocation. Plannotator's file list is
@@ -224,11 +227,26 @@ interface ItemIdentity {
   items: CodeViewItem<DiffAnnotationMetadata>[];
   /** Maps a file path to the CodeView item id that owns it. */
   filePathToItemId: Map<string, string>;
+  /** Maps a file path to ALL item ids rendering it (duplicate display paths
+   * produce twins; updates keyed by path must fan out to every twin). */
+  filePathToItemIds: Map<string, string[]>;
   /** Maps a CodeView item id back to the originating file path. */
   itemIdToFilePath: Map<string, string>;
   /** Maps a CodeView item id to its originating DiffFile. Keyed by the unique
    * item id (not path) so duplicate display paths resolve to the correct file. */
   itemIdToFile: Map<string, DiffFile>;
+}
+
+// Cheap content hash (djb2 xor variant) for diff-change detection. Replaces
+// patch-LENGTH proxies: a same-length different-content patch set must still
+// remount CodeView (fileSetKey) and must not collide in highlight caches
+// (cacheKey). Not cryptographic — collision odds for this purpose are fine.
+function hashString(value: string): string {
+  let hash = 5381;
+  for (let i = 0; i < value.length; i++) {
+    hash = ((hash * 33) ^ value.charCodeAt(i)) >>> 0;
+  }
+  return hash.toString(36);
 }
 
 // Project a file's line annotations into Pierre's DiffLineAnnotation shape. This
@@ -274,9 +292,11 @@ function buildItemIdentity(
   annotations: CodeAnnotation[],
   prUrl: string | undefined,
   prDiffScope: string | undefined,
+  patchHashes: string[],
 ): ItemIdentity {
   const items: CodeViewItem<DiffAnnotationMetadata>[] = [];
   const filePathToItemId = new Map<string, string>();
+  const filePathToItemIds = new Map<string, string[]>();
   const itemIdToFilePath = new Map<string, string>();
   const itemIdToFile = new Map<string, DiffFile>();
   const usedIds = new Set<string>();
@@ -316,9 +336,9 @@ function buildItemIdentity(
     // cacheKey seeds worker highlighting (a later phase), whose cache is a
     // singleton that SURVIVES fileSetKey remounts — so the key must be unique
     // per item (duplicate display paths) AND per diff content (the same path
-    // across a base/whitespace/PR switch carries different contents). Patch
-    // length is the same cheap content proxy fileSetKey uses.
-    fileDiff.cacheKey = `${id}#${file.patch.length}`;
+    // across a base/whitespace/PR switch carries different contents). The
+    // content hash is the same one fileSetKey uses.
+    fileDiff.cacheKey = `${id}#${patchHashes[index] ?? ''}`;
     // Seed annotations at build time so the first render (and any remount via
     // fileSetKey) already paints existing annotations without an extra update.
     const fileAnnotations = projectFileAnnotations(annotations, file.path, prUrl, prDiffScope);
@@ -328,11 +348,14 @@ function buildItemIdentity(
     if (!filePathToItemId.has(file.path)) {
       filePathToItemId.set(file.path, id);
     }
+    const twins = filePathToItemIds.get(file.path);
+    if (twins) twins.push(id);
+    else filePathToItemIds.set(file.path, [id]);
     itemIdToFilePath.set(id, file.path);
     itemIdToFile.set(id, file);
   }
 
-  return { items, filePathToItemId, itemIdToFilePath, itemIdToFile };
+  return { items, filePathToItemId, filePathToItemIds, itemIdToFilePath, itemIdToFile };
 }
 
 // Resolved pixel height of the custom header. Must equal FileHeader's fixed
@@ -386,10 +409,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   onVisibleFileChange,
   isActive = true,
   aiAvailable = false,
-  onAskAI,
+  onAskAIForFile,
   isAILoading = false,
   onViewAIResponse,
-  aiHistoryForSelection = [],
+  getAIHistoryForFile,
 }) => {
   // showFileHeader: true suppresses usePierreTheme's `[data-title]` hide rule.
   // With renderCustomHeader the built-in header runs in 'custom' mode (only the
@@ -452,6 +475,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // keyed off this file's path + patch, but the value is sourced from the
   // CodeView callback context (item.id) — never from geometry inference.
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+  // Mirror ref so stable callbacks (Ask AI) read the active file at CALL time.
+  const activeFilePathRef = useRef(activeFilePath);
+  activeFilePathRef.current = activeFilePath;
   const [selectedLines, setSelectedLines] = useState<CodeViewLineSelection | null>(null);
   // A range whose toolbar must open only after the ToolbarHost remounts against
   // the newly-activated file (its patch/filePath props changed this render).
@@ -505,21 +531,23 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // remount triggered by a file-set change still seeds current annotations.
   const annotationsRef = useRef(annotations);
   annotationsRef.current = annotations;
+  // Per-file patch content hashes — shared by fileSetKey (remount detection)
+  // and the items' cacheKeys (highlight cache identity). Hashed once per
+  // files-identity change.
+  const patchHashes = useMemo(() => files.map((f) => hashString(f.patch)), [files]);
   const identity = useMemo<ItemIdentity>(
-    () => buildItemIdentity(files, visualOrder, annotationsRef.current, prUrl, prDiffScope),
+    () => buildItemIdentity(files, visualOrder, annotationsRef.current, prUrl, prDiffScope, patchHashes),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [files, visualOrder, prUrl, prDiffScope],
+    [files, visualOrder, prUrl, prDiffScope, patchHashes],
   );
-  const { filePathToItemId, itemIdToFilePath, itemIdToFile } = identity;
+  const { filePathToItemId, filePathToItemIds, itemIdToFilePath, itemIdToFile } = identity;
 
   // Stable identity of the current diff. Changes whenever the file set or any
-  // file's patch content changes (diff type / base / whitespace / PR switch),
-  // and is used as the CodeView `key` to force a remount + fresh seed. Path +
-  // patch length is a cheap proxy for "the diff changed" without hashing every
-  // byte of every patch.
+  // file's patch CONTENT changes (diff type / base / whitespace / PR switch),
+  // and is used as the CodeView `key` to force a remount + fresh seed.
   const fileSetKey = useMemo(
-    () => `${files.length}:${files.map((f) => `${f.path}#${f.patch.length}`).join('|')}`,
-    [files],
+    () => `${files.length}:${files.map((f, i) => `${f.path}#${patchHashes[i]}`).join('|')}`,
+    [files, patchHashes],
   );
 
   // Push the split ratio onto the container as CSS vars (P7). Setting them on the
@@ -644,6 +672,21 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       );
     },
     [activeFilePath, onAddAnnotationForFile],
+  );
+
+  // Ask AI + AI history routed by THIS surface's active file (the file the
+  // toolbar selection lives in) — never by the single-file panel's focus index.
+  const handleAskAIForActiveFile = useMemo(() => {
+    if (!onAskAIForFile) return undefined;
+    return (question: string) => {
+      const filePath = activeFilePathRef.current;
+      if (filePath) onAskAIForFile(filePath, question);
+    };
+  }, [onAskAIForFile]);
+
+  const aiHistoryForActiveFile = useMemo(
+    () => (getAIHistoryForFile && activeFilePath ? getAIHistoryForFile(activeFilePath) : []),
+    [getAIHistoryForFile, activeFilePath],
   );
 
   // Edit routes through the ToolbarHost handle (same as AllFilesDiffView). The
@@ -1167,10 +1210,14 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     });
 
     for (const path of changedPaths) {
-      const itemId = filePathToItemId.get(path);
-      if (itemId != null) syncItemAnnotations(path, itemId, annotations);
+      // Fan out to ALL items rendering this path (duplicate display paths
+      // produce twins; updating only the canonical first item would leave the
+      // twin rendering deleted/stale annotations until the next remount).
+      for (const itemId of filePathToItemIds.get(path) ?? []) {
+        syncItemAnnotations(path, itemId, annotations);
+      }
     }
-  }, [annotations, prUrl, prDiffScope, filePathToItemId, syncItemAnnotations]);
+  }, [annotations, prUrl, prDiffScope, filePathToItemIds, syncItemAnnotations]);
 
   // --- Header actions ---------------------------------------------------------
 
@@ -1253,10 +1300,13 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     prevStageErrorRef.current = stageError;
 
     for (const path of changedPaths) {
-      const itemId = filePathToItemId.get(path);
-      if (itemId != null) refreshItem(itemId);
+      // All twins of a duplicate path share viewed/staged state (it's keyed by
+      // path), so refresh every item rendering it.
+      for (const itemId of filePathToItemIds.get(path) ?? []) {
+        refreshItem(itemId);
+      }
     }
-  }, [viewedFiles, stagedFiles, stagingFile, stageError, filePathToItemId, refreshItem]);
+  }, [viewedFiles, stagedFiles, stagingFile, stageError, filePathToItemIds, refreshItem]);
 
   // --- Line selection through CodeView (replaces geometry-based inference) ---
 
@@ -1441,8 +1491,18 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   useEffect(() => {
     if (!isActive) return;
     const handler = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      // composedPath()[0] pierces shadow DOM: window-level e.target retargets
+      // to the shadow HOST (e.g. <diffs-container>), which would hide a
+      // typeable element living inside a shadow root from this guard.
+      const el = (e.composedPath?.()[0] ?? e.target) as HTMLElement | null;
+      if (
+        el &&
+        (el.tagName === 'INPUT' ||
+          el.tagName === 'TEXTAREA' ||
+          el.tagName === 'SELECT' ||
+          el.isContentEditable)
+      )
+        return;
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       if (orderedItemIds.length === 0) return;
 
@@ -1459,16 +1519,19 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         return;
       }
 
-      // z — re-expand + scroll to the most recently collapsed-and-still-collapsed
-      // file (walk the visual order backward from the current position is not how
-      // legacy worked; legacy used a collapse history stack). We approximate with
-      // the nearest collapsed item before the current one, falling back to the
-      // first collapsed item.
+      // z — re-expand + scroll to a collapsed file. Legacy used a collapse
+      // history stack; we approximate with the nearest collapsed item AT or
+      // BEFORE the current position in visual order (the file you most likely
+      // just collapsed), falling back to the nearest one after it.
       if (e.key === 'z') {
         const collapsedIds = orderedItemIds.filter((id) => isItemCollapsed(id));
         if (collapsedIds.length === 0) return;
         e.preventDefault();
-        const target = collapsedIds[collapsedIds.length - 1];
+        const currentIdx = currentId ? orderedItemIds.indexOf(currentId) : -1;
+        const target =
+          [...collapsedIds]
+            .reverse()
+            .find((id) => orderedItemIds.indexOf(id) <= currentIdx) ?? collapsedIds[0];
         toggleItemCollapsed(target);
         scrollToItem(target);
         return;
@@ -1725,10 +1788,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         onAddAnnotation={handleAddAnnotation}
         onEditAnnotation={onEditAnnotation}
         aiAvailable={aiAvailable}
-        onAskAI={onAskAI}
+        onAskAI={handleAskAIForActiveFile}
         isAILoading={isAILoading}
         onViewAIResponse={onViewAIResponse}
-        aiHistoryMessages={aiHistoryForSelection}
+        aiHistoryMessages={aiHistoryForActiveFile}
       />
 
       {fileCommentAnchor && onAddFileCommentForFile && (

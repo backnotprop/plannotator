@@ -13,10 +13,10 @@ export const reviewAllFilesDiffShortcuts = defineShortcutScope({
       displayOrder: 10,
     },
     undoCollapse: {
-      description: 'Undo last collapse',
+      description: 'Re-expand nearest collapsed file',
       bindings: ['Z'],
       section: 'All-Files View',
-      hint: 'Reopens the most recently auto-collapsed file (auto-collapse fires when toggling viewed).',
+      hint: 'Reopens the nearest collapsed file at or above the current position (collapse also fires when toggling viewed).',
       displayOrder: 20,
     },
     addFileComment: {
@@ -27,14 +27,14 @@ export const reviewAllFilesDiffShortcuts = defineShortcutScope({
       displayOrder: 30,
     },
     nextFile: {
-      description: 'Scroll to next expanded file',
+      description: 'Scroll to next file',
       bindings: [']'],
       section: 'All-Files View',
       hint: 'All-files panel only.',
       displayOrder: 40,
     },
     prevFile: {
-      description: 'Scroll to previous expanded file',
+      description: 'Scroll to previous file',
       bindings: ['['],
       section: 'All-Files View',
       hint: 'All-files panel only.',

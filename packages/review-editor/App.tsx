@@ -344,6 +344,10 @@ const ReviewApp: React.FC = () => {
     // match (it reacts to the activeSearchMatch prop). Switching to the
     // single-file panel instead would defeat the point of an all-files search.
     if (dockApi) {
+      // Mirrors openAllFilesPanel (declared later, so not callable here):
+      // explicitly opening this surface cancels any pending semantic-diff
+      // auto-fallback, same as a manual tab switch.
+      semanticDiffAutoFallbackPending.current = false;
       const existing = dockApi.getPanel(REVIEW_ALL_FILES_PANEL_ID);
       if (existing) {
         if (dockApi.activePanel?.id !== REVIEW_ALL_FILES_PANEL_ID) existing.api.setActive();
@@ -552,22 +556,34 @@ const ReviewApp: React.FC = () => {
     resetAISession();
   }, [aiProviders, origin, resetAISession]);
 
-  const handleAskAI = useCallback((question: string) => {
-    if (!pendingSelection || !files[activeFileIndex]) return;
+  // File-aware Ask AI: the all-files surface resolves the owning file itself
+  // (its toolbar selection lives in a file the single-file panel may never
+  // have focused), so it must NOT go through activeFileIndex.
+  const handleAskAIForFile = useCallback((filePath: string, question: string) => {
+    if (!pendingSelection) return;
+    const file = files.find(f => f.path === filePath);
+    if (!file) return;
     const lineStart = Math.min(pendingSelection.start, pendingSelection.end);
     const lineEnd = Math.max(pendingSelection.start, pendingSelection.end);
     const side = pendingSelection.side === 'additions' ? 'new' : 'old';
-    const selectedCode = extractLinesFromPatch(files[activeFileIndex].patch, lineStart, lineEnd, side);
+    const selectedCode = extractLinesFromPatch(file.patch, lineStart, lineEnd, side);
 
     askAI({
       prompt: question,
-      filePath: files[activeFileIndex].path,
+      filePath,
       lineStart,
       lineEnd,
       side,
       selectedCode: selectedCode || undefined,
     });
-  }, [activeFileIndex, askAI, files, pendingSelection]);
+  }, [askAI, files, pendingSelection]);
+
+  // Single-file surface: the focused file IS files[activeFileIndex].
+  const handleAskAI = useCallback((question: string) => {
+    const file = files[activeFileIndex];
+    if (!file) return;
+    handleAskAIForFile(file.path, question);
+  }, [activeFileIndex, files, handleAskAIForFile]);
 
   const handleViewAIResponse = useCallback((questionId?: string) => {
     reviewSidebar.open('ai');
@@ -588,10 +604,11 @@ const ReviewApp: React.FC = () => {
   }, [openDiffFile]);
 
 
-  // AI messages overlapping the current selection (for toolbar history)
-  const aiHistoryForSelection = useMemo(() => {
-    if (!pendingSelection || !files[activeFileIndex]) return [];
-    const filePath = files[activeFileIndex].path;
+  // AI messages overlapping the current selection in a GIVEN file (toolbar
+  // history). File-aware so the all-files surface can ask for its own active
+  // file instead of inheriting the single-file panel's focus.
+  const getAIHistoryForFile = useCallback((filePath: string) => {
+    if (!pendingSelection) return [];
     const selStart = Math.min(pendingSelection.start, pendingSelection.end);
     const selEnd = Math.max(pendingSelection.start, pendingSelection.end);
     const side = pendingSelection.side === 'additions' ? 'new' : 'old';
@@ -601,7 +618,13 @@ const ReviewApp: React.FC = () => {
         q.lineStart != null && q.lineEnd != null &&
         q.lineStart <= selEnd && q.lineEnd >= selStart;
     });
-  }, [pendingSelection, files, activeFileIndex, aiMessages]);
+  }, [pendingSelection, aiMessages]);
+
+  // Single-file surface variant (focused file = files[activeFileIndex]).
+  const aiHistoryForSelection = useMemo(() => {
+    const file = files[activeFileIndex];
+    return file ? getAIHistoryForFile(file.path) : [];
+  }, [files, activeFileIndex, getAIHistoryForFile]);
 
   // Click AI marker in diff → scroll sidebar to that Q&A
   const [scrollToQuestionId, setScrollToQuestionId] = useState<string | null>(null);
@@ -1561,10 +1584,12 @@ const ReviewApp: React.FC = () => {
     aiAvailable,
     aiMessages,
     onAskAI: handleAskAI,
+    onAskAIForFile: handleAskAIForFile,
     isAILoading: aiIsCreatingSession || aiIsStreaming,
     onViewAIResponse: handleViewAIResponse,
     onClickAIMarker: handleClickAIMarker,
     aiHistoryForSelection,
+    getAIHistoryForFile,
     agentJobs: agentJobs.jobs,
     prMetadata,
     prContext,
@@ -1597,8 +1622,8 @@ const ReviewApp: React.FC = () => {
     canStageFiles, stageError, isSearchPending, debouncedSearchQuery,
     activeFileSearchMatches, activeSearchMatchId, activeSearchMatch, searchMatches,
     aiAvailable, aiMessages, aiIsCreatingSession, aiIsStreaming,
-    handleAskAI, handleViewAIResponse, handleClickAIMarker,
-    aiHistoryForSelection, agentJobs.jobs, prMetadata, prContext,
+    handleAskAI, handleAskAIForFile, handleViewAIResponse, handleClickAIMarker,
+    aiHistoryForSelection, getAIHistoryForFile, agentJobs.jobs, prMetadata, prContext,
     isPRContextLoading, prContextError, fetchPRContext, platformUser, openDiffFile,
     handleOpenTour, isAllFilesActive, isSemanticDiffActive, semanticDiffAvailable,
     handleSemanticDiffUnavailable, handleSemanticDiffLoadError, handleSemanticDiffLoadSuccess, handleAddAnnotationForFile,

@@ -82,10 +82,16 @@ export interface ReviewState {
   aiAvailable: boolean;
   aiMessages: AIChatEntry[];
   onAskAI: (question: string) => void;
+  /** File-aware Ask AI for the all-files surface. onAskAI above resolves the
+   *  file from the single-file panel's focus index, which is wrong when the
+   *  selection lives in the all-files CodeView. */
+  onAskAIForFile: (filePath: string, question: string) => void;
   isAILoading: boolean;
   onViewAIResponse: (questionId?: string) => void;
   onClickAIMarker: (questionId: string) => void;
   aiHistoryForSelection: AIChatEntry[];
+  /** File-aware variant of aiHistoryForSelection (same single-file caveat). */
+  getAIHistoryForFile: (filePath: string) => AIChatEntry[];
 
   // Agent jobs
   agentJobs: AgentJobInfo[];

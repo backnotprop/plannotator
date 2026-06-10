@@ -37,7 +37,10 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       stageError={state.stageError}
       prUrl={state.prMetadata?.url}
       prDiffScope={state.prDiffScope}
-      searchQuery={state.searchQuery}
+      // Debounced like ReviewDiffPanel: searchMatches derive from the
+      // debounced query, so painting marks from the raw query mid-debounce
+      // mismatches mark ids and re-walks every rendered item per keystroke.
+      searchQuery={state.isSearchPending ? '' : state.debouncedSearchQuery}
       searchMatches={state.searchMatches}
       activeSearchMatchId={state.activeSearchMatchId}
       activeSearchMatch={state.allFilesActiveSearchMatch}
@@ -45,10 +48,10 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       onVisibleFileChange={state.onAllFilesVisibleFileChange}
       isActive={state.isAllFilesActive}
       aiAvailable={state.aiAvailable}
-      onAskAI={state.onAskAI}
+      onAskAIForFile={state.onAskAIForFile}
       isAILoading={state.isAILoading}
       onViewAIResponse={state.onViewAIResponse}
-      aiHistoryForSelection={state.aiHistoryForSelection}
+      getAIHistoryForFile={state.getAIHistoryForFile}
     />
   );
 };

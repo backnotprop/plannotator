@@ -19,7 +19,9 @@ export function getSearchRoots(root: ParentNode): ParentNode[] {
 
   while (current) {
     if (current instanceof HTMLElement && current.shadowRoot) {
-      roots.push(current.shadowRoot);
+      // The recursive call already includes the shadow root itself as its
+      // first entry — pushing it here too would double every root (and
+      // double all clear/apply work over its subtree).
       roots.push(...getSearchRoots(current.shadowRoot));
     }
     current = walker.nextNode() as Element | null;
@@ -27,6 +29,12 @@ export function getSearchRoots(root: ParentNode): ParentNode[] {
 
   return roots;
 }
+
+// Item nodes that currently contain search marks. Lets the idle path (empty
+// query / no matches for the item — i.e. every scroll frame while search is
+// not in use) skip the full shadow-root TreeWalker without risking stale
+// marks: only nodes this module marked can need clearing.
+const markedItemNodes = new WeakSet<HTMLElement>();
 
 export function clearSearchHighlights(root: ParentNode) {
   const marks = root.querySelectorAll('mark[data-review-search-match]');
@@ -181,24 +189,33 @@ export function applyItemSearchHighlights(
   matchesForItem: ReviewSearchMatch[],
   activeSearchMatchId: string | null,
 ): void {
-  const roots = getSearchRoots(itemNode);
-  // Always clear first so a recycled element showing stale marks is reset, even
-  // when this item now has no matches.
-  for (const root of roots) clearSearchHighlights(root);
-
   const trimmed = query.trim();
-  if (!trimmed || matchesForItem.length === 0) return;
+  const idle = !trimmed || matchesForItem.length === 0;
+  // Idle fast path: this runs on EVERY item render (every scroll frame) — when
+  // search is not in use and this node was never marked, there is nothing to
+  // clear, so skip the shadow-root walk entirely.
+  if (idle && !markedItemNodes.has(itemNode)) return;
+
+  const roots = getSearchRoots(itemNode);
+  // Clear first so a node with stale marks (recycled element, query changed)
+  // is reset even when this item now has no matches.
+  for (const root of roots) clearSearchHighlights(root);
+  markedItemNodes.delete(itemNode);
+  if (idle) return;
 
   for (const root of roots) {
     applySearchHighlights(root, query, matchesForItem, activeSearchMatchId);
   }
+  markedItemNodes.add(itemNode);
 }
 
 /** Clear all search marks inside a single CodeView item's element (used when an
  * item leaves the rendered window so a future reuse starts clean). */
 export function clearItemSearchHighlights(itemNode: HTMLElement): void {
+  if (!markedItemNodes.has(itemNode)) return;
   const roots = getSearchRoots(itemNode);
   for (const root of roots) clearSearchHighlights(root);
+  markedItemNodes.delete(itemNode);
 }
 
 export function swapActiveSearchHighlight(
