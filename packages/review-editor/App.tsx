@@ -6,6 +6,7 @@ import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
 import { Settings } from '@plannotator/ui/components/Settings';
 import { FeedbackButton, ApproveButton, ExitButton } from '@plannotator/ui/components/ToolbarButtons';
 import { AgentReviewActions } from './components/AgentReviewActions';
+import { DiffOptionsPopover } from './components/DiffOptionsPopover';
 import { useUpdateCheck } from '@plannotator/ui/hooks/useUpdateCheck';
 import { storage } from '@plannotator/ui/utils/storage';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
@@ -2230,6 +2231,11 @@ const ReviewApp: React.FC = () => {
                 )}
               </button>
             )}
+
+            {/* Global diff display options. These settings apply to every
+                file's diff, so they live once in the toolbar instead of being
+                repeated in every FileHeader. */}
+            <DiffOptionsPopover />
 
             <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
 

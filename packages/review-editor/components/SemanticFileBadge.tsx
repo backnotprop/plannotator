@@ -39,7 +39,13 @@ export const SemanticFileBadge: React.FC<{ filePath: string }> = ({ filePath }) 
   };
 
   const count = changes.length + binaryChanges.length;
-  if (!state || !available || loading || count === 0) return null;
+  if (!state || !available) return null;
+  // Sem is available but this file has no named changes (or is still
+  // resolving): reserve the badge's exact footprint so the header buttons stay
+  // column-aligned across files with and without a badge.
+  if (loading || count === 0) {
+    return <span className="semantic-file-badge semantic-file-badge-ghost" aria-hidden="true" />;
+  }
 
   const openChange = (change: SemanticDiffChange) => {
     state.openDiffFile(change.filePath);
