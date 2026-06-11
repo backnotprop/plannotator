@@ -287,6 +287,7 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | --------------------- | ------ | ------------------------------------------ |
 | `/api/diff`           | GET    | Returns `{ rawPatch, gitRef, origin, mode?, diffType, base, hideWhitespace, gitContext, agentCwd?, semanticDiff? }`. Workspace mode returns `mode: "workspace"` with folder-prefixed paths and no `gitContext`. |
 | `/api/diff/switch`    | POST   | Switch diff type, base branch, or whitespace mode (body: `{ diffType, base?, hideWhitespace? }`). Response includes `semanticDiff?`. |
+| `/api/diff/fresh`     | GET    | Cheap staleness probe: recomputes the VCS fingerprint captured with the current diff snapshot and returns `{ fresh, fingerprint? }`. Unfingerprintable modes (e.g. P4) always report fresh. Polled by the UI's "Diff out of date · Refresh" notice. |
 | `/api/semantic-diff`  | GET    | Runs semantic diff for the active patch and returns parsed sem output or an unavailable/error response (`?fileExt=` / `?fileExts=` optional). |
 | `/api/file-content`   | GET    | Returns `{ oldContent, newContent }` for expandable diff context (`?path=&oldPath=&base=`) |
 | `/api/git-add`        | POST   | Stage/unstage a file (body: `{ filePath, undo? }`) |

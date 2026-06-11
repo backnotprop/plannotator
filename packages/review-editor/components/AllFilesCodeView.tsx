@@ -680,6 +680,19 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // selection / active-file / header state so nothing keys off a file from the
   // old diff.
   useEffect(() => {
+    // Keep the reader's place across a diff switch/refresh: if the file they
+    // were on still exists in the new diff, scroll the remounted CodeView back
+    // to it (rAF lets the seed render settle first). Matters most for the
+    // staleness-refresh flow — "Refresh" must not dump the user at the top.
+    const previousVisible = visibleFileRef.current;
+    if (previousVisible) {
+      const restoreId = filePathToItemId.get(previousVisible);
+      if (restoreId != null) {
+        requestAnimationFrame(() => {
+          viewerRef.current?.scrollTo({ type: 'item', id: restoreId, align: 'start' });
+        });
+      }
+    }
     setActiveFilePath(null);
     setSelectedLines(null);
     pendingToolbarRange.current = null;

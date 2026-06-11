@@ -320,9 +320,14 @@ export async function startReviewServer(options: {
 		}
 	};
 	// Fire-and-forget capture: never delays the snapshot response it describes.
+	// Generation-guarded: two rapid switches can resolve their captures out of
+	// order — only the LATEST capture may write the baseline, otherwise a stale
+	// fingerprint would make /api/diff/fresh report stale forever.
+	let fingerprintGeneration = 0;
 	const captureDiffFingerprint = (): void => {
+		const generation = ++fingerprintGeneration;
 		void computeDiffFingerprint().then((fingerprint) => {
-			currentFingerprint = fingerprint;
+			if (generation === fingerprintGeneration) currentFingerprint = fingerprint;
 		});
 	};
 	captureDiffFingerprint();
