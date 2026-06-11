@@ -60,6 +60,7 @@ import { StackedPRLabel } from './components/StackedPRLabel';
 import { PRSelector } from './components/PRSelector';
 import { PRSwitchOverlay } from './components/PRSwitchOverlay';
 import { usePRStack } from './hooks/usePRStack';
+import { useDiffFreshness } from './hooks/useDiffFreshness';
 import { usePRSession, type PRSessionUpdate } from './hooks/usePRSession';
 import { useAnnotationFactory } from './hooks/useAnnotationFactory';
 import { DEMO_DIFF } from './demoData';
@@ -1459,6 +1460,29 @@ const ReviewApp: React.FC = () => {
     fetchDiffSwitch(diffType, selectedBase, { preserveFile: true });
   }, [diffHideWhitespace, origin, reviewMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // --- Diff staleness ---------------------------------------------------------
+  // Files changing mid-review (an agent editing/committing while the user
+  // reviews) make the snapshot on screen stale. The hook polls the server's
+  // cheap fingerprint check; the toolbar shows a non-blocking notice and the
+  // user refreshes when THEY are ready — never automatically (annotations are
+  // line-anchored; rug-pulling the diff under them is worse than staleness).
+  const diffFreshness = useDiffFreshness({
+    enabled: !!origin,
+    resetKey: diffData?.rawPatch ?? '',
+  });
+
+  const handleRefreshStaleDiff = useCallback(() => {
+    if (prMetadata) {
+      // Only the full-stack scope can go stale locally — the layer diff is
+      // computed platform-side and its fingerprint never flips.
+      if (prDiffScope === 'full-stack') handlePRDiffScopeSelect('full-stack');
+      return;
+    }
+    // Same params, fresh snapshot. preserveFile keeps the reviewer on the
+    // file they were reading.
+    void fetchDiffSwitch(diffType, selectedBase, { preserveFile: true });
+  }, [prMetadata, prDiffScope, handlePRDiffScopeSelect, fetchDiffSwitch, diffType, selectedBase]);
+
   // Select annotation - switches file if needed and scrolls to it.
   // isAllFilesActive is read through the ref (declared with the state): this
   // handler is baked into Pierre slot portals, which only republish on item
@@ -2147,6 +2171,31 @@ const ReviewApp: React.FC = () => {
                     title={diffError}
                   >
                     {files.length > 0 ? 'Some workspace changes could not be loaded' : 'Workspace changes could not be loaded'}
+                  </div>
+                )}
+
+                {/* Diff staleness notice — files changed since this snapshot
+                    was computed (agent editing mid-review). Non-blocking; the
+                    user refreshes when ready. */}
+                {diffFreshness.isStale && !isLoadingDiff && (
+                  <div className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 px-2 py-1 bg-amber-500/10 rounded border border-amber-500/25">
+                    <span className="hidden md:inline">Diff out of date</span>
+                    <span className="md:hidden">Stale</span>
+                    <button
+                      onClick={handleRefreshStaleDiff}
+                      className="font-medium underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-100 transition-colors"
+                      title="Re-run the diff with the current settings"
+                    >
+                      Refresh
+                    </button>
+                    <button
+                      onClick={diffFreshness.dismiss}
+                      className="text-amber-700/60 dark:text-amber-300/60 hover:text-amber-900 dark:hover:text-amber-100 transition-colors leading-none"
+                      title="Dismiss"
+                      aria-label="Dismiss stale diff notice"
+                    >
+                      ×
+                    </button>
                   </div>
                 )}
 

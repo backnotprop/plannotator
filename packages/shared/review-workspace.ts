@@ -61,6 +61,14 @@ export interface WorkspaceReviewRuntime {
   canStageFiles(diffType: string, cwd?: string): Promise<boolean>;
   stageFile(diffType: string, filePath: string, cwd?: string): Promise<void>;
   unstageFile(diffType: string, filePath: string, cwd?: string): Promise<void>;
+  /** Optional staleness fingerprint probe (see vcs-core). Absent or `null`
+   * results are treated as always-fresh. */
+  getVcsDiffFingerprint?(
+    diffType: DiffType,
+    defaultBranch?: string,
+    cwd?: string,
+    options?: GitDiffOptions,
+  ): Promise<string | null>;
 }
 
 export interface WorkspaceReviewBuildOptions {
@@ -375,6 +383,28 @@ export class WorkspaceReviewSession implements WorkspaceReviewState {
     this.gitRef = snapshot.gitRef;
     this.error = snapshot.error;
     return snapshot;
+  }
+
+  /** Combined staleness fingerprint across EVERY child repo (selected or not —
+   * a repo with no changes at snapshot time still alters the workspace diff if
+   * it gains changes later). `null` when the runtime has no fingerprint probe. */
+  async getFingerprint(): Promise<string | null> {
+    const probe = this.runtime.getVcsDiffFingerprint;
+    if (!probe) return null;
+    const parts: string[] = ["workspace", this.diffType];
+    for (const repo of this.repos) {
+      if (!repo.vcsType || !repo.gitContext) continue;
+      const repoDiffType =
+        repo.diffType ?? mapWorkspaceModeToRepoDiffType(this.diffType, repo.vcsType);
+      if (!repoDiffType) continue;
+      const fingerprint = await probe(repoDiffType, repo.gitContext.defaultBranch, repo.cwd, {
+        hideWhitespace: this.hideWhitespace,
+      });
+      // "unknown" is stable across probes, so an unfingerprintable child never
+      // flip-flops the combined result.
+      parts.push(`${repo.id}=${fingerprint ?? "unknown"}`);
+    }
+    return parts.join("|");
   }
 
   getPromptContext(): WorkspaceReviewPromptContext {

@@ -772,6 +772,126 @@ export async function runGitDiffWithContext(
   return runGitDiff(runtime, diffType, gitContext.defaultBranch, gitContext.cwd, options);
 }
 
+// --- Diff staleness fingerprint ---------------------------------------------
+//
+// A fingerprint is a small string capturing "what the repo looked like when
+// this diff was computed". The server stores it beside the cached patch and
+// recomputes it on demand; a mismatch means the diff on screen is stale (the
+// agent/user changed files mid-review). `null` means "cannot fingerprint this
+// mode" — callers must treat that as always-fresh (no staleness banner), never
+// as stale.
+//
+// Per mode:
+//  - Commit-anchored modes (last-commit, all, branch, merge-base) change only
+//    when refs move → pure `rev-parse` fingerprints, ~10ms.
+//  - Working-tree modes (uncommitted, staged, unstaged) must reflect CONTENT,
+//    not just `git status` paths — a file that is already modified and gets
+//    modified again produces identical porcelain output. So these hash the
+//    same diff the patch itself is built from (still fast; it is exactly what
+//    a refresh would re-run), plus untracked file contents (capped).
+
+/** djb2-xor hash — cheap change-detection fingerprint, not cryptographic. */
+export function hashFingerprintPart(value: string): string {
+  let hash = 5381;
+  for (let i = 0; i < value.length; i++) {
+    hash = ((hash * 33) ^ value.charCodeAt(i)) >>> 0;
+  }
+  return hash.toString(36);
+}
+
+const MAX_UNTRACKED_FINGERPRINT_FILES = 20;
+
+export async function getGitDiffFingerprint(
+  runtime: ReviewGitRuntime,
+  diffType: DiffType,
+  defaultBranch: string = "main",
+  externalCwd?: string,
+  options?: GitDiffOptions,
+): Promise<string | null> {
+  let cwd: string | undefined = externalCwd;
+  let effectiveDiffType = diffType as string;
+  if (diffType.startsWith("worktree:")) {
+    const parsed = parseWorktreeDiffType(diffType);
+    if (!parsed) return null;
+    cwd = parsed.path;
+    effectiveDiffType = parsed.subType;
+  }
+
+  const wFlag = options?.hideWhitespace ? ["-w"] : [];
+
+  try {
+    // --no-optional-locks: fingerprint probes run in the background (polled
+    // every few seconds) and must NEVER take git's index lock — `status`/`diff`
+    // opportunistically refresh the index by default, which races concurrent
+    // `git add`/commit operations (the agent working while the user reviews).
+    const runReadOnlyGit = (args: string[]) =>
+      runtime.runGit(["--no-optional-locks", ...args], { cwd });
+
+    const head = await runReadOnlyGit(["rev-parse", "HEAD"]);
+    const headSha = head.exitCode === 0 ? head.stdout.trim() : "no-head";
+    const parts = ["git", effectiveDiffType, headSha];
+
+    const hashDiffOutput = async (args: string[]): Promise<boolean> => {
+      const result = await runReadOnlyGit(["diff", "--no-ext-diff", ...wFlag, ...args]);
+      if (result.exitCode !== 0) return false;
+      parts.push(hashFingerprintPart(result.stdout));
+      return true;
+    };
+
+    // Untracked files: porcelain `??` lines capture existence; hash their
+    // contents too so editing a freshly-created (untracked) file is detected.
+    // Capped — a pathological number of untracked files degrades to
+    // existence-only detection rather than unbounded reads.
+    const hashUntracked = async (): Promise<boolean> => {
+      const status = await runReadOnlyGit(["status", "--porcelain"]);
+      if (status.exitCode !== 0) return false;
+      parts.push(hashFingerprintPart(status.stdout));
+      const untracked = status.stdout
+        .split("\n")
+        .filter((line) => line.startsWith("?? "))
+        .map((line) => line.slice(3).trim())
+        .slice(0, MAX_UNTRACKED_FINGERPRINT_FILES);
+      for (const path of untracked) {
+        const content = await runtime.readTextFile(cwd ? resolvePath(cwd, path) : path);
+        parts.push(content != null ? hashFingerprintPart(content) : "unreadable");
+      }
+      return true;
+    };
+
+    switch (effectiveDiffType) {
+      case "uncommitted": {
+        if (headSha !== "no-head" && !(await hashDiffOutput(["HEAD"]))) return null;
+        if (!(await hashUntracked())) return null;
+        break;
+      }
+      case "staged": {
+        if (!(await hashDiffOutput(["--staged"]))) return null;
+        break;
+      }
+      case "unstaged": {
+        if (!(await hashDiffOutput([]))) return null;
+        if (!(await hashUntracked())) return null;
+        break;
+      }
+      case "branch":
+      case "merge-base": {
+        const baseTip = await runReadOnlyGit(["rev-parse", "--end-of-options", defaultBranch]);
+        parts.push(baseTip.exitCode === 0 ? baseTip.stdout.trim() : "no-base");
+        break;
+      }
+      case "last-commit":
+      case "all":
+        // HEAD alone identifies these.
+        break;
+      default:
+        return null;
+    }
+    return parts.join(":");
+  } catch {
+    return null;
+  }
+}
+
 export async function getFileContentsForDiff(
   runtime: ReviewGitRuntime,
   diffType: DiffType,

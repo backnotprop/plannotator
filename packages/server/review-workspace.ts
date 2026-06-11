@@ -1,6 +1,7 @@
 import {
   canStageFiles,
   getVcsContext,
+  getVcsDiffFingerprint,
   getVcsFileContentsForDiff,
   runVcsDiff,
   stageFile,
@@ -35,6 +36,7 @@ const workspaceRuntime = {
   getVcsContext,
   runVcsDiff,
   getVcsFileContentsForDiff,
+  getVcsDiffFingerprint,
   canStageFiles,
   stageFile,
   unstageFile,

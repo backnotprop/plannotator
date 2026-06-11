@@ -32,6 +32,7 @@ export {
 	detectVcs,
 	getGitContext,
 	getVcsContext,
+	getVcsDiffFingerprint,
 	getVcsFileContentsForDiff,
 	prepareLocalReviewDiff,
 	resolveInitialDiffType,

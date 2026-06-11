@@ -7,6 +7,7 @@ import {
   detectRemoteDefaultBranch,
   getFileContentsForDiff as getGitFileContentsForDiff,
   getGitContext,
+  getGitDiffFingerprint,
   gitAddFile,
   gitResetFile,
   parseWorktreeDiffType,
@@ -17,6 +18,7 @@ import {
   type ReviewJjRuntime,
   detectJjWorkspace,
   getJjContext,
+  getJjDiffFingerprint,
   getJjFileContentsForDiff,
   runJjDiff,
 } from "./jj-core";
@@ -54,6 +56,14 @@ export interface VcsProvider {
     oldPath?: string,
     cwd?: string,
   ): Promise<{ oldContent: string | null; newContent: string | null }>;
+  /** Cheap staleness fingerprint for a diff (see review-core/jj-core). Providers
+   * without an implementation (e.g. p4) are treated as always-fresh. */
+  getDiffFingerprint?(
+    diffType: DiffType,
+    defaultBranch: string,
+    cwd?: string,
+    options?: GitDiffOptions,
+  ): Promise<string | null>;
   stageFile?(filePath: string, cwd?: string): Promise<void>;
   unstageFile?(filePath: string, cwd?: string): Promise<void>;
   resolveCwd?(diffType: string, fallbackCwd?: string): string | undefined;
@@ -81,6 +91,14 @@ export interface VcsApi {
     oldPath?: string,
     cwd?: string,
   ): Promise<{ oldContent: string | null; newContent: string | null }>;
+  /** Best-effort staleness fingerprint for the given diff parameters. `null`
+   * means "cannot fingerprint" and must be treated as always-fresh. */
+  getVcsDiffFingerprint(
+    diffType: DiffType,
+    defaultBranch?: string,
+    cwd?: string,
+    options?: GitDiffOptions,
+  ): Promise<string | null>;
   canStageFiles(diffType: string, cwd?: string): Promise<boolean>;
   stageFile(diffType: string, filePath: string, cwd?: string): Promise<void>;
   unstageFile(diffType: string, filePath: string, cwd?: string): Promise<void>;
@@ -178,6 +196,10 @@ export function createGitProvider(runtime: ReviewGitRuntime): VcsProvider {
       return getGitFileContentsForDiff(runtime, diffType, defaultBranch, filePath, oldPath, cwd);
     },
 
+    getDiffFingerprint(diffType, defaultBranch, cwd?, options?) {
+      return getGitDiffFingerprint(runtime, diffType, defaultBranch, cwd, options);
+    },
+
     stageFile(filePath: string, cwd?: string): Promise<void> {
       return gitAddFile(runtime, filePath, cwd);
     },
@@ -223,6 +245,10 @@ export function createJjProvider(runtime: ReviewJjRuntime): VcsProvider {
 
     getFileContents(diffType, defaultBranch, filePath, oldPath?, cwd?) {
       return getJjFileContentsForDiff(runtime, diffType, defaultBranch, filePath, oldPath, cwd);
+    },
+
+    getDiffFingerprint(diffType, defaultBranch, cwd?) {
+      return getJjDiffFingerprint(runtime, diffType, defaultBranch, cwd);
     },
   };
 }
@@ -433,6 +459,23 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
     ): Promise<{ oldContent: string | null; newContent: string | null }> {
       const provider = await getProviderForOperation(diffType, cwd);
       return provider.getFileContents(diffType, defaultBranch, filePath, oldPath, cwd);
+    },
+
+    async getVcsDiffFingerprint(
+      diffType: DiffType,
+      defaultBranch: string = "main",
+      cwd?: string,
+      options?: GitDiffOptions,
+    ): Promise<string | null> {
+      try {
+        const provider = await getProviderForOperation(diffType, cwd);
+        if (!provider.getDiffFingerprint) return null;
+        return await provider.getDiffFingerprint(diffType, defaultBranch, cwd, options);
+      } catch {
+        // Fingerprinting is best-effort: failure means "always fresh", never
+        // a user-facing error.
+        return null;
+      }
     },
 
     async canStageFiles(diffType: string, cwd?: string): Promise<boolean> {
