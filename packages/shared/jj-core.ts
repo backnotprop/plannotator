@@ -145,11 +145,16 @@ export async function getJjDiffFingerprint(
         return current && base ? `jj:${diffType}:${base}:${current}` : null;
       }
       case "jj-evolog": {
-        // Evolution entries are immutable snapshots; the diff only changes if
-        // the resolved base entry changes (auto mode tracks evolog[1]).
-        if (defaultBranch.length > 0) return `jj:${diffType}:${defaultBranch}`;
+        // Evolog diffs render `--from <historical entry> --to @`: the
+        // historical end is immutable, but @ is the LIVE working copy — every
+        // edit moves it and changes the patch. Fingerprint BOTH ends.
+        const current = await idOf("@");
+        if (!current) return null;
+        if (defaultBranch.length > 0) return `jj:${diffType}:${defaultBranch}:${current}`;
         const evologs = await getJjEvoLogEntries(runtime, cwd);
-        return evologs.length >= 2 ? `jj:${diffType}:auto:${evologs[1].commitId}` : null;
+        return evologs.length >= 2
+          ? `jj:${diffType}:auto:${evologs[1].commitId}:${current}`
+          : null;
       }
       default:
         return null;

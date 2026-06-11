@@ -136,6 +136,38 @@ export async function runPRFullStackDiff(
 }
 
 /**
+ * Staleness fingerprint for the full-stack diff above. The diff is three-dot
+ * (`baseRef...HEAD` = merge-base(baseRef, HEAD)..HEAD), so its content changes
+ * exactly when HEAD or the MERGE-BASE moves — and NOT when the base branch
+ * merely advances past an unchanged fork point. Fingerprinting (merge-base,
+ * HEAD) therefore detects the real stale cases (commits on HEAD, a lower
+ * stacked PR merging, a rebase/force-push shifting the fork point) without
+ * crying stale on every ordinary `origin/<default>` fetch. `null` = cannot
+ * fingerprint (treated as always-fresh).
+ */
+export async function getPRFullStackFingerprint(
+  runtime: ReviewGitRuntime,
+  metadata: PRMetadata,
+  cwd?: string,
+): Promise<string | null> {
+  const defaultBranch = metadata.defaultBranch;
+  if (!defaultBranch || !branchNameIsSafe(defaultBranch)) return null;
+  const baseRef = await resolvePRFullStackBaseRef(runtime, defaultBranch, cwd);
+  if (!baseRef) return null;
+
+  // --no-optional-locks: probes run on a background poll and must never take
+  // git's index lock alongside concurrent agent git operations.
+  const head = await runtime.runGit(["--no-optional-locks", "rev-parse", "HEAD"], { cwd });
+  if (head.exitCode !== 0) return null;
+  const mergeBase = await runtime.runGit(
+    ["--no-optional-locks", "merge-base", "--end-of-options", baseRef, "HEAD"],
+    { cwd },
+  );
+  if (mergeBase.exitCode !== 0) return null;
+  return `pr-full-stack:${mergeBase.stdout.trim()}:${head.stdout.trim()}`;
+}
+
+/**
  * Fetch and checkout a PR/MR head in a local worktree.
  * Returns true if the checkout succeeded, false otherwise.
  */

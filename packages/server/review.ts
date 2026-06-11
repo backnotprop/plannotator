@@ -26,6 +26,7 @@ import {
 import type { SemanticDiffAvailability, SemanticDiffResponse } from "@plannotator/shared/semantic-diff-types";
 import {
   getPRDiffScopeOptions,
+  getPRFullStackFingerprint,
   getPRStackInfo,
   resolveStackInfo,
   resolvePRFullStackBaseRef,
@@ -203,13 +204,14 @@ export async function startReviewServer(
           // pr-switch; remote-side PR updates are out of scope here.
           return `pr-layer:${prMetadata?.url ?? ""}`;
         }
-        // Full-stack: a local checkout whose diff is commit-anchored — HEAD
-        // movement is the churn that matters.
+        // Full-stack: three-dot diff against the local checkout — fingerprint
+        // (merge-base, HEAD), which changes exactly when the patch can.
         const fullStackCwd =
           (options.worktreePool && prMetadata
             ? options.worktreePool.resolve(prMetadata.url)
             : undefined) ?? options.agentCwd;
-        return await getVcsDiffFingerprint("last-commit", currentBase, fullStackCwd);
+        if (!prMetadata) return null;
+        return await getPRFullStackFingerprint(gitRuntime, prMetadata, fullStackCwd);
       }
       if (!hasLocalAccess) return null;
       return await getVcsDiffFingerprint(currentDiffType as DiffType, currentBase, gitContext?.cwd, {

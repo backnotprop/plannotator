@@ -33,6 +33,7 @@ import {
 import {
 	checkoutPRHead,
 	getPRDiffScopeOptions,
+	getPRFullStackFingerprint,
 	getPRStackInfo,
 	resolveStackInfo,
 	resolvePRFullStackBaseRef,
@@ -303,10 +304,13 @@ export async function startReviewServer(options: {
 					// Platform-computed diff — immutable locally; recaptured on pr-switch.
 					return `pr-layer:${prMeta?.url ?? ""}`;
 				}
+				// Full-stack: three-dot diff against the local checkout — fingerprint
+				// (merge-base, HEAD), which changes exactly when the patch can.
 				const fullStackCwd =
 					(options.worktreePool && prMeta ? options.worktreePool.resolve(prMeta.url) : undefined) ??
 					options.agentCwd;
-				return await getVcsDiffFingerprint("last-commit", currentBase, fullStackCwd);
+				if (!prMeta) return null;
+				return await getPRFullStackFingerprint(reviewRuntime, prMeta, fullStackCwd);
 			}
 			if (!hasLocalAccess) return null;
 			return await getVcsDiffFingerprint(
