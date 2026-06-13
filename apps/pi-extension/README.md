@@ -63,6 +63,25 @@ When the agent calls `plannotator_submit_plan`, the Plannotator UI opens in your
 
 The agent iterates on the plan until you approve, then executes with full tool access. On resubmission, Plan Diff highlights what changed since the previous version.
 
+### Programmatic plan-mode control
+
+Other Pi extensions can enter, exit, toggle, or query Plannotator plan mode through the shared Pi event bus without invoking the `/plannotator` slash command:
+
+```ts
+import { PLANNOTATOR_REQUEST_CHANNEL } from "@plannotator/pi-extension/plannotator-events";
+
+const response = await new Promise((resolve) => {
+  pi.events.emit(PLANNOTATOR_REQUEST_CHANNEL, {
+    requestId: crypto.randomUUID(),
+    action: "plan-mode",
+    payload: { mode: "enter" }, // "enter" | "exit" | "toggle" | "status"
+    respond: resolve,
+  });
+});
+```
+
+A handled response returns the resulting phase, for example `{ status: "handled", result: { phase: "planning" } }`.
+
 ### Configuring per-phase behavior
 
 Plannotator loads configuration in three layers:

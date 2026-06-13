@@ -22,6 +22,7 @@ export const PLANNOTATOR_REVIEW_RESULT_CHANNEL = "plannotator:review-result" as 
 export const PLANNOTATOR_TIMEOUT_MS = 5_000;
 
 export type PlannotatorAction =
+	| "plan-mode"
 	| "plan-review"
 	| "review-status"
 	| "code-review"
@@ -54,6 +55,14 @@ export interface PlannotatorRequestBase<A extends PlannotatorAction, P, R> {
 	action: A;
 	payload: P;
 	respond: (response: PlannotatorResponse<R>) => void;
+}
+
+export interface PlannotatorPlanModePayload {
+	mode?: "enter" | "exit" | "toggle" | "status";
+}
+
+export interface PlannotatorPlanModeResult {
+	phase: "idle" | "planning" | "executing";
 }
 
 export interface PlannotatorPlanReviewPayload {
@@ -127,6 +136,7 @@ export interface PlannotatorArchiveResult {
 }
 
 export type PlannotatorRequestMap = {
+	"plan-mode": PlannotatorRequestBase<"plan-mode", PlannotatorPlanModePayload, PlannotatorPlanModeResult>;
 	"plan-review": PlannotatorRequestBase<"plan-review", PlannotatorPlanReviewPayload, PlannotatorPlanReviewStartResult>;
 	"review-status": PlannotatorRequestBase<"review-status", PlannotatorReviewStatusPayload, PlannotatorReviewStatusResult>;
 	"code-review": PlannotatorRequestBase<"code-review", PlannotatorCodeReviewPayload, PlannotatorCodeReviewResult>;
@@ -136,6 +146,7 @@ export type PlannotatorRequestMap = {
 };
 export type PlannotatorRequest = PlannotatorRequestMap[PlannotatorAction];
 export type PlannotatorResponseMap = {
+	"plan-mode": PlannotatorResponse<PlannotatorPlanModeResult>;
 	"plan-review": PlannotatorResponse<PlannotatorPlanReviewStartResult>;
 	"review-status": PlannotatorResponse<PlannotatorReviewStatusResult>;
 	"code-review": PlannotatorResponse<PlannotatorCodeReviewResult>;
@@ -145,6 +156,7 @@ export type PlannotatorResponseMap = {
 };
 function isPlannotatorAction(value: unknown): value is PlannotatorAction {
 	return (
+		value === "plan-mode" ||
 		value === "plan-review" ||
 		value === "review-status" ||
 		value === "code-review" ||
@@ -200,7 +212,17 @@ function createActiveSessionContext() {
 	};
 }
 
-export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
+export interface PlannotatorEventListenerOptions {
+	handlePlanMode?: (
+		mode: NonNullable<PlannotatorPlanModePayload["mode"]>,
+		ctx: ExtensionContext,
+	) => Promise<PlannotatorPlanModeResult> | PlannotatorPlanModeResult;
+}
+
+export function registerPlannotatorEventListeners(
+	pi: ExtensionAPI,
+	options: PlannotatorEventListenerOptions = {},
+): void {
 	const activeSessionContext = createActiveSessionContext();
 
 	// Plannotator event requests are handled against the latest active session.
@@ -233,6 +255,20 @@ export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
 			}
 
 			switch (request.action) {
+				case "plan-mode": {
+					if (!options.handlePlanMode) {
+						request.respond({ status: "unavailable", error: "Plan mode control is not available in this session." });
+						return;
+					}
+					const mode = request.payload?.mode ?? "toggle";
+					if (mode !== "enter" && mode !== "exit" && mode !== "toggle" && mode !== "status") {
+						request.respond({ status: "error", error: "Invalid plan-mode payload.mode." });
+						return;
+					}
+					const result = await options.handlePlanMode(mode, ctx);
+					request.respond({ status: "handled", result });
+					return;
+				}
 				case "plan-review": {
 					const planContent = request.payload?.planContent;
 					if (typeof planContent !== "string" || !planContent.trim()) {

@@ -211,7 +211,21 @@ function sendUserMessageWithCurrentSessionFallback(
 export default function plannotator(pi: ExtensionAPI): void {
 	const currentPiSession = registerCurrentPiSession(pi);
 	let phase: Phase = "idle";
-	void registerPlannotatorEventListeners(pi);
+	void registerPlannotatorEventListeners(pi, {
+		handlePlanMode: async (mode, ctx) => {
+			if (mode === "status") return { phase };
+			if (mode === "enter") {
+				if (phase === "idle") await enterPlanning(ctx);
+				return { phase };
+			}
+			if (mode === "exit") {
+				if (phase !== "idle") await exitToIdle(ctx);
+				return { phase };
+			}
+			await togglePlanMode(ctx);
+			return { phase };
+		},
+	});
 	let lastSubmittedPath: string | null = null;
 	let checklistItems: ChecklistItem[] = [];
 	let savedState: SavedPhaseState | null = null;
