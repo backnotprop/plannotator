@@ -260,6 +260,14 @@ if (isInteractiveNoArgInvocation(args, process.stdin.isTTY)) {
 // Ensure session cleanup on exit
 process.on("exit", () => unregisterSession());
 
+// Route fatal signals through process.exit() so "exit" handlers run — by
+// default a SIGINT/SIGTERM death skips them, leaking background-warmup
+// children and stale `git worktree` registrations (the --local PR checkout
+// cleanup below is registered on "exit"). `once` keeps a second Ctrl-C as a
+// force-quit escape hatch if cleanup ever hangs.
+process.once("SIGINT", () => process.exit(130));
+process.once("SIGTERM", () => process.exit(143));
+
 // Check if URL sharing is enabled (default: true)
 const sharingEnabled = process.env.PLANNOTATOR_SHARE !== "disabled";
 
@@ -842,7 +850,11 @@ if (args[0] === "sessions") {
     console.log(getReviewApprovedPrompt(detectedOrigin));
   } else {
     console.log(result.feedback);
-    if (!isPRMode) {
+    // Append the triage-first suffix whenever the reviewer sent annotations to
+    // act on — in PR mode too. Platform PR actions (approve/comment posted to
+    // the host) come back with an empty annotation set and a status message;
+    // those must NOT get the "triage and don't change code" instruction.
+    if (result.annotations.length > 0) {
       console.log(getReviewDeniedSuffix(detectedOrigin));
     }
   }

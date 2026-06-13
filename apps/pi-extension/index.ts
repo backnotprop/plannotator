@@ -408,7 +408,6 @@ export default function plannotator(pi: ExtensionAPI): void {
 
 			try {
 				const reviewArgs = parseReviewArgs(args ?? "");
-				const isPRReview = reviewArgs.prUrl !== undefined;
 				const session = await startCodeReviewBrowserSession(ctx, {
 					prUrl: reviewArgs.prUrl,
 					vcsType: reviewArgs.vcsType,
@@ -437,21 +436,17 @@ export default function plannotator(pi: ExtensionAPI): void {
 								safeNotify(ctx, "Code review closed (no feedback).", "info", origin);
 								return;
 							}
-							if (isPRReview) {
-								// Platform PR actions (approve/comment) return approved:false with a
-								// status message — don't tell the agent to "address" a platform action.
-								sendUserMessageWithCurrentSessionFallback(
-									pi,
-									result.feedback,
-									{ deliverAs: "followUp" },
-									"Plannotator code review feedback could not be sent",
-									origin,
-								);
-								return;
-							}
+							// Append the triage-first suffix when the reviewer sent
+							// annotations to act on (PR mode included). Platform PR actions
+							// (approve/comment posted to the host) come back with an empty
+							// annotation set and a status message — don't tell the agent to
+							// "address" a platform action.
+							const reviewFeedback = (result.annotations?.length ?? 0) > 0
+								? `${result.feedback}${getReviewDeniedSuffix("pi", loadConfig())}`
+								: result.feedback;
 							sendUserMessageWithCurrentSessionFallback(
 								pi,
-								`${result.feedback}${getReviewDeniedSuffix("pi", loadConfig())}`,
+								reviewFeedback,
 								{ deliverAs: "followUp" },
 								"Plannotator code review feedback could not be sent",
 								origin,

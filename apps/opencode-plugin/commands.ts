@@ -165,11 +165,14 @@ export async function handleReviewCommand(
       const shouldSwitchAgent = result.agentSwitch && result.agentSwitch !== "disabled";
       const targetAgent = result.agentSwitch || "build";
 
+      // Append the triage-first suffix when the reviewer sent annotations to
+      // act on (PR mode included). Platform PR actions post a status message
+      // with no annotations — those go through verbatim, no suffix.
       const message = result.approved
         ? getReviewApprovedPrompt("opencode")
-        : isPRMode
-          ? result.feedback
-          : `${result.feedback}${getReviewDeniedSuffix("opencode")}`;
+        : result.annotations.length > 0
+          ? `${result.feedback}${getReviewDeniedSuffix("opencode")}`
+          : result.feedback;
 
       try {
         await client.session.prompt({
