@@ -97,6 +97,8 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   const [text, setText] = useState(initialDraft?.text ?? initialText);
   const [images, setImages] = useState<ImageAttachment[]>(allowImages ? initialDraft?.images ?? [] : []);
   const [position, setPosition] = useState<{ top: number; left: number; flipAbove: boolean; width: number } | null>(null);
+  // Direction of an open popover that has scrolled out of view, or null when on-screen.
+  const [offscreen, setOffscreen] = useState<'above' | 'below' | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const hasUnsavedContent = hasUnsavedCommentContent(text, allowImages ? images : []);
@@ -137,6 +139,28 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       window.removeEventListener('resize', update);
     };
   }, [anchorEl, anchorRect, mode, wasDragged]);
+
+  // Surface a "jump back" arrow when an open popover scrolls out of view.
+  // Re-measures whenever the popover repositions (position updates every scroll
+  // step in tracked mode) so the indicator is accurate at rest, plus on resize.
+  useEffect(() => {
+    if (mode !== 'popover') { setOffscreen(null); return; }
+    const measure = () => {
+      const el = popoverRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.bottom < 8) setOffscreen('above');
+      else if (rect.top > window.innerHeight - 8) setOffscreen('below');
+      else setOffscreen(null);
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [position, dragPosition, mode]);
+
+  const scrollToPopover = useCallback(() => {
+    anchorEl?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [anchorEl]);
 
   // Focus textarea on mount and mode changes
   useEffect(() => {
@@ -318,9 +342,22 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   if (!position) return null;
 
   return createPortal(
-    <div
-      ref={popoverRef}
-      data-comment-popover="true"
+    <>
+      {offscreen && (
+        <button
+          type="button"
+          data-popover-layer="true"
+          onClick={scrollToPopover}
+          title="Scroll back to your open comment"
+          className={`fixed left-1/2 -translate-x-1/2 z-[101] flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-popover border border-border shadow-lg text-xs text-muted-foreground hover:text-foreground transition-colors ${offscreen === 'above' ? 'top-3' : 'bottom-3'}`}
+        >
+          {offscreen === 'above' ? <ChevronUpIcon /> : <ChevronDownIcon />}
+          <span>Open comment</span>
+        </button>
+      )}
+      <div
+        ref={popoverRef}
+        data-comment-popover="true"
       className="fixed z-[100] bg-popover border border-border rounded-xl shadow-2xl flex flex-col"
       style={dragPosition
         ? { top: dragPosition.top, left: dragPosition.left, width: position.width }
@@ -417,12 +454,25 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           </button>
         </div>
       </div>
-    </div>,
+      </div>
+    </>,
     document.body
   );
 };
 
 // Icons
+
+const ChevronUpIcon = () => (
+  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+  </svg>
+);
+
+const ChevronDownIcon = () => (
+  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+  </svg>
+);
 
 const ExpandIcon = () => (
   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
