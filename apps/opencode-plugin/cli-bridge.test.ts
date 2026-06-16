@@ -36,6 +36,7 @@ describe("OpenCode CLI bridge helpers", () => {
       json: false,
       hook: false,
       renderHtml: true,
+      renderMarkdown: false,
       noJina: true,
     });
 
@@ -46,6 +47,26 @@ describe("OpenCode CLI bridge helpers", () => {
       "--gate",
       "--render-html",
       "--no-jina",
+    ]);
+  });
+
+  test("passes annotate markdown flag through to the child CLI", () => {
+    const args = buildAnnotateCliArgs({
+      filePath: "plan.html",
+      rawFilePath: "plan.html",
+      gate: false,
+      json: false,
+      hook: false,
+      renderHtml: false,
+      renderMarkdown: true,
+      noJina: false,
+    });
+
+    expect(args).toEqual([
+      "annotate",
+      "plan.html",
+      "--json",
+      "--markdown",
     ]);
   });
 

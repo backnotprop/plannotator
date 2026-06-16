@@ -10,6 +10,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -22,6 +23,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -34,6 +36,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -46,6 +49,7 @@ describe("parseAnnotateArgs", () => {
       json: true,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -58,6 +62,7 @@ describe("parseAnnotateArgs", () => {
       json: true,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -70,6 +75,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -88,6 +94,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -100,6 +107,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -112,6 +120,7 @@ describe("parseAnnotateArgs", () => {
       json: true,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -124,6 +133,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -136,6 +146,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: true,
     });
   });
@@ -148,6 +159,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: true,
     });
   });
@@ -160,6 +172,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -172,6 +185,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -184,6 +198,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -196,6 +211,7 @@ describe("parseAnnotateArgs", () => {
       json: true,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -214,6 +230,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -226,6 +243,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -238,6 +256,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -250,6 +269,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -267,6 +287,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -279,6 +300,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -291,6 +313,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -303,6 +326,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -320,6 +344,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: true,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -332,6 +357,7 @@ describe("parseAnnotateArgs", () => {
       json: true,
       hook: true,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -344,6 +370,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: true,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -356,6 +383,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: true,
       renderHtml: false,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -368,6 +396,7 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: true,
+      renderMarkdown: false,
       noJina: false,
     });
   });
@@ -380,6 +409,33 @@ describe("parseAnnotateArgs", () => {
       json: false,
       hook: false,
       renderHtml: true,
+      renderMarkdown: false,
+      noJina: false,
+    });
+  });
+
+  test("--markdown with HTML file", () => {
+    expect(parseAnnotateArgs("plan.html --markdown")).toEqual({
+      filePath: "plan.html",
+      rawFilePath: "plan.html",
+      gate: false,
+      json: false,
+      hook: false,
+      renderHtml: false,
+      renderMarkdown: true,
+      noJina: false,
+    });
+  });
+
+  test("--markdown and legacy --render-html both parse", () => {
+    expect(parseAnnotateArgs("plan.html --render-html --markdown")).toEqual({
+      filePath: "plan.html",
+      rawFilePath: "plan.html",
+      gate: false,
+      json: false,
+      hook: false,
+      renderHtml: true,
+      renderMarkdown: true,
       noJina: false,
     });
   });

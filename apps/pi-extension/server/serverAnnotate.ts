@@ -51,6 +51,7 @@ export async function startAnnotateServer(options: {
 	gate?: boolean;
 	rawHtml?: string;
 	renderHtml?: boolean;
+	convertHtml?: boolean;
 }): Promise<AnnotateServerResult> {
 	// Side-channel pre-warm so /api/doc/exists POSTs land on warm cache.
 	void warmFileListCache(process.cwd(), "code");
@@ -111,6 +112,7 @@ export async function startAnnotateServer(options: {
 				gate: options.gate ?? false,
 				renderAs: options.renderHtml && options.rawHtml ? 'html' : 'markdown',
 				...(options.renderHtml && options.rawHtml ? { rawHtml: options.rawHtml } : {}),
+				convertHtml: options.convertHtml ?? false,
 				sharingEnabled,
 				shareBaseUrl,
 				pasteApiUrl,
@@ -142,6 +144,9 @@ export async function startAnnotateServer(options: {
 			// Skip for URL annotations — there's no local directory to resolve against.
 			if (!url.searchParams.has("base") && options.filePath && !/^https?:\/\//i.test(options.filePath)) {
 				url.searchParams.set("base", dirname(resolvePath(options.filePath)));
+			}
+			if (options.convertHtml && !url.searchParams.has("convert")) {
+				url.searchParams.set("convert", "1");
 			}
 			await handleDocRequest(res, url);
 		} else if (url.pathname === "/api/doc/exists" && req.method === "POST") {

@@ -178,8 +178,10 @@ const hookFlag = hookIdx !== -1;
 if (hookFlag) args.splice(hookIdx, 1);
 if (hookFlag) gateFlag = true;
 const renderHtmlIdx = args.indexOf("--render-html");
-const renderHtmlFlag = renderHtmlIdx !== -1;
-if (renderHtmlFlag) args.splice(renderHtmlIdx, 1);
+if (renderHtmlIdx !== -1) args.splice(renderHtmlIdx, 1);
+const renderMarkdownIdx = args.indexOf("--markdown");
+const renderMarkdownFlag = renderMarkdownIdx !== -1;
+if (renderMarkdownFlag) args.splice(renderMarkdownIdx, 1);
 
 // Stdout matrix for annotate / annotate-last / copilot annotate-last.
 //
@@ -867,7 +869,7 @@ if (args[0] === "sessions") {
 
   const rawFilePath = args[1];
   if (!rawFilePath) {
-    console.error("Usage: plannotator annotate <file.md | file.html | https://... | folder/>  [--no-jina] [--gate] [--json] [--hook]");
+    console.error("Usage: plannotator annotate <file.md | file.html | https://... | folder/>  [--markdown] [--no-jina] [--gate] [--json] [--hook]");
     process.exit(1);
   }
 
@@ -945,7 +947,8 @@ if (args[0] === "sessions") {
           process.exit(1);
         }
         const html = await htmlFile.text();
-        if (renderHtmlFlag) {
+        const renderHtmlForFile = !renderMarkdownFlag;
+        if (renderHtmlForFile) {
           rawHtml = html;
           markdown = "";
         } else {
@@ -954,7 +957,7 @@ if (args[0] === "sessions") {
         }
         absolutePath = resolvedArg;
         sourceInfo = path.basename(resolvedArg);
-        console.error(`${renderHtmlFlag ? "Raw HTML" : "Converted"}: ${absolutePath}`);
+        console.error(`${renderHtmlForFile ? "Raw HTML" : "Converted"}: ${absolutePath}`);
       } else {
         // Single markdown file annotation mode
         // Strip-first with literal-@ fallback (scoped-package-style names).
@@ -1011,7 +1014,8 @@ if (args[0] === "sessions") {
     pasteApiUrl,
     gate: gateFlag,
     rawHtml,
-    renderHtml: renderHtmlFlag,
+    renderHtml: !!rawHtml,
+    convertHtml: renderMarkdownFlag,
     htmlContent: planHtmlContent,
     onReady: async (url, isRemote, port) => {
       handleAnnotateServerReady(url, isRemote, port);

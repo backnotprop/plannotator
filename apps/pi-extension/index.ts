@@ -488,9 +488,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 			// accepted (Pi writes back via sendUserMessage, not stdout).
 			// `rawFilePath` keeps any leading `@` for the literal-@ fallback
 			// (scoped-package-style names).
-			const { filePath, rawFilePath, gate, renderHtml: renderHtmlFlag, noJina } = parseAnnotateArgs(args ?? "");
+			const { filePath, rawFilePath, gate, renderMarkdown: renderMarkdownFlag, noJina } = parseAnnotateArgs(args ?? "");
 			if (!filePath) {
-				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.html | https://... | folder/> [--no-jina] [--gate] [--json]", "error");
+				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.html | https://... | folder/> [--markdown] [--no-jina] [--gate] [--json]", "error");
 				return;
 			}
 			if (!hasPlanBrowserHtml()) {
@@ -559,14 +559,14 @@ export default function plannotator(pi: ExtensionAPI): void {
 					mode = "annotate-folder";
 					ctx.ui.notify(`Opening annotation UI for folder ${filePath}...`, "info");
 				} else if (/\.html?$/i.test(absolutePath)) {
-					// HTML file annotation — convert to markdown via Turndown
 					const fileSize = statSync(absolutePath).size;
 					if (fileSize > 10 * 1024 * 1024) {
 						ctx.ui.notify(`File too large (${Math.round(fileSize / 1024 / 1024)}MB, max 10MB)`, "error");
 						return;
 					}
 					const html = readFileSync(absolutePath, "utf-8");
-					if (renderHtmlFlag) {
+					const renderHtmlForFile = !renderMarkdownFlag;
+					if (renderHtmlForFile) {
 						rawHtml = html;
 						markdown = "";
 					} else {
@@ -595,7 +595,8 @@ export default function plannotator(pi: ExtensionAPI): void {
 					sourceConverted,
 					gate,
 					rawHtml,
-					renderHtmlFlag,
+					!!rawHtml,
+					renderMarkdownFlag,
 				);
 				ctx.ui.notify("Annotation opened. You can keep chatting while it runs.", "info");
 				void session

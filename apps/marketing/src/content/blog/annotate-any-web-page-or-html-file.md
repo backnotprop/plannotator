@@ -1,12 +1,12 @@
 ---
 title: "Annotate Any Web Page or HTML File"
-description: "Plannotator's /plannotator-annotate command now accepts URLs and HTML files, not just markdown. Fetch any web page, convert it to markdown, and annotate it with structured feedback for your coding agent."
+description: "Plannotator's /plannotator-annotate command now accepts URLs and HTML files, not just markdown. Fetch any web page, render local HTML, and annotate it with structured feedback for your coding agent."
 date: 2026-04-12
 author: "backnotprop"
 tags: ["annotate", "url", "html", "jina-reader"]
 ---
 
-**Plannotator is an open-source review UI for AI coding agents.** The `/plannotator-annotate` command now accepts URLs and HTML files alongside markdown, so you can pull in any external documentation, convert it on the fly, and send structured annotations back to your agent session.
+**Plannotator is an open-source review UI for AI coding agents.** The `/plannotator-annotate` command now accepts URLs and HTML files alongside markdown, so you can pull in any external documentation, render local HTML directly, and send structured annotations back to your agent session.
 
 <video width="100%" style="aspect-ratio: 16/9; border-radius: 8px; margin-bottom: 1.5rem;" autoplay loop muted playsinline controls><source src="https://d17ygohy796f9l.cloudfront.net/videos/annotate-url.mp4" type="video/mp4" /></video>
 
@@ -22,12 +22,13 @@ This was a [community-requested feature](https://github.com/backnotprop/plannota
 plannotator annotate https://docs.stripe.com/api      # remote URL
 plannotator annotate docs/guide.html                  # local HTML file
 plannotator annotate ./docs/                          # folder (now includes .html files)
+plannotator annotate docs/guide.html --markdown       # convert local HTML to markdown
 plannotator annotate https://... --no-jina            # direct fetch, no Jina
 ```
 
-All inputs are converted to markdown before reaching the annotation editor. You annotate, highlight, comment, and when you click Send Annotations, structured feedback goes back to the agent session.
+URLs are converted to markdown before reaching the annotation editor. Local HTML renders as HTML by default, with `--markdown` available when you want the old Turndown conversion path. You annotate, highlight, comment, and when you click Send Annotations, structured feedback goes back to the agent session.
 
-Local HTML files are read from disk and converted via Turndown. Folders now show `.html` and `.htm` files alongside markdown in the file browser, with conversion happening on demand. A source attribution badge appears under the document title so you know what you're looking at.
+Folders now show `.html` and `.htm` files alongside markdown in the file browser. A source attribution badge appears under the document title so you know what you're looking at.
 
 ## How URL fetching works
 

@@ -91,6 +91,7 @@ describe("Amp Plannotator plugin helpers", () => {
 
   test("finds annotate target after flags", () => {
     expect(findFirstPositionalArg(["--no-jina", "https://example.com"])).toBe("https://example.com");
+    expect(findFirstPositionalArg(["--markdown", "docs/page.html"])).toBe("docs/page.html");
     expect(findFirstPositionalArg(["--browser", "Google Chrome", "docs/plan.md"])).toBe("docs/plan.md");
   });
 

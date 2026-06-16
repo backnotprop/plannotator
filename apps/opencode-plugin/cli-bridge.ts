@@ -325,6 +325,7 @@ export function buildAnnotateCliArgs(parsed: ParsedAnnotateArgs): string[] {
   const args = ["annotate", parsed.rawFilePath, "--json"];
   if (parsed.gate) args.push("--gate");
   if (parsed.renderHtml) args.push("--render-html");
+  if (parsed.renderMarkdown) args.push("--markdown");
   if (parsed.noJina) args.push("--no-jina");
   return args;
 }
@@ -492,7 +493,7 @@ export async function handleCliCommand(input: {
     if (input.command === "plannotator-annotate") {
       const parsed = parseAnnotateArgs(input.rawArgs);
       if (!parsed.filePath) {
-        log(input.client, "error", "Usage: /plannotator-annotate <file.md | file.html | https://... | folder/> [--no-jina] [--gate] [--json]");
+        log(input.client, "error", "Usage: /plannotator-annotate <file.md | file.html | https://... | folder/> [--markdown] [--no-jina] [--gate] [--json]");
         return;
       }
 

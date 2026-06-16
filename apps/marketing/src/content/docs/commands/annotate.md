@@ -13,7 +13,7 @@ The `/plannotator-annotate` command opens files, URLs, or folders in the Plannot
 | Input | Command | What happens |
 |-------|---------|--------------|
 | Markdown file | `plannotator annotate README.md` | Opens the file directly |
-| HTML file | `plannotator annotate docs/guide.html` | Converts to markdown via Turndown, then opens |
+| HTML file | `plannotator annotate docs/guide.html` | Renders the HTML directly |
 | URL | `plannotator annotate https://docs.stripe.com/api` | Fetches the page, converts to markdown, then opens |
 | Folder | `plannotator annotate ./docs/` | Opens a file browser showing all `.md`, `.mdx`, `.html`, and `.htm` files |
 
@@ -82,9 +82,19 @@ If none of these are set, Jina is enabled by default.
 
 ## HTML files
 
-Local `.html` and `.htm` files are read from disk and converted to markdown using [Turndown](https://github.com/mixmark-io/turndown) with GFM table support. `<script>`, `<style>`, and `<noscript>` tags are stripped before conversion.
+Local `.html` and `.htm` files are read from disk and rendered as HTML by default. If you want Plannotator to convert the file to markdown first, pass `--markdown`.
+
+```bash
+plannotator annotate docs/guide.html --markdown
+```
+
+Markdown conversion uses [Turndown](https://github.com/mixmark-io/turndown) with GFM table support. `<script>`, `<style>`, and `<noscript>` tags are stripped before conversion.
 
 HTML files must be within your current working directory. Files outside the project root return a 403 error.
+
+### `--markdown`
+
+For local HTML files, `--markdown` switches from raw HTML rendering to markdown conversion. In folder mode, the same setting applies when you open `.html` or `.htm` files from the file browser.
 
 ## Source badge
 

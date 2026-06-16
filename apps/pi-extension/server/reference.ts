@@ -77,6 +77,7 @@ export async function handleDocRequest(res: Res, url: URL): Promise<void> {
 	// block below (no base) retains its cwd-based containment check.
 	const base = url.searchParams.get("base");
 	const resolvedBase = base ? resolveUserPath(base) : null;
+	const convert = url.searchParams.get("convert") === "1";
 	if (
 		resolvedBase &&
 		!isAbsoluteUserPath(requestedPath) &&
@@ -87,8 +88,12 @@ export async function handleDocRequest(res: Res, url: URL): Promise<void> {
 			if (existsSync(fromBase)) {
 				const raw = readFileSync(fromBase, "utf-8");
 				const isHtml = /\.html?$/i.test(requestedPath);
+				if (isHtml && !convert) {
+					json(res, { rawHtml: raw, renderAs: "html", filepath: fromBase });
+					return;
+				}
 				const markdown = isHtml ? htmlToMarkdown(raw) : raw;
-				json(res, { markdown, filepath: fromBase, isConverted: isHtml });
+				json(res, { markdown, filepath: fromBase, isConverted: isHtml, renderAs: "markdown" });
 				return;
 			}
 		} catch {
@@ -107,7 +112,11 @@ export async function handleDocRequest(res: Res, url: URL): Promise<void> {
 		try {
 			if (existsSync(resolvedHtml)) {
 				const html = readFileSync(resolvedHtml, "utf-8");
-				json(res, { markdown: htmlToMarkdown(html), filepath: resolvedHtml, isConverted: true });
+				if (!convert) {
+					json(res, { rawHtml: html, renderAs: "html", filepath: resolvedHtml });
+					return;
+				}
+				json(res, { markdown: htmlToMarkdown(html), filepath: resolvedHtml, isConverted: true, renderAs: "markdown" });
 				return;
 			}
 		} catch { /* fall through to 404 */ }

@@ -288,6 +288,7 @@ const App: React.FC = () => {
   const [projectRoot, setProjectRoot] = useState<string | null>(null);
   const [wideModeType, setWideModeType] = useState<WideModeType | null>(null);
   const wideModeSnapshotRef = useRef<WideModeLayoutSnapshot | null>(null);
+  const initialSidebarPreferenceAppliedRef = useRef(false);
   const lastAppliedTocEnabledRef = useRef(uiPrefs.tocEnabled);
   const goalSetupMode = goalSetupBundle !== null;
 
@@ -330,7 +331,7 @@ const App: React.FC = () => {
   usePrintMode();
 
   // Sidebar (shared TOC + Version Browser)
-  const sidebar = useSidebar(getUIPreferences().tocEnabled);
+  const sidebar = useSidebar(false);
 
   // Resizable panels
   const panelResize = useResizablePanel({
@@ -526,6 +527,34 @@ const App: React.FC = () => {
     markdown, viewerRef, linkedDocHook,
     setMarkdown, setAnnotations, setSelectedAnnotationId, setSubmitted,
   });
+
+  useEffect(() => {
+    if (initialSidebarPreferenceAppliedRef.current) return;
+    if (isLoading || isLoadingShared) return;
+    if (wideModeType !== null) return;
+
+    initialSidebarPreferenceAppliedRef.current = true;
+    if (archive.archiveMode || goalSetupMode || annotateSource === 'folder') return;
+    if (renderAs === 'html') {
+      sidebar.close();
+      return;
+    }
+    if (uiPrefs.tocEnabled && hasTocEntries) {
+      sidebar.open('toc');
+    }
+  }, [
+    annotateSource,
+    archive.archiveMode,
+    goalSetupMode,
+    hasTocEntries,
+    isLoading,
+    isLoadingShared,
+    renderAs,
+    sidebar.close,
+    sidebar.open,
+    uiPrefs.tocEnabled,
+    wideModeType,
+  ]);
 
   const canUseWideMode = useMemo(() => canUseAnnotateWideMode({
     archiveMode: archive.archiveMode,

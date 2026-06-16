@@ -523,6 +523,7 @@ export async function startMarkdownAnnotationSession(
 	gate?: boolean,
 	rawHtml?: string,
 	renderHtml?: boolean,
+	convertHtml?: boolean,
 	recentMessages?: { messageId: string; text: string; timestamp?: string }[],
 ): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>> {
 	if (!ctx.hasUI || !planHtmlContent) {
@@ -553,6 +554,7 @@ export async function startMarkdownAnnotationSession(
 		gate,
 		rawHtml,
 		renderHtml,
+		convertHtml,
 		htmlContent: planHtmlContent,
 		sharingEnabled: process.env.PLANNOTATOR_SHARE !== "disabled",
 		shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
@@ -587,6 +589,7 @@ export async function startLastMessageAnnotationSession(
 		undefined,
 		undefined,
 		gate,
+		undefined,
 		undefined,
 		undefined,
 		recentMessages,

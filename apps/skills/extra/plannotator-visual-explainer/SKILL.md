@@ -26,12 +26,12 @@ Always deliver via Plannotator's annotation UI. Do NOT use `open` or `xdg-open`.
 
 **Plans/proposals** (user should approve/deny):
 ```bash
-plannotator annotate <file> --render-html --gate
+plannotator annotate <file> --gate
 ```
 
 **Everything else** (informational):
 ```bash
-plannotator annotate <file> --render-html
+plannotator annotate <file>
 ```
 
 ---

@@ -26,7 +26,7 @@ export function formatTopLevelHelp(): string {
     "  plannotator --version, -v",
     "  plannotator [--browser <name>]",
     "  plannotator review [--git] [PR_URL]",
-    "  plannotator annotate <file.md | file.html | https://... | folder/>  [--no-jina] [--gate] [--json] [--hook]",
+    "  plannotator annotate <file.md | file.html | https://... | folder/>  [--markdown] [--no-jina] [--gate] [--json] [--hook]",
     "  plannotator annotate-last [--stdin] [--gate] [--json] [--hook]",
     "  plannotator setup-goal <interview|facts> <bundle.json | -> [--json]",
     "  plannotator last",

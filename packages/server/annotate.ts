@@ -1,10 +1,10 @@
 /**
  * Annotate Server
  *
- * Provides a server for annotating arbitrary markdown files.
+ * Provides a server for annotating arbitrary files, URLs, and folders.
  * Follows the same patterns as the review server but serves
- * markdown content via /api/plan so the plan editor UI can
- * render it without modifications.
+ * annotation-session content via /api/plan so the plan editor UI can
+ * render it without separate app bundles.
  *
  * Environment variables:
  *   PLANNOTATOR_REMOTE - Set to "1"/"true" for remote, "0"/"false" for local
@@ -33,7 +33,7 @@ export { handleServerReady as handleAnnotateServerReady } from "./shared-handler
 // --- Types ---
 
 export interface AnnotateServerOptions {
-  /** Markdown content of the file to annotate */
+  /** Markdown content of the file to annotate. Empty when rendering raw HTML. */
   markdown: string;
   /** Original file path (for display purposes) */
   filePath: string;
@@ -65,9 +65,9 @@ export interface AnnotateServerOptions {
   sourceConverted?: boolean;
   /** Enable review-gate UX: adds an Approve button alongside Close/Send Annotations */
   gate?: boolean;
-  /** Raw HTML content for direct iframe rendering (--render-html mode) */
+  /** Raw HTML content for direct iframe rendering. */
   rawHtml?: string;
-  /** Render HTML as-is in an iframe instead of converting to markdown */
+  /** Render HTML as-is in an iframe. */
   renderHtml?: boolean;
   /** Session-level force-markdown preference (`--markdown`). Exposed in /api/plan so the
    *  frontend appends `&convert=1` when navigating folder/linked HTML files. */

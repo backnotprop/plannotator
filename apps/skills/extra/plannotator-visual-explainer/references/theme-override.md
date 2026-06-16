@@ -4,7 +4,7 @@ When visual-explainer's workflow says to pick a palette and font pairing, use th
 
 ## CSS Custom Properties
 
-Replace visual-explainer's `--bg`, `--surface`, `--border`, `--text`, `--accent` variables with Plannotator's semantic tokens. Include these as `:root` defaults so the file works standalone. When embedded in the Plannotator UI via `--render-html`, these get overridden by the active theme.
+Replace visual-explainer's `--bg`, `--surface`, `--border`, `--text`, `--accent` variables with Plannotator's semantic tokens. Include these as `:root` defaults so the file works standalone. When embedded in Plannotator's raw HTML annotation mode, these get overridden by the active theme.
 
 ```css
 :root {
@@ -91,7 +91,7 @@ mermaid.initialize({
 
 ## Dark mode
 
-Plannotator handles dark/light via theme classes, not `prefers-color-scheme`. The standalone defaults above are the light theme. When embedded via `--render-html`, the active theme's tokens override automatically — no media query needed in the generated HTML.
+Plannotator handles dark/light via theme classes, not `prefers-color-scheme`. The standalone defaults above are the light theme. When embedded in raw HTML annotation mode, the active theme's tokens override automatically — no media query needed in the generated HTML.
 
 For standalone viewing, you may optionally add a `prefers-color-scheme: dark` block with the Plannotator dark theme values:
 
