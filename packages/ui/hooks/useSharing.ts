@@ -155,11 +155,9 @@ export function useSharing(
           const restoredAnnotations = fromShareable(payload.a, payload.d, payload.s);
           setAnnotations(restoredAnnotations);
 
-          if (payload.g?.length) {
-            const parsed = parseShareableImages(payload.g) ?? [];
-            setGlobalAttachments(parsed);
-            setSharedGlobalAttachments(parsed);
-          }
+          const parsedGlobalAttachments = parseShareableImages(payload.g) ?? [];
+          setGlobalAttachments(parsedGlobalAttachments);
+          setSharedGlobalAttachments(parsedGlobalAttachments.length ? parsedGlobalAttachments : null);
 
           setPendingSharedAnnotations(restoredAnnotations);
           setIsSharedSession(true);
@@ -205,12 +203,9 @@ export function useSharing(
         const restoredAnnotations = fromShareable(payload.a, payload.d, payload.s);
         setAnnotations(restoredAnnotations);
 
-        // Restore global attachments if present
-        if (payload.g?.length) {
-          const parsed = parseShareableImages(payload.g) ?? [];
-          setGlobalAttachments(parsed);
-          setSharedGlobalAttachments(parsed);
-        }
+        const parsedGlobalAttachments = parseShareableImages(payload.g) ?? [];
+        setGlobalAttachments(parsedGlobalAttachments);
+        setSharedGlobalAttachments(parsedGlobalAttachments.length ? parsedGlobalAttachments : null);
 
         // Store for later application to DOM
         setPendingSharedAnnotations(restoredAnnotations);
