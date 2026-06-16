@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import { decompress } from "@plannotator/shared/compress";
-import { generateRemoteShareUrl } from "./share-url";
+import { generateRemoteShareUrl, writeRemoteShareLink } from "./share-url";
 
 describe("generateRemoteShareUrl", () => {
   test("keeps markdown remote shares hash-based", async () => {
@@ -32,5 +32,34 @@ describe("generateRemoteShareUrl", () => {
 
     expect(url).toMatch(/^https:\/\/share\.example\.test\/p\/abc123#key=[A-Za-z0-9_-]+&paste=/);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  test("warns instead of silently dropping raw HTML remote share failures", async () => {
+    const fetchImpl = mock(async () =>
+      new Response(JSON.stringify({ error: "Payload too large (max 5 MB encrypted)" }), {
+        status: 413,
+        headers: { "Content-Type": "application/json" },
+      })
+    ) as typeof fetch;
+    const originalWrite = process.stderr.write;
+    let stderr = "";
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      stderr += String(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+
+    try {
+      await writeRemoteShareLink("", "https://share.example.test", "annotate", "HTML document only", {
+        rawHtml: "<!doctype html><h1>Hello</h1>",
+        pasteApiUrl: "https://paste.example.test",
+        fetchImpl,
+      });
+    } finally {
+      process.stderr.write = originalWrite;
+    }
+
+    expect(stderr).toContain("Warning: could not create remote share link for HTML document only.");
+    expect(stderr).toContain("Payload too large (max 5 MB encrypted)");
+    expect(stderr).toContain("HTML sharing uses the paste service");
   });
 });

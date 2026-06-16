@@ -60,7 +60,7 @@ async function generateRemotePasteShareUrl(
   });
 
   if (!response.ok) {
-    throw new Error(`Paste service returned ${response.status}`);
+    throw new Error(await readPasteError(response, `Paste service returned ${response.status}`));
   }
 
   const result = (await response.json()) as { id?: unknown };
@@ -79,6 +79,15 @@ function base64UrlEncode(value: string): string {
   return btoa(value).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }
 
+async function readPasteError(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = (await response.json()) as { error?: unknown };
+    return typeof body.error === "string" && body.error.trim() ? body.error : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 /**
  * Format byte size as human-readable string
  */
@@ -90,7 +99,8 @@ export function formatSize(bytes: number): string {
 
 /**
  * Generate a remote share URL and write it to stderr for the user.
- * Silently does nothing on failure.
+ * Keeps the local server running, but warns when the fallback share link
+ * cannot be created for remote sessions.
  */
 export async function writeRemoteShareLink(
   content: string,
@@ -99,11 +109,22 @@ export async function writeRemoteShareLink(
   noun: string,
   options: RemoteShareOptions = {},
 ): Promise<void> {
-  const shareUrl = await generateRemoteShareUrl(content, shareBaseUrl, options);
-  const size = formatSize(new TextEncoder().encode(shareUrl).length);
-  process.stderr.write(
-    `\n  Open this link on your local machine to ${verb}:\n` +
-    `  ${shareUrl}\n\n` +
-    `  (${size} — ${noun}, annotations added in browser)\n\n`
-  );
+  try {
+    const shareUrl = await generateRemoteShareUrl(content, shareBaseUrl, options);
+    const size = formatSize(new TextEncoder().encode(shareUrl).length);
+    process.stderr.write(
+      `\n  Open this link on your local machine to ${verb}:\n` +
+      `  ${shareUrl}\n\n` +
+      `  (${size} — ${noun}, annotations added in browser)\n\n`
+    );
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    const pasteHint = options.rawHtml
+      ? " HTML sharing uses the paste service; check PLANNOTATOR_PASTE_URL or try a smaller/self-contained HTML file."
+      : "";
+    process.stderr.write(
+      `\n  Warning: could not create remote share link for ${noun}.\n` +
+      `  ${reason}.${pasteHint}\n\n`
+    );
+  }
 }
