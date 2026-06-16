@@ -24,6 +24,7 @@ import { dirname, resolve as resolvePath } from "path";
 import { isWSL } from "./browser";
 import { AI_QUERY_ENDPOINT, createAIRuntime } from "./ai-runtime";
 import type { AIEndpoints } from "@plannotator/ai";
+import { createHtmlAssetRegistry } from "./html-assets";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -146,6 +147,7 @@ export async function startAnnotateServer(
   const draftKey = contentHash(draftSource);
   const externalAnnotations = createExternalAnnotationHandler("plan");
   const aiRuntime = await createAIRuntime();
+  const htmlAssets = createHtmlAssetRegistry();
 
   // Detect repo info (cached for this session)
   const repoInfo = await getRepoInfo();
@@ -187,6 +189,7 @@ export async function startAnnotateServer(
 
           // API: Get plan content (reuse /api/plan so the plan editor UI works)
           if (url.pathname === "/api/plan" && req.method === "GET") {
+            const displayRawHtml = renderHtml && rawHtml ? htmlAssets.rewriteHtml(rawHtml, filePath) : undefined;
             return Response.json({
               plan: markdown,
               origin,
@@ -195,8 +198,8 @@ export async function startAnnotateServer(
               sourceInfo,
               sourceConverted: sourceConverted ?? false,
               gate,
-              renderAs: renderHtml && rawHtml ? 'html' as const : 'markdown' as const,
-              ...(renderHtml && rawHtml ? { rawHtml } : {}),
+              renderAs: displayRawHtml ? 'html' as const : 'markdown' as const,
+              ...(displayRawHtml ? { rawHtml: displayRawHtml } : {}),
               convertHtml,
               sharingEnabled,
               shareBaseUrl,
@@ -230,6 +233,11 @@ export async function startAnnotateServer(
             return handleImage(req);
           }
 
+          const htmlAssetResponse = await htmlAssets.handle(req, url);
+          if (htmlAssetResponse) {
+            return htmlAssetResponse;
+          }
+
           // API: Serve a linked markdown document
           // Inject source file's directory as base for relative path resolution.
           // Skip base injection for URL annotations — there's no local directory to resolve against.
@@ -237,9 +245,9 @@ export async function startAnnotateServer(
             if (!url.searchParams.has("base") && !/^https?:\/\//i.test(filePath)) {
               const docUrl = new URL(req.url);
               docUrl.searchParams.set("base", dirname(filePath));
-              return handleDoc(new Request(docUrl.toString()));
+              return handleDoc(new Request(docUrl.toString()), { rewriteHtml: htmlAssets.rewriteHtml });
             }
-            return handleDoc(req);
+            return handleDoc(req, { rewriteHtml: htmlAssets.rewriteHtml });
           }
 
           // API: Batch existence check for code-file paths the renderer detected

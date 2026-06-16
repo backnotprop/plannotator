@@ -1,5 +1,7 @@
 import { createServer } from "node:http";
-import { dirname, resolve as resolvePath } from "node:path";
+import { dirname, isAbsolute, relative, resolve as resolvePath } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 
 import { contentHash, deleteDraft } from "../generated/draft.js";
 import { saveConfig, detectGitUser, getServerConfig } from "../generated/config.js";
@@ -26,6 +28,13 @@ import {
 } from "./reference.js";
 import { warmFileListCache } from "../generated/resolve-file.js";
 import { createExternalAnnotationHandler } from "./external-annotations.js";
+import {
+	HTML_ASSET_ROUTE_PREFIX,
+	encodeHtmlAssetPath,
+	htmlAssetContentType,
+	normalizeHtmlAssetRoutePath,
+	rewriteHtmlAssetReferences,
+} from "../generated/html-assets.js";
 
 export interface AnnotateServerResult {
 	port: number;
@@ -33,6 +42,102 @@ export interface AnnotateServerResult {
 	url: string;
 	waitForDecision: () => Promise<{ feedback: string; annotations: unknown[]; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>;
 	stop: () => void;
+}
+
+const MAX_HTML_ASSET_BYTES = 50 * 1024 * 1024;
+
+function createHtmlAssetRegistry() {
+	const rootsByToken = new Map<string, string>();
+	const tokensByRoot = new Map<string, string>();
+
+	function register(baseDir: string): string {
+		const root = resolvePath(baseDir);
+		const existing = tokensByRoot.get(root);
+		if (existing) return existing;
+		const token = randomUUID().replace(/-/g, "").slice(0, 16);
+		tokensByRoot.set(root, token);
+		rootsByToken.set(token, root);
+		return token;
+	}
+
+	function rewriteHtml(htmlContent: string, htmlFilePath: string): string {
+		if (/^https?:\/\//i.test(htmlFilePath)) return htmlContent;
+		try {
+			const token = register(dirname(resolvePath(htmlFilePath)));
+			return rewriteHtmlAssetReferences(
+				htmlContent,
+				(assetPath) => `${HTML_ASSET_ROUTE_PREFIX}/${token}/${encodeHtmlAssetPath(assetPath)}`,
+			);
+		} catch {
+			return htmlContent;
+		}
+	}
+
+	function handle(res: import("node:http").ServerResponse, url: URL): boolean {
+		const prefix = `${HTML_ASSET_ROUTE_PREFIX}/`;
+		if (!url.pathname.startsWith(prefix)) return false;
+
+		const rest = url.pathname.slice(prefix.length);
+		const slash = rest.indexOf("/");
+		if (slash <= 0) {
+			json(res, { error: "Missing asset token or path" }, 404);
+			return true;
+		}
+
+		const token = rest.slice(0, slash);
+		const root = rootsByToken.get(token);
+		if (!root) {
+			json(res, { error: "Unknown asset root" }, 404);
+			return true;
+		}
+
+		const assetPath = normalizeHtmlAssetRoutePath(rest.slice(slash + 1));
+		if (!assetPath) {
+			json(res, { error: "Invalid asset path" }, 400);
+			return true;
+		}
+
+		const contentType = htmlAssetContentType(assetPath);
+		if (!contentType) {
+			json(res, { error: "Unsupported asset type" }, 415);
+			return true;
+		}
+
+		const resolved = resolvePath(root, assetPath);
+		if (!isWithinDirectory(resolved, root)) {
+			json(res, { error: "Access denied" }, 403);
+			return true;
+		}
+
+		try {
+			if (!existsSync(resolved)) {
+				json(res, { error: "Asset not found" }, 404);
+				return true;
+			}
+			const stat = statSync(resolved);
+			if (stat.size > MAX_HTML_ASSET_BYTES) {
+				json(res, { error: "Asset too large" }, 413);
+				return true;
+			}
+			res.writeHead(200, {
+				"Content-Type": contentType,
+				"Cache-Control": "no-store",
+			});
+			res.end(readFileSync(resolved));
+		} catch {
+			json(res, { error: "Failed to read asset" }, 500);
+		}
+		return true;
+	}
+
+	return { rewriteHtml, handle };
+}
+
+function isWithinDirectory(filePath: string, root: string): boolean {
+	const resolved = resolvePath(filePath);
+	const resolvedRoot = resolvePath(root);
+	const rel = relative(resolvedRoot, resolved);
+	return rel === "" || (!!rel && !rel.startsWith("..") && !isAbsolute(rel));
 }
 
 export async function startAnnotateServer(options: {
@@ -94,6 +199,7 @@ export async function startAnnotateServer(options: {
 
 	const externalAnnotations = createExternalAnnotationHandler("plan");
 	const aiRuntime = await createPiAIRuntime();
+	const htmlAssets = createHtmlAssetRegistry();
 
 	const server = createServer(async (req, res) => {
 		const url = requestUrl(req);
@@ -102,6 +208,9 @@ export async function startAnnotateServer(options: {
 		if (url.pathname.startsWith("/api/ai/") && await handlePiAIRequest(req, res, url, aiRuntime)) return;
 
 		if (url.pathname === "/api/plan" && req.method === "GET") {
+			const displayRawHtml = options.renderHtml && options.rawHtml
+				? htmlAssets.rewriteHtml(options.rawHtml, options.filePath)
+				: undefined;
 			json(res, {
 				plan: options.markdown,
 				origin: options.origin ?? "pi",
@@ -110,8 +219,8 @@ export async function startAnnotateServer(options: {
 				sourceInfo: options.sourceInfo,
 				sourceConverted: options.sourceConverted ?? false,
 				gate: options.gate ?? false,
-				renderAs: options.renderHtml && options.rawHtml ? 'html' : 'markdown',
-				...(options.renderHtml && options.rawHtml ? { rawHtml: options.rawHtml } : {}),
+				renderAs: displayRawHtml ? 'html' : 'markdown',
+				...(displayRawHtml ? { rawHtml: displayRawHtml } : {}),
 				convertHtml: options.convertHtml ?? false,
 				sharingEnabled,
 				shareBaseUrl,
@@ -135,6 +244,8 @@ export async function startAnnotateServer(options: {
 			}
 		} else if (url.pathname === "/api/image") {
 			handleImageRequest(res, url);
+		} else if (htmlAssets.handle(res, url)) {
+			return;
 		} else if (url.pathname === "/api/upload" && req.method === "POST") {
 			await handleUploadRequest(req, res);
 		} else if (url.pathname === "/api/draft") {
@@ -148,7 +259,7 @@ export async function startAnnotateServer(options: {
 			if (options.convertHtml && !url.searchParams.has("convert")) {
 				url.searchParams.set("convert", "1");
 			}
-			await handleDocRequest(res, url);
+			await handleDocRequest(res, url, { rewriteHtml: htmlAssets.rewriteHtml });
 		} else if (url.pathname === "/api/doc/exists" && req.method === "POST") {
 			await handleDocExistsRequest(res, req);
 		} else if (url.pathname === "/api/obsidian/vaults") {

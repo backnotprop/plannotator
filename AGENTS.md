@@ -217,7 +217,7 @@ OpenCode/Pi: event handler intercepts command
         ↓
 Input type detected:
   .md/.mdx   → file read from disk
-  .html/.htm → file read, converted to markdown via Turndown (or rendered as-is with --render-html)
+  .html/.htm → file read, rendered as raw HTML by default (or converted to markdown with --markdown)
   https://   → fetched via Jina Reader (default) or fetch+Turndown (--no-jina)
   folder/    → file browser opened, files converted on demand
         ↓
@@ -330,6 +330,7 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/feedback`       | POST   | Submit annotations (body: feedback, annotations) |
 | `/api/approve`        | POST   | Approve without feedback (review-gate UX, `--gate`) |
 | `/api/exit`           | POST   | Close session without feedback |
+| `/api/html-assets/<token>/<path>` | GET | Serve relative support assets for raw HTML annotation sessions |
 | `/api/image`          | GET    | Serve image by path query param            |
 | `/api/upload`         | POST   | Upload image, returns `{ path, originalName }` |
 | `/api/doc`            | GET    | Serve linked .md/.mdx/.html file or code file (`?path=<path>&base=<dir>`) |
@@ -486,7 +487,7 @@ interface SharePayload {
   g?: ShareableImage[]; // Global attachments
   d?: (string | null)[]; // diffContext per annotation, parallel to `a`
   s?: (string | undefined)[]; // source per annotation (external tool identifier), parallel to `a`
-  h?: string; // Raw HTML content (--render-html mode)
+  h?: string; // Raw HTML content (direct HTML rendering mode)
   r?: 'html'; // Render mode flag (omitted = markdown)
 }
 

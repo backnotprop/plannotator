@@ -1020,8 +1020,12 @@ if (args[0] === "sessions") {
     onReady: async (url, isRemote, port) => {
       handleAnnotateServerReady(url, isRemote, port);
 
-      if (isRemote && sharingEnabled && markdown) {
-        await writeRemoteShareLink(markdown, shareBaseUrl, "annotate", "document only").catch(() => {});
+      if (isRemote && sharingEnabled) {
+        if (rawHtml) {
+          await writeRemoteShareLink("", shareBaseUrl, "annotate", "HTML document only", { rawHtml, pasteApiUrl }).catch(() => {});
+        } else if (markdown) {
+          await writeRemoteShareLink(markdown, shareBaseUrl, "annotate", "document only").catch(() => {});
+        }
       }
     },
   });

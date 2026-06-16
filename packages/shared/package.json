@@ -40,6 +40,7 @@
     "./worktree-pool": "./worktree-pool.ts",
     "./html-to-markdown": "./html-to-markdown.ts",
     "./url-to-markdown": "./url-to-markdown.ts",
+    "./html-assets": "./html-assets.ts",
     "./tour": "./tour.ts",
     "./annotate-args": "./annotate-args.ts",
     "./at-reference": "./at-reference.ts",
@@ -50,6 +51,7 @@
   },
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.64",
+    "parse5": "^7.3.0",
     "turndown": "^7.2.4"
   }
 }
