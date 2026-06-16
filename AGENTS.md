@@ -331,6 +331,7 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/approve`        | POST   | Approve without feedback (review-gate UX, `--gate`) |
 | `/api/exit`           | POST   | Close session without feedback |
 | `/api/html-assets/<token>/<path>` | GET | Serve relative support assets for raw HTML annotation sessions |
+| `/api/share-html`     | GET    | Lazily prepare portable raw HTML for sharing (`?path=<html-file>` optional) |
 | `/api/image`          | GET    | Serve image by path query param            |
 | `/api/upload`         | POST   | Upload image, returns `{ path, originalName }` |
 | `/api/doc`            | GET    | Serve linked .md/.mdx/.html file or code file (`?path=<path>&base=<dir>`) |

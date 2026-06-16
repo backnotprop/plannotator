@@ -100,6 +100,7 @@ export function useSharing(
   shareBaseUrl?: string,
   pasteApiUrl?: string,
   rawHtml?: string,
+  resolveRawHtmlForShare?: () => Promise<string | null>,
   setRawHtml?: (h: string) => void,
   setShareHtml?: (h: string) => void,
   setRenderAs?: (m: 'markdown' | 'html') => void,
@@ -296,12 +297,15 @@ export function useSharing(
     setShortUrlError('');
 
     try {
+      const htmlForShare = rawHtml
+        ? (await resolveRawHtmlForShare?.()) ?? rawHtml
+        : undefined;
       const result = await createShortShareUrl(
         markdown,
         annotations,
         globalAttachments,
         { pasteApiUrl, shareBaseUrl },
-        rawHtml,
+        htmlForShare,
       );
 
       if (result) {
@@ -319,7 +323,7 @@ export function useSharing(
     } finally {
       setIsGeneratingShortUrl(false);
     }
-  }, [markdown, annotations, globalAttachments, shareBaseUrl, pasteApiUrl, rawHtml]);
+  }, [markdown, annotations, globalAttachments, shareBaseUrl, pasteApiUrl, rawHtml, resolveRawHtmlForShare]);
 
   // Import annotations from a teammate's share URL (supports both hash-based and short /p/<id> URLs)
   const importFromShareUrl = useCallback(async (url: string): Promise<ImportResult> => {

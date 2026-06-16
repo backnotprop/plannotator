@@ -20,7 +20,7 @@ import { warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash, deleteDraft } from "./draft";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { saveConfig, detectGitUser, getServerConfig } from "./config";
-import { resolve as resolvePath } from "path";
+import { dirname, isAbsolute, relative, resolve as resolvePath } from "path";
 import { isWSL } from "./browser";
 import { AI_QUERY_ENDPOINT, createAIRuntime } from "./ai-runtime";
 import type { AIEndpoints } from "@plannotator/ai";
@@ -150,6 +150,40 @@ export async function startAnnotateServer(
   const aiRuntime = await createAIRuntime();
   const htmlAssets = createHtmlAssetRegistry();
 
+  async function loadShareHtml(pathParam: string | null): Promise<Response> {
+    if (/^https?:\/\//i.test(filePath)) {
+      return Response.json({ error: "Raw HTML sharing is unavailable for URL annotations" }, { status: 400 });
+    }
+
+    const sourcePath = resolvePath(filePath);
+    const requestedPath = pathParam ? resolvePath(pathParam) : sourcePath;
+    if (!/\.html?$/i.test(requestedPath)) {
+      return Response.json({ error: "Share HTML is only available for HTML documents" }, { status: 400 });
+    }
+    if (!isAllowedHtmlSharePath(requestedPath)) {
+      return Response.json({ error: "Access denied" }, { status: 403 });
+    }
+
+    try {
+      const html = renderHtml && rawHtml && requestedPath === sourcePath
+        ? rawHtml
+        : await Bun.file(requestedPath).text();
+      return Response.json({ shareHtml: htmlAssets.inlineHtml(html, requestedPath) });
+    } catch {
+      return Response.json({ error: "Failed to prepare share HTML" }, { status: 500 });
+    }
+  }
+
+  function isAllowedHtmlSharePath(targetPath: string): boolean {
+    const roots = new Set<string>([process.cwd()]);
+    if (folderPath) roots.add(folderPath);
+    if (!/^https?:\/\//i.test(filePath)) roots.add(dirname(filePath));
+    for (const root of roots) {
+      if (isWithinDirectory(targetPath, root)) return true;
+    }
+    return false;
+  }
+
   // Detect repo info (cached for this session)
   const repoInfo = await getRepoInfo();
 
@@ -191,7 +225,6 @@ export async function startAnnotateServer(
           // API: Get plan content (reuse /api/plan so the plan editor UI works)
           if (url.pathname === "/api/plan" && req.method === "GET") {
             const displayRawHtml = renderHtml && rawHtml ? htmlAssets.rewriteHtml(rawHtml, filePath) : undefined;
-            const shareHtml = renderHtml && rawHtml ? htmlAssets.inlineHtml(rawHtml, filePath) : undefined;
             return Response.json({
               plan: markdown,
               origin,
@@ -202,7 +235,6 @@ export async function startAnnotateServer(
               gate,
               renderAs: displayRawHtml ? 'html' as const : 'markdown' as const,
               ...(displayRawHtml ? { rawHtml: displayRawHtml } : {}),
-              ...(displayRawHtml && shareHtml ? { shareHtml } : {}),
               convertHtml,
               sharingEnabled,
               shareBaseUrl,
@@ -213,6 +245,10 @@ export async function startAnnotateServer(
               serverConfig: getServerConfig(gitUser),
               ...(recentMessages ? { recentMessages } : {}),
             });
+          }
+
+          if (url.pathname === "/api/share-html" && req.method === "GET") {
+            return loadShareHtml(url.searchParams.get("path"));
           }
 
           // API: Update user config (write-back to ~/.plannotator/config.json)
@@ -248,7 +284,6 @@ export async function startAnnotateServer(
             const docReq = docUrl.changed ? new Request(docUrl.url) : req;
             return handleDoc(docReq, {
               rewriteHtml: htmlAssets.rewriteHtml,
-              shareHtml: htmlAssets.inlineHtml,
             });
           }
 
@@ -411,4 +446,11 @@ export async function startAnnotateServer(
       server.stop();
     },
   };
+}
+
+function isWithinDirectory(filePath: string, root: string): boolean {
+  const resolved = resolvePath(filePath);
+  const resolvedRoot = resolvePath(root);
+  const rel = relative(resolvedRoot, resolved);
+  return rel === "" || (!!rel && !rel.startsWith("..") && !isAbsolute(rel));
 }

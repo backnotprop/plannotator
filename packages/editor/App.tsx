@@ -908,6 +908,24 @@ const App: React.FC = () => {
   // Hide share entry points once they exist so we do not silently drop feedback.
   const canShareCurrentSession = sharingEnabled && codeAnnotations.length === 0;
 
+  const resolveRawHtmlForShare = useCallback(async (): Promise<string | null> => {
+    if (renderAs !== 'html' || !rawHtml) return null;
+    if (shareHtml) return shareHtml;
+    if (!isApiMode) return rawHtml;
+
+    const params = new URLSearchParams();
+    const activePath = linkedDocHook.filepath ?? sourceFilePath;
+    if (activePath) params.set('path', activePath);
+    const query = params.toString();
+    const res = await fetch(`/api/share-html${query ? `?${query}` : ''}`);
+    const data = (await res.json().catch(() => ({}))) as { shareHtml?: unknown; error?: string };
+    if (!res.ok || data.error || typeof data.shareHtml !== 'string') {
+      throw new Error(data.error || 'Failed to prepare HTML for sharing');
+    }
+    setShareHtml(data.shareHtml);
+    return data.shareHtml;
+  }, [isApiMode, linkedDocHook.filepath, rawHtml, renderAs, shareHtml, sourceFilePath]);
+
   // URL-based sharing
   const {
     isSharedSession,
@@ -937,7 +955,8 @@ const App: React.FC = () => {
     },
     shareBaseUrl,
     pasteApiUrl,
-    renderAs === 'html' ? (shareHtml || rawHtml) : undefined,
+    renderAs === 'html' ? rawHtml : undefined,
+    resolveRawHtmlForShare,
     setRawHtml,
     setShareHtml,
     setRenderAs,
@@ -1093,7 +1112,7 @@ const App: React.FC = () => {
         } else if (data.renderAs === 'html' && data.rawHtml) {
           setRenderAs('html');
           setRawHtml(data.rawHtml);
-          setShareHtml(data.shareHtml ?? data.rawHtml);
+          setShareHtml(data.shareHtml ?? '');
           setMarkdown('');
         } else if (data.mode === 'annotate-folder') {
           // Folder annotation mode: clear demo content, let user pick a file

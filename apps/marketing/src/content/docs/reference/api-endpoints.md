@@ -117,6 +117,7 @@ Used during file annotation (`/plannotator-annotate`).
 |----------|--------|---------|
 | `/api/plan` | GET | Returns the file content in annotate mode |
 | `/api/feedback` | POST | Submit annotation feedback |
+| `/api/share-html` | GET | Lazily prepare portable raw HTML for sharing |
 | `/api/image` | GET | Serve a local image by path |
 | `/api/upload` | POST | Upload an image attachment |
 | `/api/external-annotations/stream` | GET | SSE stream for real-time external annotations |

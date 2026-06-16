@@ -209,7 +209,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
         const docRenderAs = data.renderAs === 'html' ? 'html' : 'markdown';
         setRenderAs(docRenderAs);
         setRawHtml(docRenderAs === 'html' ? (data.rawHtml ?? '') : '');
-        setShareHtml(docRenderAs === 'html' ? (data.shareHtml ?? data.rawHtml ?? '') : '');
+        setShareHtml(docRenderAs === 'html' ? (data.shareHtml ?? '') : '');
         setMarkdown(docRenderAs === 'html' ? '' : (data.markdown ?? ''));
         setAnnotations(cached?.annotations ?? []);
         setGlobalAttachments(cached?.globalAttachments ?? []);

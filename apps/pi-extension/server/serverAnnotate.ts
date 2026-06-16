@@ -205,6 +205,45 @@ export async function startAnnotateServer(options: {
 	const aiRuntime = await createPiAIRuntime();
 	const htmlAssets = createHtmlAssetRegistry();
 
+	function isAllowedHtmlSharePath(targetPath: string): boolean {
+		const roots = new Set<string>([process.cwd()]);
+		if (options.folderPath) roots.add(options.folderPath);
+		if (!/^https?:\/\//i.test(options.filePath)) roots.add(dirname(options.filePath));
+		for (const root of roots) {
+			if (isWithinDirectory(targetPath, root)) return true;
+		}
+		return false;
+	}
+
+	function handleShareHtml(res: import("node:http").ServerResponse, url: URL): void {
+		if (/^https?:\/\//i.test(options.filePath)) {
+			json(res, { error: "Raw HTML sharing is unavailable for URL annotations" }, 400);
+			return;
+		}
+
+		const sourcePath = resolvePath(options.filePath);
+		const requestedPath = url.searchParams.get("path")
+			? resolvePath(url.searchParams.get("path")!)
+			: sourcePath;
+		if (!/\.html?$/i.test(requestedPath)) {
+			json(res, { error: "Share HTML is only available for HTML documents" }, 400);
+			return;
+		}
+		if (!isAllowedHtmlSharePath(requestedPath)) {
+			json(res, { error: "Access denied" }, 403);
+			return;
+		}
+
+		try {
+			const htmlContent = options.renderHtml && options.rawHtml && requestedPath === sourcePath
+				? options.rawHtml
+				: readFileSync(requestedPath, "utf-8");
+			json(res, { shareHtml: htmlAssets.inlineHtml(htmlContent, requestedPath) });
+		} catch {
+			json(res, { error: "Failed to prepare share HTML" }, 500);
+		}
+	}
+
 	const server = createServer(async (req, res) => {
 		const url = requestUrl(req);
 
@@ -214,9 +253,6 @@ export async function startAnnotateServer(options: {
 		if (url.pathname === "/api/plan" && req.method === "GET") {
 			const displayRawHtml = options.renderHtml && options.rawHtml
 				? htmlAssets.rewriteHtml(options.rawHtml, options.filePath)
-				: undefined;
-			const shareHtml = options.renderHtml && options.rawHtml
-				? htmlAssets.inlineHtml(options.rawHtml, options.filePath)
 				: undefined;
 			json(res, {
 				plan: options.markdown,
@@ -228,7 +264,6 @@ export async function startAnnotateServer(options: {
 				gate: options.gate ?? false,
 				renderAs: displayRawHtml ? 'html' : 'markdown',
 				...(displayRawHtml ? { rawHtml: displayRawHtml } : {}),
-				...(displayRawHtml && shareHtml ? { shareHtml } : {}),
 				convertHtml: options.convertHtml ?? false,
 				sharingEnabled,
 				shareBaseUrl,
@@ -238,6 +273,8 @@ export async function startAnnotateServer(options: {
 				serverConfig: getServerConfig(gitUser),
 				...(options.recentMessages ? { recentMessages: options.recentMessages } : {}),
 			});
+		} else if (url.pathname === "/api/share-html" && req.method === "GET") {
+			handleShareHtml(res, url);
 		} else if (url.pathname === "/api/config" && req.method === "POST") {
 			try {
 				const body = (await parseBody(req)) as { displayName?: string; diffOptions?: Record<string, unknown>; conventionalComments?: boolean };
@@ -269,7 +306,6 @@ export async function startAnnotateServer(options: {
 			}
 			await handleDocRequest(res, url, {
 				rewriteHtml: htmlAssets.rewriteHtml,
-				shareHtml: htmlAssets.inlineHtml,
 			});
 		} else if (url.pathname === "/api/doc/exists" && req.method === "POST") {
 			await handleDocExistsRequest(res, req);
