@@ -528,34 +528,6 @@ const App: React.FC = () => {
     setMarkdown, setAnnotations, setSelectedAnnotationId, setSubmitted,
   });
 
-  useEffect(() => {
-    if (initialSidebarPreferenceAppliedRef.current) return;
-    if (isLoading || isLoadingShared) return;
-    if (wideModeType !== null) return;
-
-    initialSidebarPreferenceAppliedRef.current = true;
-    if (archive.archiveMode || goalSetupMode || annotateSource === 'folder') return;
-    if (renderAs === 'html') {
-      sidebar.close();
-      return;
-    }
-    if (uiPrefs.tocEnabled && hasTocEntries) {
-      sidebar.open('toc');
-    }
-  }, [
-    annotateSource,
-    archive.archiveMode,
-    goalSetupMode,
-    hasTocEntries,
-    isLoading,
-    isLoadingShared,
-    renderAs,
-    sidebar.close,
-    sidebar.open,
-    uiPrefs.tocEnabled,
-    wideModeType,
-  ]);
-
   const canUseWideMode = useMemo(() => canUseAnnotateWideMode({
     archiveMode: archive.archiveMode,
     isPlanDiffActive,
@@ -962,6 +934,34 @@ const App: React.FC = () => {
     setRawHtml,
     setRenderAs,
   );
+
+  useEffect(() => {
+    if (initialSidebarPreferenceAppliedRef.current) return;
+    if (isLoading || isLoadingShared) return;
+    if (wideModeType !== null) return;
+
+    initialSidebarPreferenceAppliedRef.current = true;
+    if (archive.archiveMode || goalSetupMode || annotateSource === 'folder') return;
+    if (renderAs === 'html') {
+      sidebar.close();
+      return;
+    }
+    if (uiPrefs.tocEnabled && hasTocEntries) {
+      sidebar.open('toc');
+    }
+  }, [
+    annotateSource,
+    archive.archiveMode,
+    goalSetupMode,
+    hasTocEntries,
+    isLoading,
+    isLoadingShared,
+    renderAs,
+    sidebar.close,
+    sidebar.open,
+    uiPrefs.tocEnabled,
+    wideModeType,
+  ]);
 
   // useLayoutEffect + synchronous getBoundingClientRect so the initial
   // bucket is set before the browser paints. Otherwise narrow viewports
