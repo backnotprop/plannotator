@@ -52,6 +52,14 @@ If you want to prevent sharing (e.g., for sensitive plans), set:
 export PLANNOTATOR_SHARE=disabled
 ```
 
+Or set it persistently in `~/.plannotator/config.json`:
+
+```json
+{ "share": "disabled" }
+```
+
+The environment variable takes precedence over the config file.
+
 When sharing is disabled:
 - The Share tab is hidden from the Export modal
 - The "Copy Share Link" quick action is removed

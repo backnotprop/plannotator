@@ -15,7 +15,7 @@ Plannotator is configured through environment variables, hook/plugin configurati
 | `PLANNOTATOR_REMOTE` | auto-detect | Set to `1` or `true` to force remote mode, `0` or `false` to force local mode, or leave unset to auto-detect via `SSH_TTY` / `SSH_CONNECTION`. Uses a fixed port in remote mode; browser-opening behavior depends on the environment. |
 | `PLANNOTATOR_PORT` | random (local) / `19432` (remote) | Fixed server port. Useful for port forwarding in remote environments. |
 | `PLANNOTATOR_BROWSER` | system default | Custom browser or script to open the UI. |
-| `PLANNOTATOR_SHARE` | enabled | Set to `disabled` to turn off URL sharing entirely. |
+| `PLANNOTATOR_SHARE` | enabled | Set to `disabled` to turn off URL sharing entirely. Can also be set via `~/.plannotator/config.json` (`{ "share": "disabled" }`). |
 | `PLANNOTATOR_SHARE_URL` | `https://share.plannotator.ai` | Point share links at a self-hosted portal. |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | Respected by the install script when placing hooks. |
 
@@ -144,6 +144,6 @@ Sessions are tracked automatically. Stale entries from crashed processes are cle
 
 ## Disabling sharing
 
-Set `PLANNOTATOR_SHARE=disabled` to remove all sharing UI — the Share tab, copy link action, and import review option are all hidden. Useful for teams working with sensitive plans.
+Set `PLANNOTATOR_SHARE=disabled` to remove all sharing UI — the Share tab, copy link action, and import review option are all hidden. Useful for teams working with sensitive plans. To make this persistent without an environment variable, add `"share": "disabled"` to `~/.plannotator/config.json`. The environment variable takes precedence over the config file.
 
 To self-host the share portal instead, see the [self-hosting guide](/docs/guides/self-hosting/).

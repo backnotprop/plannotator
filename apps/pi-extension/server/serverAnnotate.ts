@@ -4,7 +4,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 
 import { contentHash, deleteDraft } from "../generated/draft.js";
-import { saveConfig, detectGitUser, getServerConfig } from "../generated/config.js";
+import { saveConfig, detectGitUser, getServerConfig, loadConfig, resolveSharingEnabled } from "../generated/config.js";
 import { disabledSourceSave, type SourceSaveRequest } from "../generated/source-save.js";
 import {
 	createSourceSaveCapability,
@@ -173,7 +173,7 @@ export async function startAnnotateServer(options: {
 	void warmFileListCache(process.cwd(), "code");
 	const gitUser = detectGitUser();
 	const sharingEnabled =
-		options.sharingEnabled ?? process.env.PLANNOTATOR_SHARE !== "disabled";
+		options.sharingEnabled ?? resolveSharingEnabled(loadConfig());
 	const shareBaseUrl =
 		(options.shareBaseUrl ?? process.env.PLANNOTATOR_SHARE_URL) || undefined;
 	const pasteApiUrl =

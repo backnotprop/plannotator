@@ -27,7 +27,7 @@ import {
   getPlanToolName,
   getAnnotateMessageFeedbackPrompt,
 } from "@plannotator/shared/prompts";
-import { loadConfig } from "@plannotator/shared/config";
+import { loadConfig, resolveSharingEnabled } from "@plannotator/shared/config";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import {
@@ -295,9 +295,9 @@ const PlannotatorPlugin: Plugin = async (ctx, rawOptions?: PlannotatorOpenCodeOp
         return share !== "disabled";
       }
     } catch {
-      // Config read failed, fall through to env var
+      // Config read failed, fall through to env var / plannotator config
     }
-    return process.env.PLANNOTATOR_SHARE !== "disabled";
+    return resolveSharingEnabled(loadConfig());
   }
 
   function getShareBaseUrl(): string | undefined {

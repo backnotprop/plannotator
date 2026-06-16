@@ -135,6 +135,13 @@ export interface PlannotatorConfig {
    * Set to false to always use the system browser even when Glimpse is installed.
    */
   glimpse?: boolean;
+  /**
+   * Control URL sharing (Share tab, copy link, short URLs, import review).
+   * Defaults to enabled. Set to "disabled" to hide all sharing UI — useful
+   * for teams working with sensitive plans. Mirrors the PLANNOTATOR_SHARE
+   * env var value, which takes precedence over this setting.
+   */
+  share?: "enabled" | "disabled";
 }
 
 const CONFIG_DIR = getPlannotatorDataDir();
@@ -258,5 +265,18 @@ export function resolveUseJina(cliNoJina: boolean, config: PlannotatorConfig): b
   if (config.jina !== undefined) return config.jina;
 
   // Default: enabled
+  return true;
+}
+
+/**
+ * Resolve whether URL sharing is enabled.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_SHARE env var  →  config.share  →  default true
+ */
+export function resolveSharingEnabled(config: PlannotatorConfig): boolean {
+  const envVal = process.env.PLANNOTATOR_SHARE;
+  if (envVal !== undefined) return envVal !== "disabled";
+  if (config.share !== undefined) return config.share !== "disabled";
   return true;
 }

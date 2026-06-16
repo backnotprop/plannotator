@@ -33,7 +33,7 @@ import {
 } from "./generated/pr-provider.js";
 import { parseRemoteUrl } from "./generated/repo.js";
 import { fetchRef, createWorktree, removeWorktree, ensureObjectAvailable } from "./generated/worktree.js";
-import { loadConfig, resolveDefaultDiffType } from "./generated/config.js";
+import { loadConfig, resolveDefaultDiffType, resolveSharingEnabled } from "./generated/config.js";
 import {
 	WorkspaceReviewSession,
 	type WorkspaceDiffType,
@@ -192,7 +192,7 @@ export async function startPlanReviewBrowserSession(
 		plan: planContent,
 		htmlContent: planHtmlContent,
 		origin: "pi",
-		sharingEnabled: process.env.PLANNOTATOR_SHARE !== "disabled",
+		sharingEnabled: resolveSharingEnabled(loadConfig()),
 		shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
 		pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
 	});
@@ -480,7 +480,7 @@ export async function startCodeReviewBrowserSession(
 		agentCwd,
 		worktreePool,
 		htmlContent: reviewHtmlContent,
-		sharingEnabled: process.env.PLANNOTATOR_SHARE !== "disabled",
+		sharingEnabled: resolveSharingEnabled(loadConfig()),
 		shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
 		pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
 		onCleanup: worktreeCleanup,
@@ -556,7 +556,7 @@ export async function startMarkdownAnnotationSession(
 		renderHtml,
 		convertHtml,
 		htmlContent: planHtmlContent,
-		sharingEnabled: process.env.PLANNOTATOR_SHARE !== "disabled",
+		sharingEnabled: resolveSharingEnabled(loadConfig()),
 		shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
 		pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
 	});
@@ -610,7 +610,7 @@ export async function openArchiveBrowserAction(
 		origin: "pi",
 		mode: "archive",
 		customPlanPath,
-		sharingEnabled: process.env.PLANNOTATOR_SHARE !== "disabled",
+		sharingEnabled: resolveSharingEnabled(loadConfig()),
 		shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
 		pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
 	});

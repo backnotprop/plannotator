@@ -84,7 +84,7 @@ import {
   handleGoalSetupServerReady,
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
-import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
+import { loadConfig, resolveDefaultDiffType, resolveUseJina, resolveSharingEnabled } from "@plannotator/shared/config";
 import { parseReviewArgs } from "@plannotator/shared/review-args";
 import {
   normalizeGoalSetupBundle,
@@ -272,7 +272,7 @@ process.once("SIGINT", () => process.exit(130));
 process.once("SIGTERM", () => process.exit(143));
 
 // Check if URL sharing is enabled (default: true)
-const sharingEnabled = process.env.PLANNOTATOR_SHARE !== "disabled";
+const sharingEnabled = resolveSharingEnabled(loadConfig());
 
 // Custom share portal URL for self-hosting
 const shareBaseUrl = process.env.PLANNOTATOR_SHARE_URL || undefined;

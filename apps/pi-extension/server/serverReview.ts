@@ -5,7 +5,7 @@ import os from "node:os";
 import { basename } from "node:path";
 
 import { contentHash, deleteDraft } from "../generated/draft.js";
-import { loadConfig, saveConfig, detectGitUser, getServerConfig } from "../generated/config.js";
+import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveSharingEnabled } from "../generated/config.js";
 
 export type {
 	DiffOption,
@@ -625,7 +625,7 @@ export async function startReviewServer(options: {
 		},
 	});
 	const sharingEnabled =
-		options.sharingEnabled ?? process.env.PLANNOTATOR_SHARE !== "disabled";
+		options.sharingEnabled ?? resolveSharingEnabled(loadConfig());
 	const shareBaseUrl =
 		(options.shareBaseUrl ?? process.env.PLANNOTATOR_SHARE_URL) || undefined;
 	const pasteApiUrl =
