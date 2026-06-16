@@ -191,6 +191,7 @@ export async function startAnnotateServer(
           // API: Get plan content (reuse /api/plan so the plan editor UI works)
           if (url.pathname === "/api/plan" && req.method === "GET") {
             const displayRawHtml = renderHtml && rawHtml ? htmlAssets.rewriteHtml(rawHtml, filePath) : undefined;
+            const shareHtml = renderHtml && rawHtml ? htmlAssets.inlineHtml(rawHtml, filePath) : undefined;
             return Response.json({
               plan: markdown,
               origin,
@@ -201,6 +202,7 @@ export async function startAnnotateServer(
               gate,
               renderAs: displayRawHtml ? 'html' as const : 'markdown' as const,
               ...(displayRawHtml ? { rawHtml: displayRawHtml } : {}),
+              ...(displayRawHtml && shareHtml ? { shareHtml } : {}),
               convertHtml,
               sharingEnabled,
               shareBaseUrl,
@@ -244,7 +246,10 @@ export async function startAnnotateServer(
           if (url.pathname === "/api/doc" && req.method === "GET") {
             const docUrl = applyAnnotateDocSessionParams(req.url, filePath, convertHtml);
             const docReq = docUrl.changed ? new Request(docUrl.url) : req;
-            return handleDoc(docReq, { rewriteHtml: htmlAssets.rewriteHtml });
+            return handleDoc(docReq, {
+              rewriteHtml: htmlAssets.rewriteHtml,
+              shareHtml: htmlAssets.inlineHtml,
+            });
           }
 
           // API: Batch existence check for code-file paths the renderer detected

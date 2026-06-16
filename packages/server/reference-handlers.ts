@@ -26,6 +26,7 @@ import { preloadFile } from "@pierre/diffs/ssr";
 
 export interface HandleDocOptions {
 	rewriteHtml?: (html: string, filepath: string) => string;
+	shareHtml?: (html: string, filepath: string) => string;
 }
 
 /** Serve a linked markdown document. Resolves absolute, relative, or bare filename paths. */
@@ -64,7 +65,8 @@ export async function handleDoc(req: Request, options: HandleDocOptions = {}): P
 				const isHtml = /\.html?$/i.test(requestedPath);
 				if (isHtml && !convert) {
 					const rawHtml = options.rewriteHtml ? options.rewriteHtml(raw, fromBase) : raw;
-					return Response.json({ rawHtml, renderAs: "html", filepath: fromBase });
+					const shareHtml = options.shareHtml ? options.shareHtml(raw, fromBase) : rawHtml;
+					return Response.json({ rawHtml, shareHtml, renderAs: "html", filepath: fromBase });
 				}
 				const markdown = isHtml ? htmlToMarkdown(raw) : raw;
 				return Response.json({ markdown, filepath: fromBase, isConverted: isHtml, renderAs: "markdown" });
@@ -87,7 +89,8 @@ export async function handleDoc(req: Request, options: HandleDocOptions = {}): P
 				const html = await file.text();
 				if (!convert) {
 					const rawHtml = options.rewriteHtml ? options.rewriteHtml(html, resolvedHtml) : html;
-					return Response.json({ rawHtml, renderAs: "html", filepath: resolvedHtml });
+					const shareHtml = options.shareHtml ? options.shareHtml(html, resolvedHtml) : rawHtml;
+					return Response.json({ rawHtml, shareHtml, renderAs: "html", filepath: resolvedHtml });
 				}
 				const markdown = htmlToMarkdown(html);
 				return Response.json({ markdown, filepath: resolvedHtml, isConverted: true, renderAs: "markdown" });

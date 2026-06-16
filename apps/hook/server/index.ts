@@ -109,6 +109,7 @@ import {
 } from "@plannotator/shared/prompts";
 import { registerSession, unregisterSession, listSessions } from "@plannotator/server/sessions";
 import { openBrowser } from "@plannotator/server/browser";
+import { inlineHtmlLocalAssets } from "@plannotator/server/html-assets";
 import { detectProjectName } from "@plannotator/server/project";
 import { hostnameOrFallback } from "@plannotator/shared/project";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
@@ -1018,7 +1019,10 @@ if (args[0] === "sessions") {
 
       if (isRemote && sharingEnabled) {
         if (rawHtml) {
-          await writeRemoteShareLink("", shareBaseUrl, "annotate", "HTML document only", { rawHtml, pasteApiUrl }).catch(() => {});
+          await writeRemoteShareLink("", shareBaseUrl, "annotate", "HTML document only", {
+            rawHtml: inlineHtmlLocalAssets(rawHtml, absolutePath),
+            pasteApiUrl,
+          }).catch(() => {});
         } else if (markdown) {
           await writeRemoteShareLink(markdown, shareBaseUrl, "annotate", "document only").catch(() => {});
         }

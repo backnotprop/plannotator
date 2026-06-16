@@ -39,7 +39,10 @@ interface HtmlNode {
   tagName?: string;
   attrs?: HtmlAttr[];
   childNodes?: HtmlNode[];
+  value?: string;
 }
+
+type HtmlAssetUrlMapper = (assetPath: string) => string | null;
 
 export function htmlAssetContentType(assetPath: string): string | null {
   return CONTENT_TYPES_BY_EXT[pathPosix.extname(assetPath).toLowerCase()] ?? null;
@@ -57,7 +60,7 @@ export function normalizeHtmlAssetRoutePath(routePath: string): string | null {
 
 export function rewriteHtmlAssetReferences(
   html: string,
-  assetUrlFor: (assetPath: string) => string,
+  assetUrlFor: HtmlAssetUrlMapper,
 ): string {
   const tree = looksLikeFullDocument(html)
     ? parse5.parse(html)
@@ -66,12 +69,43 @@ export function rewriteHtmlAssetReferences(
   return parse5.serialize(tree as never);
 }
 
+export function rewriteCssAssetReferences(
+  css: string,
+  assetUrlFor: HtmlAssetUrlMapper,
+  basePath = "",
+): string {
+  let rewritten = css.replace(
+    /url\(\s*(["']?)([^"')]+)\1\s*\)/gi,
+    (match, _quote: string, value: string) => {
+      const next = rewriteLocalAssetUrl(value, assetUrlFor, basePath);
+      return next === null ? match : `url("${next}")`;
+    },
+  );
+
+  rewritten = rewritten.replace(
+    /@import\s+(?:url\(\s*)?(["'])([^"']+)\1\s*\)?/gi,
+    (match, _quote: string, value: string) => {
+      const next = rewriteLocalAssetUrl(value, assetUrlFor, basePath);
+      return next === null ? match : `@import url("${next}")`;
+    },
+  );
+
+  return rewritten;
+}
+
 function rewriteNodeAssetReferences(
   node: HtmlNode,
-  assetUrlFor: (assetPath: string) => string,
+  assetUrlFor: HtmlAssetUrlMapper,
 ): void {
   const tagName = node.tagName?.toLowerCase();
   if (!tagName) return;
+
+  rewriteStyleAttr(node, assetUrlFor);
+
+  if (tagName === "style") {
+    rewriteStyleContent(node, assetUrlFor);
+    return;
+  }
 
   if (tagName === "img") {
     rewriteAttr(node, "src", assetUrlFor);
@@ -109,7 +143,7 @@ function visit(node: HtmlNode, fn: (node: HtmlNode) => void): void {
 function rewriteAttr(
   node: HtmlNode,
   name: string,
-  assetUrlFor: (assetPath: string) => string,
+  assetUrlFor: HtmlAssetUrlMapper,
 ): void {
   const attr = findAttr(node, name);
   if (!attr) return;
@@ -120,7 +154,7 @@ function rewriteAttr(
 function rewriteSrcsetAttr(
   node: HtmlNode,
   name: string,
-  assetUrlFor: (assetPath: string) => string,
+  assetUrlFor: HtmlAssetUrlMapper,
 ): void {
   const attr = findAttr(node, name);
   if (!attr) return;
@@ -135,6 +169,20 @@ function findAttr(node: HtmlNode, name: string): HtmlAttr | null {
 
 function attrValue(node: HtmlNode, name: string): string | null {
   return findAttr(node, name)?.value.trim() ?? null;
+}
+
+function rewriteStyleAttr(node: HtmlNode, assetUrlFor: HtmlAssetUrlMapper): void {
+  const attr = findAttr(node, "style");
+  if (!attr) return;
+  attr.value = rewriteCssAssetReferences(attr.value, assetUrlFor);
+}
+
+function rewriteStyleContent(node: HtmlNode, assetUrlFor: HtmlAssetUrlMapper): void {
+  for (const child of node.childNodes ?? []) {
+    if (typeof child.value === "string") {
+      child.value = rewriteCssAssetReferences(child.value, assetUrlFor);
+    }
+  }
 }
 
 function isSupportLink(node: HtmlNode): boolean {
@@ -154,22 +202,27 @@ function isSupportLink(node: HtmlNode): boolean {
 
 function rewriteLocalAssetUrl(
   value: string,
-  assetUrlFor: (assetPath: string) => string,
+  assetUrlFor: HtmlAssetUrlMapper,
+  basePath = "",
 ): string | null {
   const trimmed = value.trim();
   if (shouldSkipUrl(trimmed)) return null;
 
   const { path, suffix } = splitPathSuffix(trimmed);
-  const normalized = normalizeLocalAssetPath(path);
+  const normalized = normalizeLocalAssetPath(
+    basePath ? pathPosix.join(basePath, path) : path,
+  );
   if (normalized === null) return null;
   if (htmlAssetContentType(normalized) === null) return null;
 
-  return `${assetUrlFor(normalized)}${suffix}`;
+  const next = assetUrlFor(normalized);
+  if (next === null) return null;
+  return /^data:/i.test(next) ? next : `${next}${suffix}`;
 }
 
 function rewriteSrcset(
   srcset: string,
-  assetUrlFor: (assetPath: string) => string,
+  assetUrlFor: HtmlAssetUrlMapper,
 ): string {
   const rewritten: string[] = [];
   let changed = false;

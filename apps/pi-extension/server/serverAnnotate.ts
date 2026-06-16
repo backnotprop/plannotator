@@ -33,6 +33,7 @@ import {
 	encodeHtmlAssetPath,
 	htmlAssetContentType,
 	normalizeHtmlAssetRoutePath,
+	rewriteCssAssetReferences,
 	rewriteHtmlAssetReferences,
 } from "../generated/html-assets.js";
 
@@ -68,6 +69,52 @@ function createHtmlAssetRegistry() {
 				htmlContent,
 				(assetPath) => `${HTML_ASSET_ROUTE_PREFIX}/${token}/${encodeHtmlAssetPath(assetPath)}`,
 			);
+		} catch {
+			return htmlContent;
+		}
+	}
+
+	function inlineHtml(htmlContent: string, htmlFilePath: string): string {
+		if (/^https?:\/\//i.test(htmlFilePath)) return htmlContent;
+		try {
+			const root = dirname(resolvePath(htmlFilePath));
+			const activeCss = new Set<string>();
+
+			const dataUrlFor = (assetPath: string): string | null => {
+				try {
+					const contentType = htmlAssetContentType(assetPath);
+					if (!contentType) return null;
+
+					const resolved = resolvePath(root, assetPath);
+					if (!isWithinDirectory(resolved, root)) return null;
+					if (!existsSync(resolved)) return null;
+
+					const stat = statSync(resolved);
+					if (!stat.isFile() || stat.size > MAX_HTML_ASSET_BYTES) return null;
+
+					let bytes = readFileSync(resolved);
+					if (contentType.startsWith("text/css") && !activeCss.has(assetPath)) {
+						activeCss.add(assetPath);
+						try {
+							const cssBase = dirname(assetPath).replace(/\\/g, "/");
+							const rewrittenCss = rewriteCssAssetReferences(
+								bytes.toString("utf-8"),
+								dataUrlFor,
+								cssBase === "." ? "" : cssBase,
+							);
+							bytes = Buffer.from(rewrittenCss, "utf-8");
+						} finally {
+							activeCss.delete(assetPath);
+						}
+					}
+
+					return `data:${contentType.replace(/;\s*/g, ";")};base64,${Buffer.from(bytes).toString("base64")}`;
+				} catch {
+					return null;
+				}
+			};
+
+			return rewriteHtmlAssetReferences(htmlContent, dataUrlFor);
 		} catch {
 			return htmlContent;
 		}
@@ -131,7 +178,7 @@ function createHtmlAssetRegistry() {
 		return true;
 	}
 
-	return { rewriteHtml, handle };
+	return { rewriteHtml, inlineHtml, handle };
 }
 
 function isWithinDirectory(filePath: string, root: string): boolean {
@@ -212,6 +259,9 @@ export async function startAnnotateServer(options: {
 			const displayRawHtml = options.renderHtml && options.rawHtml
 				? htmlAssets.rewriteHtml(options.rawHtml, options.filePath)
 				: undefined;
+			const shareHtml = options.renderHtml && options.rawHtml
+				? htmlAssets.inlineHtml(options.rawHtml, options.filePath)
+				: undefined;
 			json(res, {
 				plan: options.markdown,
 				origin: options.origin ?? "pi",
@@ -222,6 +272,7 @@ export async function startAnnotateServer(options: {
 				gate: options.gate ?? false,
 				renderAs: displayRawHtml ? 'html' : 'markdown',
 				...(displayRawHtml ? { rawHtml: displayRawHtml } : {}),
+				...(displayRawHtml && shareHtml ? { shareHtml } : {}),
 				convertHtml: options.convertHtml ?? false,
 				sharingEnabled,
 				shareBaseUrl,
@@ -260,7 +311,10 @@ export async function startAnnotateServer(options: {
 			if (options.convertHtml && !url.searchParams.has("convert")) {
 				url.searchParams.set("convert", "1");
 			}
-			await handleDocRequest(res, url, { rewriteHtml: htmlAssets.rewriteHtml });
+			await handleDocRequest(res, url, {
+				rewriteHtml: htmlAssets.rewriteHtml,
+				shareHtml: htmlAssets.inlineHtml,
+			});
 		} else if (url.pathname === "/api/doc/exists" && req.method === "POST") {
 			await handleDocExistsRequest(res, req);
 		} else if (url.pathname === "/api/obsidian/vaults") {

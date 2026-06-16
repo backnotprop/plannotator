@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   encodeHtmlAssetPath,
   htmlAssetContentType,
+  rewriteCssAssetReferences,
   normalizeHtmlAssetRoutePath,
   rewriteHtmlAssetReferences,
 } from "./html-assets";
@@ -16,10 +17,11 @@ describe("rewriteHtmlAssetReferences", () => {
   <head>
     <link rel="stylesheet" href="./style.css?v=1">
     <link rel="icon" href="icons/app icon.png">
+    <style>.hero { background: url("./hero.png#cover"); }</style>
     <script src="app.js"></script>
   </head>
   <body>
-    <img src="./images/logo.png" srcset="./small.png 1x, ./large.png 2x">
+    <img src="./images/logo.png" srcset="./small.png 1x, ./large.png 2x" style="background-image: url('./inline-bg.webp')">
     <video src="movie.mp4" poster="poster.jpg"></video>
     <audio src="intro.mp3"></audio>
   </body>
@@ -29,9 +31,11 @@ describe("rewriteHtmlAssetReferences", () => {
 
     expect(out).toContain('href="/api/html-assets/t/style.css?v=1"');
     expect(out).toContain('href="/api/html-assets/t/icons/app%20icon.png"');
+    expect(out).toContain('background: url("/api/html-assets/t/hero.png#cover")');
     expect(out).toContain('src="/api/html-assets/t/app.js"');
     expect(out).toContain('src="/api/html-assets/t/images/logo.png"');
     expect(out).toContain('srcset="/api/html-assets/t/small.png 1x, /api/html-assets/t/large.png 2x"');
+    expect(out).toContain('background-image: url(&quot;/api/html-assets/t/inline-bg.webp&quot;)');
     expect(out).toContain('src="/api/html-assets/t/movie.mp4"');
     expect(out).toContain('poster="/api/html-assets/t/poster.jpg"');
     expect(out).toContain('src="/api/html-assets/t/intro.mp3"');
@@ -62,6 +66,28 @@ describe("rewriteHtmlAssetReferences", () => {
 
     expect(out).toContain('src="../secret.png"');
     expect(out).toContain('src="server"');
+  });
+});
+
+describe("rewriteCssAssetReferences", () => {
+  test("rewrites local url() references relative to the stylesheet path", () => {
+    const css = `
+body { background: url("../images/bg.png?v=1"); }
+@font-face { src: url("./font.woff2") format("woff2"); }
+@import "./theme.css";
+.remote { background: url("https://example.test/a.png"); }
+`;
+
+    const out = rewriteCssAssetReferences(
+      css,
+      (assetPath) => `/assets/${encodeHtmlAssetPath(assetPath)}`,
+      "styles",
+    );
+
+    expect(out).toContain('url("/assets/images/bg.png?v=1")');
+    expect(out).toContain('url("/assets/styles/font.woff2")');
+    expect(out).toContain('@import url("/assets/styles/theme.css")');
+    expect(out).toContain('url("https://example.test/a.png")');
   });
 });
 

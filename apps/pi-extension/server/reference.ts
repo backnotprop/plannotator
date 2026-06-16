@@ -40,6 +40,7 @@ type Res = ServerResponse;
 
 export interface HandleDocOptions {
 	rewriteHtml?: (html: string, filepath: string) => string;
+	shareHtml?: (html: string, filepath: string) => string;
 }
 
 /** Recursively walk a directory collecting files by extension, skipping ignored dirs. */
@@ -94,7 +95,8 @@ export async function handleDocRequest(res: Res, url: URL, options: HandleDocOpt
 				const isHtml = /\.html?$/i.test(requestedPath);
 				if (isHtml && !convert) {
 					const rawHtml = options.rewriteHtml ? options.rewriteHtml(raw, fromBase) : raw;
-					json(res, { rawHtml, renderAs: "html", filepath: fromBase });
+					const shareHtml = options.shareHtml ? options.shareHtml(raw, fromBase) : rawHtml;
+					json(res, { rawHtml, shareHtml, renderAs: "html", filepath: fromBase });
 					return;
 				}
 				const markdown = isHtml ? htmlToMarkdown(raw) : raw;
@@ -119,7 +121,8 @@ export async function handleDocRequest(res: Res, url: URL, options: HandleDocOpt
 				const html = readFileSync(resolvedHtml, "utf-8");
 				if (!convert) {
 					const rawHtml = options.rewriteHtml ? options.rewriteHtml(html, resolvedHtml) : html;
-					json(res, { rawHtml, renderAs: "html", filepath: resolvedHtml });
+					const shareHtml = options.shareHtml ? options.shareHtml(html, resolvedHtml) : rawHtml;
+					json(res, { rawHtml, shareHtml, renderAs: "html", filepath: resolvedHtml });
 					return;
 				}
 				json(res, { markdown: htmlToMarkdown(html), filepath: resolvedHtml, isConverted: true, renderAs: "markdown" });

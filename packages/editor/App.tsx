@@ -266,6 +266,7 @@ const App: React.FC = () => {
   // card-chromed markdown column. Branch the document-area containers on this.
   const isHtmlSurface = renderAs === 'html';
   const [rawHtml, setRawHtml] = useState('');
+  const [shareHtml, setShareHtml] = useState('');
   // Session-level force-markdown preference (`--markdown`). When set, folder/linked HTML
   // files are converted instead of rendered raw — threaded into /api/doc as &convert=1.
   const [convertHtml, setConvertHtml] = useState(false);
@@ -499,7 +500,7 @@ const App: React.FC = () => {
   const linkedDocHook = useLinkedDoc({
     markdown, annotations, selectedAnnotationId, globalAttachments,
     setMarkdown, setAnnotations, setSelectedAnnotationId, setGlobalAttachments,
-    renderAs, rawHtml, setRenderAs, setRawHtml,
+    renderAs, rawHtml, shareHtml, setRenderAs, setRawHtml, setShareHtml,
     viewerRef, sidebar: linkedDocSidebar, sourceFilePath, sourceConverted,
   });
 
@@ -930,8 +931,9 @@ const App: React.FC = () => {
     },
     shareBaseUrl,
     pasteApiUrl,
-    rawHtml,
+    renderAs === 'html' ? (shareHtml || rawHtml) : undefined,
     setRawHtml,
+    setShareHtml,
     setRenderAs,
   );
 
@@ -962,6 +964,13 @@ const App: React.FC = () => {
     uiPrefs.tocEnabled,
     wideModeType,
   ]);
+
+  const ensureShareLink = useCallback(async (): Promise<string | null> => {
+    const existing = shortShareUrl || shareUrl;
+    if (existing) return existing;
+    if (!canShareCurrentSession) return null;
+    return await generateShortUrl();
+  }, [canShareCurrentSession, generateShortUrl, shareUrl, shortShareUrl]);
 
   // useLayoutEffect + synchronous getBoundingClientRect so the initial
   // bucket is set before the browser paints. Otherwise narrow viewports
@@ -1055,7 +1064,7 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; gate?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; convertHtml?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string }; recentMessages?: PickerMessage[] }) => {
+      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; gate?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; shareHtml?: string; convertHtml?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string }; recentMessages?: PickerMessage[] }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
         // Session-level force-markdown preference (--markdown); threaded into folder/linked
@@ -1078,6 +1087,7 @@ const App: React.FC = () => {
         } else if (data.renderAs === 'html' && data.rawHtml) {
           setRenderAs('html');
           setRawHtml(data.rawHtml);
+          setShareHtml(data.shareHtml ?? data.rawHtml);
           setMarkdown('');
         } else if (data.mode === 'annotate-folder') {
           // Folder annotation mode: clear demo content, let user pick a file
@@ -1939,10 +1949,15 @@ const App: React.FC = () => {
   const callbackConfig = React.useMemo(() => getCallbackConfig(), []);
 
   const callCallback = React.useCallback(async (action: CallbackAction) => {
-    if (!callbackConfig || isSubmitting || (!shareUrl && !shortShareUrl)) return;
+    if (!callbackConfig || isSubmitting) return;
     setIsSubmitting(true);
     try {
-      const result = await executeCallback(action, callbackConfig, shortShareUrl || shareUrl);
+      const callbackShareUrl = await ensureShareLink();
+      if (!callbackShareUrl) {
+        toast.error('Failed to create share link');
+        return;
+      }
+      const result = await executeCallback(action, callbackConfig, callbackShareUrl);
       if (result) {
         if (result.type === 'success') {
           toast.success(result.message);
@@ -1954,7 +1969,7 @@ const App: React.FC = () => {
     } finally {
       setIsSubmitting(false);
     }
-  }, [callbackConfig, isSubmitting, shareUrl, shortShareUrl]);
+  }, [callbackConfig, ensureShareLink, isSubmitting]);
 
   const handleCallbackApprove = React.useCallback(() => callCallback(CallbackAction.Approve), [callCallback]);
   const handleCallbackFeedback = React.useCallback(() => callCallback(CallbackAction.Feedback), [callCallback]);
@@ -2039,8 +2054,13 @@ const App: React.FC = () => {
   };
 
   const handleCopyShareLink = async () => {
-    const url = shortShareUrl || shareUrl;
-    if (!url) return;
+    const url = await ensureShareLink();
+    if (!url) {
+      setInitialExportTab('share');
+      setShowExport(true);
+      toast.error('Failed to create share link');
+      return;
+    }
     try {
       await navigator.clipboard.writeText(url);
       toast.success('Share link copied');
@@ -2270,7 +2290,7 @@ const App: React.FC = () => {
           aiHasMessages={aiMessages.length > 0}
           hasAnyAnnotations={hasAnyAnnotations}
           linkedDocIsActive={linkedDocHook.isActive}
-          callbackShareUrlReady={callbackConfig ? Boolean(shareUrl || shortShareUrl) : true}
+          callbackShareUrlReady={callbackConfig ? Boolean(shareUrl || shortShareUrl || (renderAs === 'html' && (shareHtml || rawHtml))) : true}
           canShareCurrentSession={canShareCurrentSession}
           agentName={agentName}
           availableAgents={availableAgents}
@@ -2648,7 +2668,7 @@ const App: React.FC = () => {
               const output = messageMultiSelectMode ? buildFullAnnotationsOutput() : annotationsOutput;
               await navigator.clipboard.writeText(wrapFeedbackForAgent(output));
             }}
-            onShare={canShareCurrentSession && (shareUrl || shortShareUrl) ? () => { setIsPanelOpen(false); setInitialExportTab('share'); setShowExport(true); } : undefined}
+            onShare={canShareCurrentSession ? () => { setIsPanelOpen(false); setInitialExportTab('share'); setShowExport(true); } : undefined}
             otherFileAnnotations={otherFileAnnotations}
             onOtherFileAnnotationsClick={handleFlashAnnotatedFiles}
           />

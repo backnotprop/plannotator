@@ -24,8 +24,10 @@ export interface UseLinkedDocOptions {
    *  swaps these to render raw; back() restores the base values from this snapshot. */
   renderAs: 'markdown' | 'html';
   rawHtml: string;
+  shareHtml: string;
   setRenderAs: (r: 'markdown' | 'html') => void;
   setRawHtml: (html: string) => void;
+  setShareHtml: (html: string) => void;
   viewerRef: React.RefObject<ViewerHandle | null>;
   sidebar: { open: (tab?: SidebarTab) => void };
   /** Absolute path of the primary document — enables getDocAnnotations() to include
@@ -43,6 +45,7 @@ interface SavedPlanState {
   globalAttachments: ImageAttachment[];
   renderAs: 'markdown' | 'html';
   rawHtml: string;
+  shareHtml: string;
 }
 
 export interface CachedDocState {
@@ -96,8 +99,10 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     setGlobalAttachments,
     renderAs,
     rawHtml,
+    shareHtml,
     setRenderAs,
     setRawHtml,
+    setShareHtml,
     viewerRef,
     sidebar,
     sourceFilePath,
@@ -134,6 +139,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
           isConverted?: boolean;
           renderAs?: 'markdown' | 'html';
           rawHtml?: string;
+          shareHtml?: string;
           error?: string;
           matches?: string[];
         };
@@ -167,6 +173,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
             globalAttachments: [...globalAttachments],
             renderAs,
             rawHtml,
+            shareHtml,
           };
           let total = annotations.length + globalAttachments.length;
           for (const [fp, cached] of docCache.current.entries()) {
@@ -202,6 +209,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
         const docRenderAs = data.renderAs === 'html' ? 'html' : 'markdown';
         setRenderAs(docRenderAs);
         setRawHtml(docRenderAs === 'html' ? (data.rawHtml ?? '') : '');
+        setShareHtml(docRenderAs === 'html' ? (data.shareHtml ?? data.rawHtml ?? '') : '');
         setMarkdown(docRenderAs === 'html' ? '' : (data.markdown ?? ''));
         setAnnotations(cached?.annotations ?? []);
         setGlobalAttachments(cached?.globalAttachments ?? []);
@@ -233,6 +241,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
       globalAttachments,
       renderAs,
       rawHtml,
+      shareHtml,
       linkedDoc,
       setMarkdown,
       setAnnotations,
@@ -240,6 +249,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
       setGlobalAttachments,
       setRenderAs,
       setRawHtml,
+      setShareHtml,
       viewerRef,
       sidebar,
     ]
@@ -271,6 +281,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     const saved = savedPlanState.current;
     setRenderAs(saved.renderAs);
     setRawHtml(saved.rawHtml);
+    setShareHtml(saved.shareHtml);
     setMarkdown(saved.markdown);
     setAnnotations(saved.annotations);
     setGlobalAttachments(saved.globalAttachments);
@@ -296,6 +307,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     setGlobalAttachments,
     setRenderAs,
     setRawHtml,
+    setShareHtml,
     viewerRef,
   ]);
 
@@ -317,6 +329,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
           markdown: savedPlanState.current.markdown,
           renderAs: savedPlanState.current.renderAs,
           rawHtml: savedPlanState.current.rawHtml,
+          shareHtml: savedPlanState.current.shareHtml,
           annotations: [...savedPlanState.current.annotations],
           selectedAnnotationId: savedPlanState.current.selectedAnnotationId,
           globalAttachments: [...savedPlanState.current.globalAttachments],
@@ -325,13 +338,14 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
           markdown,
           renderAs,
           rawHtml,
+          shareHtml,
           annotations: [...annotations],
           selectedAnnotationId,
           globalAttachments: [...globalAttachments],
         };
 
     return { root, docs };
-  }, [linkedDoc, annotations, globalAttachments, markdown, renderAs, rawHtml, selectedAnnotationId]);
+  }, [linkedDoc, annotations, globalAttachments, markdown, renderAs, rawHtml, shareHtml, selectedAnnotationId]);
 
   const restoreSession = useCallback((state: LinkedDocSessionState) => {
     viewerRef.current?.clearAllHighlights();
@@ -345,6 +359,9 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     setDocAnnotationCount(total);
 
     setMarkdown(state.root.markdown);
+    setRenderAs(state.root.renderAs);
+    setRawHtml(state.root.rawHtml);
+    setShareHtml(state.root.shareHtml);
     setAnnotations([...state.root.annotations]);
     setGlobalAttachments([...state.root.globalAttachments]);
     setSelectedAnnotationId(state.root.selectedAnnotationId);
@@ -362,6 +379,9 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     setAnnotations,
     setSelectedAnnotationId,
     setGlobalAttachments,
+    setRenderAs,
+    setRawHtml,
+    setShareHtml,
     viewerRef,
   ]);
 

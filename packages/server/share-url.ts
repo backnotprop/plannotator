@@ -30,8 +30,8 @@ export async function generateRemoteShareUrl(
 ): Promise<string> {
   const base = shareBaseUrl || DEFAULT_SHARE_BASE;
   if (options.rawHtml) {
-    // TODO(html-share): full-fidelity remote HTML shares need to package or inline
-    // local sibling assets such as ./style.css, images, fonts, and scripts.
+    // Callers that start from a local file should pass self-contained HTML
+    // so sibling assets keep working after the payload leaves the machine.
     return generateRemotePasteShareUrl(
       { p: plan, a: [], h: options.rawHtml, r: "html" },
       base,

@@ -25,7 +25,7 @@ interface ExportModalProps {
   /** Error from the last short URL generation attempt (empty string = no error) */
   shortUrlError?: string;
   /** Generate a short URL on demand (user clicks "Create short link") */
-  onGenerateShortUrl?: () => void;
+  onGenerateShortUrl?: () => void | Promise<unknown>;
   annotationsOutput: string;
   annotationCount: number;
   taterSprite?: React.ReactNode;
