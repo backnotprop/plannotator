@@ -590,7 +590,10 @@ export async function startAnnotateServer(
     throw new Error("Failed to start server");
   }
 
-  const port = server.port!;
+  const port = server.port ?? Number(server.url?.port);
+  if (!Number.isFinite(port) || port <= 0) {
+    throw new Error("Failed to determine server port");
+  }
   const serverUrl = `http://localhost:${port}`;
 
   // Notify caller that server is ready
