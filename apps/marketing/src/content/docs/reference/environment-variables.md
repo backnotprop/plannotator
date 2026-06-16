@@ -56,7 +56,7 @@ When running your own paste service binary, these variables configure it:
 | `PASTE_PORT` | `19433` | Server port |
 | `PASTE_DATA_DIR` | `~/.plannotator/pastes` | Filesystem storage directory |
 | `PASTE_TTL_DAYS` | `7` | Paste expiration in days |
-| `PASTE_MAX_SIZE` | `524288` | Max payload size in bytes (512KB) |
+| `PASTE_MAX_SIZE` | `5242880` | Max encrypted payload size in bytes (5 MB) |
 | `PASTE_ALLOWED_ORIGINS` | `https://share.plannotator.ai,http://localhost:3001` | CORS allowed origins (comma-separated) |
 
 ## Install script variables

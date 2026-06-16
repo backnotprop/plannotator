@@ -41,6 +41,7 @@
     "./html-to-markdown": "./html-to-markdown.ts",
     "./url-to-markdown": "./url-to-markdown.ts",
     "./html-assets": "./html-assets.ts",
+    "./html-assets-node": "./html-assets-node.ts",
     "./tour": "./tour.ts",
     "./annotate-args": "./annotate-args.ts",
     "./at-reference": "./at-reference.ts",

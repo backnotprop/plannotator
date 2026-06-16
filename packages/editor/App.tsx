@@ -142,6 +142,9 @@ const createEmptyMessageState = (message: PickerMessage): MessageAnnotationState
   linkedDocSession: {
     root: {
       markdown: message.text,
+      renderAs: 'markdown',
+      rawHtml: '',
+      shareHtml: '',
       annotations: [],
       selectedAnnotationId: null,
       globalAttachments: [],
@@ -166,6 +169,9 @@ const normalizeMessageState = (
       // Keep it as the source of truth so transient UI state cannot cache an
       // empty markdown value for a message.
       markdown: message.text,
+      renderAs: state.linkedDocSession.root.renderAs ?? 'markdown',
+      rawHtml: state.linkedDocSession.root.rawHtml ?? '',
+      shareHtml: state.linkedDocSession.root.shareHtml ?? '',
     },
     docs: new Map(state.linkedDocSession.docs),
   },

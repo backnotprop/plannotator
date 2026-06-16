@@ -286,7 +286,7 @@ export function useSharing(
     if (isSharedRef.current) { isSharedRef.current = false; return; }
     setShortShareUrl('');
     setShortUrlError('');
-  }, [markdown, annotations, rawHtml, isSharedSession]);
+  }, [markdown, annotations, globalAttachments, rawHtml, isSharedSession]);
 
   /**
    * Generate a short URL via the paste service.
@@ -317,9 +317,9 @@ export function useSharing(
         setShortUrlError('Short URL service unavailable');
         return null;
       }
-    } catch {
+    } catch (e) {
       setShortShareUrl('');
-      setShortUrlError('Failed to generate short URL');
+      setShortUrlError(e instanceof Error ? e.message : 'Failed to generate short URL');
       return null;
     } finally {
       setIsGeneratingShortUrl(false);

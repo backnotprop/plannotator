@@ -6,8 +6,10 @@ export interface PasteOptions {
   ttlSeconds: number;
 }
 
+export const DEFAULT_PASTE_MAX_SIZE = 5 * 1024 * 1024;
+
 const DEFAULT_OPTIONS: PasteOptions = {
-  maxSize: 524_288, // 512 KB
+  maxSize: DEFAULT_PASTE_MAX_SIZE,
   ttlSeconds: 7 * 24 * 60 * 60, // 7 days
 };
 
@@ -48,7 +50,7 @@ export async function createPaste(
 
   if (data.length > opts.maxSize) {
     throw new PasteError(
-      `Payload too large (max ${Math.round(opts.maxSize / 1024)} KB compressed)`,
+      `Payload too large (max ${formatByteLimit(opts.maxSize)} encrypted)`,
       413
     );
   }
@@ -56,6 +58,13 @@ export async function createPaste(
   const id = generateId();
   await store.put(id, data, opts.ttlSeconds);
   return { id };
+}
+
+function formatByteLimit(bytes: number): string {
+  if (bytes >= 1024 * 1024) {
+    return `${Math.round(bytes / 1024 / 1024)} MB`;
+  }
+  return `${Math.round(bytes / 1024)} KB`;
 }
 
 export async function getPaste(

@@ -172,7 +172,7 @@ Body:
 
 Returns: `{ "id": "aBcDeFgH" }` (201 Created)
 
-Limits: 512KB max payload. Auto-deleted after configured TTL (default: 7 days).
+Limits: 5 MB max encrypted payload. Auto-deleted after configured TTL (default: 7 days).
 
 ### GET `/api/paste/:id`
 

@@ -33,9 +33,9 @@ import {
 	encodeHtmlAssetPath,
 	htmlAssetContentType,
 	normalizeHtmlAssetRoutePath,
-	rewriteCssAssetReferences,
 	rewriteHtmlAssetReferences,
 } from "../generated/html-assets.js";
+import { inlineHtmlLocalAssets, MAX_HTML_ASSET_BYTES } from "../generated/html-assets-node.js";
 
 export interface AnnotateServerResult {
 	port: number;
@@ -44,8 +44,6 @@ export interface AnnotateServerResult {
 	waitForDecision: () => Promise<{ feedback: string; annotations: unknown[]; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>;
 	stop: () => void;
 }
-
-const MAX_HTML_ASSET_BYTES = 50 * 1024 * 1024;
 
 function createHtmlAssetRegistry() {
 	const rootsByToken = new Map<string, string>();
@@ -75,49 +73,7 @@ function createHtmlAssetRegistry() {
 	}
 
 	function inlineHtml(htmlContent: string, htmlFilePath: string): string {
-		if (/^https?:\/\//i.test(htmlFilePath)) return htmlContent;
-		try {
-			const root = dirname(resolvePath(htmlFilePath));
-			const activeCss = new Set<string>();
-
-			const dataUrlFor = (assetPath: string): string | null => {
-				try {
-					const contentType = htmlAssetContentType(assetPath);
-					if (!contentType) return null;
-
-					const resolved = resolvePath(root, assetPath);
-					if (!isWithinDirectory(resolved, root)) return null;
-					if (!existsSync(resolved)) return null;
-
-					const stat = statSync(resolved);
-					if (!stat.isFile() || stat.size > MAX_HTML_ASSET_BYTES) return null;
-
-					let bytes = readFileSync(resolved);
-					if (contentType.startsWith("text/css") && !activeCss.has(assetPath)) {
-						activeCss.add(assetPath);
-						try {
-							const cssBase = dirname(assetPath).replace(/\\/g, "/");
-							const rewrittenCss = rewriteCssAssetReferences(
-								bytes.toString("utf-8"),
-								dataUrlFor,
-								cssBase === "." ? "" : cssBase,
-							);
-							bytes = Buffer.from(rewrittenCss, "utf-8");
-						} finally {
-							activeCss.delete(assetPath);
-						}
-					}
-
-					return `data:${contentType.replace(/;\s*/g, ";")};base64,${Buffer.from(bytes).toString("base64")}`;
-				} catch {
-					return null;
-				}
-			};
-
-			return rewriteHtmlAssetReferences(htmlContent, dataUrlFor);
-		} catch {
-			return htmlContent;
-		}
+		return inlineHtmlLocalAssets(htmlContent, htmlFilePath);
 	}
 
 	function handle(res: import("node:http").ServerResponse, url: URL): boolean {
