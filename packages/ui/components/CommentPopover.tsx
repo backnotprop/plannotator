@@ -5,6 +5,7 @@ import { AttachmentsButton } from './AttachmentsButton';
 import { submitHint } from '../utils/platform';
 import { useDraggable } from '../hooks/useDraggable';
 import { SparklesIcon } from './SparklesIcon';
+import { hasUnsavedCommentContent } from '../utils/commentContent';
 
 export interface CommentAskAIContext {
   kind: 'general' | 'selection';
@@ -52,7 +53,7 @@ const draftStore = new Map<string, { text: string; images: ImageAttachment[] }>(
 function useCommentDraftSync(draftKey: string | undefined, text: string, images: ImageAttachment[]) {
   useEffect(() => {
     if (!draftKey) return;
-    if (text.trim() || images.length > 0) {
+    if (hasUnsavedCommentContent(text, images)) {
       draftStore.set(draftKey, { text, images });
     } else {
       draftStore.delete(draftKey);
@@ -98,6 +99,9 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   const [position, setPosition] = useState<{ top: number; left: number; flipAbove: boolean; width: number } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const hasUnsavedContent = hasUnsavedCommentContent(text, allowImages ? images : []);
+  const hasUnsavedContentRef = useRef(hasUnsavedContent);
+  hasUnsavedContentRef.current = hasUnsavedContent;
   const { dragPosition, dragHandleProps, wasDragged, reset: resetDrag } = useDraggable(popoverRef);
 
   useEffect(() => {
@@ -157,6 +161,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       // Don't close if clicking inside a child portal (AttachmentsButton, ImageAnnotator, etc.)
       const el = target as HTMLElement;
       if (el.closest?.('[data-popover-layer]')) return;
+      if (hasUnsavedContentRef.current) return;
       onClose();
     };
 
@@ -166,11 +171,11 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
 
   const handleSubmit = useCallback(() => {
     const canSubmitEmpty = allowEmptySubmit && initialText.trim().length > 0;
-    if (text.trim() || (allowImages && images.length > 0) || canSubmitEmpty) {
+    if (hasUnsavedContent || canSubmitEmpty) {
       if (draftKey) draftStore.delete(draftKey);
       onSubmit(text, allowImages && images.length > 0 ? images : undefined);
     }
-  }, [text, images, onSubmit, draftKey, allowImages, allowEmptySubmit, initialText]);
+  }, [text, images, onSubmit, draftKey, allowImages, allowEmptySubmit, initialText, hasUnsavedContent]);
 
   const handleAskAI = useCallback(() => {
     const question = text.trim();
@@ -207,8 +212,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       : 'Comment';
 
   const canSubmit =
-    text.trim().length > 0 ||
-    (allowImages && images.length > 0) ||
+    hasUnsavedContent ||
     (allowEmptySubmit && initialText.trim().length > 0);
   const canAskAI = !!onAskAI && !askAIDisabled && text.trim().length > 0;
 
