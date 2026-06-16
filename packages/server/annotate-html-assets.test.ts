@@ -29,6 +29,7 @@ describe("annotate raw HTML assets", () => {
     const cssResponse = await assets.handle(new Request(String(cssRequestUrl)), cssRequestUrl);
     expect(cssResponse?.status).toBe(200);
     expect(cssResponse?.headers.get("content-type")).toContain("text/css");
+    expect(cssResponse?.headers.get("access-control-allow-origin")).toBe("*");
     expect(await cssResponse?.text()).toBe("body { color: red; }");
 
     const imageRequestUrl = new URL(imageUrl!, "http://localhost");

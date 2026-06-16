@@ -20,11 +20,12 @@ import { warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash, deleteDraft } from "./draft";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { saveConfig, detectGitUser, getServerConfig } from "./config";
-import { dirname, resolve as resolvePath } from "path";
+import { resolve as resolvePath } from "path";
 import { isWSL } from "./browser";
 import { AI_QUERY_ENDPOINT, createAIRuntime } from "./ai-runtime";
 import type { AIEndpoints } from "@plannotator/ai";
 import { createHtmlAssetRegistry } from "./html-assets";
+import { applyAnnotateDocSessionParams } from "./annotate-doc-url";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -238,16 +239,12 @@ export async function startAnnotateServer(
             return htmlAssetResponse;
           }
 
-          // API: Serve a linked markdown document
-          // Inject source file's directory as base for relative path resolution.
-          // Skip base injection for URL annotations — there's no local directory to resolve against.
+          // API: Serve a linked markdown document. The annotate session owns the
+          // source-file base and --markdown preference, so enforce both here.
           if (url.pathname === "/api/doc" && req.method === "GET") {
-            if (!url.searchParams.has("base") && !/^https?:\/\//i.test(filePath)) {
-              const docUrl = new URL(req.url);
-              docUrl.searchParams.set("base", dirname(filePath));
-              return handleDoc(new Request(docUrl.toString()), { rewriteHtml: htmlAssets.rewriteHtml });
-            }
-            return handleDoc(req, { rewriteHtml: htmlAssets.rewriteHtml });
+            const docUrl = applyAnnotateDocSessionParams(req.url, filePath, convertHtml);
+            const docReq = docUrl.changed ? new Request(docUrl.url) : req;
+            return handleDoc(docReq, { rewriteHtml: htmlAssets.rewriteHtml });
           }
 
           // API: Batch existence check for code-file paths the renderer detected

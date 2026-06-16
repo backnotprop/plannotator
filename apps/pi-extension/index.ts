@@ -559,11 +559,6 @@ export default function plannotator(pi: ExtensionAPI): void {
 					mode = "annotate-folder";
 					ctx.ui.notify(`Opening annotation UI for folder ${filePath}...`, "info");
 				} else if (/\.html?$/i.test(absolutePath)) {
-					const fileSize = statSync(absolutePath).size;
-					if (fileSize > 10 * 1024 * 1024) {
-						ctx.ui.notify(`File too large (${Math.round(fileSize / 1024 / 1024)}MB, max 10MB)`, "error");
-						return;
-					}
 					const html = readFileSync(absolutePath, "utf-8");
 					const renderHtmlForFile = !renderMarkdownFlag;
 					if (renderHtmlForFile) {

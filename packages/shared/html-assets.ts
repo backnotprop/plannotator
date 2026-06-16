@@ -52,7 +52,7 @@ export function encodeHtmlAssetPath(assetPath: string): string {
 export function normalizeHtmlAssetRoutePath(routePath: string): string | null {
   const decoded = decodeUrlPath(routePath);
   if (decoded === null) return null;
-  return normalizeLocalAssetPath(decoded);
+  return normalizeDecodedLocalAssetPath(decoded);
 }
 
 export function rewriteHtmlAssetReferences(
@@ -232,7 +232,11 @@ function decodeUrlPath(value: string): string | null {
 function normalizeLocalAssetPath(value: string): string | null {
   const decoded = decodeUrlPath(value.trim());
   if (decoded === null) return null;
-  const normalized = pathPosix.normalize(decoded.replace(/\\/g, "/"));
+  return normalizeDecodedLocalAssetPath(decoded);
+}
+
+function normalizeDecodedLocalAssetPath(value: string): string | null {
+  const normalized = pathPosix.normalize(value.trim().replace(/\\/g, "/"));
   if (
     normalized === "." ||
     normalized === ".." ||

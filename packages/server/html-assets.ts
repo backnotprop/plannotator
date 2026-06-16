@@ -79,6 +79,7 @@ export function createHtmlAssetRegistry() {
         headers: {
           "Content-Type": contentType,
           "Cache-Control": "no-store",
+          "Access-Control-Allow-Origin": "*",
         },
       });
     } catch {

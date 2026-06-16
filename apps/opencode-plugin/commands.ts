@@ -254,15 +254,10 @@ export async function handleAnnotateCommand(
       annotateMode = "annotate-folder";
       client.app.log({ level: "info", message: `Opening annotation UI for folder ${resolvedArg}...` });
     } else if (/\.html?$/i.test(resolvedArg)) {
-      let fileSize: number;
       try {
-        fileSize = statSync(resolvedArg).size;
+        statSync(resolvedArg);
       } catch {
         client.app.log({ level: "error", message: `File not found: ${filePath}` });
-        return;
-      }
-      if (fileSize > 10 * 1024 * 1024) {
-        client.app.log({ level: "error", message: `File too large (${Math.round(fileSize / 1024 / 1024)}MB, max 10MB)` });
         return;
       }
       const html = await Bun.file(resolvedArg).text();

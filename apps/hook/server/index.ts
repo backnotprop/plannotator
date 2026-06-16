@@ -942,10 +942,6 @@ if (args[0] === "sessions") {
       if (htmlCandidate !== null) {
         const resolvedArg = resolveUserPath(htmlCandidate, projectRoot);
         const htmlFile = Bun.file(resolvedArg);
-        if (htmlFile.size > 10 * 1024 * 1024) {
-          console.error(`File too large (${Math.round(htmlFile.size / 1024 / 1024)}MB, max 10MB): ${resolvedArg}`);
-          process.exit(1);
-        }
         const html = await htmlFile.text();
         const renderHtmlForFile = !renderMarkdownFlag;
         if (renderHtmlForFile) {

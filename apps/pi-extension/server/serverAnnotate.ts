@@ -122,6 +122,7 @@ function createHtmlAssetRegistry() {
 			res.writeHead(200, {
 				"Content-Type": contentType,
 				"Cache-Control": "no-store",
+				"Access-Control-Allow-Origin": "*",
 			});
 			res.end(readFileSync(resolved));
 		} catch {

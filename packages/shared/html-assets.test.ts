@@ -69,6 +69,7 @@ describe("html asset route helpers", () => {
   test("normalizes valid route paths", () => {
     expect(normalizeHtmlAssetRoutePath("assets/logo%20small.png")).toBe("assets/logo small.png");
     expect(normalizeHtmlAssetRoutePath("./assets/../logo.svg")).toBe("logo.svg");
+    expect(normalizeHtmlAssetRoutePath("assets/100%2525%20done.png")).toBe("assets/100%25 done.png");
   });
 
   test("rejects traversal and invalid encodings", () => {
