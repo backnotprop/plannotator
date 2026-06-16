@@ -1570,9 +1570,6 @@ const App: React.FC = () => {
     setAnnotations(prev => [...prev, ann]);
     setSelectedAnnotationId(ann.id);
     setSelectedCodeAnnotationId(null);
-    if (wideModeType === null) {
-      setIsPanelOpen(true);
-    }
   };
 
   // Keep selection behavior explicit across mobile/wide-mode transitions.
@@ -1600,10 +1597,7 @@ const App: React.FC = () => {
     setCodeAnnotations(prev => [...prev, annotation]);
     setSelectedAnnotationId(null);
     setSelectedCodeAnnotationId(annotation.id);
-    if (wideModeType === null) {
-      setIsPanelOpen(true);
-    }
-  }, [wideModeType]);
+  }, []);
 
   // The code popout is full-viewport modal — the annotation panel is behind it.
   // This handler only fires when the popout is closed (sidebar visible), so
