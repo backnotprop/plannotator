@@ -1536,6 +1536,12 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!cancelMode && confirmCancelEdits) setConfirmCancelEdits(false);
   }, [cancelMode, confirmCancelEdits]);
+  // Each file owns its edit state: switching the active file (folder mode keeps
+  // the editor open across files) starts the discard confirmation fresh, so an
+  // armed "Discard?" on one file can never drop another file's edits on first click.
+  useEffect(() => {
+    setConfirmCancelEdits(false);
+  }, [activeEditableDocument?.key]);
 
   // True when there is anything the Direct Edits diff would carry.
   const hasSourceBackedDirectEdits = unsavedEditableDocuments.length > 0;
