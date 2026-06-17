@@ -1,0 +1,72 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { handleFileBrowserFilesStream } from "./reference-watch";
+
+const tempDirs: string[] = [];
+
+function makeTempDir(prefix: string): string {
+	const dir = mkdtempSync(join(tmpdir(), prefix));
+	tempDirs.push(dir);
+	return dir;
+}
+
+async function readSSEEvents(response: Response, count: number): Promise<Array<{ type?: string; dirPath?: string }>> {
+	const reader = response.body?.getReader();
+	if (!reader) throw new Error("Missing response body");
+	const decoder = new TextDecoder();
+	const events: Array<{ type?: string; dirPath?: string }> = [];
+	let pending = "";
+
+	try {
+		while (events.length < count) {
+			let timeout: ReturnType<typeof setTimeout> | null = null;
+			const result = await Promise.race([
+				reader.read(),
+				new Promise<never>((_, reject) => {
+					timeout = setTimeout(() => reject(new Error("Timed out waiting for SSE event")), 1000);
+				}),
+			]);
+			if (timeout) clearTimeout(timeout);
+			if (result.done) break;
+			pending += decoder.decode(result.value, { stream: true });
+			const blocks = pending.split("\n\n");
+			pending = blocks.pop() ?? "";
+			for (const block of blocks) {
+				const line = block.split("\n").find((item) => item.startsWith("data: "));
+				if (!line) continue;
+				events.push(JSON.parse(line.slice("data: ".length)));
+			}
+		}
+		return events;
+	} finally {
+		await reader.cancel();
+	}
+}
+
+afterEach(() => {
+	for (const dir of tempDirs.splice(0)) {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+describe("handleFileBrowserFilesStream", () => {
+	test("opens one SSE stream for multiple roots", async () => {
+		const first = makeTempDir("plannotator-watch-a-");
+		const second = makeTempDir("plannotator-watch-b-");
+		const url = new URL("http://localhost/api/reference/files/stream");
+		url.searchParams.append("dirPath", first);
+		url.searchParams.append("dirPath", second);
+
+		const response = handleFileBrowserFilesStream(new Request(url.toString()));
+		const events = await readSSEEvents(response, 2);
+
+		expect(response.status).toBe(200);
+		expect(response.headers.get("content-type")).toBe("text/event-stream");
+		expect(events.map((event) => [event.type, event.dirPath]).sort()).toEqual([
+			["ready", first],
+			["ready", second],
+		].sort());
+	});
+});

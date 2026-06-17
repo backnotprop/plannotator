@@ -7,8 +7,9 @@
  * from the Obsidian vault endpoint instead of the generic files endpoint.
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import type { VaultNode } from "../types";
+import type { WorkspaceStatusPayload } from "@plannotator/shared/workspace-status";
 
 export interface DirState {
   path: string;
@@ -16,6 +17,8 @@ export interface DirState {
   tree: VaultNode[];
   isLoading: boolean;
   error: string | null;
+  workspaceStatus?: WorkspaceStatusPayload;
+  lastChangedAt?: number;
   /** When true, fetches via /api/reference/obsidian/files and opens docs via /api/reference/obsidian/doc */
   isVault?: boolean;
 }
@@ -26,13 +29,50 @@ export interface UseFileBrowserReturn {
   toggleFolder: (key: string) => void;
   collapsedDirs: Set<string>;
   toggleCollapse: (dirPath: string) => void;
-  fetchTree: (dirPath: string) => void;
+  fetchTree: (dirPath: string, options?: { quiet?: boolean }) => void;
   fetchAll: (directories: string[]) => void;
   addVaultDir: (vaultPath: string) => void;
   clearVaultDirs: () => void;
   activeFile: string | null;
   activeDirPath: string | null;
   setActiveFile: (path: string | null) => void;
+}
+
+function normalizeRoot(path: string): string {
+  return path.replace(/\/+$/, "");
+}
+
+function remapWorkspaceStatusForDir(
+  status: WorkspaceStatusPayload | undefined,
+  dirPath: string
+): WorkspaceStatusPayload | undefined {
+  if (!status?.rootPath) return status;
+  const fromRoot = normalizeRoot(status.rootPath);
+  const toRoot = normalizeRoot(dirPath);
+  if (!fromRoot || fromRoot === toRoot) return status;
+
+  const files: WorkspaceStatusPayload["files"] = {};
+  for (const [path, change] of Object.entries(status.files)) {
+    const nextPath = path === fromRoot
+      ? toRoot
+      : path.startsWith(`${fromRoot}/`)
+        ? `${toRoot}${path.slice(fromRoot.length)}`
+        : path;
+    const nextOldPath = change.oldPath && change.oldPath.startsWith(`${fromRoot}/`)
+      ? `${toRoot}${change.oldPath.slice(fromRoot.length)}`
+      : change.oldPath;
+    files[nextPath] = {
+      ...change,
+      path: nextPath,
+      oldPath: nextOldPath,
+    };
+  }
+
+  return {
+    ...status,
+    rootPath: dirPath,
+    files,
+  };
 }
 
 export function useFileBrowser(): UseFileBrowserReturn {
@@ -50,14 +90,14 @@ export function useFileBrowser(): UseFileBrowserReturn {
     });
   }, []);
 
-  const fetchTree = useCallback(async (dirPath: string) => {
+  const fetchTree = useCallback(async (dirPath: string, options: { quiet?: boolean } = {}) => {
     const name = dirPath.split("/").pop() || dirPath;
 
     setDirs((prev) => {
       const exists = prev.find((d) => d.path === dirPath);
       if (exists) {
         return prev.map((d) =>
-          d.path === dirPath ? { ...d, isLoading: true, error: null } : d
+          d.path === dirPath ? { ...d, isLoading: options.quiet ? d.isLoading : true, error: null } : d
         );
       }
       return [...prev, { path: dirPath, name, tree: [], isLoading: true, error: null }];
@@ -78,9 +118,19 @@ export function useFileBrowser(): UseFileBrowserReturn {
         return;
       }
 
+      const workspaceStatus = remapWorkspaceStatusForDir(data.workspaceStatus, dirPath);
       setDirs((prev) =>
         prev.map((d) =>
-          d.path === dirPath ? { ...d, tree: data.tree, isLoading: false, error: null } : d
+          d.path === dirPath
+            ? {
+              ...d,
+              tree: data.tree,
+              workspaceStatus,
+              lastChangedAt: Date.now(),
+              isLoading: false,
+              error: null,
+            }
+            : d
         )
       );
 
@@ -100,6 +150,11 @@ export function useFileBrowser(): UseFileBrowserReturn {
       );
     }
   }, []);
+
+  const fetchTreeRef = useRef(fetchTree);
+  useEffect(() => {
+    fetchTreeRef.current = fetchTree;
+  }, [fetchTree]);
 
   const fetchAll = useCallback(
     (directories: string[]) => {
@@ -182,6 +237,51 @@ export function useFileBrowser(): UseFileBrowserReturn {
       return next;
     });
   }, []);
+
+  const watchDirsKey = useMemo(
+    () => dirs
+      .filter((dir) => !dir.isVault && !dir.error)
+      .map((dir) => dir.path)
+      .sort()
+      .join("\n"),
+    [dirs]
+  );
+
+  useEffect(() => {
+    if (!watchDirsKey || typeof EventSource === "undefined") return;
+
+    const paths = watchDirsKey.split("\n").filter(Boolean);
+    const timers = new Map<string, ReturnType<typeof setTimeout>>();
+    const params = new URLSearchParams();
+    for (const path of paths) params.append("dirPath", path);
+    const source = new EventSource(`/api/reference/files/stream?${params.toString()}`);
+    const scheduleFetch = (path: string) => {
+      const existing = timers.get(path);
+      if (existing) clearTimeout(existing);
+      timers.set(path, setTimeout(() => {
+        timers.delete(path);
+        fetchTreeRef.current(path, { quiet: true });
+      }, 120));
+    };
+    source.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data) as { type?: string; dirPath?: string };
+        if (data.type !== "changed") return;
+        if (typeof data.dirPath === "string" && paths.includes(data.dirPath)) {
+          scheduleFetch(data.dirPath);
+          return;
+        }
+      } catch {
+        return;
+      }
+      for (const path of paths) scheduleFetch(path);
+    };
+
+    return () => {
+      for (const timer of timers.values()) clearTimeout(timer);
+      source.close();
+    };
+  }, [watchDirsKey]);
 
   return {
     dirs,

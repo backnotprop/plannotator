@@ -16,6 +16,7 @@ import { getRepoInfo } from "./repo";
 import type { Origin } from "@plannotator/shared/agents";
 import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, handleSaveNotes } from "./shared-handlers";
 import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc } from "./reference-handlers";
+import { handleFileBrowserFilesStream } from "./reference-watch";
 import { warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash, deleteDraft } from "./draft";
 import { disabledSourceSave, type SourceSaveRequest } from "@plannotator/shared/source-save";
@@ -424,6 +425,13 @@ export async function startAnnotateServer(
           // API: List markdown files in a directory as a tree
           if (url.pathname === "/api/reference/files" && req.method === "GET") {
             return handleFileBrowserFiles(req);
+          }
+
+          // API: Watch file browser roots and refresh the tree/status snapshot on changes
+          if (url.pathname === "/api/reference/files/stream" && req.method === "GET") {
+            return handleFileBrowserFilesStream(req, {
+              disableIdleTimeout: () => server.timeout(req, 0),
+            });
           }
 
           // API: Upload image -> save to temp -> return path

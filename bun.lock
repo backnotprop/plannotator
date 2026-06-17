@@ -90,6 +90,7 @@
       "dependencies": {
         "@joplin/turndown-plugin-gfm": "^1.0.64",
         "@pierre/diffs": "1.2.8",
+        "chokidar": "^5.0.0",
         "parse5": "^7.3.0",
         "turndown": "^7.2.4",
       },
@@ -216,6 +217,7 @@
         "@pierre/diffs": "1.2.8",
         "@plannotator/ai": "workspace:*",
         "@plannotator/shared": "workspace:*",
+        "chokidar": "^5.0.0",
       },
       "devDependencies": {
         "glimpseui": "^0.8.0",

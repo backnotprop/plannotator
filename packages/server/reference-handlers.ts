@@ -8,6 +8,11 @@
 import { existsSync, statSync } from "fs";
 import { resolve } from "path";
 import { buildFileTree, FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
+import {
+	getWorkspaceStatusForDirectory,
+	getWorkspaceStatusRelativePaths,
+	type WorkspaceFileChange,
+} from "@plannotator/shared/workspace-status";
 import { parseCodePath } from "@plannotator/shared/code-file";
 import { detectObsidianVaults } from "./integrations";
 import {
@@ -499,6 +504,12 @@ export async function handleObsidianDoc(req: Request): Promise<Response> {
 
 // --- File Browser ---
 
+const FILE_BROWSER_EXTENSIONS = /\.(mdx?|txt|html?)$/i;
+
+function includeWorkspaceFile(relativePath: string, _change: WorkspaceFileChange): boolean {
+	return FILE_BROWSER_EXTENSIONS.test(relativePath);
+}
+
 /** List markdown files in a directory as a nested tree. */
 export async function handleFileBrowserFiles(req: Request): Promise<Response> {
 	const url = new URL(req.url);
@@ -517,18 +528,22 @@ export async function handleFileBrowserFiles(req: Request): Promise<Response> {
 
 	try {
 		const glob = new Bun.Glob("**/*.{md,mdx,txt,html,htm}");
-		const files: string[] = [];
+		const files = new Set<string>();
 		for await (const match of glob.scan({
 			cwd: resolvedDir,
 			onlyFiles: true,
 		})) {
 			if (FILE_BROWSER_EXCLUDED.some((dir) => match.includes(dir))) continue;
-			files.push(match);
+			files.add(match);
 		}
-		files.sort();
+		const workspaceStatus = getWorkspaceStatusForDirectory(resolvedDir);
+		for (const match of getWorkspaceStatusRelativePaths(workspaceStatus, resolvedDir, includeWorkspaceFile)) {
+			files.add(match);
+		}
+		const sortedFiles = [...files].sort();
 
-		const tree = buildFileTree(files);
-		return Response.json({ tree });
+		const tree = buildFileTree(sortedFiles);
+		return Response.json({ tree, workspaceStatus });
 	} catch {
 		return Response.json(
 			{ error: "Failed to list directory files" },

@@ -40,10 +40,12 @@ const TrashCardIcon = () => (
 
 interface DirectEditsPanelItem {
   id: string;
+  title?: string;
   label?: string;
   added: number;
   removed: number;
   diffText: string;
+  description?: string;
   onDiscard?: () => void;
 }
 
@@ -312,12 +314,14 @@ function formatTimestamp(ts: number): string {
  *  diff, and a two-step discard. Not part of the annotation timeline — edits
  *  are document state, not a selection-anchored note. */
 const DirectEditsCard: React.FC<{
+  title?: string;
   label?: string;
   added: number;
   removed: number;
   diffText: string;
+  description?: string;
   onDiscard?: () => void;
-}> = ({ label, added, removed, diffText, onDiscard }) => {
+}> = ({ title = 'Edits', label, added, removed, diffText, description, onDiscard }) => {
   const [expanded, setExpanded] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
 
@@ -341,7 +345,7 @@ const DirectEditsCard: React.FC<{
     <div className="w-full rounded-lg px-3 py-2.5 bg-surface-1/40 ring-1 ring-border/40">
       <div className="flex items-center gap-1.5">
         <PencilIcon />
-        <span className="text-[11px] font-medium text-primary">Edits</span>
+        <span className="text-[11px] font-medium text-primary">{title}</span>
         {label && (
           <span className="min-w-0 truncate text-[10px] text-muted-foreground" title={label}>
             {label}
@@ -385,7 +389,7 @@ const DirectEditsCard: React.FC<{
         </div>
       </div>
       <p className="mt-1 text-[10px] leading-snug text-muted-foreground/60">
-        Your text changes — sent with the feedback as a diff.
+        {description ?? 'Your text changes — sent with the feedback as a diff.'}
       </p>
       {expanded && (
         <pre className="mt-2 max-h-56 overflow-auto rounded-md bg-muted/40 p-2 font-mono text-[10px] leading-relaxed">

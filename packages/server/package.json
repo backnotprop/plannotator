@@ -28,6 +28,7 @@
     "*.ts"
   ],
   "dependencies": {
+    "chokidar": "^5.0.0",
     "@pierre/diffs": "1.2.8",
     "@plannotator/ai": "workspace:*",
     "@plannotator/shared": "workspace:*"

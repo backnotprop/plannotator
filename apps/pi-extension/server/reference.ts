@@ -22,6 +22,11 @@ import {
 	buildFileTree,
 	FILE_BROWSER_EXCLUDED,
 } from "../generated/reference-common.js";
+import {
+	getWorkspaceStatusForDirectory,
+	getWorkspaceStatusRelativePaths,
+	type WorkspaceFileChange,
+} from "../generated/workspace-status.js";
 import { detectObsidianVaults } from "../generated/integrations-common.js";
 import {
 	isAbsoluteUserPath,
@@ -177,7 +182,9 @@ function jsonDoc(res: Res, data: Record<string, unknown>, options?: HandleDocOpt
 }
 
 /** Recursively walk a directory collecting files by extension, skipping ignored dirs. */
-function walkMarkdownFiles(dir: string, root: string, results: string[], extensions: RegExp = /\.(mdx?|txt|html?)$/i): void {
+const FILE_BROWSER_EXTENSIONS = /\.(mdx?|txt|html?)$/i;
+
+function walkMarkdownFiles(dir: string, root: string, results: string[], extensions: RegExp = FILE_BROWSER_EXTENSIONS): void {
 	let entries: Dirent[];
 	try {
 		entries = readdirSync(dir, { withFileTypes: true }) as Dirent[];
@@ -195,6 +202,10 @@ function walkMarkdownFiles(dir: string, root: string, results: string[], extensi
 			results.push(relative);
 		}
 	}
+}
+
+function includeWorkspaceFile(relativePath: string, _change: WorkspaceFileChange): boolean {
+	return FILE_BROWSER_EXTENSIONS.test(relativePath);
 }
 
 /** Serve a linked markdown document. Uses shared resolveMarkdownFile for parity with Bun server. */
@@ -506,10 +517,15 @@ export function handleFileBrowserRequest(res: Res, url: URL): void {
 		return;
 	}
 	try {
-		const files: string[] = [];
-		walkMarkdownFiles(resolvedDir, resolvedDir, files);
-		files.sort();
-		json(res, { tree: buildFileTree(files) });
+		const files = new Set<string>();
+		const diskFiles: string[] = [];
+		walkMarkdownFiles(resolvedDir, resolvedDir, diskFiles);
+		for (const file of diskFiles) files.add(file);
+		const workspaceStatus = getWorkspaceStatusForDirectory(resolvedDir);
+		for (const file of getWorkspaceStatusRelativePaths(workspaceStatus, resolvedDir, includeWorkspaceFile)) {
+			files.add(file);
+		}
+		json(res, { tree: buildFileTree([...files].sort()), workspaceStatus });
 	} catch {
 		json(res, { error: "Failed to list directory files" }, 500);
 	}

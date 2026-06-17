@@ -10,6 +10,7 @@ import type { VaultNode } from "../../types";
 import type { DirState } from "../../hooks/useFileBrowser";
 import { CountBadge } from "./CountBadge";
 import { ObsidianIconRaw } from "../icons/ObsidianIcons";
+import type { WorkspaceFileChange, WorkspaceStatusPayload } from "@plannotator/shared/workspace-status";
 
 interface FileBrowserProps {
   dirs: DirState[];
@@ -31,6 +32,12 @@ export interface FileEditStatus {
   dirty: boolean;
 }
 
+interface AggregateWorkspaceChange {
+  additions: number;
+  deletions: number;
+  files: number;
+}
+
 /** Recursively sum annotation counts for all descendant files of a folder node */
 function getAggregateCount(
   node: VaultNode,
@@ -47,6 +54,34 @@ function getAggregateCount(
   return total;
 }
 
+function getWorkspaceChange(
+  absolutePath: string,
+  workspaceStatus?: WorkspaceStatusPayload
+): WorkspaceFileChange | undefined {
+  return workspaceStatus?.files?.[absolutePath];
+}
+
+function getAggregateWorkspaceChange(
+  node: VaultNode,
+  dirPath: string,
+  workspaceStatus?: WorkspaceStatusPayload
+): AggregateWorkspaceChange {
+  if (node.type === "file") {
+    const change = getWorkspaceChange(`${dirPath}/${node.path}`, workspaceStatus);
+    return change
+      ? { additions: change.additions, deletions: change.deletions, files: 1 }
+      : { additions: 0, deletions: 0, files: 0 };
+  }
+  return (node.children ?? []).reduce<AggregateWorkspaceChange>((total, child) => {
+    const childTotal = getAggregateWorkspaceChange(child, dirPath, workspaceStatus);
+    return {
+      additions: total.additions + childTotal.additions,
+      deletions: total.deletions + childTotal.deletions,
+      files: total.files + childTotal.files,
+    };
+  }, { additions: 0, deletions: 0, files: 0 });
+}
+
 const TreeNode: React.FC<{
   node: VaultNode;
   depth: number;
@@ -58,7 +93,8 @@ const TreeNode: React.FC<{
   annotationCounts?: Map<string, number>;
   highlightedFiles?: Set<string>;
   editStatuses?: Map<string, FileEditStatus>;
-}> = ({ node, depth, dirPath, expandedFolders, onToggleFolder, onSelectFile, activeFile, annotationCounts, highlightedFiles, editStatuses }) => {
+  workspaceStatus?: WorkspaceStatusPayload;
+}> = ({ node, depth, dirPath, expandedFolders, onToggleFolder, onSelectFile, activeFile, annotationCounts, highlightedFiles, editStatuses, workspaceStatus }) => {
   const folderKey = `${dirPath}:${node.path}`;
   const absolutePath = `${dirPath}/${node.path}`;
   const isExpanded = expandedFolders.has(folderKey);
@@ -67,11 +103,12 @@ const TreeNode: React.FC<{
 
   if (node.type === "folder") {
     const aggregateCount = annotationCounts ? getAggregateCount(node, dirPath, annotationCounts) : 0;
+    const aggregateChange = getAggregateWorkspaceChange(node, dirPath, workspaceStatus);
     return (
       <>
         <button
           onClick={() => onToggleFolder(folderKey)}
-          className="w-full flex items-center gap-1.5 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors rounded-sm"
+          className="file-tree-folder w-full flex items-center gap-1.5 py-1 px-2 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors rounded-sm"
           style={{ paddingLeft }}
         >
           <svg
@@ -87,7 +124,15 @@ const TreeNode: React.FC<{
             <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
           </svg>
           <span className="truncate">{node.name}</span>
-          {aggregateCount > 0 && <CountBadge count={aggregateCount} className="ml-auto" />}
+          <div className="ml-auto flex flex-shrink-0 items-center gap-1.5 text-[10px]">
+            {(aggregateChange.additions > 0 || aggregateChange.deletions > 0) && (
+              <>
+                {aggregateChange.additions > 0 && <span className="additions">+{aggregateChange.additions}</span>}
+                {aggregateChange.deletions > 0 && <span className="deletions">-{aggregateChange.deletions}</span>}
+              </>
+            )}
+            {aggregateCount > 0 && <CountBadge count={aggregateCount} />}
+          </div>
         </button>
         {isExpanded && node.children?.map((child) => (
           <TreeNode
@@ -102,16 +147,19 @@ const TreeNode: React.FC<{
             annotationCounts={annotationCounts}
             highlightedFiles={highlightedFiles}
             editStatuses={editStatuses}
+            workspaceStatus={workspaceStatus}
           />
         ))}
       </>
     );
   }
 
-  const displayName = node.name.replace(/\.(mdx?|txt)$/i, "");
+  const displayName = node.name.replace(/\.(mdx?|txt|html?)$/i, "");
   const fileCount = annotationCounts?.get(absolutePath) ?? 0;
   const isHighlighted = highlightedFiles?.has(absolutePath);
   const editStatus = editStatuses?.get(absolutePath);
+  const workspaceChange = getWorkspaceChange(absolutePath, workspaceStatus);
+  const isDeleted = workspaceChange?.status === "deleted";
   const editMarker =
     editStatus?.status === "conflict" || editStatus?.status === "error"
       ? { label: "!", className: "bg-destructive/15 text-destructive", title: editStatus.status === "conflict" ? "Save conflict" : "Save failed" }
@@ -122,30 +170,53 @@ const TreeNode: React.FC<{
           : editStatus?.status === "saved"
             ? { label: "✓", className: "bg-success/15 text-success", title: "Saved" }
             : null;
+  const statusMarker = workspaceChange?.status === "added"
+    ? { label: "A", className: "text-success", title: "Added file" }
+    : workspaceChange?.status === "untracked"
+      ? { label: "U", className: "text-primary", title: "Untracked file" }
+      : workspaceChange?.status === "deleted"
+        ? { label: "D", className: "text-destructive", title: "Deleted file" }
+        : workspaceChange?.status === "renamed"
+          ? { label: "R", className: "text-[#007aff]", title: workspaceChange.oldPath ? `Renamed from ${workspaceChange.oldPath}` : "Renamed file" }
+          : workspaceChange?.status === "conflicted"
+            ? { label: "!", className: "text-destructive", title: "Git conflict" }
+            : null;
   return (
     <button
-      onClick={() => onSelectFile(absolutePath, dirPath)}
-      className={`w-full flex items-center gap-1.5 py-1 text-[11px] transition-colors rounded-sm ${
-        isActive
-          ? "bg-primary/10 text-primary font-medium"
-          : "text-foreground/80 hover:text-foreground hover:bg-muted/50"
-      } ${isHighlighted ? 'file-annotation-flash' : ''}`}
+      onClick={() => {
+        if (!isDeleted) onSelectFile(absolutePath, dirPath);
+      }}
+      disabled={isDeleted}
+      className={`file-tree-item w-full text-left group ${isActive ? "active" : ""} ${fileCount > 0 ? "has-annotations" : ""} ${isHighlighted ? 'file-annotation-flash' : ''} ${isDeleted ? 'opacity-70 cursor-default' : ''}`}
       style={{ paddingLeft: paddingLeft + 15 }}
-      title={node.path}
+      title={isDeleted ? `${node.path} (deleted on disk)` : node.path}
     >
       <svg className="w-3 h-3 flex-shrink-0 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
       </svg>
-      <span className="truncate">{displayName}</span>
-      {editMarker && (
-        <span
-          className={`ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-semibold leading-none ${editMarker.className}`}
-          title={editMarker.title}
-        >
-          {editMarker.label}
-        </span>
-      )}
-      {fileCount > 0 && <CountBadge count={fileCount} active={isActive} className={editMarker ? "" : "ml-auto"} />}
+      <span className={`truncate flex-1 min-w-0 ${isDeleted ? "line-through" : ""}`}>{displayName}</span>
+      <div className="ml-auto flex flex-shrink-0 items-center gap-1.5 text-[10px]">
+        {editMarker && (
+          <span
+            className={`inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-semibold leading-none ${editMarker.className}`}
+            title={editMarker.title}
+          >
+            {editMarker.label}
+          </span>
+        )}
+        {fileCount > 0 && <CountBadge count={fileCount} active={isActive} />}
+        {workspaceChange && (
+          <>
+            {workspaceChange.additions > 0 && <span className="additions">+{workspaceChange.additions}</span>}
+            {workspaceChange.deletions > 0 && <span className="deletions">-{workspaceChange.deletions}</span>}
+            {statusMarker && (
+              <span className={`font-semibold ${statusMarker.className}`} title={statusMarker.title}>
+                {statusMarker.label}
+              </span>
+            )}
+          </>
+        )}
+      </div>
     </button>
   );
 };
@@ -206,6 +277,7 @@ const DirSection: React.FC<{
           annotationCounts={annotationCounts}
           highlightedFiles={highlightedFiles}
           editStatuses={editStatuses}
+          workspaceStatus={dir.workspaceStatus}
         />
       ))}
     </div>
@@ -237,12 +309,30 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
   // Summary header
   const totalCount = annotationCounts ? Array.from(annotationCounts.values()).reduce((s, c) => s + c, 0) : 0;
   const fileCount = annotationCounts?.size ?? 0;
+  const workspaceTotals = dirs.reduce(
+    (total, dir) => {
+      if (!dir.workspaceStatus?.available) return total;
+      return {
+        files: total.files + dir.workspaceStatus.totals.files,
+        additions: total.additions + dir.workspaceStatus.totals.additions,
+        deletions: total.deletions + dir.workspaceStatus.totals.deletions,
+      };
+    },
+    { files: 0, additions: 0, deletions: 0 }
+  );
 
   return (
     <div className="flex flex-col">
       {totalCount > 0 && (
         <div className="px-3 py-1.5 text-[10px] text-muted-foreground border-b border-border/30">
           {totalCount} annotation{totalCount === 1 ? '' : 's'} in {fileCount} file{fileCount === 1 ? '' : 's'}
+        </div>
+      )}
+      {workspaceTotals.files > 0 && (
+        <div className="file-tree-status-summary flex items-center gap-1.5 px-3 py-1.5 text-[10px] text-muted-foreground border-b border-border/30">
+          <span>{workspaceTotals.files} changed</span>
+          {workspaceTotals.additions > 0 && <span className="additions ml-auto">+{workspaceTotals.additions}</span>}
+          {workspaceTotals.deletions > 0 && <span className={`deletions ${workspaceTotals.additions > 0 ? "" : "ml-auto"}`}>-{workspaceTotals.deletions}</span>}
         </div>
       )}
       {dirs.map((dir) => {

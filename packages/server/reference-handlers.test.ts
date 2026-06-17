@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { handleDoc, handleDocExists } from "./reference-handlers";
+import { spawnSync } from "node:child_process";
+import { handleDoc, handleDocExists, handleFileBrowserFiles } from "./reference-handlers";
+import type { VaultNode } from "@plannotator/shared/reference-common";
+import type { WorkspaceStatusPayload } from "@plannotator/shared/workspace-status";
 
 const tempDirs: string[] = [];
 
@@ -17,6 +20,22 @@ function writeTempFile(root: string, relativePath: string, content = "x"): strin
 	mkdirSync(join(full, ".."), { recursive: true });
 	writeFileSync(full, content);
 	return full;
+}
+
+function git(cwd: string, ...args: string[]): void {
+	const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+	if (result.status !== 0) {
+		throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
+	}
+}
+
+function flattenTree(nodes: VaultNode[]): string[] {
+	const paths: string[] = [];
+	for (const node of nodes) {
+		if (node.type === "file") paths.push(node.path);
+		else paths.push(...flattenTree(node.children ?? []));
+	}
+	return paths;
 }
 
 async function postDocExists(body: unknown, options: { rootPath?: string; rootPaths?: string[] }) {
@@ -110,5 +129,35 @@ describe("handleDocExists", () => {
 		const res = await getDoc("secret.md", { base: outside, rootPaths: [root] });
 
 		expect(res.status).toBe(404);
+	});
+});
+
+describe("handleFileBrowserFiles", () => {
+	test("returns git workspace status and keeps deleted tracked files in the tree", async () => {
+		const root = makeTempDir("plannotator-files-root-");
+		git(root, "init", "-b", "main");
+		git(root, "config", "user.email", "test@test");
+		git(root, "config", "user.name", "Test");
+		writeTempFile(root, "docs/plan.md", "one\ntwo\n");
+		writeTempFile(root, "docs/gone.md", "remove me\n");
+		git(root, "add", "-A");
+		git(root, "commit", "-m", "init");
+
+		writeTempFile(root, "docs/plan.md", "one\nTWO\nthree\n");
+		unlinkSync(join(root, "docs/gone.md"));
+		writeTempFile(root, "docs/new.md", "new\n");
+
+		const url = new URL("http://localhost/api/reference/files");
+		url.searchParams.set("dirPath", join(root, "docs"));
+		const res = await handleFileBrowserFiles(new Request(url.toString()));
+		const data = await res.json() as { tree: VaultNode[]; workspaceStatus: WorkspaceStatusPayload };
+		const realDocs = realpathSync(join(root, "docs"));
+
+		expect(res.status).toBe(200);
+		expect(flattenTree(data.tree).sort()).toEqual(["gone.md", "new.md", "plan.md"]);
+		expect(data.workspaceStatus.totals.files).toBe(3);
+		expect(data.workspaceStatus.files[join(realDocs, "gone.md")]?.status).toBe("deleted");
+		expect(data.workspaceStatus.files[join(realDocs, "new.md")]?.status).toBe("untracked");
+		expect(data.workspaceStatus.files[join(realDocs, "plan.md")]?.additions).toBe(2);
 	});
 });

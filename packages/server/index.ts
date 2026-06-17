@@ -47,6 +47,7 @@ import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, handleSaveNotes, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft } from "./draft";
 import { handleDoc, handleDocExists, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, handleFileBrowserFiles } from "./reference-handlers";
+import { handleFileBrowserFilesStream } from "./reference-watch";
 import { warmFileListCache } from "@plannotator/shared/resolve-file";
 import { createEditorAnnotationHandler } from "./editor-annotations";
 import { createExternalAnnotationHandler } from "./external-annotations";
@@ -394,6 +395,13 @@ export async function startPlannotatorServer(
           // API: List markdown files in a directory as a tree
           if (url.pathname === "/api/reference/files" && req.method === "GET") {
             return handleFileBrowserFiles(req);
+          }
+
+          // API: Watch file browser roots and refresh the tree/status snapshot on changes
+          if (url.pathname === "/api/reference/files/stream" && req.method === "GET") {
+            return handleFileBrowserFilesStream(req, {
+              disableIdleTimeout: () => server.timeout(req, 0),
+            });
           }
 
           // API: Get available agents (OpenCode only)

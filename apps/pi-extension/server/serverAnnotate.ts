@@ -34,6 +34,7 @@ import {
 	handleObsidianFilesRequest,
 	handleObsidianDocRequest,
 } from "./reference.js";
+import { handleFileBrowserStreamRequest } from "./file-browser-watch.js";
 import { warmFileListCache } from "../generated/resolve-file.js";
 import { createExternalAnnotationHandler } from "./external-annotations.js";
 import {
@@ -431,6 +432,8 @@ export async function startAnnotateServer(options: {
 			handleObsidianDocRequest(res, url);
 		} else if (url.pathname === "/api/reference/files" && req.method === "GET") {
 			handleFileBrowserRequest(res, url);
+		} else if (handleFileBrowserStreamRequest(req, res, url)) {
+			return;
 		} else if (url.pathname === "/favicon.svg") {
 			handleFavicon(res);
 		} else if (url.pathname === "/api/exit" && req.method === "POST") {

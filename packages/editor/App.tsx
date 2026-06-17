@@ -111,7 +111,6 @@ import { AppHeader } from './components/AppHeader';
 import {
   buildDirectEditsSection,
   buildSavedFileChangesSection,
-  buildSourceFileDirectEditsSection,
   composeFeedbackWithEditSections,
   normalizeEditedMarkdown,
 } from './directEdits';
@@ -1543,11 +1542,15 @@ const App: React.FC = () => {
     setConfirmCancelEdits(false);
   }, [activeEditableDocument?.key]);
 
-  // True when there is anything the Direct Edits diff would carry.
-  const hasSourceBackedDirectEdits = unsavedEditableDocuments.length > 0;
-  const hasDirectEdits = hasSourceBackedDirectEdits
-    ? true
-    : isEditingMarkdown ? editorDiffersFromBaseline : editedMarkdownRef.current !== null;
+  const hasUnsavedSourceFileBuffers = unsavedEditableDocuments.length > 0;
+
+  // True when the feedback payload carries unsaved direct edits. Source-backed
+  // file buffers are ordinary dirty editor state; they only become review
+  // context once saved to disk and tracked through savedFileChanges.
+  const hasDirectEdits =
+    !activeSourceSave &&
+    !hasUnsavedSourceFileBuffers &&
+    (isEditingMarkdown ? editorDiffersFromBaseline : editedMarkdownRef.current !== null);
   const hasSavedFileChanges = savedFileChanges.length > 0;
   const hasFeedbackToSend = hasAnyAnnotations || hasDirectEdits || hasSavedFileChanges;
   const feedbackLoss = feedbackLossDescription(feedbackAnnotationCount, hasDirectEdits);
@@ -1563,22 +1566,24 @@ const App: React.FC = () => {
     : null;
 
   // Pinned "Direct edits" card data for the annotation sidebar. Source-backed
-  // folder edits render one card per dirty file so discard is file-scoped.
+  // documents show saved-to-disk changes only; dirty buffers stay in the editor
+  // and file tree until the user explicitly saves.
   const directEditsPanelInfo = useMemo(() => {
-    if (unsavedEditableDocuments.length > 0) {
-      return unsavedEditableDocuments.map((record) => {
-        const stats = computeEditStats(record.diskBaseline, record.currentText);
+    if (savedFileChanges.length > 0) {
+      return savedFileChanges.map((change) => {
+        const stats = computeEditStats(change.beforeText, change.afterText);
         return {
-          id: record.key,
-          sourceKey: record.key,
-          label: record.path ?? record.basename,
+          id: `saved:${change.key}`,
+          title: 'Saved edits',
+          label: change.path,
           added: stats.added,
           removed: stats.removed,
+          description: 'Saved to disk; sent with feedback as context.',
           diffText: createTwoFilesPatch(
-            `${record.path ?? record.basename} (saved)`,
-            `${record.path ?? record.basename} (edited)`,
-            record.diskBaseline,
-            record.currentText,
+            `${change.basename} (opened)`,
+            `${change.basename} (saved)`,
+            change.beforeText,
+            change.afterText,
             undefined,
             undefined,
             { context: 3 },
@@ -1587,28 +1592,8 @@ const App: React.FC = () => {
       });
     }
 
+    if (activeEditableDocument?.sourceSave?.enabled) return null;
     if (!editStats) return null;
-    if (activeEditableDocument?.sourceSave?.enabled) {
-      const edited = activeEditableDocument.currentText;
-      const base = activeEditableDocument.diskBaseline;
-      if (edited === base) return null;
-      return [{
-        id: activeEditableDocument.key,
-        sourceKey: activeEditableDocument.key,
-        label: activeEditableDocument.path ?? activeEditableDocument.basename,
-        added: editStats.added,
-        removed: editStats.removed,
-        diffText: createTwoFilesPatch(
-          `${activeEditableDocument.basename} (saved)`,
-          `${activeEditableDocument.basename} (edited)`,
-          base,
-          edited,
-          undefined,
-          undefined,
-          { context: 3 },
-        ),
-      }];
-    }
     const base = originalMarkdownRef.current;
     const edited = editedMarkdownRef.current;
     if (base === null || edited === null) return null;
@@ -1618,26 +1603,15 @@ const App: React.FC = () => {
       removed: editStats.removed,
       diffText: createTwoFilesPatch('plan.md (original)', 'plan.md (edited)', base, edited, undefined, undefined, { context: 3 }),
     }];
-  }, [activeEditableDocument, editStats, unsavedEditableDocuments]);
+  }, [activeEditableDocument, editStats, savedFileChanges]);
 
   // "Direct Edits" feedback section: unified diff of user edits vs the
   // as-submitted baseline. getEditedMarkdown owns the read discipline.
   const buildEditsSection = useCallback((): string => {
-    const sourceBackedEdits = editableDocuments.getUnsavedDocuments();
-    if (sourceBackedEdits.length > 0) {
-      return buildSourceFileDirectEditsSection(
-        sourceBackedEdits.map((record) => ({
-          path: record.path ?? record.basename,
-          basename: record.basename,
-          base: record.diskBaseline,
-          current: record.currentText,
-        })),
-      );
-    }
-
+    if (activeSourceSave || hasUnsavedSourceFileBuffers) return '';
     const base = originalMarkdownRef.current;
     return buildDirectEditsSection(base, getEditedMarkdown(), sourceConverted);
-  }, [editableDocuments, getEditedMarkdown, sourceConverted]);
+  }, [activeSourceSave, getEditedMarkdown, hasUnsavedSourceFileBuffers, sourceConverted]);
 
   const buildSavedChangesSection = useCallback((): string => {
     return buildSavedFileChangesSection(
@@ -2169,6 +2143,13 @@ const App: React.FC = () => {
     }
   }, []);
 
+  const warnFinishSourceFileEdits = useCallback(() => {
+    toast('Save or discard file edits first', {
+      description: 'Unsaved editor text is not sent as feedback until it is saved to disk.',
+      duration: 5000,
+    });
+  }, []);
+
   // Global keyboard shortcuts (Cmd/Ctrl+Enter to submit)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -2195,6 +2176,11 @@ const App: React.FC = () => {
       // While the markdown editor is open, submit shortcuts belong to editing,
       // not the review session.
       if (isEditingMarkdown) return;
+
+      if (hasUnsavedSourceFileBuffers) {
+        warnFinishSourceFileEdits();
+        return;
+      }
 
       // Folder files are the active review target; normal linked docs are side
       // references and should not submit the root plan.
@@ -2249,8 +2235,9 @@ const App: React.FC = () => {
     showExport, showImport, showFeedbackPrompt, showClaudeCodeWarning, showExitWarning, showAgentWarning,
     showPermissionModeSetup, pendingPasteImage,
     submitted, isSubmitting, isExiting, goalSetupAction.isSubmitting, isApiMode, isEditingMarkdown, linkedDocHook.isActive, annotations.length, codeAnnotations.length, externalAnnotations.length, annotateMode,
-    gate, hasFeedbackToSend, goalSetupMode, goalSetupAction.canSubmit,
+    gate, hasFeedbackToSend, hasUnsavedSourceFileBuffers, goalSetupMode, goalSetupAction.canSubmit,
     annotateSource, origin, getAgentWarning,
+    warnFinishSourceFileEdits,
   ]);
 
   const handleAddAnnotation = (ann: Annotation) => {
@@ -2750,6 +2737,7 @@ const App: React.FC = () => {
         sourceSave: nextSourceSave,
       });
       const normalizedEdited = edited.replace(/\r\n?/g, '\n');
+      const savedChangedFromOpen = normalizedEdited !== activeDocument.sessionOpenText;
       editedMarkdownRef.current = null;
       if (editableDocuments.getActiveKey() === activeDocument.key) {
         const live = markdownEditorHandleRef.current?.getMarkdown();
@@ -2766,6 +2754,10 @@ const App: React.FC = () => {
           setEditorDiffersFromBaseline(true);
           setEditStats(computeEditStats(normalizedEdited, currentText));
         }
+      }
+      if (savedChangedFromOpen && window.innerWidth >= 768) {
+        setRightSidebarTab('annotations');
+        setIsPanelOpen(true);
       }
       scheduleDraftSave();
       toast.success(`Saved ${activeSourceSave.basename}`);
@@ -2913,16 +2905,24 @@ const App: React.FC = () => {
   };
 
   const handleHeaderAnnotateExit = useCallback(() => {
+    if (hasUnsavedSourceFileBuffers) {
+      warnFinishSourceFileEdits();
+      return;
+    }
     if (hasFeedbackToSend) {
       setExitWarningAction('close');
       setShowExitWarning(true);
     } else {
       headerHandlersRef.current.handleAnnotateExit();
     }
-  }, [hasFeedbackToSend]);
+  }, [hasFeedbackToSend, hasUnsavedSourceFileBuffers, warnFinishSourceFileEdits]);
 
   const handleHeaderFeedback = useCallback(() => {
     const h = headerHandlersRef.current;
+    if (hasUnsavedSourceFileBuffers) {
+      warnFinishSourceFileEdits();
+      return;
+    }
     // Direct edits count as feedback — deny is the only Claude Code channel
     // whose output carries feedback to the agent.
     if (!hasFeedbackToSend) {
@@ -2930,10 +2930,14 @@ const App: React.FC = () => {
     } else {
       h.handleDeny();
     }
-  }, [hasFeedbackToSend]);
+  }, [hasFeedbackToSend, hasUnsavedSourceFileBuffers, warnFinishSourceFileEdits]);
 
   const handleHeaderApprove = useCallback(() => {
     const h = headerHandlersRef.current;
+    if (hasUnsavedSourceFileBuffers) {
+      warnFinishSourceFileEdits();
+      return;
+    }
     if (annotateMode) {
       if (hasFeedbackToSend) {
         setExitWarningAction('approve');
@@ -2956,7 +2960,7 @@ const App: React.FC = () => {
       }
     }
     h.handleApprove();
-  }, [annotateMode, hasFeedbackToSend, origin]);
+  }, [annotateMode, hasFeedbackToSend, hasUnsavedSourceFileBuffers, origin, warnFinishSourceFileEdits]);
 
   const handleHeaderAnnotateFeedback = useCallback(() => headerHandlersRef.current.handleAnnotateFeedback(), []);
   const handleHeaderAnnotateApprove = useCallback(() => headerHandlersRef.current.handleAnnotateApprove(), []);
@@ -3031,7 +3035,7 @@ const App: React.FC = () => {
           aiAvailable={canUseAI}
           isAIChatOpen={isPanelOpen && rightSidebarTab === 'ai'}
           aiHasMessages={aiMessages.length > 0}
-          hasAnyAnnotations={hasAnyAnnotations || hasDirectEdits}
+          hasAnyAnnotations={hasAnyAnnotations || hasDirectEdits || hasSavedFileChanges}
           linkedDocIsActive={linkedDocHook.isActive}
           callbackShareUrlReady={callbackConfig ? Boolean(shareUrl || shortShareUrl || (renderAs === 'html' && (shareHtml || rawHtml))) : true}
           canShareCurrentSession={canShareCurrentSession}
@@ -3347,14 +3351,6 @@ const App: React.FC = () => {
                                         : 'text-muted-foreground/50 hover:text-muted-foreground'
                                   }`}
                                 >
-                                  {/* Dot slot is always present — only its color changes — so the
-                                      button never reflows when edits appear/clear. */}
-                                  <span
-                                    aria-hidden
-                                    className={`h-1.5 w-1.5 shrink-0 rounded-full transition-colors duration-150 ${
-                                      saveFailed ? 'bg-destructive' : emphasizeSave ? 'bg-primary' : 'bg-transparent'
-                                    }`}
-                                  />
                                   {/* Invisible widest label reserves the width so Save/Saving/Saved
                                       swap without nudging neighbors (font-agnostic, no fixed px). */}
                                   <span className="grid justify-items-start">
@@ -3367,6 +3363,14 @@ const App: React.FC = () => {
                                           : 'Saved'}
                                     </span>
                                   </span>
+                                  {/* Dot slot is always present — only its color changes — so the
+                                      button never reflows when edits appear/clear. */}
+                                  <span
+                                    aria-hidden
+                                    className={`h-1.5 w-1.5 shrink-0 rounded-full transition-colors duration-150 ${
+                                      saveFailed ? 'bg-destructive' : emphasizeSave ? 'bg-primary' : 'bg-transparent'
+                                    }`}
+                                  />
                                 </button>
                               </Tooltip>
                               <span aria-hidden className="text-muted-foreground/30 select-none">|</span>
@@ -3524,10 +3528,14 @@ const App: React.FC = () => {
             }}
             onShare={canShareCurrentSession ? () => { setIsPanelOpen(false); setInitialExportTab('share'); setShowExport(true); } : undefined}
             otherFileAnnotations={otherFileAnnotations}
-            directEdits={directEditsPanelInfo?.map((item) => ({
-              ...item,
-              onDiscard: () => handleDiscardEdits(item.sourceKey),
-            })) ?? null}
+            directEdits={directEditsPanelInfo?.map((item) => {
+              const sourceKey = 'sourceKey' in item ? item.sourceKey : undefined;
+              const canDiscard = item.id === 'plan' || typeof sourceKey === 'string';
+              return {
+                ...item,
+                onDiscard: canDiscard ? () => handleDiscardEdits(sourceKey) : undefined,
+              };
+            }) ?? null}
             onOtherFileAnnotationsClick={handleFlashAnnotatedFiles}
           />
           {isPanelOpen && rightSidebarTab === 'ai' && wideModeType === null && !goalSetupMode && canUseAI && (

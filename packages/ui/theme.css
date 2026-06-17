@@ -358,6 +358,60 @@ html:not(.transitions-ready) * {
   100% { background: transparent; }
 }
 
+/* Shared file tree styling used by review and annotation sidebars. */
+.file-tree-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  cursor: pointer;
+  color: var(--muted-foreground);
+}
+
+.file-tree-item:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.file-tree-item:disabled {
+  cursor: default;
+}
+
+.file-tree-item:disabled:hover {
+  background: transparent;
+}
+
+.file-tree-item.active {
+  background: oklch(from var(--primary) l c h / 0.3);
+  color: var(--primary);
+}
+
+.file-tree-item.has-annotations {
+  background: oklch(from var(--primary) l c h / 0.08);
+}
+
+.file-tree-item.has-annotations:hover {
+  background: var(--muted);
+}
+
+.file-tree-item.active.has-annotations {
+  background: oklch(from var(--primary) l c h / 0.3);
+}
+
+.file-tree-item .additions,
+.file-tree-folder .additions,
+.file-tree-status-summary .additions {
+  color: var(--success);
+}
+
+.file-tree-item .deletions,
+.file-tree-folder .deletions,
+.file-tree-status-summary .deletions {
+  color: var(--destructive);
+}
+
 
 /* Word-level diff markers inside modified plan-diff blocks. Emitted as
    <ins>/<del> by PlanCleanDiffView's inline renderer; keep the decoration

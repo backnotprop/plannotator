@@ -50,7 +50,8 @@
     "./semantic-diff": "./semantic-diff.ts",
     "./semantic-diff-types": "./semantic-diff-types.ts",
     "./source-save": "./source-save.ts",
-    "./source-save-node": "./source-save-node.ts"
+    "./source-save-node": "./source-save-node.ts",
+    "./workspace-status": "./workspace-status.ts"
   },
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.64",

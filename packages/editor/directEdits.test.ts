@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import {
   buildDirectEditsSection,
   buildSavedFileChangesSection,
-  buildSourceFileDirectEditsSection,
   composeFeedbackWithEditSections,
   composeFeedbackWithDirectEdits,
   normalizeEditedMarkdown,
@@ -36,29 +35,6 @@ describe('direct edit feedback helpers', () => {
 
     expect(composeFeedbackWithDirectEdits('User reviewed the document and has no feedback.', edits)).toBe(edits);
     expect(composeFeedbackWithDirectEdits('A real annotation.', edits)).toBe(`${edits}\n\n---\n\nA real annotation.`);
-  });
-
-  test('builds source-file direct edits for unsaved folder files', () => {
-    const section = buildSourceFileDirectEditsSection([
-      {
-        path: '/repo/docs/a.md',
-        basename: 'a.md',
-        base: '# A\n\nold\n',
-        current: '# A\n\nnew\n',
-      },
-      {
-        path: '/repo/docs/b.txt',
-        basename: 'b.txt',
-        base: 'same\n',
-        current: 'same\n',
-      },
-    ]);
-
-    expect(section).toContain('Apply these unsaved changes');
-    expect(section).toContain('## /repo/docs/a.md');
-    expect(section).toContain('-old');
-    expect(section).toContain('+new');
-    expect(section).not.toContain('/repo/docs/b.txt');
   });
 
   test('includes saved file changes even when they are the only feedback', () => {
