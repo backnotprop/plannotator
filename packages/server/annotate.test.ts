@@ -15,6 +15,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { startAnnotateServer } from "./annotate";
@@ -79,6 +80,57 @@ describe("annotate server: /api/save-notes wiring", () => {
       const response = await fetch(`${server.url}/not-a-real-route`);
       expect(response.headers.get("content-type")).toContain("text/html");
       expect(await response.text()).toContain("Plannotator");
+    } finally {
+      server.stop();
+    }
+  });
+});
+
+describe("annotate server: /api/share-html symlink containment", () => {
+  let savedPort: string | undefined;
+  let savedRemote: string | undefined;
+
+  beforeEach(() => {
+    savedPort = process.env.PLANNOTATOR_PORT;
+    savedRemote = process.env.PLANNOTATOR_REMOTE;
+    delete process.env.PLANNOTATOR_PORT;
+    process.env.PLANNOTATOR_REMOTE = "0";
+  });
+
+  afterEach(() => {
+    if (savedPort === undefined) delete process.env.PLANNOTATOR_PORT;
+    else process.env.PLANNOTATOR_PORT = savedPort;
+    if (savedRemote === undefined) delete process.env.PLANNOTATOR_REMOTE;
+    else process.env.PLANNOTATOR_REMOTE = savedRemote;
+  });
+
+  // Regression: /api/share-html read the requested file through a lexical-only
+  // containment check, so a symlinked *.html inside the doc directory pointing
+  // outside it leaked the target's contents into the share payload. (Completes
+  // the #927 symlink fix, which hardened the asset sinks but missed this one.)
+  test("rejects a symlinked .html that escapes the document directory", async () => {
+    const docDir = mkdtempSync(join(tmpdir(), "plannotator-sharehtml-"));
+    const secretDir = mkdtempSync(join(tmpdir(), "plannotator-secret-"));
+    const secretPath = join(secretDir, "secret.html");
+    writeFileSync(secretPath, "SECRET_OUTSIDE_CONTENT", "utf-8");
+    symlinkSync(secretPath, join(docDir, "evil.html"));
+    const pagePath = join(docDir, "page.html");
+    writeFileSync(pagePath, MINIMAL_HTML, "utf-8");
+
+    const server = await startAnnotateServer({
+      markdown: "",
+      filePath: pagePath,
+      htmlContent: MINIMAL_HTML,
+      rawHtml: MINIMAL_HTML,
+      renderHtml: true,
+    });
+
+    try {
+      const response = await fetch(
+        `${server.url}/api/share-html?path=${encodeURIComponent(join(docDir, "evil.html"))}`,
+      );
+      expect(response.status).toBe(403);
+      expect(await response.text()).not.toContain("SECRET_OUTSIDE_CONTENT");
     } finally {
       server.stop();
     }

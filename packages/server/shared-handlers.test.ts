@@ -116,4 +116,45 @@ describe("handleServerReady", () => {
 
     expect(opened).toBe(false);
   });
+
+  // Regression: a remote session must surface a reachable URL in the terminal
+  // regardless of URL sharing — otherwise a sharing-disabled remote user is left
+  // with no URL and the agent hangs waiting on the review.
+  test("prints the reachable URL to stderr for a remote session", async () => {
+    const writes: string[] = [];
+    const original = process.stderr.write.bind(process.stderr);
+    (process.stderr as { write: unknown }).write = (chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    };
+    try {
+      await handleServerReady("http://localhost:19432", true, 19432, {
+        skipBrowserOpen: true,
+      });
+    } finally {
+      (process.stderr as { write: unknown }).write = original;
+    }
+    expect(writes.join("")).toContain("http://localhost:19432");
+  });
+
+  test("does not print the URL for a local session (browser opens instead)", async () => {
+    const writes: string[] = [];
+    let opened = "";
+    const original = process.stderr.write.bind(process.stderr);
+    (process.stderr as { write: unknown }).write = (chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    };
+    try {
+      await handleServerReady("http://localhost:3000", false, 3000, {
+        openBrowser: async (u: string) => {
+          opened = u;
+        },
+      });
+    } finally {
+      (process.stderr as { write: unknown }).write = original;
+    }
+    expect(writes.join("")).not.toContain("http://localhost:3000");
+    expect(opened).toBe("http://localhost:3000");
+  });
 });

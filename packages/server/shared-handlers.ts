@@ -172,6 +172,17 @@ export async function handleServerReady(
     }
   }
 
+  // A remote/SSH session can't pop a browser on the user's machine, so the
+  // session URL must be visible in the terminal — independently of whether URL
+  // sharing is enabled. The share link (gated on sharing) is an extra; this
+  // reachable URL is the lifeline. Without it, a sharing-disabled remote user
+  // saw no URL at all and the agent hung waiting on the review.
+  if (isRemote) {
+    process.stderr.write(
+      `\n  Plannotator session ready — open on your local machine (forward port ${port} if needed):\n  ${url}\n\n`,
+    );
+  }
+
   const skipBrowserOpen = options.skipBrowserOpen ?? process.env.PLANNOTATOR_SKIP_BROWSER_OPEN === "1";
   if (skipBrowserOpen) return;
 
