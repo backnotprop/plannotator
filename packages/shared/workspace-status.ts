@@ -45,7 +45,7 @@ export interface GitRepositoryInfo {
 const TEXT_FILE_MAX_BYTES = 2 * 1024 * 1024;
 
 function runGit(cwd: string, args: string[]): { ok: true; stdout: string } | { ok: false; error: string } {
-	const result = spawnSync("git", ["-C", cwd, ...args], {
+	const result = spawnSync("git", ["--no-optional-locks", "-C", cwd, ...args], {
 		encoding: "utf8",
 		maxBuffer: 20 * 1024 * 1024,
 	});
