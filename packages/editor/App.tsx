@@ -3570,14 +3570,10 @@ const App: React.FC = () => {
             }}
             onShare={canShareCurrentSession ? () => { setIsPanelOpen(false); setInitialExportTab('share'); setShowExport(true); } : undefined}
             otherFileAnnotations={otherFileAnnotations}
-            directEdits={directEditsPanelInfo?.map((item) => {
-              const sourceKey = 'sourceKey' in item ? item.sourceKey : undefined;
-              const canDiscard = item.id === 'plan' || typeof sourceKey === 'string';
-              return {
-                ...item,
-                onDiscard: canDiscard ? () => handleDiscardEdits(sourceKey) : undefined,
-              };
-            }) ?? null}
+            directEdits={directEditsPanelInfo?.map((item) => ({
+              ...item,
+              onDiscard: item.id === 'plan' ? () => handleDiscardEdits() : undefined,
+            })) ?? null}
             onOtherFileAnnotationsClick={handleFlashAnnotatedFiles}
           />
           {isPanelOpen && rightSidebarTab === 'ai' && wideModeType === null && !goalSetupMode && canUseAI && (

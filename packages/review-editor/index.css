@@ -228,58 +228,9 @@ diffs-container {
   background: oklch(from var(--primary) l c h / 0.3) !important;
 }
 
-/* File tree styling */
-.file-tree-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.25rem 0.5rem;
-  border-radius: var(--radius-sm);
-  font-size: 0.75rem;
-  cursor: pointer;
-  color: var(--muted-foreground);
-}
-
-.file-tree-item:hover {
-  background: var(--muted);
-  color: var(--foreground);
-}
-
-.file-tree-item.active {
-  background: oklch(from var(--primary) l c h / 0.3);
-  color: var(--primary);
-}
-
+/* Review-specific file tree states; shared base styles live in theme.css. */
 .file-tree-item.scroll-active {
   background: oklch(from var(--foreground) l c h / 0.06);
-}
-
-.file-tree-item.has-annotations {
-  background: oklch(from var(--primary) l c h / 0.08);
-}
-
-.file-tree-item.has-annotations:hover {
-  background: var(--muted);
-}
-
-.file-tree-item.active.has-annotations {
-  background: oklch(from var(--primary) l c h / 0.3);
-}
-
-.file-tree-item .additions {
-  color: var(--success);
-}
-
-.file-tree-item .deletions {
-  color: var(--destructive);
-}
-
-.file-tree-item.active .additions {
-  color: var(--success);
-}
-
-.file-tree-item.active .deletions {
-  color: var(--destructive);
 }
 
 .file-tree-item.staged {

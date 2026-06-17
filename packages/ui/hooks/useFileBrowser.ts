@@ -18,7 +18,6 @@ export interface DirState {
   isLoading: boolean;
   error: string | null;
   workspaceStatus?: WorkspaceStatusPayload;
-  lastChangedAt?: number;
   /** When true, fetches via /api/reference/obsidian/files and opens docs via /api/reference/obsidian/doc */
   isVault?: boolean;
 }
@@ -146,7 +145,6 @@ export function useFileBrowser(): UseFileBrowserReturn {
               ...d,
               tree: data.tree,
               workspaceStatus,
-              lastChangedAt: Date.now(),
               isLoading: false,
               error: null,
             }
@@ -276,6 +274,7 @@ export function useFileBrowser(): UseFileBrowserReturn {
 
     const paths = watchDirsKey.split("\n").filter(Boolean);
     const timers = new Map<string, ReturnType<typeof setTimeout>>();
+    const readyPaths = new Set<string>();
     const params = new URLSearchParams();
     for (const path of paths) params.append("dirPath", path);
     const source = new EventSource(`/api/reference/files/stream?${params.toString()}`);
@@ -287,18 +286,36 @@ export function useFileBrowser(): UseFileBrowserReturn {
         fetchTreeRef.current(path, { quiet: true });
       }, 120));
     };
-    source.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data) as { type?: string; dirPath?: string };
-        if (data.type !== "changed") return;
-        if (typeof data.dirPath === "string" && paths.includes(data.dirPath)) {
-          scheduleFetch(data.dirPath);
-          return;
-        }
-      } catch {
+    const scheduleEventFetch = (dirPath: unknown) => {
+      if (typeof dirPath === "string" && paths.includes(dirPath)) {
+        scheduleFetch(dirPath);
         return;
       }
       for (const path of paths) scheduleFetch(path);
+    };
+    const hasSeenReady = (dirPath: unknown): boolean => {
+      if (typeof dirPath === "string" && paths.includes(dirPath)) {
+        if (readyPaths.has(dirPath)) return true;
+        readyPaths.add(dirPath);
+        return false;
+      }
+
+      const hadAll = paths.every((path) => readyPaths.has(path));
+      for (const path of paths) readyPaths.add(path);
+      return hadAll;
+    };
+    source.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data) as { type?: string; dirPath?: string };
+        if (data.type === "ready") {
+          if (hasSeenReady(data.dirPath)) scheduleEventFetch(data.dirPath);
+          return;
+        }
+        if (data.type !== "changed") return;
+        scheduleEventFetch(data.dirPath);
+      } catch {
+        return;
+      }
     };
 
     return () => {
