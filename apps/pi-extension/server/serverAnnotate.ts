@@ -432,7 +432,8 @@ export async function startAnnotateServer(options: {
 			handleObsidianDocRequest(res, url);
 		} else if (url.pathname === "/api/reference/files" && req.method === "GET") {
 			handleFileBrowserRequest(res, url);
-		} else if (handleFileBrowserStreamRequest(req, res, url)) {
+		} else if (url.pathname === "/api/reference/files/stream" && req.method === "GET") {
+			handleFileBrowserStreamRequest(req, res, url);
 			return;
 		} else if (url.pathname === "/favicon.svg") {
 			handleFavicon(res);

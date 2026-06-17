@@ -285,7 +285,8 @@ export async function startPlanReviewServer(options: {
 			handleObsidianDocRequest(res, url);
 		} else if (url.pathname === "/api/reference/files" && req.method === "GET") {
 			handleFileBrowserRequest(res, url);
-		} else if (handleFileBrowserStreamRequest(req, res, url)) {
+		} else if (url.pathname === "/api/reference/files/stream" && req.method === "GET") {
+			handleFileBrowserStreamRequest(req, res, url);
 			return;
 		} else if (
 			url.pathname === "/api/plan/vscode-diff" &&
