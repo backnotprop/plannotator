@@ -139,13 +139,19 @@ function parsePorcelain(output: string): Array<{
 
 function parseNumstat(output: string): Map<string, { additions: number; deletions: number }> {
 	const counts = new Map<string, { additions: number; deletions: number }>();
-	for (const record of output.split("\0")) {
+	const records = output.split("\0");
+	for (let i = 0; i < records.length; i++) {
+		const record = records[i];
 		if (!record) continue;
 		const parts = record.split("\t");
 		if (parts.length < 3) continue;
 		const additions = parts[0] === "-" ? 0 : Number.parseInt(parts[0] ?? "0", 10);
 		const deletions = parts[1] === "-" ? 0 : Number.parseInt(parts[1] ?? "0", 10);
-		const path = parts.slice(2).join("\t");
+		let path = parts.slice(2).join("\t");
+		if (!path) {
+			path = records[i + 2] ?? "";
+			i += 2;
+		}
 		if (!path) continue;
 		counts.set(path, {
 			additions: Number.isFinite(additions) ? additions : 0,

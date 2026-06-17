@@ -229,6 +229,8 @@ const feedbackLossDescription = (annotationCount: number, hasDirectEdits: boolea
   return parts.length > 0 ? parts.join(' and ') : 'feedback';
 };
 
+type SourceFileEditWarningAction = 'send-feedback' | 'approve' | 'close';
+
 const App: React.FC = () => {
   const [markdown, setMarkdown] = useState(DEMO_PLAN_CONTENT);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
@@ -245,6 +247,9 @@ const App: React.FC = () => {
   const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
   const [showClaudeCodeWarning, setShowClaudeCodeWarning] = useState(false);
   const [showExitWarning, setShowExitWarning] = useState(false);
+  const [showSourceFileEditWarning, setShowSourceFileEditWarning] = useState(false);
+  const [sourceFileEditWarningAction, setSourceFileEditWarningAction] = useState<SourceFileEditWarningAction>('send-feedback');
+  const sourceFileEditWarningContinuationRef = useRef<(() => void | Promise<void>) | null>(null);
   // When the warning dialog confirms, route to the handler matching the button that opened it.
   const [exitWarningAction, setExitWarningAction] = useState<'close' | 'approve'>('close');
   const [showAgentWarning, setShowAgentWarning] = useState(false);
@@ -2143,11 +2148,34 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const warnFinishSourceFileEdits = useCallback(() => {
-    toast('Save or discard file edits first', {
-      description: 'Unsaved editor text is not sent as feedback until it is saved to disk.',
-      duration: 5000,
-    });
+  const confirmUnsavedSourceFileEdits = useCallback((
+    action: SourceFileEditWarningAction,
+    continueAction: () => void | Promise<void>,
+  ) => {
+    sourceFileEditWarningContinuationRef.current = continueAction;
+    setSourceFileEditWarningAction(action);
+    setShowSourceFileEditWarning(true);
+  }, []);
+
+  const maybeConfirmUnsavedSourceFileEdits = useCallback((
+    action: SourceFileEditWarningAction,
+    continueAction: () => void | Promise<void>,
+  ): boolean => {
+    if (!hasUnsavedSourceFileBuffers) return false;
+    confirmUnsavedSourceFileEdits(action, continueAction);
+    return true;
+  }, [confirmUnsavedSourceFileEdits, hasUnsavedSourceFileBuffers]);
+
+  const closeSourceFileEditWarning = useCallback(() => {
+    sourceFileEditWarningContinuationRef.current = null;
+    setShowSourceFileEditWarning(false);
+  }, []);
+
+  const confirmSourceFileEditWarning = useCallback(() => {
+    const continuation = sourceFileEditWarningContinuationRef.current;
+    sourceFileEditWarningContinuationRef.current = null;
+    setShowSourceFileEditWarning(false);
+    void continuation?.();
   }, []);
 
   // Global keyboard shortcuts (Cmd/Ctrl+Enter to submit)
@@ -2165,6 +2193,7 @@ const App: React.FC = () => {
 
       // Don't intercept if any modal is open
       if (showExport || showImport || showFeedbackPrompt || showClaudeCodeWarning ||
+          showSourceFileEditWarning ||
           showExitWarning || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
 
       // Don't intercept if already submitted, submitting, or exiting
@@ -2176,11 +2205,6 @@ const App: React.FC = () => {
       // While the markdown editor is open, submit shortcuts belong to editing,
       // not the review session.
       if (isEditingMarkdown) return;
-
-      if (hasUnsavedSourceFileBuffers) {
-        warnFinishSourceFileEdits();
-        return;
-      }
 
       // Folder files are the active review target; normal linked docs are side
       // references and should not submit the root plan.
@@ -2203,28 +2227,35 @@ const App: React.FC = () => {
       // Otherwise: send feedback.
       if (annotateMode) {
         if (gate && !hasFeedbackToSend) {
+          if (maybeConfirmUnsavedSourceFileEdits('approve', () => handleAnnotateApprove())) return;
           handleAnnotateApprove();
           return;
         }
+        if (maybeConfirmUnsavedSourceFileEdits('send-feedback', () => handleAnnotateFeedback())) return;
         handleAnnotateFeedback();
         return;
       }
 
       // No feedback → Approve, otherwise → Send Feedback
       if (!hasFeedbackToSend) {
-        // Check if agent exists for OpenCode users
-        if (origin === 'opencode') {
-          const warning = getAgentWarning();
-          if (warning) {
-            setAgentWarningMessage(warning);
-            setShowAgentWarning(true);
-            return;
+        const approve = () => {
+          // Check if agent exists for OpenCode users
+          if (origin === 'opencode') {
+            const warning = getAgentWarning();
+            if (warning) {
+              setAgentWarningMessage(warning);
+              setShowAgentWarning(true);
+              return;
+            }
           }
-        }
-        handleApprove();
+          handleApprove();
+        };
+        if (maybeConfirmUnsavedSourceFileEdits('approve', approve)) return;
+        approve();
       } else {
         // Direct edits route through deny too: on Claude Code, deny is the only
         // channel whose output carries feedback to the agent.
+        if (maybeConfirmUnsavedSourceFileEdits('send-feedback', () => handleDeny())) return;
         handleDeny();
       }
     };
@@ -2232,12 +2263,12 @@ const App: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
-    showExport, showImport, showFeedbackPrompt, showClaudeCodeWarning, showExitWarning, showAgentWarning,
+    showExport, showImport, showFeedbackPrompt, showClaudeCodeWarning, showSourceFileEditWarning, showExitWarning, showAgentWarning,
     showPermissionModeSetup, pendingPasteImage,
     submitted, isSubmitting, isExiting, goalSetupAction.isSubmitting, isApiMode, isEditingMarkdown, linkedDocHook.isActive, annotations.length, codeAnnotations.length, externalAnnotations.length, annotateMode,
-    gate, hasFeedbackToSend, hasUnsavedSourceFileBuffers, goalSetupMode, goalSetupAction.canSubmit,
+    gate, hasFeedbackToSend, goalSetupMode, goalSetupAction.canSubmit,
     annotateSource, origin, getAgentWarning,
-    warnFinishSourceFileEdits,
+    maybeConfirmUnsavedSourceFileEdits,
   ]);
 
   const handleAddAnnotation = (ann: Annotation) => {
@@ -2809,6 +2840,7 @@ const App: React.FC = () => {
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
       if (showExport || showFeedbackPrompt || showClaudeCodeWarning ||
+          showSourceFileEditWarning ||
           showExitWarning || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
 
       if (submitted || !isApiMode) return;
@@ -2843,7 +2875,7 @@ const App: React.FC = () => {
     window.addEventListener('keydown', handleSaveShortcut);
     return () => window.removeEventListener('keydown', handleSaveShortcut);
   }, [
-    showExport, showFeedbackPrompt, showClaudeCodeWarning, showExitWarning, showAgentWarning,
+    showExport, showFeedbackPrompt, showClaudeCodeWarning, showSourceFileEditWarning, showExitWarning, showAgentWarning,
     showPermissionModeSetup, pendingPasteImage,
     submitted, isApiMode, isEditingMarkdown, handleSaveEditedSourceFile, displayedMarkdown, annotationsOutput,
   ]);
@@ -2857,6 +2889,7 @@ const App: React.FC = () => {
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
       if (showExport || showFeedbackPrompt || showClaudeCodeWarning ||
+          showSourceFileEditWarning ||
           showExitWarning || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
 
       if (submitted) return;
@@ -2868,7 +2901,7 @@ const App: React.FC = () => {
     window.addEventListener('keydown', handlePrintShortcut);
     return () => window.removeEventListener('keydown', handlePrintShortcut);
   }, [
-    showExport, showFeedbackPrompt, showClaudeCodeWarning, showExitWarning, showAgentWarning,
+    showExport, showFeedbackPrompt, showClaudeCodeWarning, showSourceFileEditWarning, showExitWarning, showAgentWarning,
     showPermissionModeSetup, pendingPasteImage, submitted,
   ]);
 
@@ -2905,65 +2938,74 @@ const App: React.FC = () => {
   };
 
   const handleHeaderAnnotateExit = useCallback(() => {
-    if (hasUnsavedSourceFileBuffers) {
-      warnFinishSourceFileEdits();
-      return;
-    }
-    if (hasFeedbackToSend) {
-      setExitWarningAction('close');
-      setShowExitWarning(true);
-    } else {
-      headerHandlersRef.current.handleAnnotateExit();
-    }
-  }, [hasFeedbackToSend, hasUnsavedSourceFileBuffers, warnFinishSourceFileEdits]);
+    const close = () => {
+      if (hasFeedbackToSend) {
+        setExitWarningAction('close');
+        setShowExitWarning(true);
+      } else {
+        headerHandlersRef.current.handleAnnotateExit();
+      }
+    };
+    if (maybeConfirmUnsavedSourceFileEdits('close', close)) return;
+    close();
+  }, [hasFeedbackToSend, maybeConfirmUnsavedSourceFileEdits]);
 
   const handleHeaderFeedback = useCallback(() => {
-    const h = headerHandlersRef.current;
-    if (hasUnsavedSourceFileBuffers) {
-      warnFinishSourceFileEdits();
-      return;
-    }
-    // Direct edits count as feedback — deny is the only Claude Code channel
-    // whose output carries feedback to the agent.
-    if (!hasFeedbackToSend) {
-      setShowFeedbackPrompt(true);
-    } else {
-      h.handleDeny();
-    }
-  }, [hasFeedbackToSend, hasUnsavedSourceFileBuffers, warnFinishSourceFileEdits]);
+    const sendFeedback = () => {
+      const h = headerHandlersRef.current;
+      // Direct edits count as feedback — deny is the only Claude Code channel
+      // whose output carries feedback to the agent.
+      if (!hasFeedbackToSend) {
+        setShowFeedbackPrompt(true);
+      } else {
+        h.handleDeny();
+      }
+    };
+    if (maybeConfirmUnsavedSourceFileEdits('send-feedback', sendFeedback)) return;
+    sendFeedback();
+  }, [hasFeedbackToSend, maybeConfirmUnsavedSourceFileEdits]);
 
   const handleHeaderApprove = useCallback(() => {
-    const h = headerHandlersRef.current;
-    if (hasUnsavedSourceFileBuffers) {
-      warnFinishSourceFileEdits();
-      return;
-    }
-    if (annotateMode) {
-      if (hasFeedbackToSend) {
-        setExitWarningAction('approve');
-        setShowExitWarning(true);
+    const approve = () => {
+      const h = headerHandlersRef.current;
+      if (annotateMode) {
+        if (hasFeedbackToSend) {
+          setExitWarningAction('approve');
+          setShowExitWarning(true);
+          return;
+        }
+        h.handleAnnotateApprove();
         return;
       }
-      h.handleAnnotateApprove();
-      return;
-    }
-    if (origin === 'claude-code' && hasFeedbackToSend) {
-      setShowClaudeCodeWarning(true);
-      return;
-    }
-    if (origin === 'opencode') {
-      const warning = h.getAgentWarning();
-      if (warning) {
-        setAgentWarningMessage(warning);
-        setShowAgentWarning(true);
+      if (origin === 'claude-code' && hasFeedbackToSend) {
+        setShowClaudeCodeWarning(true);
         return;
       }
-    }
-    h.handleApprove();
-  }, [annotateMode, hasFeedbackToSend, hasUnsavedSourceFileBuffers, origin, warnFinishSourceFileEdits]);
+      if (origin === 'opencode') {
+        const warning = h.getAgentWarning();
+        if (warning) {
+          setAgentWarningMessage(warning);
+          setShowAgentWarning(true);
+          return;
+        }
+      }
+      h.handleApprove();
+    };
+    if (maybeConfirmUnsavedSourceFileEdits('approve', approve)) return;
+    approve();
+  }, [annotateMode, hasFeedbackToSend, maybeConfirmUnsavedSourceFileEdits, origin]);
 
-  const handleHeaderAnnotateFeedback = useCallback(() => headerHandlersRef.current.handleAnnotateFeedback(), []);
-  const handleHeaderAnnotateApprove = useCallback(() => headerHandlersRef.current.handleAnnotateApprove(), []);
+  const handleHeaderAnnotateFeedback = useCallback(() => {
+    const sendFeedback = () => headerHandlersRef.current.handleAnnotateFeedback();
+    if (maybeConfirmUnsavedSourceFileEdits('send-feedback', sendFeedback)) return;
+    sendFeedback();
+  }, [maybeConfirmUnsavedSourceFileEdits]);
+
+  const handleHeaderAnnotateApprove = useCallback(() => {
+    const approve = () => headerHandlersRef.current.handleAnnotateApprove();
+    if (maybeConfirmUnsavedSourceFileEdits('approve', approve)) return;
+    approve();
+  }, [maybeConfirmUnsavedSourceFileEdits]);
   const handleHeaderDownloadAnnotations = useCallback(() => headerHandlersRef.current.handleDownloadAnnotations(), []);
   const handleHeaderCopyAgentInstructions = useCallback(() => headerHandlersRef.current.handleCopyAgentInstructions(), []);
   const handleHeaderCopyShareLink = useCallback(() => headerHandlersRef.current.handleCopyShareLink(), []);
@@ -3650,6 +3692,30 @@ const App: React.FC = () => {
               : `To provide feedback, select text and add annotations. ${agentName} will use your annotations to revise the ${annotateMode ? 'document' : 'plan'}.`
           }
           variant="info"
+        />
+
+        {/* Unsaved source-file edit warning dialog */}
+        <ConfirmDialog
+          isOpen={showSourceFileEditWarning}
+          onClose={closeSourceFileEditWarning}
+          onConfirm={confirmSourceFileEditWarning}
+          title={sourceFileEditWarningAction === 'close' ? 'Unsaved File Edits' : "File Edits Won't Be Sent"}
+          message={
+            sourceFileEditWarningAction === 'close'
+              ? <>You have unsaved file edits. They are not saved to disk and will be lost if you close this session.</>
+              : <>You have unsaved file edits. They are not saved to disk, and {agentName} won't get them if you {sourceFileEditWarningAction === 'approve' ? 'approve' : 'send feedback'}.</>
+          }
+          subMessage="Save or discard the file edits first if you want Plannotator to keep them."
+          confirmText={
+            sourceFileEditWarningAction === 'approve'
+              ? 'Approve Anyway'
+              : sourceFileEditWarningAction === 'close'
+                ? 'Close Anyway'
+                : 'Send Anyway'
+          }
+          cancelText="Cancel"
+          variant="warning"
+          showCancel
         />
 
         {/* Claude Code feedback warning dialog */}

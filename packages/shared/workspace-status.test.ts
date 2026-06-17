@@ -75,4 +75,28 @@ describe("workspace status", () => {
 		expect(afterCommit.totals.files).toBe(0);
 		expect(afterCommit.files).toEqual({});
 	});
+
+	test("keeps line counts for renamed files with edits", () => {
+		const repo = tempRepo();
+		const docs = join(repo, "docs");
+		mkdirSync(docs);
+		writeFileSync(join(docs, "old.md"), "one\ntwo\nthree\n");
+		git(repo, "add", "-A");
+		git(repo, "commit", "-m", "init");
+
+		git(repo, "mv", join("docs", "old.md"), join("docs", "new.md"));
+		writeFileSync(join(docs, "new.md"), "one\nTWO\nthree\nfour\n");
+
+		const status = getWorkspaceStatusForDirectory(docs);
+		const realDocs = realpathSync(docs);
+		const change = status.files[join(realDocs, "new.md")];
+
+		expect(status.available).toBe(true);
+		expect(change?.status).toBe("renamed");
+		expect(change?.oldPath).toBe(join(realDocs, "old.md"));
+		expect(change?.additions).toBe(2);
+		expect(change?.deletions).toBe(1);
+		expect(status.totals.additions).toBe(2);
+		expect(status.totals.deletions).toBe(1);
+	});
 });
