@@ -38,6 +38,10 @@ export interface UseFileBrowserReturn {
   setActiveFile: (path: string | null) => void;
 }
 
+function isPermanentFileBrowserFetchError(status: number): boolean {
+  return status >= 400 && status < 500;
+}
+
 function normalizeRoot(path: string): string {
   return path.replace(/\\/g, "/").replace(/\/+$/, "");
 }
@@ -114,10 +118,20 @@ export function useFileBrowser(): UseFileBrowserReturn {
       const data = await res.json();
 
       if (!res.ok || data.error) {
+        const error = data.error || "Failed to load";
+        const shouldSurfaceError = !options.quiet || isPermanentFileBrowserFetchError(res.status);
         setDirs((prev) =>
           prev.map((d) =>
             d.path === dirPath
-              ? { ...d, isLoading: false, error: options.quiet ? d.error : data.error || "Failed to load" }
+              ? shouldSurfaceError
+                ? {
+                  ...d,
+                  tree: options.quiet ? [] : d.tree,
+                  workspaceStatus: options.quiet ? undefined : d.workspaceStatus,
+                  isLoading: false,
+                  error,
+                }
+                : { ...d, isLoading: false, error: d.error }
               : d
           )
         );
