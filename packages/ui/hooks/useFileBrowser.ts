@@ -39,7 +39,7 @@ export interface UseFileBrowserReturn {
 }
 
 function normalizeRoot(path: string): string {
-  return path.replace(/\/+$/, "");
+  return path.replace(/\\/g, "/").replace(/\/+$/, "");
 }
 
 function remapWorkspaceStatusForDir(
@@ -49,18 +49,20 @@ function remapWorkspaceStatusForDir(
   if (!status?.rootPath) return status;
   const fromRoot = normalizeRoot(status.rootPath);
   const toRoot = normalizeRoot(dirPath);
-  if (!fromRoot || fromRoot === toRoot) return status;
+  if (!fromRoot) return status;
 
   const files: WorkspaceStatusPayload["files"] = {};
   for (const [path, change] of Object.entries(status.files)) {
-    const nextPath = path === fromRoot
+    const normalizedPath = normalizeRoot(path);
+    const nextPath = normalizedPath === fromRoot
       ? toRoot
-      : path.startsWith(`${fromRoot}/`)
-        ? `${toRoot}${path.slice(fromRoot.length)}`
-        : path;
-    const nextOldPath = change.oldPath && change.oldPath.startsWith(`${fromRoot}/`)
-      ? `${toRoot}${change.oldPath.slice(fromRoot.length)}`
-      : change.oldPath;
+      : normalizedPath.startsWith(`${fromRoot}/`)
+        ? `${toRoot}${normalizedPath.slice(fromRoot.length)}`
+        : normalizedPath;
+    const normalizedOldPath = change.oldPath ? normalizeRoot(change.oldPath) : undefined;
+    const nextOldPath = normalizedOldPath && normalizedOldPath.startsWith(`${fromRoot}/`)
+      ? `${toRoot}${normalizedOldPath.slice(fromRoot.length)}`
+      : normalizedOldPath;
     files[nextPath] = {
       ...change,
       path: nextPath,
@@ -97,7 +99,9 @@ export function useFileBrowser(): UseFileBrowserReturn {
       const exists = prev.find((d) => d.path === dirPath);
       if (exists) {
         return prev.map((d) =>
-          d.path === dirPath ? { ...d, isLoading: options.quiet ? d.isLoading : true, error: null } : d
+          d.path === dirPath
+            ? { ...d, isLoading: options.quiet ? d.isLoading : true, error: options.quiet ? d.error : null }
+            : d
         );
       }
       return [...prev, { path: dirPath, name, tree: [], isLoading: true, error: null }];
@@ -112,7 +116,9 @@ export function useFileBrowser(): UseFileBrowserReturn {
       if (!res.ok || data.error) {
         setDirs((prev) =>
           prev.map((d) =>
-            d.path === dirPath ? { ...d, isLoading: false, error: data.error || "Failed to load" } : d
+            d.path === dirPath
+              ? { ...d, isLoading: false, error: options.quiet ? d.error : data.error || "Failed to load" }
+              : d
           )
         );
         return;
@@ -134,18 +140,22 @@ export function useFileBrowser(): UseFileBrowserReturn {
         )
       );
 
-      const rootFolders = (data.tree as VaultNode[])
-        .filter((n) => n.type === "folder")
-        .map((n) => `${dirPath}:${n.path}`);
-      setExpandedFolders((prev) => {
-        const next = new Set(prev);
-        rootFolders.forEach((f) => next.add(f));
-        return next;
-      });
+      if (!options.quiet) {
+        const rootFolders = (data.tree as VaultNode[])
+          .filter((n) => n.type === "folder")
+          .map((n) => `${dirPath}:${n.path}`);
+        setExpandedFolders((prev) => {
+          const next = new Set(prev);
+          rootFolders.forEach((f) => next.add(f));
+          return next;
+        });
+      }
     } catch {
       setDirs((prev) =>
         prev.map((d) =>
-          d.path === dirPath ? { ...d, isLoading: false, error: "Failed to connect to server" } : d
+          d.path === dirPath
+            ? { ...d, isLoading: false, error: options.quiet ? d.error : "Failed to connect to server" }
+            : d
         )
       );
     }

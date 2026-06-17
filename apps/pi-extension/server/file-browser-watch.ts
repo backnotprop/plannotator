@@ -3,7 +3,7 @@ import { existsSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { isAbsolute, relative } from "node:path";
 
-import { FILE_BROWSER_EXCLUDED } from "../generated/reference-common.js";
+import { isFileBrowserExcludedPath } from "../generated/reference-common.js";
 import { resolveUserPath } from "../generated/resolve-file.js";
 import { getGitMetadataWatchPaths } from "../generated/workspace-status.js";
 import { json } from "./helpers.js";
@@ -17,7 +17,7 @@ interface FileBrowserChangeEvent {
 
 interface WatchEntry {
 	dirPath: string;
-	subscribers: Set<ServerResponse>;
+	subscribers: Map<ServerResponse, string>;
 	contentWatcher: FSWatcher | null;
 	gitWatcher: FSWatcher | null;
 	debounceTimer: ReturnType<typeof setTimeout> | null;
@@ -34,10 +34,7 @@ function serialize(event: FileBrowserChangeEvent): string {
 function isExcludedPath(path: string, root: string): boolean {
 	const rel = relative(root, path).replace(/\\/g, "/");
 	if (!rel || rel.startsWith("..") || isAbsolute(rel)) return false;
-	return FILE_BROWSER_EXCLUDED.some((entry) => {
-		const name = entry.replace(/\/$/, "");
-		return rel === name || rel.startsWith(`${name}/`) || rel.includes(`/${name}/`);
-	});
+	return isFileBrowserExcludedPath(rel);
 }
 
 function isValidDirectory(dirPath: string): boolean {
@@ -49,13 +46,13 @@ function isValidDirectory(dirPath: string): boolean {
 }
 
 function broadcast(entry: WatchEntry, reason: FileBrowserChangeEvent["reason"]): void {
-	const payload = serialize({
-		type: "changed",
-		dirPath: entry.dirPath,
-		reason,
-		timestamp: Date.now(),
-	});
-	for (const res of entry.subscribers) {
+	for (const [res, clientDirPath] of entry.subscribers) {
+		const payload = serialize({
+			type: "changed",
+			dirPath: clientDirPath,
+			reason,
+			timestamp: Date.now(),
+		});
 		try {
 			res.write(payload);
 		} catch {
@@ -90,7 +87,7 @@ function ensureWatcher(dirPath: string): WatchEntry {
 
 	const entry: WatchEntry = {
 		dirPath,
-		subscribers: new Set(),
+		subscribers: new Map(),
 		contentWatcher: null,
 		gitWatcher: null,
 		debounceTimer: null,
@@ -136,13 +133,17 @@ export function handleFileBrowserStreamRequest(req: IncomingMessage, res: Server
 	}
 
 	const dirPaths: string[] = [];
+	const clientDirPaths: string[] = [];
 	for (const rawDirPath of rawDirPaths) {
 		const dirPath = resolveUserPath(rawDirPath);
 		if (!isValidDirectory(dirPath)) {
 			json(res, { error: "Invalid directory path" }, 400);
 			return true;
 		}
-		if (!dirPaths.includes(dirPath)) dirPaths.push(dirPath);
+		if (!dirPaths.includes(dirPath)) {
+			dirPaths.push(dirPath);
+			clientDirPaths.push(rawDirPath);
+		}
 	}
 
 	const entries = dirPaths.map((dirPath) => ensureWatcher(dirPath));
@@ -152,14 +153,16 @@ export function handleFileBrowserStreamRequest(req: IncomingMessage, res: Server
 		Connection: "keep-alive",
 	});
 	res.setTimeout(0);
-	for (const entry of entries) {
+	for (let i = 0; i < entries.length; i++) {
+		const entry = entries[i]!;
+		const clientDirPath = clientDirPaths[i] ?? entry.dirPath;
 		res.write(serialize({
 			type: "ready",
-			dirPath: entry.dirPath,
+			dirPath: clientDirPath,
 			reason: "initial",
 			timestamp: Date.now(),
 		}));
-		entry.subscribers.add(res);
+		entry.subscribers.set(res, clientDirPath);
 	}
 
 	const heartbeat = setInterval(() => {

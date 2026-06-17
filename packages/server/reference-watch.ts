@@ -1,7 +1,7 @@
 import chokidar, { type FSWatcher } from "chokidar";
 import { existsSync, statSync } from "fs";
 import { isAbsolute, relative } from "path";
-import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
+import { isFileBrowserExcludedPath } from "@plannotator/shared/reference-common";
 import { resolveUserPath } from "@plannotator/shared/resolve-file";
 import { getGitMetadataWatchPaths } from "@plannotator/shared/workspace-status";
 
@@ -14,7 +14,7 @@ interface FileBrowserChangeEvent {
 
 interface WatchEntry {
 	dirPath: string;
-	subscribers: Set<ReadableStreamDefaultController>;
+	subscribers: Map<ReadableStreamDefaultController, string>;
 	contentWatcher: FSWatcher | null;
 	gitWatcher: FSWatcher | null;
 	debounceTimer: ReturnType<typeof setTimeout> | null;
@@ -32,10 +32,7 @@ function serialize(event: FileBrowserChangeEvent): Uint8Array {
 function isExcludedPath(path: string, root: string): boolean {
 	const rel = relative(root, path).replace(/\\/g, "/");
 	if (!rel || rel.startsWith("..") || isAbsolute(rel)) return false;
-	return FILE_BROWSER_EXCLUDED.some((entry) => {
-		const name = entry.replace(/\/$/, "");
-		return rel === name || rel.startsWith(`${name}/`) || rel.includes(`/${name}/`);
-	});
+	return isFileBrowserExcludedPath(rel);
 }
 
 function isValidDirectory(dirPath: string): boolean {
@@ -47,13 +44,13 @@ function isValidDirectory(dirPath: string): boolean {
 }
 
 function broadcast(entry: WatchEntry, reason: FileBrowserChangeEvent["reason"]): void {
-	const payload = serialize({
-		type: "changed",
-		dirPath: entry.dirPath,
-		reason,
-		timestamp: Date.now(),
-	});
-	for (const subscriber of entry.subscribers) {
+	for (const [subscriber, clientDirPath] of entry.subscribers) {
+		const payload = serialize({
+			type: "changed",
+			dirPath: clientDirPath,
+			reason,
+			timestamp: Date.now(),
+		});
 		try {
 			subscriber.enqueue(payload);
 		} catch {
@@ -88,7 +85,7 @@ function ensureWatcher(dirPath: string): WatchEntry {
 
 	const entry: WatchEntry = {
 		dirPath,
-		subscribers: new Set(),
+		subscribers: new Map(),
 		contentWatcher: null,
 		gitWatcher: null,
 		debounceTimer: null,
@@ -135,12 +132,16 @@ export function handleFileBrowserFilesStream(
 	}
 
 	const dirPaths: string[] = [];
+	const clientDirPaths: string[] = [];
 	for (const rawDirPath of rawDirPaths) {
 		const dirPath = resolveUserPath(rawDirPath);
 		if (!isValidDirectory(dirPath)) {
 			return Response.json({ error: "Invalid directory path" }, { status: 400 });
 		}
-		if (!dirPaths.includes(dirPath)) dirPaths.push(dirPath);
+		if (!dirPaths.includes(dirPath)) {
+			dirPaths.push(dirPath);
+			clientDirPaths.push(rawDirPath);
+		}
 	}
 
 	options?.disableIdleTimeout?.();
@@ -151,11 +152,13 @@ export function handleFileBrowserFilesStream(
 	const stream = new ReadableStream({
 		start(controller) {
 			controllerRef = controller;
-			for (const entry of entries) {
-				entry.subscribers.add(controller);
+			for (let i = 0; i < entries.length; i++) {
+				const entry = entries[i]!;
+				const clientDirPath = clientDirPaths[i] ?? entry.dirPath;
+				entry.subscribers.set(controller, clientDirPath);
 				controller.enqueue(serialize({
 					type: "ready",
-					dirPath: entry.dirPath,
+					dirPath: clientDirPath,
 					reason: "initial",
 					timestamp: Date.now(),
 				}));

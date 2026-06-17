@@ -160,4 +160,28 @@ describe("handleFileBrowserFiles", () => {
 		expect(data.workspaceStatus.files[join(realDocs, "new.md")]?.status).toBe("untracked");
 		expect(data.workspaceStatus.files[join(realDocs, "plan.md")]?.additions).toBe(2);
 	});
+
+	test("does not reintroduce git changes from excluded folders", async () => {
+		const root = makeTempDir("plannotator-files-excluded-");
+		git(root, "init", "-b", "main");
+		git(root, "config", "user.email", "test@test");
+		git(root, "config", "user.name", "Test");
+		writeTempFile(root, "docs/visible.md", "visible\n");
+		writeTempFile(root, "dist/generated.md", "before\n");
+		git(root, "add", "-A");
+		git(root, "commit", "-m", "init");
+
+		writeTempFile(root, "dist/generated.md", "after\n");
+		writeTempFile(root, "node_modules/pkg/readme.md", "hidden\n");
+
+		const url = new URL("http://localhost/api/reference/files");
+		url.searchParams.set("dirPath", root);
+		const res = await handleFileBrowserFiles(new Request(url.toString()));
+		const data = await res.json() as { tree: VaultNode[]; workspaceStatus: WorkspaceStatusPayload };
+
+		expect(res.status).toBe(200);
+		expect(flattenTree(data.tree).sort()).toEqual(["docs/visible.md"]);
+		expect(data.workspaceStatus.totals.files).toBe(0);
+		expect(data.workspaceStatus.files).toEqual({});
+	});
 });

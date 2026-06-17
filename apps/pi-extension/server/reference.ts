@@ -21,8 +21,10 @@ import {
 	type VaultNode,
 	buildFileTree,
 	FILE_BROWSER_EXCLUDED,
+	isFileBrowserExcludedPath,
 } from "../generated/reference-common.js";
 import {
+	filterWorkspaceStatusForDirectory,
 	getWorkspaceStatusForDirectory,
 	getWorkspaceStatusRelativePaths,
 	type WorkspaceFileChange,
@@ -199,13 +201,14 @@ function walkMarkdownFiles(dir: string, root: string, results: string[], extensi
 			const relative = join(dir, entry.name)
 				.slice(root.length + 1)
 				.replace(/\\/g, "/");
+			if (isFileBrowserExcludedPath(relative)) continue;
 			results.push(relative);
 		}
 	}
 }
 
 function includeWorkspaceFile(relativePath: string, _change: WorkspaceFileChange): boolean {
-	return FILE_BROWSER_EXTENSIONS.test(relativePath);
+	return FILE_BROWSER_EXTENSIONS.test(relativePath) && !isFileBrowserExcludedPath(relativePath);
 }
 
 /** Serve a linked markdown document. Uses shared resolveMarkdownFile for parity with Bun server. */
@@ -521,7 +524,7 @@ export function handleFileBrowserRequest(res: Res, url: URL): void {
 		const diskFiles: string[] = [];
 		walkMarkdownFiles(resolvedDir, resolvedDir, diskFiles);
 		for (const file of diskFiles) files.add(file);
-		const workspaceStatus = getWorkspaceStatusForDirectory(resolvedDir);
+		const workspaceStatus = filterWorkspaceStatusForDirectory(getWorkspaceStatusForDirectory(resolvedDir), resolvedDir, includeWorkspaceFile);
 		for (const file of getWorkspaceStatusRelativePaths(workspaceStatus, resolvedDir, includeWorkspaceFile)) {
 			files.add(file);
 		}

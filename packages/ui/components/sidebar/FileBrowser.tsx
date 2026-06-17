@@ -38,6 +38,31 @@ interface AggregateWorkspaceChange {
   files: number;
 }
 
+export function normalizePathForLookup(path: string): string {
+  return path.replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
+function normalizeWorkspaceStatus(
+  workspaceStatus?: WorkspaceStatusPayload
+): WorkspaceStatusPayload | undefined {
+  if (!workspaceStatus) return workspaceStatus;
+  const files: WorkspaceStatusPayload["files"] = {};
+  for (const [path, change] of Object.entries(workspaceStatus.files ?? {})) {
+    const normalizedPath = normalizePathForLookup(path);
+    const normalizedOldPath = change.oldPath ? normalizePathForLookup(change.oldPath) : undefined;
+    files[normalizedPath] = {
+      ...change,
+      path: normalizedPath,
+      oldPath: normalizedOldPath,
+    };
+  }
+  return {
+    ...workspaceStatus,
+    rootPath: normalizePathForLookup(workspaceStatus.rootPath),
+    files,
+  };
+}
+
 /** Recursively sum annotation counts for all descendant files of a folder node */
 function getAggregateCount(
   node: VaultNode,
@@ -54,14 +79,22 @@ function getAggregateCount(
   return total;
 }
 
-function getWorkspaceChange(
+export function getWorkspaceChange(
   absolutePath: string,
   workspaceStatus?: WorkspaceStatusPayload
 ): WorkspaceFileChange | undefined {
-  return workspaceStatus?.files?.[absolutePath];
+  const files = workspaceStatus?.files;
+  if (!files) return undefined;
+  const normalizedPath = normalizePathForLookup(absolutePath);
+  const direct = files[absolutePath] ?? files[normalizedPath];
+  if (direct) return direct;
+  for (const [path, change] of Object.entries(files)) {
+    if (normalizePathForLookup(path) === normalizedPath) return change;
+  }
+  return undefined;
 }
 
-function getAggregateWorkspaceChange(
+export function getAggregateWorkspaceChange(
   node: VaultNode,
   dirPath: string,
   workspaceStatus?: WorkspaceStatusPayload
@@ -232,6 +265,8 @@ const DirSection: React.FC<{
   highlightedFiles?: Set<string>;
   editStatuses?: Map<string, FileEditStatus>;
 }> = ({ dir, expandedFolders, onToggleFolder, onSelectFile, activeFile, onRetry, annotationCounts, highlightedFiles, editStatuses }) => {
+  const workspaceStatus = React.useMemo(() => normalizeWorkspaceStatus(dir.workspaceStatus), [dir.workspaceStatus]);
+
   if (dir.isLoading) {
     return (
       <div className="p-3 text-[11px] text-muted-foreground">
@@ -277,7 +312,7 @@ const DirSection: React.FC<{
           annotationCounts={annotationCounts}
           highlightedFiles={highlightedFiles}
           editStatuses={editStatuses}
-          workspaceStatus={dir.workspaceStatus}
+          workspaceStatus={workspaceStatus}
         />
       ))}
     </div>

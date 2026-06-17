@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { handleFileBrowserFilesStream } from "./reference-watch";
 
 const tempDirs: string[] = [];
@@ -68,5 +68,19 @@ describe("handleFileBrowserFilesStream", () => {
 			["ready", first],
 			["ready", second],
 		].sort());
+	});
+
+	test("echoes the subscribed client path instead of the resolved watcher path", async () => {
+		const root = makeTempDir("plannotator-watch-c-");
+		const nonCanonicalRoot = join(dirname(root), "..", basename(dirname(root)), basename(root));
+		const url = new URL("http://localhost/api/reference/files/stream");
+		url.searchParams.append("dirPath", nonCanonicalRoot);
+
+		const response = handleFileBrowserFilesStream(new Request(url.toString()));
+		const events = await readSSEEvents(response, 1);
+
+		expect(response.status).toBe(200);
+		expect(events[0]?.type).toBe("ready");
+		expect(events[0]?.dirPath).toBe(nonCanonicalRoot);
 	});
 });

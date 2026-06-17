@@ -283,6 +283,40 @@ export function getWorkspaceStatusRelativePaths(
 	return paths;
 }
 
+export function filterWorkspaceStatusForDirectory(
+	status: WorkspaceStatusPayload,
+	dirPath: string,
+	filter?: (relativePath: string, change: WorkspaceFileChange) => boolean,
+): WorkspaceStatusPayload {
+	if (!status.available) return status;
+	let rootPath = status.rootPath || resolve(dirPath);
+	try {
+		rootPath = status.rootPath || realpathSync(resolve(dirPath));
+	} catch {
+		// Fall back to the resolved input when the directory disappeared between calls.
+	}
+	const files: Record<string, WorkspaceFileChange> = {};
+	let additions = 0;
+	let deletions = 0;
+	for (const change of Object.values(status.files)) {
+		const rel = relative(rootPath, change.path).replace(/\\/g, "/");
+		if (!rel || rel.startsWith("..") || isAbsolute(rel)) continue;
+		if (filter && !filter(rel, change)) continue;
+		files[change.path] = change;
+		additions += change.additions;
+		deletions += change.deletions;
+	}
+	return {
+		...status,
+		files,
+		totals: {
+			files: Object.keys(files).length,
+			additions,
+			deletions,
+		},
+	};
+}
+
 export function getGitMetadataWatchPaths(cwd: string): string[] {
 	const repo = getGitRepositoryInfo(cwd);
 	if (!repo) return [];

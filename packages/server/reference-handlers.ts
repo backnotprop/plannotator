@@ -7,8 +7,9 @@
 
 import { existsSync, statSync } from "fs";
 import { resolve } from "path";
-import { buildFileTree, FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
+import { buildFileTree, isFileBrowserExcludedPath } from "@plannotator/shared/reference-common";
 import {
+	filterWorkspaceStatusForDirectory,
 	getWorkspaceStatusForDirectory,
 	getWorkspaceStatusRelativePaths,
 	type WorkspaceFileChange,
@@ -507,7 +508,7 @@ export async function handleObsidianDoc(req: Request): Promise<Response> {
 const FILE_BROWSER_EXTENSIONS = /\.(mdx?|txt|html?)$/i;
 
 function includeWorkspaceFile(relativePath: string, _change: WorkspaceFileChange): boolean {
-	return FILE_BROWSER_EXTENSIONS.test(relativePath);
+	return FILE_BROWSER_EXTENSIONS.test(relativePath) && !isFileBrowserExcludedPath(relativePath);
 }
 
 /** List markdown files in a directory as a nested tree. */
@@ -533,10 +534,10 @@ export async function handleFileBrowserFiles(req: Request): Promise<Response> {
 			cwd: resolvedDir,
 			onlyFiles: true,
 		})) {
-			if (FILE_BROWSER_EXCLUDED.some((dir) => match.includes(dir))) continue;
+			if (isFileBrowserExcludedPath(match)) continue;
 			files.add(match);
 		}
-		const workspaceStatus = getWorkspaceStatusForDirectory(resolvedDir);
+		const workspaceStatus = filterWorkspaceStatusForDirectory(getWorkspaceStatusForDirectory(resolvedDir), resolvedDir, includeWorkspaceFile);
 		for (const match of getWorkspaceStatusRelativePaths(workspaceStatus, resolvedDir, includeWorkspaceFile)) {
 			files.add(match);
 		}
