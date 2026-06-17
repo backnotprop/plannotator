@@ -39,7 +39,9 @@ interface AggregateWorkspaceChange {
 }
 
 export function normalizePathForLookup(path: string): string {
-  return path.replace(/\\/g, "/").replace(/\/+$/, "");
+  const normalized = path.replace(/\\/g, "/");
+  const prefix = normalized.startsWith("//") ? "//" : "";
+  return prefix + normalized.slice(prefix.length).replace(/\/+/g, "/").replace(/\/+$/, "");
 }
 
 function normalizeWorkspaceStatus(

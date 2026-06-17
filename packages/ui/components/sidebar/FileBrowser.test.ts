@@ -38,4 +38,38 @@ describe("FileBrowser workspace status lookup", () => {
       files: 1,
     });
   });
+
+  test("matches workspace status when configured directory has a trailing slash", () => {
+    const status: WorkspaceStatusPayload = {
+      available: true,
+      rootPath: "/repo/docs",
+      repoRoot: "/repo",
+      files: {
+        "/repo/docs/plan.md": {
+          path: "/repo/docs/plan.md",
+          repoRelativePath: "docs/plan.md",
+          status: "modified",
+          additions: 4,
+          deletions: 2,
+          staged: false,
+          unstaged: true,
+        },
+      },
+      totals: { files: 1, additions: 4, deletions: 2 },
+    };
+    const node: VaultNode = {
+      name: "docs",
+      path: ".",
+      type: "folder",
+      children: [{ name: "plan.md", path: "plan.md", type: "file" }],
+    };
+
+    expect(normalizePathForLookup("/repo/docs//plan.md")).toBe("/repo/docs/plan.md");
+    expect(getWorkspaceChange("/repo/docs//plan.md", status)?.additions).toBe(4);
+    expect(getAggregateWorkspaceChange(node, "/repo/docs/", status)).toEqual({
+      additions: 4,
+      deletions: 2,
+      files: 1,
+    });
+  });
 });
