@@ -12,6 +12,8 @@ import { openBrowser as openBrowserImpl } from "./browser";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
 import { saveDraft, loadDraft, deleteDraft } from "./draft";
 import { FAVICON_SVG } from "@plannotator/shared/favicon";
+import { saveToObsidian, saveToBear, saveToOctarine } from "./integrations";
+import type { ObsidianConfig, BearConfig, OctarineConfig, IntegrationResult } from "./integrations";
 
 /** Serve images from local paths or temp uploads. Used by all 3 servers. */
 export async function handleImage(req: Request): Promise<Response> {
@@ -174,4 +176,40 @@ export async function handleServerReady(
   if (skipBrowserOpen) return;
 
   await (options.openBrowser ?? openBrowserImpl)(url, { isRemote, useGlimpse: true });
+}
+
+/** Save to external note apps (Obsidian, Bear, Octarine). Used by plan + annotate servers. */
+export async function handleSaveNotes(req: Request): Promise<Response> {
+  const results: { obsidian?: IntegrationResult; bear?: IntegrationResult; octarine?: IntegrationResult } = {};
+
+  try {
+    const body = (await req.json()) as {
+      obsidian?: ObsidianConfig;
+      bear?: BearConfig;
+      octarine?: OctarineConfig;
+    };
+
+    const promises: Promise<void>[] = [];
+    if (body.obsidian?.vaultPath && body.obsidian?.plan) {
+      promises.push(saveToObsidian(body.obsidian).then(r => { results.obsidian = r; }));
+    }
+    if (body.bear?.plan) {
+      promises.push(saveToBear(body.bear).then(r => { results.bear = r; }));
+    }
+    if (body.octarine?.plan && body.octarine?.workspace) {
+      promises.push(saveToOctarine(body.octarine).then(r => { results.octarine = r; }));
+    }
+    await Promise.allSettled(promises);
+
+    for (const [name, result] of Object.entries(results)) {
+      if (!result?.success && result) {
+        console.error(`[${name}] Save failed: ${result.error}`);
+      }
+    }
+  } catch (err) {
+    console.error(`[Save Notes] Error:`, err);
+    return Response.json({ error: "Save failed" }, { status: 500 });
+  }
+
+  return Response.json({ ok: true, results });
 }

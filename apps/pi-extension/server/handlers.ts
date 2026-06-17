@@ -12,6 +12,15 @@ import { saveDraft, loadDraft, deleteDraft } from "../generated/draft.js";
 import { FAVICON_SVG } from "../generated/favicon.js";
 
 import { json, parseBody, send, toWebRequest } from "./helpers";
+import {
+	type BearConfig,
+	type IntegrationResult,
+	type ObsidianConfig,
+	type OctarineConfig,
+	saveToBear,
+	saveToObsidian,
+	saveToOctarine,
+} from "./integrations.js";
 
 type Res = import("node:http").ServerResponse;
 
@@ -207,4 +216,54 @@ export function handleFavicon(res: Res): void {
 		"Content-Type": "image/svg+xml",
 		"Cache-Control": "public, max-age=86400",
 	});
+}
+
+/** Save to external note apps (Obsidian, Bear, Octarine). Used by plan + annotate servers. */
+export async function handleSaveNotesRequest(
+	req: IncomingMessage,
+	res: Res,
+): Promise<void> {
+	const results: {
+		obsidian?: IntegrationResult;
+		bear?: IntegrationResult;
+		octarine?: IntegrationResult;
+	} = {};
+	try {
+		const body = await parseBody(req);
+		const promises: Promise<void>[] = [];
+		const obsConfig = body.obsidian as ObsidianConfig | undefined;
+		const bearConfig = body.bear as BearConfig | undefined;
+		const octConfig = body.octarine as OctarineConfig | undefined;
+		if (obsConfig?.vaultPath && obsConfig?.plan) {
+			promises.push(
+				saveToObsidian(obsConfig).then((r) => {
+					results.obsidian = r;
+				}),
+			);
+		}
+		if (bearConfig?.plan) {
+			promises.push(
+				saveToBear(bearConfig).then((r) => {
+					results.bear = r;
+				}),
+			);
+		}
+		if (octConfig?.plan && octConfig?.workspace) {
+			promises.push(
+				saveToOctarine(octConfig).then((r) => {
+					results.octarine = r;
+				}),
+			);
+		}
+		await Promise.allSettled(promises);
+		for (const [name, result] of Object.entries(results)) {
+			if (!result?.success && result)
+				console.error(`[${name}] Save failed: ${result.error}`);
+		}
+	} catch (err) {
+		console.error(`[Save Notes] Error:`, err);
+		json(res, { error: "Save failed" }, 500);
+		return;
+	}
+	json(res, { ok: true, results });
 }

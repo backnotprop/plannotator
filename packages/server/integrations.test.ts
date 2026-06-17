@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "fs";
 import {
   extractTitle,
   extractTags,
@@ -174,8 +175,6 @@ describe("extractTags", () => {
 
 describe("saveToObsidian", () => {
   test("writes plan file to temp vault", async () => {
-    const { mkdtempSync } = await import("fs");
-    const { join } = await import("path");
     const tmpDir = mkdtempSync("/tmp/plannotator-vault-");
     try {
       const result = await saveToObsidian({
@@ -189,7 +188,6 @@ describe("saveToObsidian", () => {
       expect(result.path).toContain(tmpDir);
       expect(result.path).toContain("plannotator");
 
-      // File should exist and contain the plan
       const exists = Bun.file(result.path!).size > 0;
       expect(exists).toBe(true);
 
@@ -197,7 +195,6 @@ describe("saveToObsidian", () => {
       expect(content).toContain("# Test Plan");
       expect(content).toContain("[[Plannotator Plans]]");
     } finally {
-      const { rmSync } = await import("fs");
       rmSync(tmpDir, { recursive: true, force: true });
     }
   });

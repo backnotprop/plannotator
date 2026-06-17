@@ -14,9 +14,7 @@
 import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
 import { getRepoInfo } from "./repo";
 import type { Origin } from "@plannotator/shared/agents";
-import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon } from "./shared-handlers";
-import { saveToObsidian, saveToBear, saveToOctarine } from "./integrations";
-import type { ObsidianConfig, BearConfig, OctarineConfig, IntegrationResult } from "./integrations";
+import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, handleSaveNotes } from "./shared-handlers";
 import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc } from "./reference-handlers";
 import { warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash, deleteDraft } from "./draft";
@@ -501,48 +499,7 @@ export async function startAnnotateServer(
 
           // API: Save notes to external integrations (Obsidian, Bear, Octarine)
           if (url.pathname === "/api/save-notes" && req.method === "POST") {
-            const results: {
-              obsidian?: IntegrationResult;
-              bear?: IntegrationResult;
-              octarine?: IntegrationResult;
-            } = {};
-            try {
-              const body = (await req.json()) as {
-                obsidian?: ObsidianConfig;
-                bear?: BearConfig;
-                octarine?: OctarineConfig;
-              };
-              const promises: Promise<void>[] = [];
-              if (body.obsidian?.vaultPath && body.obsidian?.plan) {
-                promises.push(
-                  saveToObsidian(body.obsidian).then((r) => {
-                    results.obsidian = r;
-                  }),
-                );
-              }
-              if (body.bear?.plan) {
-                promises.push(
-                  saveToBear(body.bear).then((r) => {
-                    results.bear = r;
-                  }),
-                );
-              }
-              if (body.octarine?.plan && body.octarine?.workspace) {
-                promises.push(
-                  saveToOctarine(body.octarine).then((r) => {
-                    results.octarine = r;
-                  }),
-                );
-              }
-              await Promise.allSettled(promises);
-              for (const [name, result] of Object.entries(results)) {
-                if (!result?.success && result)
-                  console.error(`[${name}] Save failed: ${result.error}`);
-              }
-            } catch (err) {
-              console.error("[Integration] Error:", err);
-            }
-            return Response.json({ ok: true, results });
+            return handleSaveNotes(req);
           }
 
           // Favicon
@@ -590,10 +547,7 @@ export async function startAnnotateServer(
     throw new Error("Failed to start server");
   }
 
-  const port = server.port ?? Number(server.url?.port);
-  if (!Number.isFinite(port) || port <= 0) {
-    throw new Error("Failed to determine server port");
-  }
+  const port = server.port!;
   const serverUrl = `http://localhost:${port}`;
 
   // Notify caller that server is ready

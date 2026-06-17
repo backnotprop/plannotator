@@ -21,6 +21,7 @@ import {
 	handleDraftRequest,
 	handleFavicon,
 	handleImageRequest,
+	handleSaveNotesRequest,
 	handleUploadRequest,
 } from "./handlers.js";
 import { html, json, parseBody, requestUrl } from "./helpers.js";
@@ -322,49 +323,7 @@ export async function startPlanReviewServer(options: {
 		} else if (url.pathname === "/favicon.svg") {
 			handleFavicon(res);
 		} else if (url.pathname === "/api/save-notes" && req.method === "POST") {
-			const results: {
-				obsidian?: IntegrationResult;
-				bear?: IntegrationResult;
-				octarine?: IntegrationResult;
-			} = {};
-			try {
-				const body = await parseBody(req);
-				const promises: Promise<void>[] = [];
-				const obsConfig = body.obsidian as ObsidianConfig | undefined;
-				const bearConfig = body.bear as BearConfig | undefined;
-				const octConfig = body.octarine as OctarineConfig | undefined;
-				if (obsConfig?.vaultPath && obsConfig?.plan) {
-					promises.push(
-						saveToObsidian(obsConfig).then((r) => {
-							results.obsidian = r;
-						}),
-					);
-				}
-				if (bearConfig?.plan) {
-					promises.push(
-						saveToBear(bearConfig).then((r) => {
-							results.bear = r;
-						}),
-					);
-				}
-				if (octConfig?.plan && octConfig?.workspace) {
-					promises.push(
-						saveToOctarine(octConfig).then((r) => {
-							results.octarine = r;
-						}),
-					);
-				}
-				await Promise.allSettled(promises);
-				for (const [name, result] of Object.entries(results)) {
-					if (!result?.success && result)
-						console.error(`[${name}] Save failed: ${result.error}`);
-				}
-			} catch (err) {
-				console.error(`[Save Notes] Error:`, err);
-				json(res, { error: "Save failed" }, 500);
-				return;
-			}
-			json(res, { ok: true, results });
+			await handleSaveNotesRequest(req, res);
 		} else if (url.pathname === "/api/approve" && req.method === "POST") {
 			if (decisionSettled) {
 				json(res, { ok: true, duplicate: true });
