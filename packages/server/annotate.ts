@@ -27,8 +27,8 @@ import {
 } from "@plannotator/shared/source-save-node";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { saveConfig, detectGitUser, getServerConfig } from "./config";
-import { dirname, isAbsolute, relative, resolve as resolvePath } from "path";
-import { realpathSync } from "node:fs";
+import { dirname, resolve as resolvePath } from "path";
+import { isWithinDirectory } from "@plannotator/shared/html-assets-node";
 import { isWSL } from "./browser";
 import { AI_QUERY_ENDPOINT, createAIRuntime } from "./ai-runtime";
 import type { AIEndpoints } from "@plannotator/ai";
@@ -566,24 +566,4 @@ export async function startAnnotateServer(
       server.stop();
     },
   };
-}
-
-function isWithinDirectory(filePath: string, root: string): boolean {
-  let resolvedRoot: string;
-  try {
-    resolvedRoot = realpathSync(resolvePath(root));
-  } catch {
-    return false;
-  }
-  // Resolve symlinks on the target so an in-directory symlink pointing outside
-  // the root (e.g. evil.html -> ~/.ssh/id_rsa) is rejected, not followed. A
-  // nonexistent target keeps the lexical path; the later read simply fails.
-  let resolved = resolvePath(filePath);
-  try {
-    resolved = realpathSync(resolved);
-  } catch {
-    // target does not exist yet — fall through with the lexical path
-  }
-  const rel = relative(resolvedRoot, resolved);
-  return rel === "" || (!!rel && !rel.startsWith("..") && !isAbsolute(rel));
 }
