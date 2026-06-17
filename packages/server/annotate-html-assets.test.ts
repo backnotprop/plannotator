@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHtmlAssetRegistry, inlineHtmlLocalAssets } from "./html-assets";
@@ -62,5 +62,46 @@ describe("annotate raw HTML assets", () => {
     expect(cssBase64).toBeTruthy();
     const css = Buffer.from(cssBase64!, "base64").toString("utf-8");
     expect(css).toContain('url("data:image/png;base64,AQID")');
+  });
+
+  test("does not serve a symlinked asset that escapes the source directory", async () => {
+    // Attacker bundle: a symlink inside the HTML's dir pointing at a secret outside it.
+    const base = mkdtempSync(join(tmpdir(), "plannotator-html-symlink-"));
+    const htmlDir = join(base, "site");
+    mkdirSync(htmlDir);
+    const secretPath = join(base, "secret.css");
+    writeFileSync(secretPath, "SECRET_OUTSIDE_CONTENT", "utf-8");
+    symlinkSync(secretPath, join(htmlDir, "evil.css"));
+    const htmlPath = join(htmlDir, "page.html");
+    const html = '<!doctype html><html><head><link rel="stylesheet" href="./evil.css"></head><body></body></html>';
+    writeFileSync(htmlPath, html, "utf-8");
+
+    const assets = createHtmlAssetRegistry();
+    const rawHtml = assets.rewriteHtml(html, htmlPath);
+    const cssUrl = rawHtml.match(/href="([^"]+evil\.css)"/)?.[1];
+    expect(cssUrl).toBeTruthy();
+
+    const requestUrl = new URL(cssUrl!, "http://localhost");
+    const response = await assets.handle(new Request(String(requestUrl)), requestUrl);
+    expect(response?.status).toBe(403);
+    expect(await response?.text()).not.toContain("SECRET_OUTSIDE_CONTENT");
+  });
+
+  test("does not inline a symlinked asset that escapes the source directory", () => {
+    const base = mkdtempSync(join(tmpdir(), "plannotator-html-symlink-inline-"));
+    const htmlDir = join(base, "site");
+    mkdirSync(htmlDir);
+    const secretPath = join(base, "secret.css");
+    writeFileSync(secretPath, "SECRET_OUTSIDE_CONTENT", "utf-8");
+    symlinkSync(secretPath, join(htmlDir, "evil.css"));
+    const htmlPath = join(htmlDir, "page.html");
+    const html = '<!doctype html><html><head><link rel="stylesheet" href="./evil.css"></head><body></body></html>';
+    writeFileSync(htmlPath, html, "utf-8");
+
+    const shareHtml = inlineHtmlLocalAssets(html, htmlPath);
+    // The symlinked secret must not be base64-embedded into the portable share.
+    expect(shareHtml).not.toContain("base64");
+    expect(Buffer.from(shareHtml).toString("utf-8")).not.toContain("SECRET_OUTSIDE_CONTENT");
+    expect(shareHtml).not.toContain(Buffer.from("SECRET_OUTSIDE_CONTENT").toString("base64"));
   });
 });
