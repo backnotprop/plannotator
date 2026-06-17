@@ -306,6 +306,8 @@ const App: React.FC = () => {
   const [editorDirty, setEditorDirty] = useState(false);
   // True while the open editor buffer differs from the as-submitted baseline.
   const [editorDiffersFromBaseline, setEditorDiffersFromBaseline] = useState(false);
+  // Two-step guard for the "Cancel" (discard edits + exit) action.
+  const [confirmCancelEdits, setConfirmCancelEdits] = useState(false);
   const originalMarkdownRef = useRef<string | null>(null);
   // Last COMMITTED editor text (null = no edits). The Direct Edits diff reads
   // this — never the shared `markdown` state, which linked-doc navigation,
@@ -1503,6 +1505,37 @@ const App: React.FC = () => {
   const activeSourceSave = activeEditableDocument?.sourceSave?.enabled
     ? activeEditableDocument.sourceSave
     : null;
+
+  // Save-button display is driven by the editableDocuments state machine — one
+  // source of truth for dirty/saving/saved, rather than a parallel flag.
+  const activeSaveStatus = activeEditableDocument?.saveStatus;
+  const hasUnsavedDiskChanges =
+    activeSaveStatus === 'dirty' || activeSaveStatus === 'conflict' || activeSaveStatus === 'error';
+  // Emphasize the Save control (dot + primary text) whenever there is work to
+  // persist or a save is in flight — one predicate drives both so they can't diverge.
+  const emphasizeSave = hasUnsavedDiskChanges || activeSaveStatus === 'saving';
+  // A rejected save (disk conflict or write error) — surfaced as a destructive
+  // dot/label so it reads as "save failed, retry" rather than ordinary unsaved.
+  const saveFailed = activeSaveStatus === 'conflict' || activeSaveStatus === 'error';
+
+  // Editing exit control: a source-backed session with unsaved edits gets a
+  // two-step "Cancel" (discard + exit). Plan mode and clean source sessions keep
+  // the plain "Done" (commit edits + exit), so plan-mode keep behavior is unchanged.
+  const cancelMode = isEditingMarkdown && !!activeSourceSave && hasUnsavedDiskChanges;
+  const handleEditExitClick = useCallback(() => {
+    if (!isEditingMarkdown) { handleEditToggle(); return; }      // enter edit mode
+    if (activeSourceSave && hasUnsavedDiskChanges) {             // discard flow (two-step)
+      if (confirmCancelEdits) { setConfirmCancelEdits(false); handleDiscardEdits(); }
+      else setConfirmCancelEdits(true);
+      return;
+    }
+    handleEditToggle();                                          // commit edits + exit
+  }, [isEditingMarkdown, activeSourceSave, hasUnsavedDiskChanges, confirmCancelEdits, handleEditToggle, handleDiscardEdits]);
+  // Drop the discard confirmation once it no longer applies — exited the editor,
+  // or the doc went clean (e.g. the user saved).
+  useEffect(() => {
+    if (!cancelMode && confirmCancelEdits) setConfirmCancelEdits(false);
+  }, [cancelMode, confirmCancelEdits]);
 
   // True when there is anything the Direct Edits diff would carry.
   const hasSourceBackedDirectEdits = unsavedEditableDocuments.length > 0;
@@ -3299,14 +3332,35 @@ const App: React.FC = () => {
                                 <button
                                   type="button"
                                   onClick={() => { void handleSaveEditedSourceFile(); }}
-                                  disabled={activeEditableDocument?.saveStatus === 'saving'}
-                                  className={`cursor-pointer rounded-sm transition-colors duration-150 outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:opacity-80 disabled:cursor-not-allowed disabled:opacity-50 ${
-                                    activeEditableDocument?.saveStatus === 'saved'
-                                      ? 'text-primary'
-                                      : 'text-muted-foreground/50 hover:text-muted-foreground'
+                                  disabled={activeSaveStatus === 'saving'}
+                                  className={`flex items-center gap-1 cursor-pointer rounded-sm transition-colors duration-150 outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:opacity-80 disabled:cursor-not-allowed disabled:opacity-50 ${
+                                    saveFailed
+                                      ? 'text-destructive'
+                                      : emphasizeSave
+                                        ? 'text-primary'
+                                        : 'text-muted-foreground/50 hover:text-muted-foreground'
                                   }`}
                                 >
-                                  {activeEditableDocument?.saveStatus === 'saving' ? 'Saving' : 'Save'}
+                                  {/* Dot slot is always present — only its color changes — so the
+                                      button never reflows when edits appear/clear. */}
+                                  <span
+                                    aria-hidden
+                                    className={`h-1.5 w-1.5 shrink-0 rounded-full transition-colors duration-150 ${
+                                      saveFailed ? 'bg-destructive' : emphasizeSave ? 'bg-primary' : 'bg-transparent'
+                                    }`}
+                                  />
+                                  {/* Invisible widest label reserves the width so Save/Saving/Saved
+                                      swap without nudging neighbors (font-agnostic, no fixed px). */}
+                                  <span className="grid justify-items-start">
+                                    <span aria-hidden className="invisible col-start-1 row-start-1">Saving</span>
+                                    <span className="col-start-1 row-start-1">
+                                      {activeSaveStatus === 'saving'
+                                        ? 'Saving'
+                                        : hasUnsavedDiskChanges
+                                          ? 'Save'
+                                          : 'Saved'}
+                                    </span>
+                                  </span>
                                 </button>
                               </Tooltip>
                               <span aria-hidden className="text-muted-foreground/30 select-none">|</span>
@@ -3315,19 +3369,33 @@ const App: React.FC = () => {
                           <Tooltip
                             side="top"
                             align="end"
-                            content={isEditingMarkdown ? 'Commit your edits and return to annotating' : 'Edit the document text directly'}
+                            content={
+                              !isEditingMarkdown
+                                ? 'Edit the document text directly'
+                                : cancelMode
+                                  ? 'Discard your edits and stop editing'
+                                  : 'Commit your edits and return to annotating'
+                            }
                           >
                             <button
                               type="button"
-                              onClick={handleEditToggle}
+                              onClick={handleEditExitClick}
                               aria-pressed={isEditingMarkdown}
                               className={`cursor-pointer rounded-sm transition-colors duration-150 outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:opacity-80 ${
-                                isEditingMarkdown
-                                  ? 'text-primary'
-                                  : 'text-muted-foreground/50 hover:text-muted-foreground'
+                                cancelMode
+                                  ? (confirmCancelEdits
+                                      ? 'text-destructive'
+                                      : 'text-muted-foreground/70 hover:text-foreground')
+                                  : isEditingMarkdown
+                                    ? 'text-primary'
+                                    : 'text-muted-foreground/50 hover:text-muted-foreground'
                               }`}
                             >
-                              {isEditingMarkdown ? 'Done' : 'Edit'}
+                              {!isEditingMarkdown
+                                ? 'Edit'
+                                : cancelMode
+                                  ? (confirmCancelEdits ? 'Discard?' : 'Cancel')
+                                  : 'Done'}
                             </button>
                           </Tooltip>
                         </>
