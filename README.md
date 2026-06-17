@@ -314,7 +314,7 @@ Requires `gh` installed and authenticated. Can also be set persistently in `~/.p
 { "verifyAttestation": true }
 ```
 
-See the [verification docs](https://plannotator.ai/docs/getting-started/installation/#verifying-your-install) for details.
+See the [verification docs](https://plannotator.ai/docs/reference/verifying-your-install/) for details.
 
 ---
 
