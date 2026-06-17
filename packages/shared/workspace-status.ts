@@ -57,8 +57,29 @@ function runGit(cwd: string, args: string[]): { ok: true; stdout: string } | { o
 	return { ok: true, stdout: result.stdout ?? "" };
 }
 
-function resolveGitPath(repoRoot: string, value: string): string {
-	return isAbsolute(value) ? value : resolve(repoRoot, value);
+function resolveGitPath(cwd: string, value: string): string {
+	return isAbsolute(value) ? value : resolve(cwd, value);
+}
+
+function addLineCounts(
+	target: Map<string, { additions: number; deletions: number }>,
+	source: Map<string, { additions: number; deletions: number }>,
+): void {
+	for (const [path, counts] of source) {
+		const existing = target.get(path) ?? { additions: 0, deletions: 0 };
+		target.set(path, {
+			additions: existing.additions + counts.additions,
+			deletions: existing.deletions + counts.deletions,
+		});
+	}
+}
+
+function combinedLineCounts(
+	...sources: Array<Map<string, { additions: number; deletions: number }>>
+): Map<string, { additions: number; deletions: number }> {
+	const combined = new Map<string, { additions: number; deletions: number }>();
+	for (const source of sources) addLineCounts(combined, source);
+	return combined;
 }
 
 export function getGitRepositoryInfo(cwd: string): GitRepositoryInfo | null {
@@ -66,6 +87,12 @@ export function getGitRepositoryInfo(cwd: string): GitRepositoryInfo | null {
 	if (!topLevel.ok) return null;
 	const rawRepoRoot = topLevel.stdout.trim();
 	if (!rawRepoRoot) return null;
+	let gitCwd: string;
+	try {
+		gitCwd = realpathSync(resolve(cwd));
+	} catch {
+		return null;
+	}
 	const repoRoot = realpathSync(rawRepoRoot);
 
 	const gitDir = runGit(cwd, ["rev-parse", "--git-dir"]);
@@ -73,11 +100,11 @@ export function getGitRepositoryInfo(cwd: string): GitRepositoryInfo | null {
 
 	return {
 		repoRoot,
-		gitDir: gitDir.ok && gitDir.stdout.trim() ? resolveGitPath(repoRoot, gitDir.stdout.trim()) : resolve(repoRoot, ".git"),
+		gitDir: gitDir.ok && gitDir.stdout.trim() ? resolveGitPath(gitCwd, gitDir.stdout.trim()) : resolve(repoRoot, ".git"),
 		gitCommonDir: gitCommonDir.ok && gitCommonDir.stdout.trim()
-			? resolveGitPath(repoRoot, gitCommonDir.stdout.trim())
+			? resolveGitPath(gitCwd, gitCommonDir.stdout.trim())
 			: gitDir.ok && gitDir.stdout.trim()
-				? resolveGitPath(repoRoot, gitDir.stdout.trim())
+				? resolveGitPath(gitCwd, gitDir.stdout.trim())
 				: resolve(repoRoot, ".git"),
 	};
 }
@@ -211,17 +238,28 @@ export function getWorkspaceStatusForDirectory(dirPath: string): WorkspaceStatus
 		};
 	}
 
+	const entries = parsePorcelain(status.stdout);
 	const numstat = runGit(repo.repoRoot, ["diff", "--numstat", "-z", "HEAD", "--", rootPathspec]);
-	const lineCounts = numstat.ok ? parseNumstat(numstat.stdout) : new Map<string, { additions: number; deletions: number }>();
+	const headLineCounts = numstat.ok ? parseNumstat(numstat.stdout) : new Map<string, { additions: number; deletions: number }>();
+	let splitLineCounts: Map<string, { additions: number; deletions: number }> | null = null;
+	if (entries.some((entry) => entry.staged && entry.unstaged)) {
+		const cached = runGit(repo.repoRoot, ["diff", "--cached", "--numstat", "-z", "--", rootPathspec]);
+		const unstaged = runGit(repo.repoRoot, ["diff", "--numstat", "-z", "--", rootPathspec]);
+		splitLineCounts = combinedLineCounts(
+			cached.ok ? parseNumstat(cached.stdout) : new Map<string, { additions: number; deletions: number }>(),
+			unstaged.ok ? parseNumstat(unstaged.stdout) : new Map<string, { additions: number; deletions: number }>(),
+		);
+	}
 
 	const files: Record<string, WorkspaceFileChange> = {};
 	let totalAdditions = 0;
 	let totalDeletions = 0;
 
-	for (const entry of parsePorcelain(status.stdout)) {
+	for (const entry of entries) {
 		const absolutePath = resolve(repo.repoRoot, entry.repoRelativePath);
 		if (!isWithinPath(absolutePath, rootPath)) continue;
 
+		const lineCounts = entry.staged && entry.unstaged && splitLineCounts ? splitLineCounts : headLineCounts;
 		const counts = lineCounts.get(entry.repoRelativePath) ?? { additions: 0, deletions: 0 };
 		const oldCounts = entry.oldRepoRelativePath
 			? lineCounts.get(entry.oldRepoRelativePath) ?? { additions: 0, deletions: 0 }

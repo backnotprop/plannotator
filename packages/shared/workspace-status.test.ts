@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, unlinkSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { getWorkspaceStatusForDirectory, getWorkspaceStatusRelativePaths } from "./workspace-status";
+import { getGitMetadataWatchPaths, getWorkspaceStatusForDirectory, getWorkspaceStatusRelativePaths } from "./workspace-status";
 
 const tempDirs: string[] = [];
 
@@ -98,5 +98,45 @@ describe("workspace status", () => {
 		expect(change?.deletions).toBe(1);
 		expect(status.totals.additions).toBe(2);
 		expect(status.totals.deletions).toBe(1);
+	});
+
+	test("resolves git metadata paths when watching a repository subdirectory", () => {
+		const repo = tempRepo();
+		const subdir = join(repo, "docs", "sub");
+		mkdirSync(subdir, { recursive: true });
+		writeFileSync(join(subdir, "plan.md"), "# Plan\n");
+		git(repo, "add", "-A");
+		git(repo, "commit", "-m", "init");
+
+		const paths = getGitMetadataWatchPaths(subdir);
+		const realRepo = realpathSync(repo);
+
+		expect(paths).toContain(join(realRepo, ".git", "refs"));
+	});
+
+	test("counts staged and unstaged changes when the net diff against HEAD is empty", () => {
+		const repo = tempRepo();
+		const docs = join(repo, "docs");
+		mkdirSync(docs);
+		writeFileSync(join(docs, "plan.md"), "one\ntwo\n");
+		git(repo, "add", "-A");
+		git(repo, "commit", "-m", "init");
+
+		writeFileSync(join(docs, "plan.md"), "ONE\ntwo\n");
+		git(repo, "add", join("docs", "plan.md"));
+		writeFileSync(join(docs, "plan.md"), "one\ntwo\n");
+
+		const status = getWorkspaceStatusForDirectory(docs);
+		const realDocs = realpathSync(docs);
+		const change = status.files[join(realDocs, "plan.md")];
+
+		expect(status.available).toBe(true);
+		expect(change?.status).toBe("modified");
+		expect(change?.staged).toBe(true);
+		expect(change?.unstaged).toBe(true);
+		expect(change?.additions).toBe(2);
+		expect(change?.deletions).toBe(2);
+		expect(status.totals.additions).toBe(2);
+		expect(status.totals.deletions).toBe(2);
 	});
 });
