@@ -86,6 +86,7 @@ import {
 	type Phase,
 	stripPlanningOnlyTools,
 } from "./tool-scope.ts";
+import { isRemoteSession } from "./server/network.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -126,6 +127,17 @@ function safeNotify(
 		if (notifyCurrentPiSession(message, type, origin)) return;
 		console.error(`Plannotator notification failed: ${err instanceof Error ? err.message : String(err)}`);
 	}
+}
+
+/**
+ * Foreground "session opened" notice. For a remote session the auto-opened
+ * browser is unreachable, so the URL must ride in THIS in-turn message — the
+ * after-turn notify inside openBrowserForServer fires too late to render.
+ */
+function sessionOpenedMessage(label: string, url: string): string {
+	return isRemoteSession()
+		? `${label} — open ${url} on your local machine (forward the port if needed). You can keep chatting while it runs.`
+		: `${label}. You can keep chatting while it runs.`;
 }
 
 function reportBackgroundError(ctx: ExtensionContext, message: string, err: unknown, origin?: PiSessionIdentity): void {
@@ -427,7 +439,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 					vcsType: reviewArgs.vcsType,
 					useLocal: reviewArgs.useLocal,
 				});
-				ctx.ui.notify("Code review opened. You can keep chatting while it runs.", "info");
+				ctx.ui.notify(sessionOpenedMessage("Code review opened", session.url), "info");
 				void session
 					.waitForDecision()
 					.then((result) => {
@@ -597,7 +609,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 					!!rawHtml,
 					renderMarkdownFlag,
 				);
-				ctx.ui.notify("Annotation opened. You can keep chatting while it runs.", "info");
+				ctx.ui.notify(sessionOpenedMessage("Annotation opened", session.url), "info");
 				void session
 					.waitForDecision()
 					.then((result) => {
@@ -671,7 +683,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 
 			try {
 				const session = await startLastMessageAnnotationSession(ctx, snapshot.text, gate, pickerMessages);
-				ctx.ui.notify("Last-message annotation opened. You can keep chatting while it runs.", "info");
+				ctx.ui.notify(sessionOpenedMessage("Last-message annotation opened", session.url), "info");
 				void session
 					.waitForDecision()
 					.then((result) => {
