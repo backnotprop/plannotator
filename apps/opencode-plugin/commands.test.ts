@@ -2,18 +2,20 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
+import { handleAnnotateCommand, handleAnnotateLastCommand } from "./commands";
 
+// Inject the annotate-server stub through CommandDeps rather than
+// `mock.module`. Bun's module mocks are process-global and cannot be unset,
+// so a `mock.module("@plannotator/server/annotate", ...)` here would leak the
+// stub into every other suite (it previously broke packages/server tests that
+// boot the real annotate server). Dependency injection keeps it local.
 const startAnnotateServerMock = mock(async (_options: any) => ({
+  port: 0,
+  url: "http://localhost",
+  isRemote: false,
   waitForDecision: async () => ({ feedback: "", annotations: [] }),
   stop: () => {},
 }));
-
-mock.module("@plannotator/server/annotate", () => ({
-  startAnnotateServer: startAnnotateServerMock,
-  handleAnnotateServerReady: () => {},
-}));
-
-const { handleAnnotateCommand, handleAnnotateLastCommand } = await import("./commands");
 
 const tempDirs: string[] = [];
 
@@ -40,6 +42,7 @@ function makeDeps() {
     getShareBaseUrl: () => "https://share.example.test",
     getPasteApiUrl: () => "https://paste.example.test",
     directory: undefined as string | undefined,
+    startAnnotateServer: startAnnotateServerMock,
   };
 }
 

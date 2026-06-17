@@ -40,6 +40,12 @@ export interface CommandDeps {
   getShareBaseUrl: () => string | undefined;
   getPasteApiUrl: () => string | undefined;
   directory?: string;
+  /**
+   * Annotate server starter. Injectable so tests can supply a stub without a
+   * global `mock.module` (which Bun cannot scope per-file or unset, and which
+   * would leak into other suites). Defaults to the real annotate server.
+   */
+  startAnnotateServer?: typeof startAnnotateServer;
 }
 
 export async function handleReviewCommand(
@@ -194,6 +200,7 @@ export async function handleAnnotateCommand(
   deps: CommandDeps
 ) {
   const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl, directory } = deps;
+  const startServer = deps.startAnnotateServer ?? startAnnotateServer;
 
   // @ts-ignore - Event properties contain arguments
   const rawArgs = event.properties?.arguments || event.arguments || "";
@@ -299,7 +306,7 @@ export async function handleAnnotateCommand(
     }
   }
 
-  const server = await startAnnotateServer({
+  const server = await startServer({
     markdown,
     filePath: absolutePath,
     origin: "opencode",
@@ -366,6 +373,7 @@ export async function handleAnnotateLastCommand(
   deps: CommandDeps
 ): Promise<string | null> {
   const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl } = deps;
+  const startServer = deps.startAnnotateServer ?? startAnnotateServer;
 
   // @ts-ignore - Event properties contain arguments
   const rawArgs = event.properties?.arguments || event.arguments || "";
@@ -413,7 +421,7 @@ export async function handleAnnotateLastCommand(
 
   const pickerMessages = recentMessages.length > 1 ? recentMessages : undefined;
 
-  const server = await startAnnotateServer({
+  const server = await startServer({
     markdown: lastText,
     filePath: "last-message",
     origin: "opencode",
