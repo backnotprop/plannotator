@@ -35,11 +35,83 @@ const DEFAULT_MAX_TURNS = 99;
 const DEFAULT_MODEL = "claude-sonnet-4-6";
 
 // ---------------------------------------------------------------------------
+// Bedrock / Vertex model resolution
+// ---------------------------------------------------------------------------
+
+/** Env-var truthiness, matching Claude Code's own `1`/`true` convention. */
+function isTruthyEnv(value: string | undefined): boolean {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
+/**
+ * A model string that already names a Bedrock/Vertex target — a full ARN
+ * (`arn:aws:bedrock:...`) or any inference-profile / publisher id containing
+ * `anthropic.` (e.g. `us.anthropic.claude-...`). Bare aliases like
+ * `claude-sonnet-4-6` deliberately do NOT match.
+ */
+function isCloudModelId(model: string): boolean {
+  return model.startsWith("arn:") || model.includes("anthropic.");
+}
+
+/**
+ * Resolve the model identifier to hand the Claude Agent SDK.
+ *
+ * Plannotator's model picker uses bare aliases (`claude-sonnet-4-6`). Those
+ * are valid against the first-party Anthropic API but are rejected by Bedrock
+ * and Vertex, which require a full inference-profile id / ARN — producing
+ * `400 The provided model identifier is invalid`. Claude Code itself reads
+ * those identifiers from `ANTHROPIC_MODEL` and the
+ * `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` env vars; we mirror that here:
+ *
+ *   - Off Bedrock/Vertex: return the requested model unchanged.
+ *   - Already a cloud identifier (ARN / `anthropic.` profile): pass through.
+ *   - A bare family alias (opus/sonnet/haiku): map to the matching
+ *     `ANTHROPIC_DEFAULT_*_MODEL` env var when set.
+ *   - Anything else: fall back to `ANTHROPIC_MODEL`, or `undefined` so the SDK
+ *     inherits the environment's default model.
+ *
+ * Returning `undefined` is meaningful: the caller omits `--model` entirely,
+ * letting the spawned `claude` resolve the model from its own env config.
+ */
+export function resolveSDKModel(
+  requestedModel: string | undefined,
+  env: Record<string, string | undefined> = process.env,
+): string | undefined {
+  const onCloud =
+    isTruthyEnv(env.CLAUDE_CODE_USE_BEDROCK) ||
+    isTruthyEnv(env.CLAUDE_CODE_USE_VERTEX);
+  if (!onCloud) return requestedModel;
+
+  // Already a Bedrock/Vertex identifier — trust it as-is.
+  if (requestedModel && isCloudModelId(requestedModel)) return requestedModel;
+
+  // Map a bare family alias to the user's configured default ARN.
+  if (requestedModel) {
+    const family = requestedModel.toLowerCase();
+    if (family.includes("opus") && env.ANTHROPIC_DEFAULT_OPUS_MODEL) {
+      return env.ANTHROPIC_DEFAULT_OPUS_MODEL;
+    }
+    if (family.includes("sonnet") && env.ANTHROPIC_DEFAULT_SONNET_MODEL) {
+      return env.ANTHROPIC_DEFAULT_SONNET_MODEL;
+    }
+    if (family.includes("haiku") && env.ANTHROPIC_DEFAULT_HAIKU_MODEL) {
+      return env.ANTHROPIC_DEFAULT_HAIKU_MODEL;
+    }
+  }
+
+  // Fall back to the env default model, or let the SDK inherit from the env.
+  return env.ANTHROPIC_MODEL || undefined;
+}
+
+// ---------------------------------------------------------------------------
 // SDK query options — typed to catch typos at compile time
 // ---------------------------------------------------------------------------
 
 interface ClaudeSDKQueryOptions {
-  model: string;
+  /** Omitted when undefined so the SDK inherits the env's default model (Bedrock/Vertex). */
+  model?: string;
   maxTurns: number;
   allowedTools: string[];
   cwd: string;
@@ -264,8 +336,12 @@ class ClaudeAgentSDKSession extends BaseSession {
   // -------------------------------------------------------------------------
 
   private buildQueryOptions(): ClaudeSDKQueryOptions {
+    // On Bedrock/Vertex, bare aliases (e.g. "claude-sonnet-4-6") are rejected
+    // with a 400; resolveSDKModel() maps them to the configured ARN or returns
+    // undefined so the SDK inherits the environment's default model.
+    const resolvedModel = resolveSDKModel(this.config.model);
     const opts: ClaudeSDKQueryOptions = {
-      model: this.config.model,
+      ...(resolvedModel !== undefined && { model: resolvedModel }),
       maxTurns: this.config.maxTurns,
       allowedTools: this.config.allowedTools,
       cwd: this.config.cwd,

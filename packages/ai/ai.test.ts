@@ -802,6 +802,79 @@ describe("AI endpoints", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Claude Agent SDK — Bedrock/Vertex model resolution
+// ---------------------------------------------------------------------------
+
+import { resolveSDKModel } from "./providers/claude-agent-sdk.ts";
+
+describe("resolveSDKModel", () => {
+  const SONNET_ARN =
+    "arn:aws:bedrock:us-east-1:123456789012:inference-profile/global.anthropic.claude-sonnet-4-6";
+  const OPUS_ARN =
+    "arn:aws:bedrock:us-east-1:123456789012:inference-profile/global.anthropic.claude-opus-4-8[1m]";
+  const HAIKU_ARN =
+    "arn:aws:bedrock:us-east-1:123456789012:inference-profile/global.anthropic.claude-haiku-4-5-20251001-v1:0";
+
+  const bedrockEnv = {
+    CLAUDE_CODE_USE_BEDROCK: "1",
+    ANTHROPIC_MODEL: OPUS_ARN,
+    ANTHROPIC_DEFAULT_SONNET_MODEL: SONNET_ARN,
+    ANTHROPIC_DEFAULT_OPUS_MODEL: OPUS_ARN,
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: HAIKU_ARN,
+  };
+
+  test("off Bedrock/Vertex: returns the requested alias unchanged", () => {
+    expect(resolveSDKModel("claude-sonnet-4-6", {})).toBe("claude-sonnet-4-6");
+  });
+
+  test("maps a bare sonnet alias to the configured Sonnet ARN on Bedrock", () => {
+    expect(resolveSDKModel("claude-sonnet-4-6", bedrockEnv)).toBe(SONNET_ARN);
+  });
+
+  test("maps bare opus / haiku aliases to their ARNs", () => {
+    expect(resolveSDKModel("claude-opus-4-8", bedrockEnv)).toBe(OPUS_ARN);
+    expect(resolveSDKModel("claude-haiku-4-5", bedrockEnv)).toBe(HAIKU_ARN);
+  });
+
+  test("maps the [1m] context variant by family", () => {
+    expect(resolveSDKModel("claude-sonnet-4-6[1m]", bedrockEnv)).toBe(SONNET_ARN);
+  });
+
+  test("passes through an identifier that is already an ARN", () => {
+    expect(resolveSDKModel(SONNET_ARN, bedrockEnv)).toBe(SONNET_ARN);
+  });
+
+  test("passes through a bare inference-profile id", () => {
+    const profile = "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
+    expect(resolveSDKModel(profile, bedrockEnv)).toBe(profile);
+  });
+
+  test("falls back to ANTHROPIC_MODEL when no family default is set", () => {
+    expect(
+      resolveSDKModel("claude-sonnet-4-6", {
+        CLAUDE_CODE_USE_BEDROCK: "1",
+        ANTHROPIC_MODEL: OPUS_ARN,
+      }),
+    ).toBe(OPUS_ARN);
+  });
+
+  test("returns undefined so the SDK inherits env when nothing else resolves", () => {
+    expect(
+      resolveSDKModel("claude-sonnet-4-6", { CLAUDE_CODE_USE_BEDROCK: "1" }),
+    ).toBeUndefined();
+  });
+
+  test("also applies on Vertex", () => {
+    expect(
+      resolveSDKModel("claude-opus-4-8", {
+        CLAUDE_CODE_USE_VERTEX: "true",
+        ANTHROPIC_DEFAULT_OPUS_MODEL: OPUS_ARN,
+      }),
+    ).toBe(OPUS_ARN);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Codex SDK event mapping
 // ---------------------------------------------------------------------------
 
