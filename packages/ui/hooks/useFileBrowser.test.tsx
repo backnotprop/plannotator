@@ -45,6 +45,22 @@ function installFetchResponses(responses: Response[]): string[] {
   return calls;
 }
 
+function installDeferredFetch(): {
+  calls: string[];
+  resolve: (response: Response) => void;
+} {
+  const calls: string[] = [];
+  let resolve: (response: Response) => void = () => {};
+  const pending = new Promise<Response>((next) => {
+    resolve = next;
+  });
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    calls.push(String(input));
+    return pending;
+  }) as unknown as typeof fetch;
+  return { calls, resolve };
+}
+
 function installMockEventSource(): void {
   MockEventSource.instances = [];
   globalThis.EventSource = MockEventSource as unknown as typeof EventSource;
@@ -146,6 +162,57 @@ describe("useFileBrowser", () => {
     await session.unmount();
   });
 
+  test.skipIf(!hasDom)("waits for all initial folder snapshots before opening the live watcher", async () => {
+    installMockEventSource();
+    const firstDir = "/tmp/plannotator-docs-a";
+    const secondDir = "/tmp/plannotator-docs-b";
+    const first = deferred<Response>();
+    const second = deferred<Response>();
+    const pending = [first.promise, second.promise];
+    const calls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return pending.shift() ?? response({ error: "unexpected fetch" }, 500);
+    }) as unknown as typeof fetch;
+
+    const session = await mountHook();
+    await act(async () => {
+      session.result.current!.fetchAll([firstDir, secondDir]);
+    });
+    await tick(0);
+
+    expect(calls).toHaveLength(2);
+    expect(MockEventSource.instances).toHaveLength(0);
+
+    await act(async () => {
+      first.resolve(response({ tree: [{ type: "file", name: "a.md", path: "a.md" }] }));
+      await Promise.resolve();
+    });
+    await tick(0);
+
+    expect(session.result.current!.dirs.find((dir) => dir.path === firstDir)).toMatchObject({
+      isLoading: false,
+      hasLoadedTree: true,
+    });
+    expect(session.result.current!.dirs.find((dir) => dir.path === secondDir)).toMatchObject({
+      isLoading: true,
+      hasLoadedTree: false,
+    });
+    expect(MockEventSource.instances).toHaveLength(0);
+
+    await act(async () => {
+      second.resolve(response({ tree: [{ type: "file", name: "b.md", path: "b.md" }] }));
+      await Promise.resolve();
+    });
+    await tick(0);
+
+    expect(MockEventSource.instances).toHaveLength(1);
+    expect(MockEventSource.instances[0]?.url).toContain(encodeURIComponent(firstDir));
+    expect(MockEventSource.instances[0]?.url).toContain(encodeURIComponent(secondDir));
+
+    await session.unmount();
+  });
+
   test.skipIf(!hasDom)("quiet invalid-directory refresh clears stale files", async () => {
     const dirPath = "/tmp/plannotator-docs";
     const tree: VaultNode[] = [{ type: "file", name: "a.md", path: "a.md" }];
@@ -230,6 +297,38 @@ describe("useFileBrowser", () => {
     await tick(150);
     expect(calls).toHaveLength(2);
     expect(session.result.current!.dirs[0]?.tree).toEqual(reconnectedTree);
+
+    await session.unmount();
+  });
+
+  test.skipIf(!hasDom)("waits for the first tree snapshot before opening the live stream", async () => {
+    installMockEventSource();
+    const dirPath = "/tmp/plannotator-docs";
+    const tree: VaultNode[] = [{ type: "file", name: "a.md", path: "a.md" }];
+    const deferred = installDeferredFetch();
+
+    const session = await mountHook();
+    await act(async () => {
+      session.result.current!.fetchTree(dirPath);
+      await Promise.resolve();
+    });
+
+    expect(deferred.calls).toHaveLength(1);
+    expect(session.result.current!.dirs[0]).toMatchObject({
+      path: dirPath,
+      isLoading: true,
+    });
+    expect(MockEventSource.instances).toHaveLength(0);
+
+    deferred.resolve(response({ tree }));
+    await tick(0);
+
+    expect(session.result.current!.dirs[0]).toMatchObject({
+      path: dirPath,
+      isLoading: false,
+      hasLoadedTree: true,
+    });
+    expect(MockEventSource.instances).toHaveLength(1);
 
     await session.unmount();
   });

@@ -18,6 +18,8 @@ export interface DirState {
   isLoading: boolean;
   error: string | null;
   workspaceStatus?: WorkspaceStatusPayload;
+  /** True after the first successful snapshot; live watching waits for this so watcher setup cannot block initial load. */
+  hasLoadedTree?: boolean;
   /** When true, fetches via /api/reference/obsidian/files and opens docs via /api/reference/obsidian/doc */
   isVault?: boolean;
 }
@@ -107,7 +109,7 @@ export function useFileBrowser(): UseFileBrowserReturn {
             : d
         );
       }
-      return [...prev, { path: dirPath, name, tree: [], isLoading: true, error: null }];
+      return [...prev, { path: dirPath, name, tree: [], isLoading: true, error: null, hasLoadedTree: false }];
     });
 
     try {
@@ -128,6 +130,7 @@ export function useFileBrowser(): UseFileBrowserReturn {
                   tree: options.quiet ? [] : d.tree,
                   workspaceStatus: options.quiet ? undefined : d.workspaceStatus,
                   isLoading: false,
+                  hasLoadedTree: false,
                   error,
                 }
                 : { ...d, isLoading: false, error: d.error }
@@ -146,6 +149,7 @@ export function useFileBrowser(): UseFileBrowserReturn {
               tree: data.tree,
               workspaceStatus,
               isLoading: false,
+              hasLoadedTree: true,
               error: null,
             }
             : d
@@ -193,6 +197,7 @@ export function useFileBrowser(): UseFileBrowserReturn {
           // that the visible tree sits on "Loading..." for seconds.
           isLoading: true,
           error: null,
+          hasLoadedTree: false,
         }));
         return [...regularDirs, ...vaultDirs];
       });
@@ -265,13 +270,19 @@ export function useFileBrowser(): UseFileBrowserReturn {
   }, []);
 
   const watchDirsKey = useMemo(
-    () => dirs
-      // Subscribe only after the initial snapshot is visible. Live updates are
-      // for future freshness; they must not compete with first paint.
-      .filter((dir) => !dir.isVault && !dir.error && !dir.isLoading)
-      .map((dir) => dir.path)
-      .sort()
-      .join("\n"),
+    () => {
+      const regularDirs = dirs.filter((dir) => !dir.isVault);
+      const initialLoadPending = regularDirs.some((dir) => dir.isLoading && !dir.hasLoadedTree);
+      if (initialLoadPending) return "";
+
+      return regularDirs
+        // Subscribe only after the initial snapshot is visible. Live updates are
+        // for future freshness; they must not compete with first paint.
+        .filter((dir) => !dir.error && dir.hasLoadedTree)
+        .map((dir) => dir.path)
+        .sort()
+        .join("\n");
+    },
     [dirs]
   );
 

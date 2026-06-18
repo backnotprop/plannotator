@@ -31,6 +31,9 @@ jobs:
       - name: Run tests
         run: bun test
 
+      - name: Run file browser DOM tests
+        run: DOM_TESTS=1 bun test packages/ui/hooks/useFileBrowser.test.tsx
+
   pi-extension-ai-runtime-windows:
     # Exercises the Pi extension's Node/jiti server mirror on Windows with an
     # npm-style `pi` shim pair. This catches regressions where `where pi`
