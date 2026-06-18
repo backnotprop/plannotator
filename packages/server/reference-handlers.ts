@@ -277,7 +277,7 @@ export async function handleDoc(req: Request, options: HandleDocOptions = {}): P
 					{ status: 400 },
 				);
 			} else if (result.kind === "unavailable") {
-				return Response.json({ error: `Cannot scan project: ${requestedPath}` }, { status: 404 });
+				return Response.json({ error: `Cannot scan project: ${requestedPath}`, reason: "unavailable" }, { status: 503 });
 			} else {
 				return Response.json({ error: `File not found: ${requestedPath}` }, { status: 404 });
 			}
@@ -324,7 +324,14 @@ export async function handleDoc(req: Request, options: HandleDocOptions = {}): P
 		);
 	}
 
-	if (result.kind === "not_found" || result.kind === "unavailable") {
+	if (result.kind === "unavailable") {
+		return Response.json(
+			{ error: `Cannot scan project: ${result.input}`, reason: "unavailable" },
+			{ status: 503 },
+		);
+	}
+
+	if (result.kind === "not_found") {
 		return Response.json(
 			{ error: `File not found: ${result.input}` },
 			{ status: 404 },

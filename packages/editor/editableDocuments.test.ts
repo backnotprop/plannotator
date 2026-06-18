@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  canApplyEditableDocumentDiskSnapshot,
+  getEditableDocumentKnownDiskHash,
   reconcileEditableDocumentDiskSnapshot,
   type EditableDocumentRecord,
   type EnabledSourceSaveCapability,
@@ -49,6 +51,29 @@ function record(overrides: Partial<EditableDocumentRecord> = {}): EditableDocume
 }
 
 describe('reconcileEditableDocumentDiskSnapshot', () => {
+  test('known disk hash follows an active disk-conflict snapshot', () => {
+    const nextSource = sourceSave('sha256:external', 'external\n');
+    const doc = record({
+      currentText: 'after\nunsaved\n',
+      saveStatus: 'conflict',
+      diskConflict: {
+        text: 'external\n',
+        sourceSave: nextSource,
+      },
+    });
+
+    expect(getEditableDocumentKnownDiskHash(doc)).toBe('sha256:external');
+  });
+
+  test('disk snapshots only apply to the record version that requested them', () => {
+    const doc = record();
+
+    expect(canApplyEditableDocumentDiskSnapshot(doc, 'sha256:after')).toBe(true);
+    expect(canApplyEditableDocumentDiskSnapshot(doc, 'sha256:before')).toBe(false);
+    expect(canApplyEditableDocumentDiskSnapshot({ ...doc, saveStatus: 'saving' }, 'sha256:after')).toBe(false);
+    expect(canApplyEditableDocumentDiskSnapshot(null, 'sha256:after')).toBe(false);
+  });
+
   test('clean files adopt disk changes and clear stale saved edit cards', () => {
     const doc = record();
     const nextSource = sourceSave('sha256:external', 'external\n');
@@ -89,8 +114,63 @@ describe('reconcileEditableDocumentDiskSnapshot', () => {
     expect(result.record.currentText).toBe('after\nunsaved\n');
     expect(result.record.diskBaseline).toBe('after\n');
     expect(result.record.saveStatus).toBe('conflict');
+    expect(result.record.sourceSave).toEqual(sourceSave('sha256:after'));
     expect(result.record.savedChange).toBeUndefined();
     expect(result.record.diskConflict).toEqual({
+      text: 'external\n',
+      sourceSave: nextSource,
+    });
+  });
+
+  test('saving dirty files can still reconcile an explicit save-conflict snapshot', () => {
+    const doc = record({
+      currentText: 'local save\n',
+      editMountText: 'after\n',
+      saveStatus: 'saving',
+    });
+    const nextSource = sourceSave('sha256:external', 'external\n');
+
+    const result = reconcileEditableDocumentDiskSnapshot(doc, {
+      key: doc.key,
+      text: 'external\n',
+      sourceSave: nextSource,
+    });
+
+    expect(result.type).toBe('conflict');
+    if (result.type !== 'conflict') throw new Error('expected conflict');
+    expect(result.record.currentText).toBe('local save\n');
+    expect(result.record.sourceSave).toEqual(sourceSave('sha256:after'));
+    expect(result.record.diskConflict).toEqual({
+      text: 'external\n',
+      sourceSave: nextSource,
+    });
+  });
+
+  test('same disk-conflict snapshot does not report a new conflict again', () => {
+    const doc = record({
+      currentText: 'after\nunsaved\n',
+      editMountText: 'after\n',
+      saveStatus: 'dirty',
+    });
+    const nextSource = sourceSave('sha256:external', 'external\n');
+
+    const first = reconcileEditableDocumentDiskSnapshot(doc, {
+      key: doc.key,
+      text: 'external\n',
+      sourceSave: nextSource,
+    });
+    const second = reconcileEditableDocumentDiskSnapshot(doc, {
+      key: doc.key,
+      text: 'external\n',
+      sourceSave: nextSource,
+    });
+
+    expect(first.type).toBe('conflict');
+    expect(second.type).toBe('unchanged');
+    if (second.type !== 'unchanged') throw new Error('expected unchanged');
+    expect(second.record.saveStatus).toBe('conflict');
+    expect(second.record.sourceSave).toEqual(sourceSave('sha256:after'));
+    expect(second.record.diskConflict).toEqual({
       text: 'external\n',
       sourceSave: nextSource,
     });

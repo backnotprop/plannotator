@@ -312,6 +312,9 @@ export async function handleDocRequest(res: Res, url: URL, options: HandleDocOpt
 				const relative = result.matches.map((m: string) => relativizeToAllowedRoots(m, allowedRoots));
 				json(res, { error: `Ambiguous path '${requestedPath}'`, matches: relative }, 400);
 				return;
+			} else if (result.kind === "unavailable") {
+				json(res, { error: `Cannot scan project: ${requestedPath}`, reason: "unavailable" }, 503);
+				return;
 			} else {
 				json(res, { error: `File not found: ${requestedPath}` }, 404);
 				return;
@@ -366,7 +369,12 @@ export async function handleDocRequest(res: Res, url: URL, options: HandleDocOpt
 		return;
 	}
 
-	if (result.kind === "not_found" || result.kind === "unavailable") {
+	if (result.kind === "unavailable") {
+		json(res, { error: `Cannot scan project: ${result.input}`, reason: "unavailable" }, 503);
+		return;
+	}
+
+	if (result.kind === "not_found") {
 		json(res, { error: `File not found: ${result.input}` }, 404);
 		return;
 	}

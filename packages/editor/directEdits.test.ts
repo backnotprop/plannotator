@@ -1,9 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import {
   buildDirectEditsSection,
+  buildPlanEditPanelItem,
+  buildSavedFileChangePanelItems,
   buildSavedFileChangesSection,
   composeFeedbackWithEditSections,
   composeFeedbackWithDirectEdits,
+  computeEditStats,
   normalizeEditedMarkdown,
 } from './directEdits';
 
@@ -52,5 +55,38 @@ describe('direct edit feedback helpers', () => {
       .toBe(saved);
     expect(composeFeedbackWithEditSections('Please adjust the intro.', '', saved))
       .toBe(`${saved}\n\n---\n\nPlease adjust the intro.`);
+  });
+
+  test('computes line counts for edit badges', () => {
+    expect(computeEditStats('one\ntwo\n', 'one\nthree\nfour\n')).toEqual({
+      added: 2,
+      removed: 1,
+    });
+  });
+
+  test('builds saved file panel items', () => {
+    const [item] = buildSavedFileChangePanelItems([
+      {
+        key: 'file:/repo/docs/a.md',
+        path: '/repo/docs/a.md',
+        basename: 'a.md',
+        beforeText: 'before\n',
+        afterText: 'after\n',
+      },
+    ]);
+
+    expect(item.id).toBe('saved:file:/repo/docs/a.md');
+    expect(item.title).toBe('Edits');
+    expect(item.diffText).toContain('-before');
+    expect(item.diffText).toContain('+after');
+  });
+
+  test('builds plan edit panel items', () => {
+    const item = buildPlanEditPanelItem('before\n', 'after\n');
+
+    expect(item.id).toBe('plan');
+    expect(item.added).toBe(1);
+    expect(item.removed).toBe(1);
+    expect(item.diffText).toContain('plan.md (edited)');
   });
 });

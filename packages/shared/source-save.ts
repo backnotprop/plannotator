@@ -59,11 +59,37 @@ export type SourceSaveResponse =
 	  }
 	| {
 			ok: false;
-			code: "not-writable" | "conflict" | "write-failed" | "invalid-request";
+			code: "conflict";
 			message: string;
-			currentHash?: string;
-			currentMtimeMs?: number;
+			currentText: string;
+			currentHash: string;
+			currentMtimeMs: number;
+			currentSize: number;
+			currentEol: SourceFileEol;
+	  }
+	| {
+			ok: false;
+			code: "not-writable" | "write-failed" | "invalid-request";
+			message: string;
 	  };
+
+export type SourceSaveConflictResponse = Extract<SourceSaveResponse, { ok: false; code: "conflict" }>;
+
+export function isSourceFileEol(value: unknown): value is SourceFileEol {
+	return value === "lf" || value === "crlf" || value === "mixed" || value === "none";
+}
+
+export function hasSourceSaveConflictSnapshot(response: SourceSaveResponse): response is SourceSaveConflictResponse {
+	if (!("code" in response) || response.code !== "conflict") return false;
+	const conflict = response as SourceSaveConflictResponse;
+	return (
+		typeof conflict.currentText === "string" &&
+		typeof conflict.currentHash === "string" &&
+		typeof conflict.currentMtimeMs === "number" &&
+		typeof conflict.currentSize === "number" &&
+		isSourceFileEol(conflict.currentEol)
+	);
+}
 
 export const SOURCE_SAVE_FILE_REGEX = /\.(md|mdx|txt)$/i;
 

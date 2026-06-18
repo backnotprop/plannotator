@@ -1,4 +1,4 @@
-import { createTwoFilesPatch } from 'diff';
+import { createTwoFilesPatch, structuredPatch } from 'diff';
 
 const EMPTY_FEEDBACK_SENTINELS = new Set([
   '',
@@ -13,8 +13,40 @@ export interface SavedFileChangeInput {
   afterText: string;
 }
 
+export interface SavedFileChangePanelInput extends SavedFileChangeInput {
+  key: string;
+}
+
+export interface DirectEditPanelItem {
+  id: string;
+  title?: string;
+  label?: string;
+  added: number;
+  removed: number;
+  description?: string;
+  diffText: string;
+}
+
+export interface EditStats {
+  added: number;
+  removed: number;
+}
+
 export function isEmptyFeedbackSentinel(feedback: string): boolean {
   return EMPTY_FEEDBACK_SENTINELS.has(feedback);
+}
+
+export function computeEditStats(base: string, edited: string): EditStats {
+  const patch = structuredPatch('plan.md', 'plan.md', base, edited, undefined, undefined, { context: 0 });
+  let added = 0;
+  let removed = 0;
+  for (const hunk of patch.hunks) {
+    for (const line of hunk.lines) {
+      if (line.startsWith('+')) added++;
+      else if (line.startsWith('-')) removed++;
+    }
+  }
+  return { added, removed };
 }
 
 export function normalizeEditedMarkdown(base: string | null, current: string | null | undefined): string | null {
@@ -77,6 +109,39 @@ export function buildSavedFileChangesSection(changes: SavedFileChangeInput[]): s
     '',
     ...sections,
   ].join('\n\n');
+}
+
+export function buildSavedFileChangePanelItems(changes: SavedFileChangePanelInput[]): DirectEditPanelItem[] {
+  return changes.map((change) => {
+    const stats = computeEditStats(change.beforeText, change.afterText);
+    return {
+      id: `saved:${change.key}`,
+      title: 'Edits',
+      label: change.path,
+      added: stats.added,
+      removed: stats.removed,
+      description: 'Saved to disk; sent with feedback as context.',
+      diffText: createTwoFilesPatch(
+        `${change.basename} (opened)`,
+        `${change.basename} (saved)`,
+        change.beforeText,
+        change.afterText,
+        undefined,
+        undefined,
+        { context: 3 },
+      ).trimEnd(),
+    };
+  });
+}
+
+export function buildPlanEditPanelItem(base: string, edited: string): DirectEditPanelItem {
+  const stats = computeEditStats(base, edited);
+  return {
+    id: 'plan',
+    added: stats.added,
+    removed: stats.removed,
+    diffText: createTwoFilesPatch('plan.md (original)', 'plan.md (edited)', base, edited, undefined, undefined, { context: 3 }),
+  };
 }
 
 export function composeFeedbackWithEditSections(

@@ -151,8 +151,11 @@ export function saveSourceFileAtomic(
 			ok: false,
 			code: "conflict",
 			message: "The file changed on disk since Plannotator opened it.",
+			currentText: before.text,
 			currentHash: before.hash,
 			currentMtimeMs: before.mtimeMs,
+			currentSize: before.size,
+			currentEol: before.eol,
 		};
 	}
 

@@ -76,7 +76,12 @@ describe("source-save node helpers", () => {
 		expect(result.ok).toBe(false);
 		if (!result.ok) {
 			expect(result.code).toBe("conflict");
+			if (result.code !== "conflict") throw new Error("expected conflict");
+			expect(result.currentText).toBe("External change\n");
 			expect(result.currentHash).toMatch(/^sha256:/);
+			expect(typeof result.currentMtimeMs).toBe("number");
+			expect(result.currentSize).toBe("External change\n".length);
+			expect(result.currentEol).toBe("lf");
 		}
 		expect(readFileSync(filePath, "utf8")).toBe("External change\n");
 	});

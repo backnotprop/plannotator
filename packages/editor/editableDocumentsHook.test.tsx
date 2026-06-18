@@ -182,4 +182,30 @@ describe('useEditableDocuments conflict actions', () => {
 
     await session.unmount();
   });
+
+  test.skipIf(!hasDom)('restoring draft documents does not overwrite a live dirty buffer', async () => {
+    const session = await mountEditableDocuments();
+
+    await act(async () => {
+      session.current().openDocument({ key: KEY, text: 'b\n', sourceSave: SOURCE_B });
+      session.current().beginEdit('b\n');
+      session.current().updateActiveText('live edit\n');
+    });
+
+    const restoredKeys = session.current().restoreDraftDocuments([{
+      key: KEY,
+      sourceSave: SOURCE_B,
+      sessionOpenText: 'draft open\n',
+      diskBaseline: 'draft disk\n',
+      currentText: 'draft edit\n',
+    }]);
+
+    const doc = session.current().getDocument(KEY);
+    expect(restoredKeys).toEqual([]);
+    expect(doc?.currentText).toBe('live edit\n');
+    expect(doc?.diskBaseline).toBe('b\n');
+    expect(doc?.saveStatus).toBe('dirty');
+
+    await session.unmount();
+  });
 });

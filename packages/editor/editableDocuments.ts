@@ -114,6 +114,22 @@ export function editableDocumentKey(sourceSave: SourceSaveCapability | null | un
   return sourceSave?.enabled ? `file:${sourceSave.path}` : fallback;
 }
 
+export function getEditableDocumentKnownDiskHash(record: EditableDocumentRecord | null | undefined): string | undefined {
+  return record?.diskConflict?.sourceSave.hash
+    ?? (record?.sourceSave?.enabled ? record.sourceSave.hash : record?.lastKnownHash);
+}
+
+export function canApplyEditableDocumentDiskSnapshot(
+  record: EditableDocumentRecord | null | undefined,
+  expectedDiskHash: string | undefined,
+): record is EditableDocumentRecord & { sourceSave: EnabledSourceSaveCapability } {
+  return (
+    record?.sourceSave?.enabled === true &&
+    record.saveStatus !== 'saving' &&
+    getEditableDocumentKnownDiskHash(record) === expectedDiskHash
+  );
+}
+
 export type DiskSnapshotReconcileResult =
   | { type: 'missing' }
   | { type: 'unchanged'; record: EditableDocumentRecord }
@@ -127,14 +143,18 @@ export function reconcileEditableDocumentDiskSnapshot(
   if (!record) return { type: 'missing' };
 
   const normalized = normalizeDocumentText(input.text);
-  const previousHash = record.sourceSave?.enabled ? record.sourceSave.hash : record.lastKnownHash;
+  const previousHash = getEditableDocumentKnownDiskHash(record);
   const hashChanged = previousHash !== input.sourceSave.hash;
-  if (!hashChanged && !record.diskConflict) {
-    record.sourceSave = input.sourceSave;
+  if (!hashChanged) {
     record.path = input.sourceSave.path;
     record.basename = input.sourceSave.basename;
     record.lastKnownHash = input.sourceSave.hash;
     record.lastKnownMtimeMs = input.sourceSave.mtimeMs;
+    if (record.diskConflict) {
+      record.diskConflict = { text: normalized, sourceSave: input.sourceSave };
+    } else {
+      record.sourceSave = input.sourceSave;
+    }
     return { type: 'unchanged', record };
   }
 
@@ -396,10 +416,15 @@ export function useEditableDocuments() {
     if (changed) bump();
   }, [bump]);
 
-  const restoreDraftDocuments = useCallback((documents: EditableDocumentDraftData[]) => {
-    if (documents.length === 0) return;
+  const restoreDraftDocuments = useCallback((documents: EditableDocumentDraftData[]): string[] => {
+    if (documents.length === 0) return [];
+
+    const restoredKeys: string[] = [];
 
     for (const doc of documents) {
+      const existing = docsRef.current.get(doc.key);
+      if (existing && (recordIsDirty(existing) || existing.diskConflict)) continue;
+
       const sessionOpenText = normalizeDocumentText(doc.sessionOpenText);
       const diskBaseline = normalizeDocumentText(doc.diskBaseline);
       const currentText = normalizeDocumentText(doc.currentText);
@@ -429,9 +454,11 @@ export function useEditableDocuments() {
         lastKnownMtimeMs: doc.sourceSave.mtimeMs,
         savedChange,
       });
+      restoredKeys.push(doc.key);
     }
 
-    bump();
+    if (restoredKeys.length > 0) bump();
+    return restoredKeys;
   }, [bump]);
 
   const restoreSavedFileChanges = useCallback((changes: SavedFileChangeDraftData[]) => {

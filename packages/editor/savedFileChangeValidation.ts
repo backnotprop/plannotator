@@ -1,9 +1,5 @@
-import type { EnabledSourceSaveCapability, SavedFileChangeDraftData } from './editableDocuments';
-
-export type SourceSaveProbeResult =
-  | { status: 'ok'; sourceSave: EnabledSourceSaveCapability }
-  | { status: 'missing' }
-  | { status: 'unavailable' };
+import type { SavedFileChangeDraftData } from './editableDocuments';
+import type { SourceSaveProbeResult } from './sourceDocumentClient';
 
 export interface SavedFileChangeValidationResult {
   valid: SavedFileChangeDraftData[];
