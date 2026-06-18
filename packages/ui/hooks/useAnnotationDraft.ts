@@ -84,29 +84,52 @@ function parseDraftEditedDocument(value: unknown): DraftEditedDocument | null {
   )) {
     return null;
   }
+  const savedChange = parseDraftSavedFileChange(doc.savedChange, sourceSave);
   return {
     key: doc.key,
     sourceSave,
     sessionOpenText: doc.sessionOpenText,
     diskBaseline: doc.diskBaseline,
     currentText: doc.currentText,
-    ...(isDraftSavedFileChange(doc.savedChange) ? { savedChange: doc.savedChange } : {}),
+    ...(savedChange ? { savedChange } : {}),
   };
 }
 
 function isDraftSavedFileChange(value: unknown): value is DraftSavedFileChange {
-  if (!value || typeof value !== 'object') return false;
+  return parseDraftSavedFileChange(value) !== null;
+}
+
+function parseDraftSavedFileChange(
+  value: unknown,
+  fallbackSourceSave?: DraftSourceSaveCapability,
+): DraftSavedFileChange | null {
+  if (!value || typeof value !== 'object') return null;
   const change = value as Partial<DraftSavedFileChange>;
-  return (
+  if (!(
     typeof change.key === 'string' &&
     typeof change.path === 'string' &&
     typeof change.basename === 'string' &&
     typeof change.beforeText === 'string' &&
     typeof change.afterText === 'string' &&
     (change.beforeHash === undefined || typeof change.beforeHash === 'string') &&
-    (change.afterHash === undefined || typeof change.afterHash === 'string') &&
-    isDraftSourceSaveCapability(change.sourceSave)
-  );
+    (change.afterHash === undefined || typeof change.afterHash === 'string')
+  )) {
+    return null;
+  }
+  const sourceSave = isDraftSourceSaveCapability(change.sourceSave)
+    ? change.sourceSave
+    : fallbackSourceSave;
+  if (!sourceSave) return null;
+  return {
+    key: change.key,
+    path: change.path,
+    basename: change.basename,
+    beforeText: change.beforeText,
+    afterText: change.afterText,
+    beforeHash: change.beforeHash,
+    afterHash: change.afterHash,
+    sourceSave,
+  };
 }
 
 function isDraftSourceSaveCapability(value: unknown): value is DraftSourceSaveCapability {

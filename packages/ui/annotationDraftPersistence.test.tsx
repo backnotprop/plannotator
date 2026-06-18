@@ -365,6 +365,41 @@ describe('direct-edit draft persistence', () => {
     await session.unmount();
   });
 
+  test.skipIf(!hasDom)('dirty source drafts restore older nested saved-change records from the document source', async () => {
+    const { sourceSave: _sourceSave, ...olderSavedChange } = SAVED_FILE_CHANGE;
+    const dirtyDraft = {
+      key: SAVED_FILE_CHANGE.key,
+      sourceSave: SOURCE_SAVE,
+      sessionOpenText: SAVED_FILE_CHANGE.beforeText,
+      diskBaseline: SAVED_FILE_CHANGE.afterText,
+      currentText: 'after\nmore unsaved work\n',
+      savedChange: olderSavedChange,
+    };
+    saveDraft(DRAFT_KEY, {
+      annotations: [],
+      globalAttachments: [],
+      editedDocuments: [dirtyDraft],
+      ts: Date.now(),
+    });
+
+    const session = await mountSession(options());
+    let restored: ReturnType<HookResult['restoreDraft']>;
+    act(() => {
+      restored = session.result.current!.restoreDraft();
+    });
+
+    expect(restored!.editedDocuments).toEqual([{
+      key: dirtyDraft.key,
+      sourceSave: SOURCE_SAVE,
+      sessionOpenText: dirtyDraft.sessionOpenText,
+      diskBaseline: dirtyDraft.diskBaseline,
+      currentText: dirtyDraft.currentText,
+      savedChange: SAVED_FILE_CHANGE,
+    }]);
+    expect(restored!.savedFileChanges).toEqual([]);
+    await session.unmount();
+  });
+
   test.skipIf(!hasDom)('discarding everything deletes the draft from disk', async () => {
     // The user committed edits, then discarded them (no annotations either).
     // A stale draft must not resurrect the discarded content on refresh.

@@ -114,7 +114,36 @@ import {
   composeFeedbackWithEditSections,
   normalizeEditedMarkdown,
 } from './directEdits';
-import { editableDocumentKey, useEditableDocuments } from './editableDocuments';
+import {
+  editableDocumentKey,
+  useEditableDocuments,
+  type EnabledSourceSaveCapability,
+  type SavedFileChangeDraftData,
+} from './editableDocuments';
+import {
+  validateSavedFileChanges,
+  type SourceSaveProbeResult,
+} from './savedFileChangeValidation';
+
+function normalizeBrowserPath(path: string): string {
+  const normalized = path.replace(/\\/g, '/');
+  if (normalized === '/') return normalized;
+  return normalized.replace(/\/+$/, '');
+}
+
+function dirnameBrowserPath(path: string): string {
+  const normalized = normalizeBrowserPath(path);
+  const index = normalized.lastIndexOf('/');
+  if (index < 0) return normalized;
+  if (index === 0) return '/';
+  return normalized.slice(0, index);
+}
+
+function pathIsInsideDir(path: string, dir: string): boolean {
+  const normalizedPath = normalizeBrowserPath(path);
+  const normalizedDir = normalizeBrowserPath(dir);
+  return normalizedPath === normalizedDir || normalizedPath.startsWith(`${normalizedDir}/`);
+}
 
 type NoteAutoSaveResults = {
   obsidian?: boolean;
@@ -1378,61 +1407,52 @@ const App: React.FC = () => {
   // and the baseline exists. Edits flow through the same helpers
   // commitMarkdownEdits uses, with the RESTORED annotations remapped against
   // the edited document (they aren't in state yet when the remap runs).
+  const resolveSavedFileChangeSource = useCallback(async (
+    change: SavedFileChangeDraftData,
+  ): Promise<SourceSaveProbeResult> => {
+    try {
+      const res = await fetch(`/api/doc?path=${encodeURIComponent(change.path)}`);
+      if (res.status === 404) return { status: 'missing' };
+      if (!res.ok) return { status: 'unavailable' };
+      const data = (await res.json()) as { sourceSave?: SourceSaveCapability };
+      if (data.sourceSave?.enabled) return { status: 'ok', sourceSave: data.sourceSave };
+      if (data.sourceSave?.enabled === false && data.sourceSave.reason === 'missing-file') {
+        return { status: 'missing' };
+      }
+      return { status: 'unavailable' };
+    } catch {
+      return { status: 'unavailable' };
+    }
+  }, []);
+
   const validateDraftSavedFileChanges = useCallback(async (
-    changes: DraftSavedFileChange[],
-  ): Promise<DraftSavedFileChange[]> => {
-    if (changes.length === 0) return [];
-    const validated: DraftSavedFileChange[] = [];
-    let staleDropped = 0;
+    changes: SavedFileChangeDraftData[],
+  ): Promise<{ kept: SavedFileChangeDraftData[]; changedOrMissing: SavedFileChangeDraftData[]; unverified: SavedFileChangeDraftData[] }> => {
+    if (changes.length === 0) return { kept: [], changedOrMissing: [], unverified: [] };
+    const result = await validateSavedFileChanges(changes, resolveSavedFileChangeSource);
+    const changedOrMissing = result.dropped
+      .filter((entry) => entry.reason === 'changed' || entry.reason === 'missing')
+      .map((entry) => entry.change);
 
-    for (const change of changes) {
-      if (change.beforeText === change.afterText) {
-        continue;
-      }
-
-      if (!change.afterHash) {
-        validated.push(change);
-        continue;
-      }
-
-      const activeSource = activeEditableDocument?.sourceSave?.enabled && activeEditableDocument.path === change.path
-        ? activeEditableDocument.sourceSave
-        : null;
-
-      let currentSource = activeSource;
-      if (!currentSource) {
-        try {
-          const res = await fetch(`/api/doc?path=${encodeURIComponent(change.path)}`);
-          if (res.ok) {
-            const data = (await res.json()) as { sourceSave?: SourceSaveCapability };
-            currentSource = data.sourceSave?.enabled ? data.sourceSave : null;
-          }
-        } catch {
-          currentSource = null;
-        }
-      }
-
-      if (!currentSource || currentSource.hash !== change.afterHash) {
-        staleDropped++;
-        continue;
-      }
-
-      validated.push({
-        ...change,
-        sourceSave: currentSource,
-        afterHash: currentSource.hash,
+    if (changedOrMissing.length > 0) {
+      toast('Some saved edit context was not restored', {
+        description: 'Those files changed or disappeared after Plannotator saved them.',
+        duration: 5000,
       });
     }
-
-    if (staleDropped > 0) {
-      toast('Some saved edit context was not restored', {
-        description: 'Those files changed after Plannotator saved them.',
+    if (result.unverified.length > 0) {
+      toast('Some saved edit context could not be verified', {
+        description: 'Plannotator kept it for now and will check again before sending feedback.',
         duration: 5000,
       });
     }
 
-    return validated;
-  }, [activeEditableDocument]);
+    return {
+      kept: [...result.valid, ...result.unverified],
+      changedOrMissing,
+      unverified: result.unverified,
+    };
+  }, [resolveSavedFileChangeSource]);
 
   const handleRestoreDraft = React.useCallback(async () => {
     const {
@@ -1446,16 +1466,25 @@ const App: React.FC = () => {
     if (restoredCode.length > 0) setCodeAnnotations(restoredCode);
     if (restoredGlobal.length > 0) setGlobalAttachments(restoredGlobal);
 
-    const validSavedFileChanges = await validateDraftSavedFileChanges(savedFileChanges);
-    const validSavedChangeKeys = new Set(validSavedFileChanges.map((change) => change.key));
+    const nestedSavedFileChanges = editedDocuments
+      .map((doc) => doc.savedChange)
+      .filter((change): change is SavedFileChangeDraftData => !!change);
+    const savedChangeCandidates = new Map<string, SavedFileChangeDraftData>();
+    for (const change of [...savedFileChanges, ...nestedSavedFileChanges]) {
+      savedChangeCandidates.set(change.key, change);
+    }
+    const validatedSaved = await validateDraftSavedFileChanges([...savedChangeCandidates.values()]);
+    const validSavedChangeByKey = new Map(validatedSaved.kept.map((change) => [change.key, change]));
+    const editedDocumentKeys = new Set(editedDocuments.map((doc) => doc.key));
+    const cleanSavedFileChanges = validatedSaved.kept.filter((change) => !editedDocumentKeys.has(change.key));
     const editedDocumentsForRestore: DraftEditedDocument[] = editedDocuments.map((doc) =>
-      doc.savedChange && !validSavedChangeKeys.has(doc.savedChange.key)
-        ? { ...doc, savedChange: undefined }
+      doc.savedChange
+        ? { ...doc, savedChange: validSavedChangeByKey.get(doc.savedChange.key) }
         : doc
     );
 
-    if (validSavedFileChanges.length > 0) {
-      editableDocuments.restoreSavedFileChanges(validSavedFileChanges);
+    if (cleanSavedFileChanges.length > 0) {
+      editableDocuments.restoreSavedFileChanges(cleanSavedFileChanges);
       if (window.innerWidth >= 768) {
         setRightSidebarTab('annotations');
         setIsPanelOpen(true);
@@ -1583,6 +1612,19 @@ const App: React.FC = () => {
     () => editableDocuments.getSavedFileChanges(),
     [editableDocuments, editableDocuments.version],
   );
+  const openSourceDocuments = useMemo(
+    () => editableDocuments.getSourceDocuments(),
+    [editableDocuments, editableDocuments.version],
+  );
+  const savedFileChangesForValidation = useMemo(() => {
+    const sourceByKey = new Map(openSourceDocuments.map((doc) => [doc.key, doc.sourceSave]));
+    return savedFileChanges
+      .map((change): SavedFileChangeDraftData | null => {
+        const sourceSave = sourceByKey.get(change.key);
+        return sourceSave ? { ...change, sourceSave } : null;
+      })
+      .filter((change): change is SavedFileChangeDraftData => change !== null);
+  }, [openSourceDocuments, savedFileChanges]);
   const activeSourceSave = activeEditableDocument?.sourceSave?.enabled
     ? activeEditableDocument.sourceSave
     : null;
@@ -1695,9 +1737,9 @@ const App: React.FC = () => {
     return buildDirectEditsSection(base, getEditedMarkdown(), sourceConverted);
   }, [activeSourceSave, getEditedMarkdown, hasUnsavedSourceFileBuffers, sourceConverted]);
 
-  const buildSavedChangesSection = useCallback((): string => {
+  const buildSavedChangesSection = useCallback((changes = savedFileChanges): string => {
     return buildSavedFileChangesSection(
-      savedFileChanges.map((change) => ({
+      changes.map((change) => ({
         path: change.path,
         basename: change.basename,
         beforeText: change.beforeText,
@@ -1709,9 +1751,148 @@ const App: React.FC = () => {
   // Prepends the Direct Edits section to annotation feedback. When edits exist
   // but there are no annotations, the "no feedback" sentinel is replaced rather
   // than appended to.
-  const composeFeedback = useCallback((annotationsText: string): string => {
-    return composeFeedbackWithEditSections(annotationsText, buildEditsSection(), buildSavedChangesSection());
+  const composeFeedback = useCallback((annotationsText: string, checkedSavedFileChanges = savedFileChanges): string => {
+    return composeFeedbackWithEditSections(
+      annotationsText,
+      buildEditsSection(),
+      buildSavedChangesSection(checkedSavedFileChanges),
+    );
   }, [buildEditsSection, buildSavedChangesSection]);
+
+  const validateSavedFileChangesBeforeSubmit = useCallback(async (): Promise<SavedFileChangeDraftData[] | null> => {
+    if (savedFileChangesForValidation.length === 0) return [];
+    const result = await validateSavedFileChanges(savedFileChangesForValidation, resolveSavedFileChangeSource);
+    const stale = result.dropped.filter((entry) => entry.reason === 'changed' || entry.reason === 'missing');
+
+    if (stale.length > 0) {
+      editableDocuments.clearSavedFileChanges(stale.map((entry) => entry.change.key));
+      scheduleDraftSave();
+      toast.error('Saved edits changed on disk', {
+        description: 'Plannotator removed the stale edit context. Nothing was sent.',
+      });
+      return null;
+    }
+
+    if (result.unverified.length > 0) {
+      toast.error('Saved edits could not be verified', {
+        description: 'Check the file tree and try sending feedback again.',
+      });
+      return null;
+    }
+
+    return result.valid;
+  }, [editableDocuments, resolveSavedFileChangeSource, savedFileChangesForValidation, scheduleDraftSave]);
+
+  const fetchSourceDocumentSnapshot = useCallback(async (
+    doc: { sourceSave: EnabledSourceSaveCapability },
+  ): Promise<{ markdown: string; sourceSave: EnabledSourceSaveCapability } | null> => {
+    try {
+      const res = await fetch(`/api/doc?path=${encodeURIComponent(doc.sourceSave.path)}`);
+      if (!res.ok) return null;
+      const data = (await res.json()) as { markdown?: string; sourceSave?: SourceSaveCapability; renderAs?: 'markdown' | 'html' };
+      if (data.renderAs === 'html' || typeof data.markdown !== 'string' || !data.sourceSave?.enabled) return null;
+      return { markdown: data.markdown, sourceSave: data.sourceSave };
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const reconcileOpenSourceDocuments = useCallback(async (changedDir?: string) => {
+    const activeKey = editableDocuments.getActiveKey();
+    if (isEditingMarkdown && activeKey) {
+      const live = markdownEditorHandleRef.current?.getMarkdown();
+      if (live != null) editableDocuments.updateActiveText(live, { forceNotify: true });
+    }
+
+    const docs = editableDocuments.getSourceDocuments()
+      .filter((doc) => !changedDir || pathIsInsideDir(doc.sourceSave.path, changedDir));
+    let changed = false;
+
+    for (const doc of docs) {
+      const snapshot = await fetchSourceDocumentSnapshot(doc);
+      if (!snapshot) continue;
+      const result = editableDocuments.reconcileDiskSnapshot({
+        key: doc.key,
+        text: snapshot.markdown,
+        sourceSave: snapshot.sourceSave,
+      });
+
+      if (result.type === 'clean-updated') {
+        changed = true;
+        if (result.record.key === editableDocuments.getActiveKey()) {
+          setMarkdown(result.record.currentText);
+          setEditGeneration((g) => g + 1);
+          editSessionBaseRef.current = result.record.currentText;
+          setEditorDirty(false);
+          setEditorDiffersFromBaseline(false);
+          setEditStats(null);
+        }
+        if (result.clearedSavedChange) {
+          toast('File updated from disk', {
+            description: `${result.record.basename} changed outside Plannotator, so its old Edits card was cleared.`,
+          });
+        }
+      } else if (result.type === 'conflict') {
+        changed = true;
+        if (result.record.key === editableDocuments.getActiveKey()) {
+          setEditorDirty(true);
+          setEditorDiffersFromBaseline(true);
+          setEditStats(computeEditStats(result.record.diskBaseline, result.record.currentText));
+          toast.error('File changed on disk', {
+            description: 'Choose whether to overwrite disk or reload the file.',
+          });
+        }
+      }
+    }
+
+    if (changed) scheduleDraftSave();
+  }, [editableDocuments, fetchSourceDocumentSnapshot, isEditingMarkdown, scheduleDraftSave]);
+
+  const sourceWatchDirsKey = useMemo(() => {
+    const dirs = new Set<string>();
+    for (const doc of openSourceDocuments) dirs.add(dirnameBrowserPath(doc.sourceSave.path));
+    return [...dirs].sort().join('\n');
+  }, [openSourceDocuments]);
+
+  useEffect(() => {
+    if (!sourceWatchDirsKey || typeof EventSource === 'undefined') return;
+
+    const dirs = sourceWatchDirsKey.split('\n').filter(Boolean);
+    const timers = new Map<string, ReturnType<typeof setTimeout>>();
+    const params = new URLSearchParams();
+    for (const dir of dirs) params.append('dirPath', dir);
+    const source = new EventSource(`/api/reference/files/stream?${params.toString()}`);
+
+    const schedule = (dir?: string) => {
+      const key = dir ?? '*';
+      const existing = timers.get(key);
+      if (existing) clearTimeout(existing);
+      timers.set(key, setTimeout(() => {
+        timers.delete(key);
+        void reconcileOpenSourceDocuments(dir);
+      }, 120));
+    };
+
+    source.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data) as { type?: string; dirPath?: string };
+        const dir = typeof data.dirPath === 'string' && dirs.includes(data.dirPath) ? data.dirPath : undefined;
+        if (data.type === 'ready') {
+          schedule(dir);
+          return;
+        }
+        if (data.type !== 'changed') return;
+        schedule(dir);
+      } catch {
+        return;
+      }
+    };
+
+    return () => {
+      for (const timer of timers.values()) clearTimeout(timer);
+      source.close();
+    };
+  }, [reconcileOpenSourceDocuments, sourceWatchDirsKey]);
 
   const handleTaterModeChange = useCallback((enabled: boolean) => {
     setTaterMode(enabled);
@@ -2117,10 +2298,15 @@ const App: React.FC = () => {
       const hasDocAnnotations = Array.from(linkedDocHook.getDocAnnotations().values()).some(
         (d) => d.annotations.length > 0 || d.globalAttachments.length > 0
       );
+      const checkedSavedFileChanges = await validateSavedFileChangesBeforeSubmit();
+      if (checkedSavedFileChanges === null) {
+        setIsSubmitting(false);
+        return;
+      }
       const editsSection = buildEditsSection();
-      const savedChangesSection = buildSavedChangesSection();
+      const savedChangesSection = buildSavedChangesSection(checkedSavedFileChanges);
       if (allAnnotations.length > 0 || codeAnnotations.length > 0 || globalAttachments.length > 0 || hasDocAnnotations || editorAnnotations.length > 0 || editsSection || savedChangesSection) {
-        body.feedback = composeFeedback(messageMultiSelectMode ? buildFullAnnotationsOutput() : annotationsOutput);
+        body.feedback = composeFeedback(messageMultiSelectMode ? buildFullAnnotationsOutput() : annotationsOutput, checkedSavedFileChanges);
       }
 
       await fetch('/api/approve', {
@@ -2137,12 +2323,17 @@ const App: React.FC = () => {
   const handleDeny = async () => {
     setIsSubmitting(true);
     try {
+      const checkedSavedFileChanges = await validateSavedFileChangesBeforeSubmit();
+      if (checkedSavedFileChanges === null) {
+        setIsSubmitting(false);
+        return;
+      }
       const planSaveSettings = getPlanSaveSettings();
       await fetch('/api/deny', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          feedback: composeFeedback(messageMultiSelectMode ? buildFullAnnotationsOutput() : annotationsOutput),
+          feedback: composeFeedback(messageMultiSelectMode ? buildFullAnnotationsOutput() : annotationsOutput, checkedSavedFileChanges),
           planSave: {
             enabled: planSaveSettings.enabled,
             ...(planSaveSettings.customPath && { customPath: planSaveSettings.customPath }),
@@ -2160,7 +2351,12 @@ const App: React.FC = () => {
     setIsSubmitting(true);
     try {
       snapshotActiveEditableDocument();
-      const feedback = composeFeedback(messageMultiSelectMode ? buildFullAnnotationsOutput() : annotationsOutput);
+      const checkedSavedFileChanges = await validateSavedFileChangesBeforeSubmit();
+      if (checkedSavedFileChanges === null) {
+        setIsSubmitting(false);
+        return;
+      }
+      const feedback = composeFeedback(messageMultiSelectMode ? buildFullAnnotationsOutput() : annotationsOutput, checkedSavedFileChanges);
       const scopedSelectedMessageId = messageMultiSelectMode
         ? annotatedMessageIds.length === 1 ? annotatedMessageIds[0] : undefined
         : selectedMessageId ?? undefined;
@@ -2787,7 +2983,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSaveEditedSourceFile = useCallback(async (): Promise<boolean> => {
+  const handleSaveEditedSourceFile = useCallback(async (options?: { overwriteDiskConflict?: boolean }): Promise<boolean> => {
     if (!isEditingMarkdown) return false;
 
     const activeDocument = editableDocuments.getActiveDocumentLive();
@@ -2803,6 +2999,23 @@ const App: React.FC = () => {
       return true;
     }
 
+    if (activeDocument.diskConflict && !options?.overwriteDiskConflict) {
+      toast.error('Resolve the disk conflict first', {
+        description: 'Choose Overwrite disk or Reload from disk.',
+      });
+      return true;
+    }
+
+    const saveBaseSource = options?.overwriteDiskConflict && activeDocument.diskConflict
+      ? activeDocument.diskConflict.sourceSave
+      : activeSourceSave;
+    const savedChangeBaseText = options?.overwriteDiskConflict
+      ? activeDocument.diskConflict?.text
+      : undefined;
+    const savedChangeBaseHash = options?.overwriteDiskConflict
+      ? activeDocument.diskConflict?.sourceSave.hash
+      : undefined;
+
     editableDocuments.updateActiveText(edited);
     editableDocuments.markSaving(activeDocument.key);
     try {
@@ -2810,10 +3023,10 @@ const App: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          path: activeSourceSave.scope === 'folder-file' ? activeSourceSave.path : undefined,
+          path: saveBaseSource.scope === 'folder-file' ? saveBaseSource.path : undefined,
           text: edited,
-          baseHash: activeSourceSave.hash,
-          baseMtimeMs: activeSourceSave.mtimeMs,
+          baseHash: saveBaseSource.hash,
+          baseMtimeMs: saveBaseSource.mtimeMs,
         }),
       });
       const data = (await res.json()) as SourceSaveResponse;
@@ -2821,9 +3034,12 @@ const App: React.FC = () => {
       if (!res.ok || !data.ok) {
         const message = !data.ok ? data.message : 'Save failed';
         if (!data.ok && data.code === 'conflict') {
-          editableDocuments.markConflict(activeDocument.key, message);
+          await reconcileOpenSourceDocuments(dirnameBrowserPath(activeSourceSave.path));
+          if (!editableDocuments.getDocument(activeDocument.key)?.diskConflict) {
+            editableDocuments.markConflict(activeDocument.key, message);
+          }
           toast.error('File changed on disk', {
-            description: 'Reload or copy your edits before saving again.',
+            description: 'Choose whether to overwrite disk or reload the file.',
           });
         } else {
           editableDocuments.markError(activeDocument.key, message);
@@ -2833,7 +3049,7 @@ const App: React.FC = () => {
       }
 
       const nextSourceSave = {
-        ...activeSourceSave,
+        ...saveBaseSource,
         hash: data.hash,
         mtimeMs: data.mtimeMs,
         size: data.size,
@@ -2843,6 +3059,8 @@ const App: React.FC = () => {
         key: activeDocument.key,
         text: edited,
         sourceSave: nextSourceSave,
+        savedChangeBaseText,
+        savedChangeBaseHash,
       });
       const normalizedEdited = edited.replace(/\r\n?/g, '\n');
       const savedChangedFromOpen = normalizedEdited !== activeDocument.sessionOpenText;
@@ -2875,7 +3093,26 @@ const App: React.FC = () => {
       toast.error('Save failed');
       return true;
     }
-  }, [editableDocuments, isEditingMarkdown, scheduleDraftSave]);
+  }, [editableDocuments, isEditingMarkdown, reconcileOpenSourceDocuments, scheduleDraftSave]);
+
+  const handleOverwriteDiskConflict = useCallback(() => {
+    void handleSaveEditedSourceFile({ overwriteDiskConflict: true });
+  }, [handleSaveEditedSourceFile]);
+
+  const handleReloadDiskConflict = useCallback(() => {
+    const activeDocument = editableDocuments.getActiveDocumentLive();
+    if (!activeDocument?.diskConflict) return;
+    const reloaded = editableDocuments.reloadDiskConflict(activeDocument.key);
+    if (!reloaded) return;
+    setMarkdown(reloaded.currentText);
+    setEditGeneration((g) => g + 1);
+    editSessionBaseRef.current = reloaded.currentText;
+    setEditorDirty(false);
+    setEditorDiffersFromBaseline(false);
+    setEditStats(null);
+    scheduleDraftSave();
+    toast.success(`Reloaded ${reloaded.basename} from disk`);
+  }, [editableDocuments, scheduleDraftSave]);
 
   // Agent Instructions — copy a clipboard payload teaching external agents
   // (Claude Code, Codex, etc.) how to POST annotations into this session via
@@ -3210,6 +3447,28 @@ const App: React.FC = () => {
               className="ml-auto text-xs text-destructive/60 hover:text-destructive"
             >
               dismiss
+            </button>
+          </div>
+        )}
+
+        {activeEditableDocument?.diskConflict && (
+          <div className="bg-warning/10 border-b border-warning/25 px-4 py-2 flex items-center gap-3 flex-shrink-0">
+            <span className="min-w-0 flex-1 text-xs text-warning-foreground">
+              {activeEditableDocument.basename} changed on disk while you were editing.
+            </span>
+            <button
+              type="button"
+              onClick={handleOverwriteDiskConflict}
+              className="text-xs font-medium text-primary hover:text-primary/80"
+            >
+              Overwrite disk
+            </button>
+            <button
+              type="button"
+              onClick={handleReloadDiskConflict}
+              className="text-xs font-medium text-muted-foreground hover:text-foreground"
+            >
+              Reload from disk
             </button>
           </div>
         )}
