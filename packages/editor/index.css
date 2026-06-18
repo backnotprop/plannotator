@@ -41,6 +41,13 @@ pre code.hljs .hljs-code {
   color: oklch(0.25 0.02 260) !important;
 }
 
+/* The code-file hover preview is a <div class="hljs">, so the pre code.hljs
+   rule above misses it. The unscoped .hljs-* token rules below already color
+   its tokens; this just supplies the matching default text color. */
+.light .code-snippet-preview {
+  color: oklch(0.25 0.02 260) !important;
+}
+
 .light .hljs-keyword,
 .light .hljs-selector-tag,
 .light .hljs-built_in,
