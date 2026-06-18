@@ -132,6 +132,25 @@ export function canApplyEditableDocumentDiskSnapshot(
   );
 }
 
+export function canRestoreEditableDocumentDraft(
+  record: EditableDocumentRecord | null | undefined,
+  sourceSave: EnabledSourceSaveCapability,
+  diskBaseline: string,
+): boolean {
+  if (!record) return true;
+  return (
+    record.saveStatus === 'clean' &&
+    record.sourceSave?.enabled === true &&
+    record.sourceSave.path === sourceSave.path &&
+    record.sourceSave.hash === sourceSave.hash &&
+    record.diskBaseline === diskBaseline &&
+    record.currentText === diskBaseline &&
+    !record.savedChange &&
+    !record.diskConflict &&
+    !record.missingOnDisk
+  );
+}
+
 export type DiskSnapshotReconcileResult =
   | { type: 'missing' }
   | { type: 'unchanged'; record: EditableDocumentRecord }
@@ -367,14 +386,6 @@ export function useEditableDocuments() {
     bump();
   }, [bump]);
 
-  const markConflict = useCallback((key: string, message: string) => {
-    const record = docsRef.current.get(key);
-    if (!record) return;
-    record.saveStatus = 'conflict';
-    record.error = message;
-    bump();
-  }, [bump]);
-
   const markError = useCallback((key: string, message: string) => {
     const record = docsRef.current.get(key);
     if (!record) return;
@@ -458,11 +469,10 @@ export function useEditableDocuments() {
 
     for (const doc of documents) {
       const existing = docsRef.current.get(doc.key);
-      if (existing && (recordIsDirty(existing) || existing.diskConflict)) continue;
-
       const sessionOpenText = normalizeDocumentText(doc.sessionOpenText);
       const diskBaseline = normalizeDocumentText(doc.diskBaseline);
       const currentText = normalizeDocumentText(doc.currentText);
+      if (!canRestoreEditableDocumentDraft(existing, doc.sourceSave, diskBaseline)) continue;
       const savedChange = doc.savedChange
         ? {
             key: doc.savedChange.key,
@@ -502,12 +512,12 @@ export function useEditableDocuments() {
     for (const change of changes) {
       if (change.beforeText === change.afterText) continue;
       const existing = docsRef.current.get(change.key);
-      // A dirty restored buffer is more specific than a saved-change card.
-      // restoreDraftDocuments carries savedChange too, so do not overwrite it.
-      if (existing && recordIsDirty(existing)) continue;
 
       const beforeText = normalizeDocumentText(change.beforeText);
       const afterText = normalizeDocumentText(change.afterText);
+      // A dirty restored buffer is more specific than a saved-change card.
+      // restoreDraftDocuments carries savedChange too, so do not overwrite it.
+      if (!canRestoreEditableDocumentDraft(existing, change.sourceSave, afterText)) continue;
       docsRef.current.set(change.key, {
         key: change.key,
         path: change.sourceSave.path,
@@ -622,7 +632,6 @@ export function useEditableDocuments() {
     updateActiveText,
     markSaving,
     markSaved,
-    markConflict,
     markError,
     markFileMissing,
     clearDocument,

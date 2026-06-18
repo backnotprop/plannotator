@@ -15,7 +15,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { startAnnotateServer } from "./annotate";
@@ -239,6 +239,50 @@ describe("annotate server: source save", () => {
       });
 
       expect(recreateNeverOpened.status).toBe(403);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("recreates a deleted folder source opened through a relative base link", async () => {
+    const folderPath = mkdtempSync(join(tmpdir(), "plannotator-folder-relative-source-save-"));
+    const subDir = join(folderPath, "sub");
+    mkdirSync(subDir, { recursive: true });
+    const linkedPath = join(folderPath, "linked.md");
+    writeFileSync(join(subDir, "a.md"), "[linked](../linked.md)\n", "utf-8");
+    writeFileSync(linkedPath, "Before\n", "utf-8");
+
+    const server = await startAnnotateServer({
+      markdown: "",
+      filePath: folderPath,
+      folderPath,
+      mode: "annotate-folder",
+      htmlContent: MINIMAL_HTML,
+    });
+
+    try {
+      const docResponse = await fetch(
+        `${server.url}/api/doc?path=${encodeURIComponent("../linked.md")}&base=${encodeURIComponent(subDir)}`,
+      );
+      const doc = await docResponse.json() as { sourceSave?: { path: string; hash: string; mtimeMs: number; eol: "lf" | "crlf" | "mixed" | "none" } };
+      if (!doc.sourceSave) throw new Error("expected folder source save metadata");
+      unlinkSync(linkedPath);
+
+      const response = await fetch(`${server.url}/api/source/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          path: doc.sourceSave.path,
+          text: "After\n",
+          baseHash: doc.sourceSave.hash,
+          baseMtimeMs: doc.sourceSave.mtimeMs,
+          baseEol: doc.sourceSave.eol,
+          allowMissingBase: true,
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(readFileSync(linkedPath, "utf-8")).toBe("After\n");
     } finally {
       server.stop();
     }

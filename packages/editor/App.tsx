@@ -132,7 +132,7 @@ import {
   validateSavedFileChanges,
 } from './savedFileChangeValidation';
 import { fetchSourceDocumentSnapshot, probeSourceSave } from './sourceDocumentClient';
-import { dirnameBrowserPath, pathIsInsideDir } from './sourceDocumentPaths';
+import { dirnameBrowserPath, normalizeBrowserPath, pathIsInsideDir } from './sourceDocumentPaths';
 
 type NoteAutoSaveResults = {
   obsidian?: boolean;
@@ -876,13 +876,30 @@ const App: React.FC = () => {
   ]);
 
   const handleFileBrowserSelect = React.useCallback((absolutePath: string, dirPath: string) => {
+    const normalizedAbsolutePath = normalizeBrowserPath(absolutePath);
+    const editableStatus = Array.from(editableDocuments.fileEditStatuses.values())
+      .find((status) => status.path && normalizeBrowserPath(status.path) === normalizedAbsolutePath);
+    const editableKey = editableStatus?.key ?? `file:${absolutePath}`;
+    const editableRecord = editableDocuments.getDocument(editableKey);
+    if (editableRecord?.missingOnDisk && editableRecord.sourceSave?.enabled) {
+      linkedDocHook.openLoaded({
+        filepath: absolutePath,
+        markdown: editableRecord.currentText,
+        renderAs: 'markdown',
+        sourceSave: editableRecord.sourceSave,
+      }, 'files', { notifyDocumentLoaded: false });
+      editableDocuments.setActiveKey(editableKey);
+      fileBrowser.setActiveFile(absolutePath);
+      return;
+    }
+
     const dirState = fileBrowser.dirs.find(d => d.path === dirPath);
     const buildUrl = dirState?.isVault
       ? (path: string) => `/api/reference/obsidian/doc?vaultPath=${encodeURIComponent(dirPath)}&path=${encodeURIComponent(path)}`
       : (path: string) => `/api/doc?path=${encodeURIComponent(path)}&base=${encodeURIComponent(dirPath)}${convertHtml ? '&convert=1' : ''}`;
     linkedDocHook.open(absolutePath, buildUrl, 'files');
     fileBrowser.setActiveFile(absolutePath);
-  }, [linkedDocHook, fileBrowser, convertHtml]);
+  }, [editableDocuments, linkedDocHook, fileBrowser, convertHtml]);
 
   // Route linked doc opens through the correct endpoint based on current context
   const handleOpenLinkedDoc = React.useCallback((docPath: string) => {
@@ -3016,7 +3033,7 @@ const App: React.FC = () => {
           baseHash: saveBaseSource.hash,
           baseMtimeMs: saveBaseSource.mtimeMs,
           baseEol: saveBaseSource.eol,
-          allowMissingBase: activeDocument.missingOnDisk === true,
+          allowMissingBase: true,
         }),
       });
       const data = (await res.json()) as SourceSaveResponse;

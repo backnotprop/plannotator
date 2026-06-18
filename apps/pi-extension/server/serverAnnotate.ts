@@ -365,11 +365,6 @@ export async function startAnnotateServer(options: {
 		} else if (url.pathname === "/api/draft") {
 			await handleDraftRequest(req, res, draftKey);
 		} else if (url.pathname === "/api/doc" && req.method === "GET") {
-			const requestedDocPath = url.searchParams.get("path");
-			if (options.mode === "annotate-folder" && options.folderPath && requestedDocPath) {
-				const openedPath = resolveFolderSourceFile(requestedDocPath, options.folderPath);
-				if (openedPath) openedSourceFilePaths.add(openedPath);
-			}
 			// Inject source file's directory as base for relative path resolution.
 			// Skip for URL annotations — there's no local directory to resolve against.
 			if (!url.searchParams.has("base") && options.filePath && !/^https?:\/\//i.test(options.filePath)) {
@@ -384,6 +379,7 @@ export async function startAnnotateServer(options: {
 					? initialSingleFileSourcePath ?? options.filePath
 					: undefined,
 				sourceSaveFolderPath: options.mode === "annotate-folder" ? options.folderPath : undefined,
+				onSourceDocumentServed: (path) => openedSourceFilePaths.add(path),
 				rootPaths: getReferenceRootPaths(),
 			});
 		} else if (url.pathname === "/api/source/save" && req.method === "POST") {
@@ -408,7 +404,7 @@ export async function startAnnotateServer(options: {
 				targetPath = body.allowMissingBase
 					? resolveFolderSourceFileForSave(body.path, options.folderPath)
 					: resolveFolderSourceFile(body.path, options.folderPath);
-				if (body.allowMissingBase && targetPath && !openedSourceFilePaths.has(targetPath)) {
+				if (body.allowMissingBase && targetPath && !existsSync(targetPath) && !openedSourceFilePaths.has(targetPath)) {
 					targetPath = null;
 				}
 			}

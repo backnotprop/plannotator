@@ -29,6 +29,7 @@ import {
 } from "@plannotator/shared/source-save-node";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { saveConfig, detectGitUser, getServerConfig } from "./config";
+import { existsSync } from "fs";
 import { dirname, resolve as resolvePath } from "path";
 import { isWithinDirectory } from "@plannotator/shared/html-assets-node";
 import { isWSL } from "./browser";
@@ -349,11 +350,6 @@ export async function startAnnotateServer(
           // source-file base and --markdown preference, so enforce both here.
           if (url.pathname === "/api/doc" && req.method === "GET") {
             const docUrl = new URL(req.url);
-            const requestedDocPath = docUrl.searchParams.get("path");
-            if (mode === "annotate-folder" && folderPath && requestedDocPath) {
-              const openedPath = resolveFolderSourceFile(requestedDocPath, folderPath);
-              if (openedPath) openedSourceFilePaths.add(openedPath);
-            }
             let changed = false;
             if (!docUrl.searchParams.has("base") && !/^https?:\/\//i.test(filePath)) {
               docUrl.searchParams.set("base", mode === "annotate-folder" && folderPath ? folderPath : dirname(filePath));
@@ -370,6 +366,7 @@ export async function startAnnotateServer(
                 ? initialSingleFileSourcePath ?? filePath
                 : undefined,
               sourceSaveFolderPath: mode === "annotate-folder" ? folderPath : undefined,
+              onSourceDocumentServed: (path) => openedSourceFilePaths.add(path),
               rootPaths: getReferenceRootPaths(),
             });
           }
@@ -400,7 +397,7 @@ export async function startAnnotateServer(
               targetPath = body.allowMissingBase
                 ? resolveFolderSourceFileForSave(body.path, folderPath)
                 : resolveFolderSourceFile(body.path, folderPath);
-              if (body.allowMissingBase && targetPath && !openedSourceFilePaths.has(targetPath)) {
+              if (body.allowMissingBase && targetPath && !existsSync(targetPath) && !openedSourceFilePaths.has(targetPath)) {
                 targetPath = null;
               }
             }

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   canApplyEditableDocumentDiskSnapshot,
+  canRestoreEditableDocumentDraft,
   getEditableDocumentKnownDiskHash,
   markEditableDocumentFileMissing,
   reconcileEditableDocumentDiskSnapshot,
@@ -248,5 +249,35 @@ describe('reconcileEditableDocumentDiskSnapshot', () => {
     expect(result.record.missingOnDisk).toBe(true);
     expect(result.record.savedChange).toBeUndefined();
     expect(result.record.diskConflict).toBeUndefined();
+  });
+});
+
+describe('canRestoreEditableDocumentDraft', () => {
+  test('allows restoring over the initial clean file snapshot', () => {
+    const source = sourceSave('sha256:after');
+    const doc = record({
+      saveStatus: 'clean',
+      savedChange: undefined,
+      sessionOpenText: 'after\n',
+      sessionOpenHash: source.hash,
+    });
+
+    expect(canRestoreEditableDocumentDraft(doc, source, 'after\n')).toBe(true);
+  });
+
+  test('does not restore over newer session state', () => {
+    const source = sourceSave('sha256:after');
+    const cleanDoc = record({
+      saveStatus: 'clean',
+      savedChange: undefined,
+      sessionOpenText: 'after\n',
+      sessionOpenHash: source.hash,
+    });
+
+    expect(canRestoreEditableDocumentDraft({ ...cleanDoc, currentText: 'live\n' }, source, 'after\n')).toBe(false);
+    expect(canRestoreEditableDocumentDraft({ ...cleanDoc, diskBaseline: 'newer\n', currentText: 'newer\n' }, source, 'after\n')).toBe(false);
+    expect(canRestoreEditableDocumentDraft({ ...cleanDoc, saveStatus: 'missing', missingOnDisk: true }, source, 'after\n')).toBe(false);
+    expect(canRestoreEditableDocumentDraft({ ...cleanDoc, saveStatus: 'saved', savedChange: record().savedChange }, source, 'after\n')).toBe(false);
+    expect(canRestoreEditableDocumentDraft({ ...cleanDoc, sourceSave: sourceSave('sha256:external') }, source, 'after\n')).toBe(false);
   });
 });

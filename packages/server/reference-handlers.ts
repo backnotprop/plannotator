@@ -37,6 +37,7 @@ export interface HandleDocOptions {
 	rewriteHtml?: (html: string, filepath: string) => string;
 	sourceSaveFilePath?: string;
 	sourceSaveFolderPath?: string;
+	onSourceDocumentServed?: (path: string) => void;
 	rootPaths?: string[];
 }
 
@@ -165,13 +166,16 @@ function applyDocOptions<T extends Record<string, unknown>>(
 		const source = createSourceSaveCapability("single-file", options.sourceSaveFilePath);
 		const doc = createSourceSaveCapability("single-file", data.filepath);
 		if (source.enabled && doc.enabled && source.path === doc.path) {
+			options.onSourceDocumentServed?.(doc.path);
 			return { ...next, sourceSave: doc } as T & { sourceSave?: SourceSaveCapability };
 		}
 	}
 	if (!options.sourceSaveFolderPath) return next as T & { sourceSave?: SourceSaveCapability };
+	const sourceSave = createSourceSaveCapability("folder-file", data.filepath, options.sourceSaveFolderPath);
+	if (sourceSave.enabled) options.onSourceDocumentServed?.(sourceSave.path);
 	return {
 		...next,
-		sourceSave: createSourceSaveCapability("folder-file", data.filepath, options.sourceSaveFolderPath),
+		sourceSave,
 	} as T & { sourceSave?: SourceSaveCapability };
 }
 
