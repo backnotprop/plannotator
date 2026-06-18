@@ -883,12 +883,22 @@ const App: React.FC = () => {
     const editableRecord = editableDocuments.getDocument(editableKey);
     if (editableRecord?.missingOnDisk && editableRecord.sourceSave?.enabled) {
       linkedDocHook.openLoaded({
-        filepath: absolutePath,
+        filepath: editableRecord.path ?? absolutePath,
         markdown: editableRecord.currentText,
         renderAs: 'markdown',
         sourceSave: editableRecord.sourceSave,
       }, 'files', { notifyDocumentLoaded: false });
       editableDocuments.setActiveKey(editableKey);
+      if (isEditingMarkdown) {
+        editSessionBaseRef.current = editableRecord.currentText;
+        setEditorDirty(false);
+        setEditorDiffersFromBaseline(editableRecord.currentText !== editableRecord.diskBaseline);
+        setEditStats(
+          editableRecord.currentText !== editableRecord.diskBaseline
+            ? computeEditStats(editableRecord.diskBaseline, editableRecord.currentText)
+            : null,
+        );
+      }
       fileBrowser.setActiveFile(absolutePath);
       return;
     }
@@ -899,7 +909,7 @@ const App: React.FC = () => {
       : (path: string) => `/api/doc?path=${encodeURIComponent(path)}&base=${encodeURIComponent(dirPath)}${convertHtml ? '&convert=1' : ''}`;
     linkedDocHook.open(absolutePath, buildUrl, 'files');
     fileBrowser.setActiveFile(absolutePath);
-  }, [editableDocuments, linkedDocHook, fileBrowser, convertHtml]);
+  }, [editableDocuments, linkedDocHook, fileBrowser, convertHtml, isEditingMarkdown]);
 
   // Route linked doc opens through the correct endpoint based on current context
   const handleOpenLinkedDoc = React.useCallback((docPath: string) => {
