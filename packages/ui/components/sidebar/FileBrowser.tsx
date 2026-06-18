@@ -11,6 +11,7 @@ import type { DirState } from "../../hooks/useFileBrowser";
 import { CountBadge } from "./CountBadge";
 import { ObsidianIconRaw } from "../icons/ObsidianIcons";
 import type { WorkspaceFileChange, WorkspaceStatusPayload } from "@plannotator/shared/workspace-status";
+import { normalizeBrowserPath } from "@plannotator/shared/browser-paths";
 
 interface FileBrowserProps {
   dirs: DirState[];
@@ -39,9 +40,35 @@ interface AggregateWorkspaceChange {
 }
 
 export function normalizePathForLookup(path: string): string {
-  const normalized = path.replace(/\\/g, "/");
-  const prefix = normalized.startsWith("//") ? "//" : "";
-  return prefix + normalized.slice(prefix.length).replace(/\/+/g, "/").replace(/\/+$/, "");
+  return normalizeBrowserPath(path);
+}
+
+function getPathMapValue<T>(map: Map<string, T> | undefined, absolutePath: string): T | undefined {
+  if (!map) return undefined;
+  const normalizedPath = normalizePathForLookup(absolutePath);
+  const direct = map.get(absolutePath) ?? map.get(normalizedPath);
+  if (direct) return direct;
+  for (const [path, value] of map.entries()) {
+    if (normalizePathForLookup(path) === normalizedPath) return value;
+  }
+  return undefined;
+}
+
+function pathSetHas(paths: Set<string> | undefined, absolutePath: string): boolean {
+  if (!paths) return false;
+  const normalizedPath = normalizePathForLookup(absolutePath);
+  if (paths.has(absolutePath) || paths.has(normalizedPath)) return true;
+  for (const path of paths) {
+    if (normalizePathForLookup(path) === normalizedPath) return true;
+  }
+  return false;
+}
+
+export function getFileEditStatus(
+  absolutePath: string,
+  editStatuses?: Map<string, FileEditStatus>,
+): FileEditStatus | undefined {
+  return getPathMapValue(editStatuses, absolutePath);
 }
 
 function normalizeWorkspaceStatus(
@@ -72,7 +99,7 @@ function getAggregateCount(
   counts: Map<string, number>
 ): number {
   if (node.type === "file") {
-    return counts.get(`${dirPath}/${node.path}`) ?? 0;
+    return getPathMapValue(counts, `${dirPath}/${node.path}`) ?? 0;
   }
   let total = 0;
   for (const child of node.children ?? []) {
@@ -197,9 +224,9 @@ const TreeNode: React.FC<{
   }
 
   const displayName = node.name.replace(/\.(mdx?|txt|html?)$/i, "");
-  const fileCount = annotationCounts?.get(absolutePath) ?? 0;
-  const isHighlighted = highlightedFiles?.has(absolutePath);
-  const editStatus = editStatuses?.get(absolutePath);
+  const fileCount = getPathMapValue(annotationCounts, absolutePath) ?? 0;
+  const isHighlighted = pathSetHas(highlightedFiles, absolutePath);
+  const editStatus = getFileEditStatus(absolutePath, editStatuses);
   const workspaceChange = getWorkspaceChange(absolutePath, workspaceStatus);
   const isDeleted = workspaceChange?.status === "deleted";
   const isSelectionDisabled = isFileTreeSelectionDisabled(workspaceChange, editStatus);

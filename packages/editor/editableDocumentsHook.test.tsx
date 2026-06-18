@@ -214,6 +214,7 @@ describe('useEditableDocuments conflict actions', () => {
 
     await act(async () => {
       session.current().openDocument({ key: KEY, text: 'a\n', sourceSave: SOURCE_A });
+      session.current().updateActiveText('b\n');
       session.current().markSaved({ key: KEY, text: 'b\n', sourceSave: SOURCE_B });
     });
 

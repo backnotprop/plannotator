@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { VaultNode } from "../../types";
 import type { WorkspaceFileChange, WorkspaceStatusPayload } from "@plannotator/shared/workspace-status";
-import { getAggregateWorkspaceChange, getWorkspaceChange, isFileTreeSelectionDisabled, normalizePathForLookup } from "./FileBrowser";
+import { getAggregateWorkspaceChange, getFileEditStatus, getWorkspaceChange, isFileTreeSelectionDisabled, normalizePathForLookup } from "./FileBrowser";
 
 describe("FileBrowser workspace status lookup", () => {
   test("matches Windows status keys when the UI path uses mixed separators", () => {
@@ -88,5 +88,34 @@ describe("FileBrowser workspace status lookup", () => {
     expect(isFileTreeSelectionDisabled(deleted, { status: "dirty", dirty: true })).toBe(true);
     expect(isFileTreeSelectionDisabled(deleted, { status: "missing", dirty: false })).toBe(false);
     expect(isFileTreeSelectionDisabled({ ...deleted, status: "modified" }, undefined)).toBe(false);
+  });
+
+  test("matches edit statuses when the UI path uses mixed separators or doubled slashes", () => {
+    const statuses = new Map([
+      ["C:\\repo\\docs\\plan.md", { status: "missing" as const, dirty: false }],
+      ["/repo/docs/other.md", { status: "dirty" as const, dirty: true }],
+    ]);
+
+    expect(getFileEditStatus("C:\\repo\\docs/plan.md", statuses)?.status).toBe("missing");
+    expect(getFileEditStatus("/repo/docs//other.md", statuses)?.status).toBe("dirty");
+  });
+
+  test("keeps a deleted file selectable when the missing edit status needs path normalization", () => {
+    const deleted: WorkspaceFileChange = {
+      path: "C:\\repo\\docs\\plan.md",
+      repoRelativePath: "docs/plan.md",
+      status: "deleted",
+      additions: 0,
+      deletions: 3,
+      staged: false,
+      unstaged: true,
+    };
+    const statuses = new Map([
+      ["C:\\repo\\docs\\plan.md", { status: "missing" as const, dirty: false }],
+    ]);
+    const editStatus = getFileEditStatus("C:\\repo\\docs/plan.md", statuses);
+
+    expect(editStatus?.status).toBe("missing");
+    expect(isFileTreeSelectionDisabled(deleted, editStatus)).toBe(false);
   });
 });

@@ -133,6 +133,7 @@ import {
 } from './savedFileChangeValidation';
 import { fetchSourceDocumentSnapshot, probeSourceSave } from './sourceDocumentClient';
 import { dirnameBrowserPath, normalizeBrowserPath, pathIsInsideDir } from './sourceDocumentPaths';
+import { pickRestoredSingleFileDraftToDisplay } from './draftRestoreSelection';
 
 type NoteAutoSaveResults = {
   obsidian?: boolean;
@@ -967,7 +968,7 @@ const App: React.FC = () => {
     if (allDirPaths.length === 0) return allAnnotationCounts;
     const counts = new Map<string, number>();
     for (const [fp, count] of allAnnotationCounts) {
-      if (allDirPaths.some(dir => fp.startsWith(dir + '/'))) {
+      if (allDirPaths.some(dir => pathIsInsideDir(fp, dir))) {
         counts.set(fp, count);
       }
     }
@@ -1503,6 +1504,28 @@ const App: React.FC = () => {
             description: 'You already have edits in this session — those take precedence.',
             duration: 5000,
           });
+        }
+        const restoredSingleFileDraft = pickRestoredSingleFileDraftToDisplay(
+          editedDocumentsForRestore,
+          restoredDocumentKeys,
+          editableDocuments.getActiveKey(),
+        );
+        if (restoredSingleFileDraft) {
+          editableDocuments.setActiveKey(restoredSingleFileDraft.key);
+          const restoredDocument = editableDocuments.getDocument(restoredSingleFileDraft.key);
+          if (restoredDocument?.sourceSave?.enabled) {
+            const remapped = applyEditedDocument(restoredDocument.currentText, restored);
+            repaintHighlights(remapped);
+            if (restoredDocument.currentText !== restoredDocument.diskBaseline) {
+              setEditStats(computeEditStats(restoredDocument.diskBaseline, restoredDocument.currentText));
+              if (window.innerWidth >= 768) {
+                setRightSidebarTab('annotations');
+                setIsPanelOpen(true);
+              }
+            }
+            scheduleDraftSave();
+            return;
+          }
         }
         const activeRestoredDocument = editableDocuments.getActiveDocumentLive();
         const activeDraft = activeRestoredDocument?.sourceSave?.enabled && restoredDocumentKeys.includes(activeRestoredDocument.key)

@@ -17,7 +17,7 @@ import type { Origin } from "@plannotator/shared/agents";
 import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, handleSaveNotes } from "./shared-handlers";
 import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc } from "./reference-handlers";
 import { handleFileBrowserFilesStream } from "./reference-watch";
-import { warmFileListCache } from "@plannotator/shared/resolve-file";
+import { resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash, deleteDraft } from "./draft";
 import { disabledSourceSave, type SourceSaveRequest } from "@plannotator/shared/source-save";
 import {
@@ -198,7 +198,11 @@ export async function startAnnotateServer(
   const initialSingleFileSourceSave = singleFileSourceSaveEligible
     ? createSourceSaveCapability("single-file", filePath)
     : null;
-  const initialSingleFileSourcePath = initialSingleFileSourceSave?.enabled ? initialSingleFileSourceSave.path : null;
+  const initialSingleFileSourcePath = singleFileSourceSaveEligible
+    ? initialSingleFileSourceSave?.enabled
+      ? initialSingleFileSourceSave.path
+      : resolveUserPath(filePath)
+    : null;
   const openedSourceFilePaths = new Set<string>();
   if (initialSingleFileSourcePath) openedSourceFilePaths.add(initialSingleFileSourcePath);
 

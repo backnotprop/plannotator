@@ -36,7 +36,7 @@ import {
 	handleObsidianDocRequest,
 } from "./reference.js";
 import { handleFileBrowserStreamRequest } from "./file-browser-watch.js";
-import { warmFileListCache } from "../generated/resolve-file.js";
+import { resolveUserPath, warmFileListCache } from "../generated/resolve-file.js";
 import { createExternalAnnotationHandler } from "./external-annotations.js";
 import {
 	HTML_ASSET_ROUTE_PREFIX,
@@ -256,7 +256,11 @@ export async function startAnnotateServer(options: {
 	const initialSingleFileSourceSave = singleFileSourceSaveEligible
 		? createSourceSaveCapability("single-file", options.filePath)
 		: null;
-	const initialSingleFileSourcePath = initialSingleFileSourceSave?.enabled ? initialSingleFileSourceSave.path : null;
+	const initialSingleFileSourcePath = singleFileSourceSaveEligible
+		? initialSingleFileSourceSave?.enabled
+			? initialSingleFileSourceSave.path
+			: resolveUserPath(options.filePath)
+		: null;
 	const openedSourceFilePaths = new Set<string>();
 	if (initialSingleFileSourcePath) openedSourceFilePaths.add(initialSingleFileSourcePath);
 

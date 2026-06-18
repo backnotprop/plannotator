@@ -51,6 +51,7 @@
     "./semantic-diff-types": "./semantic-diff-types.ts",
     "./source-save": "./source-save.ts",
     "./source-save-node": "./source-save-node.ts",
+    "./browser-paths": "./browser-paths.ts",
     "./workspace-status": "./workspace-status.ts"
   },
   "dependencies": {

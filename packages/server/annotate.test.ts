@@ -191,6 +191,35 @@ describe("annotate server: source save", () => {
     }
   });
 
+  test("recreates a missing single-file source when the session started for that path", async () => {
+    const docDir = mkdtempSync(join(tmpdir(), "plannotator-source-save-missing-start-"));
+    const sourcePath = join(docDir, "source.md");
+
+    const server = await startAnnotateServer({
+      markdown: "Recovered\n",
+      filePath: sourcePath,
+      htmlContent: MINIMAL_HTML,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/source/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "Recovered\n",
+          baseHash: "sha256:missing-draft-base",
+          baseEol: "lf",
+          allowMissingBase: true,
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(readFileSync(sourcePath, "utf-8")).toBe("Recovered\n");
+    } finally {
+      server.stop();
+    }
+  });
+
   test("recreates a deleted folder source only after Plannotator opened it", async () => {
     const folderPath = mkdtempSync(join(tmpdir(), "plannotator-folder-source-save-"));
     const openedPath = join(folderPath, "opened.md");
