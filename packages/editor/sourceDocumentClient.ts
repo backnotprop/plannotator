@@ -23,6 +23,11 @@ export interface SourceDocumentSnapshot {
   sourceSave: EnabledSourceSaveCapability;
 }
 
+export type SourceDocumentSnapshotResult =
+  | { status: 'ok'; snapshot: SourceDocumentSnapshot }
+  | { status: 'missing' }
+  | { status: 'unavailable' };
+
 async function fetchSourceDocument(path: string): Promise<SourceDocumentFetchResult> {
   try {
     const res = await fetch(`/api/doc?path=${encodeURIComponent(path)}`);
@@ -46,11 +51,14 @@ export async function probeSourceSave(path: string): Promise<SourceSaveProbeResu
   return { status: 'unavailable' };
 }
 
-export async function fetchSourceDocumentSnapshot(path: string): Promise<SourceDocumentSnapshot | null> {
+export async function fetchSourceDocumentSnapshot(path: string): Promise<SourceDocumentSnapshotResult> {
   const result = await fetchSourceDocument(path);
-  if (result.status !== 'ok') return null;
+  if (result.status !== 'ok') return { status: result.status };
 
   const { markdown, renderAs, sourceSave } = result.data;
-  if (renderAs === 'html' || typeof markdown !== 'string' || !sourceSave?.enabled) return null;
-  return { markdown, sourceSave };
+  if (sourceSave?.enabled === false && sourceSave.reason === 'missing-file') {
+    return { status: 'missing' };
+  }
+  if (renderAs === 'html' || typeof markdown !== 'string' || !sourceSave?.enabled) return { status: 'unavailable' };
+  return { status: 'ok', snapshot: { markdown, sourceSave } };
 }

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   canApplyEditableDocumentDiskSnapshot,
   getEditableDocumentKnownDiskHash,
+  markEditableDocumentFileMissing,
   reconcileEditableDocumentDiskSnapshot,
   type EditableDocumentRecord,
   type EnabledSourceSaveCapability,
@@ -201,5 +202,51 @@ describe('reconcileEditableDocumentDiskSnapshot', () => {
       beforeHash: 'sha256:before',
       afterHash: 'sha256:after',
     });
+  });
+
+  test('same-hash snapshots clear missing state without resetting a dirty buffer', () => {
+    const doc = record({
+      currentText: 'after\nlocal\n',
+      editMountText: 'after\n',
+      saveStatus: 'missing',
+      missingOnDisk: true,
+    });
+    const nextSource = {
+      ...sourceSave('sha256:after'),
+      mtimeMs: 3000,
+    };
+
+    const result = reconcileEditableDocumentDiskSnapshot(doc, {
+      key: doc.key,
+      text: 'after\n',
+      sourceSave: nextSource,
+    });
+
+    expect(result.type).toBe('status-updated');
+    if (result.type !== 'status-updated') throw new Error('expected status update');
+    expect(result.record.currentText).toBe('after\nlocal\n');
+    expect(result.record.diskBaseline).toBe('after\n');
+    expect(result.record.saveStatus).toBe('dirty');
+    expect(result.record.missingOnDisk).toBeUndefined();
+  });
+
+  test('missing files keep the buffer and clear stale saved edit context', () => {
+    const doc = record({
+      currentText: 'after\nlocal\n',
+      editMountText: 'after\n',
+      saveStatus: 'dirty',
+    });
+
+    const result = markEditableDocumentFileMissing(doc);
+
+    expect(result.type).toBe('file-missing');
+    if (result.type !== 'file-missing') throw new Error('expected file missing');
+    expect(result.clearedSavedChange).toBe(true);
+    expect(result.record.currentText).toBe('after\nlocal\n');
+    expect(result.record.diskBaseline).toBe('after\n');
+    expect(result.record.saveStatus).toBe('missing');
+    expect(result.record.missingOnDisk).toBe(true);
+    expect(result.record.savedChange).toBeUndefined();
+    expect(result.record.diskConflict).toBeUndefined();
   });
 });

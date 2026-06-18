@@ -73,22 +73,33 @@ describe('source document client', () => {
       },
     }));
     expect(await fetchSourceDocumentSnapshot('/repo/docs/a.md')).toEqual({
-      markdown: 'after\n',
-      sourceSave: {
-        enabled: true,
-        kind: 'local-text-file',
-        scope: 'folder-file',
-        path: '/repo/docs/a.md',
-        basename: 'a.md',
-        language: 'markdown',
-        hash: 'sha256:after',
-        mtimeMs: 1000,
-        size: 6,
-        eol: 'lf',
+      status: 'ok',
+      snapshot: {
+        markdown: 'after\n',
+        sourceSave: {
+          enabled: true,
+          kind: 'local-text-file',
+          scope: 'folder-file',
+          path: '/repo/docs/a.md',
+          basename: 'a.md',
+          language: 'markdown',
+          hash: 'sha256:after',
+          mtimeMs: 1000,
+          size: 6,
+          eol: 'lf',
+        },
       },
     });
 
     mockFetch(Response.json({ markdown: '<p>after</p>', renderAs: 'html' }));
-    expect(await fetchSourceDocumentSnapshot('/repo/docs/a.html')).toBeNull();
+    expect(await fetchSourceDocumentSnapshot('/repo/docs/a.html')).toEqual({ status: 'unavailable' });
+  });
+
+  test('distinguishes missing and unavailable source snapshots', async () => {
+    mockFetch(new Response('missing', { status: 404 }));
+    expect(await fetchSourceDocumentSnapshot('/repo/docs/missing.md')).toEqual({ status: 'missing' });
+
+    mockFetch(new Error('network'));
+    expect(await fetchSourceDocumentSnapshot('/repo/docs/a.md')).toEqual({ status: 'unavailable' });
   });
 });

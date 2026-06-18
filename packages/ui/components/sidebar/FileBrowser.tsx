@@ -28,7 +28,7 @@ interface FileBrowserProps {
 }
 
 export interface FileEditStatus {
-  status: "clean" | "dirty" | "saving" | "saved" | "conflict" | "error";
+  status: "clean" | "dirty" | "saving" | "saved" | "conflict" | "error" | "missing";
   dirty: boolean;
 }
 
@@ -94,6 +94,13 @@ export function getWorkspaceChange(
     if (normalizePathForLookup(path) === normalizedPath) return change;
   }
   return undefined;
+}
+
+export function isFileTreeSelectionDisabled(
+  workspaceChange: WorkspaceFileChange | undefined,
+  editStatus: FileEditStatus | undefined,
+): boolean {
+  return workspaceChange?.status === "deleted" && editStatus?.status !== "missing";
 }
 
 export function getAggregateWorkspaceChange(
@@ -195,9 +202,12 @@ const TreeNode: React.FC<{
   const editStatus = editStatuses?.get(absolutePath);
   const workspaceChange = getWorkspaceChange(absolutePath, workspaceStatus);
   const isDeleted = workspaceChange?.status === "deleted";
+  const isSelectionDisabled = isFileTreeSelectionDisabled(workspaceChange, editStatus);
   const editMarker =
     editStatus?.status === "conflict" || editStatus?.status === "error"
       ? { label: "!", className: "bg-destructive/15 text-destructive", title: editStatus.status === "conflict" ? "Save conflict" : "Save failed" }
+      : editStatus?.status === "missing"
+        ? { label: "!", className: "bg-warning/15 text-warning-foreground", title: "File missing on disk" }
       : editStatus?.status === "saving"
         ? { label: "...", className: "bg-primary/10 text-primary", title: "Saving" }
         : editStatus?.dirty
@@ -219,12 +229,12 @@ const TreeNode: React.FC<{
   return (
     <button
       onClick={() => {
-        if (!isDeleted) onSelectFile(absolutePath, dirPath);
+        if (!isSelectionDisabled) onSelectFile(absolutePath, dirPath);
       }}
-      disabled={isDeleted}
-      className={`file-tree-item w-full text-left group ${isActive ? "active" : ""} ${fileCount > 0 ? "has-annotations" : ""} ${isHighlighted ? 'file-annotation-flash' : ''} ${isDeleted ? 'opacity-70 cursor-default' : ''}`}
+      disabled={isSelectionDisabled}
+      className={`file-tree-item w-full text-left group ${isActive ? "active" : ""} ${fileCount > 0 ? "has-annotations" : ""} ${isHighlighted ? 'file-annotation-flash' : ''} ${isSelectionDisabled ? 'opacity-70 cursor-default' : ''}`}
       style={{ paddingLeft: paddingLeft + 15 }}
-      title={isDeleted ? `${node.path} (deleted on disk)` : node.path}
+      title={isDeleted ? `${node.path} (${editStatus?.status === "missing" ? "missing on disk" : "deleted on disk"})` : node.path}
     >
       <svg className="w-3 h-3 flex-shrink-0 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />

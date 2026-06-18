@@ -9,11 +9,12 @@ import {
 	unlinkSync,
 	writeFileSync,
 } from "fs";
-import { dirname, join } from "path";
+import { basename, dirname, join } from "path";
 import { isWithinProjectRoot, resolveUserPath } from "./resolve-file";
 import {
 	disabledSourceSave,
 	enabledSourceSave,
+	isSourceFileEol,
 	isSourceSaveFilePath,
 	type SourceFileEol,
 	type SourceFileSnapshot,
@@ -76,6 +77,31 @@ export function resolveFolderSourceFile(filePath: string, folderPath: string): s
 	return candidate;
 }
 
+export function resolveFolderSourceFileForSave(filePath: string, folderPath: string): string | null {
+	if (!isSourceSaveFilePath(filePath)) return null;
+
+	let root: string;
+	let candidate: string;
+	try {
+		root = realpathSync(resolveUserPath(folderPath));
+		candidate = resolveUserPath(filePath, root);
+	} catch {
+		return null;
+	}
+
+	try {
+		if (existsSync(candidate)) return resolveFolderSourceFile(candidate, root);
+
+		const realParent = realpathSync(dirname(candidate));
+		if (!isWithinProjectRoot(realParent, root)) return null;
+		const resolvedMissingLeaf = join(realParent, basename(candidate));
+		if (!isWithinProjectRoot(resolvedMissingLeaf, root)) return null;
+		return resolvedMissingLeaf;
+	} catch {
+		return null;
+	}
+}
+
 export function createSourceSaveCapability(
 	scope: SourceSaveScope,
 	filePath: string,
@@ -114,6 +140,7 @@ export function saveSourceFileAtomic(
 	filePath: string,
 	text: string,
 	baseHash: string,
+	options: { allowMissingBase?: boolean; missingBaseEol?: SourceFileEol } = {},
 ): SourceSaveResponse {
 	if (!isSourceSaveFilePath(filePath)) {
 		return {
@@ -125,6 +152,7 @@ export function saveSourceFileAtomic(
 
 	let before: SourceFileSnapshot;
 	let mode: number | undefined;
+	let outputEol: SourceFileEol;
 	try {
 		const real = realpathSync(filePath);
 		const stat = statSync(real);
@@ -138,12 +166,40 @@ export function saveSourceFileAtomic(
 		mode = stat.mode;
 		before = readSourceFileSnapshot(real);
 		filePath = real;
+		outputEol = before.eol;
 	} catch {
-		return {
-			ok: false,
-			code: "not-writable",
-			message: "This file is missing or cannot be read.",
-		};
+		if (existsSync(filePath)) {
+			return {
+				ok: false,
+				code: "not-writable",
+				message: "This file is missing or cannot be read.",
+			};
+		}
+		if (!options.allowMissingBase) {
+			return {
+				ok: false,
+				code: "not-writable",
+				message: "This file is missing or cannot be read.",
+			};
+		}
+		try {
+			const realParent = realpathSync(dirname(filePath));
+			filePath = join(realParent, basename(filePath));
+			before = {
+				text: "",
+				hash: baseHash,
+				mtimeMs: 0,
+				size: 0,
+				eol: isSourceFileEol(options.missingBaseEol) ? options.missingBaseEol : "lf",
+			};
+			outputEol = before.eol;
+		} catch {
+			return {
+				ok: false,
+				code: "not-writable",
+				message: "This file is missing or cannot be recreated.",
+			};
+		}
 	}
 
 	if (before.hash !== baseHash) {
@@ -159,7 +215,7 @@ export function saveSourceFileAtomic(
 		};
 	}
 
-	const output = applySourceEolPolicy(text, before.eol);
+	const output = applySourceEolPolicy(text, outputEol);
 	const dir = dirname(filePath);
 	const tmp = join(dir, `.plannotator-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.tmp`);
 

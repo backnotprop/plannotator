@@ -47,6 +47,8 @@ export interface SourceSaveRequest {
 	text: string;
 	baseHash: string;
 	baseMtimeMs?: number;
+	baseEol?: SourceFileEol;
+	allowMissingBase?: boolean;
 }
 
 export type SourceSaveResponse =

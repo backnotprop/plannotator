@@ -1612,27 +1612,34 @@ const App: React.FC = () => {
   // source of truth for dirty/saving/saved, rather than a parallel flag.
   const activeSaveStatus = activeEditableDocument?.saveStatus;
   const hasUnsavedDiskChanges =
-    activeSaveStatus === 'dirty' || activeSaveStatus === 'conflict' || activeSaveStatus === 'error';
+    activeSaveStatus === 'dirty' || activeSaveStatus === 'conflict' || activeSaveStatus === 'error' || activeSaveStatus === 'missing';
   // Emphasize the Save control (dot + primary text) whenever there is work to
   // persist or a save is in flight — one predicate drives both so they can't diverge.
   const emphasizeSave = hasUnsavedDiskChanges || activeSaveStatus === 'saving';
   // A rejected save (disk conflict or write error) — surfaced as a destructive
   // dot/label so it reads as "save failed, retry" rather than ordinary unsaved.
   const saveFailed = activeSaveStatus === 'conflict' || activeSaveStatus === 'error';
+  const activeSourceBufferDirty =
+    activeEditableDocument?.sourceSave?.enabled === true &&
+    activeEditableDocument.currentText !== activeEditableDocument.diskBaseline;
 
   // Editing exit control: a source-backed session with unsaved edits gets a
   // two-step "Cancel" (discard + exit). Plan mode and clean source sessions keep
   // the plain "Done" (commit edits + exit), so plan-mode keep behavior is unchanged.
-  const cancelMode = isEditingMarkdown && !!activeSourceSave && hasUnsavedDiskChanges;
+  const cancelMode = isEditingMarkdown && !!activeSourceSave && (
+    activeSourceBufferDirty ||
+    activeSaveStatus === 'conflict' ||
+    activeSaveStatus === 'error'
+  );
   const handleEditExitClick = useCallback(() => {
     if (!isEditingMarkdown) { handleEditToggle(); return; }      // enter edit mode
-    if (activeSourceSave && hasUnsavedDiskChanges) {             // discard flow (two-step)
+    if (cancelMode) {                                            // discard flow (two-step)
       if (confirmCancelEdits) { setConfirmCancelEdits(false); handleDiscardEdits(); }
       else setConfirmCancelEdits(true);
       return;
     }
     handleEditToggle();                                          // commit edits + exit
-  }, [isEditingMarkdown, activeSourceSave, hasUnsavedDiskChanges, confirmCancelEdits, handleEditToggle, handleDiscardEdits]);
+  }, [isEditingMarkdown, cancelMode, confirmCancelEdits, handleEditToggle, handleDiscardEdits]);
   // Drop the discard confirmation once it no longer applies — exited the editor,
   // or the doc went clean (e.g. the user saved).
   useEffect(() => {
@@ -1757,13 +1764,35 @@ const App: React.FC = () => {
       const expectedDiskHash = getEditableDocumentKnownDiskHash(startRecord);
       const seq = (sourceReconcileSeqRef.current.get(doc.key) ?? 0) + 1;
       sourceReconcileSeqRef.current.set(doc.key, seq);
-      const snapshot = await fetchSourceDocumentSnapshot(doc.sourceSave.path);
-      if (!snapshot) continue;
+      const snapshotResult = await fetchSourceDocumentSnapshot(doc.sourceSave.path);
       if (sourceReconcileSeqRef.current.get(doc.key) !== seq) continue;
       const currentRecord = editableDocuments.getDocument(doc.key);
       if (!canApplyEditableDocumentDiskSnapshot(currentRecord, expectedDiskHash)) {
         continue;
       }
+      if (snapshotResult.status === 'missing') {
+        const result = editableDocuments.markFileMissing(doc.key);
+        if (!result) continue;
+        if (!result.alreadyMissing || result.clearedSavedChange) changed = true;
+        if (!result.alreadyMissing && result.record.key === editableDocuments.getActiveKey()) {
+          setEditorDiffersFromBaseline(result.record.currentText !== result.record.diskBaseline);
+          if (isEditingMarkdownRef.current) {
+            setEditorDirty(result.record.currentText !== editSessionBaseRef.current);
+            setEditStats(
+              result.record.currentText !== result.record.diskBaseline
+                ? computeEditStats(result.record.diskBaseline, result.record.currentText)
+                : null,
+            );
+          }
+          toast('File no longer exists on disk', {
+            description: `Save ${result.record.basename} to recreate it.`,
+            duration: 5000,
+          });
+        }
+        continue;
+      }
+      if (snapshotResult.status === 'unavailable') continue;
+      const { snapshot } = snapshotResult;
       const result = editableDocuments.reconcileDiskSnapshot({
         key: doc.key,
         text: snapshot.markdown,
@@ -1785,6 +1814,8 @@ const App: React.FC = () => {
             description: `${result.record.basename} changed outside Plannotator, so its old Edits card was cleared.`,
           });
         }
+      } else if (result.type === 'status-updated') {
+        changed = true;
       } else if (result.type === 'conflict') {
         changed = true;
         if (result.record.key === editableDocuments.getActiveKey()) {
@@ -2941,8 +2972,6 @@ const App: React.FC = () => {
   };
 
   const handleSaveEditedSourceFile = useCallback(async (options?: { overwriteDiskConflict?: boolean }): Promise<boolean> => {
-    if (!isEditingMarkdown) return false;
-
     const activeDocument = editableDocuments.getActiveDocumentLive();
     const activeSourceSave = activeDocument?.sourceSave;
     if (!activeDocument || !activeSourceSave?.enabled) {
@@ -2950,7 +2979,9 @@ const App: React.FC = () => {
       return true;
     }
 
-    const edited = markdownEditorHandleRef.current?.getMarkdown();
+    const edited = isEditingMarkdown
+      ? markdownEditorHandleRef.current?.getMarkdown()
+      : activeDocument.currentText;
     if (edited == null) {
       toast.error('Editor is not ready');
       return true;
@@ -2984,6 +3015,8 @@ const App: React.FC = () => {
           text: edited,
           baseHash: saveBaseSource.hash,
           baseMtimeMs: saveBaseSource.mtimeMs,
+          baseEol: saveBaseSource.eol,
+          allowMissingBase: activeDocument.missingOnDisk === true,
         }),
       });
       const data = (await res.json()) as SourceSaveResponse;
@@ -3068,7 +3101,7 @@ const App: React.FC = () => {
       const savedChangedFromOpen = normalizedEdited !== activeDocument.sessionOpenText;
       editedMarkdownRef.current = null;
       if (editableDocuments.getActiveKey() === activeDocument.key) {
-        const live = markdownEditorHandleRef.current?.getMarkdown();
+        const live = isEditingMarkdown ? markdownEditorHandleRef.current?.getMarkdown() : null;
         const normalizedLive = live?.replace(/\r\n?/g, '\n');
         editSessionBaseRef.current = normalizedEdited;
         const currentText = normalizedLive ?? editableDocuments.getDocument(activeDocument.key)?.currentText ?? normalizedEdited;
@@ -3473,6 +3506,22 @@ const App: React.FC = () => {
               className="text-xs font-medium text-muted-foreground hover:text-foreground"
             >
               Reload from disk
+            </button>
+          </div>
+        )}
+
+        {activeEditableDocument?.missingOnDisk && !activeEditableDocument.diskConflict && (
+          <div className="bg-warning/10 border-b border-warning/25 px-4 py-2 flex items-center gap-3 flex-shrink-0">
+            <span className="min-w-0 flex-1 text-xs text-warning-foreground">
+              {activeEditableDocument.basename} no longer exists on disk. Save to recreate it.
+            </span>
+            <button
+              type="button"
+              onClick={() => { void handleSaveEditedSourceFile(); }}
+              disabled={activeSaveStatus === 'saving'}
+              className="text-xs font-medium text-primary hover:text-primary/80 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Save
             </button>
           </div>
         )}

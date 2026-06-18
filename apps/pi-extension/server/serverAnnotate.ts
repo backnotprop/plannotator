@@ -10,6 +10,7 @@ import {
 	createSourceSaveCapability,
 	readSourceFileSnapshot,
 	resolveFolderSourceFile,
+	resolveFolderSourceFileForSave,
 	saveSourceFileAtomic,
 } from "../generated/source-save-node.js";
 
@@ -246,6 +247,19 @@ export async function startAnnotateServer(options: {
 		}
 	}
 
+	const sourceMode = options.mode || "annotate";
+	const singleFileSourceSaveEligible =
+		sourceMode === "annotate" &&
+		!options.sourceConverted &&
+		!(options.renderHtml && options.rawHtml) &&
+		!/^https?:\/\//i.test(options.filePath);
+	const initialSingleFileSourceSave = singleFileSourceSaveEligible
+		? createSourceSaveCapability("single-file", options.filePath)
+		: null;
+	const initialSingleFileSourcePath = initialSingleFileSourceSave?.enabled ? initialSingleFileSourceSave.path : null;
+	const openedSourceFilePaths = new Set<string>();
+	if (initialSingleFileSourcePath) openedSourceFilePaths.add(initialSingleFileSourcePath);
+
 	const getPrimarySource = () => {
 		const mode = options.mode || "annotate";
 		if (mode === "annotate-last") {
@@ -264,7 +278,7 @@ export async function startAnnotateServer(options: {
 			return { plan: options.markdown, sourceSave: disabledSourceSave("not-local-file") };
 		}
 
-		const sourceSave = createSourceSaveCapability("single-file", options.filePath);
+		const sourceSave = createSourceSaveCapability("single-file", initialSingleFileSourcePath ?? options.filePath);
 		if (!sourceSave.enabled) {
 			return { plan: options.markdown, sourceSave };
 		}
@@ -351,6 +365,11 @@ export async function startAnnotateServer(options: {
 		} else if (url.pathname === "/api/draft") {
 			await handleDraftRequest(req, res, draftKey);
 		} else if (url.pathname === "/api/doc" && req.method === "GET") {
+			const requestedDocPath = url.searchParams.get("path");
+			if (options.mode === "annotate-folder" && options.folderPath && requestedDocPath) {
+				const openedPath = resolveFolderSourceFile(requestedDocPath, options.folderPath);
+				if (openedPath) openedSourceFilePaths.add(openedPath);
+			}
 			// Inject source file's directory as base for relative path resolution.
 			// Skip for URL annotations — there's no local directory to resolve against.
 			if (!url.searchParams.has("base") && options.filePath && !/^https?:\/\//i.test(options.filePath)) {
@@ -361,8 +380,8 @@ export async function startAnnotateServer(options: {
 			}
 			await handleDocRequest(res, url, {
 				rewriteHtml: htmlAssets.rewriteHtml,
-				sourceSaveFilePath: (options.mode || "annotate") === "annotate" && !options.sourceConverted && !(options.renderHtml && options.rawHtml) && !/^https?:\/\//i.test(options.filePath)
-					? options.filePath
+				sourceSaveFilePath: singleFileSourceSaveEligible
+					? initialSingleFileSourcePath ?? options.filePath
 					: undefined,
 				sourceSaveFolderPath: options.mode === "annotate-folder" ? options.folderPath : undefined,
 				rootPaths: getReferenceRootPaths(),
@@ -382,11 +401,16 @@ export async function startAnnotateServer(options: {
 			}
 
 			let targetPath: string | null = null;
-			if ((options.mode || "annotate") === "annotate" && !options.sourceConverted && !(options.renderHtml && options.rawHtml)) {
-				const capability = createSourceSaveCapability("single-file", options.filePath);
-				targetPath = capability.enabled ? capability.path : null;
+			if (singleFileSourceSaveEligible) {
+				const capability = createSourceSaveCapability("single-file", initialSingleFileSourcePath ?? options.filePath);
+				targetPath = capability.enabled ? capability.path : initialSingleFileSourcePath;
 			} else if (options.mode === "annotate-folder" && options.folderPath && typeof body.path === "string") {
-				targetPath = resolveFolderSourceFile(body.path, options.folderPath);
+				targetPath = body.allowMissingBase
+					? resolveFolderSourceFileForSave(body.path, options.folderPath)
+					: resolveFolderSourceFile(body.path, options.folderPath);
+				if (body.allowMissingBase && targetPath && !openedSourceFilePaths.has(targetPath)) {
+					targetPath = null;
+				}
 			}
 
 			if (!targetPath) {
@@ -394,7 +418,10 @@ export async function startAnnotateServer(options: {
 				return;
 			}
 
-			const result = saveSourceFileAtomic(targetPath, body.text, body.baseHash);
+			const result = saveSourceFileAtomic(targetPath, body.text, body.baseHash, {
+				allowMissingBase: body.allowMissingBase === true,
+				missingBaseEol: body.baseEol,
+			});
 			const status = result.ok
 				? 200
 				: result.code === "conflict"

@@ -3,7 +3,7 @@ import type { SourceSaveCapability } from '@plannotator/shared/source-save';
 
 export type EnabledSourceSaveCapability = Extract<SourceSaveCapability, { enabled: true }>;
 
-export type EditableDocumentSaveStatus = 'clean' | 'dirty' | 'saving' | 'saved' | 'conflict' | 'error';
+export type EditableDocumentSaveStatus = 'clean' | 'dirty' | 'saving' | 'saved' | 'conflict' | 'error' | 'missing';
 
 export interface SavedFileChange {
   key: string;
@@ -29,6 +29,7 @@ export interface EditableDocumentRecord {
   lastKnownHash?: string;
   lastKnownMtimeMs?: number;
   savedChange?: SavedFileChange;
+  missingOnDisk?: boolean;
   diskConflict?: {
     text: string;
     sourceSave: EnabledSourceSaveCapability;
@@ -96,6 +97,7 @@ function recordIsDirty(record: EditableDocumentRecord): boolean {
 }
 
 function cleanOrDirty(record: EditableDocumentRecord): EditableDocumentSaveStatus {
+  if (record.missingOnDisk) return 'missing';
   if (record.diskConflict) return 'conflict';
   return recordIsDirty(record) ? 'dirty' : 'clean';
 }
@@ -133,8 +135,13 @@ export function canApplyEditableDocumentDiskSnapshot(
 export type DiskSnapshotReconcileResult =
   | { type: 'missing' }
   | { type: 'unchanged'; record: EditableDocumentRecord }
+  | { type: 'status-updated'; record: EditableDocumentRecord }
   | { type: 'clean-updated'; record: EditableDocumentRecord; clearedSavedChange: boolean }
   | { type: 'conflict'; record: EditableDocumentRecord };
+
+export type FileMissingReconcileResult =
+  | { type: 'missing' }
+  | { type: 'file-missing'; record: EditableDocumentRecord; clearedSavedChange: boolean; alreadyMissing: boolean };
 
 export function reconcileEditableDocumentDiskSnapshot(
   record: EditableDocumentRecord | undefined,
@@ -146,14 +153,21 @@ export function reconcileEditableDocumentDiskSnapshot(
   const previousHash = getEditableDocumentKnownDiskHash(record);
   const hashChanged = previousHash !== input.sourceSave.hash;
   if (!hashChanged) {
+    const wasMissingOnDisk = !!record.missingOnDisk;
     record.path = input.sourceSave.path;
     record.basename = input.sourceSave.basename;
     record.lastKnownHash = input.sourceSave.hash;
     record.lastKnownMtimeMs = input.sourceSave.mtimeMs;
+    record.missingOnDisk = undefined;
+    record.error = undefined;
     if (record.diskConflict) {
       record.diskConflict = { text: normalized, sourceSave: input.sourceSave };
     } else {
       record.sourceSave = input.sourceSave;
+    }
+    if (wasMissingOnDisk) {
+      record.saveStatus = cleanOrDirty(record);
+      return { type: 'status-updated', record };
     }
     return { type: 'unchanged', record };
   }
@@ -172,6 +186,7 @@ export function reconcileEditableDocumentDiskSnapshot(
     record.lastKnownHash = input.sourceSave.hash;
     record.lastKnownMtimeMs = input.sourceSave.mtimeMs;
     record.savedChange = undefined;
+    record.missingOnDisk = undefined;
     record.diskConflict = undefined;
     record.error = undefined;
     return { type: 'clean-updated', record, clearedSavedChange };
@@ -182,10 +197,26 @@ export function reconcileEditableDocumentDiskSnapshot(
   record.lastKnownHash = input.sourceSave.hash;
   record.lastKnownMtimeMs = input.sourceSave.mtimeMs;
   record.savedChange = undefined;
+  record.missingOnDisk = undefined;
   record.diskConflict = { text: normalized, sourceSave: input.sourceSave };
   record.saveStatus = 'conflict';
   record.error = 'The file changed on disk while you were editing.';
   return { type: 'conflict', record };
+}
+
+export function markEditableDocumentFileMissing(
+  record: EditableDocumentRecord | undefined,
+): FileMissingReconcileResult {
+  if (!record) return { type: 'missing' };
+
+  const clearedSavedChange = !!record.savedChange;
+  const alreadyMissing = !!record.missingOnDisk && record.saveStatus === 'missing';
+  record.savedChange = undefined;
+  record.diskConflict = undefined;
+  record.missingOnDisk = true;
+  record.saveStatus = 'missing';
+  record.error = 'The file no longer exists on disk.';
+  return { type: 'file-missing', record, clearedSavedChange, alreadyMissing };
 }
 
 export function useEditableDocuments() {
@@ -313,14 +344,15 @@ export function useEditableDocuments() {
     record.basename = sourceSave.basename;
     record.lastKnownHash = sourceSave.hash;
     record.lastKnownMtimeMs = sourceSave.mtimeMs;
+    record.error = undefined;
+    record.diskConflict = undefined;
+    record.missingOnDisk = undefined;
     if (record.currentText === normalized) {
       record.editMountText = normalized;
       record.saveStatus = 'saved';
     } else {
       record.saveStatus = cleanOrDirty(record);
     }
-    record.error = undefined;
-    record.diskConflict = undefined;
     record.savedChange = normalized === beforeText
       ? undefined
       : {
@@ -362,7 +394,7 @@ export function useEditableDocuments() {
     if (!record || !recordIsDirty(record)) return null;
     record.currentText = record.diskBaseline;
     record.editMountText = record.diskBaseline;
-    record.saveStatus = record.diskConflict ? 'conflict' : record.savedChange ? 'saved' : 'clean';
+    record.saveStatus = record.missingOnDisk || record.diskConflict ? cleanOrDirty(record) : record.savedChange ? 'saved' : 'clean';
     record.error = undefined;
     const discarded = cloneRecord(record);
     bump();
@@ -393,6 +425,7 @@ export function useEditableDocuments() {
     record.lastKnownHash = sourceSave.hash;
     record.lastKnownMtimeMs = sourceSave.mtimeMs;
     record.savedChange = undefined;
+    record.missingOnDisk = undefined;
     record.diskConflict = undefined;
     record.error = undefined;
     const reloaded = cloneRecord(record);
@@ -406,10 +439,12 @@ export function useEditableDocuments() {
       const record = docsRef.current.get(key);
       if (!record?.savedChange) continue;
       record.savedChange = undefined;
-      if (!recordIsDirty(record) && !record.diskConflict) {
+      if (!recordIsDirty(record) && !record.diskConflict && !record.missingOnDisk) {
         record.saveStatus = 'clean';
         record.sessionOpenText = record.diskBaseline;
         record.sessionOpenHash = record.sourceSave?.enabled ? record.sourceSave.hash : undefined;
+      } else if (record.missingOnDisk) {
+        record.saveStatus = 'missing';
       }
       changed = true;
     }
@@ -501,6 +536,13 @@ export function useEditableDocuments() {
     bump();
   }, [bump]);
 
+  const markFileMissing = useCallback((key: string): { record: EditableDocumentRecord; clearedSavedChange: boolean; alreadyMissing: boolean } | null => {
+    const result = markEditableDocumentFileMissing(docsRef.current.get(key));
+    if (result.type === 'missing') return null;
+    if (!result.alreadyMissing || result.clearedSavedChange) bump();
+    return { record: cloneRecord(result.record), clearedSavedChange: result.clearedSavedChange, alreadyMissing: result.alreadyMissing };
+  }, [bump]);
+
   const getUnsavedDocuments = useCallback((): EditableDocumentRecord[] => {
     return Array.from(docsRef.current.values())
       .filter((record) => recordIsDirty(record) || !!record.diskConflict)
@@ -582,6 +624,7 @@ export function useEditableDocuments() {
     markSaved,
     markConflict,
     markError,
+    markFileMissing,
     clearDocument,
     discardDocument,
     reconcileDiskSnapshot,

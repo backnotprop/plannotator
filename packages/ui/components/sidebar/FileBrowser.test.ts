@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { VaultNode } from "../../types";
-import type { WorkspaceStatusPayload } from "@plannotator/shared/workspace-status";
-import { getAggregateWorkspaceChange, getWorkspaceChange, normalizePathForLookup } from "./FileBrowser";
+import type { WorkspaceFileChange, WorkspaceStatusPayload } from "@plannotator/shared/workspace-status";
+import { getAggregateWorkspaceChange, getWorkspaceChange, isFileTreeSelectionDisabled, normalizePathForLookup } from "./FileBrowser";
 
 describe("FileBrowser workspace status lookup", () => {
   test("matches Windows status keys when the UI path uses mixed separators", () => {
@@ -71,5 +71,22 @@ describe("FileBrowser workspace status lookup", () => {
       deletions: 2,
       files: 1,
     });
+  });
+
+  test("allows selecting a deleted file when Plannotator still has a missing-file buffer", () => {
+    const deleted: WorkspaceFileChange = {
+      path: "/repo/docs/plan.md",
+      repoRelativePath: "docs/plan.md",
+      status: "deleted",
+      additions: 0,
+      deletions: 3,
+      staged: false,
+      unstaged: true,
+    };
+
+    expect(isFileTreeSelectionDisabled(deleted, undefined)).toBe(true);
+    expect(isFileTreeSelectionDisabled(deleted, { status: "dirty", dirty: true })).toBe(true);
+    expect(isFileTreeSelectionDisabled(deleted, { status: "missing", dirty: false })).toBe(false);
+    expect(isFileTreeSelectionDisabled({ ...deleted, status: "modified" }, undefined)).toBe(false);
   });
 });

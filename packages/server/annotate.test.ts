@@ -15,7 +15,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { startAnnotateServer } from "./annotate";
@@ -131,6 +131,114 @@ describe("annotate server: /api/share-html symlink containment", () => {
       );
       expect(response.status).toBe(403);
       expect(await response.text()).not.toContain("SECRET_OUTSIDE_CONTENT");
+    } finally {
+      server.stop();
+    }
+  });
+});
+
+describe("annotate server: source save", () => {
+  let savedPort: string | undefined;
+  let savedRemote: string | undefined;
+
+  beforeEach(() => {
+    savedPort = process.env.PLANNOTATOR_PORT;
+    savedRemote = process.env.PLANNOTATOR_REMOTE;
+    delete process.env.PLANNOTATOR_PORT;
+    process.env.PLANNOTATOR_REMOTE = "0";
+  });
+
+  afterEach(() => {
+    if (savedPort === undefined) delete process.env.PLANNOTATOR_PORT;
+    else process.env.PLANNOTATOR_PORT = savedPort;
+    if (savedRemote === undefined) delete process.env.PLANNOTATOR_REMOTE;
+    else process.env.PLANNOTATOR_REMOTE = savedRemote;
+  });
+
+  test("recreates a deleted single-file source on save", async () => {
+    const docDir = mkdtempSync(join(tmpdir(), "plannotator-source-save-"));
+    const sourcePath = join(docDir, "source.md");
+    writeFileSync(sourcePath, "Before\r\n", "utf-8");
+
+    const server = await startAnnotateServer({
+      markdown: "Before\r\n",
+      filePath: sourcePath,
+      htmlContent: MINIMAL_HTML,
+    });
+
+    try {
+      const planResponse = await fetch(`${server.url}/api/plan`);
+      const plan = await planResponse.json() as { sourceSave?: { hash: string; mtimeMs: number; eol: "lf" | "crlf" | "mixed" | "none" } };
+      if (!plan.sourceSave) throw new Error("expected source save metadata");
+      unlinkSync(sourcePath);
+
+      const response = await fetch(`${server.url}/api/source/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "After\n",
+          baseHash: plan.sourceSave.hash,
+          baseMtimeMs: plan.sourceSave.mtimeMs,
+          baseEol: plan.sourceSave.eol,
+          allowMissingBase: true,
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(readFileSync(sourcePath, "utf-8")).toBe("After\r\n");
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("recreates a deleted folder source only after Plannotator opened it", async () => {
+    const folderPath = mkdtempSync(join(tmpdir(), "plannotator-folder-source-save-"));
+    const openedPath = join(folderPath, "opened.md");
+    const neverOpenedPath = join(folderPath, "never-opened.md");
+    writeFileSync(openedPath, "Before\n", "utf-8");
+
+    const server = await startAnnotateServer({
+      markdown: "",
+      filePath: folderPath,
+      folderPath,
+      mode: "annotate-folder",
+      htmlContent: MINIMAL_HTML,
+    });
+
+    try {
+      const docResponse = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(openedPath)}`);
+      const doc = await docResponse.json() as { sourceSave?: { path: string; hash: string; mtimeMs: number; eol: "lf" | "crlf" | "mixed" | "none" } };
+      if (!doc.sourceSave) throw new Error("expected folder source save metadata");
+      unlinkSync(openedPath);
+
+      const recreateOpened = await fetch(`${server.url}/api/source/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          path: doc.sourceSave.path,
+          text: "After\n",
+          baseHash: doc.sourceSave.hash,
+          baseMtimeMs: doc.sourceSave.mtimeMs,
+          baseEol: doc.sourceSave.eol,
+          allowMissingBase: true,
+        }),
+      });
+
+      expect(recreateOpened.status).toBe(200);
+      expect(readFileSync(openedPath, "utf-8")).toBe("After\n");
+
+      const recreateNeverOpened = await fetch(`${server.url}/api/source/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          path: neverOpenedPath,
+          text: "Nope\n",
+          baseHash: "sha256:not-a-real-opened-file",
+          allowMissingBase: true,
+        }),
+      });
+
+      expect(recreateNeverOpened.status).toBe(403);
     } finally {
       server.stop();
     }

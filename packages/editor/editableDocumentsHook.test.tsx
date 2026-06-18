@@ -208,4 +208,44 @@ describe('useEditableDocuments conflict actions', () => {
 
     await session.unmount();
   });
+
+  test.skipIf(!hasDom)('missing source files keep the buffer and clear stale saved context', async () => {
+    const session = await mountEditableDocuments();
+
+    await act(async () => {
+      session.current().openDocument({ key: KEY, text: 'a\n', sourceSave: SOURCE_A });
+      session.current().markSaved({ key: KEY, text: 'b\n', sourceSave: SOURCE_B });
+    });
+
+    await act(async () => {
+      session.current().markFileMissing(KEY);
+    });
+
+    const doc = session.current().getDocument(KEY);
+    expect(doc?.currentText).toBe('b\n');
+    expect(doc?.diskBaseline).toBe('b\n');
+    expect(doc?.saveStatus).toBe('missing');
+    expect(doc?.missingOnDisk).toBe(true);
+    expect(doc?.savedChange).toBeUndefined();
+    expect(doc?.diskConflict).toBeUndefined();
+
+    await session.unmount();
+  });
+
+  test.skipIf(!hasDom)('saving a missing source file clears missing state', async () => {
+    const session = await mountEditableDocuments();
+
+    await act(async () => {
+      session.current().openDocument({ key: KEY, text: 'a\n', sourceSave: SOURCE_A });
+      session.current().markFileMissing(KEY);
+      session.current().markSaved({ key: KEY, text: 'a\n', sourceSave: SOURCE_B });
+    });
+
+    const doc = session.current().getDocument(KEY);
+    expect(doc?.saveStatus).toBe('saved');
+    expect(doc?.missingOnDisk).toBeUndefined();
+    expect(doc?.error).toBeUndefined();
+
+    await session.unmount();
+  });
 });

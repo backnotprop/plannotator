@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve } from "path";
 import {
 	createSourceSaveCapability,
 	readSourceFileSnapshot,
 	resolveFolderSourceFile,
+	resolveFolderSourceFileForSave,
 	saveSourceFileAtomic,
 } from "./source-save-node";
 
@@ -86,6 +87,48 @@ describe("source-save node helpers", () => {
 		expect(readFileSync(filePath, "utf8")).toBe("External change\n");
 	});
 
+	test("recreates a missing source file only when explicitly allowed", () => {
+		const root = tempRoot();
+		const filePath = join(root, "plan.md");
+		writeFileSync(filePath, "Before\r\n");
+		const before = readSourceFileSnapshot(filePath);
+		unlinkSync(filePath);
+
+		const blocked = saveSourceFileAtomic(filePath, "After\n", before.hash);
+		expect(blocked.ok).toBe(false);
+		expect(() => readFileSync(filePath, "utf8")).toThrow();
+
+		const recreated = saveSourceFileAtomic(filePath, "After\n", before.hash, {
+			allowMissingBase: true,
+			missingBaseEol: before.eol,
+		});
+
+		expect(recreated.ok).toBe(true);
+		expect(readFileSync(filePath, "utf8")).toBe("After\r\n");
+	});
+
+	test.skipIf(process.platform === "win32")("does not treat an unreadable existing file as missing", () => {
+		const root = tempRoot();
+		const filePath = join(root, "plan.md");
+		writeFileSync(filePath, "Before\n");
+		const before = readSourceFileSnapshot(filePath);
+
+		try {
+			chmodSync(filePath, 0o000);
+			const result = saveSourceFileAtomic(filePath, "After\n", before.hash, {
+				allowMissingBase: true,
+				missingBaseEol: before.eol,
+			});
+
+			expect(result.ok).toBe(false);
+			if (!result.ok) expect(result.code).toBe("not-writable");
+		} finally {
+			chmodSync(filePath, 0o600);
+		}
+
+		expect(readFileSync(filePath, "utf8")).toBe("Before\n");
+	});
+
 	test("rejects folder source paths that resolve outside the folder through a symlink", () => {
 		const root = tempRoot();
 		const folder = join(root, "docs");
@@ -98,5 +141,17 @@ describe("source-save node helpers", () => {
 		const resolved = resolveFolderSourceFile(resolve(folder, "linked/secret.md"), folder);
 
 		expect(resolved).toBeNull();
+	});
+
+	test("resolves missing folder source leaves without following symlinked parents outside the folder", () => {
+		const root = tempRoot();
+		const folder = join(root, "docs");
+		const outside = join(root, "outside");
+		mkdirSync(folder);
+		mkdirSync(outside);
+		symlinkSync(outside, join(folder, "linked"));
+
+		expect(resolveFolderSourceFileForSave(join(folder, "new.md"), folder)).toBe(join(realpathSync(folder), "new.md"));
+		expect(resolveFolderSourceFileForSave(join(folder, "linked", "new.md"), folder)).toBeNull();
 	});
 });
