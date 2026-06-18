@@ -43,7 +43,7 @@ import { getImageSrc } from './ImageThumbnail';
 import { isGraphvizLanguage, isMermaidLanguage } from './diagramLanguages';
 import { getIdentity } from '../utils/identity';
 import { type QuickLabel } from '../utils/quickLabels';
-import { DocBadges } from './DocBadges';
+import { DocBadges, type LinkedDocBadgeInfo } from './DocBadges';
 import { PinpointOverlay } from './PinpointOverlay';
 import { usePinpoint } from '../hooks/usePinpoint';
 import { useAnnotationHighlighter } from '../hooks/useAnnotationHighlighter';
@@ -75,7 +75,7 @@ interface ViewerProps {
    *  so out-of-tree relative references (e.g. `../foo.ts` in a linked doc)
    *  resolve against the doc's own directory rather than only cwd. */
   codePathBaseDir?: string;
-  linkedDocInfo?: { filepath: string; onBack: () => void; label?: string; backLabel?: string } | null;
+  linkedDocInfo?: LinkedDocBadgeInfo | null;
   // Plan diff props
   planDiffStats?: { additions: number; deletions: number; modifications: number } | null;
   isPlanDiffActive?: boolean;
@@ -964,4 +964,3 @@ function groupBlocks(blocks: Block[]): RenderGroup[] {
   }
   return groups;
 }
-

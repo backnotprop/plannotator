@@ -30,6 +30,18 @@ export interface DraftEditedDocument {
   sessionOpenText: string;
   diskBaseline: string;
   currentText: string;
+  savedChange?: DraftSavedFileChange;
+}
+
+export interface DraftSavedFileChange {
+  key: string;
+  path: string;
+  basename: string;
+  beforeText: string;
+  afterText: string;
+  beforeHash?: string;
+  afterHash?: string;
+  sourceSave: DraftSourceSaveCapability;
 }
 
 /** New format: full objects. */
@@ -42,6 +54,8 @@ interface DraftData {
   editedMarkdown?: string;
   /** Source-backed direct edits for folder/single-file annotate sessions. */
   editedDocuments?: DraftEditedDocument[];
+  /** Source-backed edits that were already saved to disk but not sent yet. */
+  savedFileChanges?: DraftSavedFileChange[];
   ts: number;
 }
 
@@ -57,15 +71,47 @@ function isLegacyDraft(data: unknown): data is LegacyDraftData {
   return !!data && typeof data === 'object' && 'a' in data && Array.isArray((data as LegacyDraftData).a);
 }
 
-function isDraftEditedDocument(value: unknown): value is DraftEditedDocument {
-  if (!value || typeof value !== 'object') return false;
+function parseDraftEditedDocument(value: unknown): DraftEditedDocument | null {
+  if (!value || typeof value !== 'object') return null;
   const doc = value as Partial<DraftEditedDocument>;
   const sourceSave = doc.sourceSave as Partial<DraftSourceSaveCapability> | undefined;
-  return (
+  if (!(
     typeof doc.key === 'string' &&
     typeof doc.sessionOpenText === 'string' &&
     typeof doc.diskBaseline === 'string' &&
     typeof doc.currentText === 'string' &&
+    isDraftSourceSaveCapability(sourceSave)
+  )) {
+    return null;
+  }
+  return {
+    key: doc.key,
+    sourceSave,
+    sessionOpenText: doc.sessionOpenText,
+    diskBaseline: doc.diskBaseline,
+    currentText: doc.currentText,
+    ...(isDraftSavedFileChange(doc.savedChange) ? { savedChange: doc.savedChange } : {}),
+  };
+}
+
+function isDraftSavedFileChange(value: unknown): value is DraftSavedFileChange {
+  if (!value || typeof value !== 'object') return false;
+  const change = value as Partial<DraftSavedFileChange>;
+  return (
+    typeof change.key === 'string' &&
+    typeof change.path === 'string' &&
+    typeof change.basename === 'string' &&
+    typeof change.beforeText === 'string' &&
+    typeof change.afterText === 'string' &&
+    (change.beforeHash === undefined || typeof change.beforeHash === 'string') &&
+    (change.afterHash === undefined || typeof change.afterHash === 'string') &&
+    isDraftSourceSaveCapability(change.sourceSave)
+  );
+}
+
+function isDraftSourceSaveCapability(value: unknown): value is DraftSourceSaveCapability {
+  const sourceSave = value as Partial<DraftSourceSaveCapability> | undefined;
+  return (
     !!sourceSave &&
     sourceSave.enabled === true &&
     typeof sourceSave.path === 'string' &&
@@ -97,6 +143,8 @@ interface UseAnnotationDraftOptions {
   getEditedMarkdown?: () => string | null;
   /** Current dirty source-backed documents. Read at save time. */
   getEditedDocuments?: () => DraftEditedDocument[];
+  /** Current saved source-backed edits. Read at save time. */
+  getSavedFileChanges?: () => DraftSavedFileChange[];
   isApiMode: boolean;
   isSharedSession: boolean;
   submitted: boolean;
@@ -108,6 +156,7 @@ interface RestoredDraft {
   globalAttachments: ImageAttachment[];
   editedMarkdown: string | null;
   editedDocuments: DraftEditedDocument[];
+  savedFileChanges: DraftSavedFileChange[];
 }
 
 interface UseAnnotationDraftResult {
@@ -125,6 +174,7 @@ export function useAnnotationDraft({
   globalAttachments,
   getEditedMarkdown,
   getEditedDocuments,
+  getSavedFileChanges,
   isApiMode,
   isSharedSession,
   submitted,
@@ -136,8 +186,8 @@ export function useAnnotationDraft({
 
   // Latest-values ref so the stable scheduleDraftSave reads current data when
   // the debounce fires, without re-creating callbacks per keystroke.
-  const latestRef = useRef({ annotations, codeAnnotations, globalAttachments, getEditedMarkdown, getEditedDocuments });
-  latestRef.current = { annotations, codeAnnotations, globalAttachments, getEditedMarkdown, getEditedDocuments };
+  const latestRef = useRef({ annotations, codeAnnotations, globalAttachments, getEditedMarkdown, getEditedDocuments, getSavedFileChanges });
+  latestRef.current = { annotations, codeAnnotations, globalAttachments, getEditedMarkdown, getEditedDocuments, getSavedFileChanges };
   const canPersist = isApiMode && !isSharedSession && !submitted;
   const canPersistRef = useRef(canPersist);
   canPersistRef.current = canPersist;
@@ -185,22 +235,29 @@ export function useAnnotationDraft({
             : null;
         const restoredEditedDocuments =
           !isLegacyDraft(data) && Array.isArray((data as DraftData).editedDocuments)
-            ? (data as DraftData).editedDocuments!.filter(isDraftEditedDocument)
+            ? (data as DraftData).editedDocuments!
+                .map(parseDraftEditedDocument)
+                .filter((doc): doc is DraftEditedDocument => doc !== null)
+            : [];
+        const restoredSavedFileChanges =
+          !isLegacyDraft(data) && Array.isArray((data as DraftData).savedFileChanges)
+            ? (data as DraftData).savedFileChanges!.filter(isDraftSavedFileChange)
             : [];
 
         const totalCount = restoredAnnotations.length + restoredCodeAnnotations.length + restoredGlobal.length;
-        if (totalCount > 0 || restoredEdited !== null || restoredEditedDocuments.length > 0) {
+        if (totalCount > 0 || restoredEdited !== null || restoredEditedDocuments.length > 0 || restoredSavedFileChanges.length > 0) {
           draftDataRef.current = {
             annotations: restoredAnnotations,
             codeAnnotations: restoredCodeAnnotations,
             globalAttachments: restoredGlobal,
             editedMarkdown: restoredEdited,
             editedDocuments: restoredEditedDocuments,
+            savedFileChanges: restoredSavedFileChanges,
           };
           setDraftBanner({
             count: totalCount,
             timeAgo: formatTimeAgo(data.ts || 0),
-            hasEdits: restoredEdited !== null || restoredEditedDocuments.length > 0,
+            hasEdits: restoredEdited !== null || restoredEditedDocuments.length > 0 || restoredSavedFileChanges.length > 0,
           });
         }
         hasMountedRef.current = true;
@@ -215,11 +272,12 @@ export function useAnnotationDraft({
     // pending — a save landing after submit would resurrect a draft the
     // server just deleted, ghosting it into the next session for this plan.
     if (!canPersistRef.current) return;
-    const { annotations, codeAnnotations, globalAttachments, getEditedMarkdown, getEditedDocuments } = latestRef.current;
+    const { annotations, codeAnnotations, globalAttachments, getEditedMarkdown, getEditedDocuments, getSavedFileChanges } = latestRef.current;
     const editedMarkdown = getEditedMarkdown?.() ?? null;
     const editedDocuments = getEditedDocuments?.() ?? [];
+    const savedFileChanges = getSavedFileChanges?.() ?? [];
 
-    if (annotations.length === 0 && codeAnnotations.length === 0 && globalAttachments.length === 0 && editedMarkdown === null && editedDocuments.length === 0) {
+    if (annotations.length === 0 && codeAnnotations.length === 0 && globalAttachments.length === 0 && editedMarkdown === null && editedDocuments.length === 0 && savedFileChanges.length === 0) {
       // Everything was cleared (last annotation removed, edits discarded).
       // A stale draft left on disk would offer back content the user
       // explicitly threw away.
@@ -233,6 +291,7 @@ export function useAnnotationDraft({
       globalAttachments,
       ...(editedMarkdown !== null ? { editedMarkdown } : {}),
       ...(editedDocuments.length > 0 ? { editedDocuments } : {}),
+      ...(savedFileChanges.length > 0 ? { savedFileChanges } : {}),
       ts: Date.now(),
     };
 
@@ -297,7 +356,7 @@ export function useAnnotationDraft({
     setDraftBanner(null);
     draftDataRef.current = null;
 
-    if (!data) return { annotations: [], codeAnnotations: [], globalAttachments: [], editedMarkdown: null, editedDocuments: [] };
+    if (!data) return { annotations: [], codeAnnotations: [], globalAttachments: [], editedMarkdown: null, editedDocuments: [], savedFileChanges: [] };
 
     return data;
   }, []);

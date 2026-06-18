@@ -45,6 +45,11 @@ export interface EditableDocumentDraftData {
   sessionOpenText: string;
   diskBaseline: string;
   currentText: string;
+  savedChange?: SavedFileChange;
+}
+
+export interface SavedFileChangeDraftData extends SavedFileChange {
+  sourceSave: EnabledSourceSaveCapability;
 }
 
 interface OpenEditableDocumentInput {
@@ -277,6 +282,13 @@ export function useEditableDocuments() {
       const sessionOpenText = normalizeDocumentText(doc.sessionOpenText);
       const diskBaseline = normalizeDocumentText(doc.diskBaseline);
       const currentText = normalizeDocumentText(doc.currentText);
+      const savedChange = doc.savedChange
+        ? {
+            ...doc.savedChange,
+            beforeText: normalizeDocumentText(doc.savedChange.beforeText),
+            afterText: normalizeDocumentText(doc.savedChange.afterText),
+          }
+        : undefined;
       docsRef.current.set(doc.key, {
         key: doc.key,
         path: doc.sourceSave.path,
@@ -290,6 +302,47 @@ export function useEditableDocuments() {
         saveStatus: currentText === diskBaseline ? 'clean' : 'dirty',
         lastKnownHash: doc.sourceSave.hash,
         lastKnownMtimeMs: doc.sourceSave.mtimeMs,
+        savedChange,
+      });
+    }
+
+    bump();
+  }, [bump]);
+
+  const restoreSavedFileChanges = useCallback((changes: SavedFileChangeDraftData[]) => {
+    if (changes.length === 0) return;
+
+    for (const change of changes) {
+      if (change.beforeText === change.afterText) continue;
+      const existing = docsRef.current.get(change.key);
+      // A dirty restored buffer is more specific than a saved-change card.
+      // restoreDraftDocuments carries savedChange too, so do not overwrite it.
+      if (existing && recordIsDirty(existing)) continue;
+
+      const beforeText = normalizeDocumentText(change.beforeText);
+      const afterText = normalizeDocumentText(change.afterText);
+      docsRef.current.set(change.key, {
+        key: change.key,
+        path: change.sourceSave.path,
+        basename: change.sourceSave.basename,
+        sourceSave: change.sourceSave,
+        sessionOpenText: beforeText,
+        sessionOpenHash: change.beforeHash,
+        diskBaseline: afterText,
+        currentText: afterText,
+        editMountText: afterText,
+        saveStatus: 'saved',
+        lastKnownHash: change.sourceSave.hash,
+        lastKnownMtimeMs: change.sourceSave.mtimeMs,
+        savedChange: {
+          key: change.key,
+          path: change.sourceSave.path,
+          basename: change.sourceSave.basename,
+          beforeText,
+          afterText,
+          beforeHash: change.beforeHash,
+          afterHash: change.afterHash ?? change.sourceSave.hash,
+        },
       });
     }
 
@@ -319,6 +372,18 @@ export function useEditableDocuments() {
         sessionOpenText: record.sessionOpenText,
         diskBaseline: record.diskBaseline,
         currentText: record.currentText,
+        savedChange: record.savedChange ? { ...record.savedChange } : undefined,
+      }));
+  }, []);
+
+  const getDraftSavedFileChanges = useCallback((): SavedFileChangeDraftData[] => {
+    return Array.from(docsRef.current.values())
+      .filter((record): record is EditableDocumentRecord & { sourceSave: EnabledSourceSaveCapability; savedChange: SavedFileChange } =>
+        record.sourceSave?.enabled === true && !!record.savedChange
+      )
+      .map((record) => ({
+        ...record.savedChange,
+        sourceSave: record.sourceSave,
       }));
   }, []);
 
@@ -359,8 +424,10 @@ export function useEditableDocuments() {
     clearDocument,
     discardDocument,
     restoreDraftDocuments,
+    restoreSavedFileChanges,
     getUnsavedDocuments,
     getSavedFileChanges,
     getDraftDocuments,
+    getDraftSavedFileChanges,
   };
 }

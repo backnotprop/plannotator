@@ -344,7 +344,6 @@ const DirectEditsCard: React.FC<{
   return (
     <div className="w-full rounded-lg px-3 py-2.5 bg-surface-1/40 ring-1 ring-border/40">
       <div className="flex items-center gap-1.5">
-        <PencilIcon />
         <span className="text-[11px] font-medium text-primary">{title}</span>
         {label && (
           <span className="min-w-0 truncate text-[10px] text-muted-foreground" title={label}>

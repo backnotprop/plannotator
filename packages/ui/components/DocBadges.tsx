@@ -15,6 +15,14 @@ import { PlanDiffBadge } from './plan-diff/PlanDiffBadge';
 import type { PlanDiffStats } from '../utils/planDiffEngine';
 import { hostnameOrFallback } from '@plannotator/shared/project';
 
+export interface LinkedDocBadgeInfo {
+  filepath: string;
+  onBack: () => void;
+  label?: string;
+  backLabel?: string;
+  variant?: 'breadcrumb' | 'folder-file';
+}
+
 export interface DocBadgesProps {
   layout: 'column' | 'row';
   repoInfo?: { display: string; branch?: string } | null;
@@ -24,7 +32,7 @@ export interface DocBadgesProps {
   onPlanDiffToggle?: () => void;
   showDemoBadge?: boolean;
   archiveInfo?: { status: 'approved' | 'denied' | 'unknown'; timestamp: string; title: string } | null;
-  linkedDocInfo?: { filepath: string; onBack: () => void; label?: string; backLabel?: string } | null;
+  linkedDocInfo?: LinkedDocBadgeInfo | null;
   /** Source attribution for HTML/URL annotations (e.g. "https://..." or "index.html") */
   sourceInfo?: string;
 }
@@ -148,36 +156,54 @@ export const DocBadges: React.FC<DocBadgesProps> = ({
 
       {/* Linked-doc breadcrumb: only in column layout (sticky lane is hidden in linked-doc mode) */}
       {!isRow && linkedDocInfo && (
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={linkedDocInfo.onBack}
-            className="px-1.5 py-0.5 bg-primary/10 text-primary rounded hover:bg-primary/20 transition-colors flex items-center gap-1"
-          >
-            <svg
-              className="w-2.5 h-2.5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2.5}
+        linkedDocInfo.variant === 'folder-file' ? (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={linkedDocInfo.onBack}
+              className="rounded-sm text-[9px] font-medium text-primary transition-colors hover:text-primary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"
-              />
-            </svg>
-            {linkedDocInfo.backLabel || 'plan'}
-          </button>
-          <span className="px-1.5 py-0.5 bg-primary/10 text-primary/80 rounded">
-            {linkedDocInfo.label || 'Linked File'}
-          </span>
-          <span
-            className="px-1.5 py-0.5 bg-muted/50 text-muted-foreground rounded truncate max-w-[200px]"
-            title={linkedDocInfo.filepath}
-          >
-            {linkedDocInfo.filepath.split('/').pop()}
-          </span>
-        </div>
+              Close
+            </button>
+            <span
+              className="truncate rounded bg-muted/50 px-1.5 py-0.5 text-[9px] text-muted-foreground max-w-[220px]"
+              title={linkedDocInfo.filepath}
+            >
+              {linkedDocInfo.filepath.split('/').pop()}
+            </span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={linkedDocInfo.onBack}
+              className="px-1.5 py-0.5 bg-primary/10 text-primary rounded hover:bg-primary/20 transition-colors flex items-center gap-1"
+            >
+              <svg
+                className="w-2.5 h-2.5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2.5}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"
+                />
+              </svg>
+              {linkedDocInfo.backLabel || 'plan'}
+            </button>
+            <span className="px-1.5 py-0.5 bg-primary/10 text-primary/80 rounded">
+              {linkedDocInfo.label || 'Linked File'}
+            </span>
+            <span
+              className="px-1.5 py-0.5 bg-muted/50 text-muted-foreground rounded truncate max-w-[200px]"
+              title={linkedDocInfo.filepath}
+            >
+              {linkedDocInfo.filepath.split('/').pop()}
+            </span>
+          </div>
+        )
       )}
     </div>
   );

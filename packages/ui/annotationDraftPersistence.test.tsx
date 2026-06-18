@@ -19,7 +19,7 @@ import { act } from 'react';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { useAnnotationDraft } from './hooks/useAnnotationDraft';
+import { useAnnotationDraft, type DraftEditedDocument, type DraftSavedFileChange } from './hooks/useAnnotationDraft';
 import { AnnotationType, type Annotation } from './types';
 import { saveDraft, loadDraft, deleteDraft, contentHash } from '../shared/draft';
 
@@ -66,6 +66,30 @@ const ANNOTATION: Annotation = {
   originalText: 'the second step',
   createdA: 1718000000000,
   author: 'tater',
+};
+
+const SOURCE_SAVE = {
+  enabled: true,
+  kind: 'local-text-file',
+  scope: 'folder-file',
+  path: '/repo/docs/a.md',
+  basename: 'a.md',
+  language: 'markdown',
+  hash: 'sha256:after',
+  mtimeMs: 1718000001000,
+  size: 6,
+  eol: 'lf',
+} as const;
+
+const SAVED_FILE_CHANGE: DraftSavedFileChange = {
+  key: 'file:/repo/docs/a.md',
+  path: '/repo/docs/a.md',
+  basename: 'a.md',
+  beforeText: 'before\n',
+  afterText: 'after\n',
+  beforeHash: 'sha256:before',
+  afterHash: 'sha256:after',
+  sourceSave: SOURCE_SAVE,
 };
 
 // Server-side draft key: contentHash of the as-submitted plan, exactly as
@@ -249,6 +273,98 @@ describe('direct-edit draft persistence', () => {
     await s2.unmount();
   });
 
+  test.skipIf(!hasDom)('saved file changes persist and restore after a reload', async () => {
+    const s1 = await mountSession(options({
+      getSavedFileChanges: () => [SAVED_FILE_CHANGE],
+    }));
+    act(() => s1.result.current!.scheduleDraftSave());
+    await tick(DEBOUNCE_WAIT_MS);
+    await s1.unmount();
+
+    const onDisk = loadDraft(DRAFT_KEY) as Record<string, unknown> | null;
+    expect(onDisk).not.toBeNull();
+    expect(onDisk!.savedFileChanges).toEqual([SAVED_FILE_CHANGE]);
+    expect(onDisk!.editedDocuments).toBeUndefined();
+
+    const s2 = await mountSession(options());
+    expect(s2.result.current!.draftBanner).toEqual({
+      count: 0,
+      timeAgo: 'just now',
+      hasEdits: true,
+    });
+
+    let restored: ReturnType<HookResult['restoreDraft']>;
+    act(() => {
+      restored = s2.result.current!.restoreDraft();
+    });
+    expect(restored!.savedFileChanges).toEqual([SAVED_FILE_CHANGE]);
+    expect(restored!.editedDocuments).toEqual([]);
+    expect(restored!.editedMarkdown).toBeNull();
+    await s2.unmount();
+  });
+
+  test.skipIf(!hasDom)('dirty source drafts carry their already-saved edit context', async () => {
+    const dirtyWithSavedChange: DraftEditedDocument = {
+      key: SAVED_FILE_CHANGE.key,
+      sourceSave: SOURCE_SAVE,
+      sessionOpenText: SAVED_FILE_CHANGE.beforeText,
+      diskBaseline: SAVED_FILE_CHANGE.afterText,
+      currentText: 'after\nmore unsaved work\n',
+      savedChange: SAVED_FILE_CHANGE,
+    };
+
+    const s1 = await mountSession(options({
+      getEditedDocuments: () => [dirtyWithSavedChange],
+      getSavedFileChanges: () => [SAVED_FILE_CHANGE],
+    }));
+    act(() => s1.result.current!.scheduleDraftSave());
+    await tick(DEBOUNCE_WAIT_MS);
+    await s1.unmount();
+
+    const s2 = await mountSession(options());
+    let restored: ReturnType<HookResult['restoreDraft']>;
+    act(() => {
+      restored = s2.result.current!.restoreDraft();
+    });
+
+    expect(restored!.editedDocuments).toEqual([dirtyWithSavedChange]);
+    expect(restored!.savedFileChanges).toEqual([SAVED_FILE_CHANGE]);
+    await s2.unmount();
+  });
+
+  test.skipIf(!hasDom)('bad saved-change metadata does not drop the dirty source draft', async () => {
+    const dirtyDraft = {
+      key: SAVED_FILE_CHANGE.key,
+      sourceSave: SOURCE_SAVE,
+      sessionOpenText: SAVED_FILE_CHANGE.beforeText,
+      diskBaseline: SAVED_FILE_CHANGE.afterText,
+      currentText: 'after\nmore unsaved work\n',
+      savedChange: { key: SAVED_FILE_CHANGE.key },
+    };
+    saveDraft(DRAFT_KEY, {
+      annotations: [],
+      globalAttachments: [],
+      editedDocuments: [dirtyDraft],
+      ts: Date.now(),
+    });
+
+    const session = await mountSession(options());
+    let restored: ReturnType<HookResult['restoreDraft']>;
+    act(() => {
+      restored = session.result.current!.restoreDraft();
+    });
+
+    expect(restored!.editedDocuments).toEqual([{
+      key: dirtyDraft.key,
+      sourceSave: SOURCE_SAVE,
+      sessionOpenText: dirtyDraft.sessionOpenText,
+      diskBaseline: dirtyDraft.diskBaseline,
+      currentText: dirtyDraft.currentText,
+    }]);
+    expect(restored!.savedFileChanges).toEqual([]);
+    await session.unmount();
+  });
+
   test.skipIf(!hasDom)('discarding everything deletes the draft from disk', async () => {
     // The user committed edits, then discarded them (no annotations either).
     // A stale draft must not resurrect the discarded content on refresh.
@@ -267,6 +383,20 @@ describe('direct-edit draft persistence', () => {
     const s2 = await mountSession(options());
     expect(s2.result.current!.draftBanner).toBeNull();
     await s2.unmount();
+  });
+
+  test.skipIf(!hasDom)('clearing saved file changes deletes an edits-only draft', async () => {
+    const saved: { value: DraftSavedFileChange[] } = { value: [SAVED_FILE_CHANGE] };
+    const session = await mountSession(options({ getSavedFileChanges: () => saved.value }));
+    act(() => session.result.current!.scheduleDraftSave());
+    await tick(DEBOUNCE_WAIT_MS);
+    expect(loadDraft(DRAFT_KEY)).not.toBeNull();
+
+    saved.value = [];
+    act(() => session.result.current!.scheduleDraftSave());
+    await tick(DEBOUNCE_WAIT_MS);
+    expect(loadDraft(DRAFT_KEY)).toBeNull();
+    await session.unmount();
   });
 
   test.skipIf(!hasDom)('legacy tuple drafts still load, with no edits', async () => {

@@ -67,7 +67,7 @@ import { useSidebar, type SidebarTab } from '@plannotator/ui/hooks/useSidebar';
 import { usePlanDiff, type VersionInfo } from '@plannotator/ui/hooks/usePlanDiff';
 import { useLinkedDoc, type LinkedDocSessionState } from '@plannotator/ui/hooks/useLinkedDoc';
 import { useCodeFilePopout } from '@plannotator/ui/hooks/useCodeFilePopout';
-import { useAnnotationDraft } from '@plannotator/ui/hooks/useAnnotationDraft';
+import { useAnnotationDraft, type DraftEditedDocument, type DraftSavedFileChange } from '@plannotator/ui/hooks/useAnnotationDraft';
 import { useArchive } from '@plannotator/ui/hooks/useArchive';
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
 import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotations';
@@ -1198,6 +1198,7 @@ const App: React.FC = () => {
     globalAttachments,
     getEditedMarkdown: getDraftEditedMarkdown,
     getEditedDocuments: editableDocuments.getDraftDocuments,
+    getSavedFileChanges: editableDocuments.getDraftSavedFileChanges,
     isApiMode: isApiMode && !goalSetupMode,
     isSharedSession,
     // isSubmitting counts: a save firing while approve/deny is in flight can
@@ -1377,27 +1378,100 @@ const App: React.FC = () => {
   // and the baseline exists. Edits flow through the same helpers
   // commitMarkdownEdits uses, with the RESTORED annotations remapped against
   // the edited document (they aren't in state yet when the remap runs).
-  const handleRestoreDraft = React.useCallback(() => {
+  const validateDraftSavedFileChanges = useCallback(async (
+    changes: DraftSavedFileChange[],
+  ): Promise<DraftSavedFileChange[]> => {
+    if (changes.length === 0) return [];
+    const validated: DraftSavedFileChange[] = [];
+    let staleDropped = 0;
+
+    for (const change of changes) {
+      if (change.beforeText === change.afterText) {
+        continue;
+      }
+
+      if (!change.afterHash) {
+        validated.push(change);
+        continue;
+      }
+
+      const activeSource = activeEditableDocument?.sourceSave?.enabled && activeEditableDocument.path === change.path
+        ? activeEditableDocument.sourceSave
+        : null;
+
+      let currentSource = activeSource;
+      if (!currentSource) {
+        try {
+          const res = await fetch(`/api/doc?path=${encodeURIComponent(change.path)}`);
+          if (res.ok) {
+            const data = (await res.json()) as { sourceSave?: SourceSaveCapability };
+            currentSource = data.sourceSave?.enabled ? data.sourceSave : null;
+          }
+        } catch {
+          currentSource = null;
+        }
+      }
+
+      if (!currentSource || currentSource.hash !== change.afterHash) {
+        staleDropped++;
+        continue;
+      }
+
+      validated.push({
+        ...change,
+        sourceSave: currentSource,
+        afterHash: currentSource.hash,
+      });
+    }
+
+    if (staleDropped > 0) {
+      toast('Some saved edit context was not restored', {
+        description: 'Those files changed after Plannotator saved them.',
+        duration: 5000,
+      });
+    }
+
+    return validated;
+  }, [activeEditableDocument]);
+
+  const handleRestoreDraft = React.useCallback(async () => {
     const {
       annotations: restored,
       codeAnnotations: restoredCode,
       globalAttachments: restoredGlobal,
       editedMarkdown,
       editedDocuments,
+      savedFileChanges,
     } = restoreDraft();
     if (restoredCode.length > 0) setCodeAnnotations(restoredCode);
     if (restoredGlobal.length > 0) setGlobalAttachments(restoredGlobal);
 
-    if (editedDocuments.length > 0) {
+    const validSavedFileChanges = await validateDraftSavedFileChanges(savedFileChanges);
+    const validSavedChangeKeys = new Set(validSavedFileChanges.map((change) => change.key));
+    const editedDocumentsForRestore: DraftEditedDocument[] = editedDocuments.map((doc) =>
+      doc.savedChange && !validSavedChangeKeys.has(doc.savedChange.key)
+        ? { ...doc, savedChange: undefined }
+        : doc
+    );
+
+    if (validSavedFileChanges.length > 0) {
+      editableDocuments.restoreSavedFileChanges(validSavedFileChanges);
+      if (window.innerWidth >= 768) {
+        setRightSidebarTab('annotations');
+        setIsPanelOpen(true);
+      }
+    }
+
+    if (editedDocumentsForRestore.length > 0) {
       if (isEditingMarkdown) {
         toast('Draft file edits were not restored', {
           description: 'You already have edits in this session — those take precedence.',
           duration: 5000,
         });
       } else {
-        editableDocuments.restoreDraftDocuments(editedDocuments);
+        editableDocuments.restoreDraftDocuments(editedDocumentsForRestore);
         const activeDraft = activeEditableDocument?.sourceSave?.enabled
-          ? editedDocuments.find((doc) => doc.key === activeEditableDocument.key)
+          ? editedDocumentsForRestore.find((doc) => doc.key === activeEditableDocument.key)
           : undefined;
         if (activeDraft && activeDraft.currentText !== markdown) {
           const remapped = applyEditedDocument(activeDraft.currentText, restored);
@@ -1409,6 +1483,7 @@ const App: React.FC = () => {
               setIsPanelOpen(true);
             }
           }
+          scheduleDraftSave();
           return;
         }
       }
@@ -1431,6 +1506,7 @@ const App: React.FC = () => {
       }
       const remapped = applyEditedDocument(edited, restored);
       repaintHighlights(remapped);
+      scheduleDraftSave();
       return;
     }
     if (edited !== null && (editStats !== null || isEditingMarkdown)) {
@@ -1449,7 +1525,8 @@ const App: React.FC = () => {
         viewerRef.current?.applySharedAnnotations(restored.filter(a => !a.diffContext));
       }, 100);
     }
-  }, [restoreDraft, editStats, isEditingMarkdown, editableDocuments, activeEditableDocument, markdown, applyEditedDocument, repaintHighlights]);
+    scheduleDraftSave();
+  }, [restoreDraft, validateDraftSavedFileChanges, editStats, isEditingMarkdown, editableDocuments, activeEditableDocument, markdown, applyEditedDocument, repaintHighlights, scheduleDraftSave]);
 
   const handleEditToggle = useCallback(() => {
     if (isEditingMarkdown) {
@@ -1579,7 +1656,7 @@ const App: React.FC = () => {
         const stats = computeEditStats(change.beforeText, change.afterText);
         return {
           id: `saved:${change.key}`,
-          title: 'Saved edits',
+          title: 'Edits',
           label: change.path,
           added: stats.added,
           removed: stats.removed,
@@ -3511,7 +3588,21 @@ const App: React.FC = () => {
                     maxWidth={annotateReaderMaxWidth}
                     onOpenLinkedDoc={handleOpenLinkedDoc}
                     onOpenCodeFile={codeFilePopout.open}
-                    linkedDocInfo={linkedDocHook.isActive ? { filepath: linkedDocHook.filepath!, onBack: handleLinkedDocBack, label: fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath)?.isVault ? 'Vault File' : fileBrowser.activeFile ? 'File' : undefined, backLabel } : null}
+                    linkedDocInfo={
+                      linkedDocHook.isActive
+                        ? {
+                            filepath: linkedDocHook.filepath!,
+                            onBack: handleLinkedDocBack,
+                            label: annotateSource === 'folder'
+                              ? undefined
+                              : fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath)?.isVault
+                                ? 'Vault File'
+                                : fileBrowser.activeFile ? 'File' : undefined,
+                            backLabel,
+                            variant: annotateSource === 'folder' ? 'folder-file' : 'breadcrumb',
+                          }
+                        : null
+                    }
                     imageBaseDir={imageBaseDir}
                     codePathBaseDir={activeDocBaseDir}
                     copyLabel={annotateSource === 'message' ? 'Copy message' : annotateSource === 'file' || annotateSource === 'folder' ? 'Copy file' : undefined}
