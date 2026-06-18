@@ -121,9 +121,7 @@ import {
   normalizeEditedMarkdown,
 } from './directEdits';
 import {
-  canApplyEditableDocumentDiskSnapshot,
   editableDocumentKey,
-  getEditableDocumentKnownDiskHash,
   useEditableDocuments,
   type EnabledSourceSaveCapability,
   type SavedFileChangeDraftData,
@@ -132,6 +130,7 @@ import {
   validateSavedFileChanges,
 } from './savedFileChangeValidation';
 import { fetchSourceDocumentSnapshot, probeSourceSave } from './sourceDocumentClient';
+import { reconcileSourceDocuments, type SourceDocumentReconcileEvent } from './sourceDocumentReconciliation';
 import { dirnameBrowserPath, normalizeBrowserPath, pathIsInsideDir } from './sourceDocumentPaths';
 import { pickRestoredSingleFileDraftToDisplay } from './draftRestoreSelection';
 
@@ -1399,6 +1398,12 @@ const App: React.FC = () => {
         if (linkedDocHook.isActive) {
           linkedDocHook.back();
           fileBrowser.setActiveFile(null);
+        } else {
+          const remapped = displayedMarkdown !== ''
+            ? applyEditedDocument('')
+            : annotations;
+          repaintHighlights(remapped);
+          originalMarkdownRef.current = '';
         }
         scheduleDraftSave();
         return;
@@ -1812,26 +1817,9 @@ const App: React.FC = () => {
       if (live != null) editableDocuments.updateActiveText(live, { forceNotify: true });
     }
 
-    const docs = editableDocuments.getSourceDocuments()
-      .filter((doc) => !changedDir || pathIsInsideDir(doc.sourceSave.path, changedDir));
-    let changed = false;
-
-    for (const doc of docs) {
-      const startRecord = editableDocuments.getDocument(doc.key);
-      if (startRecord?.saveStatus === 'saving') continue;
-      const expectedDiskHash = getEditableDocumentKnownDiskHash(startRecord);
-      const seq = (sourceReconcileSeqRef.current.get(doc.key) ?? 0) + 1;
-      sourceReconcileSeqRef.current.set(doc.key, seq);
-      const snapshotResult = await fetchSourceDocumentSnapshot(doc.sourceSave.path);
-      if (sourceReconcileSeqRef.current.get(doc.key) !== seq) continue;
-      const currentRecord = editableDocuments.getDocument(doc.key);
-      if (!canApplyEditableDocumentDiskSnapshot(currentRecord, expectedDiskHash)) {
-        continue;
-      }
-      if (snapshotResult.status === 'missing') {
-        const result = editableDocuments.markFileMissing(doc.key);
-        if (!result) continue;
-        if (!result.alreadyMissing || result.clearedSavedChange) changed = true;
+    const handleReconcileEvent = (event: SourceDocumentReconcileEvent) => {
+      const { result } = event;
+      if (event.type === 'file-missing') {
         if (!result.alreadyMissing && result.record.key === editableDocuments.getActiveKey()) {
           setEditorDiffersFromBaseline(result.record.currentText !== result.record.diskBaseline);
           if (isEditingMarkdownRef.current) {
@@ -1847,18 +1835,10 @@ const App: React.FC = () => {
             duration: 5000,
           });
         }
-        continue;
+        return;
       }
-      if (snapshotResult.status === 'unavailable') continue;
-      const { snapshot } = snapshotResult;
-      const result = editableDocuments.reconcileDiskSnapshot({
-        key: doc.key,
-        text: snapshot.markdown,
-        sourceSave: snapshot.sourceSave,
-      });
 
-      if (result.type === 'clean-updated') {
-        changed = true;
+      if (event.type === 'clean-updated') {
         if (result.record.key === editableDocuments.getActiveKey()) {
           const remapped = applyEditedDocument(result.record.currentText);
           repaintHighlights(remapped);
@@ -1872,10 +1852,7 @@ const App: React.FC = () => {
             description: `${result.record.basename} changed outside Plannotator, so its old Edits card was cleared.`,
           });
         }
-      } else if (result.type === 'status-updated') {
-        changed = true;
-      } else if (result.type === 'conflict') {
-        changed = true;
+      } else if (event.type === 'conflict') {
         if (result.record.key === editableDocuments.getActiveKey()) {
           setEditorDirty(true);
           setEditorDiffersFromBaseline(true);
@@ -1885,8 +1862,18 @@ const App: React.FC = () => {
           });
         }
       }
-    }
+    };
 
+    const changed = await reconcileSourceDocuments({
+      changedDir,
+      documents: editableDocuments.getSourceDocuments(),
+      sequenceByKey: sourceReconcileSeqRef.current,
+      getDocument: editableDocuments.getDocument,
+      fetchSnapshot: fetchSourceDocumentSnapshot,
+      markFileMissing: editableDocuments.markFileMissing,
+      reconcileDiskSnapshot: editableDocuments.reconcileDiskSnapshot,
+      onEvent: handleReconcileEvent,
+    });
     if (changed) scheduleDraftSave();
   }, [applyEditedDocument, editableDocuments, repaintHighlights, scheduleDraftSave]);
   const reconcileOpenSourceDocumentsRef = useRef(reconcileOpenSourceDocuments);

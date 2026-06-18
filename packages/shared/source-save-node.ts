@@ -184,7 +184,7 @@ export function saveSourceFileAtomic(
 	filePath: string,
 	text: string,
 	baseHash: string,
-	options: { allowMissingBase?: boolean; missingBaseEol?: SourceFileEol } = {},
+	options: { allowMissingBase?: boolean; missingBaseEol?: SourceFileEol; allowedRoot?: string } = {},
 ): SourceSaveResponse {
 	if (!isSourceSaveFilePath(filePath)) {
 		return {
@@ -194,11 +194,31 @@ export function saveSourceFileAtomic(
 		};
 	}
 
+	let allowedRoot: string | null = null;
+	if (options.allowedRoot) {
+		try {
+			allowedRoot = realpathSync(resolveUserPath(options.allowedRoot));
+		} catch {
+			return {
+				ok: false,
+				code: "not-writable",
+				message: "This file cannot be saved outside the allowed folder.",
+			};
+		}
+	}
+
 	let before: SourceFileSnapshot;
 	let mode: number | undefined;
 	let outputEol: SourceFileEol;
 	try {
 		const real = realpathSync(filePath);
+		if (allowedRoot && !isWithinProjectRoot(real, allowedRoot)) {
+			return {
+				ok: false,
+				code: "not-writable",
+				message: "This file cannot be saved outside the allowed folder.",
+			};
+		}
 		const stat = statSync(real);
 		if (!stat.isFile()) {
 			return {
@@ -229,6 +249,13 @@ export function saveSourceFileAtomic(
 		try {
 			const realParent = realpathSync(dirname(filePath));
 			filePath = join(realParent, basename(filePath));
+			if (allowedRoot && !isWithinProjectRoot(filePath, allowedRoot)) {
+				return {
+					ok: false,
+					code: "not-writable",
+					message: "This file cannot be saved outside the allowed folder.",
+				};
+			}
 			before = {
 				text: "",
 				hash: baseHash,

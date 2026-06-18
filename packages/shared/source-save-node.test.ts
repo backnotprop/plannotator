@@ -117,10 +117,35 @@ describe("source-save node helpers", () => {
 		const recreated = saveSourceFileAtomic(filePath, "After\n", before.hash, {
 			allowMissingBase: true,
 			missingBaseEol: before.eol,
+			allowedRoot: root,
 		});
 
 		expect(recreated.ok).toBe(true);
 		expect(readFileSync(filePath, "utf8")).toBe("After\r\n");
+	});
+
+	test("refuses to save or recreate files outside the allowed root", () => {
+		const root = tempRoot();
+		const outside = tempRoot();
+		const existingPath = join(outside, "existing.md");
+		const missingPath = join(outside, "missing.md");
+		writeFileSync(existingPath, "Before\n");
+		const before = readSourceFileSnapshot(existingPath);
+
+		const existing = saveSourceFileAtomic(existingPath, "After\n", before.hash, {
+			allowedRoot: root,
+		});
+		const missing = saveSourceFileAtomic(missingPath, "After\n", "sha256:missing-base", {
+			allowMissingBase: true,
+			allowedRoot: root,
+		});
+
+		expect(existing.ok).toBe(false);
+		if (!existing.ok) expect(existing.code).toBe("not-writable");
+		expect(readFileSync(existingPath, "utf8")).toBe("Before\n");
+		expect(missing.ok).toBe(false);
+		if (!missing.ok) expect(missing.code).toBe("not-writable");
+		expect(() => readFileSync(missingPath, "utf8")).toThrow();
 	});
 
 	test.skipIf(process.platform === "win32")("does not treat an unreadable existing file as missing", () => {

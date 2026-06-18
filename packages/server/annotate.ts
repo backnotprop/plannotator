@@ -425,6 +425,7 @@ export async function startAnnotateServer(
             const result = saveSourceFileAtomic(targetPath, body.text, body.baseHash, {
               allowMissingBase: body.allowMissingBase === true,
               missingBaseEol: body.baseEol,
+              allowedRoot: mode === "annotate-folder" ? folderPath : undefined,
             });
             const status = result.ok
               ? 200
