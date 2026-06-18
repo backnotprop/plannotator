@@ -4,6 +4,7 @@ import { tmpdir } from "os";
 import { join, resolve } from "path";
 import {
 	createSourceSaveCapability,
+	createSourceSaveCapabilityFromSnapshot,
 	readSourceFileSnapshot,
 	resolveFolderSourceFile,
 	resolveFolderSourceFileForSave,
@@ -39,6 +40,21 @@ describe("source-save node helpers", () => {
 			expect(capability.basename).toBe("notes.txt");
 			expect(capability.hash).toMatch(/^sha256:/);
 		}
+	});
+
+	test("creates source-save capability from the same snapshot used for displayed text", () => {
+		const root = tempRoot();
+		const filePath = join(root, "notes.md");
+		writeFileSync(filePath, "old\n");
+		const snapshot = readSourceFileSnapshot(filePath);
+		writeFileSync(filePath, "new\n");
+
+		const capability = createSourceSaveCapabilityFromSnapshot("single-file", filePath, snapshot);
+
+		expect(capability.enabled).toBe(true);
+		if (!capability.enabled) throw new Error("expected source-save capability");
+		expect(capability.hash).toBe(snapshot.hash);
+		expect(capability.size).toBe(snapshot.size);
 	});
 
 	test("saves atomically when the base hash matches", () => {

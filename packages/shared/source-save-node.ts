@@ -102,6 +102,50 @@ export function resolveFolderSourceFileForSave(filePath: string, folderPath: str
 	}
 }
 
+export function resolveExistingSourceSaveFile(
+	scope: SourceSaveScope,
+	filePath: string,
+	folderPath?: string,
+): string | null {
+	if (!isSourceSaveFilePath(filePath)) return null;
+
+	const resolved =
+		scope === "folder-file" && folderPath
+			? resolveFolderSourceFile(filePath, folderPath)
+			: resolveUserPath(filePath);
+
+	if (!resolved) return null;
+	if (!existsSync(resolved)) return null;
+
+	try {
+		const real = realpathSync(resolved);
+		if (scope === "folder-file" && folderPath) {
+			const root = realpathSync(resolveUserPath(folderPath));
+			if (!isWithinProjectRoot(real, root)) return null;
+		}
+		const stat = statSync(real);
+		if (!stat.isFile()) return null;
+		return real;
+	} catch {
+		return null;
+	}
+}
+
+export function createSourceSaveCapabilityFromSnapshot(
+	scope: SourceSaveScope,
+	filePath: string,
+	snapshot: SourceFileSnapshot,
+	folderPath?: string,
+): SourceSaveCapability {
+	if (!isSourceSaveFilePath(filePath)) {
+		return disabledSourceSave("unsupported-extension");
+	}
+
+	const resolved = resolveExistingSourceSaveFile(scope, filePath, folderPath);
+	if (!resolved) return disabledSourceSave("not-local-file");
+	return enabledSourceSave(scope, resolved, snapshot);
+}
+
 export function createSourceSaveCapability(
 	scope: SourceSaveScope,
 	filePath: string,

@@ -3,9 +3,10 @@ import { dirname, resolve as resolvePath } from "node:path";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 
-import { contentHash, deleteDraft } from "../generated/draft.js";
+import { contentHash, deleteDraft, loadDraft } from "../generated/draft.js";
 import { saveConfig, detectGitUser, getServerConfig, loadConfig, resolveSharingEnabled } from "../generated/config.js";
 import { disabledSourceSave, type SourceSaveRequest } from "../generated/source-save.js";
+import { draftContainsSourceSavePath } from "../generated/draft-source-files.js";
 import {
 	createSourceSaveCapability,
 	readSourceFileSnapshot,
@@ -263,6 +264,8 @@ export async function startAnnotateServer(options: {
 		: null;
 	const openedSourceFilePaths = new Set<string>();
 	if (initialSingleFileSourcePath) openedSourceFilePaths.add(initialSingleFileSourcePath);
+	const draftHasSourceFilePath = (path: string): boolean =>
+		draftContainsSourceSavePath(loadDraft(draftKey), path);
 
 	const getPrimarySource = () => {
 		const mode = options.mode || "annotate";
@@ -408,7 +411,13 @@ export async function startAnnotateServer(options: {
 				targetPath = body.allowMissingBase
 					? resolveFolderSourceFileForSave(body.path, options.folderPath)
 					: resolveFolderSourceFile(body.path, options.folderPath);
-				if (body.allowMissingBase && targetPath && !existsSync(targetPath) && !openedSourceFilePaths.has(targetPath)) {
+				if (
+					body.allowMissingBase &&
+					targetPath &&
+					!existsSync(targetPath) &&
+					!openedSourceFilePaths.has(targetPath) &&
+					!draftHasSourceFilePath(targetPath)
+				) {
 					targetPath = null;
 				}
 			}

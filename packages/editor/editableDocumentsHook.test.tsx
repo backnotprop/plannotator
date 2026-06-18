@@ -249,4 +249,20 @@ describe('useEditableDocuments conflict actions', () => {
 
     await session.unmount();
   });
+
+  test.skipIf(!hasDom)('discarding a missing source file removes the in-memory buffer', async () => {
+    const session = await mountEditableDocuments();
+
+    await act(async () => {
+      session.current().openDocument({ key: KEY, text: 'a\n', sourceSave: SOURCE_A });
+      session.current().markFileMissing(KEY);
+      session.current().discardDocument(KEY);
+    });
+
+    expect(session.current().getDocument(KEY)).toBeNull();
+    expect(session.current().getActiveDocument()).toBeNull();
+    expect(session.current().getUnsavedDocuments()).toEqual([]);
+
+    await session.unmount();
+  });
 });

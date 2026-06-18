@@ -40,8 +40,13 @@ import {
 } from "../generated/resolve-file.js";
 import { parseCodePath } from "../generated/code-file.js";
 import { htmlToMarkdown } from "../generated/html-to-markdown.js";
-import { disabledSourceSave, type SourceSaveCapability } from "../generated/source-save.js";
-import { createSourceSaveCapability } from "../generated/source-save-node.js";
+import { disabledSourceSave, type SourceFileSnapshot, type SourceSaveCapability } from "../generated/source-save.js";
+import {
+	createSourceSaveCapability,
+	createSourceSaveCapabilityFromSnapshot,
+	readSourceFileSnapshot,
+	resolveExistingSourceSaveFile,
+} from "../generated/source-save-node.js";
 import { preloadFile } from "@pierre/diffs/ssr";
 
 type Res = ServerResponse;
@@ -155,6 +160,7 @@ function resolveMarkdownFileFromAllowedRoots(input: string, roots: string[]): Ro
 function applyDocOptions<T extends Record<string, unknown>>(
 	data: T,
 	options: HandleDocOptions = {},
+	sourceSnapshot?: SourceFileSnapshot,
 ): T & { sourceSave?: SourceSaveCapability } {
 	const next: Record<string, unknown> = { ...data };
 	if (
@@ -176,15 +182,19 @@ function applyDocOptions<T extends Record<string, unknown>>(
 		return { ...next, sourceSave: disabledSourceSave("converted-source") } as T & { sourceSave?: SourceSaveCapability };
 	}
 	if (options.sourceSaveFilePath) {
-		const source = createSourceSaveCapability("single-file", options.sourceSaveFilePath);
-		const doc = createSourceSaveCapability("single-file", data.filepath);
-		if (source.enabled && doc.enabled && source.path === doc.path) {
+		const sourcePath = resolveExistingSourceSaveFile("single-file", options.sourceSaveFilePath);
+		const doc = sourceSnapshot
+			? createSourceSaveCapabilityFromSnapshot("single-file", data.filepath, sourceSnapshot)
+			: createSourceSaveCapability("single-file", data.filepath);
+		if (sourcePath && doc.enabled && sourcePath === doc.path) {
 			options.onSourceDocumentServed?.(doc.path);
 			return { ...next, sourceSave: doc } as T & { sourceSave?: SourceSaveCapability };
 		}
 	}
 	if (!options.sourceSaveFolderPath) return next as T & { sourceSave?: SourceSaveCapability };
-	const sourceSave = createSourceSaveCapability("folder-file", data.filepath, options.sourceSaveFolderPath);
+	const sourceSave = sourceSnapshot
+		? createSourceSaveCapabilityFromSnapshot("folder-file", data.filepath, sourceSnapshot, options.sourceSaveFolderPath)
+		: createSourceSaveCapability("folder-file", data.filepath, options.sourceSaveFolderPath);
 	if (sourceSave.enabled) options.onSourceDocumentServed?.(sourceSave.path);
 	return {
 		...next,
@@ -192,8 +202,14 @@ function applyDocOptions<T extends Record<string, unknown>>(
 	} as T & { sourceSave?: SourceSaveCapability };
 }
 
-function jsonDoc(res: Res, data: Record<string, unknown>, options?: HandleDocOptions, status?: number): void {
-	json(res, applyDocOptions(data, options), status);
+function jsonDoc(
+	res: Res,
+	data: Record<string, unknown>,
+	options?: HandleDocOptions,
+	status?: number,
+	sourceSnapshot?: SourceFileSnapshot,
+): void {
+	json(res, applyDocOptions(data, options, sourceSnapshot), status);
 }
 
 /** Recursively walk a directory collecting files by extension, skipping ignored dirs. */
@@ -254,14 +270,21 @@ export async function handleDocRequest(res: Res, url: URL, options: HandleDocOpt
 		}
 		try {
 			if (existsSync(fromBase)) {
-				const raw = readFileSync(fromBase, "utf-8");
+				const snapshot = readSourceFileSnapshot(fromBase);
+				const raw = snapshot.text;
 				const isHtml = /\.html?$/i.test(requestedPath);
 				if (isHtml && !convert) {
 					jsonDoc(res, { rawHtml: raw, renderAs: "html", filepath: fromBase }, options);
 					return;
 				}
 				const markdown = isHtml ? htmlToMarkdown(raw) : raw;
-				jsonDoc(res, { markdown, filepath: fromBase, isConverted: isHtml, renderAs: "markdown" }, options);
+				jsonDoc(
+					res,
+					{ markdown, filepath: fromBase, isConverted: isHtml, renderAs: "markdown" },
+					options,
+					undefined,
+					isHtml ? undefined : snapshot,
+				);
 				return;
 			}
 		} catch {
@@ -384,8 +407,8 @@ export async function handleDocRequest(res: Res, url: URL, options: HandleDocOpt
 	}
 
 	try {
-		const markdown = readFileSync(result.path, "utf-8");
-		jsonDoc(res, { markdown, filepath: result.path, renderAs: "markdown" }, options);
+		const snapshot = readSourceFileSnapshot(result.path);
+		jsonDoc(res, { markdown: snapshot.text, filepath: result.path, renderAs: "markdown" }, options, undefined, snapshot);
 	} catch {
 		json(res, { error: "Failed to read file" }, 500);
 	}

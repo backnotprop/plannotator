@@ -402,10 +402,18 @@ export function useEditableDocuments() {
 
   const discardDocument = useCallback((key: string): EditableDocumentRecord | null => {
     const record = docsRef.current.get(key);
-    if (!record || !recordIsDirty(record)) return null;
+    if (!record) return null;
+    if (record.missingOnDisk) {
+      const discarded = cloneRecord(record);
+      docsRef.current.delete(key);
+      if (activeKeyRef.current === key) activeKeyRef.current = null;
+      bump();
+      return discarded;
+    }
+    if (!recordIsDirty(record)) return null;
     record.currentText = record.diskBaseline;
     record.editMountText = record.diskBaseline;
-    record.saveStatus = record.missingOnDisk || record.diskConflict ? cleanOrDirty(record) : record.savedChange ? 'saved' : 'clean';
+    record.saveStatus = record.diskConflict ? cleanOrDirty(record) : record.savedChange ? 'saved' : 'clean';
     record.error = undefined;
     const discarded = cloneRecord(record);
     bump();

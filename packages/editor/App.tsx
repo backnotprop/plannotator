@@ -1395,6 +1395,14 @@ const App: React.FC = () => {
       setEditorDiffersFromBaseline(false);
       editedMarkdownRef.current = null;
       setEditStats(null);
+      if (discarded.missingOnDisk) {
+        if (linkedDocHook.isActive) {
+          linkedDocHook.back();
+          fileBrowser.setActiveFile(null);
+        }
+        scheduleDraftSave();
+        return;
+      }
       const remapped = displayedMarkdown !== discarded.diskBaseline
         ? applyEditedDocument(discarded.diskBaseline)
         : annotations;
@@ -1413,7 +1421,7 @@ const App: React.FC = () => {
     const remapped = markdown !== base ? applyEditedDocument(base) : annotations;
     repaintHighlights(remapped);
     scheduleDraftSave();
-  }, [activeEditableDocument, editableDocuments, displayedMarkdown, markdown, annotations, applyEditedDocument, repaintHighlights, scheduleDraftSave]);
+  }, [activeEditableDocument, editableDocuments, displayedMarkdown, markdown, annotations, applyEditedDocument, repaintHighlights, linkedDocHook, fileBrowser, scheduleDraftSave]);
 
   // Restores a recovered draft: annotations always; direct edits when present
   // and the baseline exists. Edits flow through the same helpers

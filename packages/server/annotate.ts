@@ -18,8 +18,9 @@ import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDr
 import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc } from "./reference-handlers";
 import { handleFileBrowserFilesStream } from "./reference-watch";
 import { resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
-import { contentHash, deleteDraft } from "./draft";
+import { contentHash, deleteDraft, loadDraft } from "./draft";
 import { disabledSourceSave, type SourceSaveRequest } from "@plannotator/shared/source-save";
+import { draftContainsSourceSavePath } from "@plannotator/shared/draft-source-files";
 import {
 	createSourceSaveCapability,
 	readSourceFileSnapshot,
@@ -205,6 +206,8 @@ export async function startAnnotateServer(
     : null;
   const openedSourceFilePaths = new Set<string>();
   if (initialSingleFileSourcePath) openedSourceFilePaths.add(initialSingleFileSourcePath);
+  const draftHasSourceFilePath = (path: string): boolean =>
+    draftContainsSourceSavePath(loadDraft(draftKey), path);
 
   const getPrimarySource = () => {
     if (mode === "annotate-last") {
@@ -401,7 +404,13 @@ export async function startAnnotateServer(
               targetPath = body.allowMissingBase
                 ? resolveFolderSourceFileForSave(body.path, folderPath)
                 : resolveFolderSourceFile(body.path, folderPath);
-              if (body.allowMissingBase && targetPath && !existsSync(targetPath) && !openedSourceFilePaths.has(targetPath)) {
+              if (
+                body.allowMissingBase &&
+                targetPath &&
+                !existsSync(targetPath) &&
+                !openedSourceFilePaths.has(targetPath) &&
+                !draftHasSourceFilePath(targetPath)
+              ) {
                 targetPath = null;
               }
             }

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { EnabledSourceSaveCapability, SavedFileChangeDraftData } from './editableDocuments';
-import { validateSavedFileChanges, type SourceSaveProbeResult } from './savedFileChangeValidation';
+import { validateSavedFileChanges } from './savedFileChangeValidation';
+import type { SourceSaveProbeResult } from './sourceDocumentClient';
 
 function sourceSave(hash: string): EnabledSourceSaveCapability {
   return {

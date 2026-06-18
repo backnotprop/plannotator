@@ -15,7 +15,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { startAnnotateServer } from "./annotate";
@@ -313,6 +313,69 @@ describe("annotate server: source save", () => {
       expect(response.status).toBe(200);
       expect(readFileSync(linkedPath, "utf-8")).toBe("After\n");
     } finally {
+      server.stop();
+    }
+  });
+
+  test("recreates a deleted folder source restored from draft state", async () => {
+    const folderPath = mkdtempSync(join(tmpdir(), "plannotator-folder-draft-source-save-"));
+    const deletedPath = join(realpathSync(folderPath), "deleted.md");
+    const sourceSave = {
+      enabled: true,
+      kind: "local-text-file",
+      scope: "folder-file",
+      path: deletedPath,
+      basename: "deleted.md",
+      language: "markdown",
+      hash: "sha256:draft-base",
+      mtimeMs: 0,
+      size: 0,
+      eol: "lf",
+    };
+
+    const server = await startAnnotateServer({
+      markdown: "",
+      filePath: folderPath,
+      folderPath,
+      mode: "annotate-folder",
+      htmlContent: MINIMAL_HTML,
+    });
+
+    try {
+      const draftResponse = await fetch(`${server.url}/api/draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          annotations: [],
+          globalAttachments: [],
+          editedDocuments: [{
+            key: `file:${deletedPath}`,
+            sourceSave,
+            sessionOpenText: "",
+            diskBaseline: "",
+            currentText: "Recovered\n",
+          }],
+          ts: Date.now(),
+        }),
+      });
+      expect(draftResponse.status).toBe(200);
+
+      const response = await fetch(`${server.url}/api/source/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          path: deletedPath,
+          text: "Recovered\n",
+          baseHash: sourceSave.hash,
+          baseEol: "lf",
+          allowMissingBase: true,
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(readFileSync(deletedPath, "utf-8")).toBe("Recovered\n");
+    } finally {
+      await fetch(`${server.url}/api/draft`, { method: "DELETE" }).catch(() => {});
       server.stop();
     }
   });

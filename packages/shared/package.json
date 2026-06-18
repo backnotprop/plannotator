@@ -22,6 +22,7 @@
     "./project": "./project.ts",
     "./storage": "./storage.ts",
     "./draft": "./draft.ts",
+    "./draft-source-files": "./draft-source-files.ts",
     "./integrations-common": "./integrations-common.ts",
     "./repo": "./repo.ts",
     "./reference-common": "./reference-common.ts",
