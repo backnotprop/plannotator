@@ -48,6 +48,7 @@ type Res = ServerResponse;
 
 export interface HandleDocOptions {
 	rewriteHtml?: (html: string, filepath: string) => string;
+	sourceSaveFilePath?: string;
 	sourceSaveFolderPath?: string;
 	rootPaths?: string[];
 }
@@ -162,9 +163,10 @@ function applyDocOptions<T extends Record<string, unknown>>(
 	) {
 		next.rawHtml = options.rewriteHtml(next.rawHtml, next.filepath);
 	}
-	if (!options.sourceSaveFolderPath) return next as T & { sourceSave?: SourceSaveCapability };
 	if (typeof data.filepath !== "string") {
-		return { ...next, sourceSave: disabledSourceSave("not-local-file") } as T & { sourceSave?: SourceSaveCapability };
+		return options.sourceSaveFolderPath || options.sourceSaveFilePath
+			? { ...next, sourceSave: disabledSourceSave("not-local-file") } as T & { sourceSave?: SourceSaveCapability }
+			: next as T & { sourceSave?: SourceSaveCapability };
 	}
 	if (data.renderAs === "html") {
 		return { ...next, sourceSave: disabledSourceSave("html-render") } as T & { sourceSave?: SourceSaveCapability };
@@ -172,6 +174,14 @@ function applyDocOptions<T extends Record<string, unknown>>(
 	if (data.isConverted === true) {
 		return { ...next, sourceSave: disabledSourceSave("converted-source") } as T & { sourceSave?: SourceSaveCapability };
 	}
+	if (options.sourceSaveFilePath) {
+		const source = createSourceSaveCapability("single-file", options.sourceSaveFilePath);
+		const doc = createSourceSaveCapability("single-file", data.filepath);
+		if (source.enabled && doc.enabled && source.path === doc.path) {
+			return { ...next, sourceSave: doc } as T & { sourceSave?: SourceSaveCapability };
+		}
+	}
+	if (!options.sourceSaveFolderPath) return next as T & { sourceSave?: SourceSaveCapability };
 	return {
 		...next,
 		sourceSave: createSourceSaveCapability("folder-file", data.filepath, options.sourceSaveFolderPath),

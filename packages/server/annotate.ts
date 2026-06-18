@@ -352,6 +352,9 @@ export async function startAnnotateServer(
             const docReq = changed ? new Request(docUrl.toString()) : req;
             return handleDoc(docReq, {
               rewriteHtml: htmlAssets.rewriteHtml,
+              sourceSaveFilePath: mode === "annotate" && !sourceConverted && !(renderHtml && rawHtml) && !/^https?:\/\//i.test(filePath)
+                ? filePath
+                : undefined,
               sourceSaveFolderPath: mode === "annotate-folder" ? folderPath : undefined,
               rootPaths: getReferenceRootPaths(),
             });
