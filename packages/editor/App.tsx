@@ -70,19 +70,20 @@ import { useAnnotationDraft, type DraftEditedDocument, type DraftSavedFileChange
 import { useArchive } from '@plannotator/ui/hooks/useArchive';
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
 import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotations';
+import { useAnnotationHistory, type AnnotationHistoryApi, type OverrideSnapshot, type SerializedHistory } from '@plannotator/ui/hooks/useAnnotationHistory';
+import { useHistoryShortcuts } from '@plannotator/ui/shortcuts';
 import { useExternalAnnotationHighlights } from '@plannotator/ui/hooks/useExternalAnnotationHighlights';
 import { buildPlanAgentInstructions } from '@plannotator/ui/utils/planAgentInstructions';
 import { useFileBrowser } from '@plannotator/ui/hooks/useFileBrowser';
 import { getFileEditStatus } from '@plannotator/ui/components/sidebar/FileBrowser';
 import { isVaultBrowserEnabled } from '@plannotator/ui/utils/obsidian';
 import { isFileBrowserEnabled, getFileBrowserSettings } from '@plannotator/ui/utils/fileBrowser';
-import { generateId } from '@plannotator/ui/utils/generateId';
 import { SidebarTabs } from '@plannotator/ui/components/sidebar/SidebarTabs';
 import { SidebarContainer } from '@plannotator/ui/components/sidebar/SidebarContainer';
 import type { ArchivedPlan } from '@plannotator/ui/components/sidebar/ArchiveBrowser';
 import type { PickerMessage } from '@plannotator/ui/components/sidebar/MessagesBrowser';
 import { PlanDiffViewer } from '@plannotator/ui/components/plan-diff/PlanDiffViewer';
-import { CodeFilePopout, type CodeFileAnnotationInput } from '@plannotator/ui/components/CodeFilePopout';
+import { CodeFilePopout } from '@plannotator/ui/components/CodeFilePopout';
 import type { PlanDiffMode } from '@plannotator/ui/components/plan-diff/PlanDiffModeSwitcher';
 import {
   GoalSetupSurface,
@@ -134,6 +135,7 @@ import { fetchSourceDocumentSnapshot, probeSourceSave } from './sourceDocumentCl
 import { reconcileSourceDocuments, type SourceDocumentReconcileEvent } from './sourceDocumentReconciliation';
 import { dirnameBrowserPath, normalizeBrowserPath, pathIsInsideDir } from './sourceDocumentPaths';
 import { pickRestoredSingleFileDraftToDisplay } from './draftRestoreSelection';
+import { useAnnotationCommands } from './hooks/useAnnotationCommands';
 
 type NoteAutoSaveResults = {
   obsidian?: boolean;
@@ -146,6 +148,8 @@ type MessageAnnotationState = {
   text: string;
   timestamp?: string;
   linkedDocSession: LinkedDocSessionState;
+  /** Root message undo/redo stack. Duplicates linkedDocSession.root.history for explicit message cache ownership. */
+  history?: SerializedHistory;
   codeAnnotations: CodeAnnotation[];
   selectedCodeAnnotationId: string | null;
 };
@@ -180,6 +184,7 @@ const createEmptyMessageState = (message: PickerMessage): MessageAnnotationState
     },
     docs: new Map(),
   },
+  history: undefined,
   codeAnnotations: [],
   selectedCodeAnnotationId: null,
 });
@@ -204,6 +209,7 @@ const normalizeMessageState = (
     },
     docs: new Map(state.linkedDocSession.docs),
   },
+  history: state.history ?? state.linkedDocSession.root.history,
 });
 
 const buildMessageAnnotationCounts = (
@@ -245,6 +251,15 @@ const App: React.FC = () => {
   const [codeAnnotations, setCodeAnnotations] = useState<CodeAnnotation[]>([]);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [selectedCodeAnnotationId, setSelectedCodeAnnotationId] = useState<string | null>(null);
+
+  // Refs mirror live state so stable useCallback handlers and the history
+  // hook can read fresh selection/annotation values without re-creating.
+  const selectedAnnotationIdRef = useRef(selectedAnnotationId);
+  selectedAnnotationIdRef.current = selectedAnnotationId;
+  const selectedCodeAnnotationIdRef = useRef(selectedCodeAnnotationId);
+  selectedCodeAnnotationIdRef.current = selectedCodeAnnotationId;
+  const codeAnnotationsRef = useRef(codeAnnotations);
+  codeAnnotationsRef.current = codeAnnotations;
   const editableDocuments = useEditableDocuments();
   const activeEditableDocument = editableDocuments.activeDocument;
   const displayedMarkdown = activeEditableDocument?.currentText ?? markdown;
@@ -409,6 +424,17 @@ const App: React.FC = () => {
   const isMobile = useIsMobile();
 
   const viewerRef = useRef<ViewerHandle>(null);
+
+  // Undo/redo API ref — assigned after `useAnnotationHistory` is instantiated
+  // below. Handlers/effects declared earlier in the component (draft restore,
+  // share import, terminal decision, linked-doc navigation, keyboard) read it
+  // via this ref to avoid TDZ and stale-closure issues.
+  const historyApiRef = useRef<AnnotationHistoryApi | null>(null);
+  // `applyOverrides` is owned by `useCheckboxOverrides`, which is instantiated
+  // after the history hook; the history hook reads it through this ref.
+  const historyApplyOverridesRef = useRef<(next: OverrideSnapshot) => void>(() => {});
+  const checkboxOverridesSnapshotRef = useRef<() => OverrideSnapshot>(() => []);
+  const checkboxRevertOverrideRef = useRef<(blockId: string) => void>(() => {});
   // containerRef + scrollViewport both point at the OverlayScrollbars
   // viewport element (the node that actually scrolls), not the <main>
   // host. Consumers: useActiveSection (IntersectionObserver root) and
@@ -657,6 +683,8 @@ const App: React.FC = () => {
   }, [activeEditableDocument, annotateSource, editableDocuments, isEditingMarkdown]);
 
   // Linked document navigation
+  const serializeHistory = useCallback((): SerializedHistory | undefined => historyApiRef.current?.serialize(), []);
+  const restoreHistory = useCallback((snapshot: SerializedHistory | undefined) => historyApiRef.current?.restore(snapshot), []);
   const linkedDocHook = useLinkedDoc({
     markdown, annotations, selectedAnnotationId, globalAttachments,
     setMarkdown, setAnnotations, setSelectedAnnotationId, setGlobalAttachments,
@@ -666,6 +694,8 @@ const App: React.FC = () => {
     onDocumentLoaded: handleLinkedDocumentLoaded,
     getDocumentMarkdown: getLinkedDocumentMarkdown,
     onAfterBack: restoreLinkedDocumentEditableKey,
+    serializeHistory,
+    restoreHistory,
   });
 
   // Active document's directory — feeds both click-time popout fetches and
@@ -781,6 +811,7 @@ const App: React.FC = () => {
       text: msg.text,
       timestamp: msg.timestamp,
       linkedDocSession: snapshot,
+      history: snapshot.root.history,
       codeAnnotations: [...codeAnnotations],
       selectedCodeAnnotationId,
     }, msg);
@@ -867,6 +898,7 @@ const App: React.FC = () => {
 
     setSelectedMessageId(messageId);
     linkedDocHook.restoreSession(targetState.linkedDocSession);
+    historyApiRef.current?.restore(targetState.history ?? targetState.linkedDocSession.root.history);
     setCodeAnnotations([...targetState.codeAnnotations]);
     setSelectedCodeAnnotationId(targetState.selectedCodeAnnotationId);
   }, [
@@ -1271,6 +1303,9 @@ const App: React.FC = () => {
         viewerRef.current?.clearAllHighlights();
         viewerRef.current?.applySharedAnnotations(pendingSharedAnnotations.filter(a => !a.diffContext));
         clearPendingSharedAnnotations();
+        // Share import establishes a fresh annotation baseline — drop any
+        // undo/redo history so prior actions can't reverse the import.
+        historyApiRef.current?.clear();
         // `clearAllHighlights` wiped live external SSE highlights too;
         // tell the external-highlight bookkeeper to re-apply them.
         resetExternalHighlights();
@@ -1319,6 +1354,10 @@ const App: React.FC = () => {
     setEditGeneration((g) => g + 1);
     annotationsRef.current = remapped;
     setAnnotations(remapped);
+    // Stored history actions carry full annotation snapshots. Once markdown
+    // edits remap anchors, those snapshots are stale unless transformed too.
+    // Direct markdown edits are non-undoable for v1, so drop the stack here.
+    historyApiRef.current?.clear();
     return remapped;
   }, []);
 
@@ -1482,6 +1521,9 @@ const App: React.FC = () => {
   }, [resolveSavedFileChangeSource]);
 
   const handleRestoreDraft = React.useCallback(async () => {
+    // Draft restore is a bulk baseline load — drop undo/redo history so prior
+    // actions can't reverse the restored snapshot.
+    historyApiRef.current?.clear();
     const {
       annotations: restored,
       codeAnnotations: restoredCode,
@@ -2261,7 +2303,7 @@ const App: React.FC = () => {
       const res = await fetch('/api/upload', { method: 'POST', body: formData });
       if (res.ok) {
         const data = await res.json();
-        setGlobalAttachments(prev => [...prev, { path: data.path, name }]);
+        handleAddGlobalAttachment({ path: data.path, name });
       }
     } catch {
       // Upload failed silently
@@ -2365,6 +2407,8 @@ const App: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+      // Terminal decision succeeded: clear history so undo can't fight a published result.
+      historyApiRef.current?.clear();
       setSubmitted('approved');
     } catch {
       setIsSubmitting(false);
@@ -2391,6 +2435,8 @@ const App: React.FC = () => {
           },
         })
       });
+      // Terminal decision succeeded: clear history so undo can't fight a published result.
+      historyApiRef.current?.clear();
       setSubmitted('denied');
     } catch {
       setIsSubmitting(false);
@@ -2422,6 +2468,8 @@ const App: React.FC = () => {
           ...(messageMultiSelectMode && annotatedMessageIds.length > 1 ? { feedbackScope: 'messages' } : {}),
         }),
       });
+      // Terminal decision succeeded: clear history so undo can't fight a published result.
+      historyApiRef.current?.clear();
       setSubmitted('denied'); // reuse 'denied' state for "feedback sent" overlay
     } catch {
       setIsSubmitting(false);
@@ -2433,6 +2481,8 @@ const App: React.FC = () => {
     setIsSubmitting(true);
     try {
       await fetch('/api/approve', { method: 'POST' });
+      // Terminal decision succeeded: clear history so undo can't fight a published result.
+      historyApiRef.current?.clear();
       setSubmitted('approved');
     } catch {
       setIsSubmitting(false);
@@ -2445,6 +2495,7 @@ const App: React.FC = () => {
     try {
       const res = await fetch('/api/exit', { method: 'POST' });
       if (res.ok) {
+        historyApiRef.current?.clear();
         setSubmitted('exited');
       } else {
         throw new Error('Failed to exit');
@@ -2595,11 +2646,95 @@ const App: React.FC = () => {
     maybeConfirmUnsavedSourceFileEdits,
   ]);
 
-  const handleAddAnnotation = (ann: Annotation) => {
-    setAnnotations(prev => [...prev, ann]);
-    setSelectedAnnotationId(ann.id);
-    setSelectedCodeAnnotationId(null);
-  };
+  // ─── Undo / Redo ──────────────────────────────────────────────────────
+  // Bounded command-pattern stack (see apps/pi-extension/UNDO_SPEC.md §5).
+  // Inverses reuse the existing ViewerHandle + the same setters the draft
+  // auto-save watches, so no persistence/protocol changes are needed.
+  const history = useAnnotationHistory({
+    setAnnotations,
+    setCodeAnnotations,
+    setGlobalAttachments,
+    viewerRef,
+    applyOverrides: (next) => historyApplyOverridesRef.current(next),
+    getSelectedAnnotationId: () => selectedAnnotationIdRef.current,
+    setSelectedAnnotationId,
+    getSelectedCodeAnnotationId: () => selectedCodeAnnotationIdRef.current,
+    setSelectedCodeAnnotationId,
+  });
+  historyApiRef.current = history;
+
+  const canHandleHistoryShortcut = useCallback((e: KeyboardEvent): boolean => {
+    // Terminal / editing / modal owners take precedence.
+    if (submitted || isSubmitting || isExiting) return false;
+    if (isEditingMarkdown) return false;
+    if (
+      showExport || showImport || showFeedbackPrompt || showClaudeCodeWarning ||
+      showSourceFileEditWarning || showExitWarning || showAgentWarning ||
+      showPermissionModeSetup || pendingPasteImage
+    ) return false;
+    if (document.querySelector('[data-plannotator-confirm-dialog="true"]')) return false;
+    if (document.querySelector('[data-comment-popover="true"]')) return false;
+    if (document.querySelector('[data-quick-label-picker]')) return false;
+    if (goalSetupMode) return false;
+
+    // Let text fields (comment popover editor, panel edit, AI input, CM6)
+    // keep native undo.
+    const target = e.target as HTMLElement | null;
+    const tag = target?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || Boolean(target?.isContentEditable)) return false;
+
+    return true;
+  }, [
+    submitted, isSubmitting, isExiting, isEditingMarkdown,
+    showExport, showImport, showFeedbackPrompt, showClaudeCodeWarning,
+    showSourceFileEditWarning, showExitWarning, showAgentWarning,
+    showPermissionModeSetup, pendingPasteImage, goalSetupMode,
+  ]);
+
+  // Mod+Z / Mod+Shift+Z / Mod+Y are registered through the shortcut runtime so
+  // registry docs, validation, and behavior stay tied to one scope.
+  useHistoryShortcuts({
+    handlers: {
+      undo: {
+        when: (e) => canHandleHistoryShortcut(e) && Boolean(historyApiRef.current?.canUndo),
+        handle: () => historyApiRef.current?.undo(),
+      },
+      redo: {
+        when: (e) => canHandleHistoryShortcut(e) && Boolean(historyApiRef.current?.canRedo),
+        handle: () => historyApiRef.current?.redo(),
+      },
+    },
+  });
+
+  const annotationCommands = useAnnotationCommands({
+    history,
+    viewerRef,
+    allAnnotations,
+    externalAnnotations,
+    codeAnnotationsRef,
+    annotationsRef,
+    selectedAnnotationIdRef,
+    selectedCodeAnnotationIdRef,
+    globalAttachments,
+    setAnnotations,
+    setCodeAnnotations,
+    setGlobalAttachments,
+    setSelectedAnnotationId,
+    setSelectedCodeAnnotationId,
+    deleteExternalAnnotation,
+    updateExternalAnnotation,
+    getCheckboxOverrides: () => checkboxOverridesSnapshotRef.current(),
+    revertCheckboxOverride: (blockId) => checkboxRevertOverrideRef.current(blockId),
+  });
+  const handleAddAnnotation = annotationCommands.addAnnotation;
+  const handleDeleteAnnotation = annotationCommands.deleteAnnotation;
+  const handleEditAnnotation = annotationCommands.editAnnotation;
+  const handleIdentityChange = annotationCommands.changeIdentity;
+  const handleAddGlobalAttachment = annotationCommands.addGlobalAttachment;
+  const handleRemoveGlobalAttachment = annotationCommands.removeGlobalAttachment;
+  const handleAddCodeAnnotation = annotationCommands.addCodeAnnotation;
+  const handleDeleteCodeAnnotation = annotationCommands.deleteCodeAnnotation;
+  const handleEditCodeAnnotation = annotationCommands.editCodeAnnotation;
 
   // Keep selection behavior explicit across mobile/wide-mode transitions.
   const handleSelectAnnotation = React.useCallback((id: string | null) => {
@@ -2607,26 +2742,6 @@ const App: React.FC = () => {
     if (id) setSelectedCodeAnnotationId(null);
     if (id && isMobile && wideModeType === null) setIsPanelOpen(true);
   }, [isMobile, wideModeType]);
-
-  const handleAddCodeAnnotation = React.useCallback((input: CodeFileAnnotationInput) => {
-    const annotation: CodeAnnotation = {
-      id: generateId('code-ann'),
-      type: 'comment',
-      scope: 'line',
-      filePath: input.filePath,
-      lineStart: input.lineStart,
-      lineEnd: input.lineEnd,
-      side: 'new',
-      text: input.text,
-      images: input.images,
-      originalCode: input.originalCode,
-      createdAt: Date.now(),
-      author: configStore.get('displayName') || undefined,
-    };
-    setCodeAnnotations(prev => [...prev, annotation]);
-    setSelectedAnnotationId(null);
-    setSelectedCodeAnnotationId(annotation.id);
-  }, []);
 
   // The code popout is full-viewport modal — the annotation panel is behind it.
   // This handler only fires when the popout is closed (sidebar visible), so
@@ -2640,76 +2755,19 @@ const App: React.FC = () => {
     if (isMobile && wideModeType === null) setIsPanelOpen(true);
   }, [codeAnnotations, codeFilePopout.open, isMobile, wideModeType]);
 
-  const handleDeleteCodeAnnotation = React.useCallback((id: string) => {
-    setCodeAnnotations(prev => prev.filter(a => a.id !== id));
-    if (selectedCodeAnnotationId === id) setSelectedCodeAnnotationId(null);
-  }, [selectedCodeAnnotationId]);
-
-  const handleEditCodeAnnotation = React.useCallback((id: string, updates: Partial<CodeAnnotation>) => {
-    setCodeAnnotations(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
-  }, []);
-
-  // Core annotation removal — highlight cleanup + state filter + selection clear
-  const removeAnnotation = (id: string) => {
-    viewerRef.current?.removeHighlight(id);
-    setAnnotations(prev => prev.filter(a => a.id !== id));
-    if (selectedAnnotationId === id) setSelectedAnnotationId(null);
-  };
-
-  // Interactive checkbox toggling with annotation tracking
+  // Interactive checkbox toggling with annotation tracking. addAnnotation /
+  // removeAnnotation are the raw (non-recording) variants; a single toggle
+  // records one composite checkbox-toggle action via onRecordToggle.
   const checkbox = useCheckboxOverrides({
     blocks,
     annotations,
-    addAnnotation: handleAddAnnotation,
-    removeAnnotation,
+    addAnnotation: annotationCommands.addAnnotationRaw,
+    removeAnnotation: annotationCommands.removeAnnotationRaw,
+    onRecordToggle: annotationCommands.recordCheckboxToggle,
   });
-
-  const handleDeleteAnnotation = (id: string) => {
-    const ann = allAnnotations.find(a => a.id === id);
-    // External annotations (live in SSE hook) route to the SSE hook, not local state.
-    // Check membership by ID — source alone is insufficient because share-imported
-    // and draft-restored annotations also carry source but live in local state.
-    if (ann?.source && externalAnnotations.some(e => e.id === id)) {
-      deleteExternalAnnotation(id);
-      if (selectedAnnotationId === id) setSelectedAnnotationId(null);
-      return;
-    }
-    // If this is a checkbox annotation, revert the visual override
-    if (id.startsWith('ann-checkbox-')) {
-      if (ann) {
-        checkbox.revertOverride(ann.blockId);
-      }
-    }
-    removeAnnotation(id);
-  };
-
-  const handleEditAnnotation = (id: string, updates: Partial<Annotation>) => {
-    const ann = allAnnotations.find(a => a.id === id);
-    if (ann?.source && externalAnnotations.some(e => e.id === id)) {
-      updateExternalAnnotation(id, updates);
-      return;
-    }
-    setAnnotations(prev => prev.map(a =>
-      a.id === id ? { ...a, ...updates } : a
-    ));
-  };
-
-  const handleIdentityChange = useCallback((oldIdentity: string, newIdentity: string) => {
-    setAnnotations(prev => prev.map(ann =>
-      ann.author === oldIdentity ? { ...ann, author: newIdentity } : ann
-    ));
-    setCodeAnnotations(prev => prev.map(ann =>
-      ann.author === oldIdentity ? { ...ann, author: newIdentity } : ann
-    ));
-  }, []);
-
-  const handleAddGlobalAttachment = (image: ImageAttachment) => {
-    setGlobalAttachments(prev => [...prev, image]);
-  };
-
-  const handleRemoveGlobalAttachment = (path: string) => {
-    setGlobalAttachments(prev => prev.filter(p => p.path !== path));
-  };
+  historyApplyOverridesRef.current = checkbox.applyOverrides;
+  checkboxOverridesSnapshotRef.current = () => [...checkbox.overrides.entries()];
+  checkboxRevertOverrideRef.current = checkbox.revertOverride;
 
 
   const handleTocNavigate = (blockId: string) => {
@@ -2952,6 +3010,7 @@ const App: React.FC = () => {
       if (result) {
         if (result.type === 'success') {
           toast.success(result.message);
+          historyApiRef.current?.clear();
           setSubmitted(action === CallbackAction.Approve ? 'approved' : 'denied');
         } else {
           toast.error(result.message);
@@ -4041,6 +4100,10 @@ const App: React.FC = () => {
               onDiscard: item.id === 'plan' ? () => handleDiscardEdits() : undefined,
             })) ?? null}
             onOtherFileAnnotationsClick={handleFlashAnnotatedFiles}
+            canUndo={history.canUndo}
+            canRedo={history.canRedo}
+            onUndo={history.undo}
+            onRedo={history.redo}
           />
           {isPanelOpen && rightSidebarTab === 'ai' && wideModeType === null && !goalSetupMode && canUseAI && (
             <aside

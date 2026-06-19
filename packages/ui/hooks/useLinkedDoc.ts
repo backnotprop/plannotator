@@ -11,6 +11,7 @@ import type { Annotation, ImageAttachment } from "../types";
 import type { ViewerHandle } from "../components/Viewer";
 import type { SidebarTab } from "./useSidebar";
 import type { SourceSaveCapability } from "@plannotator/shared/source-save";
+import type { SerializedHistory } from "./useAnnotationHistory";
 
 export interface LinkedDocLoadData {
   markdown?: string;
@@ -56,6 +57,10 @@ export interface UseLinkedDocOptions {
   getDocumentMarkdown?: (filepath: string, fallback?: string) => string | undefined;
   /** Let the host restore any state that was suspended while a linked doc was active. */
   onAfterBack?: () => void;
+  /** Snapshot the host's undo/redo stack before a surface swap. */
+  serializeHistory?: () => SerializedHistory | undefined;
+  /** Restore the host's undo/redo stack after a surface swap (undefined = clear). */
+  restoreHistory?: (snapshot: SerializedHistory | undefined) => void;
 }
 
 interface SavedPlanState {
@@ -66,6 +71,8 @@ interface SavedPlanState {
   renderAs: 'markdown' | 'html';
   rawHtml: string;
   shareHtml: string;
+  /** Stashed undo/redo stack for this surface (cross-document navigation). */
+  history?: SerializedHistory;
 }
 
 export interface CachedDocState {
@@ -73,6 +80,8 @@ export interface CachedDocState {
   globalAttachments: ImageAttachment[];
   markdown?: string;
   isConverted?: boolean;
+  /** Stashed undo/redo stack for this linked-doc surface. */
+  history?: SerializedHistory;
 }
 
 export interface LinkedDocSessionState {
@@ -137,6 +146,8 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     onDocumentLoaded,
     getDocumentMarkdown,
     onAfterBack,
+    serializeHistory,
+    restoreHistory,
   } = options;
 
   const [linkedDoc, setLinkedDoc] = useState<{ filepath: string; isConverted?: boolean; markdown?: string } | null>(null);
@@ -169,6 +180,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
         globalAttachments: [...globalAttachments],
         markdown: getDocumentMarkdown?.(linkedDoc.filepath, linkedDoc.markdown) ?? linkedDoc.markdown,
         isConverted: linkedDoc.isConverted,
+        history: serializeHistory?.(),
       });
       // Update reactive count so button labels can respond
       let total = 0;
@@ -187,6 +199,8 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     setAnnotations(saved.annotations);
     setGlobalAttachments(saved.globalAttachments);
     setSelectedAnnotationId(saved.selectedAnnotationId);
+    // Restore the root surface's undo/redo stack.
+    restoreHistory?.(saved.history);
     setLinkedDoc(null);
     setError(null);
     savedPlanState.current = null;
@@ -214,6 +228,8 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     onBeforeNavigate,
     getDocumentMarkdown,
     onAfterBack,
+    serializeHistory,
+    restoreHistory,
   ]);
 
   const activateDocument = useCallback((
@@ -250,6 +266,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
         renderAs,
         rawHtml,
         shareHtml,
+        history: serializeHistory?.(),
       };
       let total = annotations.length + globalAttachments.length;
       for (const [fp, cached] of docCache.current.entries()) {
@@ -264,6 +281,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
         globalAttachments: [...globalAttachments],
         markdown: getDocumentMarkdown?.(linkedDoc.filepath, linkedDoc.markdown) ?? linkedDoc.markdown,
         isConverted: linkedDoc.isConverted,
+        history: serializeHistory?.(),
       });
       let total = 0;
       for (const [fp, cached] of docCache.current.entries()) {
@@ -302,6 +320,10 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     setError(null);
     sidebar.open(targetTab ?? "toc");
 
+    // Swap the undo/redo stack to the destination surface: restore a
+    // previously-visited doc's stashed history, or clear for a fresh doc.
+    restoreHistory?.(cached?.history);
+
     // Re-apply cached annotations after DOM settles
     if (cached?.annotations.length) {
       setTimeout(() => {
@@ -332,6 +354,8 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     onDocumentLoaded,
     getDocumentMarkdown,
     back,
+    serializeHistory,
+    restoreHistory,
   ]);
 
   const openLoaded = useCallback((
@@ -391,6 +415,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
         globalAttachments: [...globalAttachments],
         markdown: getDocumentMarkdown?.(linkedDoc.filepath, linkedDoc.markdown) ?? linkedDoc.markdown,
         isConverted: linkedDoc.isConverted,
+        history: serializeHistory?.(),
       });
     }
 
@@ -403,6 +428,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
           annotations: [...savedPlanState.current.annotations],
           selectedAnnotationId: savedPlanState.current.selectedAnnotationId,
           globalAttachments: [...savedPlanState.current.globalAttachments],
+          history: savedPlanState.current.history,
         }
       : {
           markdown,
@@ -412,10 +438,11 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
           annotations: [...annotations],
           selectedAnnotationId,
           globalAttachments: [...globalAttachments],
+          history: serializeHistory?.(),
         };
 
     return { root, docs };
-  }, [linkedDoc, annotations, globalAttachments, markdown, renderAs, rawHtml, shareHtml, selectedAnnotationId, getDocumentMarkdown]);
+  }, [linkedDoc, annotations, globalAttachments, markdown, renderAs, rawHtml, shareHtml, selectedAnnotationId, getDocumentMarkdown, serializeHistory]);
 
   const restoreSession = useCallback((state: LinkedDocSessionState) => {
     viewerRef.current?.clearAllHighlights();
@@ -435,6 +462,8 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     setAnnotations([...state.root.annotations]);
     setGlobalAttachments([...state.root.globalAttachments]);
     setSelectedAnnotationId(state.root.selectedAnnotationId);
+    // Restore the root surface's undo/redo stack.
+    restoreHistory?.(state.root.history);
     setLinkedDoc(null);
     setError(null);
 
@@ -453,6 +482,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     setRawHtml,
     setShareHtml,
     viewerRef,
+    restoreHistory,
   ]);
 
   const getDocAnnotations = useCallback((): Map<string, CachedDocState> => {

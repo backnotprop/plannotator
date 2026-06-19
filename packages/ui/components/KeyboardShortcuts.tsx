@@ -98,6 +98,14 @@ const planShortcuts: ShortcutSection[] = [
     ],
   },
   {
+    title: 'History',
+    shortcuts: [
+      { keys: [modKey, 'Z'], desc: 'Undo', hint: 'Reverses the last annotation, comment, code annotation, attachment, checkbox toggle, or identity change. Disabled while editing markdown, the Image Annotator is open, or a modal is visible.' },
+      { keys: [modKey, 'Shift', 'Z'], desc: 'Redo', hint: 'Re-applies the most recently undone action.' },
+      { keys: [modKey, 'Y'], desc: 'Redo' },
+    ],
+  },
+  {
     title: 'Image Annotator',
     shortcuts: [
       { keys: ['1'], desc: 'Pen tool' },

@@ -68,6 +68,11 @@ interface PanelProps {
   onClose?: () => void;
   onQuickCopy?: () => Promise<void>;
   onShare?: () => void;
+  /** Undo/redo controls surfaced in the panel header. */
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
   otherFileAnnotations?: { count: number; files: number };
   onOtherFileAnnotationsClick?: () => void;
   /** Committed direct edits to one or more documents. Rendered as pinned cards
@@ -94,6 +99,10 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   onClose,
   onQuickCopy,
   onShare,
+  canUndo = false,
+  canRedo = false,
+  onUndo,
+  onRedo,
   otherFileAnnotations,
   onOtherFileAnnotationsClick,
   directEdits = null,
@@ -142,18 +151,56 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
               </span>
             )}
           </div>
-          {isMobile && onClose && (
-            <button
-              onClick={onClose}
-              className="relative rounded-md p-1.5 text-muted-foreground transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:text-foreground md:hidden"
-              title="Close panel"
-              aria-label="Close panel"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          )}
+          <div className="flex items-center gap-0.5">
+            {onUndo && (
+              <button
+                onClick={onUndo}
+                disabled={!canUndo}
+                title="Undo (Cmd+Z)"
+                aria-label="Undo"
+                className={`rounded-md p-1.5 transition-colors ${
+                  canUndo
+                    ? 'text-muted-foreground hover:bg-surface-1 hover:text-foreground'
+                    : 'text-muted-foreground/30 cursor-not-allowed'
+                }`}
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path d="M3 7v6h6" />
+                  <path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13" />
+                </svg>
+              </button>
+            )}
+            {onRedo && (
+              <button
+                onClick={onRedo}
+                disabled={!canRedo}
+                title="Redo (Cmd+Shift+Z)"
+                aria-label="Redo"
+                className={`rounded-md p-1.5 transition-colors ${
+                  canRedo
+                    ? 'text-muted-foreground hover:bg-surface-1 hover:text-foreground'
+                    : 'text-muted-foreground/30 cursor-not-allowed'
+                }`}
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path d="M21 7v6h-6" />
+                  <path d="M3 17a9 9 0 019-9 9 9 0 016 2.3L21 13" />
+                </svg>
+              </button>
+            )}
+            {isMobile && onClose && (
+              <button
+                onClick={onClose}
+                className="relative rounded-md p-1.5 text-muted-foreground transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:text-foreground md:hidden"
+                title="Close panel"
+                aria-label="Close panel"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
         </div>
         {otherFileAnnotations && otherFileAnnotations.count > 0 && (
           <button

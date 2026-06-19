@@ -76,6 +76,7 @@ describe('shortcuts', () => {
       'Input Method',
       'Annotations',
       'Image Annotator',
+      'History',
     ]);
 
     expect(annotateSections.map(section => section.title)).toEqual([
@@ -83,6 +84,7 @@ describe('shortcuts', () => {
       'Input Method',
       'Annotations',
       'Image Annotator',
+      'History',
     ]);
 
     expect(getShortcut(planReviewSettingsShortcutRegistry, 'plan-review-editor-settings', 'submitPlan')?.description).toBe('Approve / Send feedback');
