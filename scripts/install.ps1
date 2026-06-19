@@ -801,7 +801,7 @@ try {
                 }
             }
 
-            # Antigravity CLI plugin commands — ponytail: resolve base once
+            # Antigravity CLI plugin commands (only when detected)
             $agyBase = if (Test-Path "$env:USERPROFILE\.gemini\config") { "$env:USERPROFILE\.gemini\config" } elseif (Test-Path "$env:USERPROFILE\.gemini\antigravity-cli") { "$env:USERPROFILE\.gemini\antigravity-cli" } else { $null }
             if ($agyBase -and (Test-Path "apps\gemini\commands")) {
                 $agyPluginCommandsDir = "$agyBase\plugins\plannotator\commands"
@@ -979,7 +979,7 @@ fs.writeFileSync('$($geminiSettings.Replace('\','/'))', JSON.stringify(settings,
     # (apps/gemini/commands) in the git-gated skills/commands install above.
 }
 
-# --- Antigravity CLI support --- ponytail: resolve base once, derive all paths
+# --- Antigravity CLI support (only when detected) ---
 $agyBase = if (Test-Path "$env:USERPROFILE\.gemini\config") { "$env:USERPROFILE\.gemini\config" } elseif (Test-Path "$env:USERPROFILE\.gemini\antigravity-cli") { "$env:USERPROFILE\.gemini\antigravity-cli" } else { $null }
 if ($agyBase) {
     $agyPluginDir = "$agyBase\plugins\plannotator"

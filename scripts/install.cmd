@@ -714,7 +714,7 @@ if !ERRORLEVEL! equ 0 (
         echo Installed Gemini commands to !GEMINI_COMMANDS_DIR!\
     )
 
-    REM Antigravity CLI plugin commands -- ponytail: resolve AGY_BASE once
+    REM Antigravity CLI plugin commands (only when detected)
     set "AGY_BASE="
     if exist "%USERPROFILE%\.gemini\config" (set "AGY_BASE=%USERPROFILE%\.gemini\config") else if exist "%USERPROFILE%\.gemini\antigravity-cli" set "AGY_BASE=%USERPROFILE%\.gemini\antigravity-cli"
     if defined AGY_BASE if exist "apps\gemini\commands" (
@@ -912,7 +912,7 @@ echo }
     REM checkout in the git-gated skills/commands block above, not written here.
 )
 
-REM --- Antigravity CLI support --- ponytail: resolve AGY_BASE once, derive all paths
+REM --- Antigravity CLI support (only when detected) ---
 set "AGY_BASE="
 if exist "%USERPROFILE%\.gemini\config" (set "AGY_BASE=%USERPROFILE%\.gemini\config") else if exist "%USERPROFILE%\.gemini\antigravity-cli" set "AGY_BASE=%USERPROFILE%\.gemini\antigravity-cli"
 if defined AGY_BASE (

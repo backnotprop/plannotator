@@ -1131,7 +1131,7 @@ checkout_failed=0
         echo "Installed Gemini commands to ${GEMINI_COMMANDS_DIR}/"
     fi
 
-    # Antigravity CLI plugin commands — ponytail: resolve base once, derive paths
+    # Antigravity CLI plugin commands (only when detected)
     AGY_BASE=""; [ -d "$HOME/.gemini/config" ] && AGY_BASE="$HOME/.gemini/config" || { [ -d "$HOME/.gemini/antigravity-cli" ] && AGY_BASE="$HOME/.gemini/antigravity-cli"; }
     if [ -n "$AGY_BASE" ] && [ -d "apps/gemini/commands" ] && [ -n "$(ls -A apps/gemini/commands 2>/dev/null)" ]; then
         copy_commands_if_present apps/gemini/commands "$AGY_BASE/plugins/plannotator/commands"
@@ -1304,7 +1304,7 @@ GEMINI_SETTINGS_EOF
     # the skills/commands install block above (apps/gemini/commands).
 fi
 
-# --- Antigravity CLI support --- ponytail: resolve base once, derive all paths
+# --- Antigravity CLI support (only when detected) ---
 AGY_BASE=""; [ -d "$HOME/.gemini/config" ] && AGY_BASE="$HOME/.gemini/config" || { [ -d "$HOME/.gemini/antigravity-cli" ] && AGY_BASE="$HOME/.gemini/antigravity-cli"; }
 if [ -n "$AGY_BASE" ]; then
     AGY_PLUGIN_DIR="$AGY_BASE/plugins/plannotator"
