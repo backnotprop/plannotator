@@ -18,9 +18,9 @@ import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDr
 import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc } from "./reference-handlers";
 import { handleFileBrowserFilesStream } from "./reference-watch";
 import { resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
-import { contentHash, deleteDraft, loadDraft } from "./draft";
+import { contentHash, deleteDraft } from "./draft";
 import { disabledSourceSave, type SourceSaveRequest } from "@plannotator/shared/source-save";
-import { draftContainsSourceSavePath } from "@plannotator/shared/draft-source-files";
+import { getAnnotateReferenceRootPaths } from "@plannotator/shared/annotate-reference-roots-node";
 import {
 	createSourceSaveCapability,
 	createSourceSaveCapabilityFromText,
@@ -31,7 +31,7 @@ import {
 } from "@plannotator/shared/source-save-node";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { saveConfig, detectGitUser, getServerConfig } from "./config";
-import { existsSync, realpathSync } from "fs";
+import { existsSync } from "fs";
 import { dirname, resolve as resolvePath } from "path";
 import { isWithinDirectory } from "@plannotator/shared/html-assets-node";
 import { isWSL } from "./browser";
@@ -207,9 +207,6 @@ export async function startAnnotateServer(
     : null;
   const openedSourceFilePaths = new Set<string>();
   if (initialSingleFileSourcePath) openedSourceFilePaths.add(initialSingleFileSourcePath);
-  const draftHasSourceFilePath = (path: string): boolean =>
-    draftContainsSourceSavePath(loadDraft(draftKey), path);
-
   const getPrimarySource = () => {
     if (mode === "annotate-last") {
       return { plan: markdown, sourceSave: disabledSourceSave("message-mode") };
@@ -255,32 +252,12 @@ export async function startAnnotateServer(
     }
   };
 
-  const getReferenceRootPaths = () => {
-    const roots: string[] = [];
-    const addRoot = (root: string | null | undefined) => {
-      if (!root) return;
-      const resolved = resolveUserPath(root);
-      if (!roots.includes(resolved)) roots.push(resolved);
-      try {
-        const real = realpathSync(resolved);
-        if (!roots.includes(real)) roots.push(real);
-      } catch {
-        /* Missing source paths still contribute their lexical parent. */
-      }
-    };
-
-    addRoot(process.cwd());
-    if (mode === "annotate-folder" && folderPath) {
-      addRoot(folderPath);
-      return roots;
-    }
-    if (/^https?:\/\//i.test(filePath)) {
-      return roots;
-    }
-    addRoot(dirname(filePath));
-    addRoot(initialSingleFileSourcePath ? dirname(initialSingleFileSourcePath) : null);
-    return roots;
-  };
+  const getReferenceRootPaths = () => getAnnotateReferenceRootPaths({
+    mode,
+    filePath,
+    folderPath,
+    initialSingleFileSourcePath,
+  });
 
   // Detect repo info (cached for this session)
   const repoInfo = await getRepoInfo();
@@ -432,8 +409,7 @@ export async function startAnnotateServer(
                 body.allowMissingBase &&
                 targetPath &&
                 !existsSync(targetPath) &&
-                !openedSourceFilePaths.has(targetPath) &&
-                !draftHasSourceFilePath(targetPath)
+                !openedSourceFilePaths.has(targetPath)
               ) {
                 targetPath = null;
               }

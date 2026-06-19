@@ -64,7 +64,7 @@ interface OpenEditableDocumentInput {
   sourceSave: SourceSaveCapability | null;
 }
 
-interface MarkSavedInput {
+export interface MarkSavedInput {
   key: string;
   text: string;
   sourceSave: EnabledSourceSaveCapability;
@@ -149,6 +149,42 @@ export function canRestoreEditableDocumentDraft(
     !record.diskConflict &&
     !record.missingOnDisk
   );
+}
+
+export function markEditableDocumentSaved(record: EditableDocumentRecord, input: MarkSavedInput): void {
+  const normalized = normalizeDocumentText(input.text);
+  const beforeText = normalizeDocumentText(input.savedChangeBaseText ?? record.sessionOpenText);
+  const beforeHash = input.savedChangeBaseHash ?? record.sessionOpenHash;
+  if (input.savedChangeBaseText !== undefined || input.savedChangeBaseHash !== undefined) {
+    record.sessionOpenText = beforeText;
+    record.sessionOpenHash = beforeHash;
+  }
+  record.diskBaseline = normalized;
+  record.sourceSave = input.sourceSave;
+  record.path = input.sourceSave.path;
+  record.basename = input.sourceSave.basename;
+  record.lastKnownHash = input.sourceSave.hash;
+  record.lastKnownMtimeMs = input.sourceSave.mtimeMs;
+  record.error = undefined;
+  record.diskConflict = undefined;
+  record.missingOnDisk = undefined;
+  if (record.currentText === normalized) {
+    record.editMountText = normalized;
+    record.saveStatus = 'saved';
+  } else {
+    record.saveStatus = cleanOrDirty(record);
+  }
+  record.savedChange = normalized === beforeText
+    ? undefined
+    : {
+        key: input.key,
+        path: input.sourceSave.path,
+        basename: input.sourceSave.basename,
+        beforeText,
+        afterText: normalized,
+        beforeHash,
+        afterHash: input.sourceSave.hash,
+      };
 }
 
 export type DiskSnapshotReconcileResult =
@@ -354,35 +390,7 @@ export function useEditableDocuments() {
   const markSaved = useCallback(({ key, text, sourceSave, savedChangeBaseText, savedChangeBaseHash }: MarkSavedInput) => {
     const record = docsRef.current.get(key);
     if (!record) return;
-    const normalized = normalizeDocumentText(text);
-    const beforeText = normalizeDocumentText(savedChangeBaseText ?? record.sessionOpenText);
-    const beforeHash = savedChangeBaseHash ?? record.sessionOpenHash;
-    record.diskBaseline = normalized;
-    record.sourceSave = sourceSave;
-    record.path = sourceSave.path;
-    record.basename = sourceSave.basename;
-    record.lastKnownHash = sourceSave.hash;
-    record.lastKnownMtimeMs = sourceSave.mtimeMs;
-    record.error = undefined;
-    record.diskConflict = undefined;
-    record.missingOnDisk = undefined;
-    if (record.currentText === normalized) {
-      record.editMountText = normalized;
-      record.saveStatus = 'saved';
-    } else {
-      record.saveStatus = cleanOrDirty(record);
-    }
-    record.savedChange = normalized === beforeText
-      ? undefined
-      : {
-          key,
-          path: sourceSave.path,
-          basename: sourceSave.basename,
-          beforeText,
-          afterText: normalized,
-          beforeHash,
-          afterHash: sourceSave.hash,
-        };
+    markEditableDocumentSaved(record, { key, text, sourceSave, savedChangeBaseText, savedChangeBaseHash });
     bump();
   }, [bump]);
 

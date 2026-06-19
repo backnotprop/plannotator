@@ -1699,6 +1699,10 @@ const App: React.FC = () => {
   const activeSourceBufferDirty =
     activeEditableDocument?.sourceSave?.enabled === true &&
     activeEditableDocument.currentText !== activeEditableDocument.diskBaseline;
+  const canOverwriteDiskConflict =
+    activeEditableDocument?.sourceSave?.enabled === true &&
+    !!activeEditableDocument.diskConflict &&
+    activeEditableDocument.currentText !== activeEditableDocument.diskConflict.text;
 
   // Editing exit control: a source-backed session with unsaved edits gets a
   // two-step "Cancel" (discard + exit). Plan mode and clean source sessions keep
@@ -3550,7 +3554,7 @@ const App: React.FC = () => {
             <span className="min-w-0 flex-1 text-xs text-warning-foreground">
               {activeEditableDocument.basename} changed on disk{isEditingMarkdown ? ' while you were editing' : ''}.
             </span>
-            {isEditingMarkdown && (
+            {canOverwriteDiskConflict && (
               <button
                 type="button"
                 onClick={handleOverwriteDiskConflict}

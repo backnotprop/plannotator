@@ -15,7 +15,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { startAnnotateServer } from "./annotate";
@@ -413,7 +413,34 @@ describe("annotate server: source save", () => {
     }
   });
 
-  test("recreates a deleted folder source restored from draft state", async () => {
+  test("folder annotate doc lookup stays scoped to the selected folder", async () => {
+    const folderPath = mkdtempSync(join(tmpdir(), "plannotator-folder-doc-scope-"));
+    const server = await startAnnotateServer({
+      markdown: "",
+      filePath: folderPath,
+      folderPath,
+      mode: "annotate-folder",
+      htmlContent: MINIMAL_HTML,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/doc?path=${encodeURIComponent("package.json")}&base=${encodeURIComponent(folderPath)}`);
+      expect(response.status).toBe(404);
+
+      const existsResponse = await fetch(`${server.url}/api/doc/exists`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paths: ["package.json"], base: folderPath }),
+      });
+      expect(existsResponse.status).toBe(200);
+      const existsData = await existsResponse.json() as { results?: Record<string, { status?: string }> };
+      expect(existsData.results?.["package.json"]?.status).toBe("missing");
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("does not recreate a deleted folder source from draft state alone", async () => {
     const folderPath = mkdtempSync(join(tmpdir(), "plannotator-folder-draft-source-save-"));
     const deletedPath = join(realpathSync(folderPath), "deleted.md");
     const sourceSave = {
@@ -468,8 +495,8 @@ describe("annotate server: source save", () => {
         }),
       });
 
-      expect(response.status).toBe(200);
-      expect(readFileSync(deletedPath, "utf-8")).toBe("Recovered\n");
+      expect(response.status).toBe(403);
+      expect(existsSync(deletedPath)).toBe(false);
     } finally {
       await fetch(`${server.url}/api/draft`, { method: "DELETE" }).catch(() => {});
       server.stop();

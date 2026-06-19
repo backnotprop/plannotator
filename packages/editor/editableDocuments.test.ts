@@ -3,6 +3,7 @@ import {
   canApplyEditableDocumentDiskSnapshot,
   canRestoreEditableDocumentDraft,
   getEditableDocumentKnownDiskHash,
+  markEditableDocumentSaved,
   markEditableDocumentFileMissing,
   reconcileEditableDocumentDiskSnapshot,
   type EditableDocumentRecord,
@@ -279,5 +280,54 @@ describe('canRestoreEditableDocumentDraft', () => {
     expect(canRestoreEditableDocumentDraft({ ...cleanDoc, saveStatus: 'missing', missingOnDisk: true }, source, 'after\n')).toBe(false);
     expect(canRestoreEditableDocumentDraft({ ...cleanDoc, saveStatus: 'saved', savedChange: record().savedChange }, source, 'after\n')).toBe(false);
     expect(canRestoreEditableDocumentDraft({ ...cleanDoc, sourceSave: sourceSave('sha256:external') }, source, 'after\n')).toBe(false);
+  });
+});
+
+describe('markEditableDocumentSaved', () => {
+  test('carries a conflict overwrite base forward for later saved edit diffs', () => {
+    const doc = record({
+      sessionOpenText: 'original\n',
+      sessionOpenHash: 'sha256:original',
+      diskBaseline: 'local\n',
+      currentText: 'local\n',
+      savedChange: undefined,
+    });
+    const overwriteSource = sourceSave('sha256:overwrite', 'local\n');
+
+    markEditableDocumentSaved(doc, {
+      key: doc.key,
+      text: 'local\n',
+      sourceSave: overwriteSource,
+      savedChangeBaseText: 'external\n',
+      savedChangeBaseHash: 'sha256:external',
+    });
+
+    expect(doc.savedChange).toEqual({
+      key: doc.key,
+      path: overwriteSource.path,
+      basename: overwriteSource.basename,
+      beforeText: 'external\n',
+      afterText: 'local\n',
+      beforeHash: 'sha256:external',
+      afterHash: 'sha256:overwrite',
+    });
+
+    doc.currentText = 'second\n';
+    const secondSource = sourceSave('sha256:second', 'second\n');
+    markEditableDocumentSaved(doc, {
+      key: doc.key,
+      text: 'second\n',
+      sourceSave: secondSource,
+    });
+
+    expect(doc.savedChange).toEqual({
+      key: doc.key,
+      path: secondSource.path,
+      basename: secondSource.basename,
+      beforeText: 'external\n',
+      afterText: 'second\n',
+      beforeHash: 'sha256:external',
+      afterHash: 'sha256:second',
+    });
   });
 });
