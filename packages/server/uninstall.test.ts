@@ -250,6 +250,35 @@ function snapshotTree(root: string): string[] {
 }
 
 describe("default uninstall", () => {
+  test("removes both Antigravity layouts and preserves unrelated host files", async () => {
+    const { homeDir, environment } = createFixture();
+    const owned: string[] = [];
+    const unrelated: string[] = [];
+    for (const layout of ["config", "antigravity-cli"]) {
+      const base = join(homeDir, ".gemini", layout);
+      owned.push(join(base, "plugins", "plannotator"), join(base, "policies", "plannotator.toml"));
+      writeJson(join(base, "plugins", "plannotator", "plugin.json"), { name: "plannotator" });
+      writeText(join(base, "plugins", "plannotator", "hooks.json"));
+      writeText(join(base, "plugins", "plannotator", "commands", "plannotator-review.toml"));
+      writeText(join(base, "policies", "plannotator.toml"));
+      unrelated.push(join(base, "settings.json"), join(base, "plugins", "other", "plugin.json"), join(base, "policies", "custom.toml"));
+    }
+    for (const path of unrelated) writeText(path, "user content");
+
+    const dryRun = await runPlannotatorUninstall({ purge: false, dryRun: true }, environment);
+    expect(dryRun.ok).toBe(true);
+    for (const path of owned) {
+      expect(dryRun.planned).toContain(path);
+      expect(existsSync(path)).toBe(true);
+    }
+
+    const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, environment);
+    expect(result.ok).toBe(true);
+    for (const path of owned) expect(existsSync(path)).toBe(false);
+    for (const path of unrelated) expect(readFileSync(path, "utf8")).toBe("user content");
+    expect((await runPlannotatorUninstall({ purge: false, dryRun: false }, environment)).ok).toBe(true);
+  });
+
   test("removes recognized installer components and preserves local data", async () => {
     const fixture = createFixture();
     const { homeDir, dataDir } = fixture;

@@ -17,6 +17,7 @@ param(
     [switch]$WithCallFlow,
     [switch]$SkipCodex,
     [switch]$SkipGemini,
+    [switch]$SkipAntigravity,
     [switch]$SkipKiro,
     [switch]$SkipOpencode,
     # Same shape as the per-agent switches, but scoped to the skills/slash
@@ -364,6 +365,7 @@ if ($WithCallFlow) { $installCallFlowResolved = $true }
 # can name what the user set.
 $skipCodexResolved = $false;  $skipCodexSource = ""
 $skipGeminiResolved = $false; $skipGeminiSource = ""
+$skipAntigravityResolved = $false; $skipAntigravitySource = ""
 $skipKiroResolved = $false;   $skipKiroSource = ""
 $skipOpencodeResolved = $false; $skipOpencodeSource = ""
 # skipInstall.skills is not an agent - it opts out of the skills/slash-command
@@ -375,6 +377,9 @@ if ($cfg -and $cfg.skipInstall) {
     }
     if ($cfg.skipInstall.gemini -is [bool] -and $cfg.skipInstall.gemini) {
         $skipGeminiResolved = $true; $skipGeminiSource = "config skipInstall.gemini"
+    }
+    if ($cfg.skipInstall.antigravity -is [bool] -and $cfg.skipInstall.antigravity) {
+        $skipAntigravityResolved = $true; $skipAntigravitySource = "config skipInstall.antigravity"
     }
     if ($cfg.skipInstall.kiro -is [bool] -and $cfg.skipInstall.kiro) {
         $skipKiroResolved = $true; $skipKiroSource = "config skipInstall.kiro"
@@ -396,6 +401,11 @@ if ($env:PLANNOTATOR_SKIP_GEMINI_INSTALL -match '^(1|true|yes)$') {
 } elseif ($env:PLANNOTATOR_SKIP_GEMINI_INSTALL -match '^(0|false|no)$') {
     $skipGeminiResolved = $false; $skipGeminiSource = ""
 }
+if ($env:PLANNOTATOR_SKIP_ANTIGRAVITY_INSTALL -match '^(1|true|yes)$') {
+    $skipAntigravityResolved = $true; $skipAntigravitySource = "PLANNOTATOR_SKIP_ANTIGRAVITY_INSTALL"
+} elseif ($env:PLANNOTATOR_SKIP_ANTIGRAVITY_INSTALL -match '^(0|false|no)$') {
+    $skipAntigravityResolved = $false; $skipAntigravitySource = ""
+}
 if ($env:PLANNOTATOR_SKIP_KIRO_INSTALL -match '^(1|true|yes)$') {
     $skipKiroResolved = $true; $skipKiroSource = "PLANNOTATOR_SKIP_KIRO_INSTALL"
 } elseif ($env:PLANNOTATOR_SKIP_KIRO_INSTALL -match '^(0|false|no)$') {
@@ -413,9 +423,13 @@ if ($env:PLANNOTATOR_SKIP_SKILLS_INSTALL -match '^(1|true|yes)$') {
 }
 if ($SkipCodex)  { $skipCodexResolved = $true;  $skipCodexSource = "-SkipCodex" }
 if ($SkipGemini) { $skipGeminiResolved = $true; $skipGeminiSource = "-SkipGemini" }
+if ($SkipAntigravity) { $skipAntigravityResolved = $true; $skipAntigravitySource = "-SkipAntigravity" }
 if ($SkipKiro)   { $skipKiroResolved = $true;   $skipKiroSource = "-SkipKiro" }
 if ($SkipOpencode) { $skipOpencodeResolved = $true; $skipOpencodeSource = "-SkipOpencode" }
 if ($SkipSkills) { $skipSkillsResolved = $true; $skipSkillsSource = "-SkipSkills" }
+
+# Detect Antigravity once; config takes precedence when both layouts exist.
+$agyBase = if (Test-Path -LiteralPath "$env:USERPROFILE\.gemini\config" -PathType Container) { "$env:USERPROFILE\.gemini\config" } elseif (Test-Path -LiteralPath "$env:USERPROFILE\.gemini\antigravity-cli" -PathType Container) { "$env:USERPROFILE\.gemini\antigravity-cli" } else { $null }
 
 # Pre-flight: if verification is requested, reject tags older than the first
 # attested release before we download anything. Uses PowerShell's [version]
@@ -1194,6 +1208,17 @@ try {
                 Write-Host "Tag $latestTag predates the core/extra skill layout - skipping shared agent skill install"
             }
 
+            # Antigravity CLI plugin commands (only when detected)
+            if ($agyBase -and -not $skipAntigravityResolved -and (Test-Path "apps\gemini\commands")) {
+                $agyPluginCommandsDir = "$agyBase\plugins\plannotator\commands"
+                $geminiCmds = Get-ChildItem "apps\gemini\commands\*.toml" -ErrorAction SilentlyContinue
+                if ($geminiCmds) {
+                    New-Item -ItemType Directory -Force -Path $agyPluginCommandsDir | Out-Null
+                    Copy-Item -Force "apps\gemini\commands\*.toml" $agyPluginCommandsDir
+                    Write-Host "Installed Antigravity slash commands to $agyPluginCommandsDir\"
+                }
+            }
+
             # Kiro: hand-maintained skills (origin baked in) + two extras.
             # A Kiro opt-out (#1178) leaves ~/.kiro entirely untouched.
             if ($kiroAvailable -and -not $skipKiroResolved -and (Test-Path "apps\kiro-cli\skills")) {
@@ -1360,7 +1385,7 @@ Update-PiExtensionIfPresent
 $geminiDir = "$env:USERPROFILE\.gemini"
 if ((Test-Path $geminiDir) -and $skipGeminiResolved) {
     # HONEST three-state reporting (#1178): detected-but-skipped is its own
-    # state. Nothing under ~/.gemini is created, updated, or removed.
+    # state. Gemini settings, policy, and commands are left untouched.
     Write-Host ""
     Write-Host "Gemini: detected, skipped ($skipGeminiSource)."
     $geminiSettingsProbe = "$geminiDir\settings.json"
@@ -1440,6 +1465,27 @@ fs.writeFileSync('$($geminiSettings.Replace('\','/'))', JSON.stringify(settings,
 
     # Gemini slash command TOMLs are copied from the sparse checkout
     # (apps/gemini/commands) in the git-gated skills/commands install above.
+}
+
+# --- Antigravity CLI support (only when detected) ---
+if (-not $agyBase) {
+    Write-Host "Antigravity: not detected."
+} elseif ($skipAntigravityResolved) {
+    Write-Host "Antigravity: detected, skipped ($skipAntigravitySource)."
+} else {
+    $agyPluginDir = "$agyBase\plugins\plannotator"
+    New-Item -ItemType Directory -Force -Path "$agyBase\policies", $agyPluginDir | Out-Null
+    @'
+# Plannotator policy for Antigravity CLI
+# Allows exit_plan_mode without TUI confirmation so the browser UI is the sole gate.
+[[rule]]
+toolName = "exit_plan_mode"
+decision = "allow"
+priority = 100
+'@ | Set-Content -Path "$agyBase\policies\plannotator.toml"
+    '{"name":"plannotator"}' | Set-Content -Path "$agyPluginDir\plugin.json"
+    '{"hooks":{"BeforeTool":[{"matcher":"exit_plan_mode","hooks":[{"type":"command","command":"plannotator","timeout":345600}]}]}}' | Set-Content -Path "$agyPluginDir\hooks.json"
+    Write-Host "Antigravity: detected, installed plugin to $agyPluginDir"
 }
 
 Write-Host ""
