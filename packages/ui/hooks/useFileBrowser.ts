@@ -187,6 +187,10 @@ export function useFileBrowser(): UseFileBrowserReturn {
           path,
           name: path.split("/").pop() || path,
           tree: [],
+          // Keep initial roots loading until their first snapshot resolves. If
+          // the SSE watcher starts before /api/reference/files finishes,
+          // chokidar setup on large repo roots can block the server long enough
+          // that the visible tree sits on "Loading..." for seconds.
           isLoading: true,
           error: null,
         }));
@@ -262,6 +266,8 @@ export function useFileBrowser(): UseFileBrowserReturn {
 
   const watchDirsKey = useMemo(
     () => dirs
+      // Subscribe only after the initial snapshot is visible. Live updates are
+      // for future freshness; they must not compete with first paint.
       .filter((dir) => !dir.isVault && !dir.error && !dir.isLoading)
       .map((dir) => dir.path)
       .sort()
