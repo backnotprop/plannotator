@@ -1,3 +1,5 @@
+// Runs under Node.js, not Bun: it hosts node-pty, a native addon Bun can't
+// load. The parent Bun server spawns this sidecar (see agent-terminal-runtime.ts).
 import { createServer } from "node:http";
 
 const webtuiCoreUrl = process.env.PLANNOTATOR_AGENT_WEBTUI_CORE_URL || "@plannotator/webtui/core";

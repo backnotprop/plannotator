@@ -137,7 +137,7 @@ describe("handleServerReady", () => {
     expect(writes.join("")).toContain("http://localhost:19432");
   });
 
-  test("does not print the URL for a local session (browser opens instead)", async () => {
+  test("does not print the URL for a local session when the browser opens", async () => {
     const writes: string[] = [];
     let opened = "";
     const original = process.stderr.write.bind(process.stderr);
@@ -149,6 +149,7 @@ describe("handleServerReady", () => {
       await handleServerReady("http://localhost:3000", false, 3000, {
         openBrowser: async (u: string) => {
           opened = u;
+          return true;
         },
       });
     } finally {
@@ -156,5 +157,25 @@ describe("handleServerReady", () => {
     }
     expect(writes.join("")).not.toContain("http://localhost:3000");
     expect(opened).toBe("http://localhost:3000");
+  });
+
+  // Regression: a local session whose browser can't be opened (headless box,
+  // devcontainer with no display) must still surface the URL, or the agent
+  // hangs at waitForDecision with the user having no link to visit.
+  test("prints the URL for a local session when the browser fails to open", async () => {
+    const writes: string[] = [];
+    const original = process.stderr.write.bind(process.stderr);
+    (process.stderr as { write: unknown }).write = (chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    };
+    try {
+      await handleServerReady("http://localhost:4000", false, 4000, {
+        openBrowser: async () => false,
+      });
+    } finally {
+      (process.stderr as { write: unknown }).write = original;
+    }
+    expect(writes.join("")).toContain("http://localhost:4000");
   });
 });

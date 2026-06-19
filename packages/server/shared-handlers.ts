@@ -208,7 +208,15 @@ export async function handleServerReady(
   const skipBrowserOpen = options.skipBrowserOpen ?? process.env.PLANNOTATOR_SKIP_BROWSER_OPEN === "1";
   if (skipBrowserOpen) return;
 
-  await (options.openBrowser ?? openBrowserImpl)(url, { isRemote, useGlimpse: true });
+  const opened = await (options.openBrowser ?? openBrowserImpl)(url, { isRemote, useGlimpse: true });
+
+  // Local fallback lifeline: if the browser couldn't be opened (headless box,
+  // devcontainer with no display, broken open/xdg-open), the user otherwise has
+  // no URL and the agent hangs at waitForDecision. Remote already printed the
+  // URL above; only cover the local case here to avoid a double print.
+  if (!opened && !isRemote) {
+    process.stderr.write(`\n  Plannotator session ready — open in your browser:\n  ${url}\n\n`);
+  }
 }
 
 /** Save to external note apps (Obsidian, Bear, Octarine). Used by plan + annotate servers. */

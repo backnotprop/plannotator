@@ -1,3 +1,21 @@
+/**
+ * Agent-terminal runtime resolution.
+ *
+ * Why this exists: Bun cannot dlopen the native `node-pty` addon, so the PTY
+ * can't run in-process. Instead it runs in a spawned **Node.js (>=20)** sidecar
+ * (`agent-terminal-node-sidecar.mjs`), which imports `@plannotator/webtui`'s
+ * server (the package that owns node-pty). This module's job is to locate a
+ * usable Node + sidecar + webtui runtime, in one of two modes:
+ *
+ *   - **bundled (dev):** the sidecar `.mjs` is on real disk next to this source,
+ *     so Node resolves webtui/node-pty straight from the repo's node_modules.
+ *   - **managed (compiled release binary):** the sidecar is a Bun *virtual*
+ *     path (not real disk), so we materialize it to the data dir and rely on a
+ *     webtui runtime `npm install`-ed there ahead of time by
+ *     `plannotator install-runtime agent-terminal` (run by scripts/install.sh).
+ *
+ * See ADR adr/implementation/annotate-agent-terminal.md for the full design.
+ */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -76,6 +94,12 @@ export async function resolveAgentTerminalRuntime(): Promise<ResolvedAgentTermin
   const nodeCheck = await checkNodeVersion(nodePath);
   if (!nodeCheck.ok) return nodeCheck;
 
+  // Prefer the bundled (dev) sidecar when it's on real disk; fall back to the
+  // managed runtime otherwise. `resolveBundledAgentTerminalSidecarPath` returns
+  // null when the path is a Bun *virtual* path — i.e. we're running from the
+  // compiled binary — which is exactly how we distinguish dev from a release
+  // build. Bundled resolution can also fail its preflight (e.g. webtui not in
+  // the repo node_modules), in which case we still try the managed runtime.
   const bundledSidecarPath = resolveBundledAgentTerminalSidecarPath();
   if (bundledSidecarPath) {
     const bundledRuntime = await resolveBundledAgentTerminalRuntime(nodePath, bundledSidecarPath);
