@@ -5,6 +5,7 @@ import { join, resolve } from "path";
 import {
 	createSourceSaveCapability,
 	createSourceSaveCapabilityFromSnapshot,
+	createSourceSaveCapabilityFromText,
 	readSourceFileSnapshot,
 	resolveFolderSourceFile,
 	resolveFolderSourceFileForSave,
@@ -55,6 +56,20 @@ describe("source-save node helpers", () => {
 		if (!capability.enabled) throw new Error("expected source-save capability");
 		expect(capability.hash).toBe(snapshot.hash);
 		expect(capability.size).toBe(snapshot.size);
+	});
+
+	test("creates source-save capability from in-memory text for a missing file", () => {
+		const root = tempRoot();
+		const filePath = join(root, "missing.md");
+
+		const capability = createSourceSaveCapabilityFromText("single-file", filePath, "Recovered\r\n");
+
+		expect(capability.enabled).toBe(true);
+		if (!capability.enabled) throw new Error("expected source-save capability");
+		expect(capability.path).toBe(join(realpathSync(root), "missing.md"));
+		expect(capability.hash).toMatch(/^sha256:/);
+		expect(capability.eol).toBe("crlf");
+		expect(capability.size).toBe(Buffer.byteLength("Recovered\r\n", "utf8"));
 	});
 
 	test("saves atomically when the base hash matches", () => {

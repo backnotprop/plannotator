@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { dirname, resolve as resolvePath } from "node:path";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 
 import { contentHash, deleteDraft, loadDraft } from "../generated/draft.js";
@@ -9,6 +9,7 @@ import { disabledSourceSave, type SourceSaveRequest } from "../generated/source-
 import { draftContainsSourceSavePath } from "../generated/draft-source-files.js";
 import {
 	createSourceSaveCapability,
+	createSourceSaveCapabilityFromText,
 	readSourceFileSnapshot,
 	resolveFolderSourceFile,
 	resolveFolderSourceFileForSave,
@@ -287,6 +288,12 @@ export async function startAnnotateServer(options: {
 
 		const sourceSave = createSourceSaveCapability("single-file", initialSingleFileSourcePath ?? options.filePath);
 		if (!sourceSave.enabled) {
+			if (sourceSave.reason === "missing-file" && initialSingleFileSourcePath) {
+				const missingSourceSave = createSourceSaveCapabilityFromText("single-file", initialSingleFileSourcePath, options.markdown);
+				if (missingSourceSave.enabled) {
+					return { plan: options.markdown, sourceSave: missingSourceSave };
+				}
+			}
 			return { plan: options.markdown, sourceSave };
 		}
 
@@ -309,13 +316,30 @@ export async function startAnnotateServer(options: {
 
 	const getReferenceRootPaths = () => {
 		const mode = options.mode || "annotate";
+		const roots: string[] = [];
+		const addRoot = (root: string | null | undefined) => {
+			if (!root) return;
+			const resolved = resolveUserPath(root);
+			if (!roots.includes(resolved)) roots.push(resolved);
+			try {
+				const real = realpathSync(resolved);
+				if (!roots.includes(real)) roots.push(real);
+			} catch {
+				/* Missing source paths still contribute their lexical parent. */
+			}
+		};
+
+		addRoot(process.cwd());
 		if (mode === "annotate-folder" && options.folderPath) {
-			return [options.folderPath];
+			addRoot(options.folderPath);
+			return roots;
 		}
 		if (/^https?:\/\//i.test(options.filePath)) {
-			return [process.cwd()];
+			return roots;
 		}
-		return [process.cwd(), dirname(resolvePath(options.filePath))];
+		addRoot(dirname(resolvePath(options.filePath)));
+		addRoot(initialSingleFileSourcePath ? dirname(initialSingleFileSourcePath) : null);
+		return roots;
 	};
 
 	const server = createServer(async (req, res) => {

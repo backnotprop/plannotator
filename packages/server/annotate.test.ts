@@ -202,19 +202,87 @@ describe("annotate server: source save", () => {
     });
 
     try {
+      const planResponse = await fetch(`${server.url}/api/plan`);
+      const plan = await planResponse.json() as {
+        plan?: string;
+        sourceSave?: {
+          enabled?: boolean;
+          path?: string;
+          hash: string;
+          mtimeMs: number;
+          eol: "lf" | "crlf" | "mixed" | "none";
+        };
+      };
+      expect(plan.plan).toBe("Recovered\n");
+      expect(plan.sourceSave?.enabled).toBe(true);
+      expect(plan.sourceSave?.path).toBe(join(realpathSync(docDir), "source.md"));
+
       const response = await fetch(`${server.url}/api/source/save`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: "Recovered\n",
-          baseHash: "sha256:missing-draft-base",
-          baseEol: "lf",
+          baseHash: plan.sourceSave!.hash,
+          baseMtimeMs: plan.sourceSave!.mtimeMs,
+          baseEol: plan.sourceSave!.eol,
           allowMissingBase: true,
         }),
       });
 
       expect(response.status).toBe(200);
       expect(readFileSync(sourcePath, "utf-8")).toBe("Recovered\n");
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("verifies a saved single-file source opened through a symlink", async () => {
+    const linkDir = mkdtempSync(join(tmpdir(), "plannotator-source-link-"));
+    const realDir = mkdtempSync(join(tmpdir(), "plannotator-source-real-"));
+    const realPath = join(realDir, "AGENTS.md");
+    const linkPath = join(linkDir, "CLAUDE.md");
+    writeFileSync(realPath, "Before\n", "utf-8");
+    symlinkSync(realPath, linkPath);
+
+    const server = await startAnnotateServer({
+      markdown: "Before\n",
+      filePath: linkPath,
+      htmlContent: MINIMAL_HTML,
+    });
+
+    try {
+      const planResponse = await fetch(`${server.url}/api/plan`);
+      const plan = await planResponse.json() as {
+        sourceSave?: {
+          enabled?: boolean;
+          path?: string;
+          hash: string;
+          mtimeMs: number;
+          eol: "lf" | "crlf" | "mixed" | "none";
+        };
+      };
+      expect(plan.sourceSave?.enabled).toBe(true);
+      expect(plan.sourceSave?.path).toBe(realpathSync(realPath));
+
+      const saveResponse = await fetch(`${server.url}/api/source/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "After\n",
+          baseHash: plan.sourceSave!.hash,
+          baseMtimeMs: plan.sourceSave!.mtimeMs,
+          baseEol: plan.sourceSave!.eol,
+          allowMissingBase: true,
+        }),
+      });
+      expect(saveResponse.status).toBe(200);
+
+      const probeResponse = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(plan.sourceSave!.path!)}`);
+      expect(probeResponse.status).toBe(200);
+      const probe = await probeResponse.json() as { markdown?: string; sourceSave?: { enabled?: boolean; path?: string } };
+      expect(probe.markdown).toBe("After\n");
+      expect(probe.sourceSave?.enabled).toBe(true);
+      expect(probe.sourceSave?.path).toBe(realpathSync(realPath));
     } finally {
       server.stop();
     }
@@ -312,6 +380,34 @@ describe("annotate server: source save", () => {
 
       expect(response.status).toBe(200);
       expect(readFileSync(linkedPath, "utf-8")).toBe("After\n");
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("serves a folder source through the real root when the folder is symlinked", async () => {
+    const realFolder = mkdtempSync(join(tmpdir(), "plannotator-folder-real-"));
+    const linkParent = mkdtempSync(join(tmpdir(), "plannotator-folder-link-"));
+    const linkFolder = join(linkParent, "docs");
+    const realPath = join(realFolder, "note.md");
+    writeFileSync(realPath, "Before\n", "utf-8");
+    symlinkSync(realFolder, linkFolder);
+
+    const server = await startAnnotateServer({
+      markdown: "",
+      filePath: linkFolder,
+      folderPath: linkFolder,
+      mode: "annotate-folder",
+      htmlContent: MINIMAL_HTML,
+    });
+
+    try {
+      const docResponse = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(realpathSync(realPath))}`);
+      expect(docResponse.status).toBe(200);
+      const doc = await docResponse.json() as { markdown?: string; sourceSave?: { enabled?: boolean; path?: string } };
+      expect(doc.markdown).toBe("Before\n");
+      expect(doc.sourceSave?.enabled).toBe(true);
+      expect(doc.sourceSave?.path).toBe(realpathSync(realPath));
     } finally {
       server.stop();
     }

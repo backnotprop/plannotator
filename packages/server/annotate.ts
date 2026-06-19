@@ -23,6 +23,7 @@ import { disabledSourceSave, type SourceSaveRequest } from "@plannotator/shared/
 import { draftContainsSourceSavePath } from "@plannotator/shared/draft-source-files";
 import {
 	createSourceSaveCapability,
+	createSourceSaveCapabilityFromText,
 	readSourceFileSnapshot,
 	resolveFolderSourceFile,
 	resolveFolderSourceFileForSave,
@@ -30,7 +31,7 @@ import {
 } from "@plannotator/shared/source-save-node";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { saveConfig, detectGitUser, getServerConfig } from "./config";
-import { existsSync } from "fs";
+import { existsSync, realpathSync } from "fs";
 import { dirname, resolve as resolvePath } from "path";
 import { isWithinDirectory } from "@plannotator/shared/html-assets-node";
 import { isWSL } from "./browser";
@@ -228,6 +229,12 @@ export async function startAnnotateServer(
 
     const sourceSave = createSourceSaveCapability("single-file", initialSingleFileSourcePath ?? filePath);
     if (!sourceSave.enabled) {
+      if (sourceSave.reason === "missing-file" && initialSingleFileSourcePath) {
+        const missingSourceSave = createSourceSaveCapabilityFromText("single-file", initialSingleFileSourcePath, markdown);
+        if (missingSourceSave.enabled) {
+          return { plan: markdown, sourceSave: missingSourceSave };
+        }
+      }
       return { plan: markdown, sourceSave };
     }
 
@@ -249,13 +256,30 @@ export async function startAnnotateServer(
   };
 
   const getReferenceRootPaths = () => {
+    const roots: string[] = [];
+    const addRoot = (root: string | null | undefined) => {
+      if (!root) return;
+      const resolved = resolveUserPath(root);
+      if (!roots.includes(resolved)) roots.push(resolved);
+      try {
+        const real = realpathSync(resolved);
+        if (!roots.includes(real)) roots.push(real);
+      } catch {
+        /* Missing source paths still contribute their lexical parent. */
+      }
+    };
+
+    addRoot(process.cwd());
     if (mode === "annotate-folder" && folderPath) {
-      return [folderPath];
+      addRoot(folderPath);
+      return roots;
     }
     if (/^https?:\/\//i.test(filePath)) {
-      return [process.cwd()];
+      return roots;
     }
-    return [process.cwd(), dirname(filePath)];
+    addRoot(dirname(filePath));
+    addRoot(initialSingleFileSourcePath ? dirname(initialSingleFileSourcePath) : null);
+    return roots;
   };
 
   // Detect repo info (cached for this session)

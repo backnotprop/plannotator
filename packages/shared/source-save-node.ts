@@ -59,6 +59,17 @@ export function readSourceFileSnapshot(filePath: string): SourceFileSnapshot {
 	};
 }
 
+export function sourceFileSnapshotFromText(text: string): SourceFileSnapshot {
+	const bytes = Buffer.from(text, "utf8");
+	return {
+		text,
+		hash: hashSourceBytes(bytes),
+		mtimeMs: 0,
+		size: bytes.byteLength,
+		eol: detectSourceEol(text),
+	};
+}
+
 export function resolveFolderSourceFile(filePath: string, folderPath: string): string | null {
 	if (!isSourceSaveFilePath(filePath)) return null;
 
@@ -144,6 +155,42 @@ export function createSourceSaveCapabilityFromSnapshot(
 	const resolved = resolveExistingSourceSaveFile(scope, filePath, folderPath);
 	if (!resolved) return disabledSourceSave("not-local-file");
 	return enabledSourceSave(scope, resolved, snapshot);
+}
+
+// Used when Plannotator already read the source text, but the file vanished
+// before the browser asked for /api/plan. Disk reads should use
+// createSourceSaveCapability/createSourceSaveCapabilityFromSnapshot instead.
+export function createSourceSaveCapabilityFromText(
+	scope: SourceSaveScope,
+	filePath: string,
+	text: string,
+	folderPath?: string,
+): SourceSaveCapability {
+	if (!isSourceSaveFilePath(filePath)) {
+		return disabledSourceSave("unsupported-extension");
+	}
+
+	if (scope === "folder-file") {
+		if (!folderPath) return disabledSourceSave("not-local-file");
+		const resolved = resolveFolderSourceFileForSave(filePath, folderPath);
+		if (!resolved) return disabledSourceSave("not-local-file");
+		return enabledSourceSave(scope, resolved, sourceFileSnapshotFromText(text));
+	}
+
+	const resolved = resolveUserPath(filePath);
+	try {
+		if (existsSync(resolved)) {
+			const real = realpathSync(resolved);
+			const stat = statSync(real);
+			if (!stat.isFile()) return disabledSourceSave("unsupported-extension");
+			return enabledSourceSave(scope, real, sourceFileSnapshotFromText(text));
+		}
+
+		const realParent = realpathSync(dirname(resolved));
+		return enabledSourceSave(scope, join(realParent, basename(resolved)), sourceFileSnapshotFromText(text));
+	} catch {
+		return disabledSourceSave("missing-file");
+	}
 }
 
 export function createSourceSaveCapability(
