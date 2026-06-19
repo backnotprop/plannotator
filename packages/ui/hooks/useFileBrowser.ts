@@ -187,7 +187,7 @@ export function useFileBrowser(): UseFileBrowserReturn {
           path,
           name: path.split("/").pop() || path,
           tree: [],
-          isLoading: false,
+          isLoading: true,
           error: null,
         }));
         return [...regularDirs, ...vaultDirs];
@@ -262,7 +262,7 @@ export function useFileBrowser(): UseFileBrowserReturn {
 
   const watchDirsKey = useMemo(
     () => dirs
-      .filter((dir) => !dir.isVault && !dir.error)
+      .filter((dir) => !dir.isVault && !dir.error && !dir.isLoading)
       .map((dir) => dir.path)
       .sort()
       .join("\n"),

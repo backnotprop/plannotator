@@ -50,6 +50,20 @@ function installMockEventSource(): void {
   globalThis.EventSource = MockEventSource as unknown as typeof EventSource;
 }
 
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason?: unknown) => void;
+} {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 function Harness({ resultRef }: { resultRef: { current: UseFileBrowserReturn | null } }) {
   resultRef.current = useFileBrowser();
   return null;
@@ -99,6 +113,39 @@ afterEach(() => {
 });
 
 describe("useFileBrowser", () => {
+  test.skipIf(!hasDom)("waits for the initial tree fetch before opening the live watcher", async () => {
+    installMockEventSource();
+    const dirPath = "/tmp/plannotator-docs";
+    const pending = deferred<Response>();
+    const calls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return pending.promise;
+    }) as unknown as typeof fetch;
+
+    const session = await mountHook();
+    await act(async () => {
+      session.result.current!.fetchAll([dirPath]);
+    });
+    await tick(0);
+
+    expect(calls).toHaveLength(1);
+    expect(session.result.current!.dirs[0]).toMatchObject({ path: dirPath, isLoading: true });
+    expect(MockEventSource.instances).toHaveLength(0);
+
+    await act(async () => {
+      pending.resolve(response({ tree: [] }));
+      await tick(0);
+    });
+    await tick(0);
+
+    expect(session.result.current!.dirs[0]).toMatchObject({ path: dirPath, isLoading: false, error: null });
+    expect(MockEventSource.instances).toHaveLength(1);
+    expect(MockEventSource.instances[0]?.url).toContain("/api/reference/files/stream?");
+
+    await session.unmount();
+  });
+
   test.skipIf(!hasDom)("quiet invalid-directory refresh clears stale files", async () => {
     const dirPath = "/tmp/plannotator-docs";
     const tree: VaultNode[] = [{ type: "file", name: "a.md", path: "a.md" }];
