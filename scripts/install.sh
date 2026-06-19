@@ -1131,6 +1131,13 @@ checkout_failed=0
         echo "Installed Gemini commands to ${GEMINI_COMMANDS_DIR}/"
     fi
 
+    # Antigravity CLI plugin commands — ponytail: resolve base once, derive paths
+    AGY_BASE=""; [ -d "$HOME/.gemini/config" ] && AGY_BASE="$HOME/.gemini/config" || { [ -d "$HOME/.gemini/antigravity-cli" ] && AGY_BASE="$HOME/.gemini/antigravity-cli"; }
+    if [ -n "$AGY_BASE" ] && [ -d "apps/gemini/commands" ] && [ -n "$(ls -A apps/gemini/commands 2>/dev/null)" ]; then
+        copy_commands_if_present apps/gemini/commands "$AGY_BASE/plugins/plannotator/commands"
+        echo "Installed Antigravity commands to ${AGY_BASE}/plugins/plannotator/commands/"
+    fi
+
     if [ "$kiro_available" -eq 1 ] && [ -d "apps/kiro-cli/skills" ] && [ -n "$(ls -A apps/kiro-cli/skills 2>/dev/null)" ]; then
         mkdir -p "$KIRO_SKILLS_DIR"
         # Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
@@ -1297,6 +1304,28 @@ GEMINI_SETTINGS_EOF
     # the skills/commands install block above (apps/gemini/commands).
 fi
 
+# --- Antigravity CLI support --- ponytail: resolve base once, derive all paths
+AGY_BASE=""; [ -d "$HOME/.gemini/config" ] && AGY_BASE="$HOME/.gemini/config" || { [ -d "$HOME/.gemini/antigravity-cli" ] && AGY_BASE="$HOME/.gemini/antigravity-cli"; }
+if [ -n "$AGY_BASE" ]; then
+    AGY_PLUGIN_DIR="$AGY_BASE/plugins/plannotator"
+    mkdir -p "$AGY_BASE/policies" "$AGY_PLUGIN_DIR"
+    cat > "$AGY_BASE/policies/plannotator.toml" << 'AGY_POLICY_EOF'
+# Plannotator policy for Antigravity CLI
+# Allows exit_plan_mode without TUI confirmation so the browser UI is the sole gate.
+[[rule]]
+toolName = "exit_plan_mode"
+decision = "allow"
+priority = 100
+AGY_POLICY_EOF
+    cat > "$AGY_PLUGIN_DIR/plugin.json" << 'AGY_PLUGIN_EOF'
+{"name":"plannotator"}
+AGY_PLUGIN_EOF
+    cat > "$AGY_PLUGIN_DIR/hooks.json" << 'AGY_HOOKS_EOF'
+{"hooks":{"BeforeTool":[{"matcher":"exit_plan_mode","hooks":[{"type":"command","command":"plannotator","timeout":345600}]}]}}
+AGY_HOOKS_EOF
+    echo "Installed Antigravity plugin to ${AGY_PLUGIN_DIR}"
+fi
+
 echo ""
 echo "=========================================="
 echo "  OPENCODE USERS"
@@ -1328,6 +1357,18 @@ echo ""
 echo "Plans will open in your browser for review."
 echo "If settings.json was not auto-configured, see:"
 echo "  ~/.gemini/settings.json (add BeforeTool hook)"
+echo ""
+echo "=========================================="
+echo "  ANTIGRAVITY CLI USERS"
+echo "=========================================="
+echo ""
+echo "Plannotator is installed as an Antigravity plugin."
+echo "Restart the CLI, and the following commands will be ready:"
+echo ""
+echo "  /plannotator-review"
+echo "  /plannotator-annotate"
+echo ""
+echo "Plans will automatically open in your browser during plan reviews."
 echo ""
 echo "=========================================="
 echo "  CODEX USERS"
