@@ -29,8 +29,11 @@ interface FileBrowserProps {
 }
 
 export interface FileEditStatus {
+  key?: string;
+  path?: string;
   status: "clean" | "dirty" | "saving" | "saved" | "conflict" | "error" | "missing";
   dirty: boolean;
+  conflict?: boolean;
 }
 
 interface AggregateWorkspaceChange {
@@ -43,23 +46,57 @@ export function normalizePathForLookup(path: string): string {
   return normalizeBrowserPath(path);
 }
 
-function getPathMapValue<T>(map: Map<string, T> | undefined, absolutePath: string): T | undefined {
+function joinLookupPath(rootPath: string, relativePath: string): string {
+  const root = normalizePathForLookup(rootPath);
+  const relative = normalizePathForLookup(relativePath).replace(/^\/+/, "");
+  if (!relative || relative === ".") return root;
+  if (root === "/" || /^[A-Za-z]:\/$/.test(root)) return normalizePathForLookup(`${root}${relative}`);
+  return normalizePathForLookup(`${root}/${relative}`);
+}
+
+export function getPathLookupCandidates(
+  absolutePath: string,
+  relativePath?: string,
+  workspaceStatus?: WorkspaceStatusPayload,
+): string[] {
+  const candidates = [absolutePath, normalizePathForLookup(absolutePath)];
+  if (relativePath && workspaceStatus?.rootPath) {
+    candidates.push(joinLookupPath(workspaceStatus.rootPath, relativePath));
+  }
+  const seen = new Set<string>();
+  return candidates.filter((path) => {
+    const normalized = normalizePathForLookup(path);
+    if (seen.has(normalized)) return false;
+    seen.add(normalized);
+    return true;
+  });
+}
+
+function getPathMapValue<T>(map: Map<string, T> | undefined, paths: string | string[]): T | undefined {
   if (!map) return undefined;
-  const normalizedPath = normalizePathForLookup(absolutePath);
-  const direct = map.get(absolutePath) ?? map.get(normalizedPath);
-  if (direct) return direct;
+  const candidates = Array.isArray(paths) ? paths : [paths];
+  const normalizedCandidates = candidates.map(normalizePathForLookup);
+  for (let index = 0; index < candidates.length; index += 1) {
+    const path = candidates[index];
+    const normalized = normalizedCandidates[index];
+    if (map.has(path)) return map.get(path);
+    if (map.has(normalized)) return map.get(normalized);
+  }
   for (const [path, value] of map.entries()) {
-    if (normalizePathForLookup(path) === normalizedPath) return value;
+    if (normalizedCandidates.includes(normalizePathForLookup(path))) return value;
   }
   return undefined;
 }
 
-function pathSetHas(paths: Set<string> | undefined, absolutePath: string): boolean {
+function pathSetHas(paths: Set<string> | undefined, candidates: string | string[]): boolean {
   if (!paths) return false;
-  const normalizedPath = normalizePathForLookup(absolutePath);
-  if (paths.has(absolutePath) || paths.has(normalizedPath)) return true;
+  const candidatePaths = Array.isArray(candidates) ? candidates : [candidates];
+  const normalizedCandidates = candidatePaths.map(normalizePathForLookup);
+  for (let index = 0; index < candidatePaths.length; index += 1) {
+    if (paths.has(candidatePaths[index]) || paths.has(normalizedCandidates[index])) return true;
+  }
   for (const path of paths) {
-    if (normalizePathForLookup(path) === normalizedPath) return true;
+    if (normalizedCandidates.includes(normalizePathForLookup(path))) return true;
   }
   return false;
 }
@@ -67,8 +104,10 @@ function pathSetHas(paths: Set<string> | undefined, absolutePath: string): boole
 export function getFileEditStatus(
   absolutePath: string,
   editStatuses?: Map<string, FileEditStatus>,
+  relativePath?: string,
+  workspaceStatus?: WorkspaceStatusPayload,
 ): FileEditStatus | undefined {
-  return getPathMapValue(editStatuses, absolutePath);
+  return getPathMapValue(editStatuses, getPathLookupCandidates(absolutePath, relativePath, workspaceStatus));
 }
 
 function normalizeWorkspaceStatus(
@@ -96,29 +135,34 @@ function normalizeWorkspaceStatus(
 function getAggregateCount(
   node: VaultNode,
   dirPath: string,
-  counts: Map<string, number>
+  counts: Map<string, number>,
+  workspaceStatus?: WorkspaceStatusPayload,
 ): number {
   if (node.type === "file") {
-    return getPathMapValue(counts, `${dirPath}/${node.path}`) ?? 0;
+    return getPathMapValue(counts, getPathLookupCandidates(`${dirPath}/${node.path}`, node.path, workspaceStatus)) ?? 0;
   }
   let total = 0;
   for (const child of node.children ?? []) {
-    total += getAggregateCount(child, dirPath, counts);
+    total += getAggregateCount(child, dirPath, counts, workspaceStatus);
   }
   return total;
 }
 
 export function getWorkspaceChange(
   absolutePath: string,
-  workspaceStatus?: WorkspaceStatusPayload
+  workspaceStatus?: WorkspaceStatusPayload,
+  relativePath?: string,
 ): WorkspaceFileChange | undefined {
   const files = workspaceStatus?.files;
   if (!files) return undefined;
-  const normalizedPath = normalizePathForLookup(absolutePath);
-  const direct = files[absolutePath] ?? files[normalizedPath];
-  if (direct) return direct;
+  const candidates = getPathLookupCandidates(absolutePath, relativePath, workspaceStatus);
+  const normalizedCandidates = candidates.map(normalizePathForLookup);
+  for (let index = 0; index < candidates.length; index += 1) {
+    const direct = files[candidates[index]] ?? files[normalizedCandidates[index]];
+    if (direct) return direct;
+  }
   for (const [path, change] of Object.entries(files)) {
-    if (normalizePathForLookup(path) === normalizedPath) return change;
+    if (normalizedCandidates.includes(normalizePathForLookup(path))) return change;
   }
   return undefined;
 }
@@ -136,7 +180,7 @@ export function getAggregateWorkspaceChange(
   workspaceStatus?: WorkspaceStatusPayload
 ): AggregateWorkspaceChange {
   if (node.type === "file") {
-    const change = getWorkspaceChange(`${dirPath}/${node.path}`, workspaceStatus);
+    const change = getWorkspaceChange(`${dirPath}/${node.path}`, workspaceStatus, node.path);
     return change
       ? { additions: change.additions, deletions: change.deletions, files: 1 }
       : { additions: 0, deletions: 0, files: 0 };
@@ -171,7 +215,7 @@ const TreeNode: React.FC<{
   const paddingLeft = 8 + depth * 14;
 
   if (node.type === "folder") {
-    const aggregateCount = annotationCounts ? getAggregateCount(node, dirPath, annotationCounts) : 0;
+    const aggregateCount = annotationCounts ? getAggregateCount(node, dirPath, annotationCounts, workspaceStatus) : 0;
     const aggregateChange = getAggregateWorkspaceChange(node, dirPath, workspaceStatus);
     return (
       <>
@@ -224,10 +268,11 @@ const TreeNode: React.FC<{
   }
 
   const displayName = node.name.replace(/\.(mdx?|txt|html?)$/i, "");
-  const fileCount = getPathMapValue(annotationCounts, absolutePath) ?? 0;
-  const isHighlighted = pathSetHas(highlightedFiles, absolutePath);
-  const editStatus = getFileEditStatus(absolutePath, editStatuses);
-  const workspaceChange = getWorkspaceChange(absolutePath, workspaceStatus);
+  const lookupCandidates = getPathLookupCandidates(absolutePath, node.path, workspaceStatus);
+  const fileCount = getPathMapValue(annotationCounts, lookupCandidates) ?? 0;
+  const isHighlighted = pathSetHas(highlightedFiles, lookupCandidates);
+  const editStatus = getFileEditStatus(absolutePath, editStatuses, node.path, workspaceStatus);
+  const workspaceChange = getWorkspaceChange(absolutePath, workspaceStatus, node.path);
   const isDeleted = workspaceChange?.status === "deleted";
   const isSelectionDisabled = isFileTreeSelectionDisabled(workspaceChange, editStatus);
   const editMarker =

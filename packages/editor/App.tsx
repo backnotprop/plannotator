@@ -73,6 +73,7 @@ import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotat
 import { useExternalAnnotationHighlights } from '@plannotator/ui/hooks/useExternalAnnotationHighlights';
 import { buildPlanAgentInstructions } from '@plannotator/ui/utils/planAgentInstructions';
 import { useFileBrowser } from '@plannotator/ui/hooks/useFileBrowser';
+import { getFileEditStatus } from '@plannotator/ui/components/sidebar/FileBrowser';
 import { isVaultBrowserEnabled } from '@plannotator/ui/utils/obsidian';
 import { isFileBrowserEnabled, getFileBrowserSettings } from '@plannotator/ui/utils/fileBrowser';
 import { generateId } from '@plannotator/ui/utils/generateId';
@@ -877,8 +878,22 @@ const App: React.FC = () => {
 
   const handleFileBrowserSelect = React.useCallback((absolutePath: string, dirPath: string) => {
     const normalizedAbsolutePath = normalizeBrowserPath(absolutePath);
-    const editableStatus = Array.from(editableDocuments.fileEditStatuses.values())
-      .find((status) => status.path && normalizeBrowserPath(status.path) === normalizedAbsolutePath);
+    const dirState = fileBrowser.dirs.find(d => d.path === dirPath);
+    const normalizedDirPath = normalizeBrowserPath(dirPath);
+    const dirPrefix = normalizedDirPath === "/" || /^[A-Za-z]:\/$/.test(normalizedDirPath)
+      ? normalizedDirPath
+      : `${normalizedDirPath}/`;
+    const relativePath = normalizedAbsolutePath === normalizedDirPath
+      ? ""
+      : normalizedAbsolutePath.startsWith(dirPrefix)
+        ? normalizedAbsolutePath.slice(dirPrefix.length)
+        : undefined;
+    const editableStatus = getFileEditStatus(
+      absolutePath,
+      editableDocuments.fileEditStatuses,
+      relativePath,
+      dirState?.workspaceStatus,
+    );
     const editableKey = editableStatus?.key ?? `file:${absolutePath}`;
     const editableRecord = editableDocuments.getDocument(editableKey);
     if (editableRecord?.missingOnDisk && editableRecord.sourceSave?.enabled) {
@@ -903,7 +918,6 @@ const App: React.FC = () => {
       return;
     }
 
-    const dirState = fileBrowser.dirs.find(d => d.path === dirPath);
     const buildUrl = dirState?.isVault
       ? (path: string) => `/api/reference/obsidian/doc?vaultPath=${encodeURIComponent(dirPath)}&path=${encodeURIComponent(path)}`
       : (path: string) => `/api/doc?path=${encodeURIComponent(path)}&base=${encodeURIComponent(dirPath)}${convertHtml ? '&convert=1' : ''}`;

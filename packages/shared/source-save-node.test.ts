@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "fs";
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve } from "path";
 import {
@@ -161,6 +161,21 @@ describe("source-save node helpers", () => {
 		expect(missing.ok).toBe(false);
 		if (!missing.ok) expect(missing.code).toBe("not-writable");
 		expect(() => readFileSync(missingPath, "utf8")).toThrow();
+	});
+
+	test.skipIf(process.platform === "win32")("does not replace an occupied missing path while recreating a file", () => {
+		const root = tempRoot();
+		const filePath = join(root, "plan.md");
+		symlinkSync(join(root, "missing-target.md"), filePath);
+
+		const result = saveSourceFileAtomic(filePath, "After\n", "sha256:missing-base", {
+			allowMissingBase: true,
+			allowedRoot: root,
+		});
+
+		expect(result.ok).toBe(false);
+		expect(lstatSync(filePath).isSymbolicLink()).toBe(true);
+		expect(() => readFileSync(filePath, "utf8")).toThrow();
 	});
 
 	test.skipIf(process.platform === "win32")("does not treat an unreadable existing file as missing", () => {

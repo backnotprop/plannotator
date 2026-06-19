@@ -118,4 +118,45 @@ describe("FileBrowser workspace status lookup", () => {
     expect(editStatus?.status).toBe("missing");
     expect(isFileTreeSelectionDisabled(deleted, editStatus)).toBe(false);
   });
+
+  test("matches deleted-file status through a symlinked folder root alias", () => {
+    const status: WorkspaceStatusPayload = {
+      available: true,
+      rootPath: "/real/docs",
+      repoRoot: "/real",
+      files: {
+        "/real/docs/plan.md": {
+          path: "/real/docs/plan.md",
+          repoRelativePath: "docs/plan.md",
+          status: "deleted",
+          additions: 0,
+          deletions: 5,
+          staged: false,
+          unstaged: true,
+        },
+      },
+      totals: { files: 1, additions: 0, deletions: 5 },
+    };
+    const editStatuses = new Map([
+      ["/real/docs/plan.md", { status: "missing" as const, dirty: false }],
+    ]);
+    const node: VaultNode = {
+      name: "docs",
+      path: ".",
+      type: "folder",
+      children: [{ name: "plan.md", path: "plan.md", type: "file" }],
+    };
+
+    const workspaceChange = getWorkspaceChange("/link/docs/plan.md", status, "plan.md");
+    const editStatus = getFileEditStatus("/link/docs/plan.md", editStatuses, "plan.md", status);
+
+    expect(workspaceChange?.status).toBe("deleted");
+    expect(editStatus?.status).toBe("missing");
+    expect(isFileTreeSelectionDisabled(workspaceChange, editStatus)).toBe(false);
+    expect(getAggregateWorkspaceChange(node, "/link/docs", status)).toEqual({
+      additions: 0,
+      deletions: 5,
+      files: 1,
+    });
+  });
 });

@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import {
 	chmodSync,
 	existsSync,
+	linkSync,
 	realpathSync,
 	readFileSync,
 	renameSync,
@@ -25,6 +26,15 @@ import {
 
 export function hashSourceBytes(bytes: Uint8Array): string {
 	return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+}
+
+function isFileExistsError(error: unknown): boolean {
+	return (
+		typeof error === "object" &&
+		error !== null &&
+		"code" in error &&
+		(error as { code?: unknown }).code === "EEXIST"
+	);
 }
 
 export function detectSourceEol(text: string): SourceFileEol {
@@ -257,6 +267,7 @@ export function saveSourceFileAtomic(
 	let before: SourceFileSnapshot;
 	let mode: number | undefined;
 	let outputEol: SourceFileEol;
+	let recreateMissingBase = false;
 	try {
 		const real = realpathSync(filePath);
 		if (allowedRoot && !isWithinProjectRoot(real, allowedRoot)) {
@@ -311,6 +322,7 @@ export function saveSourceFileAtomic(
 				eol: isSourceFileEol(options.missingBaseEol) ? options.missingBaseEol : "lf",
 			};
 			outputEol = before.eol;
+			recreateMissingBase = true;
 		} catch {
 			return {
 				ok: false,
@@ -340,7 +352,41 @@ export function saveSourceFileAtomic(
 	try {
 		writeFileSync(tmp, output, { encoding: "utf8", mode });
 		if (mode !== undefined) chmodSync(tmp, mode);
-		renameSync(tmp, filePath);
+		if (recreateMissingBase) {
+			try {
+				// Create the final path only if it is still absent. A plain rename
+				// would overwrite a file recreated by another tool after our first
+				// missing-file check.
+				linkSync(tmp, filePath);
+			} catch (error) {
+				if (isFileExistsError(error)) {
+					const current = readSourceFileSnapshot(filePath);
+					try {
+						unlinkSync(tmp);
+					} catch {
+						/* best effort */
+					}
+					return {
+						ok: false,
+						code: "conflict",
+						message: "The file changed on disk since Plannotator opened it.",
+						currentText: current.text,
+						currentHash: current.hash,
+						currentMtimeMs: current.mtimeMs,
+						currentSize: current.size,
+						currentEol: current.eol,
+					};
+				}
+				throw error;
+			}
+			try {
+				unlinkSync(tmp);
+			} catch {
+				/* best effort */
+			}
+		} else {
+			renameSync(tmp, filePath);
+		}
 		const after = readSourceFileSnapshot(filePath);
 		return {
 			ok: true,
