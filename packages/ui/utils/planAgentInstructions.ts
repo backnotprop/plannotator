@@ -13,8 +13,8 @@
  * the single source of truth for the agent-facing contract surface.
  *
  * The only dynamic value is `origin`, which is interpolated at click time from
- * `window.location.origin` so the agent gets the correct base URL whether the
- * server is running on a random local port or the fixed remote port (19432).
+ * `window.location.origin` so the agent gets the correct base URL whatever
+ * (random) port the server bound to, local or remote.
  */
 export function buildPlanAgentInstructions(origin: string): string {
   return `# Plannotator — External Annotations

@@ -8,7 +8,7 @@
  *
  * Environment variables:
  *   PLANNOTATOR_REMOTE - Set to "1"/"true" for remote, "0"/"false" for local
- *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
+ *   PLANNOTATOR_PORT   - Fixed port to use (default: random)
  */
 
 import { isRemoteSession, getServerHostname, getServerPort } from "./remote";

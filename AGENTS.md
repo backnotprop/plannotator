@@ -126,9 +126,9 @@ claude --plugin-dir ./apps/hook
 
 | Variable | Description |
 |----------|-------------|
-| `PLANNOTATOR_REMOTE` | Set to `1` / `true` for remote mode, `0` / `false` for local mode, or leave unset for SSH auto-detection. Uses a fixed port in remote mode; browser-opening behavior depends on the environment. |
+| `PLANNOTATOR_REMOTE` | Set to `1` / `true` for remote mode, `0` / `false` for local mode, or leave unset for SSH auto-detection. Uses a random port and binds beyond localhost in remote mode; browser-opening behavior depends on the environment. |
 | `PLANNOTATOR_AGENT_TERMINAL_REMOTE` | Set to `1` / `true` to enable the annotate-mode agent terminal while `PLANNOTATOR_REMOTE` is active. Off by default because remote mode binds beyond localhost. |
-| `PLANNOTATOR_PORT` | Fixed port to use. Default: random locally, `19432` for remote sessions. |
+| `PLANNOTATOR_PORT` | Fixed port to use. Default: random. Remote sessions are reached via a resolved hostname (Tailscale / `PLANNOTATOR_HOSTNAME`), not a fixed forwarded port. |
 | `PLANNOTATOR_BROWSER` | Custom browser to open plans in. macOS: app name or path. Linux/Windows: executable path. |
 | `PLANNOTATOR_SHARE` | Set to `disabled` to turn off URL sharing entirely. Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "share": "disabled" }`); the env var takes precedence. |
 | `PLANNOTATOR_SHARE_URL` | Custom base URL for share links (self-hosted portal). Default: `https://share.plannotator.ai`. |
@@ -357,7 +357,7 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/external-annotations` | PATCH | Update fields on a single annotation (`?id=`) |
 | `/api/external-annotations` | DELETE | Remove by `?id=`, `?source=`, or clear all |
 
-All servers use random ports locally or fixed port (`19432`) in remote mode.
+All servers use random ports. Remote sessions are reached via a resolved hostname (Tailscale / `PLANNOTATOR_HOSTNAME`) or the read-only share link, not a fixed forwarded port.
 
 ### Paste Service (`apps/paste-service/`)
 

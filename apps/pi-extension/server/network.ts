@@ -10,7 +10,6 @@ import { release } from "node:os";
 import { delimiter, join } from "node:path";
 import { loadConfig, resolveUseGlimpse } from "../generated/config.js";
 
-const DEFAULT_REMOTE_PORT = 19432;
 const LOOPBACK_HOST = "127.0.0.1";
 const NOOP_BROWSER_VALUES = new Set(["true", "false", "none", ":", "0", "1"]);
 
@@ -55,8 +54,9 @@ export function isRemoteSession(): boolean {
 /**
  * Get the server port to use.
  * - PLANNOTATOR_PORT env var takes precedence
- * - Remote sessions default to 19432 (for port forwarding)
- * - Local sessions use random port
+ * - Everything else uses a random port. Remote sessions are reached via a
+ *   resolved hostname (Tailscale/PLANNOTATOR_HOSTNAME) instead of a fixed
+ *   forwarded port, so a random port is fine and lets parallel sessions coexist.
  * Returns { port, portSource } so caller can notify user if needed.
  */
 export function getServerPort(): {
@@ -71,14 +71,108 @@ export function getServerPort(): {
 		}
 		// Invalid port - fall back silently, caller can check env var themselves
 	}
-	if (isRemoteSession()) {
-		return { port: DEFAULT_REMOTE_PORT, portSource: "remote-default" };
-	}
 	return { port: 0, portSource: "random" };
 }
 
 export function getServerHostname(): string {
 	return isRemoteSession() ? "0.0.0.0" : LOOPBACK_HOST;
+}
+
+let cachedHostname: string | null | undefined;
+
+/**
+ * Reset the memoized hostname. Test-only — production resolves once per process.
+ */
+export function resetServerUrlHostnameCache(): void {
+	cachedHostname = undefined;
+}
+
+/**
+ * Get the hostname to use in user-facing server URLs.
+ *
+ * Priority:
+ *   1. PLANNOTATOR_HOSTNAME env var (explicit override)
+ *   2. Tailscale hostname (auto-detected via `tailscale status`)
+ *   3. "localhost" (fallback)
+ */
+export async function getServerUrlHostname(): Promise<string> {
+	if (cachedHostname !== undefined) {
+		return cachedHostname ?? "localhost";
+	}
+
+	const envHostname = process.env.PLANNOTATOR_HOSTNAME;
+	if (envHostname) {
+		cachedHostname = envHostname;
+		return envHostname;
+	}
+
+	if (isRemoteSession()) {
+		const tsHostname = await detectTailscaleHostname();
+		if (tsHostname) {
+			cachedHostname = tsHostname;
+			return tsHostname;
+		}
+	}
+
+	cachedHostname = null;
+	return "localhost";
+}
+
+/**
+ * Detect the Tailscale DNS name by running `tailscale status --self --json`.
+ * Returns null if Tailscale is not available, not running, or hangs.
+ */
+function detectTailscaleHostname(): Promise<string | null> {
+	return new Promise((resolvePromise) => {
+		let settled = false;
+		let stdout = "";
+		let child: ReturnType<typeof spawn>;
+		const finish = (value: string | null) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			resolvePromise(value);
+		};
+
+		try {
+			child = spawn("tailscale", ["status", "--self", "--json"], {
+				stdio: ["ignore", "pipe", "ignore"],
+			});
+		} catch {
+			resolvePromise(null);
+			return;
+		}
+
+		// Guard against a wedged tailscaled: kill the probe if it neither prints
+		// nor exits within the timeout so callers never hang.
+		const timer = setTimeout(() => {
+			try {
+				child.kill();
+			} catch {
+				/* ignore */
+			}
+			finish(null);
+		}, 3_000);
+
+		child.stdout?.on("data", (chunk) => {
+			stdout += chunk.toString();
+		});
+		child.once("error", () => finish(null));
+		child.once("close", (code) => {
+			if (code !== 0) return finish(null);
+			try {
+				const data = JSON.parse(stdout);
+				// DNSName has a trailing dot, e.g. "a4000.chaco-dory.ts.net."
+				const dnsName = data?.Self?.DNSName;
+				if (typeof dnsName === "string" && dnsName.length > 1) {
+					return finish(dnsName.replace(/\.$/, ""));
+				}
+			} catch {
+				/* fall through to null */
+			}
+			finish(null);
+		});
+	});
 }
 
 const MAX_RETRIES = 5;

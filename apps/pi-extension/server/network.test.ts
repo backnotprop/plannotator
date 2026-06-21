@@ -2,15 +2,18 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
 	getServerHostname,
 	getServerPort,
+	getServerUrlHostname,
 	isNoOpBrowserSentinel,
 	isRemoteSession,
 	openBrowser,
+	resetServerUrlHostnameCache,
 } from "./network";
 
 const savedEnv: Record<string, string | undefined> = {};
 const envKeys = [
 	"PLANNOTATOR_REMOTE",
 	"PLANNOTATOR_PORT",
+	"PLANNOTATOR_HOSTNAME",
 	"SSH_TTY",
 	"SSH_CONNECTION",
 	"PLANNOTATOR_BROWSER",
@@ -93,10 +96,10 @@ describe("pi port selection", () => {
 		expect(getServerPort()).toEqual({ port: 0, portSource: "random" });
 	});
 
-	test("uses default remote port when SSH is detected", () => {
+	test("uses a random port for remote sessions (hostname is resolved separately)", () => {
 		clearEnv();
 		process.env.SSH_CONNECTION = "192.168.1.1 12345 192.168.1.2 22";
-		expect(getServerPort()).toEqual({ port: 19432, portSource: "remote-default" });
+		expect(getServerPort()).toEqual({ port: 0, portSource: "random" });
 	});
 
 	test("PLANNOTATOR_PORT still takes precedence", () => {
@@ -118,6 +121,33 @@ describe("pi server hostname", () => {
 		clearEnv();
 		process.env.PLANNOTATOR_REMOTE = "1";
 		expect(getServerHostname()).toBe("0.0.0.0");
+	});
+});
+
+describe("pi server url hostname", () => {
+	test("PLANNOTATOR_HOSTNAME overrides everything", async () => {
+		clearEnv();
+		resetServerUrlHostnameCache();
+		process.env.PLANNOTATOR_HOSTNAME = "mybox.ts.net";
+		expect(await getServerUrlHostname()).toBe("mybox.ts.net");
+	});
+
+	test("falls back to localhost for non-remote sessions without an explicit hostname", async () => {
+		clearEnv();
+		resetServerUrlHostnameCache();
+		expect(await getServerUrlHostname()).toBe("localhost");
+	});
+
+	test("memoizes the resolved hostname until reset", async () => {
+		clearEnv();
+		resetServerUrlHostnameCache();
+		process.env.PLANNOTATOR_HOSTNAME = "first.ts.net";
+		expect(await getServerUrlHostname()).toBe("first.ts.net");
+		// Cached: a later env change is ignored until the cache is reset.
+		process.env.PLANNOTATOR_HOSTNAME = "second.ts.net";
+		expect(await getServerUrlHostname()).toBe("first.ts.net");
+		resetServerUrlHostnameCache();
+		expect(await getServerUrlHostname()).toBe("second.ts.net");
 	});
 });
 

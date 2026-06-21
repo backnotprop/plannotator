@@ -23,6 +23,7 @@ import {
 	unstageFile,
 } from "./server.js";
 import { openBrowser, isRemoteSession } from "./server/network.js";
+import { prepareRemoteShareLink } from "./generated/share-url.js";
 import { parsePRUrl, checkPRAuth, fetchPR } from "./server/pr.js";
 import {
 	getMRLabel,
@@ -92,10 +93,61 @@ export function getStartupErrorMessage(err: unknown): string {
 	return err instanceof Error ? err.message : "Unknown error";
 }
 
-async function openBrowserForServer(serverUrl: string, ctx: ExtensionContext): Promise<void> {
+/**
+ * Describes the content to share if the remote server isn't directly reachable.
+ * When omitted, only the raw server URL is surfaced (e.g. archive browsing).
+ */
+interface RemoteShareSpec {
+	content: string;
+	verb: string;
+	noun: string;
+	rawHtml?: string;
+}
+
+/**
+ * On remote sessions, surface a directly-reachable URL (Tailscale/explicit
+ * hostname → full approve/deny) or a read-only share link as fallback, and
+ * fire an ntfy push if configured. Falls back to the raw server URL on error.
+ */
+async function notifyRemoteShareLink(
+	serverUrl: string,
+	ctx: ExtensionContext,
+	share: RemoteShareSpec,
+): Promise<void> {
+	try {
+		const link = await prepareRemoteShareLink(
+			share.content,
+			process.env.PLANNOTATOR_SHARE_URL || undefined,
+			share.verb,
+			share.noun,
+			{
+				serverUrl,
+				pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
+				rawHtml: share.rawHtml,
+			},
+		);
+		const suffix = link.ntfyOk ? " [notified via ntfy]" : "";
+		ctx.ui.notify(
+			`[Plannotator] Open on your local machine to ${share.verb}: ${link.url} (${link.descriptor})${suffix}`,
+			"info",
+		);
+	} catch {
+		ctx.ui.notify(`[Plannotator] ${serverUrl}`, "info");
+	}
+}
+
+async function openBrowserForServer(
+	serverUrl: string,
+	ctx: ExtensionContext,
+	remoteShare?: RemoteShareSpec,
+): Promise<void> {
 	const browserResult = await openBrowser(serverUrl);
 	if (isRemoteSession()) {
-		ctx.ui.notify(`[Plannotator] ${serverUrl}`, "info");
+		if (remoteShare) {
+			await notifyRemoteShareLink(serverUrl, ctx, remoteShare);
+		} else {
+			ctx.ui.notify(`[Plannotator] ${serverUrl}`, "info");
+		}
 	} else if (!browserResult.opened) {
 		ctx.ui.notify(`Open this URL to review: ${serverUrl}`, "info");
 	}
@@ -142,8 +194,9 @@ function startBrowserDecisionSession<T>(
 	server: { url: string; stop: () => void },
 	ctx: ExtensionContext,
 	waitForResult: () => Promise<T>,
+	remoteShare?: RemoteShareSpec,
 ): BrowserDecisionSession<T> {
-	openBrowserForServer(server.url, ctx);
+	openBrowserForServer(server.url, ctx, remoteShare);
 	let stopped = false;
 	let stopReject: ((err: Error) => void) | undefined;
 	let decisionPromise: Promise<T> | undefined;
@@ -197,7 +250,11 @@ export async function startPlanReviewBrowserSession(
 		pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
 	});
 
-	const session = startBrowserDecisionSession(server, ctx, server.waitForDecision);
+	const session = startBrowserDecisionSession(server, ctx, server.waitForDecision, {
+		content: planContent,
+		verb: "review the plan",
+		noun: "plan only",
+	});
 	server.onDecision(() => {
 		setTimeout(() => session.stop(), 1500);
 	});
@@ -486,7 +543,11 @@ export async function startCodeReviewBrowserSession(
 		onCleanup: worktreeCleanup,
 	});
 
-	return startBrowserDecisionSession(server, ctx, server.waitForDecision);
+	return startBrowserDecisionSession(server, ctx, server.waitForDecision, {
+		content: rawPatch,
+		verb: "review changes",
+		noun: "diff only",
+	});
 }
 
 export async function openMarkdownAnnotation(
@@ -562,7 +623,14 @@ export async function startMarkdownAnnotationSession(
 		agentCwd: ctx.cwd,
 	});
 
-	return startBrowserDecisionSession(server, ctx, server.waitForDecision);
+	return startBrowserDecisionSession(
+		server,
+		ctx,
+		server.waitForDecision,
+		rawHtml
+			? { content: "", verb: "annotate", noun: "HTML document only", rawHtml }
+			: { content: resolvedMarkdown, verb: "annotate", noun: "document only" },
+	);
 }
 
 export async function openLastMessageAnnotation(

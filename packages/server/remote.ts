@@ -83,6 +83,13 @@ export function getServerHostname(): string {
 let cachedHostname: string | null | undefined;
 
 /**
+ * Reset the memoized hostname. Test-only — production resolves once per process.
+ */
+export function resetServerUrlHostnameCache(): void {
+  cachedHostname = undefined;
+}
+
+/**
  * Get the hostname to use in user-facing server URLs.
  *
  * Priority:
@@ -127,8 +134,18 @@ async function detectTailscaleHostname(): Promise<string | null> {
       stderr: "ignore",
     });
 
-    const text = await new Response(proc.stdout).text();
-    const exitCode = await proc.exited;
+    // Guard against a wedged tailscaled: kill the probe if it neither prints
+    // nor exits within the timeout so callers (writeRemoteShareLink) never hang.
+    const timer = setTimeout(() => proc.kill(), 3_000);
+
+    let text: string;
+    let exitCode: number;
+    try {
+      text = await new Response(proc.stdout).text();
+      exitCode = await proc.exited;
+    } finally {
+      clearTimeout(timer);
+    }
     if (exitCode !== 0) return null;
 
     const data = JSON.parse(text);
