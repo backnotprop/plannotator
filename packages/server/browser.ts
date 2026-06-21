@@ -205,6 +205,16 @@ export async function openBrowser(
       }
     }
 
+    // In a remote session the only legitimate way to reach a browser is the
+    // VS Code IPC bridge above (which opens on the user's local machine). The
+    // local fallbacks below (glimpse, xdg-open/open/start) would launch a
+    // browser on the remote host itself — e.g. an ugly X-forwarded window over
+    // SSH — which is never what a remote user wants. The reachable URL is
+    // already surfaced via stderr + ntfy, so bail out here instead.
+    if (isRemote) {
+      return false;
+    }
+
     if (options?.useGlimpse && !browser && !isRemote && resolveUseGlimpse(loadConfig())) {
       const openedViaGlimpse = await openGlimpse(url);
       if (openedViaGlimpse) {
