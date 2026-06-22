@@ -62,6 +62,11 @@ export function useCodeAnnotationDraft({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasMountedRef = useRef(false);
   const draftGenerationRef = useRef(0);
+  // True once the user has actually had annotations this session. Used to decide
+  // whether an empty state is a real "cleared everything" edit (persist it) vs a
+  // fresh/unengaged session (leave the server alone). Keyed on annotations only —
+  // see the autosave effect for why viewedFiles must not count.
+  const hasHadAnnotationsRef = useRef(false);
 
   // Load draft on mount
   useEffect(() => {
@@ -105,13 +110,38 @@ export function useCodeAnnotationDraft({
   useEffect(() => {
     if (!isApiMode || submitted) return;
     if (!hasMountedRef.current) return;
-    if (annotations.length === 0 && viewedFiles.size === 0) return;
+
+    // Track engagement on USER-AUTHORED annotations only. Two things that arrive
+    // without user action must NOT count as "had content", or a later empty state
+    // would look like the user deleted everything and wrongly delete the draft:
+    //   - viewedFiles are seeded from GitHub's already-viewed state on mount
+    //     (review App.tsx) before the user does anything.
+    //   - external/SSE annotations (source-tagged, e.g. an eslint plugin) arrive
+    //     via `allAnnotations` and have their own lifecycle, separate from the draft.
+    if (annotations.some((a) => !a.source)) hasHadAnnotationsRef.current = true;
+
+    const isEmpty = annotations.length === 0 && viewedFiles.size === 0;
+    // Leave the server alone for an empty state until the user has actually had
+    // annotations this session. This preserves an unrestored draft sitting on disk
+    // at mount (the draft-recovery banner can still offer it).
+    if (isEmpty && !hasHadAnnotationsRef.current) return;
 
     if (timerRef.current) clearTimeout(timerRef.current);
 
     timerRef.current = setTimeout(() => {
       const draftGeneration = draftGenerationRef.current + 1;
       draftGenerationRef.current = draftGeneration;
+
+      if (isEmpty) {
+        // The user cleared everything (#948). Delete the draft with a generation
+        // tombstone so it can't resurface on refresh and a late save can't revive
+        // it. Mirrors useAnnotationDraft.persistNow.
+        fetch(`/api/draft?generation=${draftGeneration}`, { method: 'DELETE' }).catch(() => {
+          // Silent failure
+        });
+        return;
+      }
+
       const payload: DraftData = {
         codeAnnotations: annotations,
         viewedFiles: [...viewedFiles],
@@ -134,6 +164,9 @@ export function useCodeAnnotationDraft({
   }, [annotations, viewedFiles, isApiMode, submitted]);
 
   const restoreDraft = useCallback(() => {
+    // Cancel any pending autosave so it can't fire with pre-restore state and
+    // overwrite what we're about to restore.
+    if (timerRef.current) clearTimeout(timerRef.current);
     const data = draftDataRef.current;
     setDraftBanner(null);
     draftDataRef.current = null;
@@ -146,6 +179,9 @@ export function useCodeAnnotationDraft({
   const getDraftGeneration = useCallback(() => draftGenerationRef.current + 1, []);
 
   const dismissDraft = useCallback(() => {
+    // Cancel any pending autosave so a late save can't revive the draft the user
+    // just dismissed.
+    if (timerRef.current) clearTimeout(timerRef.current);
     const deletedGeneration = draftGenerationRef.current + 1;
     draftGenerationRef.current = deletedGeneration;
     setDraftBanner(null);
