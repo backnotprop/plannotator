@@ -896,7 +896,14 @@ const App: React.FC = () => {
 
   const buildMessageAnnotationEntries = React.useCallback((): MessageAnnotationEntry[] => {
     if (annotateSource !== 'message' || recentMessages.length === 0) return [];
-    const states = saveCurrentMessageState();
+    // Must be a PURE read: this runs on the render path via
+    // currentFeedbackPayload (useMemo) -> getCurrentFeedbackPayload ->
+    // buildFullAnnotationsOutput. saveCurrentMessageState() writes React state
+    // (setCachedMessageAnnotationCounts), which during render is an infinite
+    // re-render loop in multi-message mode (#949). getMessageStatesWithCurrent
+    // returns the same merged data without the setState side effect; the cache
+    // persistence happens in event handlers (handleSelectMessage) instead.
+    const states = getMessageStatesWithCurrent();
     return recentMessages.map((msg) => {
       const state = states.get(msg.messageId) ?? createEmptyMessageState(msg);
       const linkedDocs: Map<string, LinkedDocAnnotationEntry> = new Map();
@@ -917,7 +924,7 @@ const App: React.FC = () => {
         codeAnnotations: state.codeAnnotations,
       };
     });
-  }, [annotateSource, recentMessages, saveCurrentMessageState]);
+  }, [annotateSource, recentMessages, getMessageStatesWithCurrent]);
 
   const activeMessageAnnotationCounts = React.useMemo(() => {
     const counts = new Map(cachedMessageAnnotationCounts);
