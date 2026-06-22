@@ -215,7 +215,7 @@ export async function openBrowser(
       return false;
     }
 
-    if (options?.useGlimpse && !browser && !isRemote && resolveUseGlimpse(loadConfig())) {
+    if (options?.useGlimpse && !browser && resolveUseGlimpse(loadConfig())) {
       const openedViaGlimpse = await openGlimpse(url);
       if (openedViaGlimpse) {
         return true;

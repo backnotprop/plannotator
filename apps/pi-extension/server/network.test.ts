@@ -185,4 +185,18 @@ describe("pi browser no-op sentinels", () => {
 			url: "http://127.0.0.1:19432",
 		});
 	});
+
+	test("remote session never launches a browser on the remote host, even with a real browser handler set", async () => {
+		clearEnv();
+		process.env.PLANNOTATOR_REMOTE = "1";
+		process.env.PLANNOTATOR_BROWSER = "/usr/bin/firefox";
+
+		// Must bail (no spawn on the remote host); the reachable URL is surfaced
+		// to the user's local machine via the notification path instead.
+		expect(await openBrowser("http://127.0.0.1:45231")).toEqual({
+			opened: false,
+			isRemote: true,
+			url: "http://127.0.0.1:45231",
+		});
+	});
 });

@@ -6,7 +6,7 @@ sidebar:
 section: "Guides"
 ---
 
-Plannotator works in remote environments — SSH sessions, VS Code Remote, devcontainers, and Docker. The key difference is that remote sessions benefit from a fixed port for forwarding, and browser-opening behavior depends on your environment.
+Plannotator works in remote environments — SSH sessions, VS Code Remote, devcontainers, and Docker. In remote mode the server binds beyond localhost and never opens a browser on the remote host; instead it surfaces a URL you open on your local machine.
 
 ## Remote mode
 
@@ -14,13 +14,32 @@ Set `PLANNOTATOR_REMOTE=1` (or `true`) to force remote mode:
 
 ```bash
 export PLANNOTATOR_REMOTE=1
-export PLANNOTATOR_PORT=9999  # Choose a port you'll forward
 ```
 
-Remote mode changes two behaviors:
+Remote mode changes these behaviors:
 
-1. **Fixed port** — Uses `PLANNOTATOR_PORT` (default: `19432`) instead of a random port, so you can set up port forwarding once
-2. **Browser handling changes** — In headless setups you may need to open the forwarded URL manually instead of relying on browser auto-open
+1. **Binds beyond localhost** — The server listens on `0.0.0.0` on a random port (so parallel sessions never collide), instead of loopback only
+2. **Reachable via a resolved hostname** — Plannotator surfaces a URL built from `PLANNOTATOR_HOSTNAME` if set, otherwise an auto-detected [Tailscale](#tailscale-recommended) hostname. No fixed port forwarding required. If no reachable hostname is found, it generates a read-only share link instead
+3. **No browser on the remote host** — The reachable URL is printed to stderr and, if `CLAUDE_HOOKS_NTFY_URL` is set, sent as an ntfy push. Open it on your local machine
+
+## Tailscale (recommended)
+
+If both your remote host and local machine are on the same [Tailscale](https://tailscale.com/) tailnet, Plannotator auto-detects the host's Tailscale DNS name via `tailscale status` and builds a directly-reachable URL (full review with approve/deny) — no port forwarding or share link needed. Nothing to configure beyond having Tailscale running on the remote host.
+
+To override auto-detection (or to use a non-Tailscale reachable hostname), set it explicitly:
+
+```bash
+export PLANNOTATOR_HOSTNAME=mybox.ts.net
+```
+
+## Fixed port + forwarding (fallback)
+
+If you can't use a reachable hostname, pin a port and forward it yourself. Setting `PLANNOTATOR_PORT` opts back into a stable port for forwarding:
+
+```bash
+export PLANNOTATOR_REMOTE=1
+export PLANNOTATOR_PORT=9999  # Choose a port you'll forward
+```
 
 ### Legacy detection
 

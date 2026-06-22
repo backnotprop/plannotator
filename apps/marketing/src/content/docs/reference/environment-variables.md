@@ -12,8 +12,9 @@ All Plannotator environment variables and their defaults.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PLANNOTATOR_REMOTE` | auto-detect | Set to `1` or `true` to force remote mode, `0` or `false` to force local mode, or leave unset to auto-detect via `SSH_TTY` / `SSH_CONNECTION`. Uses a fixed port in remote mode; browser-opening behavior depends on the environment. |
-| `PLANNOTATOR_PORT` | random (local) / `19432` (remote) | Fixed server port. When not set, local sessions use a random port; remote sessions default to `19432`. |
+| `PLANNOTATOR_REMOTE` | auto-detect | Set to `1` or `true` to force remote mode, `0` or `false` to force local mode, or leave unset to auto-detect via `SSH_TTY` / `SSH_CONNECTION`. Uses a random port and binds beyond localhost in remote mode; browser-opening behavior depends on the environment. |
+| `PLANNOTATOR_PORT` | random | Fixed server port. When not set, every session uses a random port. Remote sessions are reached via a resolved hostname (Tailscale / `PLANNOTATOR_HOSTNAME`), not a fixed forwarded port. |
+| `PLANNOTATOR_HOSTNAME` | auto-detect | Explicit hostname for remote URLs (e.g. `mybox.ts.net`). Auto-detected from Tailscale when unset; falls back to a read-only share link if no reachable hostname is available. |
 | `PLANNOTATOR_BROWSER` | system default | Custom browser to open the UI in. macOS: app name or path. Linux/Windows: executable path. Can also be a script. Takes priority over `BROWSER`. Also settable per-invocation with `--browser`. |
 | `BROWSER` | (none) | Standard env var for specifying a browser. VS Code sets this automatically in devcontainers. Used as fallback when `PLANNOTATOR_BROWSER` is not set. |
 | `PLANNOTATOR_ORIGIN` | auto-detect | Explicit agent-origin override. Valid values: `claude-code`, `amp`, `droid`, `opencode`, `codex`, `copilot-cli`, `pi`, `gemini-cli`, `kiro-cli`. Invalid values silently fall through to env-based detection. |
@@ -70,9 +71,10 @@ When running your own paste service binary, these variables configure it:
 
 When remote mode is forced with `PLANNOTATOR_REMOTE=1` / `true`, or SSH is detected while `PLANNOTATOR_REMOTE` is unset:
 
-- Server binds to `PLANNOTATOR_PORT` (default `19432`) instead of a random port
-- Browser-opening behavior depends on the environment and configured browser handler
-- In headless setups, you may need to open the forwarded URL manually
+- Server binds beyond localhost (`0.0.0.0`) on a random port (or `PLANNOTATOR_PORT` if set)
+- The reachable URL uses a resolved hostname — `PLANNOTATOR_HOSTNAME` if set, otherwise an auto-detected Tailscale hostname — so no fixed port forwarding is needed
+- When no reachable hostname is available, a read-only share link is generated instead
+- A browser is never opened on the remote host; the reachable URL is surfaced via stderr and an optional ntfy push
 
 ### Legacy SSH detection
 
@@ -88,8 +90,15 @@ If either is present, Plannotator enables remote mode automatically when `PLANNO
 ## Port resolution order
 
 1. `PLANNOTATOR_PORT` environment variable (if valid integer 0-65535; `0` means random)
-2. `19432` if in remote mode
-3. `0` (random) if in local mode
+2. `0` (random) otherwise — both local and remote sessions use a random port
+
+## Hostname resolution order
+
+For the user-facing URL of a remote session:
+
+1. `PLANNOTATOR_HOSTNAME` environment variable (explicit override)
+2. Tailscale hostname (auto-detected via `tailscale status`)
+3. `localhost` fallback — surfaced as a read-only share link instead of a direct URL
 
 ## Custom browser examples
 

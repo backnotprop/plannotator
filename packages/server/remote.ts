@@ -13,6 +13,11 @@
  * allows random ports, so parallel sessions work.
  */
 
+import {
+  createHostnameResolver,
+  parseTailscaleDnsName,
+} from "@plannotator/shared/hostname";
+
 const LOOPBACK_HOST = "127.0.0.1";
 
 function getRemoteOverride(): boolean | null {
@@ -80,13 +85,16 @@ export function getServerHostname(): string {
   return isRemoteSession() ? "0.0.0.0" : LOOPBACK_HOST;
 }
 
-let cachedHostname: string | null | undefined;
+const hostnameResolver = createHostnameResolver({
+  isRemoteSession,
+  detectTailscaleHostname,
+});
 
 /**
  * Reset the memoized hostname. Test-only — production resolves once per process.
  */
 export function resetServerUrlHostnameCache(): void {
-  cachedHostname = undefined;
+  hostnameResolver.reset();
 }
 
 /**
@@ -97,30 +105,8 @@ export function resetServerUrlHostnameCache(): void {
  *   2. Tailscale hostname (auto-detected via `tailscale status`)
  *   3. "localhost" (fallback)
  */
-export async function getServerUrlHostname(): Promise<string> {
-  if (cachedHostname !== undefined) {
-    return cachedHostname ?? "localhost";
-  }
-
-  // 1. Explicit env var
-  const envHostname = process.env.PLANNOTATOR_HOSTNAME;
-  if (envHostname) {
-    cachedHostname = envHostname;
-    return envHostname;
-  }
-
-  // 2. Auto-detect Tailscale
-  if (isRemoteSession()) {
-    const tsHostname = await detectTailscaleHostname();
-    if (tsHostname) {
-      cachedHostname = tsHostname;
-      return tsHostname;
-    }
-  }
-
-  // 3. Fallback
-  cachedHostname = null;
-  return "localhost";
+export function getServerUrlHostname(): Promise<string> {
+  return hostnameResolver.resolve();
 }
 
 /**
@@ -148,14 +134,7 @@ async function detectTailscaleHostname(): Promise<string | null> {
     }
     if (exitCode !== 0) return null;
 
-    const data = JSON.parse(text);
-    // DNSName has a trailing dot, e.g. "a4000.chaco-dory.ts.net."
-    const dnsName = data?.Self?.DNSName;
-    if (typeof dnsName === "string" && dnsName.length > 1) {
-      return dnsName.replace(/\.$/, "");
-    }
-
-    return null;
+    return parseTailscaleDnsName(text);
   } catch {
     return null;
   }

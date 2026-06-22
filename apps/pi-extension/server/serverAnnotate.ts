@@ -59,7 +59,7 @@ import {
 
 export interface AnnotateServerResult {
 	port: number;
-	portSource: "env" | "remote-default" | "random";
+	portSource: "env" | "random";
 	url: string;
 	waitForDecision: () => Promise<{ feedback: string; annotations: unknown[]; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>;
 	stop: () => void;

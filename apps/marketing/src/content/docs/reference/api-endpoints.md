@@ -8,7 +8,7 @@ section: "Reference"
 
 Plannotator runs a local Bun HTTP server for each session. The server serves the UI and exposes a REST API for communication between the browser and the CLI.
 
-All servers use random ports locally or a fixed port (`19432` by default) in remote mode.
+All servers use random ports. Remote sessions are reached via a resolved hostname (Tailscale / `PLANNOTATOR_HOSTNAME`) or a read-only share link, not a fixed forwarded port.
 
 ## Plan server
 

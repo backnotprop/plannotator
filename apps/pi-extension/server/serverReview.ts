@@ -170,7 +170,7 @@ function detectWSL(): boolean {
 
 export interface ReviewServerResult {
 	port: number;
-	portSource: "env" | "remote-default" | "random";
+	portSource: "env" | "random";
 	url: string;
 	isRemote: boolean;
 	waitForDecision: () => Promise<{

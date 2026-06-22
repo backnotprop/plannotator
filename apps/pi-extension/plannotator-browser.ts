@@ -107,7 +107,8 @@ interface RemoteShareSpec {
 /**
  * On remote sessions, surface a directly-reachable URL (Tailscale/explicit
  * hostname → full approve/deny) or a read-only share link as fallback, and
- * fire an ntfy push if configured. Falls back to the raw server URL on error.
+ * fire an ntfy push if configured. On error, surface the failure reason rather
+ * than the (locally-unreachable) raw server URL.
  */
 async function notifyRemoteShareLink(
 	serverUrl: string,
@@ -131,8 +132,19 @@ async function notifyRemoteShareLink(
 			`[Plannotator] Open on your local machine to ${share.verb}: ${link.url} (${link.descriptor})${suffix}`,
 			"info",
 		);
-	} catch {
-		ctx.ui.notify(`[Plannotator] ${serverUrl}`, "info");
+	} catch (error) {
+		// prepareRemoteShareLink only throws when the read-only fallback share
+		// link can't be generated (the server URL isn't directly reachable here,
+		// so echoing it would be useless to the remote user). Surface the reason
+		// and a hint instead. Mirrors the Bun CLI's writeRemoteShareLink warning.
+		const reason = error instanceof Error ? error.message : String(error);
+		const pasteHint = share.rawHtml
+			? " HTML sharing uses the paste service; check PLANNOTATOR_PASTE_URL or try a smaller/self-contained HTML file."
+			: "";
+		ctx.ui.notify(
+			`[Plannotator] Could not create a remote share link for ${share.noun}: ${reason}.${pasteHint}`,
+			"error",
+		);
 	}
 }
 

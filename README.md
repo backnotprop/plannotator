@@ -325,7 +325,7 @@ Settings are saved in cookies (not localStorage) because each hook invocation ru
 | Variable | Description |
 |---|---|
 | `PLANNOTATOR_REMOTE` | `1`/`true` for remote mode, `0`/`false` for local, unset for SSH auto-detection |
-| `PLANNOTATOR_PORT` | Fixed port (default: random locally, `19432` remote) |
+| `PLANNOTATOR_PORT` | Fixed port (default: random; remote sessions are reached via a resolved hostname, not a fixed port) |
 | `PLANNOTATOR_BROWSER` | Custom browser to open plans in |
 | `PLANNOTATOR_SHARE` | `disabled` to turn off URL sharing |
 | `PLANNOTATOR_SHARE_URL` | Custom base URL for share links (self-hosted portal) |

@@ -12,8 +12,8 @@ Plannotator is configured through environment variables, hook/plugin configurati
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PLANNOTATOR_REMOTE` | auto-detect | Set to `1` or `true` to force remote mode, `0` or `false` to force local mode, or leave unset to auto-detect via `SSH_TTY` / `SSH_CONNECTION`. Uses a fixed port in remote mode; browser-opening behavior depends on the environment. |
-| `PLANNOTATOR_PORT` | random (local) / `19432` (remote) | Fixed server port. Useful for port forwarding in remote environments. |
+| `PLANNOTATOR_REMOTE` | auto-detect | Set to `1` or `true` to force remote mode, `0` or `false` to force local mode, or leave unset to auto-detect via `SSH_TTY` / `SSH_CONNECTION`. Uses a random port and binds beyond localhost in remote mode; browser-opening behavior depends on the environment. |
+| `PLANNOTATOR_PORT` | random | Fixed server port. When unset, every session uses a random port; remote sessions are reached via a resolved hostname (Tailscale / `PLANNOTATOR_HOSTNAME`), not a fixed forwarded port. |
 | `PLANNOTATOR_BROWSER` | system default | Custom browser or script to open the UI. |
 | `PLANNOTATOR_SHARE` | enabled | Set to `disabled` to turn off URL sharing entirely. Can also be set via `~/.plannotator/config.json` (`{ "share": "disabled" }`). |
 | `PLANNOTATOR_SHARE_URL` | `https://share.plannotator.ai` | Point share links at a self-hosted portal. |

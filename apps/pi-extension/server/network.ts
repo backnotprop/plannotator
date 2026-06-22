@@ -9,6 +9,10 @@ import type { Server } from "node:http";
 import { release } from "node:os";
 import { delimiter, join } from "node:path";
 import { loadConfig, resolveUseGlimpse } from "../generated/config.js";
+import {
+	createHostnameResolver,
+	parseTailscaleDnsName,
+} from "../generated/hostname.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
 const NOOP_BROWSER_VALUES = new Set(["true", "false", "none", ":", "0", "1"]);
@@ -61,7 +65,7 @@ export function isRemoteSession(): boolean {
  */
 export function getServerPort(): {
 	port: number;
-	portSource: "env" | "remote-default" | "random";
+	portSource: "env" | "random";
 } {
 	const envPort = process.env.PLANNOTATOR_PORT;
 	if (envPort) {
@@ -78,13 +82,16 @@ export function getServerHostname(): string {
 	return isRemoteSession() ? "0.0.0.0" : LOOPBACK_HOST;
 }
 
-let cachedHostname: string | null | undefined;
+const hostnameResolver = createHostnameResolver({
+	isRemoteSession,
+	detectTailscaleHostname,
+});
 
 /**
  * Reset the memoized hostname. Test-only — production resolves once per process.
  */
 export function resetServerUrlHostnameCache(): void {
-	cachedHostname = undefined;
+	hostnameResolver.reset();
 }
 
 /**
@@ -95,27 +102,8 @@ export function resetServerUrlHostnameCache(): void {
  *   2. Tailscale hostname (auto-detected via `tailscale status`)
  *   3. "localhost" (fallback)
  */
-export async function getServerUrlHostname(): Promise<string> {
-	if (cachedHostname !== undefined) {
-		return cachedHostname ?? "localhost";
-	}
-
-	const envHostname = process.env.PLANNOTATOR_HOSTNAME;
-	if (envHostname) {
-		cachedHostname = envHostname;
-		return envHostname;
-	}
-
-	if (isRemoteSession()) {
-		const tsHostname = await detectTailscaleHostname();
-		if (tsHostname) {
-			cachedHostname = tsHostname;
-			return tsHostname;
-		}
-	}
-
-	cachedHostname = null;
-	return "localhost";
+export function getServerUrlHostname(): Promise<string> {
+	return hostnameResolver.resolve();
 }
 
 /**
@@ -159,18 +147,7 @@ function detectTailscaleHostname(): Promise<string | null> {
 		});
 		child.once("error", () => finish(null));
 		child.once("close", (code) => {
-			if (code !== 0) return finish(null);
-			try {
-				const data = JSON.parse(stdout);
-				// DNSName has a trailing dot, e.g. "a4000.chaco-dory.ts.net."
-				const dnsName = data?.Self?.DNSName;
-				if (typeof dnsName === "string" && dnsName.length > 1) {
-					return finish(dnsName.replace(/\.$/, ""));
-				}
-			} catch {
-				/* fall through to null */
-			}
-			finish(null);
+			finish(code === 0 ? parseTailscaleDnsName(stdout) : null);
 		});
 	});
 }
@@ -180,7 +157,7 @@ const RETRY_DELAY_MS = 500;
 
 export async function listenOnPort(
 	server: Server,
-): Promise<{ port: number; portSource: "env" | "remote-default" | "random" }> {
+): Promise<{ port: number; portSource: "env" | "random" }> {
 	const result = getServerPort();
 
 	for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -311,7 +288,12 @@ export async function openBrowser(url: string): Promise<{
 		: rawPlannotatorBrowser;
 	const envBrowser = isNoOpBrowserSentinel(rawBrowser) ? undefined : rawBrowser;
 	const browser = plannotatorBrowser || envBrowser;
-	if (isRemoteSession() && !browser) {
+	// In a remote session, never launch a browser on the remote host — even when
+	// PLANNOTATOR_BROWSER/BROWSER is set, that would open (e.g. an X-forwarded
+	// window over SSH) on the wrong machine. The reachable URL is surfaced to the
+	// user's local machine via the notification path instead. Mirrors the Bun
+	// server's remote bail in packages/server/browser.ts.
+	if (isRemoteSession()) {
 		return { opened: false, isRemote: true, url };
 	}
 

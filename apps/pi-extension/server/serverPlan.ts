@@ -65,7 +65,7 @@ export interface PlanReviewDecision {
 export interface PlanServerResult {
 	reviewId: string;
 	port: number;
-	portSource: "env" | "remote-default" | "random";
+	portSource: "env" | "random";
 	url: string;
 	waitForDecision: () => Promise<PlanReviewDecision>;
 	onDecision: (listener: (result: PlanReviewDecision) => void | Promise<void>) => () => void;
