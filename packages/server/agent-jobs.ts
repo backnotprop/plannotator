@@ -9,6 +9,7 @@
  */
 
 import { formatClaudeLogEvent } from "./claude-review";
+import { formatCursorLogEvent, parseCursorModelsOutput, type CursorModel } from "./cursor-review";
 import {
   type AgentJobInfo,
   type AgentJobEvent,
@@ -45,6 +46,15 @@ const BASE = "/api/agents";
 const JOBS = `${BASE}/jobs`;
 const JOBS_STREAM = `${JOBS}/stream`;
 const CAPABILITIES = `${BASE}/capabilities`;
+
+// Providers whose command is owned by the server. Client-supplied argv is never
+// spawned for these — buildCommand must produce the command or the launch fails.
+const SERVER_BUILT_PROVIDERS: ReadonlySet<string> = new Set([
+  "claude",
+  "codex",
+  "tour",
+  "cursor",
+]);
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -95,6 +105,26 @@ export interface AgentJobHandlerOptions {
   onJobComplete?: (job: AgentJobInfo, meta: { outputPath?: string; stdout?: string; cwd?: string }) => void | Promise<void>;
 }
 
+
+/**
+ * Best-effort Cursor model catalog from `agent models`, parsed once and cached.
+ * Empty when discovery fails or the CLI is unauthenticated — the UI falls back
+ * to an `auto`-only picker. Account-specific, so never hardcoded.
+ */
+function discoverCursorModels(): CursorModel[] {
+  try {
+    const res = Bun.spawnSync(["agent", "models"], {
+      stdout: "pipe",
+      stderr: "ignore",
+      timeout: 5000,
+    });
+    if (!res.success) return [];
+    return parseCursorModelsOutput(new TextDecoder().decode(res.stdout));
+  } catch {
+    return [];
+  }
+}
+
 export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJobHandler {
   const { mode, getServerUrl, getCwd } = options;
 
@@ -106,10 +136,19 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
   let version = 0;
 
   // --- Capability detection (run once) ---
+  // Cursor CLI's binary is literally named `agent` (NOT `cursor`). When present,
+  // discover its account-specific model catalog so the UI doesn't hardcode ids.
+  const cursorAvailable = mode === "review" && !!Bun.which("agent");
   const capabilities: AgentCapability[] = [
     { id: "claude", name: "Claude Code", available: !!Bun.which("claude") },
     { id: "codex", name: "Codex CLI", available: !!Bun.which("codex") },
     { id: "tour", name: "Code Tour", available: !!Bun.which("claude") || !!Bun.which("codex") },
+    {
+      id: "cursor",
+      name: "Cursor CLI",
+      available: cursorAvailable,
+      ...(cursorAvailable ? { models: discoverCursorModels() } : {}),
+    },
   ];
   const capabilitiesResponse: AgentCapabilities = {
     mode,
@@ -235,32 +274,44 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
       let stdoutBuf = "";
       const stdoutDone = (captureStdout && proc.stdout && typeof proc.stdout !== "number")
         ? (async () => {
+            // Format one complete JSONL line into a live-log delta (skip result
+            // events — those are handled in onJobComplete).
+            const emitLogLine = (line: string) => {
+              if (!line.trim()) return;
+              // Claude: format JSONL into readable text. Tour jobs with the
+              // Claude engine also stream Claude JSONL, so key off engine too.
+              if (provider === "claude" || spawnOptions?.engine === "claude") {
+                const formatted = formatClaudeLogEvent(line);
+                if (formatted !== null) broadcast({ type: "job:log", jobId: id, delta: formatted + '\n' });
+                return;
+              }
+              // Cursor: map stream-json events (init/assistant/tool_call/result)
+              // into readable log deltas, applying the partial-output dedup rule.
+              if (provider === "cursor") {
+                const formatted = formatCursorLogEvent(line);
+                if (formatted !== null) broadcast({ type: "job:log", jobId: id, delta: formatted + '\n' });
+                return;
+              }
+              try {
+                const event = JSON.parse(line);
+                if (event.type === 'result') return;
+              } catch { /* not JSON — forward as raw log */ }
+              broadcast({ type: "job:log", jobId: id, delta: line + '\n' });
+            };
             try {
               const reader = proc!.stdout as unknown as AsyncIterable<Uint8Array>;
+              // stream-json output is NDJSON and chunk boundaries are arbitrary —
+              // carry the trailing partial line until a later chunk completes it,
+              // otherwise records split across chunks are dropped from live logs.
+              let logLineCarry = "";
               for await (const chunk of reader) {
                 const text = typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
                 stdoutBuf += text;
-
-                // Forward JSONL lines as log events (skip result events)
-                const lines = text.split('\n');
-                for (const line of lines) {
-                  if (!line.trim()) continue;
-                  // Claude: format JSONL into readable text. Tour jobs with the
-                  // Claude engine also stream Claude JSONL, so key off engine too.
-                  if (provider === "claude" || spawnOptions?.engine === "claude") {
-                    const formatted = formatClaudeLogEvent(line);
-                    if (formatted !== null) {
-                      broadcast({ type: "job:log", jobId: id, delta: formatted + '\n' });
-                    }
-                    continue;
-                  }
-                  try {
-                    const event = JSON.parse(line);
-                    if (event.type === 'result') continue; // handled in onJobComplete
-                  } catch { /* not JSON — forward as raw log */ }
-                  broadcast({ type: "job:log", jobId: id, delta: line + '\n' });
-                }
+                const lines = (logLineCarry + text).split('\n');
+                logLineCarry = lines.pop() ?? "";
+                for (const line of lines) emitLogLine(line);
               }
+              if (logLineCarry) emitLogLine(logLineCarry);
             } catch {
               // Stream closed
             }
@@ -293,8 +344,16 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
               stdout: captureStdout ? stdoutBuf : undefined,
               cwd: jobCwd,
             });
-          } catch {
-            // Result ingestion failure shouldn't prevent job completion broadcast
+          } catch (err) {
+            // Claude/Codex are fail-open: an ingestion error is logged but does
+            // not change the terminal state. Cursor is fail-closed — its findings
+            // are prompt-enforced, so an unexpected throw here must surface as a
+            // failed job rather than a green one. (The Cursor handler normally
+            // fails by mutation and never throws; this guards future refactors.)
+            if (provider === "cursor") {
+              entry.info.status = "failed";
+              entry.info.error = err instanceof Error ? err.message : "Cursor result ingestion failed";
+            }
           }
         }
         jobOutputPaths.delete(id);
@@ -442,6 +501,22 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
               { error: `Unknown or unavailable provider: ${provider}` },
               { status: 400 },
             );
+          }
+
+          // Fail-closed enforcement for server-owned providers: the command MUST
+          // be built server-side. Client-supplied argv is never spawned for these
+          // providers — a null/throwing builder becomes an error, not a fallback.
+          const isServerBuiltProvider = SERVER_BUILT_PROVIDERS.has(provider);
+          if (isServerBuiltProvider) {
+            if (!options.buildCommand) {
+              return Response.json(
+                { error: `Provider ${provider} requires server-built command` },
+                { status: 400 },
+              );
+            }
+            // Discard any client-supplied argv so a null build cleanly hits the
+            // `command.length === 0` guard below instead of falling through.
+            command = [];
           }
 
           // Try server-side command building for known providers

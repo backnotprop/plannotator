@@ -350,7 +350,7 @@ function ProviderPill({ provider, engine, model }: { provider: string; engine?: 
     const engineLabel = engine === 'codex' ? 'Codex' : 'Claude';
     label = model && engine !== 'codex' ? `Tour · ${engineLabel} ${model.charAt(0).toUpperCase() + model.slice(1)}` : `Tour · ${engineLabel}`;
   } else {
-    label = provider === 'claude' ? 'Claude' : provider === 'codex' ? 'Codex' : 'Shell';
+    label = provider === 'claude' ? 'Claude' : provider === 'codex' ? 'Codex' : provider === 'cursor' ? 'Cursor' : 'Shell';
   }
   return (
     <span className={`text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${

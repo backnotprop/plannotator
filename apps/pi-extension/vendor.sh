@@ -13,7 +13,7 @@ for f in feedback-templates prompts review-core diff-paths cli-pagination jj-cor
 done
 
 # Vendor review agent modules from packages/server/ — rewrite imports for generated/ layout
-for f in agent-review-message codex-review claude-review path-utils; do
+for f in agent-review-message codex-review claude-review cursor-review path-utils; do
   src="../../packages/server/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/server/%s.ts\n' "$f" | cat - "$src" \
     | sed 's|from "./vcs"|from "./review-core.js"|' \

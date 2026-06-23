@@ -81,6 +81,13 @@ export interface AgentCapability {
   id: string;
   name: string;
   available: boolean;
+  /**
+   * Provider-discovered model catalog (currently only Cursor). Best-effort and
+   * account-specific — populated from the provider CLI at capability-detection
+   * time, empty when discovery fails or the CLI is unauthenticated. The UI
+   * drives its model picker from this instead of a hardcoded list.
+   */
+  models?: { id: string; label: string }[];
 }
 
 export interface AgentCapabilities {
