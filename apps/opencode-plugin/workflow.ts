@@ -16,6 +16,8 @@ export interface NormalizedWorkflowOptions {
   runtime: RuntimeMode;
 }
 
+export type RuntimeExecutionMode = "embedded" | "cli" | "embedded-unavailable";
+
 const WORKFLOWS = new Set<WorkflowMode>(["manual", "user-managed", "plan-agent", "all-agents"]);
 const RUNTIMES = new Set<RuntimeMode>(["auto", "embedded", "cli"]);
 const DEFAULT_WORKFLOW: WorkflowMode = "plan-agent";
@@ -63,6 +65,17 @@ function normalizeRuntime(value: unknown): RuntimeMode {
   return RUNTIMES.has(rawRuntime as RuntimeMode)
     ? rawRuntime as RuntimeMode
     : DEFAULT_RUNTIME;
+}
+
+export function resolveRuntimeExecutionMode(
+  runtime: RuntimeMode,
+  embeddedAvailable: boolean,
+): RuntimeExecutionMode {
+  if (runtime === "cli") return "cli";
+  if (runtime === "embedded") {
+    return embeddedAvailable ? "embedded" : "embedded-unavailable";
+  }
+  return embeddedAvailable ? "embedded" : "cli";
 }
 
 function normalizePlanningAgents(value: unknown): string[] {

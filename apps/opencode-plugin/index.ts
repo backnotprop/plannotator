@@ -38,6 +38,7 @@ import {
   applyWorkflowConfig,
   isPlanningAgent,
   normalizeWorkflowOptions,
+  resolveRuntimeExecutionMode,
   shouldApplyToolDefinitionRewrites,
   shouldInjectFullPlanningPrompt,
   shouldInjectGenericPlanReminder,
@@ -94,6 +95,18 @@ function getPlanHtml(): string {
 function getReviewHtml(): string {
   if (!_reviewHtml) _reviewHtml = readBundledHtml("review-editor.html");
   return _reviewHtml;
+}
+
+function preloadBundledHtml(filename: string, cache: (html: string) => void): void {
+  // CLI runtime paths do not need packaged HTML. Keep startup tolerant in
+  // source checkouts; embedded paths still fail at first get*Html() use.
+  let htmlPath: string;
+  try {
+    htmlPath = resolveBundledHtmlPath(filename);
+  } catch {
+    return;
+  }
+  readFile(htmlPath, "utf-8").then(cache).catch(() => {});
 }
 
 const DEFAULT_PLAN_TIMEOUT_SECONDS = 345_600; // 96 hours
@@ -177,10 +190,6 @@ function hasEmbeddedRuntime(): boolean {
   return typeof getBunRuntime()?.serve === "function";
 }
 
-function shouldUseEmbeddedRuntime(runtime: RuntimeMode): boolean {
-  return runtime !== "cli" && hasEmbeddedRuntime();
-}
-
 function getEmbeddedRuntimeError(): string {
   return "runtime \"embedded\" requires a Bun-hosted OpenCode plugin runtime. Use runtime \"auto\" or \"cli\" with this OpenCode host.";
 }
@@ -240,11 +249,12 @@ async function runPlanReview(input: {
   cwd?: string;
   bridge: OpenCodeBridgeContext;
 }): Promise<OpenCodePlanReviewResult> {
-  if (input.runtime === "embedded" && !hasEmbeddedRuntime()) {
+  const runtimeMode = resolveRuntimeExecutionMode(input.runtime, hasEmbeddedRuntime());
+  if (runtimeMode === "embedded-unavailable") {
     throw new Error(getEmbeddedRuntimeError());
   }
 
-  if (shouldUseEmbeddedRuntime(input.runtime)) {
+  if (runtimeMode === "embedded") {
     try {
       const embedded = await importEmbeddedRuntime();
       return await embedded.runEmbeddedPlanReview({
@@ -281,8 +291,8 @@ const PlannotatorPlugin: Plugin = async (ctx, rawOptions?: PlannotatorOpenCodeOp
   const workflowOptions = normalizeWorkflowOptions(rawOptions);
 
   // Preload HTML in background — populates the sync cache before first use
-  readFile(resolveBundledHtmlPath("plannotator.html"), "utf-8").then(h => { _planHtml = h; }).catch(() => {});
-  readFile(resolveBundledHtmlPath("review-editor.html"), "utf-8").then(h => { _reviewHtml = h; }).catch(() => {});
+  preloadBundledHtml("plannotator.html", h => { _planHtml = h; });
+  preloadBundledHtml("review-editor.html", h => { _reviewHtml = h; });
 
   let cachedAgents: any[] | null = null;
 
@@ -507,7 +517,12 @@ Do NOT proceed with implementation until your plan is approved.`);
         properties: { sessionID: input.sessionID, arguments: input.arguments },
       };
 
-      if (shouldUseEmbeddedRuntime(workflowOptions.runtime)) {
+      const runtimeMode = resolveRuntimeExecutionMode(
+        workflowOptions.runtime,
+        hasEmbeddedRuntime(),
+      );
+
+      if (runtimeMode === "embedded") {
         try {
           const embedded = await importEmbeddedRuntime();
           const deps = {
@@ -547,7 +562,7 @@ Do NOT proceed with implementation until your plan is approved.`);
         }
       }
 
-      if (workflowOptions.runtime === "embedded" && !hasEmbeddedRuntime()) {
+      if (runtimeMode === "embedded-unavailable") {
         try {
           void ctx.client.app.log({
             level: "error",
@@ -635,6 +650,10 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
           writeFileSync(backingPath, planContent, "utf-8");
 
           const timeoutSeconds = getPlanTimeoutSeconds();
+          const runtimeMode = resolveRuntimeExecutionMode(
+            workflowOptions.runtime,
+            hasEmbeddedRuntime(),
+          );
           let result: OpenCodePlanReviewResult;
           try {
             result = await runPlanReview({
@@ -644,7 +663,7 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
               sharingEnabled: await getSharingEnabled(),
               shareBaseUrl: getShareBaseUrl(),
               pasteApiUrl: getPasteApiUrl(),
-              htmlContent: getPlanHtml(),
+              htmlContent: runtimeMode === "embedded" ? getPlanHtml() : "",
               timeoutSeconds,
               cwd: ctx.directory,
               bridge: await getBridgeContext(),

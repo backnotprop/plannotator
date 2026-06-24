@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   applyWorkflowConfig,
   normalizeWorkflowOptions,
+  resolveRuntimeExecutionMode,
   shouldApplyToolDefinitionRewrites,
   shouldInjectFullPlanningPrompt,
   shouldInjectGenericPlanReminder,
@@ -48,6 +49,23 @@ describe("normalizeWorkflowOptions", () => {
     });
 
     expect(options.planningAgents).toEqual(["plan"]);
+  });
+});
+
+describe("resolveRuntimeExecutionMode", () => {
+  test("runtime cli always selects the CLI bridge", () => {
+    expect(resolveRuntimeExecutionMode("cli", true)).toBe("cli");
+    expect(resolveRuntimeExecutionMode("cli", false)).toBe("cli");
+  });
+
+  test("runtime auto uses embedded only when available", () => {
+    expect(resolveRuntimeExecutionMode("auto", true)).toBe("embedded");
+    expect(resolveRuntimeExecutionMode("auto", false)).toBe("cli");
+  });
+
+  test("runtime embedded stays strict when unavailable", () => {
+    expect(resolveRuntimeExecutionMode("embedded", true)).toBe("embedded");
+    expect(resolveRuntimeExecutionMode("embedded", false)).toBe("embedded-unavailable");
   });
 });
 
