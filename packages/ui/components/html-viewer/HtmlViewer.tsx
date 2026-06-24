@@ -83,6 +83,12 @@ export interface HtmlViewerProps {
   /** Hide the floating doc-level controls (attachments + global comment) in
    *  full-viewport mode, so the user can read the page unobstructed. */
   hideControls?: boolean;
+  /** A version diff (vs the previous version) is available to toggle. */
+  diffAvailable?: boolean;
+  /** Whether the diff-highlighted HTML is currently shown. */
+  diffActive?: boolean;
+  /** Toggle the diff-highlighted view on/off. */
+  onToggleDiff?: () => void;
   onAskAI?: CommentAskAIHandler;
 }
 
@@ -102,6 +108,9 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       maxWidth,
       fullViewport,
       hideControls,
+      diffAvailable,
+      diffActive,
+      onToggleDiff,
       onAskAI,
     },
     ref,
@@ -124,7 +133,11 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       themeCSS += "}\n";
       if (isLightTheme()) themeCSS += ":root { color-scheme: light; }\n:root.light, :root { }\n";
 
-      const injection = `<style>${themeCSS}${ANNOTATION_HIGHLIGHT_CSS}</style><script>${BRIDGE_SCRIPT}</script>`;
+      // Version-diff highlights: htmlDiff wraps changed text in <ins>/<del>.
+      const diffCSS =
+        "ins{background:#e6ffec;color:#0a7d33;text-decoration:none;border-radius:2px;box-shadow:0 0 0 1px #abf2bc inset}" +
+        "del{background:#ffebe9;color:#b31d28;text-decoration:line-through;border-radius:2px;box-shadow:0 0 0 1px #ffc1bc inset}";
+      const injection = `<style>${themeCSS}${ANNOTATION_HIGHLIGHT_CSS}${diffCSS}</style><script>${BRIDGE_SCRIPT}</script>`;
       const headClose = rawHtml.indexOf("</head>");
       if (headClose !== -1) {
         return rawHtml.slice(0, headClose) + injection + rawHtml.slice(headClose);
@@ -221,6 +234,18 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     // edge-to-edge HTML keeps these affordances rather than dropping them.
     const actionButtons = (
       <>
+        {diffAvailable && onToggleDiff && (
+          <button
+            onClick={onToggleDiff}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer ${diffActive ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted"}`}
+            title={diffActive ? "Hide changes vs previous version" : "Show changes vs previous version"}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-9L21 3m0 0l-4.5 4.5M21 3H7.5" />
+            </svg>
+            <span>{diffActive ? "Hide changes" : "Show changes"}</span>
+          </button>
+        )}
         {onAddGlobalAttachment && onRemoveGlobalAttachment && (
           <AttachmentsButton
             images={globalAttachments}

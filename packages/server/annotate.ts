@@ -20,6 +20,7 @@ import { handleFileBrowserFilesStream } from "./reference-watch";
 import { resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash, deleteDraft } from "./draft";
 import { saveToHistory, getPlanVersion, getVersionCount, listVersions } from "@plannotator/shared/storage";
+import { htmlDiff } from "@plannotator/shared/html-diff";
 import { disabledSourceSave, type SourceSaveRequest } from "@plannotator/shared/source-save";
 import { getAnnotateReferenceRootPaths } from "@plannotator/shared/annotate-reference-roots-node";
 import {
@@ -370,6 +371,13 @@ export async function startAnnotateServer(
           // API: Get plan content (reuse /api/plan so the plan editor UI works)
           if (url.pathname === "/api/plan" && req.method === "GET") {
             const displayRawHtml = renderHtml && rawHtml ? htmlAssets.rewriteHtml(rawHtml, filePath) : undefined;
+            // For HTML, render the version diff as the real page with inline
+            // <ins>/<del> highlights (tag-aware htmlDiff), asset-rewritten the
+            // same way as the live page so it renders identically.
+            const diffHtml =
+              renderHtml && rawHtml && annotateHistory?.previousPlan
+                ? htmlAssets.rewriteHtml(htmlDiff(annotateHistory.previousPlan, rawHtml), filePath)
+                : undefined;
             const primarySource = getPrimarySource();
             return Response.json({
               plan: primarySource.plan,
@@ -382,6 +390,7 @@ export async function startAnnotateServer(
               gate,
               renderAs: displayRawHtml ? 'html' as const : 'markdown' as const,
               ...(displayRawHtml ? { rawHtml: displayRawHtml } : {}),
+              ...(diffHtml ? { diffHtml } : {}),
               convertHtml,
               ...(annotateHistory
                 ? {
