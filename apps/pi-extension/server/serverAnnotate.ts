@@ -4,6 +4,8 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 
 import { contentHash, deleteDraft } from "../generated/draft.js";
+import { saveToHistory, getPlanVersion, getVersionCount, listVersions } from "../generated/storage.js";
+import { htmlDiff } from "../generated/html-diff.js";
 import { saveConfig, detectGitUser, getServerConfig, loadConfig, resolveSharingEnabled } from "../generated/config.js";
 import { disabledSourceSave, type SourceSaveRequest } from "../generated/source-save.js";
 import { getAnnotateReferenceRootPaths } from "../generated/annotate-reference-roots-node.js";
@@ -175,6 +177,8 @@ export async function startAnnotateServer(options: {
 	renderHtml?: boolean;
 	convertHtml?: boolean;
 	agentCwd?: string;
+	/** Project name for keying per-file version history (powers the annotate version diff). */
+	project?: string;
 }): Promise<AnnotateServerResult> {
 	// Side-channel pre-warm so /api/doc/exists POSTs land on warm cache.
 	void warmFileListCache(process.cwd(), "code");
@@ -211,6 +215,52 @@ export async function startAnnotateServer(options: {
 			? `folder:${resolvePath(options.folderPath)}`
 			: options.renderHtml && options.rawHtml ? options.rawHtml : options.markdown;
 	const draftKey = contentHash(draftSource);
+
+	// Per-file version history → powers the native version diff in annotate mode.
+	// Unlike the plan flow (slug = first-heading + date), annotate keys history by
+	// file path so re-opening the same file groups its versions across edits even
+	// when headings change. Diff content is the markdown, or the raw HTML source
+	// when rendering HTML. Only single local files (not URLs/folders/messages).
+	const annotateProjectName = options.project ?? "_unknown";
+	let annotateHistory:
+		| {
+				slug: string;
+				diffCurrent: string;
+				previousPlan: string | null;
+				versionInfo: { version: number; totalVersions: number; project: string };
+		  }
+		| null = null;
+	{
+		const historyContent = options.renderHtml && options.rawHtml ? options.rawHtml : options.markdown;
+		const eligible =
+			(options.mode || "annotate") === "annotate" &&
+			!/^https?:\/\//i.test(options.filePath) &&
+			historyContent.length > 0;
+		if (eligible) {
+			const base =
+				(options.filePath.split(/[\\/]/).pop() || "document")
+					.toLowerCase()
+					.replace(/[^a-z0-9]+/g, "-")
+					.replace(/^-+|-+$/g, "")
+					.slice(0, 60) || "document";
+			const slug = `annotate-${base}-${contentHash(resolvePath(options.filePath)).slice(0, 8)}`;
+			const saved = saveToHistory(annotateProjectName, slug, historyContent);
+			const previousPlan =
+				saved.version > 1
+					? getPlanVersion(annotateProjectName, slug, saved.version - 1)
+					: null;
+			annotateHistory = {
+				slug,
+				diffCurrent: historyContent,
+				previousPlan,
+				versionInfo: {
+					version: saved.version,
+					totalVersions: getVersionCount(annotateProjectName, slug),
+					project: annotateProjectName,
+				},
+			};
+		}
+	}
 
 	// Detect repo info (cached for this session)
 	const repoInfo = getRepoInfo();
@@ -341,6 +391,13 @@ export async function startAnnotateServer(options: {
 			const displayRawHtml = options.renderHtml && options.rawHtml
 				? htmlAssets.rewriteHtml(options.rawHtml, options.filePath)
 				: undefined;
+			// For HTML, render the version diff as the real page with inline
+			// <ins>/<del> highlights (tag-aware htmlDiff), asset-rewritten the
+			// same way as the live page so it renders identically.
+			const diffHtml =
+				options.renderHtml && options.rawHtml && annotateHistory?.previousPlan
+					? htmlAssets.rewriteHtml(htmlDiff(annotateHistory.previousPlan, options.rawHtml), options.filePath)
+					: undefined;
 			const primarySource = getPrimarySource();
 			json(res, {
 				plan: primarySource.plan,
@@ -353,7 +410,15 @@ export async function startAnnotateServer(options: {
 				gate: options.gate ?? false,
 				renderAs: displayRawHtml ? 'html' : 'markdown',
 				...(displayRawHtml ? { rawHtml: displayRawHtml } : {}),
+				...(diffHtml ? { diffHtml } : {}),
 				convertHtml: options.convertHtml ?? false,
+				...(annotateHistory
+					? {
+							previousPlan: annotateHistory.previousPlan,
+							versionInfo: annotateHistory.versionInfo,
+							diffCurrent: annotateHistory.diffCurrent,
+					  }
+					: {}),
 				sharingEnabled,
 				shareBaseUrl,
 				pasteApiUrl,
@@ -362,6 +427,35 @@ export async function startAnnotateServer(options: {
 				serverConfig: getServerConfig(gitUser),
 				agentTerminal: agentTerminalCapability,
 				...(options.recentMessages ? { recentMessages: options.recentMessages } : {}),
+			});
+		} else if (url.pathname === "/api/plan/version" && req.method === "GET") {
+			// fetch a specific version of the annotated file (version diff base picker)
+			if (!annotateHistory) {
+				json(res, { error: "No version history" }, 404);
+				return;
+			}
+			const vParam = url.searchParams.get("v");
+			const v = vParam ? parseInt(vParam, 10) : NaN;
+			if (isNaN(v) || v < 1) {
+				json(res, { error: "Invalid version number" }, 400);
+				return;
+			}
+			const content = getPlanVersion(annotateProjectName, annotateHistory.slug, v);
+			if (content === null) {
+				json(res, { error: "Version not found" }, 404);
+				return;
+			}
+			json(res, { plan: content, version: v });
+		} else if (url.pathname === "/api/plan/versions" && req.method === "GET") {
+			// list all stored versions of the annotated file (Version Browser)
+			if (!annotateHistory) {
+				json(res, { project: annotateProjectName, slug: null, versions: [] });
+				return;
+			}
+			json(res, {
+				project: annotateProjectName,
+				slug: annotateHistory.slug,
+				versions: listVersions(annotateProjectName, annotateHistory.slug),
 			});
 		} else if (url.pathname === "/api/share-html" && req.method === "GET") {
 			handleShareHtml(res, url);

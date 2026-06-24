@@ -23,6 +23,7 @@ import {
 	unstageFile,
 } from "./server.js";
 import { openBrowser, isRemoteSession } from "./server/network.js";
+import { detectProjectName } from "./server/project.js";
 import { parsePRUrl, checkPRAuth, fetchPR } from "./server/pr.js";
 import {
 	getMRLabel,
@@ -560,6 +561,7 @@ export async function startMarkdownAnnotationSession(
 		shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
 		pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
 		agentCwd: ctx.cwd,
+		project: detectProjectName(),
 	});
 
 	return startBrowserDecisionSession(server, ctx, server.waitForDecision);
