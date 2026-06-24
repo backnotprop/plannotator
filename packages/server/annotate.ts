@@ -19,6 +19,7 @@ import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVault
 import { handleFileBrowserFilesStream } from "./reference-watch";
 import { resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash, deleteDraft } from "./draft";
+import { saveToHistory, getPlanVersion, getVersionCount, listVersions } from "@plannotator/shared/storage";
 import { disabledSourceSave, type SourceSaveRequest } from "@plannotator/shared/source-save";
 import { getAnnotateReferenceRootPaths } from "@plannotator/shared/annotate-reference-roots-node";
 import {
@@ -91,6 +92,8 @@ export interface AnnotateServerOptions {
   convertHtml?: boolean;
   /** CWD where the optional annotate agent terminal should launch. Defaults to process.cwd(). */
   agentCwd?: string;
+  /** Project name for keying per-file version history (powers the annotate version diff). */
+  project?: string;
   /** Called when server starts with the URL, remote status, and port */
   onReady?: (url: string, isRemote: boolean, port: number) => void;
 }
@@ -152,6 +155,7 @@ export async function startAnnotateServer(
     renderHtml = false,
     convertHtml = false,
     agentCwd,
+    project,
     onReady,
   } = options;
 
@@ -159,6 +163,52 @@ export async function startAnnotateServer(
   const configuredPort = getServerPort();
   const wslFlag = await isWSL();
   const gitUser = detectGitUser();
+
+  // Per-file version history → powers the native version diff in annotate mode.
+  // Unlike the plan flow (slug = first-heading + date), annotate keys history by
+  // file path so re-opening the same file groups its versions across edits even
+  // when headings change. Diff content is the markdown, or the raw HTML source
+  // when rendering HTML. Only single local files (not URLs/folders/messages).
+  const annotateProjectName = project ?? "_unknown";
+  let annotateHistory:
+    | {
+        slug: string;
+        diffCurrent: string;
+        previousPlan: string | null;
+        versionInfo: { version: number; totalVersions: number; project: string };
+      }
+    | null = null;
+  {
+    const historyContent = renderHtml && rawHtml ? rawHtml : markdown;
+    const eligible =
+      mode === "annotate" &&
+      !/^https?:\/\//i.test(filePath) &&
+      historyContent.length > 0;
+    if (eligible) {
+      const base =
+        (filePath.split(/[\\/]/).pop() || "document")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 60) || "document";
+      const slug = `annotate-${base}-${contentHash(resolvePath(filePath)).slice(0, 8)}`;
+      const saved = saveToHistory(annotateProjectName, slug, historyContent);
+      const previousPlan =
+        saved.version > 1
+          ? getPlanVersion(annotateProjectName, slug, saved.version - 1)
+          : null;
+      annotateHistory = {
+        slug,
+        diffCurrent: historyContent,
+        previousPlan,
+        versionInfo: {
+          version: saved.version,
+          totalVersions: getVersionCount(annotateProjectName, slug),
+          project: annotateProjectName,
+        },
+      };
+    }
+  }
   const draftSource =
     mode === "annotate-folder" && folderPath
       ? `folder:${resolvePath(folderPath)}`
@@ -333,6 +383,13 @@ export async function startAnnotateServer(
               renderAs: displayRawHtml ? 'html' as const : 'markdown' as const,
               ...(displayRawHtml ? { rawHtml: displayRawHtml } : {}),
               convertHtml,
+              ...(annotateHistory
+                ? {
+                    previousPlan: annotateHistory.previousPlan,
+                    versionInfo: annotateHistory.versionInfo,
+                    diffCurrent: annotateHistory.diffCurrent,
+                  }
+                : {}),
               sharingEnabled,
               shareBaseUrl,
               pasteApiUrl,
@@ -342,6 +399,35 @@ export async function startAnnotateServer(
               serverConfig: getServerConfig(gitUser),
               agentTerminal: agentTerminal.capability,
               ...(recentMessages ? { recentMessages } : {}),
+            });
+          }
+
+          // API: fetch a specific version of the annotated file (version diff base picker)
+          if (url.pathname === "/api/plan/version" && req.method === "GET") {
+            if (!annotateHistory) {
+              return Response.json({ error: "No version history" }, { status: 404 });
+            }
+            const vParam = url.searchParams.get("v");
+            const v = vParam ? parseInt(vParam, 10) : NaN;
+            if (isNaN(v) || v < 1) {
+              return new Response("Invalid version number", { status: 400 });
+            }
+            const content = getPlanVersion(annotateProjectName, annotateHistory.slug, v);
+            if (content === null) {
+              return Response.json({ error: "Version not found" }, { status: 404 });
+            }
+            return Response.json({ plan: content, version: v });
+          }
+
+          // API: list all stored versions of the annotated file (Version Browser)
+          if (url.pathname === "/api/plan/versions" && req.method === "GET") {
+            if (!annotateHistory) {
+              return Response.json({ project: annotateProjectName, slug: null, versions: [] });
+            }
+            return Response.json({
+              project: annotateProjectName,
+              slug: annotateHistory.slug,
+              versions: listVersions(annotateProjectName, annotateHistory.slug),
             });
           }
 

@@ -1026,6 +1026,7 @@ if (args[0] === "sessions") {
     renderHtml: !!rawHtml,
     convertHtml: renderMarkdownFlag,
     agentCwd: projectRoot,
+    project: annotateProject,
     htmlContent: planHtmlContent,
     onReady: async (url, isRemote, port) => {
       handleAnnotateServerReady(url, isRemote, port);
