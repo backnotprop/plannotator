@@ -54,7 +54,7 @@ function getHtml(url: string, origin: string): string {
   </style>
 </head>
 <body>
-  <iframe id="pn-frame" src="${url}"></iframe>
+  <iframe id="pn-frame" src="${url}" allow="clipboard-read; clipboard-write"></iframe>
   ${themeScript}
   <script>
     (function() {
