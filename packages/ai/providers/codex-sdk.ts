@@ -12,6 +12,8 @@
 
 import { buildSystemPrompt, buildEffectivePrompt } from "../context.ts";
 import { BaseSession } from "../base-session.ts";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type {
   AIProvider,
   AIProviderCapabilities,
@@ -27,6 +29,30 @@ import type {
 
 const PROVIDER_NAME = "codex-sdk";
 const DEFAULT_MODEL = "gpt-5.4";
+
+type GitWorkTreeProbe = (
+  command: string,
+  args: string[],
+  options: { encoding: "utf8" },
+) => Promise<{ stdout?: string | Buffer }>;
+
+const execFileAsync = promisify(execFile);
+
+export async function shouldSkipGitRepoCheck(
+  cwd: string,
+  probe: GitWorkTreeProbe = execFileAsync,
+): Promise<boolean> {
+  try {
+    const result = probe(
+      "git",
+      ["-C", cwd, "rev-parse", "--is-inside-work-tree"],
+      { encoding: "utf8" },
+    );
+    return String((await result).stdout ?? "").trim() !== "true";
+  } catch {
+    return true;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -57,10 +83,13 @@ export class CodexSDKProvider implements AIProvider {
   }
 
   async createSession(options: CreateSessionOptions): Promise<AISession> {
+    const cwd = options.cwd ?? this.config.cwd ?? process.cwd();
+    const skipGitRepoCheck = await shouldSkipGitRepoCheck(cwd);
     return new CodexSDKSession({
       ...this.baseConfig(options),
       systemPrompt: buildSystemPrompt(options.context),
-      cwd: options.cwd ?? this.config.cwd ?? process.cwd(),
+      cwd,
+      skipGitRepoCheck,
       parentSessionId: null,
     });
   }
@@ -73,10 +102,13 @@ export class CodexSDKProvider implements AIProvider {
   }
 
   async resumeSession(sessionId: string): Promise<AISession> {
+    const cwd = this.config.cwd ?? process.cwd();
+    const skipGitRepoCheck = await shouldSkipGitRepoCheck(cwd);
     return new CodexSDKSession({
       ...this.baseConfig(),
       systemPrompt: null,
-      cwd: this.config.cwd ?? process.cwd(),
+      cwd,
+      skipGitRepoCheck,
       parentSessionId: null,
       resumeThreadId: sessionId,
     });
@@ -123,6 +155,7 @@ interface SessionConfig {
   maxTurns: number;
   sandboxMode: "read-only" | "workspace-write" | "danger-full-access";
   cwd: string;
+  skipGitRepoCheck: boolean;
   parentSessionId: string | null;
   resumeThreadId?: string;
   codexExecutablePath?: string;
@@ -173,6 +206,7 @@ class CodexSDKSession extends BaseSession {
           this._thread = this._codexInstance.resumeThread(this.config.resumeThreadId, {
             model: this.config.model,
             workingDirectory: this.config.cwd,
+            skipGitRepoCheck: this.config.skipGitRepoCheck,
             sandboxMode: this.config.sandboxMode,
             ...(this.config.reasoningEffort && { modelReasoningEffort: this.config.reasoningEffort }),
           });
@@ -180,6 +214,7 @@ class CodexSDKSession extends BaseSession {
           this._thread = this._codexInstance.startThread({
             model: this.config.model,
             workingDirectory: this.config.cwd,
+            skipGitRepoCheck: this.config.skipGitRepoCheck,
             sandboxMode: this.config.sandboxMode,
             ...(this.config.reasoningEffort && { modelReasoningEffort: this.config.reasoningEffort }),
           });

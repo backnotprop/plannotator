@@ -878,7 +878,40 @@ describe("resolveSDKModel", () => {
 // Codex SDK event mapping
 // ---------------------------------------------------------------------------
 
-import { mapCodexEvent, mapCodexItem } from "./providers/codex-sdk.ts";
+import {
+  mapCodexEvent,
+  mapCodexItem,
+  shouldSkipGitRepoCheck,
+} from "./providers/codex-sdk.ts";
+
+describe("shouldSkipGitRepoCheck", () => {
+  test("keeps the Codex git repo check inside a worktree", async () => {
+    const probe = async (command: string, args: string[], options: { encoding: "utf8" }) => {
+      expect(command).toBe("git");
+      expect(args).toEqual(["-C", "/repo", "rev-parse", "--is-inside-work-tree"]);
+      expect(options).toEqual({ encoding: "utf8" });
+      return { stdout: "true\n" };
+    };
+
+    expect(await shouldSkipGitRepoCheck("/repo", probe)).toBe(false);
+  });
+
+  test("skips the Codex git repo check for standalone document sessions", async () => {
+    const probe = async () => {
+      throw new Error("not a git repo");
+    };
+
+    expect(await shouldSkipGitRepoCheck("/tmp/plain-session", probe)).toBe(true);
+  });
+
+  test("skips the Codex git repo check when the probe cannot run", async () => {
+    const probe = async () => {
+      throw new Error("git unavailable");
+    };
+
+    expect(await shouldSkipGitRepoCheck("/tmp/plain-session", probe)).toBe(true);
+  });
+});
 
 describe("mapCodexEvent", () => {
   function offsets() {
