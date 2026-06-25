@@ -136,6 +136,7 @@ import {
   isInteractiveNoArgInvocation,
   isTopLevelHelpInvocation,
   isVersionInvocation,
+  shouldAliasToAnnotate,
 } from "./cli";
 import path from "path";
 import { tmpdir } from "os";
@@ -246,6 +247,34 @@ async function loadGoalSetupBundle(
   return normalizeGoalSetupBundle(JSON.parse(raw), stage);
 }
 
+const ANNOTATE_ALIAS_SUPPORTED_FILE_REGEX = /\.(mdx?|txt|html?)$/i;
+const ANNOTATE_ALIAS_MARKDOWN_FILE_REGEX = /\.(mdx?|txt)$/i;
+
+function isAnnotatableExistingPath(candidate: string, projectRoot: string): boolean {
+  const resolvedPath = resolveUserPath(candidate, projectRoot);
+  try {
+    const stat = statSync(resolvedPath);
+    if (stat.isDirectory()) return true;
+    if (stat.isFile() && ANNOTATE_ALIAS_SUPPORTED_FILE_REGEX.test(resolvedPath)) return true;
+  } catch {
+    // Fall through to markdown's richer resolver for bare filenames.
+  }
+
+  if (!ANNOTATE_ALIAS_MARKDOWN_FILE_REGEX.test(candidate)) return false;
+  return resolveMarkdownFile(candidate, projectRoot).kind === "found";
+}
+
+function isAnnotateAliasTarget(rawTarget: string): boolean {
+  const target = stripAtPrefix(rawTarget);
+  if (/^https?:\/\//i.test(target)) return true;
+  if (/[\\/]$/.test(target)) return true;
+
+  const projectRoot = process.env.PLANNOTATOR_CWD || process.cwd();
+  return resolveAtReference(rawTarget, (candidate) =>
+    isAnnotatableExistingPath(candidate, projectRoot)
+  ) !== null;
+}
+
 if (isVersionInvocation(args)) {
   console.log(formatVersion());
   process.exit(0);
@@ -270,6 +299,10 @@ if (args[0] === "install-runtime") {
 if (isInteractiveNoArgInvocation(args, process.stdin.isTTY)) {
   console.log(formatInteractiveNoArgClarification());
   process.exit(0);
+}
+
+if (shouldAliasToAnnotate(args, isAnnotateAliasTarget)) {
+  args.unshift("annotate");
 }
 
 // Ensure session cleanup on exit

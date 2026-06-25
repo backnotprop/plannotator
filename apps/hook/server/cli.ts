@@ -19,6 +19,44 @@ export function isInteractiveNoArgInvocation(
   return args.length === 0 && stdinIsTTY === true;
 }
 
+const RESERVED_TOP_LEVEL_COMMANDS = new Set([
+  "annotate",
+  "annotate-last",
+  "archive",
+  "copilot-last",
+  "copilot-plan",
+  "improve-context",
+  "install-runtime",
+  "last",
+  "opencode-annotate-last",
+  "opencode-plan",
+  "opencode-review",
+  "review",
+  "sessions",
+  "setup-goal",
+]);
+
+export function isReservedTopLevelCommand(command: string): boolean {
+  return (
+    RESERVED_TOP_LEVEL_COMMANDS.has(command) ||
+    command.startsWith("opencode-") ||
+    command.startsWith("copilot-")
+  );
+}
+
+export function shouldAliasToAnnotate(
+  args: string[],
+  isAnnotatableTarget: (arg: string) => boolean,
+): boolean {
+  const firstNonFlagIndex = args.findIndex((arg) => !arg.startsWith("-"));
+  if (firstNonFlagIndex === -1 || firstNonFlagIndex !== 0) return false;
+
+  const target = args[firstNonFlagIndex];
+  if (!target || isReservedTopLevelCommand(target)) return false;
+
+  return isAnnotatableTarget(target);
+}
+
 export function formatTopLevelHelp(): string {
   return [
     "Usage:",

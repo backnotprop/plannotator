@@ -4,8 +4,10 @@ import {
   formatTopLevelHelp,
   formatVersion,
   isInteractiveNoArgInvocation,
+  isReservedTopLevelCommand,
   isTopLevelHelpInvocation,
   isVersionInvocation,
+  shouldAliasToAnnotate,
 } from "./cli";
 
 describe("CLI top-level help", () => {
@@ -61,5 +63,59 @@ describe("interactive no-arg invocation", () => {
     expect(output).toContain("plannotator setup-goal interview bundle.json --json");
     expect(output).toContain("plannotator sessions");
     expect(output).toContain("Run 'plannotator --help' for top-level usage.");
+  });
+});
+
+describe("annotate target shorthand", () => {
+  const annotatableTargets = new Set([
+    "./",
+    "docs/",
+    "README.md",
+    "page.html",
+    "https://example.com",
+  ]);
+  const isAnnotatableTarget = (arg: string) => annotatableTargets.has(arg);
+  const applyAlias = (args: string[]) =>
+    shouldAliasToAnnotate(args, isAnnotatableTarget) ? ["annotate", ...args] : args;
+
+  test("routes bare annotatable targets to annotate", () => {
+    expect(applyAlias(["./"])).toEqual(["annotate", "./"]);
+    expect(applyAlias(["docs/"])).toEqual(["annotate", "docs/"]);
+    expect(applyAlias(["README.md"])).toEqual(["annotate", "README.md"]);
+    expect(applyAlias(["https://example.com"])).toEqual(["annotate", "https://example.com"]);
+  });
+
+  test("preserves trailing flags when aliasing", () => {
+    expect(applyAlias(["page.html", "--markdown"])).toEqual([
+      "annotate",
+      "page.html",
+      "--markdown",
+    ]);
+  });
+
+  test("keeps existing commands and bare invocation unchanged", () => {
+    expect(shouldAliasToAnnotate([], isAnnotatableTarget)).toBe(false);
+    expect(shouldAliasToAnnotate(["review"], () => true)).toBe(false);
+    expect(shouldAliasToAnnotate(["annotate"], () => true)).toBe(false);
+    expect(shouldAliasToAnnotate(["annotate-last"], () => true)).toBe(false);
+    expect(shouldAliasToAnnotate(["archive"], () => true)).toBe(false);
+    expect(shouldAliasToAnnotate(["sessions"], () => true)).toBe(false);
+    expect(shouldAliasToAnnotate(["setup-goal"], () => true)).toBe(false);
+    expect(shouldAliasToAnnotate(["improve-context"], () => true)).toBe(false);
+    expect(shouldAliasToAnnotate(["install-runtime"], () => true)).toBe(false);
+  });
+
+  test("keeps internal bridge command families unchanged", () => {
+    expect(isReservedTopLevelCommand("opencode-plan")).toBe(true);
+    expect(isReservedTopLevelCommand("opencode-anything")).toBe(true);
+    expect(isReservedTopLevelCommand("copilot-plan")).toBe(true);
+    expect(isReservedTopLevelCommand("copilot-anything")).toBe(true);
+    expect(shouldAliasToAnnotate(["opencode-plan"], () => true)).toBe(false);
+    expect(shouldAliasToAnnotate(["copilot-plan"], () => true)).toBe(false);
+  });
+
+  test("does not alias typo commands or targets hidden behind unknown flags", () => {
+    expect(shouldAliasToAnnotate(["revieew"], isAnnotatableTarget)).toBe(false);
+    expect(shouldAliasToAnnotate(["--unknown", "README.md"], isAnnotatableTarget)).toBe(false);
   });
 });
