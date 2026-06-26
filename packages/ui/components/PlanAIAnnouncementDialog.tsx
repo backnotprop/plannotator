@@ -5,10 +5,18 @@ import { AGENT_CONFIG, getAgentAIProviderTypes, getAgentName } from '@plannotato
 import { SparklesIcon } from './SparklesIcon';
 import { getProviderMeta } from './ProviderIcons';
 
+interface PlanAIAnnouncementProvider {
+  id: string;
+  name: string;
+}
+
 interface PlanAIAnnouncementDialogProps {
   isOpen: boolean;
   origin?: Origin | null;
   providerName?: string | null;
+  /** Actually-detected providers (installed + authenticated). Cards matching one of these are selectable. */
+  providers?: PlanAIAnnouncementProvider[];
+  onSelectProvider?: (providerId: string) => void;
   onOpenAI: () => void;
   onDismiss: () => void;
 }
@@ -27,6 +35,8 @@ export const PlanAIAnnouncementDialog: React.FC<PlanAIAnnouncementDialogProps> =
   isOpen,
   origin,
   providerName,
+  providers = [],
+  onSelectProvider,
   onOpenAI,
   onDismiss,
 }) => {
@@ -67,25 +77,55 @@ export const PlanAIAnnouncementDialog: React.FC<PlanAIAnnouncementDialogProps> =
                   const meta = getProviderMeta(providerType);
                   const Icon = meta.icon;
                   const isSelected = providerType === providerName;
-                  return (
-                    <div
-                      key={providerType}
-                      className={`flex min-h-16 items-center gap-2 rounded-lg border p-2.5 ${
-                        isSelected
-                          ? 'border-primary bg-primary/5'
-                          : 'border-border bg-muted/35'
-                      }`}
-                    >
+                  // A card is selectable only if the provider is actually detected on this machine.
+                  const detected = providers.find(p => p.name === providerType) ?? null;
+                  const isSelectable = Boolean(detected && onSelectProvider);
+
+                  const inner = (
+                    <>
                       <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-background/70 text-muted-foreground">
                         <Icon className="h-[18px] w-[18px]" />
                       </div>
                       <div className="min-w-0">
                         <div className="truncate text-sm font-medium">{meta.label}</div>
-                        {isSelected && (
+                        {isSelected ? (
                           <div className="text-[10px] uppercase tracking-wide text-primary">selected</div>
-                        )}
+                        ) : !detected ? (
+                          <div className="text-[10px] text-muted-foreground/60">not installed</div>
+                        ) : null}
                       </div>
-                    </div>
+                    </>
+                  );
+
+                  if (!isSelectable) {
+                    return (
+                      <div
+                        key={providerType}
+                        className={`flex min-h-16 items-center gap-2 rounded-lg border p-2.5 ${
+                          isSelected
+                            ? 'border-primary bg-primary/5'
+                            : 'border-border bg-muted/35 opacity-60'
+                        }`}
+                      >
+                        {inner}
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <button
+                      key={providerType}
+                      type="button"
+                      onClick={() => onSelectProvider?.(detected!.id)}
+                      aria-pressed={isSelected}
+                      className={`flex min-h-16 items-center gap-2 rounded-lg border p-2.5 text-left transition-colors ${
+                        isSelected
+                          ? 'border-primary bg-primary/5'
+                          : 'border-border bg-muted/35 hover:border-muted-foreground/30 hover:bg-muted/60'
+                      }`}
+                    >
+                      {inner}
+                    </button>
                   );
                 })}
               </div>

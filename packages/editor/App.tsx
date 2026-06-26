@@ -4655,6 +4655,8 @@ const App: React.FC = () => {
           isOpen={shouldShowPlanAIAnnouncement}
           origin={origin}
           providerName={selectedAIProvider?.name ?? null}
+          providers={aiProviders}
+          onSelectProvider={(providerId) => handleAIConfigChange({ providerId })}
           onOpenAI={handleOpenAIAnnouncement}
           onDismiss={dismissPlanAIAnnouncement}
         />
