@@ -3757,6 +3757,7 @@ const App: React.FC = () => {
           isAIChatOpen={isPanelOpen && rightSidebarTab === 'ai'}
           aiHasMessages={visibleAIMessages.length > 0}
           hasAnyAnnotations={hasAnyAnnotations || hasDirectEdits || hasSavedFileChanges}
+          annotationCount={feedbackAnnotationCount}
           linkedDocIsActive={linkedDocHook.isActive}
           callbackShareUrlReady={callbackConfig ? Boolean(shareUrl || shortShareUrl || (renderAs === 'html' && (shareHtml || rawHtml))) : true}
           canShareCurrentSession={canShareCurrentSession}
