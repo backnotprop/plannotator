@@ -17,12 +17,76 @@ const POLL_INTERVAL_MS = 500;
 const STREAM_URL = '/api/agents/jobs/stream';
 const JOBS_URL = '/api/agents/jobs';
 const CAPABILITIES_URL = '/api/agents/capabilities';
+const DEFAULT_LAUNCH_ERROR = 'Could not start agent job.';
+const AGENT_JOB_STATUSES = new Set(['starting', 'running', 'done', 'failed', 'killed']);
+
+export type AgentLaunchParams = {
+  provider?: string;
+  command?: string[];
+  label?: string;
+  engine?: string;
+  model?: string;
+  reasoningEffort?: string;
+  effort?: string;
+  fastMode?: boolean;
+  reviewProfileId?: string;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function isAgentJobInfo(value: unknown): value is AgentJobInfo {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === 'string' &&
+    typeof value.source === 'string' &&
+    typeof value.provider === 'string' &&
+    typeof value.label === 'string' &&
+    typeof value.status === 'string' &&
+    AGENT_JOB_STATUSES.has(value.status) &&
+    typeof value.startedAt === 'number' &&
+    isStringArray(value.command)
+  );
+}
+
+function upsertJob(jobs: AgentJobInfo[], job: AgentJobInfo): AgentJobInfo[] {
+  const existing = jobs.findIndex((current) => current.id === job.id);
+  if (existing === -1) return [...jobs, job];
+  const next = [...jobs];
+  next[existing] = job;
+  return next;
+}
+
+async function readResponseError(response: Response): Promise<string> {
+  try {
+    const body: unknown = await response.json();
+    if (body && typeof body === 'object' && 'error' in body) {
+      const error = (body as { readonly error?: unknown }).error;
+      if (typeof error === 'string' && error.trim()) return error;
+    }
+  } catch {
+    // Fall through to the generic launch message.
+  }
+  return DEFAULT_LAUNCH_ERROR;
+}
+
+function parseLaunchJob(body: unknown): AgentJobInfo | null {
+  if (!isRecord(body)) return null;
+  const job = body.job;
+  return isAgentJobInfo(job) ? job : null;
+}
 
 interface UseAgentJobsReturn {
   jobs: AgentJobInfo[];
   jobLogs: Map<string, string>;
   capabilities: AgentCapabilities | null;
-  launchJob: (params: { provider?: string; command?: string[]; label?: string; engine?: string; model?: string; reasoningEffort?: string; effort?: string; fastMode?: boolean; reviewProfileId?: string }) => Promise<AgentJobInfo | null>;
+  /** Rejects with a user-facing message when the server refuses the launch. */
+  launchJob: (params: AgentLaunchParams) => Promise<AgentJobInfo | null>;
   killJob: (id: string) => Promise<void>;
   killAll: () => Promise<void>;
 }
@@ -77,7 +141,7 @@ export function useAgentJobs(
             setJobs(parsed.jobs);
             break;
           case 'job:started':
-            setJobs((prev) => [...prev, parsed.job]);
+            setJobs((prev) => upsertJob(prev, parsed.job));
             break;
           case 'job:updated':
           case 'job:completed':
@@ -159,29 +223,20 @@ export function useAgentJobs(
   }, [enabled]);
 
   const launchJob = useCallback(
-    async (params: {
-      provider?: string;
-      command?: string[];
-      label?: string;
-      engine?: string;
-      model?: string;
-      reasoningEffort?: string;
-      effort?: string;
-      fastMode?: boolean;
-      reviewProfileId?: string;
-    }): Promise<AgentJobInfo | null> => {
-      try {
-        const res = await fetch(JOBS_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(params),
-        });
-        if (!res.ok) return null;
-        const data = await res.json();
-        return data.job ?? null;
-      } catch {
-        return null;
+    async (params: AgentLaunchParams): Promise<AgentJobInfo | null> => {
+      const res = await fetch(JOBS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+      if (!res.ok) {
+        throw new Error(await readResponseError(res));
       }
+
+      const data: unknown = await res.json();
+      const job = parseLaunchJob(data);
+      if (job) setJobs((prev) => upsertJob(prev, job));
+      return job;
     },
     [],
   );

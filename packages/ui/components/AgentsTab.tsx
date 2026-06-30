@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Bot,
   Play,
@@ -21,6 +21,9 @@ import { ReviewAgentsIcon } from './ReviewAgentsIcon';
 import { ClaudeIcon, CodexIcon, CursorIcon, OpenCodeIcon } from './icons/AgentIcons';
 import { useAgentSettings } from '../hooks/useAgentSettings';
 import type { AgentEngine, AgentMode, ReviewEngine } from '../hooks/useAgentSettings';
+import type { AgentLaunchParams } from '../hooks/useAgentJobs';
+
+export type { AgentLaunchParams } from '../hooks/useAgentJobs';
 
 // --- Agent option catalogs (shared across review + tour engine dropdowns) ---
 
@@ -119,10 +122,12 @@ const REVIEW_ENGINE_ICON: Record<ReviewEngine, React.FC<{ className?: string }>>
   opencode: OpenCodeIcon,
 };
 
+export type AgentLaunchResult = AgentJobInfo | null | void;
+
 interface AgentsTabProps {
   jobs: AgentJobInfo[];
   capabilities: AgentCapabilities | null;
-  onLaunch: (params: { provider?: string; command?: string[]; label?: string; engine?: string; model?: string; reasoningEffort?: string; effort?: string; fastMode?: boolean; reviewProfileId?: string }) => void;
+  onLaunch: (params: AgentLaunchParams) => AgentLaunchResult | Promise<AgentLaunchResult>;
   onKillJob: (id: string) => void;
   onKillAll: () => void;
   externalAnnotations: Array<{ source?: string }>;
@@ -532,6 +537,35 @@ function JobCard({
   );
 }
 
+function PendingLaunchCard({
+  label,
+  provider,
+  startedAt,
+}: {
+  label: string;
+  provider?: string;
+  startedAt: number;
+}) {
+  return (
+    <div className="rounded-lg bg-primary/5 px-2.5 py-2 ring-1 ring-primary/10">
+      <div className="flex items-start gap-2.5">
+        <StatusSquare status="starting" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <span className="truncate font-medium text-[12px] text-foreground">{label}</span>
+          </div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[9px] text-muted-foreground/50">
+            {provider && <span className="rounded bg-surface-1 px-1 py-px">{provider}</span>}
+            <span>requesting launch</span>
+            <span className="text-muted-foreground/30">·</span>
+            <span className="tabular-nums"><ElapsedTime startedAt={startedAt} /></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // --- Main component ---
 
 export const AgentsTab: React.FC<AgentsTabProps> = ({
@@ -544,6 +578,9 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
   onOpenJobDetail,
 }) => {
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
+  const [pendingLaunch, setPendingLaunch] = useState<{ label: string; provider?: string; startedAt: number } | null>(null);
+  const [launchError, setLaunchError] = useState<string | null>(null);
+  const launchingRef = useRef(false);
   const settings = useAgentSettings();
   const {
     selectedMode,
@@ -738,7 +775,7 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
     ? reviewProfileId
     : 'builtin:default';
 
-  type LaunchParams = Parameters<typeof onLaunch>[0];
+  type LaunchParams = AgentLaunchParams;
   const buildReviewLaunch = (engine: ReviewEngine): LaunchParams => {
     // Carry the chosen review only when it is a custom one. Absent → the server
     // resolves to the built-in default.
@@ -794,9 +831,28 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
       ? tourAvailable && engineAvailable(tourEngine)
       : false;
 
-  const handleLaunch = () => {
-    if (!canLaunch) return;
-    onLaunch(selectedMode === 'review' ? buildReviewLaunch(reviewEngine) : buildTourLaunch());
+  const handleLaunch = async () => {
+    if (!canLaunch || launchingRef.current) return;
+    const params = selectedMode === 'review' ? buildReviewLaunch(reviewEngine) : buildTourLaunch();
+    launchingRef.current = true;
+    setPendingLaunch({
+      label: params.label ?? 'Agent job',
+      ...(params.provider && { provider: params.provider }),
+      startedAt: Date.now(),
+    });
+    setLaunchError(null);
+
+    try {
+      const result = await onLaunch(params);
+      if (result === null) {
+        setLaunchError('Could not start agent job.');
+      }
+    } catch (error) {
+      setLaunchError(error instanceof Error ? error.message : 'Could not start agent job.');
+    } finally {
+      launchingRef.current = false;
+      setPendingLaunch(null);
+    }
   };
 
   const modeOptions = availableModes.map((mode) => ({ value: mode, label: MODE_LABEL[mode] }));
@@ -985,18 +1041,31 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
 
           <button
             onClick={handleLaunch}
-            disabled={!canLaunch}
+            disabled={!canLaunch || pendingLaunch !== null}
+            aria-busy={pendingLaunch !== null}
             className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary py-2 font-medium text-[12px] text-primary-foreground transition-colors hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Play size={11} />
-            Run
+            {pendingLaunch ? <Loader2 className="animate-spin" size={11} /> : <Play size={11} />}
+            {pendingLaunch ? 'Starting...' : 'Run'}
           </button>
+          {launchError && (
+            <p className="mt-2 text-[10px] leading-snug text-destructive/80">
+              {launchError}
+            </p>
+          )}
         </div>
       )}
 
       {/* Job list (scrolls; launch controls are pinned above) */}
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
-        {sortedJobs.length === 0 ? (
+        {pendingLaunch && (
+          <PendingLaunchCard
+            label={pendingLaunch.label}
+            provider={pendingLaunch.provider}
+            startedAt={pendingLaunch.startedAt}
+          />
+        )}
+        {sortedJobs.length === 0 && !pendingLaunch ? (
           <div className="flex flex-col items-center py-10 text-center">
             <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-surface-1/50">
               <ReviewAgentsIcon className="h-4 w-4 text-muted-foreground/40" />

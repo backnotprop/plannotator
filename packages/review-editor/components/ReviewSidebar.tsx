@@ -9,7 +9,7 @@ import { detectLanguage } from '../utils/detectLanguage';
 import { renderInlineMarkdown } from '../utils/renderInlineMarkdown';
 import { FileNameChip } from './FileNameChip';
 import { AITab } from './AITab';
-import { AgentsTab } from '@plannotator/ui/components/AgentsTab';
+import { AgentsTab, type AgentLaunchParams, type AgentLaunchResult } from '@plannotator/ui/components/AgentsTab';
 import type { PRMetadata } from '@plannotator/shared/pr-types';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import type { AIChatEntry } from '../hooks/useAIChat';
@@ -55,7 +55,7 @@ interface ReviewSidebarProps {
   // Agent props
   agentJobs?: AgentJobInfo[];
   agentCapabilities?: AgentCapabilities | null;
-  onAgentLaunch?: (params: { provider?: string; command?: string[]; label?: string; engine?: string; model?: string; reasoningEffort?: string; effort?: string; fastMode?: boolean; reviewProfileId?: string }) => void;
+  onAgentLaunch?: (params: AgentLaunchParams) => AgentLaunchResult | Promise<AgentLaunchResult>;
   onAgentKillJob?: (id: string) => void;
   onAgentKillAll?: () => void;
   externalAnnotations?: Array<{ source?: string }>;
@@ -411,7 +411,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
             <AgentsTab
               jobs={agentJobs ?? []}
               capabilities={agentCapabilities ?? null}
-              onLaunch={onAgentLaunch ?? (() => {})}
+              onLaunch={onAgentLaunch ?? (() => null)}
               onKillJob={onAgentKillJob ?? (() => {})}
               onKillAll={onAgentKillAll ?? (() => {})}
               externalAnnotations={externalAnnotations ?? []}
