@@ -7,6 +7,7 @@ import {
 } from '@plannotator/ui/components/ActionMenu';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { MenuVersionSection } from '@plannotator/ui/components/MenuVersionSection';
+import { ReviewAgentsIcon } from '@plannotator/ui/components/ReviewAgentsIcon';
 import { TextShimmer } from '@plannotator/ui/components/TextShimmer';
 import { modKey } from '@plannotator/ui/utils/platform';
 import type { UpdateInfo } from '@plannotator/ui/hooks/useUpdateCheck';
@@ -15,10 +16,12 @@ import type { Origin } from '@plannotator/shared/agents';
 interface ReviewHeaderMenuProps {
   onOpenSettings: () => void;
   onOpenExport: () => void;
+  onCopyAgentInstructions: () => void;
   onToggleFileTree: () => void;
   onToggleSidebar: () => void;
   isFileTreeOpen: boolean;
   isSidebarOpen: boolean;
+  agentInstructionsEnabled: boolean;
   appVersion: string;
   updateInfo?: UpdateInfo | null;
   origin?: Origin | null;
@@ -28,10 +31,12 @@ interface ReviewHeaderMenuProps {
 export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
   onOpenSettings,
   onOpenExport,
+  onCopyAgentInstructions,
   onToggleFileTree,
   onToggleSidebar,
   isFileTreeOpen,
   isSidebarOpen,
+  agentInstructionsEnabled,
   appVersion,
   updateInfo,
   origin,
@@ -118,6 +123,17 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
             icon={<ExportIcon />}
             label="Export"
           />
+          {agentInstructionsEnabled && (
+            <ActionMenuItem
+              onClick={() => {
+                closeMenu();
+                onCopyAgentInstructions();
+              }}
+              icon={<ReviewAgentsIcon />}
+              label="Agent Instructions"
+              subtitle="Copy agent instructions for external review comments"
+            />
+          )}
 
           <ActionMenuDivider />
 

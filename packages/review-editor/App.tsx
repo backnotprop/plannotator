@@ -41,6 +41,7 @@ import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations
 import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotations';
 import { useAgentJobs } from '@plannotator/ui/hooks/useAgentJobs';
 import { exportEditorAnnotations } from '@plannotator/ui/utils/parser';
+import { buildReviewAgentInstructions } from '@plannotator/ui/utils/reviewAgentInstructions';
 import { ResizeHandle } from '@plannotator/ui/components/ResizeHandle';
 import { FolderTree } from 'lucide-react';
 import { DockviewReact, type DockviewReadyEvent, type DockviewApi } from 'dockview-react';
@@ -431,6 +432,20 @@ const ReviewApp: React.FC = () => {
     if (restored.annotations.length > 0) setAnnotations(restored.annotations);
     if (restored.viewedFiles.length > 0) setViewedFiles(new Set(restored.viewedFiles));
   }, [restoreDraft]);
+
+  // Agent Instructions — copy a clipboard payload teaching external agents
+  // (Claude Code, Codex, etc.) how to POST review comments into this session
+  // via /api/external-annotations. The instruction body lives in a separate
+  // module (utils/reviewAgentInstructions.ts) so it's easy to edit independently.
+  const handleCopyAgentInstructions = useCallback(async () => {
+    const payload = buildReviewAgentInstructions(window.location.origin);
+    try {
+      await navigator.clipboard.writeText(payload);
+      toast.success('Agent instructions copied');
+    } catch {
+      toast.error('Failed to copy');
+    }
+  }, []);
 
   // AI Chat
   const [aiAvailable, setAiAvailable] = useState(false);
@@ -2408,10 +2423,12 @@ const ReviewApp: React.FC = () => {
             <ReviewHeaderMenu
               onOpenSettings={() => setOpenSettingsMenu(true)}
               onOpenExport={() => setShowExportModal(true)}
+              onCopyAgentInstructions={handleCopyAgentInstructions}
               onToggleFileTree={() => setIsFileTreeOpen(prev => !prev)}
               onToggleSidebar={() => reviewSidebar.isOpen ? reviewSidebar.close() : reviewSidebar.open()}
               isFileTreeOpen={isFileTreeOpen}
               isSidebarOpen={reviewSidebar.isOpen}
+              agentInstructionsEnabled={!!origin}
               appVersion={appVersion}
               updateInfo={updateInfo}
               origin={origin}
