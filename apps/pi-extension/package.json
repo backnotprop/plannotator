@@ -14,9 +14,17 @@
   "bugs": {
     "url": "https://github.com/backnotprop/plannotator/issues"
   },
-  "keywords": ["pi-package", "plannotator", "plan-review", "ai-agent", "coding-agent"],
+  "keywords": [
+    "pi-package",
+    "plannotator",
+    "plan-review",
+    "ai-agent",
+    "coding-agent"
+  ],
   "pi": {
-    "extensions": ["./"]
+    "extensions": [
+      "./"
+    ]
   },
   "files": [
     "index.ts",
@@ -44,16 +52,16 @@
     "@plannotator/webtui": "0.1.0",
     "chokidar": "^5.0.0",
     "parse5": "^7.3.0",
-    "turndown": "^7.2.4"
+    "turndown": "^7.2.4",
+    "@earendil-works/pi-agent-core": ">=0.74.0",
+    "@earendil-works/pi-ai": ">=0.74.0",
+    "@earendil-works/pi-tui": ">=0.74.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.74.0"
   },
   "devDependencies": {
     "glimpseui": "^0.8.0",
-    "@earendil-works/pi-coding-agent": ">=0.74.0",
-    "@earendil-works/pi-agent-core": ">=0.74.0",
-    "@earendil-works/pi-ai": ">=0.74.0",
-    "@earendil-works/pi-tui": ">=0.74.0"
+    "@earendil-works/pi-coding-agent": ">=0.74.0"
   }
 }

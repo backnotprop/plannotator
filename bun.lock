@@ -63,7 +63,7 @@
     },
     "apps/opencode-plugin": {
       "name": "@plannotator/opencode",
-      "version": "0.21.2",
+      "version": "0.21.3",
       "dependencies": {
         "@opencode-ai/plugin": "^1.1.10",
       },
@@ -85,8 +85,11 @@
     },
     "apps/pi-extension": {
       "name": "@plannotator/pi-extension",
-      "version": "0.21.2",
+      "version": "0.21.3",
       "dependencies": {
+        "@earendil-works/pi-agent-core": ">=0.74.0",
+        "@earendil-works/pi-ai": ">=0.74.0",
+        "@earendil-works/pi-tui": ">=0.74.0",
         "@joplin/turndown-plugin-gfm": "^1.0.64",
         "@pierre/diffs": "1.2.8",
         "@plannotator/webtui": "0.1.0",
@@ -95,10 +98,7 @@
         "turndown": "^7.2.4",
       },
       "devDependencies": {
-        "@earendil-works/pi-agent-core": ">=0.74.0",
-        "@earendil-works/pi-ai": ">=0.74.0",
         "@earendil-works/pi-coding-agent": ">=0.74.0",
-        "@earendil-works/pi-tui": ">=0.74.0",
         "glimpseui": "^0.8.0",
       },
       "peerDependencies": {
@@ -147,7 +147,7 @@
     },
     "apps/vscode-extension": {
       "name": "plannotator-webview",
-      "version": "0.16.5",
+      "version": "0.16.7",
       "devDependencies": {
         "@types/bun": "latest",
         "@types/vscode": "^1.85.0",
@@ -214,7 +214,7 @@
     },
     "packages/server": {
       "name": "@plannotator/server",
-      "version": "0.21.2",
+      "version": "0.21.3",
       "dependencies": {
         "@pierre/diffs": "1.2.8",
         "@plannotator/ai": "workspace:*",
