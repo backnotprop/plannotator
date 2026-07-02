@@ -284,6 +284,58 @@ describe("install.sh", () => {
     expect(script).toContain('GEMINI_POLICY_EOF');
     expect(script).toContain('GEMINI_SETTINGS_EOF');
   });
+
+  test("--minimal flag and PLANNOTATOR_MINIMAL env var are documented", () => {
+    // Usage text advertises the flag and the env-var opt-in for curl | bash.
+    expect(script).toContain("--minimal");
+    expect(script).toContain("PLANNOTATOR_MINIMAL");
+    // Accepts both --minimal and the --binary-only alias.
+    expect(script).toContain("--minimal|--binary-only)");
+  });
+
+  test("minimal mode is resolved from flag with env-var fallback", () => {
+    // Flag wins over env var, which wins over the default (off).
+    expect(script).toContain("MINIMAL_FLAG=-1");
+    expect(script).toContain('case "${PLANNOTATOR_MINIMAL:-}" in');
+    expect(script).toContain('if [ "$MINIMAL_FLAG" -ne -1 ]; then');
+  });
+
+  test("minimal mode exits after the binary install, before any extras", () => {
+    // The early exit must come AFTER the binary is moved into place but BEFORE
+    // the sidecar downloads, agent integrations, skill checkout, and config
+    // writes — that ordering is the whole point of #977.
+    const binaryInstalled = script.indexOf(
+      'mv "$tmp_file" "$INSTALL_DIR/plannotator"',
+    );
+    const minimalExit = script.indexOf('if [ "$minimal" -eq 1 ]; then');
+    const semInstall = script.indexOf("install_sem_sidecar\n");
+    const agentTerminal = script.indexOf("install_agent_terminal_runtime\n");
+    const codexBlock = script.indexOf(
+      "# --- Codex CLI / Desktop app support",
+    );
+    const skillsCheckout = script.indexOf(
+      "git clone --depth 1 --filter=blob:none --sparse",
+    );
+
+    expect(binaryInstalled).toBeGreaterThan(0);
+    expect(minimalExit).toBeGreaterThan(binaryInstalled);
+    // Everything the reporter called "trash" runs strictly after the exit gate.
+    expect(semInstall).toBeGreaterThan(minimalExit);
+    expect(agentTerminal).toBeGreaterThan(minimalExit);
+    expect(codexBlock).toBeGreaterThan(minimalExit);
+    expect(skillsCheckout).toBeGreaterThan(minimalExit);
+    // The gate really exits rather than falling through.
+    const gateBody = script.slice(minimalExit, minimalExit + 400);
+    expect(gateBody).toContain("exit 0");
+  });
+
+  test("PATH advice is a reusable function shared by both paths", () => {
+    // Extracted so the minimal early exit and the normal flow both print it.
+    expect(script).toContain("print_path_advice() {");
+    // Called exactly once inside the minimal gate and once in the normal flow.
+    const calls = script.match(/^\s*print_path_advice$/gm) ?? [];
+    expect(calls.length).toBe(2);
+  });
 });
 
 describe("install.ps1", () => {

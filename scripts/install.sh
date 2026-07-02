@@ -40,12 +40,18 @@ EXTRAS_FLAG=""
 MODEL_INVOCABLE_FLAG=""
 NON_INTERACTIVE=0
 RECONFIGURE=0
+# Binary-only mode. Installs just the plannotator binary (to $INSTALL_DIR) and
+# nothing else — no sem sidecar, no agent-terminal runtime, no skills, hooks,
+# slash commands, or per-agent config (Claude, Codex, OpenCode, Gemini, Kiro).
+# -1 = flag not set (fall through to env var); 0 = off; 1 = on. Resolved after
+# arg parsing so PLANNOTATOR_MINIMAL can enable it for `curl | bash` runs.
+MINIMAL_FLAG=-1
 
 usage() {
     cat <<'USAGE'
 Usage: install.sh [--version <tag>] [--verify-attestation | --skip-attestation]
                   [--extras | --no-extras] [--model-invocable <list>|none]
-                  [--non-interactive] [--reconfigure] [--help]
+                  [--minimal] [--non-interactive] [--reconfigure] [--help]
        install.sh <tag>
 
 Options:
@@ -63,6 +69,13 @@ Options:
   --model-invocable <l>  Comma-separated skill names to make model-invocable
                          (e.g. plannotator-review,plannotator-compound), or
                          "none". Skills are user-invoked-only by default.
+  --minimal              Install only the plannotator binary. Skips the sem
+                         semantic-diff sidecar, the agent-terminal runtime, and
+                         every per-agent integration (skills, hooks, slash
+                         commands, and config for Claude, Codex, OpenCode,
+                         Gemini, and Kiro). Nothing is written outside
+                         $HOME/.local/bin. Also enabled by exporting
+                         PLANNOTATOR_MINIMAL=1.
   --non-interactive      Never prompt, even in a terminal. Uses flags, then
                          saved answers from a previous run, then the defaults
                          (no extras, nothing model-invocable).
@@ -189,6 +202,10 @@ while [ $# -gt 0 ]; do
             RECONFIGURE=1
             shift
             ;;
+        --minimal|--binary-only)
+            MINIMAL_FLAG=1
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -213,6 +230,17 @@ while [ $# -gt 0 ]; do
             ;;
     esac
 done
+
+# Resolve binary-only mode. Precedence: --minimal flag > PLANNOTATOR_MINIMAL
+# env var > default (off). The env var lets `curl ... | bash` runs opt in
+# without a flag, matching how PLANNOTATOR_SKIP_SEM_INSTALL et al. work.
+minimal=0
+case "${PLANNOTATOR_MINIMAL:-}" in
+    1|true|yes|TRUE|YES|True|Yes) minimal=1 ;;
+esac
+if [ "$MINIMAL_FLAG" -ne -1 ]; then
+    minimal="$MINIMAL_FLAG"
+fi
 
 case "$(uname -s)" in
     Darwin) os="darwin" ;;
@@ -379,6 +407,37 @@ chmod +x "$INSTALL_DIR/plannotator"
 echo ""
 echo "plannotator ${latest_tag} installed to ${INSTALL_DIR}/plannotator"
 
+# Print the PATH-setup hint if $INSTALL_DIR isn't already on PATH. Extracted so
+# both the normal flow and the --minimal early exit below can reuse it.
+print_path_advice() {
+    if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
+        echo ""
+        echo "${INSTALL_DIR} is not in your PATH. Add it with:"
+        echo ""
+
+        case "$SHELL" in
+            */zsh)  shell_config="~/.zshrc" ;;
+            */bash) shell_config="~/.bashrc" ;;
+            *)      shell_config="your shell config" ;;
+        esac
+
+        echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ${shell_config}"
+        echo "  source ${shell_config}"
+    fi
+}
+
+# Binary-only mode stops here: the binary is installed, so print PATH advice and
+# exit before any sidecar download, agent integration, skill checkout, config
+# write, cache clear, or cleanup migration runs. Nothing outside $INSTALL_DIR is
+# touched. See the MINIMAL_FLAG / PLANNOTATOR_MINIMAL resolution near the top.
+if [ "$minimal" -eq 1 ]; then
+    print_path_advice
+    echo ""
+    echo "Minimal install complete — only the plannotator binary was installed."
+    echo "No skills, hooks, agent integrations, or config files were written."
+    exit 0
+fi
+
 sem_asset_for_platform() {
     case "$platform" in
         darwin-arm64) echo "sem-darwin-arm64.tar.gz" ;;
@@ -496,20 +555,7 @@ install_agent_terminal_runtime() {
 install_sem_sidecar
 install_agent_terminal_runtime
 
-if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
-    echo ""
-    echo "${INSTALL_DIR} is not in your PATH. Add it with:"
-    echo ""
-
-    case "$SHELL" in
-        */zsh)  shell_config="~/.zshrc" ;;
-        */bash) shell_config="~/.bashrc" ;;
-        *)      shell_config="your shell config" ;;
-    esac
-
-    echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ${shell_config}"
-    echo "  source ${shell_config}"
-fi
+print_path_advice
 
 # --- Codex CLI / Desktop app support (only if Codex is installed or configured) ---
 # Codex stores config and state under $CODEX_HOME when set, falling back to
