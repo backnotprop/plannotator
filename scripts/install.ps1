@@ -364,8 +364,9 @@ function Show-PathAdvice {
 
 # Binary-only mode stops here (see the $minimal resolution near the top): the
 # binary is installed, so add it to PATH and exit before any sidecar download,
-# agent integration, skill checkout, config write, or cleanup runs. No
-# persistent state is written outside $installDir.
+# agent integration, skill checkout, config write, or cleanup runs. Only the
+# binary and its PATH entry are added — none of the sem sidecar, agent-terminal
+# runtime, or per-agent skills, hooks, or config.
 if ($minimal) {
     Show-PathAdvice
     Write-Host ""
