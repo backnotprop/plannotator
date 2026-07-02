@@ -41,17 +41,19 @@ MODEL_INVOCABLE_FLAG=""
 NON_INTERACTIVE=0
 RECONFIGURE=0
 # Binary-only mode. Installs just the plannotator binary (to $INSTALL_DIR) and
-# nothing else — no sem sidecar, no agent-terminal runtime, no skills, hooks,
-# slash commands, or per-agent config (Claude, Codex, OpenCode, Gemini, Kiro).
-# -1 = flag not set (fall through to env var); 0 = off; 1 = on. Resolved after
-# arg parsing so PLANNOTATOR_MINIMAL can enable it for `curl | bash` runs.
+# no persistent state elsewhere — no sem sidecar, no agent-terminal runtime, no
+# skills, hooks, slash commands, or per-agent config (Claude, Codex, OpenCode,
+# Gemini, Kiro). Set by --minimal (1) / --no-minimal (0); -1 = neither flag
+# given (fall through to the PLANNOTATOR_MINIMAL env var). Resolved after arg
+# parsing so a flag overrides the env var in either direction.
 MINIMAL_FLAG=-1
 
 usage() {
     cat <<'USAGE'
 Usage: install.sh [--version <tag>] [--verify-attestation | --skip-attestation]
                   [--extras | --no-extras] [--model-invocable <list>|none]
-                  [--minimal] [--non-interactive] [--reconfigure] [--help]
+                  [--minimal | --no-minimal] [--non-interactive]
+                  [--reconfigure] [--help]
        install.sh <tag>
 
 Options:
@@ -69,13 +71,16 @@ Options:
   --model-invocable <l>  Comma-separated skill names to make model-invocable
                          (e.g. plannotator-review,plannotator-compound), or
                          "none". Skills are user-invoked-only by default.
-  --minimal              Install only the plannotator binary. Skips the sem
-                         semantic-diff sidecar, the agent-terminal runtime, and
-                         every per-agent integration (skills, hooks, slash
-                         commands, and config for Claude, Codex, OpenCode,
-                         Gemini, and Kiro). Nothing is written outside
-                         $HOME/.local/bin. Also enabled by exporting
-                         PLANNOTATOR_MINIMAL=1.
+  --minimal              Install only the plannotator binary (aliased
+                         --binary-only). Skips the sem semantic-diff sidecar,
+                         the agent-terminal runtime, and every per-agent
+                         integration (skills, hooks, slash commands, and config
+                         for Claude, Codex, OpenCode, Gemini, and Kiro). No
+                         persistent state is written outside $HOME/.local/bin
+                         (a temp download file is still used and removed). Also
+                         enabled by exporting PLANNOTATOR_MINIMAL=1.
+  --no-minimal           Force a full install even when PLANNOTATOR_MINIMAL is
+                         set in the environment.
   --non-interactive      Never prompt, even in a terminal. Uses flags, then
                          saved answers from a previous run, then the defaults
                          (no extras, nothing model-invocable).
@@ -203,7 +208,21 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         --minimal|--binary-only)
+            if [ "$MINIMAL_FLAG" = "0" ]; then
+                echo "--minimal and --no-minimal are mutually exclusive" >&2
+                usage >&2
+                exit 1
+            fi
             MINIMAL_FLAG=1
+            shift
+            ;;
+        --no-minimal)
+            if [ "$MINIMAL_FLAG" = "1" ]; then
+                echo "--no-minimal and --minimal are mutually exclusive" >&2
+                usage >&2
+                exit 1
+            fi
+            MINIMAL_FLAG=0
             shift
             ;;
         -h|--help)
@@ -231,9 +250,10 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# Resolve binary-only mode. Precedence: --minimal flag > PLANNOTATOR_MINIMAL
-# env var > default (off). The env var lets `curl ... | bash` runs opt in
-# without a flag, matching how PLANNOTATOR_SKIP_SEM_INSTALL et al. work.
+# Resolve binary-only mode. Precedence: --minimal / --no-minimal flag >
+# PLANNOTATOR_MINIMAL env var > default (off). The env var lets `curl ... | bash`
+# runs opt in without a flag, matching how PLANNOTATOR_SKIP_SEM_INSTALL et al.
+# work; --no-minimal lets a flag override an env var that enables it.
 minimal=0
 case "${PLANNOTATOR_MINIMAL:-}" in
     1|true|yes|TRUE|YES|True|Yes) minimal=1 ;;
@@ -428,8 +448,10 @@ print_path_advice() {
 
 # Binary-only mode stops here: the binary is installed, so print PATH advice and
 # exit before any sidecar download, agent integration, skill checkout, config
-# write, cache clear, or cleanup migration runs. Nothing outside $INSTALL_DIR is
-# touched. See the MINIMAL_FLAG / PLANNOTATOR_MINIMAL resolution near the top.
+# write, cache clear, or cleanup migration runs. No persistent state is written
+# outside $INSTALL_DIR (the temp download file was already cleaned up above; the
+# config dir may have been read, never written). See the MINIMAL_FLAG /
+# PLANNOTATOR_MINIMAL resolution near the top.
 if [ "$minimal" -eq 1 ]; then
     print_path_advice
     echo ""

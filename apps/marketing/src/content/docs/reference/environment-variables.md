@@ -64,6 +64,8 @@ When running your own paste service binary, these variables configure it:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PLANNOTATOR_VERIFY_ATTESTATION` | off | Set to `1` or `true` to have the install script run `gh attestation verify` on the downloaded binary. Requires `gh` CLI installed and authenticated. Can also be set via `~/.plannotator/config.json` (`{ "verifyAttestation": true }`) or per-invocation via `--verify-attestation`. |
+| `PLANNOTATOR_MINIMAL` | off | Set to `1` / `true` / `yes` to install **only** the `plannotator` binary — no sem sidecar, agent-terminal runtime, skills, hooks, slash commands, or per-agent config. Equivalent to passing `--minimal` (aliased `--binary-only`); pass `--no-minimal` to override. Read by the install scripts only, not the runtime binary. |
+| `PLANNOTATOR_SKIP_SEM_INSTALL` | off | Set to `1` / `true` to skip installing the optional `sem` semantic-diff sidecar used by code review. Read by the install scripts only. |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | Custom Claude Code config directory. The install script places hooks here instead of the default location. |
 
 ## Remote mode behavior
