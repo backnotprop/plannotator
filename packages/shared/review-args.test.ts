@@ -7,6 +7,7 @@ describe("parseReviewArgs", () => {
       prUrl: undefined,
       vcsType: undefined,
       useLocal: true,
+      noWorktree: false,
     });
   });
 
@@ -15,6 +16,7 @@ describe("parseReviewArgs", () => {
       prUrl: undefined,
       vcsType: "git",
       useLocal: true,
+      noWorktree: false,
     });
   });
 
@@ -23,11 +25,13 @@ describe("parseReviewArgs", () => {
       prUrl: "https://github.com/acme/repo/pull/12",
       vcsType: "git",
       useLocal: true,
+      noWorktree: false,
     });
     expect(parseReviewArgs("https://github.com/acme/repo/pull/12 --git")).toEqual({
       prUrl: "https://github.com/acme/repo/pull/12",
       vcsType: "git",
       useLocal: true,
+      noWorktree: false,
     });
   });
 
@@ -36,6 +40,34 @@ describe("parseReviewArgs", () => {
       prUrl: "https://github.com/acme/repo/pull/12",
       vcsType: undefined,
       useLocal: false,
+      noWorktree: false,
+    });
+  });
+
+  test("parses --no-worktree for PR review mode", () => {
+    expect(parseReviewArgs("--no-worktree https://github.com/acme/repo/pull/12")).toEqual({
+      prUrl: "https://github.com/acme/repo/pull/12",
+      vcsType: undefined,
+      useLocal: true,
+      noWorktree: true,
+    });
+  });
+
+  test("combines --no-worktree with --git and a PR URL", () => {
+    expect(parseReviewArgs(["--git", "--no-worktree", "https://github.com/acme/repo/pull/12"])).toEqual({
+      prUrl: "https://github.com/acme/repo/pull/12",
+      vcsType: "git",
+      useLocal: true,
+      noWorktree: true,
+    });
+  });
+
+  test("parses --no-local and --no-worktree together (precedence resolved by the caller)", () => {
+    expect(parseReviewArgs("--no-local --no-worktree https://github.com/acme/repo/pull/12")).toEqual({
+      prUrl: "https://github.com/acme/repo/pull/12",
+      vcsType: undefined,
+      useLocal: false,
+      noWorktree: true,
     });
   });
 
@@ -44,6 +76,7 @@ describe("parseReviewArgs", () => {
       prUrl: "https://github.com/acme/repo/pull/12",
       vcsType: "git",
       useLocal: false,
+      noWorktree: false,
     });
   });
 
@@ -59,6 +92,7 @@ describe("parseReviewArgs", () => {
       prUrl: undefined,
       vcsType: "git",
       useLocal: true,
+      noWorktree: false,
     });
   });
 });

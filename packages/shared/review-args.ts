@@ -5,6 +5,13 @@ export interface ParsedReviewArgs {
   prUrl?: string;
   vcsType?: VcsSelection;
   useLocal: boolean;
+  /**
+   * PR review only. When true, reuse the current repository for the local
+   * checkout (fetch + `git checkout` the PR head in place) instead of adding a
+   * separate git worktree. Avoids the cost of `git worktree add` on huge repos.
+   * Ignored when useLocal is false (--no-local wins) or for cross-repo PRs.
+   */
+  noWorktree: boolean;
 }
 
 export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
@@ -14,6 +21,7 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
 
   let vcsType: VcsSelection | undefined;
   let useLocal = true;
+  let noWorktree = false;
   const positional: string[] = [];
 
   for (const token of tokens) {
@@ -27,6 +35,9 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
       case "--no-local":
         useLocal = false;
         break;
+      case "--no-worktree":
+        noWorktree = true;
+        break;
       default:
         positional.push(token);
         break;
@@ -38,6 +49,7 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
     prUrl: target && isReviewUrl(target) ? target : undefined,
     vcsType,
     useLocal,
+    noWorktree,
   };
 }
 
