@@ -680,10 +680,10 @@ if "!EXTRAS_CHOICE!"=="yes" if "!EXTRAS_PRESENT!"=="0" (
     if !ERRORLEVEL! equ 0 if "!RUN_WIZARD!"=="1" set "NPX_OK=1"
     if "!NPX_OK!"=="1" (
         echo Launching the skills CLI for the extras ^(pick your agents in its UI^)...
-        call npx skills add backnotprop/plannotator/apps/skills/extra
-        if not !ERRORLEVEL! equ 0 echo skills CLI did not complete - install later with: npx skills add backnotprop/plannotator/apps/skills/extra
+        call npx skills add backnotprop/plannotator/apps/skills/extra --global
+        if not !ERRORLEVEL! equ 0 echo skills CLI did not complete - install later with: npx skills add backnotprop/plannotator/apps/skills/extra --global
     ) else (
-        echo Install the extras with: npx skills add backnotprop/plannotator/apps/skills/extra
+        echo Install the extras with: npx skills add backnotprop/plannotator/apps/skills/extra --global
     )
 )
 
@@ -969,7 +969,7 @@ echo The /plannotator-review, /plannotator-annotate, and /plannotator-last skill
 if not "!EXTRAS_CHOICE!"=="yes" (
     echo.
     echo Optional skills ^(compound planning, setup-goal, visual explainer^):
-    echo   npx skills add backnotprop/plannotator/apps/skills/extra
+    echo   npx skills add backnotprop/plannotator/apps/skills/extra --global
 )
 
 REM Warn if plannotator is configured in both settings.json hooks AND the plugin (causes double execution)

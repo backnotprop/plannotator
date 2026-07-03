@@ -1084,10 +1084,10 @@ fi
 if [ "$extras_choice" = "yes" ] && [ "$extras_present" -eq 0 ]; then
     if [ "$can_prompt" -eq 1 ] && command -v npx >/dev/null 2>&1; then
         echo "Launching the skills CLI for the extras (pick your agents in its UI)..."
-        npx skills add backnotprop/plannotator/apps/skills/extra < /dev/tty || \
-            echo "skills CLI did not complete — install later with: npx skills add backnotprop/plannotator/apps/skills/extra"
+        npx skills add backnotprop/plannotator/apps/skills/extra --global < /dev/tty || \
+            echo "skills CLI did not complete — install later with: npx skills add backnotprop/plannotator/apps/skills/extra --global"
     else
-        echo "Install the extras with: npx skills add backnotprop/plannotator/apps/skills/extra"
+        echo "Install the extras with: npx skills add backnotprop/plannotator/apps/skills/extra --global"
     fi
 fi
 
@@ -1442,7 +1442,7 @@ echo "The /plannotator-review, /plannotator-annotate, and /plannotator-last comm
 if [ "$extras_choice" != "yes" ]; then
     echo ""
     echo "Optional skills (compound planning, setup-goal, visual explainer):"
-    echo "  npx skills add backnotprop/plannotator/apps/skills/extra"
+    echo "  npx skills add backnotprop/plannotator/apps/skills/extra --global"
 fi
 
 # Warn if plannotator is configured in both settings.json hooks AND the plugin (causes double execution)

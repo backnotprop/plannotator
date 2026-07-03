@@ -133,7 +133,7 @@ describe("install.sh", () => {
     // Answers persist to the data dir and silent re-runs reuse them.
     expect(script).toContain('PREFS_FILE="$_config_dir/install-prefs"');
     // Extras install is delegated to the skills CLI with the terminal attached.
-    expect(script).toContain("npx skills add backnotprop/plannotator/apps/skills/extra < /dev/tty");
+    expect(script).toContain("npx skills add backnotprop/plannotator/apps/skills/extra --global < /dev/tty");
     // Flip pass unlocks INSTALLED copies only (repo sources always stay
     // locked) and flips the Codex sidecar to match.
     expect(script).toContain("grep -v '^disable-model-invocation: true$'");
@@ -215,7 +215,7 @@ describe("install.sh", () => {
 
   test("suggests installing extras via npx skills add", () => {
     expect(script).toContain("Optional skills (compound planning, setup-goal, visual explainer):");
-    expect(script).toContain("npx skills add backnotprop/plannotator/apps/skills/extra");
+    expect(script).toContain("npx skills add backnotprop/plannotator/apps/skills/extra --global");
   });
 
   test("no longer installs core skills to ~/.codex/skills", () => {
@@ -477,7 +477,7 @@ describe("install.ps1", () => {
 
   test("suggests installing extras via npx skills add", () => {
     expect(script).toContain("Optional skills (compound planning, setup-goal, visual explainer):");
-    expect(script).toContain("npx skills add backnotprop/plannotator/apps/skills/extra");
+    expect(script).toContain("npx skills add backnotprop/plannotator/apps/skills/extra --global");
   });
 
   test("Pi extension update keeps no settings.json package-skills filter", () => {
@@ -641,7 +641,7 @@ describe("install.cmd", () => {
 
   test("suggests installing extras via npx skills add", () => {
     expect(script).toContain("Optional skills");
-    expect(script).toContain("npx skills add backnotprop/plannotator/apps/skills/extra");
+    expect(script).toContain("npx skills add backnotprop/plannotator/apps/skills/extra --global");
   });
 
   test("Gemini settings merge uses || idiom (issue #506 regression)", () => {
@@ -765,6 +765,26 @@ describe("Core Plannotator skills", () => {
 describe("install shared behavior", () => {
   const sh = readScript("install.sh");
   const ps = readScript("install.ps1");
+
+  test("every extras install command uses global scope", () => {
+    const files = [
+      "scripts/install.sh",
+      "scripts/install.ps1",
+      "scripts/install.cmd",
+      "AGENTS.md",
+      "apps/marketing/src/content/docs/getting-started/installation.md",
+      "apps/marketing/src/content/docs/guides/claude-code.md",
+    ];
+    const command = "npx skills add backnotprop/plannotator/apps/skills/extra";
+
+    for (const file of files) {
+      const contents = readFileSync(join(scriptsDir, "..", file), "utf-8").replace(/\r\n?/g, "\n");
+      const commandCount = contents.split(command).length - 1;
+      const globalCommandCount = contents.split(`${command} --global`).length - 1;
+      expect(commandCount, `${file} should contain an extras install command`).toBeGreaterThan(0);
+      expect(globalCommandCount, `${file} has an extras install command without --global`).toBe(commandCount);
+    }
+  });
 
   test("install.cmd contains no unix redirect bash-isms", () => {
     // Tripwire: during PR #850 development, three freshly written `>nul`

@@ -138,7 +138,7 @@ Upgrading from an older version? The installer removes the legacy `~/.claude/com
 Optional extra skills (compound planning, setup-goal, visual explainer) are not installed by default. Add them with:
 
 ```bash
-npx skills add backnotprop/plannotator/apps/skills/extra
+npx skills add backnotprop/plannotator/apps/skills/extra --global
 ```
 
 ## OpenCode
@@ -243,7 +243,7 @@ Notes:
 The installer also copies Plannotator's core skills (`plannotator-review`, `plannotator-annotate`, `plannotator-last`) into `~/.agents/skills` — the official OpenAI agent skills path. Optional extra skills (compound planning, setup-goal, visual explainer) are not installed by default; add them with:
 
 ```bash
-npx skills add backnotprop/plannotator/apps/skills/extra
+npx skills add backnotprop/plannotator/apps/skills/extra --global
 ```
 
 You can still use the direct commands at any time:
