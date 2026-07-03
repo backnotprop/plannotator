@@ -10,6 +10,8 @@ export interface ParsedReviewArgs {
    * checkout (fetch + `git checkout` the PR head in place) instead of adding a
    * separate git worktree. Avoids the cost of `git worktree add` on huge repos.
    * Ignored when useLocal is false (--no-local wins) or for cross-repo PRs.
+   * Only the Claude Code runtime acts on this; OpenCode and Pi reject the flag
+   * with an error.
    */
   noWorktree: boolean;
 }

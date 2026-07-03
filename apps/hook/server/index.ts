@@ -535,8 +535,6 @@ if (args[0] === "sessions") {
   const urlArg = reviewArgs.prUrl;
   const isPRMode = urlArg !== undefined;
   const useLocal = isPRMode && reviewArgs.useLocal;
-  // --no-worktree: reuse the current repo in place instead of a worktree.
-  // Only meaningful alongside a local checkout, so --no-local takes precedence.
   const inPlace = useLocal && reviewArgs.noWorktree === true;
 
   let rawPatch: string;
@@ -601,12 +599,9 @@ if (args[0] === "sessions") {
     if (inPlace && prMetadata) {
       try {
         const repoDir = process.cwd();
-        // Validate inputs from platform API to prevent git flag/path injection
         if (prMetadata.baseBranch.includes('..') || prMetadata.baseBranch.startsWith('-')) throw new Error(`Invalid base branch: ${prMetadata.baseBranch}`);
         if (!/^[0-9a-f]{40,64}$/i.test(prMetadata.baseSha)) throw new Error(`Invalid base SHA: ${prMetadata.baseSha}`);
 
-        // Detect same-repo vs cross-repo (must match both owner/repo AND host).
-        // Checking a PR out in place only makes sense when this repo IS the PR's repo.
         let isSameRepo = false;
         try {
           const remoteResult = await gitRuntime.runGit(["remote", "get-url", "origin"], { cwd: repoDir });
@@ -626,8 +621,6 @@ if (args[0] === "sessions") {
         } catch { /* not in a git repo */ }
 
         if (!isSameRepo) {
-          // Can't check another repo's PR out in place — review from the
-          // platform (remote) diff only, exactly like --no-local.
           console.error("Warning: --no-worktree only applies to a PR from the current repository; reviewing from the platform diff only.");
         } else {
           // Guard: never clobber uncommitted work.
@@ -637,16 +630,12 @@ if (args[0] === "sessions") {
             throw new Error("working tree has uncommitted changes — commit or stash them, or drop --no-worktree");
           }
 
-          // Remember the branch (or detached SHA) so it can be restored on exit.
           const branchRes = await gitRuntime.runGit(["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: repoDir });
           const origRef = branchRes.exitCode === 0
             ? branchRes.stdout.trim()
             : (await gitRuntime.runGit(["rev-parse", "HEAD"], { cwd: repoDir })).stdout.trim();
           if (!origRef) throw new Error("could not determine the current git ref to restore later");
 
-          // Fetch base refs first (best-effort) so origin/<base> resolves for
-          // full-stack diffs, THEN fetch + checkout the PR head. The head fetch
-          // must be last because checkoutPRHead checks out FETCH_HEAD.
           const baseFetchRes = await gitRuntime.runGit(["fetch", "origin", "--", prMetadata.baseBranch], { cwd: repoDir });
           if (baseFetchRes.exitCode !== 0) throw new Error(`git fetch origin ${prMetadata.baseBranch} failed: ${baseFetchRes.stderr.trim()}`);
           const catRes = await gitRuntime.runGit(["cat-file", "-t", prMetadata.baseSha], { cwd: repoDir });
@@ -655,12 +644,8 @@ if (args[0] === "sessions") {
           const checkedOut = await checkoutPRHead(gitRuntime, prMetadata, repoDir);
           if (!checkedOut) throw new Error("failed to fetch/checkout the PR head into the current repository");
 
-          // The current repo now holds the PR head — hand it to the server as
-          // the agent working dir. No worktree pool is created.
           agentCwd = repoDir;
 
-          // Restore the user's original ref on exit — both a graceful session
-          // close (onCleanup) and a hard process exit (Ctrl-C).
           let restored = false;
           const restore = () => {
             if (restored) return;

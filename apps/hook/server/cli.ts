@@ -68,6 +68,7 @@ const SUBCOMMAND_HELP: Record<string, string> = {
     "  --no-worktree  For PR review, check the PR out in the current repo instead of a",
     "                 separate worktree (same-repo only; needs a clean working tree; your",
     "                 branch is restored on exit). Cheaper than a worktree on large repos.",
+    "                 Claude Code runtime only (OpenCode and Pi reject this flag).",
     "  PR_URL         GitHub PR or GitLab MR URL to review",
     "",
     "Examples:",

@@ -434,6 +434,11 @@ export default function plannotator(pi: ExtensionAPI): void {
 
 			try {
 				const reviewArgs = parseReviewArgs(args ?? "");
+				// --no-worktree (in-place PR checkout) is implemented only in the Claude Code runtime.
+				if (reviewArgs.noWorktree) {
+					ctx.ui.notify("Plannotator: --no-worktree is only supported in the Claude Code runtime, not Pi.", "error");
+					return;
+				}
 				const session = await startCodeReviewBrowserSession(ctx, {
 					prUrl: reviewArgs.prUrl,
 					vcsType: reviewArgs.vcsType,
