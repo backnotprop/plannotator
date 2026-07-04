@@ -67,6 +67,20 @@ describe("rewriteHtmlAssetReferences", () => {
     expect(out).toContain('src="../secret.png"');
     expect(out).toContain('src="server"');
   });
+
+  test("rewrites Babel-standalone .jsx/.ts/.tsx script references", () => {
+    // Common in multi-file browser prototypes that load React/TS components via
+    // <script type="text/babel" src="component.jsx"> instead of a single bundle.
+    const out = rewrite(`
+<script type="text/babel" src="app.jsx"></script>
+<script type="text/babel" src="utils.ts"></script>
+<script type="text/babel" src="widget.tsx"></script>
+`);
+
+    expect(out).toContain('src="/api/html-assets/t/app.jsx"');
+    expect(out).toContain('src="/api/html-assets/t/utils.ts"');
+    expect(out).toContain('src="/api/html-assets/t/widget.tsx"');
+  });
 });
 
 describe("rewriteCssAssetReferences", () => {
@@ -109,5 +123,8 @@ describe("html asset route helpers", () => {
     expect(htmlAssetContentType("font.woff2")).toBe("font/woff2");
     expect(htmlAssetContentType("site.webmanifest")).toBe("application/manifest+json; charset=utf-8");
     expect(htmlAssetContentType("image.unknown")).toBeNull();
+    expect(htmlAssetContentType("app.jsx")).toBe("application/javascript; charset=utf-8");
+    expect(htmlAssetContentType("utils.ts")).toBe("application/javascript; charset=utf-8");
+    expect(htmlAssetContentType("widget.tsx")).toBe("application/javascript; charset=utf-8");
   });
 });
