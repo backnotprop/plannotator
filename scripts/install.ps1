@@ -800,6 +800,18 @@ try {
                     Write-Host "Installed Gemini slash commands to $geminiCommandsDir\"
                 }
             }
+
+            # Antigravity CLI plugin commands (only when detected)
+            $agyBase = if (Test-Path "$env:USERPROFILE\.gemini\config") { "$env:USERPROFILE\.gemini\config" } elseif (Test-Path "$env:USERPROFILE\.gemini\antigravity-cli") { "$env:USERPROFILE\.gemini\antigravity-cli" } else { $null }
+            if ($agyBase -and (Test-Path "apps\gemini\commands")) {
+                $agyPluginCommandsDir = "$agyBase\plugins\plannotator\commands"
+                $geminiCmds = Get-ChildItem "apps\gemini\commands\*.toml" -ErrorAction SilentlyContinue
+                if ($geminiCmds) {
+                    New-Item -ItemType Directory -Force -Path $agyPluginCommandsDir | Out-Null
+                    Copy-Item -Force "apps\gemini\commands\*.toml" $agyPluginCommandsDir
+                    Write-Host "Installed Antigravity slash commands to $agyPluginCommandsDir\"
+                }
+            }
         } finally {
             Pop-Location
         }
@@ -967,6 +979,24 @@ fs.writeFileSync('$($geminiSettings.Replace('\','/'))', JSON.stringify(settings,
     # (apps/gemini/commands) in the git-gated skills/commands install above.
 }
 
+# --- Antigravity CLI support (only when detected) ---
+$agyBase = if (Test-Path "$env:USERPROFILE\.gemini\config") { "$env:USERPROFILE\.gemini\config" } elseif (Test-Path "$env:USERPROFILE\.gemini\antigravity-cli") { "$env:USERPROFILE\.gemini\antigravity-cli" } else { $null }
+if ($agyBase) {
+    $agyPluginDir = "$agyBase\plugins\plannotator"
+    New-Item -ItemType Directory -Force -Path "$agyBase\policies", $agyPluginDir | Out-Null
+    @'
+# Plannotator policy for Antigravity CLI
+# Allows exit_plan_mode without TUI confirmation so the browser UI is the sole gate.
+[[rule]]
+toolName = "exit_plan_mode"
+decision = "allow"
+priority = 100
+'@ | Set-Content -Path "$agyBase\policies\plannotator.toml"
+    '{"name":"plannotator"}' | Set-Content -Path "$agyPluginDir\plugin.json"
+    '{"hooks":{"BeforeTool":[{"matcher":"exit_plan_mode","hooks":[{"type":"command","command":"plannotator","timeout":345600}]}]}}' | Set-Content -Path "$agyPluginDir\hooks.json"
+    Write-Host "Installed Antigravity plugin to $agyPluginDir"
+}
+
 Write-Host ""
 Write-Host "=========================================="
 Write-Host "  OPENCODE USERS"
@@ -997,6 +1027,18 @@ if ($kiroAvailable) {
 } else {
     Write-Host "Kiro was not detected. After installing Kiro, rerun this installer to add Kiro skills."
 }
+Write-Host ""
+Write-Host "=========================================="
+Write-Host "  ANTIGRAVITY CLI USERS"
+Write-Host "=========================================="
+Write-Host ""
+Write-Host "Plannotator is installed as an Antigravity plugin."
+Write-Host "Restart the CLI, and the following commands will be ready:"
+Write-Host ""
+Write-Host "  /plannotator-review"
+Write-Host "  /plannotator-annotate"
+Write-Host ""
+Write-Host "Plans will automatically open in your browser during plan reviews."
 Write-Host ""
 Write-Host "=========================================="
 Write-Host "  CLAUDE CODE USERS: YOU ARE ALL SET!"

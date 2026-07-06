@@ -284,6 +284,12 @@ describe("install.sh", () => {
     expect(script).toContain('GEMINI_POLICY_EOF');
     expect(script).toContain('GEMINI_SETTINGS_EOF');
   });
+
+  test("installs Antigravity plugin configuration", () => {
+    expect(script).toContain("AGY_BASE=");
+    expect(script).toContain("plannotator.toml");
+    expect(script).toContain("hooks.json");
+  });
 });
 
 describe("install.ps1", () => {
@@ -423,6 +429,12 @@ describe("install.ps1", () => {
     const piUpdateCallIndex = script.lastIndexOf("Update-PiExtensionIfPresent");
     expect(skillsInstallIndex).toBeGreaterThan(0);
     expect(piUpdateCallIndex).toBeGreaterThan(skillsInstallIndex);
+  });
+
+  test("installs Antigravity plugin configuration on Windows", () => {
+    expect(script).toContain("$agyBase");
+    expect(script).toContain("plannotator.toml");
+    expect(script).toContain("hooks.json");
   });
 });
 
@@ -579,6 +591,12 @@ describe("install.cmd", () => {
     expect(script).toContain("--skip-attestation");
     // Enforcement: hard-fail when opted in but gh missing
     expect(script).toContain("gh CLI was not found");
+  });
+
+  test("installs Antigravity plugin configuration in cmd", () => {
+    expect(script).toContain("AGY_BASE");
+    expect(script).toContain("plannotator.toml");
+    expect(script).toContain("hooks.json");
   });
 });
 
