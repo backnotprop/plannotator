@@ -15,8 +15,8 @@ const coreFeatures = [
     eyebrow: 'annotate → agent',
     title: 'Your annotations become the agent\'s instructions',
     body: [
-      'Select lines, a single token, or a whole file and leave a comment, a concern, or a code suggestion. Conventional Comments labels are there if your team writes reviews that way.',
-      'When you hit Send Feedback, everything exports as markdown anchored to exact files and lines and lands in your agent session. The agent reads it like any other instruction and gets to work.',
+      'Select lines, a single token, or a whole file, and leave a comment, a concern, or a suggested edit. Conventional Comments labels are there if your team reviews that way.',
+      'Hit Send Feedback and everything exports as markdown, anchored to exact files and lines, straight into your agent session. The agent reads it like any other instruction and gets to work.',
     ],
     points: ['Line, token, file, and review-level scopes', 'Suggested-code blocks with the original alongside', 'Drafts auto-save and survive a crashed session'],
     img: '/assets/code-review/annotations.png',
@@ -27,8 +27,8 @@ const coreFeatures = [
     eyebrow: 'git status view',
     title: 'Review the whole change before it\'s a PR',
     body: [
-      'The default view pulls together everything you\'ve touched: committed work, uncommitted edits, and untracked files, in one screen. No need to commit, push, or open a PR first, you see exactly what a PR would show while the work is still in progress.',
-      'It\'s grouped the way git status groups it: a Committed section, a Changes section, an Untracked section. Every row shows the change type and line counts, and you can stage or unstage files right there while you review.',
+      'The default view pulls together everything you\'ve touched — committed work, uncommitted edits, and untracked files — in one screen. No commit, push, or PR required; you see what a PR would show while the work is still in progress.',
+      'It\'s grouped the way git status groups it: Committed, Changes, Untracked. Every row shows the change type and line counts, and you can stage or unstage files right there while you review.',
     ],
     points: ['Falls back gracefully when no base branch resolves', 'One-click fetch when the base is behind GitHub'],
     img: '/assets/code-review/git-status.png',
@@ -39,8 +39,8 @@ const coreFeatures = [
     eyebrow: 'commits panel',
     title: 'Walk the branch, one commit at a time',
     body: [
-      'The Commits panel is a plain history rail of your branch, newest first, with a divider where your work meets the base. Click any commit and you get that commit\'s own diff against its parent, with the full commit message on top.',
-      'It\'s git show with annotations. Review a teammate\'s commit, or your own from last Tuesday, and the feedback records which commit each note was anchored to.',
+      'The Commits panel is a plain history rail of your branch, newest first, with a divider where your work meets the base. Click any commit for its own diff against its parent, with the full commit message on top.',
+      'It\'s git show with annotations. Review a teammate\'s commit or your own from last Tuesday; the feedback records which commit each note was anchored to.',
     ],
     points: ['Session-scoped: glancing at history never changes your default view'],
     img: '/assets/code-review/commits.png',
@@ -51,8 +51,8 @@ const coreFeatures = [
     eyebrow: 'pull requests',
     title: 'Review PRs without the noise',
     body: [
-      'Point it at a GitHub PR or a GitLab MR and it opens in the same viewer: the description, checks, and full discussion in one Overview panel. On a busy PR the discussion is where you drown, so the comments column filters it down. Hide bots (Dependabot, CI, Copilot) with one toggle, drop resolved and outdated threads, narrow to specific people, or search the whole thread.',
-      'The description and comments are annotatable too. The agent can\'t see the PR discussion on its own, so your notes travel with the full comment quoted. Post your review back to the platform as inline comments, or hand it to the agent to fix.',
+      'Point it at a GitHub PR or GitLab MR and it opens in the same viewer: description, checks, and the full discussion in one Overview panel. The comments column filters the noise — hide bots (Dependabot, CI, Copilot) with one toggle, drop resolved and outdated threads, narrow to specific people, or search the thread.',
+      'The description and comments are annotatable too. The agent can\'t see the discussion on its own, so your notes travel with the full comment quoted. Post your review back as inline comments, or hand it to the agent to fix.',
     ],
     points: ['Hide bots is on by default; resolved and outdated threads collapse away', 'Uses your gh / glab auth, so private repos just work', 'Stacked PRs get a Layer / Full-stack toggle for the whole chain'],
     img: '/assets/code-review/pr-review.png',
@@ -66,8 +66,8 @@ const aiFeatures = [
     eyebrow: 'ask ai',
     title: 'Ask the diff a question',
     body: [
-      'Select lines in the diff and ask. The answer streams into a side panel, scoped to the code you selected and the changeset on screen, riding whichever agent CLI you already use.',
-      'It\'s reading support, not delegation. You stay in the diff; the model holds the context you would otherwise go dig for.',
+      'Select lines in the diff and ask. The answer streams into a side panel, scoped to what you selected and the changeset on screen, riding whichever agent CLI you already use.',
+      'It\'s reading support, not delegation — you stay in the diff while the model holds the context you\'d otherwise go dig for.',
     ],
     points: ['Providers detected from the CLIs you already have installed', 'Answers stay grouped by file for the session'],
     img: '/assets/code-review/ask-ai.png',
@@ -78,8 +78,8 @@ const aiFeatures = [
     eyebrow: 'guided review',
     title: 'Let an agent chapter the changeset',
     body: [
-      'A Guided Review has an agent reorganize the changeset into chapters by importance: the heart of the change first, then its consequences, then the glue. Each chapter pairs a short overview and per-file summaries with the diffs it covers. On a big diff it reads far better than file order.',
-      'The diffs inside a guide are the real diff viewer, not excerpts. You still read every line; the agent just puts the lines in a smarter order. Anything you annotate there lands in the same review and ships in the same feedback.',
+      'A Guided Review has an agent reorganize the changeset into chapters by importance — the heart of the change first, then its consequences, then the glue (inspired by Linear). Each chapter pairs a short overview and per-file summaries with the diffs it covers. On a big diff it reads far better than file order.',
+      'The diffs inside a guide are the real diff viewer, not excerpts. You still read every line; the agent just orders them. Anything you annotate there lands in the same review and ships in the same feedback.',
     ],
     points: ['Per-section reviewed state for multi-sitting reviews', 'Every changed file validated against the real diff'],
     img: '/assets/code-review/guided-review.png',
@@ -88,10 +88,10 @@ const aiFeatures = [
   {
     id: 'agent-reviews',
     eyebrow: 'agent reviews',
-    title: 'Run review agents, keep the final say',
+    title: 'Run review agents',
     body: [
-      'Kick off a review agent against the current changeset and its findings come back as annotations on the diff, each with a severity, the reasoning behind it, and a file and line anchor. You decide what to keep. Nothing gets sent anywhere until you send it.',
-      'The review is yours to define. Point it at one of your own skills, your team\'s security checklist, your naming conventions, whatever you\'ve written, and that skill becomes a launchable reviewer whose findings land as inline diff comments exactly like the built-in one. Runs on Claude or Codex natively, or through Cursor, OpenCode, Pi, and GitHub Copilot CLI when they\'re on your PATH.',
+      'Kick off a review agent against the current changeset; its findings come back as annotations on the diff, each with a severity, the reasoning behind it, and a file and line anchor. You decide what to keep — nothing is sent anywhere until you send it.',
+      'The review is yours to define. Point it at one of your own skills — a security checklist, your naming conventions, whatever you\'ve written — and Plannotator links to it locally and runs it as a launchable reviewer, findings landing inline like the built-in one. Runs on Claude or Codex natively, or through Cursor, OpenCode, Pi, and GitHub Copilot CLI when they\'re on your PATH.',
     ],
     points: ['Bring your own review skill; its findings land as diff comments', 'Code Tours: a narrated walkthrough with checkpoints', 'Run several engines on the same diff and compare findings'],
     img: '/assets/code-review/agent-reviews.png',
@@ -124,7 +124,7 @@ const aiIds = new Set(aiFeatures.map((f) => f.id));
 
 const title = 'Code Review · Plannotator';
 const description =
-  'Review agent-written code in a real diff viewer: a git-status view of everything since main, guided reviews, per-commit diffs, launchable review agents, and PR reviews. Feedback goes straight back to your agent.';
+  'A local diff viewer for reviewing agent-written code — git, jj, Perforce, and GitHub/GitLab PRs. Annotate lines and files; your notes feed straight back into your agent session. Optional AI layer: inline Q&A, guided reviews, and launchable review agents. Free, MIT / Apache-2.0, runs on your machine.';
 ---
 
 <Base title={title} description={description}>
@@ -161,11 +161,11 @@ const description =
           Code review for<br />the modern era.
         </h1>
         <p class="cr-overview">
-          Plannotator opens every change your agent makes in a local diff viewer. You mark up
-          what's wrong, and your notes go back to the agent as instructions. The core tool is
-          fully manual and works on local diffs, branches, single commits, and pull requests.
-          The AI layer on top is optional, and it answers to you. Free, open source, and it
-          runs entirely on your machine.
+          Plannotator opens a local diff viewer for git, jj, and Perforce. You annotate lines,
+          tokens, or whole files, and when you're done the notes feed straight into your agent
+          session — an automated feedback loop. It works on local diffs, commits, branches,
+          worktrees, and GitHub/GitLab PRs. The core tool is manual; the AI layer on top is
+          optional and answers to you. Free, MIT / Apache-2.0, and it runs entirely on your machine.
         </p>
 
         <div class="cr-vcs-badges">
@@ -267,10 +267,9 @@ const description =
         <p class="cr-eyebrow">integrations</p>
         <h2 class="font-display cr-title">Agents can talk to it from the outside, too</h2>
         <p class="cr-body cr-int-lede">
-          The AI you run inside Plannotator isn't the only thing that can touch a review. Through
-          a small HTTP API, anything outside, another agent, your CI, a linter, a script, can POST
-          findings straight onto the diff. They stream in live and land inline, tagged by where
-          they came from, right next to your own notes.
+          There's also a local API. Anything outside the viewer — another agent, your CI, a
+          linter, a script — can POST findings, markers, or notes straight onto the diff. They
+          stream in live and land inline, tagged by source, right next to your own annotations.
         </p>
 
         <figure class="cr-int-figure">
@@ -353,9 +352,9 @@ const description =
         <p class="cr-arc-eyebrow">part three</p>
         <h2 class="font-display cr-arc-title">Compound engineering</h2>
         <p class="cr-arc-sub">
-          Every annotation you make is saved to disk. Point an agent at that history, and the
-          feedback you keep repeating turns into a custom review skill — caught before you ever
-          see it again.
+          Every annotation you make is saved to <code>~/.plannotator</code>. Point an agent at
+          that history and the feedback you keep repeating distills into a custom review skill —
+          caught before you see it again.
         </p>
 
         <div class="cr-loop">
@@ -909,6 +908,15 @@ const description =
     line-height: 1.7;
     color: var(--cr-dim);
     max-width: 40rem;
+  }
+
+  .cr-arc-sub code {
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    padding: 0.05em 0.35em;
+    border-radius: 5px;
+    background: color-mix(in oklab, var(--foreground) 8%, transparent);
+    color: var(--foreground);
   }
 
   /* The first section after a marker doesn't need its own divider. */
