@@ -156,9 +156,9 @@ goto parse_args
 REM Resolve binary-only mode. Precedence: --minimal / --no-minimal flag >
 REM PLANNOTATOR_MINIMAL env var > default (off). Mirrors install.sh / install.ps1.
 set "MINIMAL=0"
-if /i "%PLANNOTATOR_MINIMAL%"=="1"    set "MINIMAL=1"
-if /i "%PLANNOTATOR_MINIMAL%"=="true" set "MINIMAL=1"
-if /i "%PLANNOTATOR_MINIMAL%"=="yes"  set "MINIMAL=1"
+if /i "!PLANNOTATOR_MINIMAL!"=="1"    set "MINIMAL=1"
+if /i "!PLANNOTATOR_MINIMAL!"=="true" set "MINIMAL=1"
+if /i "!PLANNOTATOR_MINIMAL!"=="yes"  set "MINIMAL=1"
 if "!MINIMAL_FLAG!"=="1" set "MINIMAL=1"
 if "!MINIMAL_FLAG!"=="0" set "MINIMAL=0"
 
