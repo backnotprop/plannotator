@@ -83,6 +83,8 @@ const aiFeatures = [
     ],
     points: ['Per-section reviewed state for multi-sitting reviews', 'Every changed file validated against the real diff'],
     img: '/assets/code-review/guided-review.png',
+    video: '/assets/guided-review-demo.mp4',
+    poster: '/assets/guided-review-poster.jpg',
     alt: 'A guided review section: prose overview on the left, live annotatable diff on the right',
   },
   {
@@ -243,15 +245,34 @@ const description =
               <button
                 type="button"
                 class="cr-shot-btn"
-                data-lightbox={f.img}
+                data-lightbox={f.video ?? f.img}
                 data-lightbox-alt={f.alt}
-                aria-label={`View ${f.alt} full size`}
+                data-lightbox-video={f.video ? 'true' : undefined}
+                aria-label={f.video ? `Play the ${f.eyebrow} demo full size` : `View ${f.alt} full size`}
               >
-                <img src={f.img} alt={f.alt} width="1600" height="1000" loading={gi === 0 ? 'eager' : 'lazy'} />
+                {f.video ? (
+                  <video
+                    src={f.video}
+                    poster={f.poster ?? f.img}
+                    width="1600"
+                    height="1000"
+                    autoplay
+                    muted
+                    loop
+                    playsinline
+                    preload="metadata"
+                  ></video>
+                ) : (
+                  <img src={f.img} alt={f.alt} width="1600" height="1000" loading={gi === 0 ? 'eager' : 'lazy'} />
+                )}
                 <span class="cr-shot-zoom" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
-                  </svg>
+                  {f.video ? (
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+                    </svg>
+                  )}
                 </span>
               </button>
             </figure>
@@ -437,6 +458,7 @@ const description =
       <div class="cr-lightbox-dialog" role="dialog" aria-modal="true" aria-label="Screenshot">
         <button class="cr-demo-close" type="button" aria-label="Close" data-close-lightbox>&times;</button>
         <img class="cr-lightbox-img" alt="" />
+        <video class="cr-lightbox-video" controls loop playsinline hidden></video>
       </div>
     </div>
 
@@ -460,13 +482,23 @@ const description =
         document.querySelectorAll('[data-open-demo]').forEach((b) => b.addEventListener('click', openDemo));
         document.querySelectorAll('[data-close-demo]').forEach((b) => b.addEventListener('click', closeDemo));
 
-        // Screenshot lightbox
+        // Screenshot / video lightbox
         const lb = document.querySelector('[data-lightbox-modal]');
         const lbImg = lb?.querySelector('.cr-lightbox-img');
-        const openLightbox = (src, alt) => {
-          if (!lb || !lbImg) return;
-          lbImg.src = src;
-          lbImg.alt = alt || '';
+        const lbVideo = lb?.querySelector('.cr-lightbox-video');
+        const openLightbox = (src, alt, isVideo) => {
+          if (!lb) return;
+          if (isVideo && lbVideo) {
+            lbImg.hidden = true;
+            lbVideo.hidden = false;
+            lbVideo.src = src;
+            lbVideo.play().catch(() => {});
+          } else if (lbImg) {
+            if (lbVideo) lbVideo.hidden = true;
+            lbImg.hidden = false;
+            lbImg.src = src;
+            lbImg.alt = alt || '';
+          }
           lb.hidden = false;
           document.body.style.overflow = 'hidden';
         };
@@ -475,10 +507,15 @@ const description =
           lb.hidden = true;
           document.body.style.overflow = '';
           if (lbImg) lbImg.removeAttribute('src');
+          if (lbVideo) { lbVideo.pause(); lbVideo.removeAttribute('src'); }
         };
         document.querySelectorAll('[data-lightbox]').forEach((b) =>
           b.addEventListener('click', () =>
-            openLightbox(b.getAttribute('data-lightbox'), b.getAttribute('data-lightbox-alt')),
+            openLightbox(
+              b.getAttribute('data-lightbox'),
+              b.getAttribute('data-lightbox-alt'),
+              b.getAttribute('data-lightbox-video') === 'true',
+            ),
           ),
         );
         document.querySelectorAll('[data-close-lightbox]').forEach((b) => b.addEventListener('click', closeLightbox));
@@ -1032,7 +1069,8 @@ const description =
     box-shadow: 0 1px 2px color-mix(in oklab, var(--foreground) 6%, transparent);
   }
 
-  .cr-shot img {
+  .cr-shot img,
+  .cr-shot video {
     display: block;
     width: 100%;
     height: auto;
@@ -1050,9 +1088,12 @@ const description =
     position: relative;
   }
 
-  .cr-shot-btn img { transition: opacity 0.18s; }
+  .cr-shot-btn img,
+  .cr-shot-btn video { transition: opacity 0.18s; }
   .cr-shot-btn:hover img,
-  .cr-shot-btn:focus-visible img { opacity: 0.9; }
+  .cr-shot-btn:focus-visible img,
+  .cr-shot-btn:hover video,
+  .cr-shot-btn:focus-visible video { opacity: 0.9; }
   .cr-shot-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
   .cr-shot-zoom {
@@ -1095,7 +1136,8 @@ const description =
     max-height: 92vh;
   }
 
-  .cr-lightbox-img {
+  .cr-lightbox-img,
+  .cr-lightbox-video {
     display: block;
     max-width: 96vw;
     max-height: 92vh;
@@ -1105,6 +1147,9 @@ const description =
     border: 1px solid var(--border);
     box-shadow: 0 40px 120px rgba(0, 0, 0, 0.6);
   }
+
+  .cr-lightbox-img[hidden],
+  .cr-lightbox-video[hidden] { display: none; }
 
   /* ── Compound engineering loop ── */
   .cr-compound {
