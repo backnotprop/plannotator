@@ -14,9 +14,17 @@
   "bugs": {
     "url": "https://github.com/backnotprop/plannotator/issues"
   },
-  "keywords": ["pi-package", "plannotator", "plan-review", "ai-agent", "coding-agent"],
+  "keywords": [
+    "pi-package",
+    "plannotator",
+    "plan-review",
+    "ai-agent",
+    "coding-agent"
+  ],
   "pi": {
-    "extensions": ["./"]
+    "extensions": [
+      "./"
+    ]
   },
   "files": [
     "index.ts",
@@ -43,6 +51,7 @@
     "@pierre/diffs": "1.2.8",
     "@plannotator/webtui": "0.1.0",
     "chokidar": "^5.0.0",
+    "diff": "^8.0.4",
     "parse5": "^7.3.0",
     "turndown": "^7.2.4"
   },

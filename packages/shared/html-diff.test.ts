@@ -120,6 +120,34 @@ describe("htmlDiff", () => {
     expect(count(out, "<del>")).toBe(count(out, "</del>"));
   });
 
+  test("tags with > inside quoted attributes are tokenized whole (attr-only change)", () => {
+    // Regression: the old tokenizer stopped at the first > even inside a quoted
+    // attribute, splitting the tag and corrupting the output.
+    const out = htmlDiff(
+      '<td title="x > y">cell</td>',
+      '<td title="x > z">cell</td>',
+    );
+    // Attribute-only change: new tag emitted intact, unchanged text untouched.
+    expect(out).toBe('<td title="x > z">cell</td>');
+  });
+
+  test("text edit inside a tag carrying > in an attribute stays clean", () => {
+    const out = htmlDiff(
+      '<td title="a > b">cat</td>',
+      '<td title="a > b">dog</td>',
+    );
+    expect(out).toBe('<td title="a > b"><del>cat</del><ins>dog</ins></td>');
+  });
+
+  test("script opener with > in an attribute keeps contents opaque", () => {
+    const oldHtml = '<script data-x="a>b">var a = 1;</script><p>hi</p>';
+    const newHtml = '<script data-x="a>b">var a = 2;</script><p>hi</p>';
+    const out = htmlDiff(oldHtml, newHtml);
+    expect(out).toContain('<script data-x="a>b">var a = 2;</script>');
+    expect(out).not.toContain("<ins>");
+    expect(out).not.toContain("<del>");
+  });
+
   test("removed element drops its tags (no unbalanced tags) and dels its text", () => {
     const oldHtml = "<ul><li>One</li><li>Two</li></ul>";
     const newHtml = "<ul><li>One</li></ul>";

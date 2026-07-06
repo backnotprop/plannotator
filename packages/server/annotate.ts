@@ -32,7 +32,7 @@ import {
 	saveSourceFileAtomic,
 } from "@plannotator/shared/source-save-node";
 import { createExternalAnnotationHandler } from "./external-annotations";
-import { saveConfig, detectGitUser, getServerConfig } from "./config";
+import { saveConfig, detectGitUser, getServerConfig, loadConfig, resolveAnnotateHistory } from "./config";
 import { existsSync } from "fs";
 import { dirname, resolve as resolvePath } from "path";
 import { isWithinDirectory } from "@plannotator/shared/html-assets-node";
@@ -184,7 +184,8 @@ export async function startAnnotateServer(
     const eligible =
       mode === "annotate" &&
       !/^https?:\/\//i.test(filePath) &&
-      historyContent.length > 0;
+      historyContent.length > 0 &&
+      resolveAnnotateHistory(loadConfig());
     if (eligible) {
       const base =
         (filePath.split(/[\\/]/).pop() || "document")

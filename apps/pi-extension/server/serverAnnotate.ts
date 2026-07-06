@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { contentHash, deleteDraft } from "../generated/draft.js";
 import { saveToHistory, getPlanVersion, getVersionCount, listVersions } from "../generated/storage.js";
 import { htmlDiff } from "../generated/html-diff.js";
-import { saveConfig, detectGitUser, getServerConfig, loadConfig, resolveSharingEnabled } from "../generated/config.js";
+import { saveConfig, detectGitUser, getServerConfig, loadConfig, resolveSharingEnabled, resolveAnnotateHistory } from "../generated/config.js";
 import { disabledSourceSave, type SourceSaveRequest } from "../generated/source-save.js";
 import { getAnnotateReferenceRootPaths } from "../generated/annotate-reference-roots-node.js";
 import {
@@ -235,7 +235,8 @@ export async function startAnnotateServer(options: {
 		const eligible =
 			(options.mode || "annotate") === "annotate" &&
 			!/^https?:\/\//i.test(options.filePath) &&
-			historyContent.length > 0;
+			historyContent.length > 0 &&
+			resolveAnnotateHistory(loadConfig());
 		if (eligible) {
 			const base =
 				(options.filePath.split(/[\\/]/).pop() || "document")

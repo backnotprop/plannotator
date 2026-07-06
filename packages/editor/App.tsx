@@ -3938,7 +3938,7 @@ const App: React.FC = () => {
               activeTab={sidebar.activeTab}
               onToggleTab={toggleSidebarTab}
               hasDiff={planDiff.hasPreviousVersion}
-              showVersionsTab={versionInfo !== null && versionInfo.totalVersions > 1}
+              showVersionsTab={!isHtmlSurface && versionInfo !== null && versionInfo.totalVersions > 1}
               showFilesTab={showFilesTab && !archive.archiveMode}
               showMessagesTab={annotateSource === 'message' && recentMessages.length > 1}
               showAgentTerminalTab={showAgentTerminalControls}
@@ -3994,7 +3994,7 @@ const App: React.FC = () => {
                 onFilesFetchAll={() => fileBrowser.fetchAll(fileBrowserDirs)}
                 onFilesRetryVaultDir={(vaultPath) => fileBrowser.addVaultDir(vaultPath)}
                 hasFileAnnotations={hasFileAnnotations}
-                showVersionsTab={versionInfo !== null && versionInfo.totalVersions > 1}
+                showVersionsTab={!isHtmlSurface && versionInfo !== null && versionInfo.totalVersions > 1}
                 versionInfo={versionInfo}
                 versions={planDiff.versions}
                 selectedBaseVersion={planDiff.diffBaseVersion}

@@ -38,8 +38,18 @@ interface Token {
  * The `i`/`s` flags make script/style/comment matching case-insensitive and let
  * `.` span newlines so multi-line opaque blocks are captured whole.
  */
-const TOKEN_RE =
-  /<script\b[^>]*>[\s\S]*?<\/script\s*>|<style\b[^>]*>[\s\S]*?<\/style\s*>|<!--[\s\S]*?-->|<[^>]*>|\s+|[^<\s]+/gi;
+// Tag matching must skip `>` inside quoted attribute values (title="a > b"),
+// otherwise the tag splits mid-attribute and the diff corrupts the markup:
+// `(?:"[^"]*"|'[^']*'|[^>])*` consumes quoted strings whole.
+const TAG_INNER = `(?:"[^"]*"|'[^']*'|[^>])*`;
+const TOKEN_RE = new RegExp(
+  `<script\\b${TAG_INNER}>[\\s\\S]*?<\\/script\\s*>|` +
+    `<style\\b${TAG_INNER}>[\\s\\S]*?<\\/style\\s*>|` +
+    `<!--[\\s\\S]*?-->|` +
+    `<${TAG_INNER}>|` +
+    `\\s+|[^<\\s]+`,
+  "gi",
+);
 
 /**
  * Split an HTML string into an ordered list of atomic tokens. A token is either
