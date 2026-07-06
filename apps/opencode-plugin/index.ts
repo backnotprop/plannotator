@@ -55,7 +55,9 @@ import {
 } from "./plan-edits";
 import {
   handleCliCommand,
+  isOpenChamberRuntime,
   runCliPlanReview,
+  startDetachedCliPlanReview,
   type OpenCodeBridgeContext,
   type OpenCodePlanReviewResult,
 } from "./cli-bridge";
@@ -635,6 +637,90 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
           writeFileSync(backingPath, planContent, "utf-8");
 
           const timeoutSeconds = getPlanTimeoutSeconds();
+          if (isOpenChamberRuntime()) {
+            const sendDetachedResult = async (result: OpenCodePlanReviewResult) => {
+              try {
+                if (result.approved) {
+                  try { unlinkSync(backingPath); } catch { /* already gone */ }
+
+                  const shouldSwitchAgent = result.agentSwitch && result.agentSwitch !== 'disabled';
+                  const targetAgent = result.agentSwitch || 'build';
+                  const text = result.feedback
+                    ? getPlanApprovedWithNotesPrompt("opencode", undefined, {
+                        planFilePath: backingPath,
+                        doneMsg: result.savedPath ? `Saved to: ${result.savedPath}` : "",
+                        feedback: result.feedback,
+                        proceedSuffix: shouldSwitchAgent
+                          ? "\n\nProceed with implementation, incorporating these notes where applicable."
+                          : "",
+                      })
+                    : getPlanApprovedPrompt("opencode", undefined, {
+                        planFilePath: backingPath,
+                        doneMsg: result.savedPath ? ` Saved to: ${result.savedPath}` : "",
+                      });
+
+                  await ctx.client.session.prompt({
+                    path: { id: context.sessionID },
+                    body: {
+                      ...(shouldSwitchAgent && { agent: targetAgent }),
+                      parts: [{ type: "text", text }],
+                    },
+                  });
+                  return;
+                }
+
+                const lineNumberedPlan = formatWithLineNumbers(planContent);
+                const totalLines = planContent.split("\n").length;
+                const text = getPlanDeniedPrompt("opencode", undefined, {
+                  toolName: getPlanToolName("opencode"),
+                  planFileRule: "",
+                  feedback: result.feedback || "Plan changes requested",
+                }) + `\n\n## Current Plan (${totalLines} lines)\n\nThe plan below shows the current state with line numbers. Use these exact line numbers in your next \`submit_plan\` call:\n\n\`\`\`\n${lineNumberedPlan}\n\`\`\`\n\nCall \`submit_plan\` with targeted edits to address the feedback above.`;
+
+                await ctx.client.session.prompt({
+                  path: { id: context.sessionID },
+                  body: { parts: [{ type: "text", text }] },
+                });
+              } catch (error) {
+                try {
+                  void ctx.client.app.log({
+                    level: "error",
+                    message: `[Plannotator] Failed to deliver detached plan result: ${error instanceof Error ? error.message : String(error)}`,
+                  });
+                } catch {}
+              }
+            };
+
+            const sendDetachedError = async (error: Error) => {
+              try {
+                await ctx.client.session.prompt({
+                  path: { id: context.sessionID },
+                  body: {
+                    parts: [{
+                      type: "text",
+                      text: `[Plannotator] Failed to complete detached plan review: ${error.message}`,
+                    }],
+                  },
+                });
+              } catch {}
+            };
+
+            try {
+              const launch = startDetachedCliPlanReview({
+                client: ctx.client,
+                planContent,
+                timeoutSeconds,
+                cwd: ctx.directory,
+                bridge: await getBridgeContext(),
+                onResult: sendDetachedResult,
+                onError: sendDetachedError,
+              });
+              return launch.message;
+            } catch (error) {
+              return `[Plannotator] Failed to start detached plan review: ${error instanceof Error ? error.message : String(error)}`;
+            }
+          }
+
           let result: OpenCodePlanReviewResult;
           try {
             result = await runPlanReview({

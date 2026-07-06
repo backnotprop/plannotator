@@ -7,8 +7,12 @@ import {
   buildCliBridgeEnv,
   buildCliSpawnConfig,
   buildReviewPromptFromBridgeOutcome,
+  formatDetachedPlanReviewMessage,
   formatUserFacingCliStderrLine,
+  getDetachedPlanReviewUrl,
   getRecentAssistantMessages,
+  isOpenChamberRuntime,
+  resolveDetachedPlanReviewPort,
 } from "./cli-bridge";
 import { getReviewDeniedSuffix } from "@plannotator/shared/prompts";
 
@@ -82,6 +86,25 @@ describe("OpenCode CLI bridge helpers", () => {
       "(1.2 KB - plan only, annotations added in browser)",
     );
     expect(formatUserFacingCliStderrLine("Fetching: https://example.com")).toBeUndefined();
+  });
+
+  test("detects OpenChamber runtime without recursing in the detached child", () => {
+    expect(isOpenChamberRuntime({ OPENCHAMBER_RUNTIME: "desktop" } as NodeJS.ProcessEnv)).toBe(true);
+    expect(isOpenChamberRuntime({ OPENCHAMBER_RUNTIME: "desktop", PLANNOTATOR_DETACHED_CHILD: "1" } as NodeJS.ProcessEnv)).toBe(false);
+    expect(isOpenChamberRuntime({} as NodeJS.ProcessEnv)).toBe(false);
+  });
+
+  test("chooses a concrete detached review port for immediate OpenChamber URLs", () => {
+    expect(resolveDetachedPlanReviewPort({ PLANNOTATOR_PORT: "4432" } as NodeJS.ProcessEnv)).toBe(4432);
+    expect(resolveDetachedPlanReviewPort({ PLANNOTATOR_PORT: "0" } as NodeJS.ProcessEnv, () => 0)).toBe(19_000);
+    expect(resolveDetachedPlanReviewPort({ PLANNOTATOR_PORT: "bad" } as NodeJS.ProcessEnv, () => 0.5)).toBe(29_000);
+  });
+
+  test("formats the detached OpenChamber review URL message", () => {
+    const url = getDetachedPlanReviewUrl(4432);
+    expect(url).toBe("http://localhost:4432");
+    expect(formatDetachedPlanReviewMessage(url)).toContain("Review UI is starting at http://localhost:4432");
+    expect(formatDetachedPlanReviewMessage(url)).toContain("approval or comments");
   });
 
   test("resolves Windows CLI commands to an executable without shell mode", () => {
