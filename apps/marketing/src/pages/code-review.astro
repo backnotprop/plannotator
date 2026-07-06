@@ -1,0 +1,1367 @@
+---
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import GitHubStars from '../components/landing/GitHubStars';
+
+// The page runs as two arcs (research-backed ordering): the fully manual
+// tool first, since control is the credibility floor for reviewers in the
+// agent era; then the AI layer, ordered from weakest claim of autonomy
+// (inline Q&A) to strongest (agent-run reviews), so trust builds rung by
+// rung. Screenshots alternate sides continuously across both arcs.
+const coreFeatures = [
+  {
+    id: 'annotations',
+    eyebrow: 'annotate → agent',
+    title: 'Your annotations become the agent\'s instructions',
+    body: [
+      'Select lines, a single token, or a whole file and leave a comment, a concern, or a code suggestion. Conventional Comments labels are there if your team writes reviews that way.',
+      'When you hit Send Feedback, everything exports as markdown anchored to exact files and lines and lands in your agent session. The agent reads it like any other instruction and gets to work.',
+    ],
+    points: ['Line, token, file, and review-level scopes', 'Suggested-code blocks with the original alongside', 'Drafts auto-save and survive a crashed session'],
+    img: '/assets/code-review/annotations.png',
+    alt: 'A selected diff range with a comment popover and a suggested-code block',
+  },
+  {
+    id: 'all-changes',
+    eyebrow: 'git status view',
+    title: 'Review the whole change before it\'s a PR',
+    body: [
+      'The default view pulls together everything you\'ve touched: committed work, uncommitted edits, and untracked files, in one screen. No need to commit, push, or open a PR first, you see exactly what a PR would show while the work is still in progress.',
+      'It\'s grouped the way git status groups it: a Committed section, a Changes section, an Untracked section. Every row shows the change type and line counts, and you can stage or unstage files right there while you review.',
+    ],
+    points: ['Falls back gracefully when no base branch resolves', 'One-click fetch when the base is behind GitHub'],
+    img: '/assets/code-review/git-status.png',
+    alt: 'The git status panel showing Committed, Changes, and Untracked sections beside an open diff',
+  },
+  {
+    id: 'commits',
+    eyebrow: 'commits panel',
+    title: 'Walk the branch, one commit at a time',
+    body: [
+      'The Commits panel is a plain history rail of your branch, newest first, with a divider where your work meets the base. Click any commit and you get that commit\'s own diff against its parent, with the full commit message on top.',
+      'It\'s git show with annotations. Review a teammate\'s commit, or your own from last Tuesday, and the feedback records which commit each note was anchored to.',
+    ],
+    points: ['Session-scoped: glancing at history never changes your default view'],
+    img: '/assets/code-review/commits.png',
+    alt: 'The commits rail with avatars beside a per-commit diff and its rendered message',
+  },
+  {
+    id: 'pr-review',
+    eyebrow: 'pull requests',
+    title: 'Review PRs without the noise',
+    body: [
+      'Point it at a GitHub PR or a GitLab MR and it opens in the same viewer: the description, checks, and full discussion in one Overview panel. On a busy PR the discussion is where you drown, so the comments column filters it down. Hide bots (Dependabot, CI, Copilot) with one toggle, drop resolved and outdated threads, narrow to specific people, or search the whole thread.',
+      'The description and comments are annotatable too. The agent can\'t see the PR discussion on its own, so your notes travel with the full comment quoted. Post your review back to the platform as inline comments, or hand it to the agent to fix.',
+    ],
+    points: ['Hide bots is on by default; resolved and outdated threads collapse away', 'Uses your gh / glab auth, so private repos just work', 'Stacked PRs get a Layer / Full-stack toggle for the whole chain'],
+    img: '/assets/code-review/pr-review.png',
+    alt: 'The PR overview panel with description, checks, and annotatable comments',
+  },
+];
+
+const aiFeatures = [
+  {
+    id: 'ask-ai',
+    eyebrow: 'ask ai',
+    title: 'Ask the diff a question',
+    body: [
+      'Select lines in the diff and ask. The answer streams into a side panel, scoped to the code you selected and the changeset on screen, riding whichever agent CLI you already use.',
+      'It\'s reading support, not delegation. You stay in the diff; the model holds the context you would otherwise go dig for.',
+    ],
+    points: ['Providers detected from the CLIs you already have installed', 'Answers stay grouped by file for the session'],
+    img: '/assets/code-review/ask-ai.png',
+    alt: 'Selected diff lines with an Ask AI answer streaming into the side panel',
+  },
+  {
+    id: 'guided-review',
+    eyebrow: 'guided review',
+    title: 'Let an agent chapter the changeset',
+    body: [
+      'A Guided Review has an agent reorganize the changeset into chapters by importance: the heart of the change first, then its consequences, then the glue. Each chapter pairs a short overview and per-file summaries with the diffs it covers. On a big diff it reads far better than file order.',
+      'The diffs inside a guide are the real diff viewer, not excerpts. You still read every line; the agent just puts the lines in a smarter order. Anything you annotate there lands in the same review and ships in the same feedback.',
+    ],
+    points: ['Per-section reviewed state for multi-sitting reviews', 'Every changed file validated against the real diff'],
+    img: '/assets/code-review/guided-review.png',
+    alt: 'A guided review section: prose overview on the left, live annotatable diff on the right',
+  },
+  {
+    id: 'agent-reviews',
+    eyebrow: 'agent reviews',
+    title: 'Run review agents, keep the final say',
+    body: [
+      'Kick off a review agent against the current changeset and its findings come back as annotations on the diff, each with a severity, the reasoning behind it, and a file and line anchor. You decide what to keep. Nothing gets sent anywhere until you send it.',
+      'The review is yours to define. Point it at one of your own skills, your team\'s security checklist, your naming conventions, whatever you\'ve written, and that skill becomes a launchable reviewer whose findings land as inline diff comments exactly like the built-in one. Runs on Claude or Codex natively, or through Cursor, OpenCode, Pi, and GitHub Copilot CLI when they\'re on your PATH.',
+    ],
+    points: ['Bring your own review skill; its findings land as diff comments', 'Code Tours: a narrated walkthrough with checkpoints', 'Run several engines on the same diff and compare findings'],
+    img: '/assets/code-review/agent-reviews.png',
+    alt: 'The review agents tab with engine choices and agent findings in the annotations sidebar',
+  },
+];
+
+// Chapter markers. The title-voice shift between the two is deliberate:
+// part one stays in tool-description register, part two names the handoff.
+const arcs = [
+  {
+    id: 'core',
+    eyebrow: 'part one',
+    title: 'The manual tool',
+    sub: 'Review any changeset with nothing between you and the diff. No model in the loop unless you put one there.',
+    items: coreFeatures,
+  },
+  {
+    id: 'ai',
+    eyebrow: 'part two',
+    title: 'The AI layer',
+    sub: 'Same viewer, same annotations, more eyes on the code. Agents flag; you decide what ships.',
+    items: aiFeatures,
+  },
+];
+
+const features = arcs.flatMap((a) => a.items);
+// AI-layer features get a slanted "AI" mark on their badges + eyebrows.
+const aiIds = new Set(aiFeatures.map((f) => f.id));
+
+const title = 'Code Review · Plannotator';
+const description =
+  'Review agent-written code in a real diff viewer: a git-status view of everything since main, guided reviews, per-commit diffs, launchable review agents, and PR reviews. Feedback goes straight back to your agent.';
+---
+
+<Base title={title} description={description}>
+  <div class="min-h-screen bg-background text-foreground">
+    <Nav />
+
+    <main class="max-w-6xl mx-auto px-6 md:px-8">
+      <div class="cr-hero-wrap">
+      <!-- ── Demo video launcher (right of the hero, vertically centered) ── -->
+      <button class="cr-demo-launch" type="button" aria-label="Watch the two-minute code review demo" data-open-demo>
+        <img src="/assets/code-review-demo-poster.jpg" alt="" class="cr-demo-poster" loading="eager" width="640" height="360" />
+        <span class="cr-demo-play" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+        </span>
+        <span class="cr-demo-caption">Watch the 2-min demo</span>
+      </button>
+
+      <!-- ── Hero ── -->
+      <header class="cr-hero">
+        <div class="cr-cmd-row">
+          <p class="cr-cmd">/plannotator-review <span class="cr-cmd-dim">[PR_URL]</span></p>
+          <a
+            href="https://github.com/backnotprop/plannotator"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="cr-gh"
+            aria-label="Plannotator on GitHub"
+          >
+            <svg class="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8C0 11.54 2.29 14.53 5.47 15.59C5.87 15.66 6.02 15.42 6.02 15.21C6.02 15.02 6.01 14.39 6.01 13.72C4 14.09 3.48 13.23 3.32 12.78C3.23 12.55 2.84 11.84 2.5 11.65C2.22 11.5 1.82 11.13 2.49 11.12C3.12 11.11 3.57 11.7 3.72 11.94C4.44 13.15 5.59 12.81 6.05 12.6C6.12 12.08 6.33 11.73 6.56 11.53C4.78 11.33 2.92 10.64 2.92 7.58C2.92 6.71 3.23 5.99 3.74 5.43C3.66 5.23 3.38 4.41 3.82 3.31C3.82 3.31 4.49 3.1 6.02 4.13C6.66 3.95 7.34 3.86 8.02 3.86C8.7 3.86 9.38 3.95 10.02 4.13C11.55 3.09 12.22 3.31 12.22 3.31C12.66 4.41 12.38 5.23 12.3 5.43C12.81 5.99 13.12 6.7 13.12 7.58C13.12 10.65 11.25 11.33 9.47 11.53C9.76 11.78 10.01 12.26 10.01 13.01C10.01 14.08 10 14.94 10 15.21C10 15.42 10.15 15.67 10.55 15.59C13.71 14.53 16 11.53 16 8C16 3.58 12.42 0 8 0Z"/></svg>
+            <GitHubStars client:load />
+          </a>
+        </div>
+        <h1 class="font-display cr-heading">
+          Code review for<br />the modern era.
+        </h1>
+        <p class="cr-overview">
+          Plannotator opens every change your agent makes in a local diff viewer. You mark up
+          what's wrong, and your notes go back to the agent as instructions. The core tool is
+          fully manual and works on local diffs, branches, single commits, and pull requests.
+          The AI layer on top is optional, and it answers to you. Free, open source, and it
+          runs entirely on your machine.
+        </p>
+
+        <div class="cr-vcs-badges">
+          <span class="cr-badge cr-badge-plain">git</span>
+          <span class="cr-badge" title="Jujutsu repos get native jj diff modes">jj</span>
+          <span class="cr-badge" title="Perforce changelists supported">Perforce</span>
+        </div>
+
+        <dl class="cr-caps">
+          <div class="cr-cap">
+            <dt class="cr-cap-label">review agents</dt>
+            <dd class="cr-cap-val cr-agent-icons">
+              <img src="/assets/icon-claude.svg" alt="Claude" title="Claude" draggable="false" />
+              <img src="/assets/icon-codex.png" alt="Codex" title="Codex" class="rounded-sm" draggable="false" />
+              <img src="/assets/icon-opencode-dark.svg" alt="OpenCode" title="OpenCode" class="icon-opencode" draggable="false" />
+              <img src="/assets/icon-pi.svg" alt="Pi" title="Pi" class="icon-pi" draggable="false" />
+              <img src="/assets/icon-copilot.svg" alt="GitHub Copilot CLI" title="GitHub Copilot CLI" class="icon-copilot" draggable="false" />
+              <img src="/assets/icon-gemini.png" alt="Gemini CLI" title="Gemini CLI" draggable="false" />
+              <img src="/assets/icon-droid.png" alt="Droid" title="Droid" class="rounded-sm" draggable="false" />
+              <img src="/assets/icon-amp.svg" alt="Amp" title="Amp" draggable="false" />
+              <img src="/assets/icon-kiro.svg" alt="Kiro" title="Kiro" class="rounded-sm" draggable="false" />
+              <img src="/assets/icon-vscode.svg" alt="VS Code" title="VS Code" draggable="false" />
+            </dd>
+          </div>
+          <div class="cr-cap">
+            <dt class="cr-cap-label">custom reviews</dt>
+            <dd class="cr-cap-val cr-cap-text">
+              Bring your own skills. They run in the background and leave findings as inline diff comments.
+            </dd>
+          </div>
+        </dl>
+
+        <nav class="cr-toc" aria-label="Features on this page">
+          {features.map((f) => (
+            <a href={`#${f.id}`} class="cr-toc-item">
+              {aiIds.has(f.id) && <span class="cr-ai-mark">AI</span>}
+              {f.title}
+            </a>
+          ))}
+        </nav>
+      </header>
+      </div>
+
+      <!-- ── Two arcs: manual tool, then AI layer ── -->
+      {arcs.map((arc, arcIdx) => (
+        <Fragment>
+          <div class="cr-arc" id={`arc-${arc.id}`}>
+            <p class="cr-arc-eyebrow">{arc.eyebrow}</p>
+            <h2 class="font-display cr-arc-title">{arc.title}</h2>
+            <p class="cr-arc-sub">{arc.sub}</p>
+          </div>
+          {arc.items.map((f, i) => {
+            const gi = (arcIdx === 0 ? 0 : coreFeatures.length) + i;
+            return (
+        <section id={f.id} class="cr-section">
+          <div class:list={['cr-grid', gi % 2 === 1 && 'cr-grid-flip']}>
+            <div class="cr-copy">
+              <p class="cr-eyebrow">
+                {aiIds.has(f.id) && <span class="cr-ai-mark">AI</span>}
+                {f.eyebrow}
+              </p>
+              <h2 class="font-display cr-title">{f.title}</h2>
+              {f.body.map((p) => (
+                <p class="cr-body">{p}</p>
+              ))}
+              {f.points && (
+                <ul class="cr-points">
+                  {f.points.map((pt) => (
+                    <li>{pt}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <figure class="cr-shot">
+              <button
+                type="button"
+                class="cr-shot-btn"
+                data-lightbox={f.img}
+                data-lightbox-alt={f.alt}
+                aria-label={`View ${f.alt} full size`}
+              >
+                <img src={f.img} alt={f.alt} width="1600" height="1000" loading={gi === 0 ? 'eager' : 'lazy'} />
+                <span class="cr-shot-zoom" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+                  </svg>
+                </span>
+              </button>
+            </figure>
+          </div>
+        </section>
+            );
+          })}
+        </Fragment>
+      ))}
+
+      <!-- ── Integration ── -->
+      <section id="integrations" class="cr-integrations">
+        <p class="cr-eyebrow">integrations</p>
+        <h2 class="font-display cr-title">Agents can talk to it from the outside, too</h2>
+        <p class="cr-body cr-int-lede">
+          The AI you run inside Plannotator isn't the only thing that can touch a review. Through
+          a small HTTP API, anything outside, another agent, your CI, a linter, a script, can POST
+          findings straight onto the diff. They stream in live and land inline, tagged by where
+          they came from, right next to your own notes.
+        </p>
+
+        <figure class="cr-int-figure">
+          <svg viewBox="0 0 980 340" class="cr-int-svg" role="img"
+            aria-label="External tools POST annotations into a live Plannotator review; the findings appear inline on the diff, tagged by source.">
+            <defs>
+              <marker id="cri-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" class="cri-arrowhead" />
+              </marker>
+            </defs>
+
+            <!-- Source nodes -->
+            <g class="cri-source">
+              <rect x="8" y="18" width="204" height="54" rx="11" class="cri-pill" />
+              <text x="28" y="42" class="cri-pill-title">Other agents</text>
+              <text x="28" y="60" class="cri-pill-sub">background · CI</text>
+            </g>
+            <g class="cri-source">
+              <rect x="8" y="92" width="204" height="54" rx="11" class="cri-pill" />
+              <text x="28" y="116" class="cri-pill-title">CI &amp; checks</text>
+              <text x="28" y="134" class="cri-pill-sub">status · coverage</text>
+            </g>
+            <g class="cri-source">
+              <rect x="8" y="166" width="204" height="54" rx="11" class="cri-pill" />
+              <text x="28" y="190" class="cri-pill-title">Linters, scanners</text>
+              <text x="28" y="208" class="cri-pill-sub">ESLint · Semgrep</text>
+            </g>
+            <g class="cri-source">
+              <rect x="8" y="240" width="204" height="54" rx="11" class="cri-pill" />
+              <text x="28" y="264" class="cri-pill-title">Your scripts</text>
+              <text x="28" y="282" class="cri-pill-sub">post anything</text>
+            </g>
+
+            <!-- Wires converging on the ingest node -->
+            <path d="M212 45 C 320 45, 372 175, 448 175" class="cri-wire" />
+            <path d="M212 119 C 320 119, 372 175, 448 175" class="cri-wire" />
+            <path d="M212 193 C 320 193, 372 175, 448 175" class="cri-wire" />
+            <path d="M212 267 C 320 267, 372 175, 448 175" class="cri-wire" marker-end="url(#cri-arrow)" />
+
+            <!-- Ingest node -->
+            <rect x="450" y="150" width="118" height="50" rx="10" class="cri-hub" />
+            <text x="509" y="172" class="cri-hub-title">POST</text>
+            <text x="509" y="190" class="cri-hub-sub">JSON</text>
+            <text x="509" y="232" class="cri-endpoint">/api/external-annotations</text>
+
+            <!-- Arrow into the review -->
+            <path d="M568 175 L 624 175" class="cri-wire" marker-end="url(#cri-arrow)" />
+
+            <!-- Review card -->
+            <rect x="628" y="30" width="344" height="280" rx="14" class="cri-card" />
+            <text x="652" y="64" class="cri-card-title">Your live review</text>
+            <line x1="628" y1="80" x2="972" y2="80" class="cri-card-rule" />
+
+            <g>
+              <circle cx="664" cy="118" r="5" class="cri-dot cri-dot-a" />
+              <text x="682" y="114" class="cri-ann-src">agent</text>
+              <text x="682" y="132" class="cri-ann-body">possible race in the retry path</text>
+            </g>
+            <g>
+              <circle cx="664" cy="176" r="5" class="cri-dot cri-dot-b" />
+              <text x="682" y="172" class="cri-ann-src">semgrep</text>
+              <text x="682" y="190" class="cri-ann-body">taint: req.params flows to fs.read</text>
+            </g>
+            <g>
+              <circle cx="664" cy="234" r="5" class="cri-dot cri-dot-c" />
+              <text x="682" y="230" class="cri-ann-src">ci</text>
+              <text x="682" y="248" class="cri-ann-body">coverage on this file dropped 4%</text>
+            </g>
+            <g>
+              <circle cx="664" cy="284" r="5" class="cri-dot cri-dot-you" />
+              <text x="682" y="280" class="cri-ann-src cri-ann-you">you</text>
+              <text x="682" y="298" class="cri-ann-body">let's pull this into a helper</text>
+            </g>
+          </svg>
+        </figure>
+      </section>
+
+      <!-- ── Compound engineering ── -->
+      <section id="compound" class="cr-compound">
+        <p class="cr-arc-eyebrow">part three</p>
+        <h2 class="font-display cr-arc-title">Compound engineering</h2>
+        <p class="cr-arc-sub">
+          Every annotation you make is saved to disk. Point an agent at that history, and the
+          feedback you keep repeating turns into a custom review skill — caught before you ever
+          see it again.
+        </p>
+
+        <div class="cr-loop">
+          <div class="cr-loop-node">
+            <span class="cr-loop-step">01</span>
+            <h3 class="cr-loop-title">You annotate</h3>
+            <p class="cr-loop-body">
+              Every note is written to <code>~/.plannotator</code>, review after review — a growing
+              record of what you actually care about.
+            </p>
+          </div>
+          <span class="cr-loop-arrow" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M13 6l6 6-6 6" /></svg>
+          </span>
+          <div class="cr-loop-node">
+            <span class="cr-loop-step">02</span>
+            <h3 class="cr-loop-title">Distill a skill</h3>
+            <p class="cr-loop-body">
+              Point an agent at that history. The feedback you give again and again becomes a
+              custom review skill, in your own words.
+            </p>
+          </div>
+          <span class="cr-loop-arrow" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M13 6l6 6-6 6" /></svg>
+          </span>
+          <div class="cr-loop-node">
+            <span class="cr-loop-step">03</span>
+            <h3 class="cr-loop-title">It reviews for you</h3>
+            <p class="cr-loop-body">
+              The skill runs as a review agent and leaves the note inline, on the diff — so the
+              next agent gets it right the first time.
+            </p>
+          </div>
+        </div>
+
+        <div class="cr-loop-return" aria-hidden="true">
+          <svg class="cr-loop-return-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v6h6M20 20v-6h-6M20 10a8 8 0 0 0-14.9-3M4 14a8 8 0 0 0 14.9 3" /></svg>
+          <span class="cr-loop-return-label">the same feedback, caught automatically — never typed twice</span>
+        </div>
+      </section>
+
+      <!-- ── CTA ── -->
+      <section class="cr-cta">
+        <h2 class="font-display cr-title">Two minutes to your first review</h2>
+        <p class="cr-body">
+          Install once and <code class="cr-inline-cmd">/plannotator-review</code> works from
+          Claude Code, OpenCode, Codex, Pi, Copilot CLI, Droid, and more.
+        </p>
+        <div class="cr-cta-actions">
+          <a href="/docs/getting-started/installation/" class="cr-btn">
+            Install Plannotator
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+            </svg>
+          </a>
+          <a href="/docs/commands/code-review/" class="cr-btn cr-btn-outline">Read the docs</a>
+        </div>
+      </section>
+    </main>
+
+    <!-- ── Demo video modal ── -->
+    <div class="cr-demo-modal" data-demo-modal hidden>
+      <div class="cr-demo-backdrop" data-close-demo></div>
+      <div class="cr-demo-dialog" role="dialog" aria-modal="true" aria-label="Code review demo">
+        <button class="cr-demo-close" type="button" aria-label="Close" data-close-demo>&times;</button>
+        <video
+          class="cr-demo-video"
+          controls
+          playsinline
+          preload="none"
+          poster="/assets/code-review-demo-poster.jpg"
+          src="/assets/code-review-demo.mp4"
+        ></video>
+      </div>
+    </div>
+
+    <!-- ── Screenshot lightbox ── -->
+    <div class="cr-lightbox" data-lightbox-modal hidden>
+      <div class="cr-demo-backdrop" data-close-lightbox></div>
+      <div class="cr-lightbox-dialog" role="dialog" aria-modal="true" aria-label="Screenshot">
+        <button class="cr-demo-close" type="button" aria-label="Close" data-close-lightbox>&times;</button>
+        <img class="cr-lightbox-img" alt="" />
+      </div>
+    </div>
+
+    <script is:inline>
+      (() => {
+        // Demo video modal
+        const modal = document.querySelector('[data-demo-modal]');
+        const video = modal?.querySelector('video');
+        const openDemo = () => {
+          if (!modal) return;
+          modal.hidden = false;
+          document.body.style.overflow = 'hidden';
+          if (video) video.play().catch(() => {});
+        };
+        const closeDemo = () => {
+          if (!modal) return;
+          modal.hidden = true;
+          document.body.style.overflow = '';
+          if (video) video.pause();
+        };
+        document.querySelectorAll('[data-open-demo]').forEach((b) => b.addEventListener('click', openDemo));
+        document.querySelectorAll('[data-close-demo]').forEach((b) => b.addEventListener('click', closeDemo));
+
+        // Screenshot lightbox
+        const lb = document.querySelector('[data-lightbox-modal]');
+        const lbImg = lb?.querySelector('.cr-lightbox-img');
+        const openLightbox = (src, alt) => {
+          if (!lb || !lbImg) return;
+          lbImg.src = src;
+          lbImg.alt = alt || '';
+          lb.hidden = false;
+          document.body.style.overflow = 'hidden';
+        };
+        const closeLightbox = () => {
+          if (!lb) return;
+          lb.hidden = true;
+          document.body.style.overflow = '';
+          if (lbImg) lbImg.removeAttribute('src');
+        };
+        document.querySelectorAll('[data-lightbox]').forEach((b) =>
+          b.addEventListener('click', () =>
+            openLightbox(b.getAttribute('data-lightbox'), b.getAttribute('data-lightbox-alt')),
+          ),
+        );
+        document.querySelectorAll('[data-close-lightbox]').forEach((b) => b.addEventListener('click', closeLightbox));
+
+        document.addEventListener('keydown', (e) => {
+          if (e.key !== 'Escape') return;
+          if (modal && !modal.hidden) closeDemo();
+          if (lb && !lb.hidden) closeLightbox();
+        });
+      })();
+    </script>
+
+    <Footer />
+  </div>
+</Base>
+
+<style>
+  /* Quiet text tiers, borrowed from the v3 landing language and mapped to
+     the site's theme tokens so the page follows the global light/dark toggle. */
+  .cr-hero,
+  .cr-section,
+  .cr-cta {
+    --cr-dim: color-mix(in oklab, var(--foreground) 62%, transparent);
+    --cr-subtle: color-mix(in oklab, var(--foreground) 38%, transparent);
+  }
+
+  /* ── Hero ── */
+  .cr-hero {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1.25rem;
+    padding: 5rem 0 4rem;
+    max-width: 46rem;
+  }
+
+  .cr-cmd-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    width: 100%;
+  }
+
+  .cr-cmd {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--primary);
+    letter-spacing: 0.01em;
+  }
+
+  .cr-gh {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    line-height: 1;
+    padding: 0.5rem 0.875rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--cr-dim);
+    text-decoration: none;
+    transition: color 0.15s, border-color 0.15s;
+    -webkit-user-drag: none;
+  }
+
+  .cr-gh svg { pointer-events: none; }
+
+  /* ── Demo video launcher (right of the hero, vertically centered) ── */
+  .cr-hero-wrap { position: relative; }
+
+  .cr-demo-launch {
+    position: absolute;
+    top: 50%;
+    right: 0;
+    translate: 0 -50%;
+    width: 360px;
+    aspect-ratio: 16 / 9;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--card);
+    cursor: pointer;
+    padding: 0;
+    box-shadow: 0 20px 50px color-mix(in oklab, var(--foreground) 12%, transparent);
+    transition: transform 0.18s, border-color 0.18s, box-shadow 0.18s;
+    z-index: 5;
+  }
+
+  /* translate (individual property) handles centering; transform handles hover lift */
+  .cr-demo-launch:hover,
+  .cr-demo-launch:focus-visible {
+    transform: translateY(-2px);
+    border-color: color-mix(in oklab, var(--primary) 55%, var(--border));
+    box-shadow: 0 26px 60px color-mix(in oklab, var(--primary) 20%, transparent);
+    outline: none;
+  }
+
+  .cr-demo-poster {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    opacity: 0.92;
+  }
+
+  .cr-demo-play {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    width: 56px;
+    height: 56px;
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--primary) 92%, transparent);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  }
+
+  .cr-demo-play svg {
+    width: 26px;
+    height: 26px;
+    margin-left: 3px;
+  }
+
+  .cr-demo-caption {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 28px 14px 10px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.02em;
+    color: #fff;
+    text-align: left;
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.72));
+  }
+
+  @media (max-width: 1080px) {
+    .cr-demo-launch {
+      /* relative (not static) keeps the play button + caption anchored to the
+         card instead of escaping to the hero wrapper */
+      position: relative;
+      top: auto;
+      right: auto;
+      translate: none;
+      width: 100%;
+      max-width: 440px;
+      margin: 0 0 2rem;
+    }
+  }
+
+  /* ── Demo modal ── */
+  .cr-demo-modal[hidden] { display: none; }
+
+  .cr-demo-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4vw;
+  }
+
+  .cr-demo-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.82);
+    backdrop-filter: blur(4px);
+  }
+
+  .cr-demo-dialog {
+    position: relative;
+    width: min(1200px, 92vw);
+    border-radius: 16px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    box-shadow: 0 40px 120px rgba(0, 0, 0, 0.6);
+  }
+
+  .cr-demo-video {
+    width: 100%;
+    height: auto;
+    max-height: 86vh;
+    display: block;
+    background: #000;
+  }
+
+  .cr-demo-close {
+    position: absolute;
+    top: -48px;
+    right: 0;
+    width: 40px;
+    height: 40px;
+    border: none;
+    background: transparent;
+    color: #fff;
+    font-size: 36px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.8;
+  }
+
+  .cr-demo-close:hover { opacity: 1; }
+
+  .cr-gh:hover,
+  .cr-gh:focus-visible {
+    color: var(--foreground);
+    border-color: var(--cr-subtle);
+  }
+
+  .cr-cmd-dim {
+    color: var(--cr-subtle);
+    font-weight: 400;
+  }
+
+  .cr-heading {
+    font-size: clamp(2rem, 5vw, 3rem);
+    line-height: 1.08;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+
+  .cr-overview {
+    font-size: 1rem;
+    line-height: 1.7;
+    color: var(--cr-dim);
+    max-width: 42rem;
+  }
+
+  /* ── Capabilities block: aligned label → value rows ── */
+  /* Standalone VCS badges, above the capabilities block */
+  .cr-vcs-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .cr-caps {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin: 0;
+    padding: 1.125rem 0 1.125rem 1.125rem;
+    border-left: 2px solid color-mix(in oklab, var(--primary) 50%, transparent);
+  }
+
+  .cr-cap {
+    display: grid;
+    grid-template-columns: 7.5rem 1fr;
+    gap: 1rem;
+    align-items: center;
+  }
+
+  .cr-cap-label {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--cr-subtle);
+  }
+
+  .cr-cap-val {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .cr-cap-text {
+    font-size: 0.875rem;
+    line-height: 1.55;
+    color: var(--cr-dim);
+  }
+
+  @media (max-width: 560px) {
+    .cr-cap {
+      grid-template-columns: 1fr;
+      gap: 0.375rem;
+    }
+  }
+
+  .cr-badge {
+    position: relative;
+    overflow: hidden;
+    display: inline-flex;
+    align-items: center;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    line-height: 1;
+    padding: 0.375rem 0.625rem;
+    border-radius: 999px;
+    color: var(--primary);
+    border: 1px solid color-mix(in oklab, var(--primary) 45%, var(--border));
+    background: color-mix(in oklab, var(--primary) 10%, transparent);
+  }
+
+  /* Sheen sweep. The second badge starts half a cycle later so they
+     don't blink in unison. */
+  .cr-badge::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      105deg,
+      transparent 35%,
+      color-mix(in oklab, var(--foreground) 30%, transparent) 50%,
+      transparent 65%
+    );
+    transform: translateX(-100%);
+    animation: cr-shimmer 3.2s ease-in-out infinite;
+    pointer-events: none;
+  }
+
+  .cr-badge + .cr-badge::after {
+    animation-delay: 1.6s;
+  }
+
+  /* The baseline VCS: present but not highlighted. No accent, no shimmer. */
+  .cr-badge-plain {
+    color: var(--cr-dim);
+    border-color: var(--border);
+    background: transparent;
+  }
+
+  .cr-badge-plain::after {
+    display: none;
+  }
+
+  @keyframes cr-shimmer {
+    0% { transform: translateX(-100%); }
+    45%, 100% { transform: translateX(100%); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cr-badge::after {
+      animation: none;
+      display: none;
+    }
+  }
+
+  .cr-agent-icons img {
+    width: 18px;
+    height: 18px;
+    object-fit: contain;
+    opacity: 0.85;
+    -webkit-user-drag: none;
+    user-select: none;
+  }
+
+  .cr-toc {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+
+  .cr-toc-item {
+    font-size: 0.75rem;
+    line-height: 1;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--cr-dim);
+    text-decoration: none;
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  .cr-toc-item:hover,
+  .cr-toc-item:focus-visible {
+    color: var(--foreground);
+    border-color: var(--cr-subtle);
+  }
+
+  /* Slanted "AI" marker on AI-layer badges — italic, accent, its own chip. */
+  .cr-ai-mark {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-style: italic;
+    font-weight: 800;
+    font-size: 0.85em;
+    letter-spacing: 0.02em;
+    color: var(--primary);
+    margin-right: 0.4em;
+    padding: 0.05em 0.32em;
+    border-radius: 4px;
+    background: color-mix(in oklab, var(--primary) 14%, transparent);
+  }
+
+  /* ── Arc chapter markers ── */
+  .cr-arc {
+    --cr-dim: color-mix(in oklab, var(--foreground) 62%, transparent);
+    --cr-subtle: color-mix(in oklab, var(--foreground) 38%, transparent);
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+    padding: 4.5rem 0 2.75rem;
+    border-top: 2px solid var(--border);
+  }
+
+  .cr-arc-eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--cr-subtle);
+  }
+
+  .cr-arc-title {
+    font-size: clamp(1.75rem, 3.5vw, 2.375rem);
+    line-height: 1.1;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .cr-arc-sub {
+    font-size: 0.9375rem;
+    line-height: 1.7;
+    color: var(--cr-dim);
+    max-width: 40rem;
+  }
+
+  /* The first section after a marker doesn't need its own divider. */
+  .cr-arc + .cr-section {
+    border-top: none;
+    padding-top: 0.5rem;
+  }
+
+  /* ── Feature sections ── */
+  .cr-section {
+    padding: 3.5rem 0;
+    border-top: 1px solid color-mix(in oklab, var(--border) 55%, transparent);
+    scroll-margin-top: 4rem;
+  }
+
+  .cr-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2rem;
+    align-items: center;
+  }
+
+  /* Stacked (mobile): screenshot above its prose. */
+  .cr-grid .cr-copy { order: 2; }
+  .cr-grid .cr-shot { order: 1; }
+
+  @media (min-width: 810px) {
+    .cr-grid {
+      grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+      gap: 3.5rem;
+    }
+
+    /* Two-column: copy left, screenshot right. */
+    .cr-grid .cr-copy { order: 1; }
+    .cr-grid .cr-shot { order: 2; }
+
+    /* Alternate: screenshot moves to the left, copy to the right. */
+    .cr-grid-flip {
+      grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    }
+
+    .cr-grid-flip .cr-copy {
+      order: 2;
+    }
+
+    .cr-grid-flip .cr-shot {
+      order: 1;
+    }
+  }
+
+  .cr-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+  }
+
+  .cr-eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--primary);
+  }
+
+  .cr-title {
+    font-size: clamp(1.375rem, 2.6vw, 1.75rem);
+    line-height: 1.2;
+    font-weight: 650;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+  }
+
+  .cr-body {
+    font-size: 0.9375rem;
+    line-height: 1.7;
+    color: var(--cr-dim);
+  }
+
+  .cr-points {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    margin-top: 0.25rem;
+  }
+
+  .cr-points li {
+    position: relative;
+    padding-left: 1.125rem;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    color: var(--cr-subtle);
+  }
+
+  .cr-points li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0.55em;
+    width: 0.375rem;
+    height: 0.375rem;
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--primary) 70%, transparent);
+  }
+
+  /* Screenshot frame — the v3 card, simplified. */
+  .cr-shot {
+    margin: 0;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--card);
+    box-shadow: 0 1px 2px color-mix(in oklab, var(--foreground) 6%, transparent);
+  }
+
+  .cr-shot img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  /* Clickable screenshot → fullscreen viewer */
+  .cr-shot-btn {
+    display: block;
+    width: 100%;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: none;
+    cursor: zoom-in;
+    position: relative;
+  }
+
+  .cr-shot-btn img { transition: opacity 0.18s; }
+  .cr-shot-btn:hover img,
+  .cr-shot-btn:focus-visible img { opacity: 0.9; }
+  .cr-shot-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+  .cr-shot-zoom {
+    position: absolute;
+    top: 0.6rem;
+    right: 0.6rem;
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    color: #fff;
+    background: color-mix(in oklab, #000 55%, transparent);
+    backdrop-filter: blur(3px);
+    opacity: 0;
+    transition: opacity 0.18s;
+  }
+
+  .cr-shot-zoom svg { width: 17px; height: 17px; }
+  .cr-shot-btn:hover .cr-shot-zoom,
+  .cr-shot-btn:focus-visible .cr-shot-zoom { opacity: 1; }
+
+  /* ── Screenshot lightbox ── */
+  .cr-lightbox[hidden] { display: none; }
+
+  .cr-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4vw;
+  }
+
+  .cr-lightbox-dialog {
+    position: relative;
+    max-width: 96vw;
+    max-height: 92vh;
+  }
+
+  .cr-lightbox-img {
+    display: block;
+    max-width: 96vw;
+    max-height: 92vh;
+    width: auto;
+    height: auto;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    box-shadow: 0 40px 120px rgba(0, 0, 0, 0.6);
+  }
+
+  /* ── Compound engineering loop ── */
+  .cr-compound {
+    padding: 5rem 0 1rem;
+  }
+
+  .cr-loop {
+    display: flex;
+    align-items: stretch;
+    gap: 0.5rem;
+    margin-top: 2.5rem;
+  }
+
+  .cr-loop-node {
+    flex: 1 1 0;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--card);
+    padding: 1.5rem 1.5rem 1.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .cr-loop-step {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--primary);
+    letter-spacing: 0.05em;
+  }
+
+  .cr-loop-title {
+    font-size: 1.35rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--foreground);
+  }
+
+  .cr-loop-body {
+    font-size: 0.95rem;
+    line-height: 1.55;
+    color: color-mix(in oklab, var(--foreground) 66%, transparent);
+  }
+
+  .cr-loop-body code {
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    padding: 0.05em 0.35em;
+    border-radius: 5px;
+    background: color-mix(in oklab, var(--foreground) 8%, transparent);
+  }
+
+  .cr-loop-arrow {
+    display: flex;
+    align-items: center;
+    color: color-mix(in oklab, var(--primary) 70%, var(--foreground));
+    flex: 0 0 auto;
+  }
+
+  .cr-loop-arrow svg { width: 26px; height: 26px; }
+
+  .cr-loop-return {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.7rem;
+    margin-top: 1.25rem;
+    padding: 0.85rem 1.25rem;
+    border: 1px dashed color-mix(in oklab, var(--primary) 45%, var(--border));
+    border-radius: 999px;
+  }
+
+  .cr-loop-return-icon {
+    width: 20px;
+    height: 20px;
+    color: var(--primary);
+    flex: 0 0 auto;
+  }
+
+  .cr-loop-return-label {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: color-mix(in oklab, var(--foreground) 72%, transparent);
+    letter-spacing: 0.01em;
+  }
+
+  @media (max-width: 800px) {
+    .cr-loop { flex-direction: column; }
+    .cr-loop-arrow { justify-content: center; transform: rotate(90deg); padding: 0.25rem 0; }
+    .cr-loop-return { flex-direction: column; text-align: center; border-radius: 16px; }
+  }
+
+  /* ── Integration diagram ── */
+  .cr-integrations {
+    --cr-dim: color-mix(in oklab, var(--foreground) 62%, transparent);
+    --cr-subtle: color-mix(in oklab, var(--foreground) 38%, transparent);
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+    padding: 3.5rem 0;
+    border-top: 1px solid color-mix(in oklab, var(--border) 55%, transparent);
+  }
+
+  .cr-int-lede {
+    max-width: 44rem;
+  }
+
+  .cr-int-figure {
+    margin: 1.5rem 0 0;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: color-mix(in oklab, var(--card) 60%, transparent);
+    padding: 1.25rem;
+    overflow-x: auto;
+  }
+
+  .cr-int-svg {
+    display: block;
+    width: 100%;
+    min-width: 640px;
+    height: auto;
+  }
+
+  /* Diagram tokens */
+  .cri-pill,
+  .cri-hub {
+    fill: var(--card);
+    stroke: var(--border);
+    stroke-width: 1;
+  }
+
+  .cri-hub {
+    stroke: color-mix(in oklab, var(--primary) 55%, var(--border));
+    fill: color-mix(in oklab, var(--primary) 10%, transparent);
+  }
+
+  .cri-pill-title {
+    fill: var(--foreground);
+    font: 600 15px var(--font-sans);
+  }
+
+  .cri-pill-sub {
+    fill: var(--cr-subtle);
+    font: 400 12px var(--font-mono);
+  }
+
+  .cri-hub-title {
+    fill: var(--primary);
+    font: 700 13px var(--font-mono);
+    text-anchor: middle;
+  }
+
+  .cri-hub-sub {
+    fill: var(--cr-subtle);
+    font: 400 11px var(--font-mono);
+    text-anchor: middle;
+  }
+
+  .cri-endpoint {
+    fill: var(--cr-dim);
+    font: 500 12px var(--font-mono);
+    text-anchor: middle;
+  }
+
+  .cri-wire {
+    fill: none;
+    stroke: color-mix(in oklab, var(--primary) 55%, transparent);
+    stroke-width: 1.5;
+  }
+
+  .cri-arrowhead {
+    fill: color-mix(in oklab, var(--primary) 70%, transparent);
+  }
+
+  .cri-card {
+    fill: color-mix(in oklab, var(--card) 80%, transparent);
+    stroke: var(--border);
+    stroke-width: 1;
+  }
+
+  .cri-card-title {
+    fill: var(--foreground);
+    font: 600 14px var(--font-sans);
+  }
+
+  .cri-card-rule {
+    stroke: color-mix(in oklab, var(--border) 70%, transparent);
+    stroke-width: 1;
+  }
+
+  .cri-ann-src {
+    font: 600 11px var(--font-mono);
+    fill: var(--cr-dim);
+    text-transform: lowercase;
+  }
+
+  .cri-ann-you {
+    fill: var(--primary);
+  }
+
+  .cri-ann-body {
+    font: 400 12.5px var(--font-sans);
+    fill: var(--cr-subtle);
+  }
+
+  .cri-dot-a { fill: var(--destructive); }
+  .cri-dot-b { fill: color-mix(in oklab, #f59e0b 90%, var(--foreground)); }
+  .cri-dot-c { fill: color-mix(in oklab, var(--primary) 80%, var(--foreground)); }
+  .cri-dot-you { fill: var(--primary); }
+
+  /* ── CTA ── */
+  .cr-cta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.875rem;
+    padding: 3.5rem 0 5.5rem;
+    border-top: 1px solid color-mix(in oklab, var(--border) 55%, transparent);
+  }
+
+  .cr-inline-cmd {
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    padding: 0.1em 0.4em;
+    border-radius: 6px;
+    background: var(--muted);
+  }
+
+  .cr-cta-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.625rem;
+    margin-top: 0.375rem;
+  }
+
+  .cr-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    padding: 0.625rem 1.125rem;
+    border-radius: 8px;
+    background: var(--foreground);
+    color: var(--background);
+    text-decoration: none;
+    border: 1px solid var(--foreground);
+    transition: opacity 0.15s;
+  }
+
+  .cr-btn:hover,
+  .cr-btn:focus-visible {
+    opacity: 0.88;
+  }
+
+  .cr-btn-outline {
+    background: transparent;
+    color: var(--foreground);
+    border-color: var(--border);
+  }
+
+  .cr-btn-outline:hover,
+  .cr-btn-outline:focus-visible {
+    opacity: 1;
+    border-color: var(--cr-subtle);
+  }
+</style>
