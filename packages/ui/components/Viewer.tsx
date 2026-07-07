@@ -203,6 +203,28 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     }
   };
   const containerRef = useRef<HTMLDivElement>(null);
+  // The badge cluster (repo chips / diff badge) is absolutely positioned in the
+  // card's top padding. One row fits; a second row (diff badge) or mobile
+  // wrapping outgrows the padding and lands on the document's first heading.
+  // Measure the cluster and insert exactly the clearance it needs (0 when it fits).
+  const docBadgesRef = useRef<HTMLDivElement | null>(null);
+  const [badgeClearance, setBadgeClearance] = useState(0);
+  useEffect(() => {
+    const el = docBadgesRef.current;
+    const article = containerRef.current;
+    if (!el || !article) { setBadgeClearance(0); return; }
+    const measure = () => {
+      const pad = parseFloat(getComputedStyle(article).paddingTop) || 0;
+      const overflow = el.offsetTop + el.offsetHeight - pad;
+      setBadgeClearance(overflow > 1 ? overflow + 4 : 0);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    window.addEventListener('resize', measure);
+    return () => { ro.disconnect(); window.removeEventListener('resize', measure); };
+  }, [repoInfo, hasPreviousVersion, showDemoBadge, linkedDocInfo, archiveInfo, sourceInfo, planDiffStats, openInAppPath]);
+
   // Per-doc heading slug map with dedup — computed once per blocks array so
   // anchor ids stay stable across re-renders and duplicate heading texts get
   // `-1`/`-2`/... suffixes rather than colliding on the same id.
@@ -543,7 +565,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       >
         {/* Repo info + plan diff badge + demo badge + linked doc badge + archive badge - top left */}
         {(repoInfo || hasPreviousVersion || showDemoBadge || linkedDocInfo || archiveInfo || sourceInfo || openInAppPath) && (
-          <div data-print-hide className={`absolute top-3 md:top-4 ${gridEnabled ? 'left-3 md:left-5' : 'left-0'}`}>
+          <div ref={docBadgesRef} data-print-hide className={`absolute top-3 md:top-4 ${gridEnabled ? 'left-3 md:left-5' : 'left-0'}`}>
             <DocBadges
               layout="column"
               repoInfo={repoInfo}
@@ -559,6 +581,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             />
           </div>
         )}
+
+        {/* Clearance so document content starts below the (absolute) badge cluster
+            when it outgrows the card's top padding — see the measuring effect above. */}
+        {badgeClearance > 0 && <div data-print-hide style={{ height: badgeClearance }} aria-hidden="true" />}
 
         {/* Sentinel for sticky detection */}
         {stickyActions && <div ref={stickySentinelRef} className="h-0 w-0 float-right" aria-hidden="true" />}
