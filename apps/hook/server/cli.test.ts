@@ -26,7 +26,7 @@ describe("CLI top-level help", () => {
     expect(output).toContain("plannotator --version, -v");
     expect(output).toContain("plannotator [--browser <name>]");
     expect(output).toContain("plannotator review [--git] [PR_URL]");
-    expect(output).toContain("plannotator annotate <file.md | file.txt | file.html | https://... | folder/>");
+    expect(output).toContain("plannotator annotate <file.md | file.txt | file.adoc | file.html | https://... | folder/>");
     expect(output).toContain("[--markdown] [--no-jina]");
     expect(output).toContain("plannotator annotate-last [--stdin]");
     expect(output).toContain("plannotator setup-goal <interview|facts>");
