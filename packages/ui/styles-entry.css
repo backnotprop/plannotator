@@ -7,8 +7,6 @@
    hosts that render math load katex/dist/katex.min.css themselves (see HANDOFF.md). */
 @import "tailwindcss";
 
-@plugin "tailwindcss-animate";
-
 @source "./components/**/*.tsx";
 @source "./hooks/**/*.ts";
 @source "./utils/**/*.ts";

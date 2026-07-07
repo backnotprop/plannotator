@@ -252,7 +252,7 @@
     },
     "packages/ui": {
       "name": "@plannotator/ui",
-      "version": "0.22.0",
+      "version": "0.23.0",
       "dependencies": {
         "@base-ui/react": "1.6.0",
         "@codemirror/autocomplete": "^6.20.3",
@@ -301,7 +301,6 @@
         "react": "^19.2.3",
         "react-dom": "^19.2.3",
         "tailwindcss": "^4.1.18",
-        "tailwindcss-animate": "^1.0.7",
         "typescript": "~5.8.2",
         "vite": "^6.2.0",
       },
@@ -309,7 +308,6 @@
         "react": "^19.2.3",
         "react-dom": "^19.2.3",
         "tailwindcss": "^4.1.18",
-        "tailwindcss-animate": "^1.0.7",
       },
     },
   },

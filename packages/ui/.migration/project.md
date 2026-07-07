@@ -67,6 +67,25 @@ Strict-consumer gate note: `Viewer.tsx` (gate file) transitively pulls
 8. PopoutDialog (behavior-heaviest: non-modal + outside-interaction guard)
 9. OpenInAppButton sweep; remove Radix deps; full builds; HANDOFF/0.23.0
 
+## Final state (after the last commit)
+
+- Dependency swap complete: all 6 `@radix-ui/*` removed from
+  `packages/ui/package.json`; `@base-ui/react@1.6.0` (exact pin) added.
+  Peer dep `tailwindcss-animate` removed (zero plugin utilities remain in
+  package sources; published styles.css rebuilt without it, 187.4 → 186.0 kB).
+- App-code sweep: `SearchableSelect`, `OpenInAppButton` (ui) and
+  `AnnotateAgentTerminalPanel`, both `App.tsx` TooltipProviders (editor /
+  review-editor — providers unchanged by design, wrapper keeps prop names).
+- Version bumped to `0.23.0`; publish stays owner-gated. HANDOFF.md gained
+  the "UI engine: Base UI (0.23.0)" section (deps, 11 breaking/behavior
+  items, what didn't change).
+- Final builds vs baseline: monorepo typecheck (incl. strict-consumer gate)
+  PASS; full test suite 1955 pass / 0 fail; apps/review + build:hook +
+  build:opencode + build:css all PASS.
+- Derived remaining-radix count for packages/ui: **0 wrappers remain on
+  Radix** (`grep -rn "@radix-ui" packages/ui` → only historical mentions in
+  .migration reports).
+
 ## Intentionally untouched
 
 - No cmdk/vaul/sonner/input-otp/react-day-picker/recharts in this package.

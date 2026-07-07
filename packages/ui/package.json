@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/ui",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "type": "module",
   "exports": {
     "./components/*": "./components/*.tsx",
@@ -88,8 +88,7 @@
   "peerDependencies": {
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "tailwindcss": "^4.1.18",
-    "tailwindcss-animate": "^1.0.7"
+    "tailwindcss": "^4.1.18"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.10.1",
@@ -100,7 +99,6 @@
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "tailwindcss": "^4.1.18",
-    "tailwindcss-animate": "^1.0.7",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   },

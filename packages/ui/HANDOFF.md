@@ -276,9 +276,45 @@ None of these block adoption. They're the honest "here's what we'd polish next" 
 
 ---
 
+## UI engine: Base UI (0.23.0)
+
+As of `0.23.0`, `@plannotator/ui` is built on **Base UI** (`@base-ui/react@1.6.0`, exact pin) instead of Radix. This follows shadcn/ui making Base UI its default engine (July 2026). The migration was deliberate and whole-package: **zero `@radix-ui/*` packages remain** — no mixed engines. Per-component reports with hand-verification checklists live in `packages/ui/.migration/`.
+
+### Dependency changes
+
+- Removed dependencies: `@radix-ui/react-dialog`, `react-dropdown-menu`, `react-popover`, `react-slot`, `react-tabs`, `react-tooltip`.
+- Added dependency: `@base-ui/react@1.6.0` (regular dependency — installs transitively, nothing for you to add).
+- **Peer dependency removed: `tailwindcss-animate`.** The kit's enter/exit animations are now CSS-transition-based (Base UI's `data-starting-style`/`data-ending-style`), so the plugin is no longer used. If your Tailwind config loaded it only for this package, you can drop it. Remaining peers are unchanged: `react`, `react-dom`, `tailwindcss`.
+
+### Breaking API changes in 0.23.0 (what a consumer must change)
+
+1. **`asChild` → `render`, everywhere.** `<Button asChild><a/></Button>` becomes `<Button render={<a/>}>label</Button>` (children go on the wrapper, element props on `render`). Applies to `Button`, `Badge`, `DialogTrigger`/`DialogClose`, `DropdownMenuTrigger`, `PopoverTrigger`, and tab parts.
+2. **Menu item selection:** `onSelect(event)` no longer exists. Use `onClick`; to keep the menu open after a click (the old `event.preventDefault()` idiom), pass `closeOnClick={false}`. `textValue` → `label`.
+3. **`DropdownMenuCheckboxItem` / `DropdownMenuRadioItem` no longer close the menu on click by default** (Base UI defaults `closeOnClick` to `false` for these two; plain `DropdownMenuItem` still closes). Pass `closeOnClick` explicitly for the old behavior. `checked="indeterminate"` is gone (boolean only).
+4. **`DropdownMenuLabel` must be nested inside a `DropdownMenuGroup`** (it wires `aria-labelledby`); a free-floating label was legal under Radix.
+5. **`PopoverAnchor` export removed.** Base UI has no Anchor part; anchored positioning is a Positioner concern (if you need a custom anchor, ask for a seam — do not fork the wrapper).
+6. **Content-level focus/dismiss callbacks are gone.** `onOpenAutoFocus`/`onCloseAutoFocus` → `initialFocus`/`finalFocus` props (element/ref/boolean, on `DialogContent`/`PopoverContent`/`DropdownMenuContent`). `onEscapeKeyDown`/`onPointerDownOutside`/`onInteractOutside` → the Root's `onOpenChange(open, eventDetails)`: branch on `eventDetails.reason` (`'escape-key'`, `'outside-press'`, `'focus-out'`) and call `eventDetails.cancel()` to block the close.
+7. **`onOpenChange` gains a second `eventDetails` argument** on every overlay Root. Existing single-arg handlers keep compiling and working.
+8. **Styling hooks changed.** `data-[state=open/closed]` → `data-open`/`data-closed`; triggers expose `data-popup-open`; active tab is `data-active` (was `data-[state=active]`); highlighted menu items are `data-highlighted` (items are no longer DOM-focused, so `focus:` variants on menu items do nothing). CSS vars: `--radix-<comp>-content-transform-origin` → `--transform-origin`, `--radix-<comp>-trigger-width` → `--anchor-width`, available-size vars → `--available-width`/`--available-height`.
+9. **Tabs behavior:** arrow keys now move focus WITHOUT activating (Base UI's manual-activation default; pass `<TabsList activateOnFocus>` for the Radix feel), and an uncontrolled `Tabs` activates its first tab by default (Radix activated none).
+10. **Tooltip:** `children` must be a single React element (was loosely typed). Unset-delay defaults shift: open delay 700ms → 600ms, skip-window 300ms → 400ms (irrelevant if you set them via `TooltipProvider`). `TooltipProvider` deliberately KEEPS the Radix-era prop names (`delayDuration`, `skipDelayDuration`, `disableHoverableContent`) and maps them internally — your provider call sites don't change.
+11. **Portals render a wrapper `<div>`** (Radix portals rendered nothing extra). Only matters if you style popups via direct-child selectors on `document.body`.
+
+Dialog/dropdown enter/exit animations look the same (fade+scale, 150–200ms) but are transitions, not keyframes — the subtle Radix `slide-in-from-*` nudge on menus is gone, matching the shadcn base registry look.
+
+### What did NOT change
+
+- Every export name (`Dialog*`, `DropdownMenu*`, `Popover*`, `Tabs*`, `Tooltip*`, `Button`, `Badge`, `PopoutDialog`, `SearchableSelect`) and the theme/token system.
+- The seam catalog and `configurePlannotatorUI()` — the engine swap is invisible to the backend seams.
+- The strict-consumer TS gate (`tsconfig.strict-consumer.json`) stayed green throughout; your `tsc --noEmit` should too.
+
+Re-verify your seam contract against `0.23.0` before adopting; the list above is exactly what to test against.
+
+---
+
 ## Publishing & versioning
 
-- `@plannotator/core` and `@plannotator/ui` are versioned **in lockstep with the repo** (currently `0.22.0`).
+- `@plannotator/core` and `@plannotator/ui` are versioned **in lockstep with the repo** (`@plannotator/ui` is now `0.23.0`; `@plannotator/core` is untouched by the Base UI migration and remains `0.22.0` until its next change — the ui→core dependency still resolves exactly at pack time).
 - They depend on each other via `workspace:*`. At publish time that must resolve to the **exact** version in the tarball, so publish with a tool that does that resolution (the repo's existing flow uses `bun pm pack` to build the tarball, then `npm publish *.tgz --provenance --access public`). Publish **`core` first, then `ui`**.
 - `styles.css` is built by the `prepack` script (`bun run build:css`) so the published tarball always carries fresh precompiled CSS.
 - There is **no CI publish job for these two packages yet** — first publish is manual from `main` after merge. (Wiring a CI publish job is a follow-up.)
