@@ -10,6 +10,7 @@
     "./code-file": "./code-file.ts",
     "./compress": "./compress.ts",
     "./crypto": "./crypto.ts",
+    "./document-format": "./document-format.ts",
     "./external-annotation": "./external-annotation.ts",
     "./extract-code-paths": "./extract-code-paths.ts",
     "./favicon": "./favicon.ts",
