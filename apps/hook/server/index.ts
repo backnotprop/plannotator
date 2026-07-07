@@ -1981,6 +1981,11 @@ if (args[0] === "sessions") {
             hookEventName: "PermissionRequest",
             decision: {
               behavior: "allow",
+              // Echo the original tool_input as updatedInput. Claude Code
+              // >= 2.1.199 silently drops an allow decision for ExitPlanMode
+              // (a tool requiring user interaction) when updatedInput is
+              // absent, falling back to the built-in approval dialog.
+              updatedInput: event.tool_input,
               ...(updatedPermissions.length > 0 && { updatedPermissions }),
             },
           },
