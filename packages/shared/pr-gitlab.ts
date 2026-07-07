@@ -241,6 +241,26 @@ export async function fetchGlMR(
 
 // --- MR Context ---
 
+/**
+ * Best-effort GitLab bot detection. GitLab's note/approval user objects don't
+ * reliably carry a `bot` flag (unlike GitHub's `__typename`), so check it when
+ * present and otherwise fall back to the username conventions GitLab uses for
+ * automation accounts: project/group access-token bots (`project_<id>_bot…`,
+ * `group_<id>_bot…`), a `_bot`/`[bot]` suffix, and the `ghost` placeholder.
+ * Conservative on purpose — better to miss a bot than hide a real person.
+ */
+function isGitlabBot(user: any): boolean {
+  if (!user) return false;
+  if (user.bot === true) return true;
+  const name = String(user.username ?? "").toLowerCase();
+  return (
+    /^(project|group)_\d+_bot/.test(name) ||
+    name.endsWith("_bot") ||
+    name.endsWith("[bot]") ||
+    name === "ghost"
+  );
+}
+
 export async function fetchGlMRContext(
   runtime: PRRuntime,
   ref: GlMRRef,
@@ -259,11 +279,31 @@ export async function fetchGlMRContext(
 
   const str = (v: unknown): string => (typeof v === "string" ? v : "");
   const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+  // GitLab returns avatar URLs that are absolute on gitlab.com but often
+  // relative (`/uploads/...`) on self-hosted instances. A relative URL would
+  // resolve against our local server, not the GitLab host, so make it absolute.
+  const resolveAvatar = (v: unknown): string | undefined => {
+    const s = str(v);
+    if (!s) return undefined;
+    return s.startsWith("/") ? `https://${ref.host}${s}` : s;
+  };
 
   // --- MR details ---
-  let mr: Record<string, unknown> = {};
-  if (mrResult.exitCode === 0) {
-    try { mr = JSON.parse(mrResult.stdout); } catch { /* non-JSON response */ }
+  if (mrResult.exitCode !== 0) {
+    throw new Error(
+      `Failed to fetch MR context: ${mrResult.stderr.trim() || `exit code ${mrResult.exitCode}`}`,
+    );
+  }
+
+  let mr: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(mrResult.stdout);
+    if (!isRecord(parsed)) {
+      throw new Error("non-object MR response");
+    }
+    mr = parsed;
+  } catch {
+    throw new Error("Failed to fetch MR context: invalid MR response");
   }
 
   // Normalize state: GitLab uses "opened"/"closed"/"merged" → uppercase
@@ -314,9 +354,12 @@ export async function fetchGlMRContext(
       const rawNotes = JSON.parse(notesResult.stdout) as any[];
       for (const n of rawNotes) {
         if (n.system) continue;
+        const avatarUrl = resolveAvatar(n.author?.avatar_url);
         notes.push({
           id: String(n.id ?? ""),
           author: str(n.author?.username),
+          ...(avatarUrl ? { avatarUrl } : {}),
+          ...(isGitlabBot(n.author) ? { isBot: true } : {}),
           body: str(n.body),
           createdAt: str(n.created_at),
           url: str(n.web_url) || "",
@@ -338,9 +381,12 @@ export async function fetchGlMRContext(
       for (const a of approvedBy) {
         const user = (a as any)?.user;
         if (!user) continue;
+        const avatarUrl = resolveAvatar(user.avatar_url);
         reviews.push({
           id: String(user.id ?? ""),
           author: str(user.username),
+          ...(avatarUrl ? { avatarUrl } : {}),
+          ...(isGitlabBot(user) ? { isBot: true } : {}),
           state: "APPROVED",
           body: "",
           submittedAt: "",
@@ -418,6 +464,10 @@ export async function fetchGlMRContext(
     checks,
     linkedIssues,
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 // --- File Content ---

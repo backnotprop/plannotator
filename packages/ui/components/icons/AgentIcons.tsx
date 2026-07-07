@@ -18,3 +18,49 @@ const CODEX_DATA_URI =
 export function CodexIcon({ className }: { className?: string }) {
   return <img src={CODEX_DATA_URI} className={className} alt="" aria-hidden="true" draggable={false} />;
 }
+
+// Pi brand mark — path data from packages/ui/components/ProviderIcons.tsx's
+// PiIcon (itself extracted from apps/marketing/public/assets/icon-pi.svg).
+// currentColor so it adapts to theme, like OpenCodeIcon below.
+export function PiIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 800 800" className={className} xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+      <path fill="currentColor" fillRule="evenodd" d="M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z" />
+      <path fill="currentColor" d="M517.36 400H634.72V634.72H517.36Z" />
+    </svg>
+  );
+}
+
+// GitHub Copilot brand mark — path from the official agent icon set
+// (welcome.developers.workers.dev/icons/agents/copilot); the dark/light
+// variants there differ only by fill, so one currentColor component covers
+// both themes, like PiIcon/OpenCodeIcon.
+export function CopilotIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 256 208" className={className} xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+      <path fill="currentColor" d="M205.3 31.4c14 14.8 20 35.2 22.5 63.6 6.6 0 12.8 1.5 17 7.2l7.8 10.6c2.2 3 3.4 6.6 3.4 10.4v28.7a12 12 0 0 1-4.8 9.5C215.9 187.2 172.3 208 128 208c-49 0-98.2-28.3-123.2-46.6a12 12 0 0 1-4.8-9.5v-28.7c0-3.8 1.2-7.4 3.4-10.5l7.8-10.5c4.2-5.7 10.4-7.2 17-7.2 2.5-28.4 8.4-48.8 22.5-63.6C77.3 3.2 112.6 0 127.6 0h.4c14.7 0 50.4 2.9 77.3 31.4ZM128 78.7c-3 0-6.5.2-10.3.6a27.1 27.1 0 0 1-6 12.1 45 45 0 0 1-32 13c-6.8 0-13.9-1.5-19.7-5.2-5.5 1.9-10.8 4.5-11.2 11-.5 12.2-.6 24.5-.6 36.8 0 6.1 0 12.3-.2 18.5 0 3.6 2.2 6.9 5.5 8.4C79.9 185.9 105 192 128 192s48-6 74.5-18.1a9.4 9.4 0 0 0 5.5-8.4c.3-18.4 0-37-.8-55.3-.4-6.6-5.7-9.1-11.2-11-5.8 3.7-13 5.1-19.7 5.1a45 45 0 0 1-32-12.9 27.1 27.1 0 0 1-6-12.1c-3.4-.4-6.9-.5-10.3-.6Zm-27 44c5.8 0 10.5 4.6 10.5 10.4v19.2a10.4 10.4 0 0 1-20.8 0V133c0-5.8 4.6-10.4 10.4-10.4Zm53.4 0c5.8 0 10.4 4.6 10.4 10.4v19.2a10.4 10.4 0 0 1-20.8 0V133c0-5.8 4.7-10.4 10.4-10.4Zm-73-94.4c-11.2 1.1-20.6 4.8-25.4 10-10.4 11.3-8.2 40.1-2.2 46.2A31.2 31.2 0 0 0 75 91.7c6.8 0 19.6-1.5 30.1-12.2 4.7-4.5 7.5-15.7 7.2-27-.3-9.1-2.9-16.7-6.7-19.9-4.2-3.6-13.6-5.2-24.2-4.3Zm69 4.3c-3.8 3.2-6.4 10.8-6.7 19.9-.3 11.3 2.5 22.5 7.2 27a41.7 41.7 0 0 0 30 12.2c8.9 0 17-2.9 21.3-7.2 6-6.1 8.2-34.9-2.2-46.3-4.8-5-14.2-8.8-25.4-9.9-10.6-1-20 .7-24.2 4.3ZM128 56c-2.6 0-5.6.2-9 .5.4 1.7.5 3.7.7 5.7 0 1.5 0 3-.2 4.5 3.2-.3 6-.3 8.5-.3 2.6 0 5.3 0 8.5.3-.2-1.6-.2-3-.2-4.5.2-2 .3-4 .7-5.7-3.4-.3-6.4-.5-9-.5Z" />
+    </svg>
+  );
+}
+
+// Cursor brand mark — from packages/ui/components/icons/app/cursor.svg
+// (black rounded square + white cursor facet).
+export function CursorIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 40 40" className={className} xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+      <path d="M28.375 4H11.625C7.41383 4 4 7.41383 4 11.625V28.375C4 32.5862 7.41383 36 11.625 36H28.375C32.5862 36 36 32.5862 36 28.375V11.625C36 7.41383 32.5862 4 28.375 4Z" fill="#000" />
+      <path d="M29.6214 14.2072L20.9502 9.12249C20.6718 8.95917 20.3282 8.95917 20.0498 9.12249L11.3786 14.2072C11.1445 14.3445 11 14.5984 11 14.8733V25.1267C11 25.4012 11.1445 25.6555 11.3786 25.7928L20.0498 30.8775C20.3282 31.0408 20.6718 31.0408 20.9502 30.8775L29.6214 25.7928C29.8555 25.6555 30 25.4016 30 25.1267V14.8733C30 14.5988 29.8555 14.3445 29.6214 14.2072ZM29.0767 15.2843L20.706 30.0101C20.6494 30.1093 20.5 30.0688 20.5 29.9538V20.3115C20.5 20.1189 20.3986 19.9407 20.2342 19.8439L12.0124 15.0226C11.9147 14.9651 11.9546 14.8134 12.0678 14.8134H28.8093C29.047 14.8134 29.1956 15.0751 29.0767 15.2843Z" fill="#fff" />
+    </svg>
+  );
+}
+
+// OpenCode brand mark — extracted from apps/marketing/public/assets/icon-opencode-dark.svg
+// (same vector ProviderIcons.tsx uses; currentColor so it adapts to theme).
+export function OpenCodeIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 32 32" className={className} xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+      <path d="M3 32V0h26v32zM22 7H10v18h12z" fill="currentColor" />
+      <path d="M10 13h12v12H10z" fill="currentColor" opacity={0.4} />
+    </svg>
+  );
+}

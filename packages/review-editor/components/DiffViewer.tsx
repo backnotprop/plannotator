@@ -13,6 +13,10 @@ import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { useOverlayViewport } from '@plannotator/ui/hooks/useOverlayViewport';
 import { FileHeader } from './FileHeader';
+import { FileCommentBanner } from './FileCommentBanner';
+import { isFileScopedAnnotation, lineRangeForAnnotation } from '../utils/annotationScope';
+import { lineAnnotationMetadata } from '../utils/annotationDisplay';
+import type { AnnotationScrollTarget } from '../types';
 import { getLineNumberFromNode, getSideFromNode, getDiffSelection } from '../utils/diffSelection';
 import { isContentConsistentWithPatch } from '../utils/patchConsistency';
 import { InlineAnnotation } from './InlineAnnotation';
@@ -152,6 +156,7 @@ interface DiffViewerProps {
   fontSize?: string;
   annotations: CodeAnnotation[];
   selectedAnnotationId: string | null;
+  scrollTargetAnnotation: AnnotationScrollTarget | null;
   pendingSelection: SelectedLineRange | null;
   onLineSelection: (range: SelectedLineRange | null) => void;
   onAddAnnotation: (type: CodeAnnotationType, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel, decorations?: ConventionalDecoration[], tokenMeta?: TokenAnnotationMeta) => void;
@@ -203,6 +208,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   fontSize,
   annotations,
   selectedAnnotationId,
+  scrollTargetAnnotation,
   pendingSelection,
   onLineSelection,
   onAddAnnotation,
@@ -406,13 +412,16 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     return () => viewport.removeEventListener('scroll', onScroll);
   }, [viewport, filePath]);
 
-  // Scroll to selected annotation when it changes
+  // Scroll to a comment ONLY on sidebar navigation (scrollTargetAnnotation),
+  // never on a bare in-diff selection — clicking a comment must not move the
+  // viewport. Keyed on the token so re-clicking the same sidebar row re-centers.
   useEffect(() => {
-    if (!selectedAnnotationId || !containerRef.current) return;
+    if (!scrollTargetAnnotation || !containerRef.current) return;
+    const targetId = scrollTargetAnnotation.id;
 
     const timeoutId = setTimeout(() => {
       const annotationEl = containerRef.current?.querySelector(
-        `[data-annotation-id="${selectedAnnotationId}"]`
+        `[data-annotation-id="${targetId}"]`
       );
       if (annotationEl) {
         annotationEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -420,7 +429,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     }, 100);
 
     return () => clearTimeout(timeoutId);
-  }, [selectedAnnotationId, viewport]);
+  }, [scrollTargetAnnotation, viewport]);
 
   // Apply search highlights to diff lines (including inside shadow DOM).
   // The query is already debounced upstream (useReviewSearch), so this runs synchronously.
@@ -504,18 +513,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       .map(ann => ({
         side: ann.side === 'new' ? 'additions' as const : 'deletions' as const,
         lineNumber: ann.lineEnd,
-        metadata: {
-          annotationId: ann.id,
-          type: ann.type,
-          text: ann.text,
-          suggestedCode: ann.suggestedCode,
-          originalCode: ann.originalCode,
-          author: ann.author,
-          severity: ann.severity,
-          reasoning: ann.reasoning,
-          conventionalLabel: ann.conventionalLabel,
-          decorations: ann.decorations,
-        } as DiffAnnotationMetadata,
+        metadata: lineAnnotationMetadata(ann),
       }));
   }, [annotations]);
 
@@ -570,12 +568,13 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       <InlineAnnotation
         metadata={annotation.metadata}
         language={detectLanguage(filePath)}
+        isSelected={annotation.metadata.annotationId === selectedAnnotationId}
         onSelect={onSelectAnnotation}
         onEdit={handleEdit}
         onDelete={onDeleteAnnotation}
       />
     );
-  }, [filePath, onSelectAnnotation, handleEdit, onDeleteAnnotation, onClickAIMarker]);
+  }, [filePath, selectedAnnotationId, onSelectAnnotation, handleEdit, onDeleteAnnotation, onClickAIMarker]);
 
   const handleGutterUtilityClick = useCallback((range: SelectedLineRange) => {
     toolbarHostRef.current?.handleLineSelectionEnd(range);
@@ -638,6 +637,24 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     } as React.CSSProperties;
   }, [diffOverflow, isSplitLayout, splitRatio]);
 
+  // File-scoped comments render below the path, above the hunks (full text, no
+  // truncation) — line-scoped annotations stay inline in the gutter.
+  const fileComments = useMemo(
+    () => annotations.filter(isFileScopedAnnotation),
+    [annotations],
+  );
+
+  // Replay a selected line/range comment's anchor as the controlled highlight so
+  // clicking it (inline card or sidebar) lights up its lines. A live compose
+  // selection (pendingSelection) wins while the toolbar is open; file-scoped
+  // comments have no meaningful line so they don't paint a highlight.
+  const selectedAnnotationRange = useMemo<SelectedLineRange | null>(() => {
+    if (!selectedAnnotationId) return null;
+    const ann = annotations.find((a) => a.id === selectedAnnotationId);
+    if (!ann || isFileScopedAnnotation(ann)) return null;
+    return lineRangeForAnnotation(ann);
+  }, [selectedAnnotationId, annotations]);
+
   return (
     <div className="h-full flex flex-col">
       <FileHeader
@@ -660,6 +677,13 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         overflowX="scroll"
         onViewportReady={onViewportReady}
       >
+        <FileCommentBanner
+          comments={fileComments}
+          selectedAnnotationId={selectedAnnotationId}
+          onSelect={onSelectAnnotation}
+          onEdit={onEditAnnotation}
+          onDelete={onDeleteAnnotation}
+        />
         <div className="p-4" ref={diffContentRef}>
           <div ref={splitSurfaceRef} className="relative min-w-0" style={splitGridStyle}>
             {isSplitLayout && diffOverflow !== 'wrap' && (
@@ -684,7 +708,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
               disableBackground={disableBackground}
               expandUnchanged={expandUnchanged}
               mergedAnnotations={mergedAnnotations}
-              pendingSelection={pendingSelection}
+              pendingSelection={pendingSelection ?? selectedAnnotationRange}
               onLineSelectionEnd={handlePierreLineSelectionEnd}
               onGutterUtilityClick={handleGutterUtilityClick}
               renderAnnotation={renderAnnotation}

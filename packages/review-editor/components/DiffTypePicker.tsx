@@ -16,6 +16,7 @@ interface DiffTypePickerProps {
  * Keep these short — they're hover hints, not docs.
  */
 const OPTION_HINTS: Record<string, string> = {
+  'since-base': "Everything since your branch split from the base — committed, uncommitted, and untracked. What a PR would show if you committed it all and pushed.",
   uncommitted: "All your local changes — anything you haven't committed yet.",
   staged: "Only what you've run `git add` on.",
   unstaged: "What `git diff` shows with no arguments.",
@@ -47,7 +48,9 @@ export const DiffTypePicker: React.FC<DiffTypePickerProps> = ({
   // base-dependent labels — the branch belongs in the picker.
   const displayLabel = (opt: DiffOption) => {
     if (!hasBasePicker) return opt.label;
-    if (opt.id === 'merge-base') return 'Committed changes';
+    if (opt.id === 'merge-base') return 'Committed changes (PR view)';
+    // since-base falls through to opt.label — the dynamic "All changes since <base>" from
+    // getGitContext — so the dropdown matches the live header.
     return opt.label;
   };
 

@@ -40,6 +40,7 @@ class ConfigStore {
   private version = 0;
   private pendingServerWrites: Record<string, unknown> = {};
   private serverSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  private pagehideFlushRegistered = false;
 
   constructor() {
     // Eagerly resolve all settings from synchronous sources (cookie > default).
@@ -111,16 +112,35 @@ class ConfigStore {
   }
 
   private scheduleServerSync(): void {
+    // The debounce loses writes when the page goes away within 300ms — and
+    // review/plan sessions end abruptly (approve/feedback shuts the server
+    // down right after a settings change). A lost write leaves the cookie and
+    // ~/.plannotator/config.json disagreeing; on the next session init() then
+    // "restores" the stale server value over the cookie. Flush on pagehide so
+    // the two stores can't diverge this way.
+    if (!this.pagehideFlushRegistered && typeof window !== 'undefined') {
+      this.pagehideFlushRegistered = true;
+      window.addEventListener('pagehide', () => this.flushServerSync());
+    }
     if (this.serverSyncTimer) clearTimeout(this.serverSyncTimer);
-    this.serverSyncTimer = setTimeout(() => {
-      const payload = { ...this.pendingServerWrites };
-      this.pendingServerWrites = {};
-      fetch('/api/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      }).catch(() => {}); // best-effort
-    }, 300);
+    this.serverSyncTimer = setTimeout(() => this.flushServerSync(), 300);
+  }
+
+  private flushServerSync(): void {
+    if (this.serverSyncTimer) {
+      clearTimeout(this.serverSyncTimer);
+      this.serverSyncTimer = null;
+    }
+    if (Object.keys(this.pendingServerWrites).length === 0) return;
+    const payload = JSON.stringify(this.pendingServerWrites);
+    this.pendingServerWrites = {};
+    // keepalive lets the request outlive page teardown (pagehide flush).
+    fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload,
+      keepalive: true,
+    }).catch(() => {}); // best-effort
   }
 }
 

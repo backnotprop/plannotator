@@ -40,17 +40,23 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
   }
 
   try {
-    await import("@plannotator/ai/providers/codex-sdk");
-    await import("@openai/codex-sdk");
+    await import("@plannotator/ai/providers/codex-app-server");
     const codexPath = Bun.which("codex");
-    const provider = await createProvider({
-      type: "codex-sdk",
-      cwd,
-      ...(codexPath && { codexExecutablePath: codexPath }),
-    });
-    registry.register(provider);
+    if (codexPath) {
+      const provider = await createProvider({
+        type: "codex-sdk",
+        cwd,
+        ...(codexPath ? { codexExecutablePath: codexPath } : {}),
+      });
+      registry.register(provider);
+      if ("fetchModels" in provider) {
+        modelDiscovery.push(
+          (provider as { fetchModels: () => Promise<void> }).fetchModels().catch(() => {}),
+        );
+      }
+    }
   } catch {
-    // Codex SDK not available.
+    // Codex not available.
   }
 
   try {

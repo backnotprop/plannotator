@@ -25,7 +25,7 @@ import { homedir } from 'node:os';
 import {
   AtomicCodeMirrorEditor,
   type AtomicCodeMirrorEditorHandle,
-} from '@atomic-editor/editor';
+} from '@plannotator/atomic-editor';
 
 const hasDom = typeof document !== 'undefined';
 const CORPUS_DIR = join(homedir(), '.plannotator', 'history');

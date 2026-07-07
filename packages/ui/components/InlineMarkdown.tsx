@@ -7,6 +7,7 @@ import { getImageSrc } from "./ImageThumbnail";
 import { useCodePathValidation, type CodePathValidationContextValue } from "./CodePathValidationContext";
 import type { ValidationEntry } from "../hooks/useValidatedCodePaths";
 import { CodeFilePicker } from "./CodeFilePicker";
+import { normalizeMathTex, renderMathToHtml } from "./blocks/MathBlock";
 
 /**
  * Decide how a candidate code-file path should render based on validation state:
@@ -260,6 +261,32 @@ const CodeFileIcon = () => (
   </svg>
 );
 
+const InlineMath: React.FC<{ tex: string }> = ({ tex }) => {
+  const normalizedTex = normalizeMathTex(tex);
+  const html = useMemo(() => renderMathToHtml(normalizedTex, false), [normalizedTex]);
+
+  return (
+    <span
+      className="math-inline math-annotatable text-foreground"
+      data-math-tex={normalizedTex}
+      data-math-display="false"
+      aria-label={normalizedTex}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+};
+
+function canRenderSpacedDollarMath(tex: string): boolean {
+  const trimmed = normalizeMathTex(tex);
+  if (!trimmed) return false;
+  if (!/^\s|\s$/.test(tex)) return true;
+  return (
+    /\\[a-zA-Z]+/.test(trimmed) ||
+    /[=^_{}+\-*/<>|]/.test(trimmed) ||
+    /^[a-zA-Z]$/.test(trimmed)
+  );
+}
+
 // Trim trailing sentence punctuation from a bare URL, but keep closing
 // brackets when they balance an opener inside the URL (Wikipedia-style
 // https://…/Function_(mathematics) should keep its closing paren).
@@ -381,7 +408,7 @@ function emitPlainTextWithBareUrls(
  * Scanner that walks a text string and emits React nodes for inline markdown:
  * emphasis (**bold**, *italic*, _italic_, ***both***), `code`, ~~strikethrough~~,
  * [label](url) / ![alt](src) / <autolink>, bare https:// URLs, [[wiki-links]],
- * hex color swatches (#fff / #123abc), @mentions, #issue-refs, and backslash
+ * inline math ($...$), hex color swatches (#fff / #123abc), @mentions, #issue-refs, and backslash
  * escapes. Plain-text chunks outside these patterns pass through
  * `transformPlainText` for emoji shortcodes + smart punctuation.
  */
@@ -412,13 +439,65 @@ export const InlineMarkdown: React.FC<{
       continue;
     }
 
-    // Backslash escaping: \. \* \_ \` \[ \~ etc. — emit literal char, hide backslash
-    match = remaining.match(/^\\([\\*_`\[\]~!.()\-#>+|{}&])/);
+    // Inline math: \( ... \) or $...$ — require non-space content and avoid
+    // display fences.
+    if (remaining.startsWith('\\(')) {
+      let end = -1;
+      for (let i = 2; i < remaining.length - 1; i++) {
+        if (remaining[i] === '\\' && remaining[i + 1] === ')') {
+          if (i > 0 && remaining[i - 1] === '\\') continue;
+          end = i;
+          break;
+        }
+      }
+      if (end > 1) {
+        const tex = remaining.slice(2, end);
+        if (tex.trim()) {
+          parts.push(<InlineMath key={key++} tex={tex} />);
+          remaining = remaining.slice(end + 2);
+          previousChar = ')';
+          continue;
+        }
+      }
+    }
+
+    // Backslash escaping: \. \* \_ \` \[ \~ \$ etc. — emit literal char, hide backslash
+    match = remaining.match(/^\\([\\*_`\[\]~!.()\-#>+|{}&$])/);
     if (match) {
       parts.push(match[1]);
       remaining = remaining.slice(2);
       previousChar = match[1];
       continue;
+    }
+
+    // Inline math: $...$ — require non-space content and avoid $$ display fences.
+    if (remaining.startsWith('$') && previousChar !== '$' && !remaining.startsWith('$$')) {
+      let end = -1;
+      for (let i = 1; i < remaining.length; i++) {
+        if (remaining[i] === '\\') {
+          i++;
+          continue;
+        }
+        if (remaining[i] === '$') {
+          end = i;
+          break;
+        }
+      }
+      if (end > 1) {
+        const tex = remaining.slice(1, end);
+        // Money guard: `$A$B` where a digit immediately follows the closing `$`
+        // is almost always two currency amounts ("$5-$10", "$50,000-$100,000",
+        // "$5/mo and tier B is $10/mo"), not inline math — real inline math never
+        // abuts a digit across the closing delimiter. Leave such text literal.
+        const afterClose = remaining[end + 1];
+        const looksLikeMoney = /^\s*\d/.test(tex) && afterClose !== undefined && /\d/.test(afterClose);
+        if (!looksLikeMoney && canRenderSpacedDollarMath(tex)) {
+          parts.push(<InlineMath key={key++} tex={tex} />);
+          remaining = remaining.slice(end + 1);
+          previousChar = '$';
+          continue;
+        }
+      }
     }
 
     // Bare URL autolink: https://… preceded by word boundary.
@@ -973,7 +1052,7 @@ export const InlineMarkdown: React.FC<{
     // `h` mid-word (e.g. ":heart:", "hello"), and splitting on it breaks
     // multi-char patterns like emoji shortcodes. Bare URLs are instead
     // detected inline via emitPlainTextWithBareUrls() below.
-    const nextSpecial = remaining.slice(1).search(/[\*_`\[!~\\<#@]/);
+    const nextSpecial = remaining.slice(1).search(/[\*_`\[!~\\<#@$]/);
     const plainText = nextSpecial === -1 ? remaining : remaining.slice(0, nextSpecial + 1);
     emitPlainTextWithBareUrls(plainText, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir);
     previousChar = plainText[plainText.length - 1] || previousChar;

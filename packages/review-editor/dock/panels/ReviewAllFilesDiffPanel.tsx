@@ -1,10 +1,24 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import type { IDockviewPanelProps } from 'dockview-react';
 import { AllFilesCodeView } from '../../components/AllFilesCodeView';
+import { CommitDescriptionHeader } from '../../components/CommitDescriptionHeader';
 import { useReviewState } from '../ReviewStateContext';
 
 export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
   const state = useReviewState();
+
+  // A commit diff heads the surface with the full commit message and opens
+  // its files folded — the description gives the "what/why", the collapsed
+  // file list the shape, and each file expands on demand. The card rides
+  // INSIDE the scroller (leadingContent), so it scrolls away with the diff.
+  const commitInfo = state.commitInfo;
+  // Stable element identity per commit — an inline JSX literal would be a new
+  // object every context re-render and churn the measuring ResizeObserver in
+  // AllFilesCodeView (leadingContent is in its effect deps).
+  const leadingContent = useMemo(
+    () => (commitInfo ? <CommitDescriptionHeader key={commitInfo.sha} info={commitInfo} /> : undefined),
+    [commitInfo],
+  );
 
   return (
     <AllFilesCodeView
@@ -20,6 +34,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       fontSize={state.fontSize}
       annotations={state.allAnnotations}
       selectedAnnotationId={state.selectedAnnotationId}
+      scrollTargetAnnotation={state.scrollTargetAnnotation}
       pendingSelection={state.pendingSelection}
       reviewBase={state.reviewBase}
       onLineSelection={state.onLineSelection}
@@ -33,6 +48,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       stagedFiles={state.stagedFiles}
       onStage={state.onStage}
       canStageFiles={state.canStageFiles}
+      canStagePath={state.canStagePath}
       stagingFile={state.stagingFile}
       stageError={state.stageError}
       prUrl={state.prMetadata?.url}
@@ -46,12 +62,17 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       activeSearchMatch={state.allFilesActiveSearchMatch}
       onCodeNavRequest={state.onCodeNavRequest}
       onVisibleFileChange={state.onAllFilesVisibleFileChange}
+      fileOrder={state.allFilesOrder}
+      registerCollapseAllToggle={state.registerAllFilesCollapseToggle}
+      onAllCollapsedChange={state.onAllFilesCollapsedChange}
       isActive={state.isAllFilesActive}
       aiAvailable={state.aiAvailable}
       onAskAIForFile={state.onAskAIForFile}
       isAILoading={state.isAILoading}
       onViewAIResponse={state.onViewAIResponse}
       getAIHistoryForFile={state.getAIHistoryForFile}
+      defaultCollapsed={!!commitInfo}
+      leadingContent={leadingContent}
     />
   );
 };

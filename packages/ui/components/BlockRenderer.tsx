@@ -7,6 +7,7 @@ import { HtmlBlock } from "./blocks/HtmlBlock";
 import { Callout } from "./blocks/Callout";
 import { AlertBlock } from "./blocks/AlertBlock";
 import { TableBlock } from "./blocks/TableBlock";
+import { MathBlock } from "./blocks/MathBlock";
 
 export const BlockRenderer: React.FC<{
   block: Block;
@@ -119,6 +120,9 @@ export const BlockRenderer: React.FC<{
           onNavigateAnchor={onNavigateAnchor}
         />
       );
+
+    case 'math':
+      return <MathBlock block={block} />;
 
     case 'hr':
       return <hr className="border-border/30 my-8" data-block-id={block.id} />;

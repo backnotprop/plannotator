@@ -6,12 +6,14 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { CodeAnnotation } from '../types';
+import type { CodeAnnotation, Annotation, CommentAnnotation } from '../types';
 
 const DEBOUNCE_MS = 500;
 
 interface DraftData {
   codeAnnotations: CodeAnnotation[];
+  descriptionAnnotations?: Annotation[];
+  commentAnnotations?: CommentAnnotation[];
   viewedFiles?: string[];
   draftGeneration?: number;
   ts: number;
@@ -39,6 +41,8 @@ function formatTimeAgo(ts: number): string {
 
 interface UseCodeAnnotationDraftOptions {
   annotations: CodeAnnotation[];
+  descriptionAnnotations?: Annotation[];
+  commentAnnotations?: CommentAnnotation[];
   viewedFiles: Set<string>;
   isApiMode: boolean;
   submitted: boolean;
@@ -46,13 +50,15 @@ interface UseCodeAnnotationDraftOptions {
 
 interface UseCodeAnnotationDraftResult {
   draftBanner: { count: number; viewedCount: number; timeAgo: string } | null;
-  restoreDraft: () => { annotations: CodeAnnotation[]; viewedFiles: string[] };
+  restoreDraft: () => { annotations: CodeAnnotation[]; descriptionAnnotations: Annotation[]; commentAnnotations: CommentAnnotation[]; viewedFiles: string[] };
   getDraftGeneration: () => number;
   dismissDraft: () => void;
 }
 
 export function useCodeAnnotationDraft({
   annotations,
+  descriptionAnnotations = [],
+  commentAnnotations = [],
   viewedFiles,
   isApiMode,
   submitted,
@@ -89,7 +95,9 @@ export function useCodeAnnotationDraft({
         if (generation !== null) {
           draftGenerationRef.current = Math.max(draftGenerationRef.current, generation);
         }
-        const annotationCount = Array.isArray(data?.codeAnnotations) ? data.codeAnnotations.length : 0;
+        const annotationCount = (Array.isArray(data?.codeAnnotations) ? data.codeAnnotations.length : 0)
+          + (Array.isArray(data?.descriptionAnnotations) ? data.descriptionAnnotations.length : 0)
+          + (Array.isArray(data?.commentAnnotations) ? data.commentAnnotations.length : 0);
         const viewedCount = Array.isArray(data?.viewedFiles) ? data.viewedFiles.length : 0;
         if (annotationCount > 0 || viewedCount > 0) {
           draftDataRef.current = data;
@@ -118,9 +126,9 @@ export function useCodeAnnotationDraft({
     //     (review App.tsx) before the user does anything.
     //   - external/SSE annotations (source-tagged, e.g. an eslint plugin) arrive
     //     via `allAnnotations` and have their own lifecycle, separate from the draft.
-    if (annotations.some((a) => !a.source)) hasHadAnnotationsRef.current = true;
+    if (annotations.some((a) => !a.source) || descriptionAnnotations.length > 0 || commentAnnotations.length > 0) hasHadAnnotationsRef.current = true;
 
-    const isEmpty = annotations.length === 0 && viewedFiles.size === 0;
+    const isEmpty = annotations.length === 0 && descriptionAnnotations.length === 0 && commentAnnotations.length === 0 && viewedFiles.size === 0;
     // Leave the server alone for an empty state until the user has actually had
     // annotations this session. This preserves an unrestored draft sitting on disk
     // at mount (the draft-recovery banner can still offer it).
@@ -144,6 +152,8 @@ export function useCodeAnnotationDraft({
 
       const payload: DraftData = {
         codeAnnotations: annotations,
+        descriptionAnnotations,
+        commentAnnotations,
         viewedFiles: [...viewedFiles],
         draftGeneration,
         ts: Date.now(),
@@ -161,7 +171,7 @@ export function useCodeAnnotationDraft({
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [annotations, viewedFiles, isApiMode, submitted]);
+  }, [annotations, descriptionAnnotations, commentAnnotations, viewedFiles, isApiMode, submitted]);
 
   const restoreDraft = useCallback(() => {
     // Cancel any pending autosave so it can't fire with pre-restore state and
@@ -172,6 +182,8 @@ export function useCodeAnnotationDraft({
     draftDataRef.current = null;
     return {
       annotations: data?.codeAnnotations ?? [],
+      descriptionAnnotations: data?.descriptionAnnotations ?? [],
+      commentAnnotations: data?.commentAnnotations ?? [],
       viewedFiles: data?.viewedFiles ?? [],
     };
   }, []);

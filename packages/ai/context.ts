@@ -26,7 +26,7 @@ export function buildSystemPrompt(ctx: AIContext): string {
     case "plan-review":
       return buildPlanReviewPrompt(ctx);
     case "code-review":
-      return buildCodeReviewPrompt(ctx);
+      return buildCodeReviewPrompt();
     case "annotate":
       return buildAnnotatePrompt(ctx);
   }
@@ -42,7 +42,8 @@ export function buildSystemPrompt(ctx: AIContext): string {
 export function buildForkPreamble(ctx: AIContext): string {
   const lines: string[] = [
     "The user is now reviewing your work in Plannotator and has a question.",
-    "Answer concisely based on the conversation history and the context below.",
+    "Answer the user's message directly and concisely based on the conversation " +
+      "history and the context below. Do not re-review or summarize the work unless they ask.",
     "",
   ];
 
@@ -140,6 +141,16 @@ export function buildEffectivePrompt(
 const MAX_PLAN_CHARS = 60_000;
 const MAX_DIFF_CHARS = 40_000;
 
+/**
+ * Leading instruction for every Ask AI session. Ask AI is a chat assistant —
+ * it must respond to the user's message, not launch an unprompted review of the
+ * material it was given for context.
+ */
+const ANSWER_DIRECTLY =
+  "You are a helpful assistant inside Plannotator. Respond to the user's message directly and concisely. " +
+  "The material below is context for what the user is looking at — do NOT review, summarize, or critique it unless the user's message asks you to. " +
+  "Only investigate further (read files, run git) if the user's question actually requires it.";
+
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max)}\n\n... [truncated for context window]`;
@@ -149,6 +160,8 @@ function buildPlanReviewPrompt(
   ctx: Extract<AIContext, { mode: "plan-review" }>
 ): string {
   const sections: string[] = [
+    ANSWER_DIRECTLY,
+    "",
     "The user is reviewing an implementation plan in Plannotator.",
     "",
     "## Plan Under Review",
@@ -181,45 +194,30 @@ function buildPlanReviewPrompt(
   return sections.join("\n");
 }
 
-function buildCodeReviewPrompt(
-  ctx: Extract<AIContext, { mode: "code-review" }>
-): string {
-  const sections: string[] = [
-    "The user is reviewing a code diff in Plannotator.",
-  ];
-
-  if (ctx.review.filePath) {
-    sections.push("");
-    sections.push(`## Currently Viewing: ${ctx.review.filePath}`);
-  }
-
-  if (ctx.review.selectedCode) {
-    sections.push("");
-    sections.push("## Selected Code");
-    sections.push("```");
-    sections.push(ctx.review.selectedCode);
-    sections.push("```");
-  }
-
-  sections.push("");
-  sections.push("## Diff");
-  sections.push("```diff");
-  sections.push(truncate(ctx.review.patch, MAX_DIFF_CHARS));
-  sections.push("```");
-
-  if (ctx.review.annotations) {
-    sections.push("");
-    sections.push("## User Annotations");
-    sections.push(ctx.review.annotations);
-  }
-
-  return sections.join("\n");
+/**
+ * Code-review system prompt: role only. The actual changeset and how to inspect
+ * it are NOT in the system prompt — they ride on the user's messages, where the
+ * review server's shared agent-review prompt machine describes the *current*
+ * view (a git command to run, or the diff inline for modes git can't reproduce)
+ * and the client latches it on. See packages/server/review.ts
+ * `buildCurrentAiReviewContext` and packages/ui/utils/aiPrompt.ts.
+ */
+function buildCodeReviewPrompt(): string {
+  return [
+    ANSWER_DIRECTLY,
+    "",
+    "The user is reviewing a set of code changes in Plannotator. Their messages " +
+      "describe the changeset under review and how to inspect it — either a git " +
+      "command to run, or the diff inline.",
+  ].join("\n");
 }
 
 function buildAnnotatePrompt(
   ctx: Extract<AIContext, { mode: "annotate" }>
 ): string {
   const sections: string[] = [
+    ANSWER_DIRECTLY,
+    "",
     "The user is annotating a markdown document in Plannotator.",
     "",
     `## Document: ${ctx.annotate.filePath}`,

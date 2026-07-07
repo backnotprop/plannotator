@@ -45,6 +45,8 @@ export interface AgentJobInfo {
   reasoningEffort?: string;
   /** Whether Codex fast mode (service_tier=fast) was enabled. */
   fastMode?: boolean;
+  /** Pi's unified reasoning level (marker engines only), e.g. "minimal", "high". */
+  thinking?: string;
   /** Human-readable label for the job. */
   label: string;
   /** Current lifecycle status. */
@@ -85,6 +87,13 @@ export interface AgentCapability {
   id: string;
   name: string;
   available: boolean;
+  /**
+   * Provider-discovered model catalog (currently only Cursor). Best-effort and
+   * account-specific — populated from the provider CLI at capability-detection
+   * time, empty when discovery fails or the CLI is unauthenticated. The UI
+   * drives its model picker from this instead of a hardcoded list.
+   */
+  models?: { id: string; label: string }[];
 }
 
 export interface AgentCapabilities {

@@ -18,6 +18,10 @@ set "EXTRAS_FLAG="
 set "MODEL_INVOCABLE_FLAG="
 set "NON_INTERACTIVE=0"
 set "RECONFIGURE=0"
+REM Binary-only mode. Installs just plannotator.exe and no persistent state
+REM elsewhere. Set by --minimal (1) / --no-minimal (0); -1 = neither flag given
+REM (fall through to the PLANNOTATOR_MINIMAL env var, resolved after :args_done).
+set "MINIMAL_FLAG=-1"
 
 :parse_args
 if "%~1"=="" goto args_done
@@ -92,6 +96,33 @@ if /i "%~1"=="--reconfigure" (
     shift
     goto parse_args
 )
+if /i "%~1"=="--minimal" (
+    if "!MINIMAL_FLAG!"=="0" (
+        echo --minimal and --no-minimal are mutually exclusive >&2
+        exit /b 1
+    )
+    set "MINIMAL_FLAG=1"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--binary-only" (
+    if "!MINIMAL_FLAG!"=="0" (
+        echo --binary-only and --no-minimal are mutually exclusive >&2
+        exit /b 1
+    )
+    set "MINIMAL_FLAG=1"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--no-minimal" (
+    if "!MINIMAL_FLAG!"=="1" (
+        echo --no-minimal and --minimal are mutually exclusive >&2
+        exit /b 1
+    )
+    set "MINIMAL_FLAG=0"
+    shift
+    goto parse_args
+)
 REM Reject any other dash-prefixed token as an unknown option, so a typoed
 REM flag like --verify-attesttion fails fast instead of being interpreted as
 REM a version tag (which would 404 on releases/download/v--verify-attesttion/...).
@@ -106,7 +137,7 @@ REM unquoted arg containing `&` would re-trigger metacharacter interpretation.
 set "CURRENT_ARG=%~1"
 if "!CURRENT_ARG:~0,1!"=="-" (
     echo Unknown option: "%~1" >&2
-    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--non-interactive] [--reconfigure] >&2
+    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--minimal ^| --no-minimal] [--non-interactive] [--reconfigure] >&2
     exit /b 1
 )
 REM Positional form: install.cmd vX.Y.Z (legacy interface).
@@ -121,6 +152,15 @@ set "VERSION_EXPLICIT=1"
 shift
 goto parse_args
 :args_done
+
+REM Resolve binary-only mode. Precedence: --minimal / --no-minimal flag >
+REM PLANNOTATOR_MINIMAL env var > default (off). Mirrors install.sh / install.ps1.
+set "MINIMAL=0"
+if /i "!PLANNOTATOR_MINIMAL!"=="1"    set "MINIMAL=1"
+if /i "!PLANNOTATOR_MINIMAL!"=="true" set "MINIMAL=1"
+if /i "!PLANNOTATOR_MINIMAL!"=="yes"  set "MINIMAL=1"
+if "!MINIMAL_FLAG!"=="1" set "MINIMAL=1"
+if "!MINIMAL_FLAG!"=="0" set "MINIMAL=0"
 
 set "REPO=backnotprop/plannotator"
 set "SEM_REPO=Ataraxy-Labs/sem"
@@ -388,23 +428,22 @@ move /y "!TEMP_FILE!" "!INSTALL_PATH!" >nul
 echo.
 echo plannotator !TAG! installed to !INSTALL_PATH!
 
+REM Binary-only mode stops here (see the MINIMAL resolution after :args_done):
+REM the binary is installed, so print PATH advice and exit before any sidecar
+REM download, agent integration, skill checkout, or config write runs. No
+REM persistent state is written outside !INSTALL_DIR!.
+if "!MINIMAL!"=="1" (
+    call :PrintPathAdvice
+    echo.
+    echo Minimal install complete - only the plannotator binary was installed.
+    echo No skills, hooks, agent integrations, or config files were written.
+    exit /b 0
+)
+
 call :InstallSemSidecar
 call :InstallAgentTerminalRuntime
 
-REM Check if install directory is in PATH
-echo !PATH! | findstr /i /c:"!INSTALL_DIR!" >nul
-if !ERRORLEVEL! neq 0 (
-    echo.
-    echo !INSTALL_DIR! is not in your PATH.
-    echo.
-    echo Add it permanently with:
-    echo.
-    echo   setx PATH "%%PATH%%;!INSTALL_DIR!"
-    echo.
-    echo Or add it for this session only:
-    echo.
-    echo   set PATH=%%PATH%%;!INSTALL_DIR!
-)
+call :PrintPathAdvice
 
 REM Validate plugin hooks.json if plugin is already installed
 if defined CLAUDE_CONFIG_DIR (
@@ -958,6 +997,27 @@ if exist "!PLUGIN_HOOKS!" if exist "!CLAUDE_SETTINGS!" (
 
 echo.
 exit /b 0
+
+REM ======================================================================
+REM Print the PATH-setup hint if INSTALL_DIR isn't already on PATH. Called by
+REM both the --minimal early exit and the normal flow (mirrors install.sh's
+REM print_path_advice).
+REM ======================================================================
+:PrintPathAdvice
+echo !PATH! | findstr /i /c:"!INSTALL_DIR!" >nul
+if !ERRORLEVEL! neq 0 (
+    echo.
+    echo !INSTALL_DIR! is not in your PATH.
+    echo.
+    echo Add it permanently with:
+    echo.
+    echo   setx PATH "%%PATH%%;!INSTALL_DIR!"
+    echo.
+    echo Or add it for this session only:
+    echo.
+    echo   set PATH=%%PATH%%;!INSTALL_DIR!
+)
+goto :eof
 
 REM ======================================================================
 REM Optional annotate agent terminal runtime install. Non-fatal: Plannotator

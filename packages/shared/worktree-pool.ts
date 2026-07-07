@@ -36,6 +36,25 @@ export interface WorktreePool {
   cleanup(runtime: ReviewGitRuntime): Promise<void>;
 }
 
+/** A PR checkout is ready, still warming up, or absent from the pool. */
+export type PoolCwdResolution =
+  | { kind: "ready"; path: string }
+  | { kind: "pending" }
+  | { kind: "absent" };
+
+/**
+ * Resolve a PR's checkout state from the pool. The "pending" case (entry exists
+ * but isn't ready) is kept distinct from "absent" so callers don't fall back to
+ * the launch repo for a checkout that simply hasn't finished warming up. Shared
+ * by both servers' resolvePRLocalCwd so the readiness rule can't drift.
+ */
+export function resolvePoolCwd(pool: WorktreePool, prUrl: string): PoolCwdResolution {
+  const entry = pool.get(prUrl);
+  if (entry?.ready) return { kind: "ready", path: entry.path };
+  if (entry) return { kind: "pending" };
+  return { kind: "absent" };
+}
+
 export function createWorktreePool(
   config: WorktreePoolConfig,
   initial?: PoolEntry,

@@ -17,6 +17,10 @@ export interface AIProviderModel {
   id: string;
   label: string;
   default?: boolean;
+  /** Reasoning-effort options this model supports (provider-reported, e.g. Codex). */
+  reasoningEfforts?: { id: string; label: string }[];
+  /** The model's default reasoning effort. */
+  defaultReasoningEffort?: string;
 }
 
 export interface AIProviderOption {
@@ -38,13 +42,6 @@ export interface AIProviderSelection {
   providerId: string | null;
   model: string | null;
 }
-
-export const AI_REASONING_EFFORTS = [
-  { id: 'low', label: 'Low' },
-  { id: 'medium', label: 'Medium' },
-  { id: 'high', label: 'High' },
-  { id: 'xhigh', label: 'Max' },
-] as const;
 
 export function originHasDedicatedAIProvider(origin: Origin | null | undefined): boolean {
   return getAgentAIProviderTypes(origin).length > 0;

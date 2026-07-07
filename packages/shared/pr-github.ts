@@ -356,23 +356,38 @@ export async function fetchGhPRContext(
   const raw = JSON.parse(result.stdout) as Record<string, unknown>;
   const context = parseGhPRContext(raw);
 
-  // Fetch inline review threads via GraphQL (parallel-safe, non-blocking failure)
+  // Fetch inline review threads + bot author logins via GraphQL (the only place
+  // GitHub exposes whether an author is a Bot vs a User — `gh pr view --json`
+  // gives the login only). Non-blocking failure: degrade to no threads / no bot
+  // tags rather than failing the whole context.
   try {
-    context.reviewThreads = await fetchGhReviewThreads(runtime, ref);
+    const { threads, botLogins, avatarByLogin } = await fetchGhThreadsAndBots(runtime, ref);
+    context.reviewThreads = threads;
+    for (const c of context.comments) {
+      if (botLogins.has(c.author)) c.isBot = true;
+      const a = avatarByLogin.get(c.author);
+      if (a) c.avatarUrl = a;
+    }
+    for (const r of context.reviews) {
+      if (botLogins.has(r.author)) r.isBot = true;
+      const a = avatarByLogin.get(r.author);
+      if (a) r.avatarUrl = a;
+    }
   } catch {
-    // GraphQL may not be available or may fail — degrade gracefully
     context.reviewThreads = [];
   }
 
   return context;
 }
 
-// --- Review Threads (GraphQL) ---
+// --- Review Threads + bot detection (GraphQL) ---
 
-const REVIEW_THREADS_QUERY = `
+const PR_CONTEXT_GRAPHQL_QUERY = `
 query($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
+      comments(first: 100) { nodes { author { __typename login avatarUrl(size: 48) } } }
+      reviews(first: 100) { nodes { author { __typename login avatarUrl(size: 48) } } }
       reviewThreads(first: 100) {
         nodes {
           id
@@ -386,7 +401,7 @@ query($owner: String!, $repo: String!, $number: Int!) {
             nodes {
               id
               body
-              author { login }
+              author { __typename login avatarUrl(size: 48) }
               createdAt
               url
               diffHunk
@@ -398,43 +413,72 @@ query($owner: String!, $repo: String!, $number: Int!) {
   }
 }`;
 
-async function fetchGhReviewThreads(
+/**
+ * One GraphQL round-trip returning the PR's inline review threads AND the set of
+ * author logins that are bots (`__typename === "Bot"`) across comments, reviews,
+ * and thread comments. GraphQL is the only place GitHub exposes author type —
+ * `gh pr view --json` gives the login only. The caller uses the bot set to tag
+ * the top-level comments/reviews; thread comments are tagged inline here.
+ */
+async function fetchGhThreadsAndBots(
   runtime: PRRuntime,
   ref: GhPRRef,
-): Promise<PRReviewThread[]> {
+): Promise<{ threads: PRReviewThread[]; botLogins: Set<string>; avatarByLogin: Map<string, string> }> {
   const result = await runtime.runCommand("gh", hostnameArgs(ref.host, [
     "api", "graphql",
-    "-f", `query=${REVIEW_THREADS_QUERY}`,
+    "-f", `query=${PR_CONTEXT_GRAPHQL_QUERY}`,
     "-f", `owner=${ref.owner}`,
     "-f", `repo=${ref.repo}`,
     "-F", `number=${ref.number}`,
   ]));
 
-  if (result.exitCode !== 0) return [];
+  const empty = { threads: [] as PRReviewThread[], botLogins: new Set<string>(), avatarByLogin: new Map<string, string>() };
+  if (result.exitCode !== 0) return empty;
 
   const data = JSON.parse(result.stdout);
-  const threads = data?.data?.repository?.pullRequest?.reviewThreads?.nodes;
-  if (!Array.isArray(threads)) return [];
+  const pr = data?.data?.repository?.pullRequest;
+  if (!pr) return empty;
 
-  return threads.map((t: any): PRReviewThread => ({
-    id: String(t.id ?? ''),
-    isResolved: t.isResolved === true,
-    isOutdated: t.isOutdated === true,
-    path: String(t.path ?? ''),
-    line: typeof t.line === 'number' ? t.line : null,
-    startLine: typeof t.startLine === 'number' ? t.startLine : null,
-    diffSide: t.diffSide === 'LEFT' || t.diffSide === 'RIGHT' ? t.diffSide : null,
-    comments: Array.isArray(t.comments?.nodes)
-      ? t.comments.nodes.map((c: any): PRThreadComment => ({
-          id: String(c.id ?? ''),
-          author: c.author?.login ? String(c.author.login) : '',
-          body: String(c.body ?? ''),
-          createdAt: String(c.createdAt ?? ''),
-          url: String(c.url ?? ''),
-          ...(c.diffHunk ? { diffHunk: String(c.diffHunk) } : {}),
-        }))
-      : [],
-  }));
+  const botLogins = new Set<string>();
+  const avatarByLogin = new Map<string, string>();
+  const collect = (author: any) => {
+    if (!author?.login) return;
+    const login = String(author.login);
+    if (author.__typename === 'Bot') botLogins.add(login);
+    if (author.avatarUrl && !avatarByLogin.has(login)) avatarByLogin.set(login, String(author.avatarUrl));
+  };
+  for (const n of (pr.comments?.nodes ?? [])) collect(n?.author);
+  for (const n of (pr.reviews?.nodes ?? [])) collect(n?.author);
+
+  const threadNodes = pr.reviewThreads?.nodes;
+  const threads: PRReviewThread[] = Array.isArray(threadNodes)
+    ? threadNodes.map((t: any): PRReviewThread => ({
+        id: String(t.id ?? ''),
+        isResolved: t.isResolved === true,
+        isOutdated: t.isOutdated === true,
+        path: String(t.path ?? ''),
+        line: typeof t.line === 'number' ? t.line : null,
+        startLine: typeof t.startLine === 'number' ? t.startLine : null,
+        diffSide: t.diffSide === 'LEFT' || t.diffSide === 'RIGHT' ? t.diffSide : null,
+        comments: Array.isArray(t.comments?.nodes)
+          ? t.comments.nodes.map((c: any): PRThreadComment => {
+              collect(c?.author);
+              return {
+                id: String(c.id ?? ''),
+                author: c.author?.login ? String(c.author.login) : '',
+                ...(c.author?.__typename === 'Bot' ? { isBot: true } : {}),
+                ...(c.author?.avatarUrl ? { avatarUrl: String(c.author.avatarUrl) } : {}),
+                body: String(c.body ?? ''),
+                createdAt: String(c.createdAt ?? ''),
+                url: String(c.url ?? ''),
+                ...(c.diffHunk ? { diffHunk: String(c.diffHunk) } : {}),
+              };
+            })
+          : [],
+      }))
+    : [];
+
+  return { threads, botLogins, avatarByLogin };
 }
 
 // --- File Content ---

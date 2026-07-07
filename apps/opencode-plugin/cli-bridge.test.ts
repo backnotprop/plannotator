@@ -10,6 +10,7 @@ import {
   formatUserFacingCliStderrLine,
   getRecentAssistantMessages,
 } from "./cli-bridge";
+import { getReviewDeniedSuffix } from "@plannotator/shared/prompts";
 
 describe("OpenCode CLI bridge helpers", () => {
   test("maps OpenCode sharing context into child CLI env", () => {
@@ -169,7 +170,9 @@ describe("OpenCode CLI bridge helpers", () => {
     });
     expect(localFeedback.agent).toBeUndefined();
     expect(localFeedback.message).toContain("Fix these issues.");
-    expect(localFeedback.message).toContain("This feedback came from review. Please triage it and verify it against the code and then come back to me with your thoughts on the findings. Do not change any code until we've discussed the findings.");
+    // Assert against the actual suffix (not a hardcoded copy) so future edits to
+    // the review trailer don't break this wiring test.
+    expect(localFeedback.message).toContain(getReviewDeniedSuffix("opencode"));
 
     const prFeedback = buildReviewPromptFromBridgeOutcome({
       decision: "annotated",

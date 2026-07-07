@@ -284,6 +284,62 @@ describe("install.sh", () => {
     expect(script).toContain('GEMINI_POLICY_EOF');
     expect(script).toContain('GEMINI_SETTINGS_EOF');
   });
+
+  test("--minimal flag and PLANNOTATOR_MINIMAL env var are documented", () => {
+    // Usage text advertises the flag and the env-var opt-in for curl | bash.
+    expect(script).toContain("--minimal");
+    expect(script).toContain("PLANNOTATOR_MINIMAL");
+    // Accepts both --minimal and the --binary-only alias, plus the opt-out.
+    expect(script).toContain("--minimal|--binary-only)");
+    expect(script).toContain("--no-minimal)");
+  });
+
+  test("minimal mode is resolved from flag with env-var fallback", () => {
+    // A flag (--minimal or --no-minimal) wins over the env var, which wins over
+    // the default (off). MINIMAL_FLAG stays -1 until a flag sets 0 or 1.
+    expect(script).toContain("MINIMAL_FLAG=-1");
+    expect(script).toContain('case "${PLANNOTATOR_MINIMAL:-}" in');
+    expect(script).toContain('if [ "$MINIMAL_FLAG" -ne -1 ]; then');
+    // --minimal and --no-minimal are mutually exclusive.
+    expect(script).toContain("--minimal and --no-minimal are mutually exclusive");
+  });
+
+  test("minimal mode exits after the binary install, before any extras", () => {
+    // The early exit must come AFTER the binary is moved into place but BEFORE
+    // the sidecar downloads, agent integrations, skill checkout, and config
+    // writes — that ordering is the whole point of #977.
+    const binaryInstalled = script.indexOf(
+      'mv "$tmp_file" "$INSTALL_DIR/plannotator"',
+    );
+    const minimalExit = script.indexOf('if [ "$minimal" -eq 1 ]; then');
+    const semInstall = script.indexOf("install_sem_sidecar\n");
+    const agentTerminal = script.indexOf("install_agent_terminal_runtime\n");
+    const codexBlock = script.indexOf(
+      "# --- Codex CLI / Desktop app support",
+    );
+    const skillsCheckout = script.indexOf(
+      "git clone --depth 1 --filter=blob:none --sparse",
+    );
+
+    expect(binaryInstalled).toBeGreaterThan(0);
+    expect(minimalExit).toBeGreaterThan(binaryInstalled);
+    // Everything the reporter called "trash" runs strictly after the exit gate.
+    expect(semInstall).toBeGreaterThan(minimalExit);
+    expect(agentTerminal).toBeGreaterThan(minimalExit);
+    expect(codexBlock).toBeGreaterThan(minimalExit);
+    expect(skillsCheckout).toBeGreaterThan(minimalExit);
+    // The gate really exits rather than falling through.
+    const gateBody = script.slice(minimalExit, minimalExit + 400);
+    expect(gateBody).toContain("exit 0");
+  });
+
+  test("PATH advice is a reusable function shared by both paths", () => {
+    // Extracted so the minimal early exit and the normal flow both print it.
+    expect(script).toContain("print_path_advice() {");
+    // Called exactly once inside the minimal gate and once in the normal flow.
+    const calls = script.match(/^\s*print_path_advice$/gm) ?? [];
+    expect(calls.length).toBe(2);
+  });
 });
 
 describe("install.ps1", () => {
@@ -423,6 +479,35 @@ describe("install.ps1", () => {
     const piUpdateCallIndex = script.lastIndexOf("Update-PiExtensionIfPresent");
     expect(skillsInstallIndex).toBeGreaterThan(0);
     expect(piUpdateCallIndex).toBeGreaterThan(skillsInstallIndex);
+  });
+
+  test("supports -Minimal / -BinaryOnly binary-only mode with env-var fallback", () => {
+    // Switch + alias in the param block, plus the PLANNOTATOR_MINIMAL env fallback.
+    expect(script).toContain('[Alias("BinaryOnly")]');
+    expect(script).toContain("[switch]$Minimal");
+    expect(script).toContain("[switch]$NoMinimal");
+    expect(script).toContain("$env:PLANNOTATOR_MINIMAL");
+    // -Minimal / -NoMinimal are mutually exclusive (parity with sh/cmd).
+    expect(script).toContain("-Minimal and -NoMinimal are mutually exclusive");
+  });
+
+  test("minimal mode exits after the binary install, before any extras", () => {
+    // Same ordering guarantee as install.sh: binary placed, then the early exit,
+    // then (only in the full install) the sidecar + integration work.
+    const binaryInstalled = script.indexOf(
+      'Move-Item -Force $tmpFile "$installDir\\plannotator.exe"',
+    );
+    const minimalExit = script.indexOf("if ($minimal) {");
+    const semInstall = script.indexOf("Install-SemSidecar\n");
+    const pathAdvice = script.indexOf("function Show-PathAdvice");
+
+    expect(binaryInstalled).toBeGreaterThan(0);
+    expect(pathAdvice).toBeGreaterThan(binaryInstalled);
+    expect(minimalExit).toBeGreaterThan(binaryInstalled);
+    expect(semInstall).toBeGreaterThan(minimalExit);
+    // The gate exits rather than falling through.
+    const gateBody = script.slice(minimalExit, minimalExit + 400);
+    expect(gateBody).toContain("exit 0");
   });
 });
 
@@ -580,6 +665,36 @@ describe("install.cmd", () => {
     // Enforcement: hard-fail when opted in but gh missing
     expect(script).toContain("gh CLI was not found");
   });
+
+  test("supports --minimal / --binary-only binary-only mode with env-var fallback", () => {
+    expect(script).toContain('if /i "%~1"=="--minimal"');
+    expect(script).toContain('if /i "%~1"=="--binary-only"');
+    expect(script).toContain('if /i "%~1"=="--no-minimal"');
+    expect(script).toContain("PLANNOTATOR_MINIMAL");
+    // Usage string advertises the flag.
+    expect(script).toContain("[--minimal ^| --no-minimal]");
+    // --minimal / --no-minimal are mutually exclusive (parity with sh/ps1).
+    expect(script).toContain("--minimal and --no-minimal are mutually exclusive");
+  });
+
+  test("minimal mode exits after the binary install, before any extras", () => {
+    const binaryInstalled = script.indexOf(
+      'move /y "!TEMP_FILE!" "!INSTALL_PATH!"',
+    );
+    const minimalExit = script.indexOf('if "!MINIMAL!"=="1" (');
+    const semInstall = script.indexOf("call :InstallSemSidecar");
+    const printPathAdvice = script.indexOf(":PrintPathAdvice");
+
+    expect(binaryInstalled).toBeGreaterThan(0);
+    expect(minimalExit).toBeGreaterThan(binaryInstalled);
+    expect(semInstall).toBeGreaterThan(minimalExit);
+    // The gate exits rather than falling through, and reuses :PrintPathAdvice.
+    const gateBody = script.slice(minimalExit, minimalExit + 400);
+    expect(gateBody).toContain("call :PrintPathAdvice");
+    expect(gateBody).toContain("exit /b 0");
+    // :PrintPathAdvice is defined as a subroutine.
+    expect(printPathAdvice).toBeGreaterThan(0);
+  });
 });
 
 describe("Core Plannotator skills", () => {
@@ -637,6 +752,26 @@ describe("install shared behavior", () => {
     // rewriting cmd syntax.
     const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
     expect(cmdScript).not.toContain("/dev/null");
+  });
+
+  test("binary-only (minimal) mode exists in all three installers", () => {
+    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    // Every installer exposes the flag, its --binary-only / -BinaryOnly alias,
+    // the explicit opt-out, and the PLANNOTATOR_MINIMAL env-var fallback — so a
+    // user gets the same binary-only path whatever host they install from.
+    expect(sh).toContain("--minimal|--binary-only)");
+    expect(sh).toContain("--no-minimal)");
+    expect(sh).toContain("PLANNOTATOR_MINIMAL");
+
+    expect(ps).toContain('[Alias("BinaryOnly")]');
+    expect(ps).toContain("[switch]$Minimal");
+    expect(ps).toContain("[switch]$NoMinimal");
+    expect(ps).toContain("$env:PLANNOTATOR_MINIMAL");
+
+    expect(cmdScript).toContain('if /i "%~1"=="--minimal"');
+    expect(cmdScript).toContain('if /i "%~1"=="--binary-only"');
+    expect(cmdScript).toContain('if /i "%~1"=="--no-minimal"');
+    expect(cmdScript).toContain("PLANNOTATOR_MINIMAL");
   });
 
   test("guided install exists in all three installers with safe automation behavior", () => {

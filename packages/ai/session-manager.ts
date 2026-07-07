@@ -123,7 +123,11 @@ export class SessionManager {
    */
   remove(sessionId: string): void {
     const canonical = this.resolve(sessionId);
+    const entry = this.sessions.get(canonical);
     this.sessions.delete(canonical);
+    // Release any long-lived resources (e.g. a spawned subprocess). No-op for
+    // providers whose sessions don't implement dispose().
+    entry?.session.dispose?.();
     // Clean up any aliases pointing to this session
     for (const [alias, target] of this.aliases) {
       if (target === canonical) this.aliases.delete(alias);
@@ -163,6 +167,8 @@ export class SessionManager {
       if (entry.session.isActive) {
         entry.session.abort();
       }
+      // Release long-lived resources. No-op for providers without dispose().
+      entry.session.dispose?.();
     }
     this.sessions.clear();
     this.aliases.clear();
@@ -185,7 +191,11 @@ export class SessionManager {
     }
 
     if (oldest) {
+      const entry = this.sessions.get(oldest.id);
       this.sessions.delete(oldest.id);
+      // Release long-lived resources held by the evicted session. No-op for
+      // providers whose sessions don't implement dispose().
+      entry?.session.dispose?.();
       // Clean up aliases pointing to the evicted session
       for (const [alias, target] of this.aliases) {
         if (target === oldest.id) this.aliases.delete(alias);

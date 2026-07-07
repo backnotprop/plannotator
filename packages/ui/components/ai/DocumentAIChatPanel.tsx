@@ -12,6 +12,8 @@ interface DocumentAIChatPanelProps {
   isCreatingSession: boolean;
   isStreaming: boolean;
   onAskGeneral?: (question: string) => void;
+  /** Stop the in-flight answer. When provided, the input shows a Stop button while streaming. */
+  onStop?: () => void;
   permissionRequests?: PendingPermission[];
   onRespondToPermission?: (requestId: string, allow: boolean) => void;
   aiProviders?: AIProviderOption[];
@@ -56,6 +58,7 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
   isCreatingSession,
   isStreaming,
   onAskGeneral,
+  onStop,
   permissionRequests = [],
   onRespondToPermission,
   aiProviders = [],
@@ -105,6 +108,16 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
             </div>
           )}
 
+          {messages.map(entry => (
+            <DocumentQAPair key={entry.question.id} entry={entry} />
+          ))}
+        </div>
+      </OverlayScrollArea>
+
+      {/* Pending permission requests — pinned just above the input/model bar so
+          the user sees them right where they act, not buried at the top. */}
+      {permissionRequests.filter(p => !p.decided).length > 0 && (
+        <div className="border-t border-border/50 p-2 space-y-2">
           {permissionRequests.filter(p => !p.decided).map(permission => (
             <PermissionCard
               key={permission.requestId}
@@ -112,12 +125,8 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
               onRespond={onRespondToPermission ?? (() => {})}
             />
           ))}
-
-          {messages.map(entry => (
-            <DocumentQAPair key={entry.question.id} entry={entry} />
-          ))}
         </div>
-      </OverlayScrollArea>
+      )}
 
       <AIProviderBar
         providers={aiProviders}
@@ -135,6 +144,8 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
           onChange={setGeneralInput}
           onSubmit={handleGeneralSubmit}
           disabled={isStreaming}
+          isStreaming={isStreaming}
+          onStop={onStop}
         />
       )}
     </div>
@@ -241,7 +252,9 @@ const GeneralInput: React.FC<{
   onChange: (value: string) => void;
   onSubmit: () => void;
   disabled?: boolean;
-}> = ({ value, onChange, onSubmit, disabled }) => {
+  isStreaming?: boolean;
+  onStop?: () => void;
+}> = ({ value, onChange, onSubmit, disabled, isStreaming, onStop }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -270,17 +283,30 @@ const GeneralInput: React.FC<{
             }
           }}
         />
-        <button
-          onClick={onSubmit}
-          disabled={disabled || !value.trim()}
-          className="p-1.5 mb-px rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-          title={`Send (${submitHint})`}
-          aria-label="Send AI question"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-          </svg>
-        </button>
+        {isStreaming && onStop ? (
+          <button
+            onClick={onStop}
+            className="p-1.5 mb-px rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex-shrink-0"
+            title="Stop generating"
+            aria-label="Stop generating"
+          >
+            <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+              <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
+          </button>
+        ) : (
+          <button
+            onClick={onSubmit}
+            disabled={disabled || !value.trim()}
+            className="p-1.5 mb-px rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+            title={`Send (${submitHint})`}
+            aria-label="Send AI question"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+            </svg>
+          </button>
+        )}
       </div>
     </div>
   );

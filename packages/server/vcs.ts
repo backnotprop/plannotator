@@ -75,6 +75,7 @@ export {
   JJ_TRUNK_REVSET,
   jjCompareTargetRevset,
   jjLineBaseRevset,
+  parseCommitDiffType,
   parseRemoteBookmark,
   parseWorktreeDiffType,
   validateFilePath,

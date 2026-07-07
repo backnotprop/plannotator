@@ -182,6 +182,50 @@ function injectScript(html: string, savedCookies: string): string {
       setTimeout(sc,500);setInterval(sc,2000);
       var ci=setInterval(function(){if(document.body&&document.body.textContent.indexOf("Your response has been sent")!==-1){clearInterval(ci);sc();fetch("/___ext/close",{method:"POST"});}},500);
       try{window.parent.postMessage("plannotator-ready","*");}catch(e){}
+      // Clipboard bridge: inside a nested cross-origin webview iframe the
+      // document never holds focus, so the async Clipboard API is rejected and
+      // native copy/cut/paste events never fire. Route reads and writes through
+      // the extension host (which owns the system clipboard) and drive them off
+      // keydown, the only input signal the iframe still receives.
+      var readSeq=0,readPending={};
+      function bridgeWrite(text){window.parent.postMessage({type:"plannotator-clipboard-write",text:String(text==null?"":text)},"*");}
+      function bridgeRead(){return new Promise(function(resolve){var id=++readSeq;readPending[id]=resolve;window.parent.postMessage({type:"plannotator-clipboard-read",id:id},"*");});}
+      try{Object.defineProperty(navigator,"clipboard",{configurable:true,value:{
+        writeText:function(t){bridgeWrite(t);return Promise.resolve();},
+        readText:function(){return bridgeRead();}
+      }});}catch(err){}
+      function fieldSelection(el){
+        if(el&&(el.tagName==="INPUT"||el.tagName==="TEXTAREA")&&el.selectionStart!=null&&el.selectionEnd>el.selectionStart){
+          return el.value.slice(el.selectionStart,el.selectionEnd);
+        }
+        return (window.getSelection&&window.getSelection().toString())||"";
+      }
+      window.addEventListener("message",function(e){var d=e.data;if(d&&d.type==="plannotator-clipboard-data"){var cb=readPending[d.id];if(cb){delete readPending[d.id];cb(d.text||"");}}});
+      window.addEventListener("keydown",function(e){
+        var k=(e.key||"").toLowerCase();
+        if((e.metaKey||e.ctrlKey)&&!e.altKey){
+          if(k==="c"||k==="x"){
+            var sel=fieldSelection(document.activeElement);
+            if(sel){
+              e.preventDefault();
+              bridgeWrite(sel);
+              if(k==="x")document.execCommand("delete");
+            }
+            return;
+          }
+          if(k==="v"){
+            e.preventDefault();
+            bridgeRead().then(function(text){if(text)document.execCommand("insertText",false,text);});
+            return;
+          }
+          // Undo/redo/select-all stay native; forwarding them would hijack them.
+          if(k==="a"||k==="z"||k==="y")return;
+        }
+        try{window.parent.postMessage({type:"plannotator-keydown",event:{
+          key:e.key,code:e.code,keyCode:e.keyCode,which:e.which,location:e.location,
+          ctrlKey:e.ctrlKey,shiftKey:e.shiftKey,altKey:e.altKey,metaKey:e.metaKey,repeat:e.repeat
+        }},"*");}catch(err){}
+      });
     })();</script>`;
 
   const headMatch = html.match(/<head(\s[^>]*)?>/) ;

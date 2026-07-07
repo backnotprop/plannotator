@@ -7,7 +7,10 @@ param(
     [switch]$NoExtras,
     [string]$ModelInvocable = "",
     [switch]$NonInteractive,
-    [switch]$Reconfigure
+    [switch]$Reconfigure,
+    [Alias("BinaryOnly")]
+    [switch]$Minimal,
+    [switch]$NoMinimal
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,6 +26,22 @@ if ($Extras -and $NoExtras) {
     [Console]::Error.WriteLine("-Extras and -NoExtras are mutually exclusive. Pass one or the other.")
     exit 1
 }
+if ($Minimal -and $NoMinimal) {
+    [Console]::Error.WriteLine("-Minimal and -NoMinimal are mutually exclusive. Pass one or the other.")
+    exit 1
+}
+
+# Binary-only mode. Installs just the plannotator binary and no persistent state
+# elsewhere — no sem sidecar, agent-terminal runtime, skills, hooks, or per-agent
+# config. Precedence: -Minimal / -NoMinimal switch > PLANNOTATOR_MINIMAL env var
+# > default (off). Mirrors install.sh's --minimal / --no-minimal.
+$minimal = $false
+if ($env:PLANNOTATOR_MINIMAL -match '^(1|true|yes)$') {
+    $minimal = $true
+}
+if ($Minimal) { $minimal = $true }
+if ($NoMinimal) { $minimal = $false }
+
 $repo = "backnotprop/plannotator"
 $semRepo = "Ataraxy-Labs/sem"
 $semVersion = "v0.8.0"
@@ -330,17 +349,36 @@ Move-Item -Force $tmpFile "$installDir\plannotator.exe"
 Write-Host ""
 Write-Host "plannotator $latestTag installed to $installDir\plannotator.exe"
 
+# Add $installDir to the user PATH if not already there. Extracted so both the
+# -Minimal early exit and the normal flow reuse it (mirrors install.sh's
+# print_path_advice).
+function Show-PathAdvice {
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    if ($userPath -notlike "*$installDir*") {
+        Write-Host ""
+        Write-Host "$installDir is not in your PATH. Adding it..."
+        [Environment]::SetEnvironmentVariable("Path", "$userPath;$installDir", "User")
+        Write-Host "Added to PATH. Restart your terminal for changes to take effect."
+    }
+}
+
+# Binary-only mode stops here (see the $minimal resolution near the top): the
+# binary is installed, so add it to PATH and exit before any sidecar download,
+# agent integration, skill checkout, config write, or cleanup runs. Only the
+# binary and its PATH entry are added — none of the sem sidecar, agent-terminal
+# runtime, or per-agent skills, hooks, or config.
+if ($minimal) {
+    Show-PathAdvice
+    Write-Host ""
+    Write-Host "Minimal install complete - only the plannotator binary was installed."
+    Write-Host "No skills, hooks, agent integrations, or config files were written."
+    exit 0
+}
+
 Install-SemSidecar
 Install-AgentTerminalRuntime
 
-# Add to PATH if not already there
-$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($userPath -notlike "*$installDir*") {
-    Write-Host ""
-    Write-Host "$installDir is not in your PATH. Adding it..."
-    [Environment]::SetEnvironmentVariable("Path", "$userPath;$installDir", "User")
-    Write-Host "Added to PATH. Restart your terminal for changes to take effect."
-}
+Show-PathAdvice
 
 # Validate plugin hooks.json if plugin is already installed
 $pluginHooks = if ($env:CLAUDE_CONFIG_DIR) { "$env:CLAUDE_CONFIG_DIR\plugins\marketplaces\plannotator\apps\hook\hooks\hooks.json" } else { "$env:USERPROFILE\.claude\plugins\marketplaces\plannotator\apps\hook\hooks\hooks.json" }

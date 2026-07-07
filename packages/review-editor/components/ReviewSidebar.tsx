@@ -1,16 +1,15 @@
 import React, { useState } from 'react';
-import { CodeAnnotation, type CodeAnnotationScope, type EditorAnnotation } from '@plannotator/ui/types';
-import { isCurrentUser } from '@plannotator/ui/utils/identity';
+import { CodeAnnotation, type CodeAnnotationScope, type EditorAnnotation, type Annotation, type CommentAnnotation } from '@plannotator/ui/types';
+import { CommentMeta } from './CommentMeta';
 import { EditorAnnotationCard } from '@plannotator/ui/components/EditorAnnotationCard';
-import { CopyButton } from './CopyButton';
-import { copyLocationPrefix } from '../utils/annotationDisplay';
-import { ConventionalLabelBadge } from './ConventionalLabelPicker';
+import { CommentActions } from './CommentActions';
+import { commentCopyText } from '../utils/annotationDisplay';
 import { HighlightedCode } from './HighlightedCode';
 import { detectLanguage } from '../utils/detectLanguage';
 import { renderInlineMarkdown } from '../utils/renderInlineMarkdown';
-import { formatRelativeTime } from '../utils/formatRelativeTime';
+import { FileNameChip } from './FileNameChip';
 import { AITab } from './AITab';
-import { AgentsTab } from '@plannotator/ui/components/AgentsTab';
+import { AgentsTab, type AgentLaunchParams, type AgentLaunchResult } from '@plannotator/ui/components/AgentsTab';
 import type { PRMetadata } from '@plannotator/shared/pr-types';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import type { AIChatEntry } from '../hooks/useAIChat';
@@ -29,17 +28,30 @@ interface ReviewSidebarProps {
   files: DiffFile[];
   selectedAnnotationId: string | null;
   onSelectAnnotation: (id: string | null) => void;
+  /** Sidebar row click → select AND scroll the diff to the comment. */
+  onNavigateToAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
   feedbackMarkdown?: string;
   width?: number;
   editorAnnotations?: EditorAnnotation[];
   onDeleteEditorAnnotation?: (id: string) => void;
+  // PR description prose annotations (comment-only) — shown in their own group.
+  descriptionAnnotations?: Annotation[];
+  selectedDescriptionAnnotationId?: string | null;
+  onSelectDescriptionAnnotation?: (id: string | null) => void;
+  onDeleteDescriptionAnnotation?: (id: string) => void;
+  // PR comment annotations (notes on a whole comment) — own group.
+  commentAnnotations?: CommentAnnotation[];
+  selectedCommentAnnotationId?: string | null;
+  onSelectCommentAnnotation?: (id: string | null) => void;
+  onDeleteCommentAnnotation?: (id: string) => void;
   prMetadata?: PRMetadata | null;
   // AI props
   aiAvailable?: boolean;
   aiMessages?: AIChatEntry[];
   isAICreatingSession?: boolean;
   isAIStreaming?: boolean;
+  onAIStop?: () => void;
   onScrollToAILines?: (filePath: string, lineStart: number, lineEnd: number, side: 'old' | 'new') => void;
   activeFilePath?: string;
   scrollToQuestionId?: string | null;
@@ -53,12 +65,19 @@ interface ReviewSidebarProps {
   // Agent props
   agentJobs?: AgentJobInfo[];
   agentCapabilities?: AgentCapabilities | null;
-  onAgentLaunch?: (params: { provider?: string; command?: string[]; label?: string; engine?: string; model?: string; reasoningEffort?: string; effort?: string; fastMode?: boolean; reviewProfileId?: string }) => void;
+  onAgentLaunch?: (params: AgentLaunchParams) => AgentLaunchResult | Promise<AgentLaunchResult>;
   onAgentKillJob?: (id: string) => void;
   onAgentKillAll?: () => void;
   externalAnnotations?: Array<{ source?: string }>;
   onOpenJobDetail?: (jobId: string) => void;
-  onOpenPRPanel?: (type: 'summary' | 'comments' | 'checks') => void;
+  onOpenGuide?: (jobId: string) => void;
+  /** Pass-through to AgentsTab — gates the sidebar's Guided Review mode on
+   *  file availability, mirroring the header's hasSearchableFiles gate on
+   *  the "Guide" badge/shortcut (see App.tsx). */
+  guideLaunchable?: boolean;
+  /** Pass-through to AgentsTab — gates each guide job card's "Open guide"
+   *  action on whether that job belongs to the current review context. */
+  canOpenGuideJob?: (job: import('@plannotator/ui/types').AgentJobInfo) => boolean;
 }
 
 const SuggestionPreview: React.FC<{ code: string; originalCode?: string; language?: string }> = ({ code, originalCode, language }) => {
@@ -115,16 +134,26 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   files,
   selectedAnnotationId,
   onSelectAnnotation,
+  onNavigateToAnnotation,
   onDeleteAnnotation,
   feedbackMarkdown,
   width,
   editorAnnotations,
   onDeleteEditorAnnotation,
+  descriptionAnnotations,
+  selectedDescriptionAnnotationId,
+  onSelectDescriptionAnnotation,
+  onDeleteDescriptionAnnotation,
+  commentAnnotations,
+  selectedCommentAnnotationId,
+  onSelectCommentAnnotation,
+  onDeleteCommentAnnotation,
   prMetadata,
   aiAvailable = false,
   aiMessages = [],
   isAICreatingSession = false,
   isAIStreaming = false,
+  onAIStop,
   onScrollToAILines,
   activeFilePath,
   scrollToQuestionId,
@@ -142,9 +171,11 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   onAgentKillAll,
   externalAnnotations,
   onOpenJobDetail,
-  onOpenPRPanel,
+  onOpenGuide,
+  guideLaunchable,
+  canOpenGuideJob,
 }) => {
-  const totalCount = annotations.length + (editorAnnotations?.length ?? 0);
+  const totalCount = annotations.length + (editorAnnotations?.length ?? 0) + (descriptionAnnotations?.length ?? 0) + (commentAnnotations?.length ?? 0);
   const [copied, setCopied] = useState(false);
 
   const handleQuickCopy = async () => {
@@ -213,23 +244,21 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
     return (
       <div
         key={annotation.id}
-        onClick={() => onSelectAnnotation(annotation.id)}
+        onClick={() => onNavigateToAnnotation(annotation.id)}
         className={`group relative p-2.5 rounded border cursor-pointer transition-colors duration-150 ${
           isSelected
             ? 'bg-primary/5 border-primary/30'
             : 'border-transparent hover:bg-muted/30'
         }`}
       >
-        <div className="flex items-center justify-between mb-1.5">
-          <div className="flex items-center gap-2">
-            {isGeneralScope ? (
+        <CommentMeta
+          leading={
+            isGeneralScope ? (
               <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary">
                 general
               </span>
             ) : isFileScope ? (
-              <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary">
-                file
-              </span>
+              <FileNameChip path={annotation.filePath} />
             ) : (
               <span className="text-[10px] font-mono text-muted-foreground">
                 {annotation.lineStart === annotation.lineEnd
@@ -239,25 +268,15 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                   <span className="ml-1 text-primary/70">{`\`${annotation.tokenText.length > 30 ? annotation.tokenText.slice(0, 27) + '...' : annotation.tokenText}\``}</span>
                 )}
               </span>
-            )}
-            {annotation.conventionalLabel && (
-              <ConventionalLabelBadge label={annotation.conventionalLabel} decorations={annotation.decorations} />
-            )}
-            {annotation.reviewProfileLabel && (
-              <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent/10 text-accent/90">
-                {annotation.reviewProfileLabel}
-              </span>
-            )}
-            {annotation.author && (
-              <span className={`text-[10px] truncate max-w-[100px] ${isCurrentUser(annotation.author) ? 'text-muted-foreground/50' : 'text-muted-foreground/70'}`}>
-                {annotation.author}{isCurrentUser(annotation.author) && ' (me)'}
-              </span>
-            )}
-          </div>
-          <span className="text-[10px] text-muted-foreground/50">
-            {formatRelativeTime(annotation.createdAt)}
-          </span>
-        </div>
+            )
+          }
+          conventionalLabel={annotation.conventionalLabel}
+          decorations={annotation.decorations}
+          reviewProfileLabel={annotation.reviewProfileLabel}
+          source={annotation.source}
+          author={annotation.author}
+          createdAt={annotation.createdAt}
+        />
         {annotation.text && (
           <div className="text-xs text-foreground/80 line-clamp-2 review-comment-markdown">
             {renderInlineMarkdown(annotation.text)}
@@ -268,26 +287,91 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
             <SuggestionPreview code={annotation.suggestedCode} originalCode={annotation.originalCode} language={detectLanguage(annotation.filePath)} />
           </div>
         )}
-        <div className="flex items-center justify-end gap-1 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-          {annotation.text && (
-            <CopyButton text={`${copyLocationPrefix(annotation, scope)}${annotation.text}${annotation.reasoning ? `\n\nReasoning: ${annotation.reasoning}` : ''}`} variant="inline" />
-          )}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onDeleteAnnotation(annotation.id);
-            }}
-            className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-            title="Delete annotation"
-          >
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
+        <CommentActions
+          copyText={annotation.text ? commentCopyText(annotation, scope) : undefined}
+          onDelete={() => onDeleteAnnotation(annotation.id)}
+        />
       </div>
     );
   }
+
+  // Prose annotations on the PR description — comment-only, anchored to selected
+  // text (no file/line). Mirrors renderAnnotationCard for visual consistency.
+  // Shared card shell for prose annotations (PR description + PR comment): a
+  // scope label, the quoted source text, the reviewer's note, select + delete.
+  // Thin per-type call sites below map their fields onto it.
+  function renderProseAnnotationCard(opts: {
+    id: string;
+    label: string;
+    quote?: string;
+    quoteClamp?: string;
+    note?: string;
+    author?: string;
+    createdAt: number;
+    source?: string;
+    isSelected: boolean;
+    onSelect: () => void;
+    onDelete: () => void;
+  }) {
+    const { id, label, quote, quoteClamp = 'line-clamp-2', note, author, createdAt, source, isSelected, onSelect, onDelete } = opts;
+    return (
+      <div
+        key={id}
+        onClick={onSelect}
+        className={`group relative p-2.5 rounded border cursor-pointer transition-colors duration-150 ${
+          isSelected ? 'bg-primary/5 border-primary/30' : 'border-transparent hover:bg-muted/30'
+        }`}
+      >
+        <CommentMeta
+          leading={
+            <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+              {label}
+            </span>
+          }
+          source={source}
+          author={author}
+          createdAt={createdAt}
+        />
+        {quote && (
+          <div className={`mt-1 mb-1 border-l-2 border-border/40 pl-1.5 text-[11px] italic text-muted-foreground/80 ${quoteClamp}`}>
+            {quote}
+          </div>
+        )}
+        {note && (
+          <div className="text-xs text-foreground/80 line-clamp-2 review-comment-markdown">
+            {renderInlineMarkdown(note)}
+          </div>
+        )}
+        <CommentActions copyText={note || undefined} onDelete={onDelete} />
+      </div>
+    );
+  }
+
+  const renderDescriptionAnnotationCard = (annotation: Annotation) => renderProseAnnotationCard({
+    id: annotation.id,
+    label: 'PR description',
+    quote: annotation.originalText,
+    quoteClamp: 'line-clamp-1',
+    note: annotation.text,
+    author: annotation.author,
+    createdAt: annotation.createdA,
+    source: annotation.source,
+    isSelected: selectedDescriptionAnnotationId === annotation.id,
+    onSelect: () => onSelectDescriptionAnnotation?.(annotation.id),
+    onDelete: () => onDeleteDescriptionAnnotation?.(annotation.id),
+  });
+
+  const renderCommentAnnotationCard = (annotation: CommentAnnotation) => renderProseAnnotationCard({
+    id: annotation.id,
+    label: 'PR comment',
+    quote: annotation.commentBody,
+    note: annotation.text,
+    author: annotation.commentAuthor,
+    createdAt: annotation.createdAt,
+    isSelected: selectedCommentAnnotationId === annotation.id,
+    onSelect: () => onSelectCommentAnnotation?.(annotation.id),
+    onDelete: () => onDeleteCommentAnnotation?.(annotation.id),
+  });
 
   return (
     <aside className="border-l border-border/50 bg-card/30 backdrop-blur-sm flex flex-col flex-shrink-0" style={{ width: width ?? 288 }}>
@@ -404,6 +488,38 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                 </>
               )}
 
+              {/* PR description annotations */}
+              {descriptionAnnotations && descriptionAnnotations.length > 0 && (
+                <>
+                  {(annotations.length > 0 || (editorAnnotations?.length ?? 0) > 0) && (
+                    <div className="flex items-center gap-2 pt-2 pb-1">
+                      <div className="flex-1 border-t border-border/30" />
+                      <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/60">PR description</span>
+                      <div className="flex-1 border-t border-border/30" />
+                    </div>
+                  )}
+                  <div className="space-y-1">
+                    {descriptionAnnotations.map(renderDescriptionAnnotationCard)}
+                  </div>
+                </>
+              )}
+
+              {/* PR comment annotations */}
+              {commentAnnotations && commentAnnotations.length > 0 && (
+                <>
+                  {(annotations.length > 0 || (editorAnnotations?.length ?? 0) > 0 || (descriptionAnnotations?.length ?? 0) > 0) && (
+                    <div className="flex items-center gap-2 pt-2 pb-1">
+                      <div className="flex-1 border-t border-border/30" />
+                      <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/60">PR comments</span>
+                      <div className="flex-1 border-t border-border/30" />
+                    </div>
+                  )}
+                  <div className="space-y-1">
+                    {commentAnnotations.map(renderCommentAnnotationCard)}
+                  </div>
+                </>
+              )}
+
             </div>
           )}
 
@@ -417,6 +533,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
               scrollToQuestionId={scrollToQuestionId}
               onScrollToLines={onScrollToAILines ?? (() => {})}
               onAskGeneral={onAskGeneral}
+              onStop={onAIStop}
               permissionRequests={aiPermissionRequests}
               onRespondToPermission={onRespondToPermission}
               aiProviders={aiProviders}
@@ -431,11 +548,14 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
             <AgentsTab
               jobs={agentJobs ?? []}
               capabilities={agentCapabilities ?? null}
-              onLaunch={onAgentLaunch ?? (() => {})}
+              onLaunch={onAgentLaunch ?? (() => null)}
               onKillJob={onAgentKillJob ?? (() => {})}
               onKillAll={onAgentKillAll ?? (() => {})}
               externalAnnotations={externalAnnotations ?? []}
               onOpenJobDetail={onOpenJobDetail}
+              onOpenGuide={onOpenGuide}
+              guideLaunchable={guideLaunchable}
+              canOpenGuideJob={canOpenGuideJob}
             />
           )}
 

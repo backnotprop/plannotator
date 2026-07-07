@@ -241,6 +241,12 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
             controller.close();
           }
         },
+        cancel() {
+          // Client disconnected (Stop fetch abort, superseding question, tab
+          // close, navigation). Stop the in-flight turn so it doesn't keep
+          // running on the now long-lived provider process.
+          entry.session.abort();
+        },
       });
 
       return new Response(stream, {

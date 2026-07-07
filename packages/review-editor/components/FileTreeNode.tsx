@@ -1,6 +1,7 @@
 import React from 'react';
 import * as ContextMenu from '@radix-ui/react-context-menu';
 import type { FileTreeNode as TreeNode } from '../utils/buildFileTree';
+import { ViewedControl, ChangeTypeLetter, StageControl, AnnotationBadge, DiffCounts, CommittedDot } from './FileRowBits';
 
 interface FileTreeNodeProps {
   node: TreeNode;
@@ -13,10 +14,18 @@ interface FileTreeNodeProps {
   onToggleViewed?: (filePath: string) => void;
   hideViewedFiles: boolean;
   getAnnotationCount: (filePath: string) => number;
-  stagedFiles?: Set<string>;
+  /** EFFECTIVE staged set from useGitAdd (sidecar + session overrides).
+   *  REQUIRED and the ONLY staging source surfaces may render from — the
+   *  sidecar's own `staged` flag is a snapshot and must never be ORed in. */
+  stagedFiles: Set<string>;
   scrollHighlightIndex?: number;
   /** Absolute repo root used to build the "Copy full path" menu item. Null in PR-review mode (files aren't on local disk). */
   repoRoot?: string | null;
+  /** Since-base mode extras: sidecar lookup for untracked (U) / staged (dot)
+   * markers and the per-row stage button. Undefined outside since-base. */
+  getSectionEntry?: (filePath: string) => { group: 'committed' | 'changes' | 'untracked'; staged: boolean } | undefined;
+  onStageFile?: (filePath: string) => void;
+  stagingFile?: string | null;
 }
 
 function hasVisibleChildren(
@@ -50,6 +59,9 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
   stagedFiles,
   scrollHighlightIndex,
   repoRoot,
+  getSectionEntry,
+  onStageFile,
+  stagingFile,
 }) => {
   const paddingLeft = 4 + node.depth * 8;
 
@@ -104,6 +116,9 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
             stagedFiles={stagedFiles}
             scrollHighlightIndex={scrollHighlightIndex}
             repoRoot={repoRoot}
+            getSectionEntry={getSectionEntry}
+            onStageFile={onStageFile}
+            stagingFile={stagingFile}
           />
         ))}
       </>
@@ -114,8 +129,17 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
   const isActive = node.fileIndex === activeFileIndex;
   const isScrollActive = !isActive && scrollHighlightIndex != null && node.fileIndex === scrollHighlightIndex;
   const isViewed = viewedFiles.has(node.path);
-  const isStaged = stagedFiles?.has(node.path) ?? false;
+  const isStaged = stagedFiles.has(node.path);
   const annotationCount = getAnnotationCount(node.path);
+  // Since-base mode: sidecar-driven markers (U for untracked, staged dot,
+  // stage button) replace the legacy staged treatment for this row.
+  const sectionEntry = getSectionEntry?.(node.path);
+  const sinceBaseMode = getSectionEntry != null;
+  const isUntracked = sectionEntry?.group === 'untracked';
+  // isStaged comes from the EFFECTIVE set (sidecar + session overrides) —
+  // the sidecar's own snapshot flag must never be ORed back in, or a file
+  // unstaged this session would render staged and invert the next toggle.
+  const isStageable = sinceBaseMode && !!onStageFile && sectionEntry != null && sectionEntry.group !== 'committed';
 
   if (hideViewedFiles && isViewed && !isActive) {
     return null;
@@ -127,62 +151,33 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
         <button
           onClick={() => onSelectFile(node.fileIndex!)}
           onDoubleClick={() => onDoubleClickFile?.(node.fileIndex!)}
-          className={`file-tree-item w-full text-left group ${isActive ? 'active' : isScrollActive ? 'scroll-active' : ''} ${annotationCount > 0 ? 'has-annotations' : ''} ${isStaged ? 'staged' : ''}`}
+          className={`file-tree-item w-full text-left group ${isActive ? 'active' : isScrollActive ? 'scroll-active' : ''} ${annotationCount > 0 ? 'has-annotations' : ''} ${isStaged && !sinceBaseMode ? 'staged' : ''}`}
           style={{ paddingLeft }}
         >
+          {/* Leading rail: [view][add][letter] then name — same anatomy as
+              the sections view rows. View reveals on hover / when active; the
+              stage control (since-base mode only) and letter are always shown.
+              Name inherits the row font; letter/counts stay the small size. */}
           <div className="flex items-center gap-1.5 flex-1 min-w-0">
-            <span
-              role="checkbox"
-              aria-checked={isViewed}
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleViewed?.(node.path);
-              }}
-              className="flex-shrink-0 p-0.5 rounded hover:bg-muted/50 cursor-pointer"
-            >
-              {isViewed ? (
-                <svg className="w-3.5 h-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              ) : (
-                <svg className="w-3.5 h-3.5 text-muted-foreground opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <circle cx="12" cy="12" r="9" />
-                </svg>
-              )}
-            </span>
+            <ViewedControl isViewed={isViewed} onToggle={onToggleViewed ? () => onToggleViewed(node.path) : undefined} forceVisible={isActive} />
+            {sinceBaseMode && (isStageable || isStaged) ? (
+              <StageControl
+                isStaged={isStaged}
+                isStaging={stagingFile === node.path}
+                onStage={onStageFile ? () => onStageFile(node.path) : undefined}
+              />
+            ) : sinceBaseMode && sectionEntry?.group === 'committed' ? (
+              <CommittedDot />
+            ) : sinceBaseMode && onStageFile ? (
+              <span className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+            ) : isStaged && !sinceBaseMode ? (
+              <span className="text-[10px] text-primary font-medium flex items-center justify-center w-4 flex-shrink-0" title="Staged (git add)">+</span>
+            ) : null}
+            <ChangeTypeLetter status={node.file!.status} oldPath={node.file!.oldPath} untracked={isUntracked} />
             <span className="truncate">{node.name}</span>
+            <AnnotationBadge count={annotationCount} />
           </div>
-          <div className="flex items-center gap-1.5 flex-shrink-0 text-[10px]">
-            {isStaged && (
-              <span className="text-primary font-medium" title="Staged (git add)">+</span>
-            )}
-            {annotationCount > 0 && (
-              <span className="text-primary font-medium">{annotationCount}</span>
-            )}
-            {node.file!.additions > 0 && (
-              <span className="additions">+{node.file!.additions}</span>
-            )}
-            {node.file!.deletions > 0 && (
-              <span className="deletions">-{node.file!.deletions}</span>
-            )}
-            {/* Change-type marker — modified is deliberately undecorated so
-                added/deleted/renamed pop (diffshub treatment; renamed uses
-                its blue). */}
-            {node.file!.status === 'added' && (
-              <span className="text-success font-semibold" title="Added file">A</span>
-            )}
-            {node.file!.status === 'deleted' && (
-              <span className="text-destructive font-semibold" title="Deleted file">D</span>
-            )}
-            {node.file!.status === 'renamed' && (
-              <span
-                className="text-[#007aff] font-semibold"
-                title={node.file!.oldPath ? `Renamed from ${node.file!.oldPath}` : 'Renamed file'}
-              >
-                R
-              </span>
-            )}
-          </div>
+          <DiffCounts additions={node.file!.additions} deletions={node.file!.deletions} />
         </button>
       </ContextMenu.Trigger>
       <ContextMenu.Portal>

@@ -89,6 +89,14 @@ export const HTML_BLOCK_TAGS: ReadonlySet<string> = new Set([
   'blockquote', 'pre',
   'table', 'thead', 'tbody', 'tr', 'td', 'th',
   'ul', 'ol', 'li', 'p',
+  // Media: GitHub embeds screenshots/videos as raw HTML on their own line.
+  'img', 'video', 'picture',
+]);
+
+/** Void elements — no closing tag, so the block is a single line (don't scan
+ *  ahead for a `</tag>` that will never come). */
+const VOID_HTML_TAGS: ReadonlySet<string> = new Set([
+  'img', 'br', 'hr', 'source', 'input', 'wbr', 'area', 'col', 'embed',
 ]);
 
 const HTML_BLOCK_OPEN_RE = /^<\/?([a-zA-Z][a-zA-Z0-9]*)(?:\s|>|\/|$)/;
@@ -285,6 +293,129 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
       continue;
     }
 
+    // Display math: $$ ... $$ — only when a closing $$ actually exists. An
+    // unclosed $$ (a stray delimiter or informal money like "$$100k for infra")
+    // must NOT swallow the rest of the document: scan ahead without committing,
+    // and if there's no close, fall through and treat the line as ordinary text.
+    if (trimmed.startsWith('$$')) {
+      const mathStartLine = currentLineNum;
+      const afterOpen = trimmed.slice(2);
+      const mathLines: string[] = [];
+      let remainder = '';
+      let closed = false;
+      let closeLine = i;
+      // Find the closing $$ anywhere on the opening line (not just at its end),
+      // so `$$x$$.` or `$$x$$ trailing` close correctly instead of running on.
+      const inlineClose = afterOpen.indexOf('$$');
+      if (inlineClose !== -1) {
+        const body = afterOpen.slice(0, inlineClose).trim();
+        if (body) mathLines.push(body);
+        remainder = afterOpen.slice(inlineClose + 2).trim();
+        closed = true;
+      } else {
+        const scanned: string[] = afterOpen.trim() ? [afterOpen.trim()] : [];
+        let j = i;
+        while (j + 1 < lines.length) {
+          j++;
+          // A blank line ends the search: real $$…$$ has no blank line before its
+          // close, so a blank means this opener was never closed. Stopping here
+          // also prevents matching a stray $$ far below (e.g. inside a later code
+          // fence) and swallowing everything in between.
+          if (lines[j].trim() === '') break;
+          const closeAt = lines[j].indexOf('$$');
+          if (closeAt !== -1) {
+            const before = lines[j].slice(0, closeAt);
+            if (before.trim()) scanned.push(before);
+            remainder = lines[j].slice(closeAt + 2).trim();
+            closed = true;
+            closeLine = j;
+            break;
+          }
+          scanned.push(lines[j]);
+        }
+        if (closed) for (const s of scanned) mathLines.push(s);
+      }
+
+      if (closed) {
+        flush();
+        i = closeLine;
+        blocks.push({
+          id: `block-${currentId++}`,
+          type: 'math',
+          content: mathLines.join('\n'),
+          order: currentId,
+          startLine: mathStartLine,
+          sourceLineCount: i + contentStartLine - mathStartLine + 1,
+        });
+        // Trailing text after the closing $$ isn't math — reprocess it as its own
+        // line so it renders normally instead of being swallowed into the block.
+        if (remainder) {
+          lines[i] = remainder;
+          i--;
+        }
+        continue;
+      }
+      // No closing $$ found — not display math; fall through to normal handling.
+    }
+
+    // Display math: \[ ... \] — same unclosed-guard as $$ above: only treat as
+    // math when the closing \] exists, so a stray `\[deprecated\]`-style line or
+    // an unclosed `\[` doesn't swallow the rest of the document.
+    if (trimmed.startsWith('\\[')) {
+      const mathStartLine = currentLineNum;
+      const afterOpen = trimmed.slice(2);
+      const mathLines: string[] = [];
+      let remainder = '';
+      let closed = false;
+      let closeLine = i;
+      const inlineClose = afterOpen.indexOf('\\]');
+      if (inlineClose !== -1) {
+        const body = afterOpen.slice(0, inlineClose).trim();
+        if (body) mathLines.push(body);
+        remainder = afterOpen.slice(inlineClose + 2).trim();
+        closed = true;
+      } else {
+        const scanned: string[] = afterOpen.trim() ? [afterOpen.trim()] : [];
+        let j = i;
+        while (j + 1 < lines.length) {
+          j++;
+          // Blank line ends the search (see the $$ branch): unclosed \[ must not
+          // swallow later blocks or match a stray \] inside a later code fence.
+          if (lines[j].trim() === '') break;
+          const closeAt = lines[j].indexOf('\\]');
+          if (closeAt !== -1) {
+            const before = lines[j].slice(0, closeAt);
+            if (before.trim()) scanned.push(before);
+            remainder = lines[j].slice(closeAt + 2).trim();
+            closed = true;
+            closeLine = j;
+            break;
+          }
+          scanned.push(lines[j]);
+        }
+        if (closed) for (const s of scanned) mathLines.push(s);
+      }
+
+      if (closed) {
+        flush();
+        i = closeLine;
+        blocks.push({
+          id: `block-${currentId++}`,
+          type: 'math',
+          content: mathLines.join('\n'),
+          order: currentId,
+          startLine: mathStartLine,
+          sourceLineCount: i + contentStartLine - mathStartLine + 1,
+        });
+        if (remainder) {
+          lines[i] = remainder;
+          i--;
+        }
+        continue;
+      }
+      // No closing \] found — not display math; fall through to normal handling.
+    }
+
     // Tables (lines starting with |)
     if (trimmed.startsWith('|')) {
       flush();
@@ -358,15 +489,35 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
           i++;
           htmlLines.push(lines[i]);
         }
+      } else if (VOID_HTML_TAGS.has(tagName)) {
+        // Void element (e.g. <img>): no closing tag, but attributes can wrap across
+        // lines. Consume until the line that actually closes the tag with `>` so a
+        // multi-line <img> isn't truncated to a bare `<img` fragment.
+        while (!lines[i].includes('>') && i + 1 < lines.length && lines[i + 1].trim() !== '') {
+          i++;
+          htmlLines.push(lines[i]);
+        }
       } else {
         const openRe = new RegExp(`<${tagName}(?:\\s|>|/|$)`, 'gi');
         const closeRe = new RegExp(`</${tagName}\\s*>`, 'gi');
-        let depth = (line.match(openRe) || []).length - (line.match(closeRe) || []).length;
-        while (depth > 0 && i + 1 < lines.length) {
-          i++;
-          htmlLines.push(lines[i]);
-          depth += (lines[i].match(openRe) || []).length;
-          depth -= (lines[i].match(closeRe) || []).length;
+        const depth = (line.match(openRe) || []).length - (line.match(closeRe) || []).length;
+        if (depth > 0) {
+          // Scan ahead for the matching close tag. If none is ever found — a
+          // self-closing <video/>, or an unclosed <picture>/<div> — do NOT swallow
+          // the rest of the document into this block; keep it to the opening line.
+          let j = i;
+          let d = depth;
+          const scanned: string[] = [];
+          while (d > 0 && j + 1 < lines.length) {
+            j++;
+            scanned.push(lines[j]);
+            d += (lines[j].match(openRe) || []).length;
+            d -= (lines[j].match(closeRe) || []).length;
+          }
+          if (d === 0) {
+            i = j;
+            for (const s of scanned) htmlLines.push(s);
+          }
         }
       }
 
@@ -456,6 +607,32 @@ export const computeListIndices = (blocks: Block[]): (number | null)[] => {
   });
 };
 
+/** A run of blocks to render: a single block, or consecutive list items grouped
+ *  together so list numbering/indent can be computed across the run. */
+export type RenderGroup =
+  | { type: 'single'; block: Block }
+  | { type: 'list-group'; blocks: Block[]; key: string };
+
+/** Groups consecutive list-item blocks so a list renders as one unit. */
+export function groupBlocks(blocks: Block[]): RenderGroup[] {
+  const groups: RenderGroup[] = [];
+  let i = 0;
+  while (i < blocks.length) {
+    if (blocks[i].type === 'list-item') {
+      const listBlocks: Block[] = [];
+      while (i < blocks.length && blocks[i].type === 'list-item') {
+        listBlocks.push(blocks[i]);
+        i++;
+      }
+      groups.push({ type: 'list-group', blocks: listBlocks, key: `list-${listBlocks[0].id}` });
+    } else {
+      groups.push({ type: 'single', block: blocks[i] });
+      i++;
+    }
+  }
+  return groups;
+}
+
 /** Wrap feedback output with the deny preamble for pasting into agent sessions */
 export const wrapFeedbackForAgent = (feedback: string): string =>
   planDenyFeedback(feedback);
@@ -466,6 +643,9 @@ export interface ExportAnnotationsOptions {
 
 /** Compute the end line of a block from its content and type. */
 const blockEndLine = (block: Block): number => {
+  if (block.sourceLineCount && block.sourceLineCount > 0) {
+    return block.startLine + block.sourceLineCount - 1;
+  }
   if (!block.content) return block.startLine;
   const contentLines = block.content.split('\n').length;
   if (block.type === 'code') return block.startLine + contentLines + 1;

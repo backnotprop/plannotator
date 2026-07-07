@@ -1,15 +1,19 @@
 import React, { useEffect, useCallback, useState, useMemo } from 'react';
 import { CodeAnnotation } from '@plannotator/ui/types';
-import type { AvailableBranches, CompareTargetConfig, DiffOption, JjEvoLogEntry, RecentCommit, WorktreeInfo } from '@plannotator/shared/types';
+import type { AvailableBranches, CompareTargetConfig, DiffOption, JjEvoLogEntry, RecentCommit, SinceBaseSections, WorktreeInfo } from '@plannotator/shared/types';
 import { buildFileTree, getAncestorPaths, getAllFolderPaths, getVisualFileOrder } from '../utils/buildFileTree';
 import { FileTreeNodeItem } from './FileTreeNode';
 import { BaseBranchPicker } from './BaseBranchPicker';
 import { EvoLogPicker } from './EvoLogPicker';
 import { DiffTypePicker } from './DiffTypePicker';
 import { WorktreePicker } from './WorktreePicker';
+import { PanelViewToggle } from './PanelViewToggle';
 import { getReviewSearchSideLabel, type ReviewSearchFileGroup, type ReviewSearchMatch } from '../utils/reviewSearch';
 import type { DiffFile } from '../types';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
+import { GitHubIcon } from '@plannotator/ui/components/GitHubIcon';
+
+import { SidebarActionRow, SemanticDiffRow, AllFilesRow } from './PanelNavRows';
 
 interface FileTreeProps {
   files: DiffFile[];
@@ -43,7 +47,10 @@ interface FileTreeProps {
   jjEvologs?: JjEvoLogEntry[];
   /** Default evolog commit ID to compare against (second evolog entry). */
   detectedEvoBase?: string;
-  stagedFiles?: Set<string>;
+  /** EFFECTIVE staged set from useGitAdd (sidecar + session overrides).
+   *  REQUIRED and the ONLY staging source surfaces may render from — the
+   *  sidecar's own `staged` flag is a snapshot and must never be ORed in. */
+  stagedFiles: Set<string>;
   onCopyRawDiff?: () => void;
   canCopyRawDiff?: boolean;
   copyRawDiffStatus?: 'idle' | 'success' | 'error';
@@ -60,6 +67,12 @@ interface FileTreeProps {
   activeSearchMatchId?: string | null;
   onSelectSearchMatch?: (matchId: string) => void;
   onStepSearchMatch?: (direction: 1 | -1) => void;
+  onSelectPROverview?: () => void;
+  isPROverviewActive?: boolean;
+  /** PR number label (e.g. "#123") for the PR overview row; omit in non-PR reviews. */
+  prOverviewNumber?: string;
+  /** PR title for the PR overview row. */
+  prOverviewTitle?: string;
   onSelectSemanticDiff?: () => void;
   isSemanticDiffActive?: boolean;
   semanticDiffAvailable?: boolean;
@@ -68,6 +81,15 @@ interface FileTreeProps {
   scrollHighlightIndex?: number;
   /** Absolute repo root for the "Copy full path" context menu item. Null/undefined hides the option (e.g. PR review mode). */
   repoRoot?: string | null;
+  /** When the since-base sections view is available, renders a nav row back to it. */
+  onSwitchToSections?: () => void;
+  /** When the commit-history view is available, offers its toggle segment. */
+  onSwitchToCommits?: () => void;
+  /** Sections sidecar while the since-base diff is displayed as a tree —
+   * powers per-row U/staged markers and the stage button. */
+  sinceBaseSections?: SinceBaseSections | null;
+  onStageFile?: (filePath: string) => void;
+  stagingFile?: string | null;
 }
 
 export const FileTree: React.FC<FileTreeProps> = ({
@@ -115,6 +137,10 @@ export const FileTree: React.FC<FileTreeProps> = ({
   activeSearchMatchId,
   onSelectSearchMatch,
   onStepSearchMatch,
+  onSelectPROverview,
+  isPROverviewActive = false,
+  prOverviewNumber,
+  prOverviewTitle,
   onSelectSemanticDiff,
   isSemanticDiffActive = false,
   semanticDiffAvailable = false,
@@ -122,10 +148,21 @@ export const FileTree: React.FC<FileTreeProps> = ({
   isAllFilesActive = false,
   scrollHighlightIndex,
   repoRoot,
+  onSwitchToSections,
+  onSwitchToCommits,
+  sinceBaseSections,
+  onStageFile,
+  stagingFile,
 }) => {
   const isSearchVisible = !!onSearchChange && (isSearchOpen || !!searchQuery.trim());
 
   const tree = useMemo(() => buildFileTree(files), [files]);
+
+  // Since-base sidecar lookup for per-row lifecycle markers + stage buttons.
+  const getSectionEntry = useMemo(() => {
+    if (!sinceBaseSections) return undefined;
+    return (filePath: string) => sinceBaseSections.files[filePath];
+  }, [sinceBaseSections]);
   const allFolderPaths = useMemo(() => getAllFolderPaths(tree), [tree]);
   const visualOrder = useMemo(() => getVisualFileOrder(tree), [tree]);
 
@@ -237,11 +274,27 @@ export const FileTree: React.FC<FileTreeProps> = ({
           immediately AFTER the hide-viewed eye toggle it relates to. */}
       <div className="px-3 flex items-center border-b border-border/50" style={{ height: 'var(--panel-header-h)' }}>
         <div className="w-full flex items-center justify-between">
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-            {searchQuery.trim() ? 'Results' : 'Files'}
-          </span>
+          {searchQuery.trim() ? (
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Results
+            </span>
+          ) : onSwitchToSections || onSwitchToCommits ? (
+            <PanelViewToggle
+              view="tree"
+              showSections={!!onSwitchToSections}
+              showCommits={!!onSwitchToCommits}
+              onSelect={(view) => {
+                if (view === 'sections') onSwitchToSections?.();
+                else if (view === 'commits') onSwitchToCommits?.();
+              }}
+            />
+          ) : (
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Files
+            </span>
+          )}
           <div className="flex items-center gap-1.5">
-            {stagedFiles && stagedFiles.size > 0 && (
+            {stagedFiles.size > 0 && (
               <span className="text-xs text-primary font-medium">
                 {stagedFiles.size} added
               </span>
@@ -456,38 +509,27 @@ export const FileTree: React.FC<FileTreeProps> = ({
           )
         ) : (
           <>
-          {semanticDiffAvailable && onSelectSemanticDiff && (
-            <button
-              onClick={onSelectSemanticDiff}
-              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors mb-0.5 ${
-                isSemanticDiffActive
-                  ? 'bg-primary/15 text-primary font-medium'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-              }`}
+          {prOverviewNumber && prOverviewTitle && onSelectPROverview && (
+            <SidebarActionRow
+              active={isPROverviewActive}
+              onClick={onSelectPROverview}
+              title={`${prOverviewNumber} · ${prOverviewTitle}`}
             >
-              <span className="w-3.5 h-3.5 flex flex-shrink-0 items-center justify-center" aria-hidden="true">∆</span>
-              <span>Semantic diff</span>
-            </button>
+              <GitHubIcon className="w-3.5 h-3.5 flex-shrink-0" />
+              <span className="font-mono flex-shrink-0">{prOverviewNumber}</span>
+              <span className="truncate text-muted-foreground/80">{prOverviewTitle}</span>
+            </SidebarActionRow>
+          )}
+          {semanticDiffAvailable && onSelectSemanticDiff && (
+            <SemanticDiffRow active={isSemanticDiffActive} onClick={onSelectSemanticDiff} />
           )}
           {onSelectAllFiles && (
-            <button
+            <AllFilesRow
+              active={isAllFilesActive}
               onClick={onSelectAllFiles}
-              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors mb-0.5 ${
-                isAllFilesActive
-                  ? 'bg-primary/15 text-primary font-medium'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-              }`}
-            >
-              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 6.878V6a2.25 2.25 0 012.25-2.25h7.5A2.25 2.25 0 0118 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 004.5 9v.878m13.5-3A2.25 2.25 0 0119.5 9v.878m-13.5 0A2.25 2.25 0 003 12v3a2.25 2.25 0 002.25 2.25h13.5A2.25 2.25 0 0021 15v-3a2.25 2.25 0 00-2.25-2.25m-13.5 0h13.5" />
-              </svg>
-              <span>All files</span>
-              <span className="ml-auto text-[10px] tabular-nums opacity-60">
-                <span className="text-green-500">+{files.reduce((s, f) => s + f.additions, 0)}</span>
-                {' '}
-                <span className="text-red-500">-{files.reduce((s, f) => s + f.deletions, 0)}</span>
-              </span>
-            </button>
+              additions={files.reduce((s, f) => s + f.additions, 0)}
+              deletions={files.reduce((s, f) => s + f.deletions, 0)}
+            />
           )}
           {tree.map(node => (
             <FileTreeNodeItem
@@ -495,7 +537,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
               node={node}
               expandedFolders={expandedFolders}
               onToggleFolder={handleToggleFolder}
-              activeFileIndex={isAllFilesActive || isSemanticDiffActive ? -1 : activeFileIndex}
+              activeFileIndex={isAllFilesActive || isSemanticDiffActive || isPROverviewActive ? -1 : activeFileIndex}
               scrollHighlightIndex={isAllFilesActive ? scrollHighlightIndex : undefined}
               onSelectFile={onSelectFile}
               onDoubleClickFile={onDoubleClickFile}
@@ -505,6 +547,9 @@ export const FileTree: React.FC<FileTreeProps> = ({
               getAnnotationCount={getAnnotationCount}
               stagedFiles={stagedFiles}
               repoRoot={repoRoot}
+              getSectionEntry={getSectionEntry}
+              onStageFile={onStageFile}
+              stagingFile={stagingFile}
             />
           ))}
           </>
@@ -569,7 +614,7 @@ function highlightQuery(text: string, query: string) {
   );
 }
 
-const SearchFileGroup: React.FC<{
+export const SearchFileGroup: React.FC<{
   group: ReviewSearchFileGroup;
   searchQuery: string;
   activeSearchMatchId: string | null;

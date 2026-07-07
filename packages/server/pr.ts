@@ -77,6 +77,9 @@ const runtime: PRRuntime = {
   },
 };
 
+/** The Bun command runner, exported for non-PR CLI consumers (commit avatars). */
+export const prCommandRuntime: PRRuntime = runtime;
+
 export const parsePRUrl = parsePRUrlCore;
 
 export function checkPRAuth(ref: PRRef): Promise<void> {

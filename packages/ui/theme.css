@@ -1,5 +1,7 @@
 /* Plannotator Theme System — imports all themes, provides Tailwind bridge + base styles */
 
+@import "katex/dist/katex.min.css";
+
 /* Theme files — each defines .theme-{name} (dark) and .theme-{name}.light */
 @import "./themes/plannotator.css";
 @import "./themes/claude-plus.css";
@@ -196,6 +198,38 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-feature-settings: "ss01", "ss02", "cv01";
+}
+
+.math-inline {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  vertical-align: text-bottom;
+  line-height: 1;
+}
+
+/* Signal that a rendered formula is a clickable annotation target. */
+.math-annotatable {
+  cursor: pointer;
+}
+
+.math-block {
+  max-width: 100%;
+}
+
+.math-inline .katex,
+.math-block .katex {
+  color: inherit;
+  font-size: 1.02em;
+}
+
+.math-inline .katex {
+  line-height: inherit;
+}
+
+.math-block .katex-display {
+  margin: 0;
+  text-align: center;
 }
 
 /* Subtle grid background */
@@ -397,7 +431,7 @@ html:not(.transitions-ready) * {
   gap: 0.5rem;
   padding: 0.25rem 0.5rem;
   border-radius: var(--radius-sm);
-  font-size: 0.75rem;
+  font-size: 0.8125rem; /* 13px — file rows felt small vs. the rest of the app */
   cursor: pointer;
   color: var(--muted-foreground);
 }
@@ -418,6 +452,13 @@ html:not(.transitions-ready) * {
 .file-tree-item.active {
   background: oklch(from var(--primary) l c h / 0.3);
   color: var(--primary);
+}
+
+/* The stage (+) button's default border (--border) has no contrast against
+   the active row's primary tint and visually disappears — tint it with the
+   row color instead. :not(:hover) leaves the button's own hover border. */
+.file-tree-item.active .stage-plus:not(:hover) {
+  border-color: oklch(from var(--primary) l c h / 0.5);
 }
 
 .file-tree-item.has-annotations {
@@ -676,4 +717,63 @@ body:has([data-popout="true"]) [data-sidebar-tabs="true"] {
   border-left: 2px solid color-mix(in oklab, var(--primary) 45%, transparent);
   padding-left: 0.6rem;
   color: var(--muted-foreground);
+}
+
+/* Annotation highlights — shared by the plan editor and the code-review
+   description annotations. (Moved here from packages/editor/index.css so both
+   surfaces render web-highlighter marks identically.) */
+.annotation-highlight {
+  border-radius: 2px;
+  padding: 0 2px;
+  margin: 0 -2px;
+}
+
+/* Math annotations style the rendered formula element directly rather than
+   wrapping text in a <mark>, so they need their own display handling. */
+.annotation-highlight.math-inline-annotation {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+}
+
+.annotation-highlight.math-block-annotation {
+  display: block;
+}
+
+.annotation-highlight.deletion {
+  background: oklch(from var(--destructive) l c h / 0.35);
+  text-decoration: line-through;
+  text-decoration-color: var(--destructive);
+  text-decoration-thickness: 2px;
+}
+
+.annotation-highlight.comment {
+  background: oklch(0.70 0.18 60 / 0.3);
+  border-bottom: 2px solid var(--accent);
+}
+
+/* Light mode: softer highlights */
+.light .annotation-highlight.deletion {
+  background: oklch(0.65 0.22 25 / 0.2);
+}
+
+.light .annotation-highlight.comment {
+  background: oklch(0.70 0.20 60 / 0.15);
+}
+
+.annotation-highlight.focused {
+  background: oklch(from var(--focus-highlight) l c h / 0.45) !important;
+  box-shadow: 0 0 8px oklch(from var(--focus-highlight) l c h / 0.4);
+  border-bottom: 2px solid var(--focus-highlight);
+  filter: none;
+}
+
+.light .annotation-highlight.focused {
+  background: oklch(0.70 0.22 200 / 0.3) !important;
+  box-shadow: 0 0 6px oklch(0.60 0.20 200 / 0.3);
+}
+
+.annotation-highlight:hover {
+  filter: brightness(1.2);
+  cursor: pointer;
 }

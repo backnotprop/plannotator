@@ -74,8 +74,14 @@ export const commands = {
   async executeCommand(_command: string, ..._args: unknown[]) {},
 };
 
+export interface Webview {
+  html: string;
+  onDidReceiveMessage(listener: (message: unknown) => void): { dispose(): void };
+  postMessage(message: unknown): Thenable<boolean>;
+}
+
 export interface WebviewPanel {
-  webview: { html: string };
+  webview: Webview;
   iconPath?: Uri;
   reveal(viewColumn?: number): void;
   dispose(): void;
@@ -105,11 +111,15 @@ export const window = {
     _viewType: string,
     _title: string,
     _showOptions: number,
-    _options?: { enableScripts?: boolean },
+    _options?: { enableScripts?: boolean; retainContextWhenHidden?: boolean },
   ): WebviewPanel {
     let disposeListener: (() => void) | null = null;
     return {
-      webview: { html: "" },
+      webview: {
+        html: "",
+        onDidReceiveMessage() { return { dispose() {} }; },
+        postMessage() { return Promise.resolve(true); },
+      },
       reveal() {},
       dispose() {
         disposeListener?.();
@@ -137,6 +147,12 @@ export const window = {
 export const env = {
   async asExternalUri(uri: Uri): Promise<Uri> {
     return uri;
+  },
+  clipboard: {
+    async readText(): Promise<string> {
+      return "";
+    },
+    async writeText(_value: string): Promise<void> {},
   },
 };
 

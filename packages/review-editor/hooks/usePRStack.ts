@@ -5,6 +5,7 @@ import type { SemanticDiffAdvert } from '@plannotator/shared/semantic-diff-types
 export interface PRSwitchResponse {
   rawPatch: string;
   gitRef: string;
+  aiReviewContext?: string;
   prMetadata?: unknown;
   prStackInfo?: unknown;
   prStackTree?: unknown;

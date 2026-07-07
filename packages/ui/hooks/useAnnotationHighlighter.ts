@@ -35,6 +35,188 @@ export interface QuickLabelPickerState {
   source?: any;
 }
 
+type MathAnnotationSource = {
+  kind: 'math';
+  element: HTMLElement;
+  text: string;
+  blockId: string;
+  displayMode: boolean;
+};
+
+const isMathAnnotationSource = (source: any): source is MathAnnotationSource =>
+  source?.kind === 'math';
+
+type MathAnnotationTarget = {
+  element: HTMLElement;
+  blockId: string;
+  tex: string;
+  displayMode: boolean;
+};
+
+const elementFromNode = (node: Node | null): HTMLElement | null => {
+  if (!node) return null;
+  if (node.nodeType === Node.ELEMENT_NODE) return node as HTMLElement;
+  return node.parentNode instanceof HTMLElement ? node.parentNode : null;
+};
+
+const closestMathElement = (node: Node | null, root: HTMLElement | null): HTMLElement | null => {
+  const element = elementFromNode(node);
+  const math = element?.closest<HTMLElement>('.math-annotatable[data-math-tex]');
+  if (!math || !root?.contains(math)) return null;
+  return math;
+};
+
+const mathElementFromSelection = (selection: Selection | null, root: HTMLElement | null): HTMLElement | null => {
+  if (!selection || selection.rangeCount === 0) return null;
+  return (
+    closestMathElement(selection.anchorNode, root) ||
+    closestMathElement(selection.focusNode, root) ||
+    closestMathElement(selection.getRangeAt(0).commonAncestorContainer, root)
+  );
+};
+
+const selectionContainsNode = (range: Range, node: Node): boolean => {
+  try {
+    return range.intersectsNode(node);
+  } catch {
+    return false;
+  }
+};
+
+const mathSourceFromElement = (element: HTMLElement): MathAnnotationSource | null => {
+  const text = element.dataset.mathTex;
+  if (!text) return null;
+
+  const block = element.closest<HTMLElement>('[data-block-id]');
+  const blockId = block?.dataset.blockId;
+  if (!blockId) return null;
+
+  return {
+    kind: 'math',
+    element,
+    text,
+    blockId,
+    displayMode: element.dataset.mathDisplay === 'true',
+  };
+};
+
+const mathTargetsFromSelection = (
+  selection: Selection | null,
+  root: HTMLElement | null,
+): MathAnnotationTarget[] => {
+  if (!selection || selection.rangeCount === 0 || !root) return [];
+
+  const seen = new Set<HTMLElement>();
+  const targets: MathAnnotationTarget[] = [];
+  const candidates = root.querySelectorAll<HTMLElement>('.math-annotatable[data-math-tex]');
+
+  for (let i = 0; i < selection.rangeCount; i += 1) {
+    const range = selection.getRangeAt(i);
+    candidates.forEach(element => {
+      if (seen.has(element) || !selectionContainsNode(range, element)) return;
+      const source = mathSourceFromElement(element);
+      if (!source) return;
+      seen.add(element);
+      targets.push({
+        element,
+        blockId: source.blockId,
+        tex: source.text,
+        displayMode: source.displayMode,
+      });
+    });
+  }
+
+  return targets;
+};
+
+const selectionHasNonMathContent = (
+  selection: Selection | null,
+  root: HTMLElement | null,
+): boolean => {
+  if (!selection || selection.rangeCount === 0 || !root) return false;
+
+  for (let i = 0; i < selection.rangeCount; i += 1) {
+    const range = selection.getRangeAt(i);
+    if (!root.contains(range.commonAncestorContainer)) continue;
+
+    // Whole selection sits inside a single formula (both endpoints within the
+    // rendered KaTeX): a pure-math selection, not mixed content.
+    if (closestMathElement(range.commonAncestorContainer, root)) continue;
+
+    // Otherwise clone the selection, drop any whole math elements it covers,
+    // and see if meaningful text is left. Leftover text = genuinely mixed
+    // (prose + formula) and should fall through to the normal text path.
+    // Nothing left = the selection only spans formulas — even when an endpoint
+    // spills into an adjacent text node at offset 0, which the browser does on
+    // nearly every drag-select of an inline formula.
+    const fragment = range.cloneContents();
+    fragment.querySelectorAll?.('.math-annotatable[data-math-tex]').forEach(element => {
+      element.remove();
+    });
+    if (fragment.textContent?.trim()) return true;
+  }
+
+  return false;
+};
+
+const annotationId = (): string => {
+  const cryptoRef = globalThis.crypto;
+  if (cryptoRef && typeof cryptoRef.randomUUID === 'function') {
+    return cryptoRef.randomUUID();
+  }
+  return `ann-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+};
+
+const escapeAttrValue = (value: string): string => {
+  if (globalThis.CSS && typeof globalThis.CSS.escape === 'function') {
+    return globalThis.CSS.escape(value);
+  }
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+};
+
+const applyMathAnnotationClass = (
+  element: HTMLElement,
+  id: string,
+  type: AnnotationType,
+  displayMode: boolean,
+) => {
+  element.classList.add(
+    'annotation-highlight',
+    displayMode ? 'math-block-annotation' : 'math-inline-annotation',
+  );
+  element.classList.remove('deletion', 'comment');
+  if (type === AnnotationType.DELETION) {
+    element.classList.add('deletion');
+  } else if (type === AnnotationType.COMMENT) {
+    element.classList.add('comment');
+  }
+  element.dataset.bindId = id;
+  element.dataset.mathAnnotation = 'true';
+};
+
+const applyMathTargets = (
+  targets: MathAnnotationTarget[],
+  id: string,
+  type: AnnotationType,
+) => {
+  targets.forEach(target => {
+    applyMathAnnotationClass(target.element, id, type, target.displayMode);
+  });
+};
+
+const clearMathAnnotationClass = (element: Element) => {
+  element.classList.remove(
+    'annotation-highlight',
+    'math-block-annotation',
+    'math-inline-annotation',
+    'deletion',
+    'comment',
+    'focused',
+  );
+  delete (element as HTMLElement).dataset.bindId;
+  delete (element as HTMLElement).dataset.mathAnnotation;
+};
+
 // --- Hook options & return ---
 
 export interface UseAnnotationHighlighterOptions {
@@ -82,8 +264,11 @@ export function useAnnotationHighlighter({
   const onAddAnnotationRef = useRef(onAddAnnotation);
   const onSelectAnnotationRef = useRef(onSelectAnnotation);
   const pendingSourceRef = useRef<any>(null);
+  const pendingMathTargetsRef = useRef<MathAnnotationTarget[]>([]);
+  const pendingMathElementRef = useRef<HTMLElement | null>(null);
   const justCreatedIdRef = useRef<string | null>(null);
   const lastMousePosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const mouseDownMathRef = useRef<HTMLElement | null>(null);
 
   const [toolbarState, setToolbarState] = useState<ToolbarState | null>(null);
   const [commentPopover, setCommentPopover] = useState<CommentPopoverState | null>(null);
@@ -94,12 +279,30 @@ export function useAnnotationHighlighter({
   useEffect(() => { onAddAnnotationRef.current = onAddAnnotation; }, [onAddAnnotation]);
   useEffect(() => { onSelectAnnotationRef.current = onSelectAnnotation; }, [onSelectAnnotation]);
 
+  const clearPendingSelection = useCallback(() => {
+    pendingSourceRef.current = null;
+    pendingMathTargetsRef.current = [];
+    // Strip the pre-submission preview highlight if the annotation was never
+    // finalized (createAnnotationFromMathSource nulls this ref once committed).
+    if (pendingMathElementRef.current) {
+      clearMathAnnotationClass(pendingMathElementRef.current);
+      pendingMathElementRef.current = null;
+    }
+  }, []);
+
+  // Paint a preview highlight on a formula the moment its toolbar/popover opens,
+  // so the target is visible before the user commits the annotation.
+  const showPendingMathPreview = useCallback((source: MathAnnotationSource) => {
+    applyMathAnnotationClass(source.element, 'pending-math', AnnotationType.COMMENT, source.displayMode);
+    pendingMathElementRef.current = source.element;
+  }, []);
+
   // Track mouse position for quick label picker
   useEffect(() => {
     const track = (e: MouseEvent) => { lastMousePosRef.current = { x: e.clientX, y: e.clientY }; };
     document.addEventListener('mouseup', track, true);
     return () => document.removeEventListener('mouseup', track, true);
-  }, []);
+  }, [clearPendingSelection]);
 
   // --- Helpers ---
 
@@ -261,6 +464,8 @@ export function useAnnotationHighlighter({
       }
     }
 
+    const mathTargets = pendingMathTargetsRef.current;
+
     const newAnnotation: Annotation = {
       id: source.id,
       blockId,
@@ -274,6 +479,13 @@ export function useAnnotationHighlighter({
       startMeta: source.startMeta,
       endMeta: source.endMeta,
       images,
+      ...(mathTargets.length > 0 ? {
+        mathTargets: mathTargets.map(target => ({
+          blockId: target.blockId,
+          tex: target.tex,
+          displayMode: target.displayMode,
+        })),
+      } : {}),
       ...(isQuickLabel ? { isQuickLabel: true } : {}),
       ...(quickLabelTip ? { quickLabelTip } : {}),
     };
@@ -283,10 +495,110 @@ export function useAnnotationHighlighter({
     } else if (type === AnnotationType.COMMENT) {
       highlighter.addClass('comment', source.id);
     }
+    applyMathTargets(mathTargets, source.id, type);
 
     justCreatedIdRef.current = newAnnotation.id;
     onAddAnnotationRef.current?.(newAnnotation);
   };
+
+  const createAnnotationFromMathSource = (
+    source: MathAnnotationSource,
+    type: AnnotationType,
+    text?: string,
+    images?: ImageAttachment[],
+    isQuickLabel?: boolean,
+    quickLabelTip?: string,
+  ) => {
+    const id = annotationId();
+    applyMathAnnotationClass(source.element, id, type, source.displayMode);
+    // Committed — hand ownership of the highlight to the annotation so a later
+    // clearPendingSelection() doesn't strip it.
+    pendingMathElementRef.current = null;
+
+    const newAnnotation: Annotation = {
+      id,
+      blockId: source.blockId,
+      startOffset: 0,
+      endOffset: source.text.length,
+      type,
+      text,
+      originalText: source.text,
+      createdA: Date.now(),
+      author: getIdentity(),
+      images,
+      ...(isQuickLabel ? { isQuickLabel: true } : {}),
+      ...(quickLabelTip ? { quickLabelTip } : {}),
+    };
+
+    justCreatedIdRef.current = newAnnotation.id;
+    onAddAnnotationRef.current?.(newAnnotation);
+  };
+
+  const findMathElementForAnnotation = useCallback((ann: Annotation): HTMLElement | null => {
+    if (!containerRef.current || !ann.blockId || !ann.originalText) return null;
+
+    const block = containerRef.current.querySelector<HTMLElement>(
+      `[data-block-id="${escapeAttrValue(ann.blockId)}"]`
+    );
+    if (!block) return null;
+
+    if (
+      block.matches('.math-annotatable[data-math-tex]') &&
+      block.dataset.mathTex === ann.originalText
+    ) {
+      return block;
+    }
+
+    const candidates = block.querySelectorAll<HTMLElement>('.math-annotatable[data-math-tex]');
+    for (const candidate of Array.from(candidates)) {
+      if (candidate.dataset.mathTex === ann.originalText) return candidate;
+    }
+
+    return null;
+  }, []);
+
+  const findMathElementsForAnnotation = useCallback((ann: Annotation): MathAnnotationTarget[] => {
+    if (!containerRef.current) return [];
+
+    if (ann.mathTargets?.length) {
+      const targets: MathAnnotationTarget[] = [];
+      const seen = new Set<HTMLElement>();
+
+      ann.mathTargets.forEach(target => {
+        const block = containerRef.current?.querySelector<HTMLElement>(
+          `[data-block-id="${escapeAttrValue(target.blockId)}"]`
+        );
+        if (!block) return;
+
+        const candidates = [
+          ...(block.matches('.math-annotatable[data-math-tex]') ? [block] : []),
+          ...Array.from(block.querySelectorAll<HTMLElement>('.math-annotatable[data-math-tex]')),
+        ];
+        const element = candidates.find(candidate => candidate.dataset.mathTex === target.tex);
+        if (!element || seen.has(element)) return;
+
+        seen.add(element);
+        targets.push({
+          element,
+          blockId: target.blockId,
+          tex: target.tex,
+          displayMode: target.displayMode,
+        });
+      });
+
+      return targets;
+    }
+
+    const mathElement = findMathElementForAnnotation(ann);
+    if (!mathElement) return [];
+
+    return [{
+      element: mathElement,
+      blockId: ann.blockId,
+      tex: mathElement.dataset.mathTex ?? ann.originalText,
+      displayMode: mathElement.dataset.mathDisplay === 'true',
+    }];
+  }, [findMathElementForAnnotation]);
 
   // --- Imperative methods ---
 
@@ -304,6 +616,14 @@ export function useAnnotationHighlighter({
       } catch {}
       const existingManual = containerRef.current?.querySelector(`[data-bind-id="${ann.id}"]`);
       if (existingManual) return;
+
+      const mathTargets = findMathElementsForAnnotation(ann);
+      if (mathTargets.length > 0) {
+        applyMathTargets(mathTargets, ann.id, ann.type);
+        if (!ann.startMeta && !ann.endMeta && !ann.mathTargets?.length) {
+          return;
+        }
+      }
 
       if (ann.startMeta && ann.endMeta) {
         try {
@@ -400,13 +720,19 @@ export function useAnnotationHighlighter({
         console.warn(`Failed to apply highlight for annotation ${ann.id}:`, e);
       }
     });
-  }, [findTextInDOM]);
+  }, [findMathElementsForAnnotation, findTextInDOM]);
 
   const removeHighlight = useCallback((id: string) => {
     highlighterRef.current?.remove(id);
 
+    const mathHighlights = containerRef.current?.querySelectorAll(
+      `[data-bind-id="${id}"][data-math-annotation="true"]`
+    );
+    mathHighlights?.forEach(clearMathAnnotationClass);
+
     const manualHighlights = containerRef.current?.querySelectorAll(`[data-bind-id="${id}"]`);
     manualHighlights?.forEach(el => {
+      if ((el as HTMLElement).dataset.mathAnnotation === 'true') return;
       const parent = el.parentNode;
       while (el.firstChild) {
         parent?.insertBefore(el.firstChild, el);
@@ -416,8 +742,12 @@ export function useAnnotationHighlighter({
   }, []);
 
   const clearAllHighlights = useCallback(() => {
+    const mathHighlights = containerRef.current?.querySelectorAll('[data-math-annotation="true"]');
+    mathHighlights?.forEach(clearMathAnnotationClass);
+
     const manualHighlights = containerRef.current?.querySelectorAll('[data-bind-id]');
     manualHighlights?.forEach(el => {
+      if ((el as HTMLElement).dataset.mathAnnotation === 'true') return;
       const parent = el.parentNode;
       while (el.firstChild) {
         parent?.insertBefore(el.firstChild, el);
@@ -427,6 +757,7 @@ export function useAnnotationHighlighter({
 
     const webHighlights = containerRef.current?.querySelectorAll('.annotation-highlight');
     webHighlights?.forEach(el => {
+      if ((el as HTMLElement).dataset.mathAnnotation === 'true') return;
       const parent = el.parentNode;
       while (el.firstChild) {
         parent?.insertBefore(el.firstChild, el);
@@ -443,7 +774,7 @@ export function useAnnotationHighlighter({
 
     const highlighter = new Highlighter({
       $root: containerRef.current,
-      exceptSelectors: ['.annotation-toolbar', 'button'],
+      exceptSelectors: ['.annotation-toolbar', 'button', '.math-annotatable', '.katex'],
       wrapTag: 'mark',
       style: { className: 'annotation-highlight' },
     });
@@ -459,8 +790,9 @@ export function useAnnotationHighlighter({
           // Clean up previous pending
           if (pendingSourceRef.current) {
             highlighter.remove(pendingSourceRef.current.id);
-            pendingSourceRef.current = null;
           }
+          clearPendingSelection();
+          pendingMathTargetsRef.current = mathTargetsFromSelection(window.getSelection(), containerRef.current);
           setCommentPopover(null);
           setQuickLabelPicker(null);
 
@@ -501,6 +833,91 @@ export function useAnnotationHighlighter({
 
     highlighter.run();
 
+    const handleMathMouseDown = (event: MouseEvent) => {
+      mouseDownMathRef.current = closestMathElement(event.target as Node, containerRef.current);
+      if (mouseDownMathRef.current) {
+        event.stopPropagation();
+      }
+    };
+
+    const handleMathMouseUp = (event: MouseEvent) => {
+      if (!containerRef.current) return;
+
+      const selection = window.getSelection();
+      const mathElement =
+        closestMathElement(event.target as Node, containerRef.current) ||
+        mouseDownMathRef.current ||
+        mathElementFromSelection(selection, containerRef.current);
+      mouseDownMathRef.current = null;
+
+      if (!mathElement) return;
+
+      const existingId = mathElement.dataset.bindId;
+      const selectedText = selection?.toString().trim() ?? '';
+      if (!selectedText && existingId && modeRef.current !== 'redline') {
+        event.preventDefault();
+        event.stopPropagation();
+        onSelectAnnotationRef.current?.(existingId);
+        return;
+      }
+      if (selectionHasNonMathContent(selection, containerRef.current)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+
+      const source = mathSourceFromElement(mathElement);
+      if (!source) return;
+
+      if (pendingSourceRef.current && !isMathAnnotationSource(pendingSourceRef.current)) {
+        highlighter.remove(pendingSourceRef.current.id);
+      }
+      clearPendingSelection();
+      setToolbarState(null);
+      setCommentPopover(null);
+      setQuickLabelPicker(null);
+
+      if (modeRef.current === 'redline') {
+        createAnnotationFromMathSource(source, AnnotationType.DELETION);
+        selection?.removeAllRanges();
+        return;
+      }
+
+      if (modeRef.current === 'comment') {
+        pendingSourceRef.current = source;
+        showPendingMathPreview(source);
+        setCommentPopover({
+          anchorEl: source.element,
+          contextText: source.text.slice(0, 80),
+          selectedText: source.text,
+          source,
+        });
+        return;
+      }
+
+      if (modeRef.current === 'quickLabel') {
+        pendingSourceRef.current = source;
+        showPendingMathPreview(source);
+        setQuickLabelPicker({
+          anchorEl: source.element,
+          cursorHint: lastMousePosRef.current,
+          source,
+        });
+        return;
+      }
+
+      pendingSourceRef.current = source;
+      showPendingMathPreview(source);
+      setToolbarState({
+        element: source.element,
+        source,
+        selectionText: source.text,
+      });
+    };
+
+    containerRef.current.addEventListener('mousedown', handleMathMouseDown, true);
+    containerRef.current.addEventListener('mouseup', handleMathMouseUp, true);
+
     // Mobile bridge
     const isTouchPrimary = window.matchMedia('(pointer: coarse)').matches;
     let selectionTimer: ReturnType<typeof setTimeout>;
@@ -525,9 +942,11 @@ export function useAnnotationHighlighter({
         clearTimeout(selectionTimer);
         document.removeEventListener('selectionchange', handleSelectionChange);
       }
+      containerRef.current?.removeEventListener('mousedown', handleMathMouseDown, true);
+      containerRef.current?.removeEventListener('mouseup', handleMathMouseUp, true);
       highlighter.dispose();
     };
-  }, [enabled]);
+  }, [clearPendingSelection, enabled]);
 
   // Apply CSS classes to existing annotations
   useEffect(() => {
@@ -597,30 +1016,49 @@ export function useAnnotationHighlighter({
 
   const handleAnnotate = (type: AnnotationType) => {
     const highlighter = highlighterRef.current;
-    if (!toolbarState || !highlighter) return;
+    if (!toolbarState) return;
+    if (isMathAnnotationSource(toolbarState.source)) {
+      createAnnotationFromMathSource(toolbarState.source, type);
+      clearPendingSelection();
+      setToolbarState(null);
+      window.getSelection()?.removeAllRanges();
+      return;
+    }
+    if (!highlighter) return;
     createAnnotationFromSource(highlighter, toolbarState.source, type);
-    pendingSourceRef.current = null;
+    clearPendingSelection();
     setToolbarState(null);
     window.getSelection()?.removeAllRanges();
   };
 
   const handleQuickLabel = (label: QuickLabel) => {
     const highlighter = highlighterRef.current;
-    if (!toolbarState || !highlighter) return;
+    if (!toolbarState) return;
+    if (isMathAnnotationSource(toolbarState.source)) {
+      createAnnotationFromMathSource(
+        toolbarState.source, AnnotationType.COMMENT,
+        `${label.emoji} ${label.text}`, undefined, true, label.tip
+      );
+      clearPendingSelection();
+      setToolbarState(null);
+      window.getSelection()?.removeAllRanges();
+      return;
+    }
+    if (!highlighter) return;
     createAnnotationFromSource(
       highlighter, toolbarState.source, AnnotationType.COMMENT,
       `${label.emoji} ${label.text}`, undefined, true, label.tip
     );
-    pendingSourceRef.current = null;
+    clearPendingSelection();
     setToolbarState(null);
     window.getSelection()?.removeAllRanges();
   };
 
   const handleToolbarClose = () => {
-    if (toolbarState && highlighterRef.current) {
+    if (toolbarState && highlighterRef.current && !isMathAnnotationSource(toolbarState.source)) {
       highlighterRef.current.remove(toolbarState.source.id);
     }
-    pendingSourceRef.current = null;
+    clearPendingSelection();
     setToolbarState(null);
     window.getSelection()?.removeAllRanges();
   };
@@ -639,12 +1077,24 @@ export function useAnnotationHighlighter({
 
   const handleCommentSubmit = (text: string, images?: ImageAttachment[]) => {
     if (!commentPopover) return;
+    if (isMathAnnotationSource(commentPopover.source)) {
+      createAnnotationFromMathSource(
+        commentPopover.source,
+        AnnotationType.COMMENT,
+        text,
+        images,
+      );
+      clearPendingSelection();
+      window.getSelection()?.removeAllRanges();
+      setCommentPopover(null);
+      return;
+    }
     if (commentPopover.source && highlighterRef.current) {
       createAnnotationFromSource(
         highlighterRef.current, commentPopover.source,
         AnnotationType.COMMENT, text, images
       );
-      pendingSourceRef.current = null;
+      clearPendingSelection();
       window.getSelection()?.removeAllRanges();
     }
     setCommentPopover(null);
@@ -652,34 +1102,53 @@ export function useAnnotationHighlighter({
 
   const handleCommentClose = useCallback(() => {
     setCommentPopover(prev => {
-      if (prev?.source && highlighterRef.current) {
+      if (prev?.source && highlighterRef.current && !isMathAnnotationSource(prev.source)) {
         highlighterRef.current.remove(prev.source.id);
-        pendingSourceRef.current = null;
       }
       return null;
     });
+    clearPendingSelection();
     window.getSelection()?.removeAllRanges();
-  }, []);
+  }, [clearPendingSelection]);
 
   const handleFloatingQuickLabel = useCallback((label: QuickLabel) => {
-    if (!quickLabelPicker?.source || !highlighterRef.current) return;
+    if (!quickLabelPicker?.source) return;
+    if (isMathAnnotationSource(quickLabelPicker.source)) {
+      createAnnotationFromMathSource(
+        quickLabelPicker.source,
+        AnnotationType.COMMENT,
+        `${label.emoji} ${label.text}`,
+        undefined,
+        true,
+        label.tip,
+      );
+      clearPendingSelection();
+      setQuickLabelPicker(null);
+      window.getSelection()?.removeAllRanges();
+      return;
+    }
+    if (!highlighterRef.current) return;
     createAnnotationFromSource(
       highlighterRef.current, quickLabelPicker.source, AnnotationType.COMMENT,
       `${label.emoji} ${label.text}`, undefined, true, label.tip
     );
-    pendingSourceRef.current = null;
+    clearPendingSelection();
     setQuickLabelPicker(null);
     window.getSelection()?.removeAllRanges();
-  }, [quickLabelPicker]);
+  }, [clearPendingSelection, quickLabelPicker]);
 
   const handleQuickLabelPickerDismiss = useCallback(() => {
-    if (quickLabelPicker?.source && highlighterRef.current) {
+    if (
+      quickLabelPicker?.source &&
+      highlighterRef.current &&
+      !isMathAnnotationSource(quickLabelPicker.source)
+    ) {
       highlighterRef.current.remove(quickLabelPicker.source.id);
-      pendingSourceRef.current = null;
     }
+    clearPendingSelection();
     setQuickLabelPicker(null);
     window.getSelection()?.removeAllRanges();
-  }, [quickLabelPicker]);
+  }, [clearPendingSelection, quickLabelPicker]);
 
   return {
     highlighterRef,

@@ -77,7 +77,7 @@ export const BUILTIN_DEFAULT_PROFILE: ResolvedReviewProfile = {
  * isn't the reserved built-in default. The default (or any instruction-less
  * profile) falls back to the provider prompt, keeping it byte-for-byte today's.
  */
-function profileHasCustomSection(profile: ResolvedReviewProfile | undefined): boolean {
+export function profileHasCustomSection(profile: ResolvedReviewProfile | undefined): boolean {
   return (
     !!profile &&
     profile.id !== BUILTIN_DEFAULT_ID &&

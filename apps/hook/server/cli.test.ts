@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
   formatInteractiveNoArgClarification,
+  formatSubcommandHelp,
   formatTopLevelHelp,
   formatVersion,
+  hasHelpFlag,
   isInteractiveNoArgInvocation,
+  isSubcommandHelpInvocation,
   isTopLevelHelpInvocation,
   isVersionInvocation,
 } from "./cli";
@@ -11,6 +14,7 @@ import {
 describe("CLI top-level help", () => {
   test("recognizes top-level --help", () => {
     expect(isTopLevelHelpInvocation(["--help"])).toBe(true);
+    expect(isTopLevelHelpInvocation(["-h"])).toBe(true);
     expect(isTopLevelHelpInvocation([])).toBe(false);
     expect(isTopLevelHelpInvocation(["review", "--help"])).toBe(false);
   });
@@ -26,7 +30,77 @@ describe("CLI top-level help", () => {
     expect(output).toContain("[--markdown] [--no-jina]");
     expect(output).toContain("plannotator annotate-last [--stdin]");
     expect(output).toContain("plannotator setup-goal <interview|facts>");
+    expect(output).toContain("Run 'plannotator <command> --help' for command-specific usage.");
     expect(output).toContain("running 'plannotator' without arguments is for hook integration");
+  });
+});
+
+describe("CLI subcommand help", () => {
+  test("hasHelpFlag detects --help / -h anywhere", () => {
+    expect(hasHelpFlag(["--help"])).toBe(true);
+    expect(hasHelpFlag(["-h"])).toBe(true);
+    expect(hasHelpFlag(["file.md", "--help"])).toBe(true);
+    expect(hasHelpFlag(["--git"])).toBe(false);
+    expect(hasHelpFlag([])).toBe(false);
+  });
+
+  test("recognizes `review --help` as a subcommand help invocation", () => {
+    expect(isSubcommandHelpInvocation(["review", "--help"])).toBe("review");
+    expect(isSubcommandHelpInvocation(["review", "-h"])).toBe("review");
+    // help flag may appear after other args (agents probe in various ways)
+    expect(isSubcommandHelpInvocation(["annotate", "file.md", "--help"])).toBe(
+      "annotate",
+    );
+  });
+
+  test("does not treat a real review invocation as help", () => {
+    expect(isSubcommandHelpInvocation(["review"])).toBeNull();
+    expect(isSubcommandHelpInvocation(["review", "--git"])).toBeNull();
+    expect(
+      isSubcommandHelpInvocation([
+        "review",
+        "https://github.com/owner/repo/pull/1",
+      ]),
+    ).toBeNull();
+  });
+
+  test("resolves the `last` alias to annotate-last help", () => {
+    expect(isSubcommandHelpInvocation(["last", "--help"])).toBe("annotate-last");
+    expect(isSubcommandHelpInvocation(["annotate-last", "--help"])).toBe(
+      "annotate-last",
+    );
+  });
+
+  test("covers every command advertised in top-level help", () => {
+    // Each command listed in formatTopLevelHelp() must respond to --help so the
+    // advertised "run 'plannotator <command> --help'" contract holds.
+    for (const sub of [
+      "annotate",
+      "setup-goal",
+      "archive",
+      "sessions",
+      "improve-context",
+    ]) {
+      expect(isSubcommandHelpInvocation([sub, "--help"])).toBe(sub);
+    }
+  });
+
+  test("ignores help flags for unknown / internal subcommands", () => {
+    expect(isSubcommandHelpInvocation(["opencode-review", "--help"])).toBeNull();
+    expect(isSubcommandHelpInvocation(["install-runtime", "--help"])).toBeNull();
+    expect(isSubcommandHelpInvocation(["--help"])).toBeNull();
+    expect(isSubcommandHelpInvocation([])).toBeNull();
+  });
+
+  test("renders subcommand-specific usage", () => {
+    expect(formatSubcommandHelp("review")).toContain(
+      "plannotator review [--git]",
+    );
+    expect(formatSubcommandHelp("review")).toContain("PR_URL");
+    expect(formatSubcommandHelp("annotate")).toContain("--no-jina");
+    expect(formatSubcommandHelp("sessions")).toContain("--open [N]");
+    // unknown key falls back to top-level help
+    expect(formatSubcommandHelp("nope")).toBe(formatTopLevelHelp());
   });
 });
 

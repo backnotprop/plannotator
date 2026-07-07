@@ -1,6 +1,6 @@
 import React from 'react';
 import { getProviderMeta } from '../ProviderIcons';
-import { AI_REASONING_EFFORTS, type AIProviderOption } from '../../utils/aiProvider';
+import { type AIProviderOption } from '../../utils/aiProvider';
 
 interface AIProviderBarProps {
   providers: AIProviderOption[];
@@ -34,9 +34,12 @@ export const AIProviderBar: React.FC<AIProviderBarProps> = ({
   const models = currentProvider?.models ?? [];
   const defaultModel = models.find(m => m.default) ?? models[0];
   const effectiveModel = selectedModel ?? defaultModel?.id ?? '';
+  const currentModel = models.find(m => m.id === effectiveModel) ?? defaultModel;
+  const reasoningEfforts = currentModel?.reasoningEfforts ?? [];
   const meta = getProviderMeta(currentProvider?.name ?? 'AI');
   const Icon = meta.icon;
-  const showReasoningEffort = currentProvider?.name === 'codex-sdk' && !!onReasoningEffortChange;
+  // Show only when the selected model actually reports reasoning efforts.
+  const showReasoningEffort = !!onReasoningEffortChange && reasoningEfforts.length > 0;
 
   return (
     <div className="border-t border-border/50 px-2 py-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -80,7 +83,7 @@ export const AIProviderBar: React.FC<AIProviderBarProps> = ({
           aria-label="Reasoning effort"
         >
           <option value="">Auto</option>
-          {AI_REASONING_EFFORTS.map(effort => (
+          {reasoningEfforts.map(effort => (
             <option key={effort.id} value={effort.id}>
               {effort.label}
             </option>

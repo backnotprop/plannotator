@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import type { Origin } from '@plannotator/shared/agents';
 import type { DiffLineBgIntensity } from '@plannotator/shared/config';
-import { configStore, useConfigValue } from '../config';
+import { configStore, useConfigValue, setReviewPanelView, setReviewDefaultDiffType } from '../config';
 import { loadDiffFont } from '../utils/diffFonts';
 import { TaterSpritePullup } from './TaterSpritePullup';
 import { getIdentity, regenerateIdentity, setCustomIdentity } from '../utils/identity';
@@ -87,6 +87,10 @@ interface SettingsProps {
   aiProviders?: Array<{ id: string; name: string; capabilities: Record<string, boolean>; models?: Array<{ id: string; label: string; default?: boolean }> }>;
   /** Git user name from `git config user.name`, for quick identity set */
   gitUser?: string;
+  /** Current session is a local git review where since-base ISN'T offered
+   *  (base ref unresolvable) — the Git tab shows a note that the Git-status
+   *  preference can't take effect in THIS repo. */
+  sinceBaseUnavailable?: boolean;
 }
 
 // --- Review-mode Display tab (diff display options) ---
@@ -129,10 +133,13 @@ export const LINE_BG_INTENSITY_OPTIONS: { value: DiffLineBgIntensity; label: str
   { value: 'strong', label: 'Strong' },
 ];
 const DEFAULT_DIFF_TYPE_OPTIONS = [
-  { value: 'uncommitted' as const, label: 'All Changes', description: "Everything you've changed since your last commit" },
+  // "All Changes" belongs to since-base (the flagship composite); uncommitted
+  // reverts to its plain name so the two stay distinguishable side by side.
+  { value: 'since-base' as const, label: 'All Changes (Recommended)', description: "Everything since your branch split from main — committed, uncommitted, and untracked" },
+  { value: 'uncommitted' as const, label: 'Uncommitted', description: "Everything you've changed since your last commit" },
   { value: 'unstaged' as const, label: 'Unstaged', description: "Only changes you haven't staged yet" },
   { value: 'staged' as const, label: 'Staged', description: "Only changes you've staged for commit" },
-  { value: 'merge-base' as const, label: 'Committed', description: "Everything you've committed on this branch" },
+  { value: 'merge-base' as const, label: 'Committed changes (PR view)', description: "Everything you've committed on this branch" },
   { value: 'all' as const, label: 'All Files (HEAD)', description: "Every tracked file at HEAD, shown as additions" },
 ];
 
@@ -190,10 +197,39 @@ function ToggleSwitch({ checked, onChange, label, description }: {
   );
 }
 
-const GitTab: React.FC = () => {
+const GitTab: React.FC<{ sinceBaseUnavailable?: boolean }> = ({ sinceBaseUnavailable }) => {
   const defaultDiffType = useConfigValue('defaultDiffType');
+  const reviewPanelView = useConfigValue('reviewPanelView');
   return (
-    <div className="space-y-2">
+    <div className="space-y-5">
+      <div className="space-y-2">
+        <div>
+          <div className="text-sm font-medium">Default review view</div>
+          <div className="text-xs text-muted-foreground">Which panel a code review opens in</div>
+          {/* This is a GLOBAL preference — never hide the options because the
+              CURRENT repo can't serve them; just say so. Without this note,
+              picking Git status on a repo whose base ref doesn't resolve
+              silently falls back to Tree and the setting looks broken. */}
+          {sinceBaseUnavailable && (
+            <div className="text-xs text-warning mt-1">
+              Git status view isn't available in this repository (its base branch
+              couldn't be resolved) — reviews here open in Tree. The preference
+              still applies in repositories where it works.
+            </div>
+          )}
+        </div>
+        {/* No Commits option here: the Commits view is session-only (entered
+            via the panel toggle) and is never the opening view. */}
+        <SegmentedControl
+          options={[
+            { value: 'sections' as const, label: 'Git status' },
+            { value: 'tree' as const, label: 'Tree' },
+          ]}
+          value={reviewPanelView}
+          onChange={setReviewPanelView}
+        />
+      </div>
+      <div className="space-y-2">
       <div>
         <div className="text-sm font-medium">Default Diff View</div>
         <div className="text-xs text-muted-foreground">Which changes to show when you open a code review</div>
@@ -203,7 +239,9 @@ const GitTab: React.FC = () => {
           <button
             key={opt.value}
             type="button"
-            onClick={() => configStore.set('defaultDiffType', opt.value)}
+            // Coupling (sections ⟺ since-base) lives in the shared setter —
+            // never write the pair by hand (see config/reviewView).
+            onClick={() => setReviewDefaultDiffType(opt.value)}
             className={`w-full flex items-start gap-3 p-3 rounded-lg border transition-colors text-left ${
               defaultDiffType === opt.value
                 ? 'border-primary bg-primary/5'
@@ -223,6 +261,7 @@ const GitTab: React.FC = () => {
             </div>
           </button>
         ))}
+      </div>
       </div>
     </div>
   );
@@ -610,7 +649,7 @@ const CommentsTab: React.FC = () => {
   );
 };
 
-export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', onUIPreferencesChange, externalOpen, onExternalClose, aiProviders = [], gitUser }) => {
+export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', onUIPreferencesChange, externalOpen, onExternalClose, aiProviders = [], gitUser, sinceBaseUnavailable }) => {
   const [showDialog, setShowDialog] = useState(false);
   const [themePreview, setThemePreview] = useState(false);
 
@@ -1139,7 +1178,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
 
                 {/* === GIT TAB === */}
                 {activeTab === 'git' && mode === 'review' && (
-                  <GitTab />
+                  <GitTab sinceBaseUnavailable={sinceBaseUnavailable} />
                 )}
 
                 {/* === DISPLAY TAB === */}

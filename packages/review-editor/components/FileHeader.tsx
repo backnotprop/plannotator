@@ -146,7 +146,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
       <div className="min-w-0 flex flex-1 items-center" onClick={onCollapseToggle} style={onCollapseToggle ? { cursor: 'pointer' } : undefined}>
         {collapseToggle}
         <span
-          className="min-w-0 flex items-center text-xs font-semibold leading-none whitespace-nowrap"
+          className="min-w-0 flex items-center text-xs font-semibold leading-normal whitespace-nowrap"
           title={status === 'renamed' && oldPath ? `${oldPath} → ${filePath}` : filePath}
         >
           {/* Rename: dimmed old path → new path (diffshub treatment). Dropped

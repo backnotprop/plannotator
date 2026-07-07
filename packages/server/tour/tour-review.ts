@@ -243,13 +243,23 @@ is a person; what would THEY do to gain confidence?
 Reference which stops each question relates to via stop_indices. Every question
 should reference at least one stop.
 
+## Speed
+You are handed the changeset directly — reading it once, carefully, is most
+of the job. The diff (inlined, or one diff command away) is your primary
+and usually only source. A few TARGETED lookups are fine when a stop's
+story needs one; do NOT explore the repository, read unchanged files "for
+context", or run broad searches. The reviewer is waiting for the tour:
+fast and well-told beats exhaustive and late.
+
 ## Pipeline
 
-1. Read the full diff (git diff, jj diff, or inlined patch).
-2. Read CLAUDE.md and README.md for project context.
-3. Read commit messages (git log --oneline) and PR title/body if available.
+1. Read the full diff (inlined, or ONE diff command: git diff / jj diff).
+2. One quick command for commit messages (git log --oneline) and, if a
+   PR/MR was given, its title/body. Skip whatever isn't there.
+3. OPTIONAL, not a required step: skim CLAUDE.md or README.md only if the
+   project is unfamiliar AND a stop's story genuinely depends on it.
 4. Identify logical groupings of change (cross-file when appropriate). These
-   become stops.
+   become stops. This is thinking, not tool calls.
 5. Determine reading flow order: entry point first, then outward. Definitions
    before consumers, cause before effect.
 6. Write the greeting, intent, before/after, takeaways, stops, and checklist

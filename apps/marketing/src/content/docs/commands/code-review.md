@@ -72,15 +72,18 @@ Platform posting is intentionally limited to **Layer** because GitHub and GitLab
 
 ## Switching diff types
 
-By default the review opens showing uncommitted changes, but you can switch what you're comparing using the diff type dropdown in the toolbar. The available options are:
+By default the review opens showing **all changes since your base branch** — everything a pull request would show if you committed and pushed right now: committed work, uncommitted edits, and untracked files, compared against the merge base with `main` (or your default branch). You can switch what you're comparing using the diff type dropdown in the toolbar. The available options are:
 
+- **All changes** (since main) - committed + uncommitted + untracked, vs the merge base with your base branch. The default, and the diff behind the Git status panel view.
 - **Uncommitted changes** - everything that differs from HEAD, including untracked files
 - **Staged changes** - only what's in the staging area (what `git commit` would include)
 - **Unstaged changes** - working tree changes that haven't been staged yet, plus untracked files
 - **Last commit** - the diff introduced by the most recent commit
-- **vs main** (or your default branch) - all committed changes on your branch compared to the base branch. This gives you the same view you'd see on a pull request, without needing to push or create one. Only appears when you're on a branch other than the default.
+- **vs main** (or your default branch) - all committed changes on your branch compared to the base branch. Only appears when you're on a branch other than the default.
 
-If you're working on a feature branch and want to see everything you've done before opening a PR, switch to the "vs main" option. It's a good way to do a self-review of your full branch diff.
+The first time you open a review, a setup dialog lets you choose your default view and diff type; you can change both later in **Settings → Git** or reopen the dialog from the review header menu. On repos where the base branch can't be resolved, the review falls back to uncommitted changes.
+
+If the base branch has moved on GitHub since your last fetch, a "Baseline is behind" banner offers a one-click fetch so you're reviewing against the real base.
 
 You can also pick a specific commit as the diff base from the base branch picker. This lets you compare against any of the last 20 commits on your branch rather than just the branch tip.
 
@@ -98,10 +101,18 @@ In a jj workspace, the diff type picker shows jj-native options instead of git m
 
 The review UI shows your changes in a familiar diff format:
 
-- **File tree sidebar** for navigating between changed files
+- **Left panel views** — a `Git status | Tree | Commits` toggle in the header (see below)
 - **Viewed tracking** to mark files as reviewed and track your progress
 - **Unified diff** showing additions and deletions in context
 - **Annotation tools** with the same annotation types as plan review (delete, comment, quick label, "looks good")
+
+### Panel views
+
+The left panel has three views. The header toggle is session-scoped — glancing at another view never changes your saved default (that's a Settings / setup-dialog decision).
+
+- **Git status** (default) — your changes grouped the way `git status` groups them: **Committed / Changes / Untracked**. Each row shows viewed state, a stage/unstage button, the change-type letter, and +/- counts. Only available with the "All changes" diff.
+- **Tree** — the classic file tree over whichever diff type you've selected.
+- **Commits** — a linear history rail of your branch, newest first, with an "In origin/main" divider where your work meets the base. Clicking a commit opens that commit's own diff (vs its parent), headed by the full commit message. Local git sessions only; a commit is never saved as your opening view.
 
 ## Annotating code
 
@@ -128,9 +139,15 @@ When multiple providers are available, set your default in **Settings → AI**. 
 
 If only one provider is installed, it's used automatically with no configuration needed.
 
+## Guided Review
+
+A Guided Review turns the changeset into an ordered, chaptered walkthrough: an agent organizes the diff into sections — the heart of the change first, consequences next, glue last — each pairing a prose overview and per-file summaries with the live, annotatable diffs it covers. Annotations made inside a guide are the same annotations as everywhere else and export in the same feedback.
+
+Open it with the **Guide** button in the review header (or `Mod+Shift+G`), pick an agent and model, and generate. Sections track a per-section "reviewed" state so you can work through a large change in order. Guides run on Claude or Codex natively, and on Cursor, OpenCode, Pi, or GitHub Copilot CLI when those binaries are installed.
+
 ## How review agents prompt the CLI
 
-The review agents (Claude, Codex, Code Tour) shell out to external CLIs. Plannotator controls the user message and output schema; the CLI's own harness owns the system prompt. See the [Prompts reference](/docs/reference/prompts/) for the full breakdown of what each provider sends, how the pieces join, and which knobs you can tune per job.
+The review agents (Claude, Codex, Code Tour, Guided Review) shell out to external CLIs — Claude and Codex natively, plus Cursor, OpenCode, Pi, and GitHub Copilot CLI as additional engines for review and guide jobs. Plannotator controls the user message and output schema; the CLI's own harness owns the system prompt. See the [Prompts reference](/docs/reference/prompts/) for the full breakdown of what each provider sends, how the pieces join, and which knobs you can tune per job.
 
 ## Submitting feedback
 
@@ -170,8 +187,12 @@ Runtime keys use Plannotator's runtime identifiers. For code review, the current
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/api/diff` | GET | Returns diff data including `rawPatch`, `gitRef`, `origin`, `diffType`, `base`, `hideWhitespace`, `gitContext` |
-| `/api/diff/switch` | POST | Switch diff type, base branch/commit, or whitespace mode |
+| `/api/diff` | GET | Returns diff data including `rawPatch`, `gitRef`, `origin`, `diffType`, `base`, `hideWhitespace`, `gitContext`, plus the git-status `sections` and commit-metadata sidecars |
+| `/api/diff/switch` | POST | Switch diff type (including `commit:<sha>`), base branch/commit, or whitespace mode |
+| `/api/diff/fresh` | GET | Cheap staleness probe backing the "Diff out of date" notice |
+| `/api/commits` | GET | One page of the branch's linear history for the Commits panel |
+| `/api/fetch-base` | POST | Fetch the base branch's remote tracking ref ("Baseline is behind" banner) |
+| `/api/semantic-diff` | GET | Semantic diff for the active patch, when available |
 | `/api/file-content` | GET | Full file content for expandable diff context |
 | `/api/git-add` | POST | Stage or unstage a file |
 | `/api/feedback` | POST | Submit review feedback |
@@ -184,6 +205,11 @@ Runtime keys use Plannotator's runtime identifiers. For code review, the current
 | `/api/ai/abort` | POST | Abort current AI query |
 | `/api/ai/permission` | POST | Respond to tool approval request |
 | `/api/agents/capabilities` | GET | Check available agent providers |
-| `/api/agents/jobs` | GET/POST/DELETE | Manage agent jobs (Code Tour, etc.) |
+| `/api/agents/jobs` | GET/POST/DELETE | Manage agent jobs (review, Code Tour, Guided Review) |
+| `/api/guide/:jobId` | GET | Fetch a completed Guided Review (sections, summaries, file refs) |
+| `/api/guide/:jobId/reviewed` | PUT | Persist per-section reviewed state |
+| `/api/code-nav/resolve` | POST | Find symbol definitions/references for code navigation |
+| `/api/code-nav/file` | GET | Read a working-tree file for code-nav preview |
 | `/api/pr-list` | GET | List PRs for the current repo |
 | `/api/pr-switch` | POST | Switch to a different PR in-place |
+| `/api/pr-diff-scope` | POST | Switch between Layer and Full-stack diff scope |

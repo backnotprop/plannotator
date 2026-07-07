@@ -1,7 +1,7 @@
 import type React from 'react';
 import { useState, useEffect, useRef } from 'react';
 import { getProviderMeta } from '@plannotator/ui/components/ProviderIcons';
-import { AI_REASONING_EFFORTS, type AIProviderOption } from '@plannotator/ui/utils/aiProvider';
+import { type AIProviderOption } from '@plannotator/ui/utils/aiProvider';
 
 interface AIConfigBarProps {
   providers: AIProviderOption[];
@@ -68,7 +68,11 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
   const models = currentProvider.models ?? [];
   const defaultModel = models.find(m => m.default) ?? models[0];
   const effectiveModel = selectedModel ?? defaultModel?.id;
-  const currentModelLabel = models.find(m => m.id === effectiveModel)?.label ?? defaultModel?.label;
+  const currentModel = models.find(m => m.id === effectiveModel) ?? defaultModel;
+  const currentModelLabel = currentModel?.label;
+  const reasoningEfforts = currentModel?.reasoningEfforts ?? [];
+  const effortFallback = currentModel?.defaultReasoningEffort ?? reasoningEfforts[0]?.id ?? '';
+  const activeEffort = selectedReasoningEffort ?? effortFallback;
 
   const handleProviderSelect = (id: string) => {
     if (hasSession) setShowSessionNote(true);
@@ -204,8 +208,8 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
         </>
       ) : null}
 
-      {/* Reasoning effort — Codex only */}
-      {currentProvider.name === 'codex-sdk' && (
+      {/* Reasoning effort — shown when the selected model reports supported efforts */}
+      {reasoningEfforts.length > 0 && (
         <>
           <span className="text-border/60">·</span>
           <div className="relative">
@@ -215,14 +219,14 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
               className="flex items-center gap-1 px-1 py-0.5 -mx-1 rounded hover:bg-muted/50 transition-colors"
               title="Reasoning effort"
             >
-              <span>{AI_REASONING_EFFORTS.find(e => e.id === (selectedReasoningEffort ?? 'high'))?.label ?? 'High'}</span>
+              <span>{reasoningEfforts.find(e => e.id === activeEffort)?.label ?? 'Auto'}</span>
               {chevron}
             </button>
 
             {openMenu === 'effort' && (
               <div className="ai-config-menu">
-                {AI_REASONING_EFFORTS.map(e => {
-                  const isActive = e.id === (selectedReasoningEffort ?? 'high');
+                {reasoningEfforts.map(e => {
+                  const isActive = e.id === activeEffort;
                   return (
                     <button
                       key={e.id}

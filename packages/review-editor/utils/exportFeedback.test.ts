@@ -316,4 +316,41 @@ describe("exportReviewFeedback", () => {
     expect(result).toContain("## General");
     expect(result).toContain("review-wide note");
   });
+
+  it("labels the header with short sha + subject for a commit diff", () => {
+    const sha = "0123456789abcdef0123456789abcdef01234567";
+    const result = exportReviewFeedback([ann({ commitSha: sha })], undefined, {
+      mode: `commit:${sha}`,
+      commitSubject: "fix: broken widget",
+    });
+    expect(result).toContain("**Diff:** Commit `0123456` — fix: broken widget (diff vs its parent)");
+    // Anchor matches the header — no mismatch note.
+    expect(result).not.toContain("anchored");
+  });
+
+  it("labels commit-anchored annotations exported under a different diff", () => {
+    const sha = "0123456789abcdef0123456789abcdef01234567";
+    const result = exportReviewFeedback(
+      [ann({ commitSha: sha, commitSubject: "feat: add widget" })],
+      undefined,
+      { mode: "since-base", base: "origin/main" },
+    );
+    expect(result).toContain('_Made on commit `0123456` ("feat: add widget") — anchored to that commit\'s diff, not the diff above._');
+  });
+
+  it("labels working-tree annotations exported under a commit diff", () => {
+    const sha = "0123456789abcdef0123456789abcdef01234567";
+    const result = exportReviewFeedback([ann()], undefined, { mode: `commit:${sha}` });
+    expect(result).toContain("_Made on a working-tree diff, not commit `0123456` — anchored there._");
+  });
+
+  it("does not label annotations sent from the commit they were made on", () => {
+    const sha = "0123456789abcdef0123456789abcdef01234567";
+    const result = exportReviewFeedback(
+      [ann({ commitSha: sha })],
+      undefined,
+      { mode: `commit:${sha}` },
+    );
+    expect(result).not.toContain("anchored");
+  });
 });

@@ -3,6 +3,7 @@ import type { IDockviewPanelProps } from 'dockview-react';
 import { DiffViewer } from '../../components/DiffViewer';
 import { useReviewState } from '../ReviewStateContext';
 import { getReviewDiffPanelFilePath, type ReviewDiffPanelParams } from '../reviewPanelTypes';
+import { annotationMatchesPrScope } from '../../utils/annotationScope';
 
 /**
  * Thin adapter between dockview's panel API and the existing DiffViewer.
@@ -27,8 +28,7 @@ export const ReviewDiffPanel: React.FC<IDockviewPanelProps> = (props) => {
       const currentDiffScope = state.prDiffScope;
       return state.allAnnotations.filter((a) =>
         a.filePath === file.path &&
-        (!a.prUrl || !currentPrUrl || a.prUrl === currentPrUrl) &&
-        (!a.diffScope || !currentDiffScope || a.diffScope === currentDiffScope)
+        annotationMatchesPrScope(a, currentPrUrl, currentDiffScope)
       );
     },
     [state.allAnnotations, file, state.prMetadata, state.prDiffScope]
@@ -86,6 +86,7 @@ export const ReviewDiffPanel: React.FC<IDockviewPanelProps> = (props) => {
         fontSize={state.fontSize}
         annotations={fileAnnotations}
         selectedAnnotationId={state.selectedAnnotationId}
+        scrollTargetAnnotation={state.scrollTargetAnnotation}
         pendingSelection={state.pendingSelection}
         onLineSelection={state.onLineSelection}
         onAddAnnotation={state.onAddAnnotation}
@@ -98,7 +99,11 @@ export const ReviewDiffPanel: React.FC<IDockviewPanelProps> = (props) => {
         isStaged={state.stagedFiles.has(file.path)}
         isStaging={state.stagingFile === file.path}
         onStage={() => state.onStage(file.path)}
-        canStage={state.canStageFiles}
+        // Per-path gate (falls back to the mode-level flag): in since-base the
+        // single-file header lists committed files too — mode-level canStageFiles
+        // alone would offer a no-op Git Add on them that flips local state.
+        // Mirrors the `a` shortcut and the all-files header.
+        canStage={state.canStagePath ? state.canStagePath(file.path) : state.canStageFiles}
         stageError={state.stageError}
         searchQuery={state.isSearchPending ? '' : state.debouncedSearchQuery}
         searchMatches={searchMatchesForFile}

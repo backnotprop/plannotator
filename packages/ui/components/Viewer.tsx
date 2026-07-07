@@ -2,7 +2,7 @@ import React, { useRef, useState, useEffect, useMemo, forwardRef, useImperativeH
 import { createPortal } from 'react-dom';
 import hljs from 'highlight.js';
 import { Block, Annotation, AnnotationType, EditorMode, type InputMethod, type ImageAttachment, type ActionsLabelMode } from '../types';
-import { Frontmatter, computeListIndices } from '../utils/parser';
+import { Frontmatter, computeListIndices, groupBlocks } from '../utils/parser';
 import { buildHeadingSlugMap } from '../utils/slugify';
 import { BlockRenderer } from './BlockRenderer';
 import { CodeBlock } from './blocks/CodeBlock';
@@ -945,26 +945,3 @@ const ImageLightbox: React.FC<{ src: string; alt: string; onClose: () => void }>
 
 
 
-/** Groups consecutive list-item blocks so they can share a pinpoint hover wrapper. */
-type RenderGroup =
-  | { type: 'single'; block: Block }
-  | { type: 'list-group'; blocks: Block[]; key: string };
-
-function groupBlocks(blocks: Block[]): RenderGroup[] {
-  const groups: RenderGroup[] = [];
-  let i = 0;
-  while (i < blocks.length) {
-    if (blocks[i].type === 'list-item') {
-      const listBlocks: Block[] = [];
-      while (i < blocks.length && blocks[i].type === 'list-item') {
-        listBlocks.push(blocks[i]);
-        i++;
-      }
-      groups.push({ type: 'list-group', blocks: listBlocks, key: `list-${listBlocks[0].id}` });
-    } else {
-      groups.push({ type: 'single', block: blocks[i] });
-      i++;
-    }
-  }
-  return groups;
-}

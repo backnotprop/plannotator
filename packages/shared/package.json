@@ -10,6 +10,7 @@
     "./feedback-templates": "./feedback-templates.ts",
     "./jj-core": "./jj-core.ts",
     "./review-core": "./review-core.ts",
+    "./commit-history": "./commit-history.ts",
     "./review-workspace": "./review-workspace.ts",
     "./review-workspace-node": "./review-workspace-node.ts",
     "./review-args": "./review-args.ts",
@@ -17,6 +18,7 @@
     "./checklist": "./checklist.ts",
     "./types": "./types.ts",
     "./pr-types": "./pr-types.ts",
+    "./pr-context-live": "./pr-context-live.ts",
     "./pr-provider": "./pr-provider.ts",
     "./pr-stack": "./pr-stack.ts",
     "./project": "./project.ts",
@@ -46,6 +48,7 @@
     "./html-assets": "./html-assets.ts",
     "./html-assets-node": "./html-assets-node.ts",
     "./tour": "./tour.ts",
+    "./guide": "./guide.ts",
     "./annotate-args": "./annotate-args.ts",
     "./at-reference": "./at-reference.ts",
     "./code-nav": "./code-nav.ts",
@@ -57,7 +60,8 @@
     "./browser-paths": "./browser-paths.ts",
     "./workspace-status": "./workspace-status.ts",
     "./open-in-apps": "./open-in-apps.ts",
-    "./review-profiles": "./review-profiles.ts"
+    "./review-profiles": "./review-profiles.ts",
+    "./commit-avatars": "./commit-avatars.ts"
   },
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.64",

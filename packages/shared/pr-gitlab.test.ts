@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { fetchGlMR, parsePaginatedArray } from "./pr-gitlab";
+import { fetchGlMR, fetchGlMRContext, parsePaginatedArray } from "./pr-gitlab";
 import type { PRRuntime } from "./pr-types";
 
 describe("fetchGlMR", () => {
@@ -338,6 +338,24 @@ describe("fetchGlMR raw_diffs fallback", () => {
       diffs: { exitCode: 1, stderr: "diffs boom" },
     });
     await expect(fetchGlMR(runtime, REF)).rejects.toThrow(/Failed to fetch MR diff/);
+  });
+});
+
+describe("fetchGlMRContext", () => {
+  test("throws when the primary MR details request fails", async () => {
+    const runtime: PRRuntime = {
+      async runCommand(_command, args) {
+        const endpoint = args[1] ?? "";
+        if (endpoint === "projects/g%2Fp/merge_requests/1") {
+          return { stdout: "", stderr: "429 Too Many Requests", exitCode: 1 };
+        }
+        return { stdout: "[]", stderr: "", exitCode: 0 };
+      },
+    };
+
+    await expect(fetchGlMRContext(runtime, REF)).rejects.toThrow(
+      "Failed to fetch MR context: 429 Too Many Requests",
+    );
   });
 });
 

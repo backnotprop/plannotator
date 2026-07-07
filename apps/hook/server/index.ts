@@ -131,9 +131,11 @@ import { findCodexRolloutByThreadId, getLatestCodexPlan, getRecentCodexMessages 
 import { findCopilotPlanContent, findCopilotSessionForCwd, getRecentCopilotMessages } from "./copilot-session";
 import {
   formatInteractiveNoArgClarification,
+  formatSubcommandHelp,
   formatTopLevelHelp,
   formatVersion,
   isInteractiveNoArgInvocation,
+  isSubcommandHelpInvocation,
   isTopLevelHelpInvocation,
   isVersionInvocation,
 } from "./cli";
@@ -253,6 +255,16 @@ if (isVersionInvocation(args)) {
 
 if (isTopLevelHelpInvocation(args)) {
   console.log(formatTopLevelHelp());
+  process.exit(0);
+}
+
+// Per-subcommand help must be handled before the subcommand branches below —
+// otherwise `plannotator review --help` (commonly run by agents probing the
+// CLI) falls through to local review mode and launches the browser UI,
+// spawning a stray tab whose close injects a bogus "no feedback" signal.
+const helpSubcommand = isSubcommandHelpInvocation(args);
+if (helpSubcommand) {
+  console.log(formatSubcommandHelp(helpSubcommand));
   process.exit(0);
 }
 

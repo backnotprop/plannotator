@@ -177,6 +177,10 @@ export function writeServerReadyMetadata(readyFile: string, metadata: ServerRead
   appendFileSync(readyFile, `${JSON.stringify(metadata)}\n`, "utf8");
 }
 
+export function isCodexDesktopHost(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.__CFBundleIdentifier === "com.openai.codex";
+}
+
 /** Attempt to open the browser for the session URL. */
 export async function handleServerReady(
   url: string,
@@ -203,6 +207,8 @@ export async function handleServerReady(
     process.stderr.write(
       `\n  Plannotator session ready — open on your local machine (forward port ${port} if needed):\n  ${url}\n\n`,
     );
+  } else if (isCodexDesktopHost()) {
+    process.stderr.write(`\n  Plannotator session ready:\n  ${url}\n\n`);
   }
 
   const skipBrowserOpen = options.skipBrowserOpen ?? process.env.PLANNOTATOR_SKIP_BROWSER_OPEN === "1";

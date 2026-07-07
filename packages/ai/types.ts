@@ -48,8 +48,15 @@ export interface PlanContext {
  * Passed when AIContextMode is "code-review".
  */
 export interface CodeReviewContext {
-  /** The unified diff patch. */
+  /** The unified diff patch. Used as a fallback when the changeset can't be
+   *  reproduced locally with a single VCS command. */
   patch: string;
+  /** The VCS diff type (e.g. "uncommitted", "branch", "merge-base"). When set
+   *  to a git-reproducible type, the prompt tells the agent how to inspect the
+   *  changes with git instead of pasting the whole diff. */
+  diffType?: string;
+  /** The base branch/ref the diff is computed against (for branch/merge-base). */
+  base?: string;
   /** The specific file being discussed (if scoped). */
   filePath?: string;
   /** The line range being discussed (if scoped). */
@@ -195,6 +202,13 @@ export interface AISession {
   respondToPermission?(requestId: string, allow: boolean, message?: string): void;
 
   /**
+   * Release any long-lived resources held by this session (e.g. a spawned
+   * subprocess). Called by the SessionManager when a session is evicted or
+   * removed. Optional — providers without persistent resources omit it.
+   */
+  dispose?(): void;
+
+  /**
    * Callback invoked when the real session ID is resolved from the provider.
    * Set by the SessionManager to remap its internal tracking key.
    */
@@ -264,7 +278,15 @@ export interface AIProvider {
   readonly capabilities: AIProviderCapabilities;
 
   /** Available models for this provider. */
-  readonly models?: ReadonlyArray<{ id: string; label: string; default?: boolean }>;
+  readonly models?: ReadonlyArray<{
+    id: string;
+    label: string;
+    default?: boolean;
+    /** Reasoning-effort options this model supports (provider-reported). */
+    reasoningEfforts?: ReadonlyArray<{ id: string; label: string }>;
+    /** The model's default reasoning effort. */
+    defaultReasoningEffort?: string;
+  }>;
 
   /**
    * Create a fresh session (no parent history).

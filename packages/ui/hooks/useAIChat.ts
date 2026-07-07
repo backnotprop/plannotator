@@ -36,6 +36,12 @@ export interface AskAIParams {
   selectedCode?: string;
   scope?: AIQuestion['scope'];
   contextUpdate?: string;
+  /** What the user is currently viewing (changes mid-session, so it rides with
+   *  each question rather than the once-created session context). */
+  viewing?: { scope: 'all' | 'file'; filePath?: string };
+  /** Context block prepended to the message (e.g. the "changes under review"
+   *  description). Rides with each question so it reflects the live view. */
+  contextPreamble?: string;
 }
 
 interface UseAIChatOptions {
@@ -48,29 +54,47 @@ interface UseAIChatOptions {
 }
 
 export function buildDefaultPrompt(params: AskAIParams): string {
-  if (params.filePath && params.lineStart != null && params.lineEnd != null) {
-    const lineRef = params.lineStart === params.lineEnd
-      ? `line ${params.lineStart}`
-      : `lines ${params.lineStart}-${params.lineEnd}`;
-    const sideLabel = params.side === 'new' ? 'new (added)' : 'old (removed)';
-    const codeBlock = params.selectedCode
-      ? `\n\`\`\`\n${params.selectedCode}\n\`\`\`\n`
-      : '';
-    return `Re: ${params.filePath}, ${lineRef} (${sideLabel} side)${codeBlock}\n${params.prompt}`;
-  }
+  // The "changes under review" context (and any other preamble) leads the
+  // message, so the agent is oriented to the live view before the question and
+  // the existing file/line/viewing notes.
+  const pre = params.contextPreamble?.trim() ? `${params.contextPreamble.trim()}\n\n` : '';
 
-  if (params.filePath) {
-    return `Re: ${params.filePath} (entire file)\n\n${params.prompt}`;
-  }
+  const base = ((): string => {
+    if (params.filePath && params.lineStart != null && params.lineEnd != null) {
+      const lineRef = params.lineStart === params.lineEnd
+        ? `line ${params.lineStart}`
+        : `lines ${params.lineStart}-${params.lineEnd}`;
+      const sideLabel = params.side === 'new' ? 'new (added)' : 'old (removed)';
+      const codeBlock = params.selectedCode
+        ? `\n\`\`\`\n${params.selectedCode}\n\`\`\`\n`
+        : '';
+      return `Re: ${params.filePath}, ${lineRef} (${sideLabel} side)${codeBlock}\n${params.prompt}`;
+    }
 
-  if (params.scope?.kind === 'selection') {
-    const label = params.scope.label ? `Re: ${params.scope.label}` : 'Re: selected text';
-    const source = params.scope.sourcePath ? `\nSource: ${params.scope.sourcePath}` : '';
-    const selection = params.scope.text ? `\n\nSelected text:\n\`\`\`\n${params.scope.text}\n\`\`\`` : '';
-    return `${label}${source}${selection}\n\n${params.prompt}`;
-  }
+    if (params.filePath) {
+      return `Re: ${params.filePath} (entire file)\n\n${params.prompt}`;
+    }
 
-  return params.prompt;
+    if (params.scope?.kind === 'selection') {
+      const label = params.scope.label ? `Re: ${params.scope.label}` : 'Re: selected text';
+      const source = params.scope.sourcePath ? `\nSource: ${params.scope.sourcePath}` : '';
+      const selection = params.scope.text ? `\n\nSelected text:\n\`\`\`\n${params.scope.text}\n\`\`\`` : '';
+      return `${label}${source}${selection}\n\n${params.prompt}`;
+    }
+
+    // General question (no explicit file/line/selection): tell the agent what the
+    // user is currently looking at so it can scope its own investigation.
+    if (params.viewing) {
+      const note = params.viewing.scope === 'file' && params.viewing.filePath
+        ? `[The user is currently viewing ${params.viewing.filePath}]`
+        : '[The user is currently viewing all changed files]';
+      return `${note}\n${params.prompt}`;
+    }
+
+    return params.prompt;
+  })();
+
+  return pre + base;
 }
 
 function createThread(title = 'Chat'): AIChatThread {
@@ -106,6 +130,9 @@ export function useAIChat({
   const [error, setError] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
+  // In-flight server abort (from Stop or a superseding question). The next ask()
+  // waits on it so a new query can't race the still-active turn into busy.
+  const pendingAbortRef = useRef<Promise<unknown> | null>(null);
   const sessionEpochRef = useRef(0);
   const createRequestRef = useRef(0);
   const sessionIdRef = useRef<string | null>(null);
@@ -166,9 +193,34 @@ export function useAIChat({
     }
   }, [context, model, providerId, reasoningEffort, setSessionId]);
 
+  // Tell the server to stop the current session's in-flight turn, and resolve
+  // once it has. Used by the Stop button and when a new question supersedes a
+  // streaming one — aborting the browser fetch alone leaves the agent's turn
+  // running. The /api/ai/abort handler clears the session's active flag before
+  // it responds, so awaiting this guarantees a following query won't race it
+  // into a session_busy error. Best-effort (never rejects).
+  const postServerAbort = useCallback((): Promise<unknown> => {
+    if (!sessionIdRef.current) return Promise.resolve();
+    return fetch('/api/ai/abort', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: sessionIdRef.current }),
+    }).catch(() => {});
+  }, []);
+
   const ask = useCallback(async (params: AskAIParams) => {
     if (abortRef.current) {
       abortRef.current.abort();
+      // Supersede: stop the server-side turn (not just the browser fetch).
+      pendingAbortRef.current = postServerAbort();
+    }
+    // Wait for any in-flight server abort — from this supersede OR a prior Stop
+    // click — so the query below doesn't race the still-active turn into a
+    // session_busy error. Stopping still kills the turn; chatting right after
+    // just waits the one round-trip for the stop to land.
+    if (pendingAbortRef.current) {
+      await pendingAbortRef.current;
+      pendingAbortRef.current = null;
     }
 
     const controller = new AbortController();
@@ -337,7 +389,7 @@ export function useAIChat({
         abortRef.current = null;
       }
     }
-  }, [buildPrompt, createSession, updateMessages, updatePermissions]);
+  }, [buildPrompt, createSession, updateMessages, updatePermissions, postServerAbort]);
 
   const abort = useCallback(() => {
     if (abortRef.current) {
@@ -346,14 +398,13 @@ export function useAIChat({
       setIsStreaming(false);
     }
 
-    if (sessionIdRef.current) {
-      fetch('/api/ai/abort', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: sessionIdRef.current }),
-      }).catch(() => {});
-    }
-  }, []);
+    // Drop any still-undecided permission cards: abort cancels them server-side,
+    // so leaving them on screen would be a dead Allow/Deny the agent never hears.
+    updatePermissions(prev => prev.filter(p => p.decided));
+
+    // Record the abort so a quick follow-up question waits for it (see ask()).
+    pendingAbortRef.current = postServerAbort();
+  }, [updatePermissions, postServerAbort]);
 
   const respondToPermission = useCallback((requestId: string, allow: boolean) => {
     if (!sessionIdRef.current) return;

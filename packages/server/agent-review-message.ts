@@ -1,6 +1,7 @@
 import {
   JJ_TRUNK_REVSET,
   jjLineBaseRevset,
+  parseCommitDiffType,
   parseWorktreeDiffType,
   type DiffType,
 } from "./vcs";
@@ -136,7 +137,17 @@ export function buildAgentReviewUserMessage(
         "Do NOT diff against the local `main` branch; it may be stale. Always use origin/.",
       ].join("\n");
     }
-    return prMetadata.url;
+    // No confirmed local checkout yet. A worktree at the PR head is being
+    // prepared and pulls the PR files on demand — tell the agent to verify the
+    // files exist before relying on them, give it the same diff command, and
+    // fall back to the PR URL if the checkout isn't ready.
+    return [
+      prMetadata.url,
+      "",
+      "You are reviewing this PR. A local worktree checked out at the PR head is being prepared; it may still be warming up, so verify the PR files exist before relying on them.",
+      `Once they do, see the PR changes by diffing against the remote base branch: git diff origin/${prMetadata.baseBranch}...HEAD`,
+      "Do NOT diff against the local `main` branch; it may be stale. Always use origin/. If the files are not yet available, use the PR URL above for context.",
+    ].join("\n");
   }
 
   const instruction = getLocalDiffInstruction(diffType, options?.defaultBranch);
@@ -179,7 +190,27 @@ export function getLocalDiffInstruction(
 ): LocalDiffInstruction | null {
   const effectiveDiffType = normalizeLocalDiffType(diffType);
 
+  // commit:<sha> — a single historical commit, not the working tree.
+  const commitRef = parseCommitDiffType(effectiveDiffType);
+  if (commitRef) {
+    return {
+      target: `the changes introduced by commit ${commitRef.sha.slice(0, 7)}`,
+      // First-parent diff, NOT `git show`: the on-screen patch is
+      // `<sha>^ <sha>`, and for a merge commit `git show`'s combined-diff
+      // presentation renders a different (often empty) changeset — the agent
+      // must inspect exactly what the reviewer is looking at.
+      inspect: `This is a historical commit, not the working tree. Run \`git diff ${commitRef.sha}^ ${commitRef.sha}\` — the commit against its first parent — to inspect exactly the changeset under review (do not use \`git show\`; its merge-commit presentation differs). For a root commit with no parent, use \`git show ${commitRef.sha}\` instead.`,
+    };
+  }
+
   switch (effectiveDiffType) {
+    case "since-base": {
+      const base = defaultBranch || "main";
+      return {
+        target: `all changes since the merge-base with '${base}' — committed, uncommitted, and untracked; the full set a PR would show once it is all committed and pushed`,
+        inspect: `First find the common ancestor with \`git merge-base ${base} HEAD\`, then run \`git diff <merge-base>\` (no right-hand ref — it compares against the working tree) to inspect committed + uncommitted changes. That diff does NOT include untracked files, so also list them with \`git status --porcelain\` (or \`git ls-files --others --exclude-standard\`) and read each new file directly — they are part of this review.`,
+      };
+    }
     case "uncommitted":
       return {
         target: "the current code changes (staged, unstaged, and untracked files)",

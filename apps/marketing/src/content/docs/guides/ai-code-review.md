@@ -259,7 +259,7 @@ At the end, output an overall correctness verdict.
 codex exec \
   --output-schema ~/.plannotator/codex-review-schema.json \
   -o /tmp/plannotator-codex-<uuid>.json \
-  --sandbox workspace-write \
+  --full-auto \
   --ephemeral \
   -C <working-directory> \
   "<system-prompt>\n\n---\n\n<user-message>"

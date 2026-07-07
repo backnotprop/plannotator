@@ -159,6 +159,15 @@ describe("createVcsApi", () => {
     await expect(git.canStageFiles("staged", "/repo")).resolves.toBe(false);
     await expect(git.canStageFiles("branch", "/repo")).resolves.toBe(false);
     await expect(git.canStageFiles("merge-base", "/repo")).resolves.toBe(false);
+    // Historical commit diffs have nothing stageable — plain and worktree forms.
+    await expect(git.canStageFiles("commit:abc1234", "/repo")).resolves.toBe(false);
+    await expect(git.canStageFiles("worktree:/repo:commit:abc1234", "/repo")).resolves.toBe(false);
+  });
+
+  test("the git provider owns commit:<sha> diff types", () => {
+    const git = createGitProvider(gitRuntime);
+    expect(git.ownsDiffType("commit:abc1234")).toBe(true);
+    expect(git.ownsDiffType("worktree:/repo:commit:abc1234")).toBe(true);
   });
 
   test("requires providers to explicitly opt into staging", async () => {
