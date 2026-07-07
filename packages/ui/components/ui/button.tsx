@@ -1,4 +1,4 @@
-import { Slot, Slottable } from "@radix-ui/react-slot";
+import { Button as ButtonPrimitive } from "@base-ui/react/button";
 import { cva, type VariantProps } from "class-variance-authority";
 import type * as React from "react";
 
@@ -7,7 +7,7 @@ import { cn } from "../../lib/utils";
 /**
  * Button — the canonical action primitive (shared by the frontend shell and the
  * embedded plan/review apps). cva variants + sizes, optional `iconLeft`/`iconRight`
- * slots, and `asChild` for polymorphism.
+ * slots, and Base UI's `render` prop for polymorphism (e.g. `render={<a href=... />}`).
  *
  * `success` (solid, token-driven green) covers the plan app's Approve action; the
  * Feedback action uses `outline`. (No `accent` variant — `text-accent` on `bg-accent`
@@ -51,32 +51,32 @@ function Button({
   className,
   variant,
   size,
-  asChild = false,
   iconLeft,
   iconRight,
   ...props
-}: React.ComponentProps<"button"> &
+}: ButtonPrimitive.Props &
   VariantProps<typeof buttonVariants> & {
-    asChild?: boolean;
     iconLeft?: ButtonIcon;
     iconRight?: ButtonIcon;
   }) {
-  const Comp = asChild ? Slot : "button";
-
   return (
-    <Comp data-slot="button" className={cn(buttonVariants({ variant, size, className }))} {...props}>
+    <ButtonPrimitive
+      data-slot="button"
+      className={cn(buttonVariants({ variant, size, className }))}
+      {...props}
+    >
       {iconLeft ? (
         <span data-slot="button-icon" data-side="left" aria-hidden="true" className="shrink-0">
           {iconLeft}
         </span>
       ) : null}
-      <Slottable>{children}</Slottable>
+      {children}
       {iconRight ? (
         <span data-slot="button-icon" data-side="right" aria-hidden="true" className="shrink-0">
           {iconRight}
         </span>
       ) : null}
-    </Comp>
+    </ButtonPrimitive>
   );
 }
 
