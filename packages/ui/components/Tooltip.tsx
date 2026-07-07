@@ -1,11 +1,39 @@
 import React from 'react';
-import * as RadixTooltip from '@radix-ui/react-tooltip';
+import { Tooltip as BaseTooltip } from '@base-ui/react/tooltip';
 
-export const TooltipProvider = RadixTooltip.Provider;
+/**
+ * TooltipProvider keeps the Radix-era prop names (`delayDuration`,
+ * `skipDelayDuration`, `disableHoverableContent`) as its public API and maps
+ * them onto Base UI's Provider (`delay`, `timeout`) — call sites in the apps
+ * stay unchanged. `disableHoverableContent` has no provider-level equivalent
+ * in Base UI (it moved to per-root `disableHoverablePopup`), so it is carried
+ * via context and applied to every Tooltip root under the provider.
+ */
+const DisableHoverablePopupContext = React.createContext(false);
+
+interface TooltipProviderProps {
+  delayDuration?: number;
+  skipDelayDuration?: number;
+  disableHoverableContent?: boolean;
+  children?: React.ReactNode;
+}
+
+export const TooltipProvider: React.FC<TooltipProviderProps> = ({
+  delayDuration,
+  skipDelayDuration,
+  disableHoverableContent = false,
+  children,
+}) => (
+  <BaseTooltip.Provider delay={delayDuration} timeout={skipDelayDuration}>
+    <DisableHoverablePopupContext.Provider value={disableHoverableContent}>
+      {children}
+    </DisableHoverablePopupContext.Provider>
+  </BaseTooltip.Provider>
+);
 
 interface TooltipProps {
   content: React.ReactNode;
-  children: React.ReactNode;
+  children: React.ReactElement;
   side?: 'top' | 'right' | 'bottom' | 'left';
   align?: 'start' | 'center' | 'end';
   delayDuration?: number;
@@ -26,20 +54,22 @@ export const Tooltip: React.FC<TooltipProps> = ({
   delayDuration,
   sideOffset = 8,
   wide = false,
-}) => (
-  <RadixTooltip.Root delayDuration={delayDuration}>
-    <RadixTooltip.Trigger asChild>{children}</RadixTooltip.Trigger>
-    <RadixTooltip.Portal>
-      <RadixTooltip.Content
-        side={side}
-        align={align}
-        sideOffset={sideOffset}
-        className={`z-50 px-2 py-1 text-xs bg-popover text-popover-foreground border border-border rounded shadow-md origin-[var(--radix-tooltip-content-transform-origin)] transition-[opacity,transform] duration-150 ease-out data-[state=closed]:opacity-0 data-[state=closed]:scale-95 data-[state=delayed-open]:opacity-100 data-[state=delayed-open]:scale-100 data-[state=instant-open]:opacity-100 data-[state=instant-open]:scale-100 ${
-          wide ? 'max-w-[260px] leading-snug whitespace-normal' : 'whitespace-nowrap'
-        }`}
-      >
-        {content}
-      </RadixTooltip.Content>
-    </RadixTooltip.Portal>
-  </RadixTooltip.Root>
-);
+}) => {
+  const disableHoverablePopup = React.useContext(DisableHoverablePopupContext);
+  return (
+    <BaseTooltip.Root disableHoverablePopup={disableHoverablePopup}>
+      <BaseTooltip.Trigger render={children} delay={delayDuration} />
+      <BaseTooltip.Portal>
+        <BaseTooltip.Positioner side={side} align={align} sideOffset={sideOffset} className="isolate z-50">
+          <BaseTooltip.Popup
+            className={`z-50 px-2 py-1 text-xs bg-popover text-popover-foreground border border-border rounded shadow-md origin-[var(--transform-origin)] transition-[opacity,scale] duration-150 ease-out data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 ${
+              wide ? 'max-w-[260px] leading-snug whitespace-normal' : 'whitespace-nowrap'
+            }`}
+          >
+            {content}
+          </BaseTooltip.Popup>
+        </BaseTooltip.Positioner>
+      </BaseTooltip.Portal>
+    </BaseTooltip.Root>
+  );
+};
