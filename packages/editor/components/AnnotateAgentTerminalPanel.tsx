@@ -437,23 +437,25 @@ function AgentSelect({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          aria-label="Select agent"
-          disabled={agents.length === 0}
-          className="flex h-8 w-full items-center gap-1.5 rounded-md border border-border/70 bg-muted/50 px-2.5 text-xs text-foreground transition-colors hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring data-[state=open]:border-primary/50 data-[state=open]:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <span className="min-w-0 flex-1 truncate text-left">
-            {selectedAgent?.name ?? "Select agent"}
-          </span>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        </button>
+      <DropdownMenuTrigger
+        render={
+          <button
+            type="button"
+            aria-label="Select agent"
+            disabled={agents.length === 0}
+            className="flex h-8 w-full items-center gap-1.5 rounded-md border border-border/70 bg-muted/50 px-2.5 text-xs text-foreground transition-colors hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring data-[popup-open]:border-primary/50 data-[popup-open]:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          />
+        }
+      >
+        <span className="min-w-0 flex-1 truncate text-left">
+          {selectedAgent?.name ?? "Select agent"}
+        </span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
         sideOffset={4}
-        className="z-[100] min-w-[var(--radix-dropdown-menu-trigger-width)]"
+        className="z-[100] min-w-[var(--anchor-width)]"
       >
         {agents.map((agent) => {
           const selected = agent.id === selectedAgentId;
@@ -462,7 +464,7 @@ function AgentSelect({
           return (
             <DropdownMenuItem
               key={agent.id}
-              onSelect={() => onSelect(agent.id)}
+              onClick={() => onSelect(agent.id)}
               className={`h-7 text-xs ${tone}`}
             >
               <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">

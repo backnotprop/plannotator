@@ -212,22 +212,24 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
         )}
         {/* Chevron (with primary) or standalone overflow (copy-only). */}
         <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              disabled={isDisabled}
-              className={`text-xs flex items-center py-1 transition-colors text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed ${
-                openable ? 'px-1 border-l border-border/50' : 'px-1.5'
-              }`}
-              title={openable ? 'Open in…' : 'File actions'}
-              aria-label={openable ? 'Choose app to open in' : 'File actions'}
-            >
-              {openable ? (
-                <ChevronDown className="w-3 h-3" />
-              ) : (
-                <MoreHorizontal className="w-3.5 h-3.5" />
-              )}
-            </button>
+          <DropdownMenuTrigger
+            render={
+              <button
+                type="button"
+                disabled={isDisabled}
+                className={`text-xs flex items-center py-1 transition-colors text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed ${
+                  openable ? 'px-1 border-l border-border/50' : 'px-1.5'
+                }`}
+                title={openable ? 'Open in…' : 'File actions'}
+                aria-label={openable ? 'Choose app to open in' : 'File actions'}
+              />
+            }
+          >
+            {openable ? (
+              <ChevronDown className="w-3 h-3" />
+            ) : (
+              <MoreHorizontal className="w-3.5 h-3.5" />
+            )}
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"
@@ -235,7 +237,7 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
             className="min-w-[12rem]"
             // Don't snap focus (and its focus ring) back onto the trigger when
             // the menu closes — that left-edge bar reads as a stray artifact.
-            onCloseAutoFocus={(event) => event.preventDefault()}
+            finalFocus={false}
           >
             {openable &&
               grouped.map((group, gi) => (
@@ -244,10 +246,8 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
                   {group.map((app) => (
                     <DropdownMenuItem
                       key={app.id}
-                      onSelect={(e) => {
-                        e.preventDefault();
-                        selectApp(app.id);
-                      }}
+                      closeOnClick={false}
+                      onClick={() => selectApp(app.id)}
                       className="text-xs"
                     >
                       <AppIcon id={app.icon} className="w-4 h-4" />
@@ -260,10 +260,8 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
             {openable && (filePath || diffText) && <DropdownMenuSeparator />}
             {filePath && (
               <DropdownMenuItem
-                onSelect={(e) => {
-                  e.preventDefault();
-                  void copyText(filePath);
-                }}
+                closeOnClick={false}
+                onClick={() => void copyText(filePath)}
                 className="text-xs"
               >
                 <Copy className="w-4 h-4" />
@@ -272,10 +270,8 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
             )}
             {diffText && (
               <DropdownMenuItem
-                onSelect={(e) => {
-                  e.preventDefault();
-                  void copyText(diffText);
-                }}
+                closeOnClick={false}
+                onClick={() => void copyText(diffText)}
                 className="text-xs"
               >
                 <Copy className="w-4 h-4" />
