@@ -47,7 +47,7 @@
     "!test-setup"
   ],
   "dependencies": {
-    "@plannotator/atomic-editor": "^0.5.0",
+    "@base-ui/react": "1.6.0",
     "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.10.3",
     "@codemirror/lang-javascript": "^6.2.5",
@@ -62,9 +62,10 @@
     "@codemirror/view": "^6.43.0",
     "@fontsource-variable/geist-mono": "5.2.7",
     "@fontsource-variable/inter": "^5.2.8",
-    "@pierre/diffs": "1.2.8",
     "@lezer/common": "^1.5.2",
     "@lezer/highlight": "^1.2.3",
+    "@pierre/diffs": "1.2.8",
+    "@plannotator/atomic-editor": "^0.5.0",
     "@plannotator/core": "workspace:*",
     "@plannotator/markdown-editor": "^0.2.0",
     "@plannotator/web-highlighter": "^0.8.1",
