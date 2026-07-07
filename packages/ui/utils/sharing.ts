@@ -29,6 +29,7 @@ export interface SharePayload {
   s?: (string | undefined)[];  // source per annotation (external tool identifier), parallel to `a`
   h?: string;  // raw HTML content (direct HTML rendering mode)
   r?: 'html';  // render mode flag (omitted = markdown)
+  f?: 'adoc';  // source document format flag (omitted = markdown) — picks the block parser on load
 }
 
 /**
@@ -165,6 +166,7 @@ export async function generateShareUrl(
   globalAttachments?: ImageAttachment[],
   baseUrl: string = DEFAULT_SHARE_BASE,
   rawHtml?: string,
+  docFormat?: 'markdown' | 'asciidoc',
 ): Promise<string | null> {
   // HTML content is too large for URL hashes — force paste service path
   if (rawHtml) return null;
@@ -176,6 +178,7 @@ export async function generateShareUrl(
     g: globalAttachments?.length ? toShareableImages(globalAttachments) : undefined,
     ...(diffContexts ? { d: diffContexts } : {}),
     ...(sources ? { s: sources } : {}),
+    ...(docFormat === 'asciidoc' ? { f: 'adoc' as const } : {}),
   };
 
   const hash = await compress(payload);
@@ -247,6 +250,7 @@ export async function createShortShareUrl(
     shareBaseUrl?: string;
   },
   rawHtml?: string,
+  docFormat?: 'markdown' | 'asciidoc',
 ): Promise<{ shortUrl: string; id: string } | null> {
   const pasteApi = options?.pasteApiUrl ?? DEFAULT_PASTE_API;
   const shareBase = options?.shareBaseUrl ?? DEFAULT_SHARE_BASE;
@@ -261,6 +265,7 @@ export async function createShortShareUrl(
       ...(diffContexts ? { d: diffContexts } : {}),
       ...(sources ? { s: sources } : {}),
       ...(rawHtml ? { h: rawHtml, r: 'html' as const } : {}),
+      ...(docFormat === 'asciidoc' ? { f: 'adoc' as const } : {}),
     };
 
     const compressed = await compress(payload);

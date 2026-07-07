@@ -3,6 +3,8 @@ import { toast, Toaster } from 'sonner';
 import { type Origin, getAgentName } from '@plannotator/shared/agents';
 import { annotateFileFeedback, annotateMessageFeedback } from '@plannotator/shared/feedback-templates';
 import { parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, exportCodeFileAnnotations, exportMessageAnnotations, extractFrontmatter, wrapFeedbackForAgent, Frontmatter, type LinkedDocAnnotationEntry, type MessageAnnotationEntry } from '@plannotator/ui/utils/parser';
+import { parseDocumentToBlocks } from '@plannotator/ui/utils/asciidocParser';
+import { documentFormatForPath, type DocumentFormat } from '@plannotator/shared/document-format';
 import { Viewer, ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { HtmlViewer } from '@plannotator/ui/components/html-viewer';
 import { MarkdownEditor, type MarkdownEditorHandle } from '@plannotator/ui/components/MarkdownEditor';
@@ -189,6 +191,7 @@ const createEmptyMessageState = (message: PickerMessage): MessageAnnotationState
       renderAs: 'markdown',
       rawHtml: '',
       shareHtml: '',
+      docFormat: 'markdown',
       annotations: [],
       selectedAnnotationId: null,
       globalAttachments: [],
@@ -216,6 +219,7 @@ const normalizeMessageState = (
       renderAs: state.linkedDocSession.root.renderAs ?? 'markdown',
       rawHtml: state.linkedDocSession.root.rawHtml ?? '',
       shareHtml: state.linkedDocSession.root.shareHtml ?? '',
+      docFormat: state.linkedDocSession.root.docFormat ?? 'markdown',
     },
     docs: new Map(state.linkedDocSession.docs),
   },
@@ -263,8 +267,17 @@ const App: React.FC = () => {
   const editableDocuments = useEditableDocuments();
   const activeEditableDocument = editableDocuments.activeDocument;
   const displayedMarkdown = activeEditableDocument?.currentText ?? markdown;
-  const frontmatter = useMemo(() => extractFrontmatter(displayedMarkdown).frontmatter, [displayedMarkdown]);
-  const blocks = useMemo(() => parseMarkdownToBlocks(displayedMarkdown), [displayedMarkdown]);
+  // Block-parser format of the ACTIVE document (root plan, linked doc, or folder
+  // file). Derived from the file extension; .adoc parses with the native
+  // AsciiDoc parser. Declared here (above the memos that consume it) and
+  // snapshot/restored alongside renderAs by useLinkedDoc.
+  const [docFormat, setDocFormat] = useState<DocumentFormat>('markdown');
+  // AsciiDoc owns its own document header — frontmatter is a markdown concept.
+  const frontmatter = useMemo(
+    () => (docFormat === 'asciidoc' ? null : extractFrontmatter(displayedMarkdown).frontmatter),
+    [displayedMarkdown, docFormat],
+  );
+  const blocks = useMemo(() => parseDocumentToBlocks(displayedMarkdown, docFormat), [displayedMarkdown, docFormat]);
   const [showExport, setShowExport] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
@@ -752,6 +765,7 @@ const App: React.FC = () => {
     markdown, annotations, selectedAnnotationId, globalAttachments,
     setMarkdown, setAnnotations, setSelectedAnnotationId, setGlobalAttachments,
     renderAs, rawHtml, shareHtml, setRenderAs, setRawHtml, setShareHtml,
+    docFormat, setDocFormat,
     viewerRef, sidebar: linkedDocSidebar, sourceFilePath, sourceConverted,
     onBeforeNavigate: snapshotActiveEditableDocument,
     onDocumentLoaded: handleLinkedDocumentLoaded,
@@ -973,7 +987,7 @@ const App: React.FC = () => {
       for (const [filepath, doc] of state.linkedDocSession.docs) {
         linkedDocs.set(filepath, {
           ...doc,
-          blocks: doc.markdown ? parseMarkdownToBlocks(doc.markdown) : undefined,
+          blocks: doc.markdown ? parseDocumentToBlocks(doc.markdown, documentFormatForPath(filepath)) : undefined,
         });
       }
       return {
@@ -1308,7 +1322,7 @@ const App: React.FC = () => {
       const enriched: Map<string, LinkedDocAnnotationEntry> = new Map(docAnnotations);
       for (const [filepath, entry] of enriched) {
         if (entry.markdown) {
-          enriched.set(filepath, { ...entry, blocks: parseMarkdownToBlocks(entry.markdown) });
+          enriched.set(filepath, { ...entry, blocks: parseDocumentToBlocks(entry.markdown, documentFormatForPath(filepath)) });
         }
       }
       output += exportLinkedDocAnnotations(enriched);
@@ -1381,6 +1395,8 @@ const App: React.FC = () => {
     setRawHtml,
     setShareHtml,
     setRenderAs,
+    docFormat,
+    setDocFormat,
   );
 
   useEffect(() => {
@@ -1524,7 +1540,7 @@ const App: React.FC = () => {
   // which isn't in state yet when the remap runs.
   const applyEditedDocument = useCallback((next: string, list?: Annotation[]): Annotation[] => {
     const sourceAnnotations = list ?? annotationsRef.current;
-    const newBlocks = parseMarkdownToBlocks(next);
+    const newBlocks = parseDocumentToBlocks(next, docFormat);
     const remapped = sourceAnnotations.map((a) => {
       if (a.diffContext || a.type === AnnotationType.GLOBAL_COMMENT || a.id.startsWith('ann-checkbox-')) return a;
       const blk = newBlocks.find((b) => b.content.includes(a.originalText));
@@ -1538,7 +1554,7 @@ const App: React.FC = () => {
     annotationsRef.current = remapped;
     setAnnotations(remapped);
     return remapped;
-  }, []);
+  }, [docFormat]);
 
   // The Viewer is remounted after every edit-mode exit (it was unmounted while
   // editing), so highlight DOM is rebuilt from scratch. Re-anchor via the same
@@ -2268,6 +2284,10 @@ const App: React.FC = () => {
         }
         setSourceInfo(data.sourceInfo ?? undefined);
         setSourceConverted(!!data.sourceConverted);
+        // Pick the block parser from the source file's extension. Only single-file
+        // annotate carries a real document path — URLs, messages, folders (until a
+        // file is opened), archive, and plan mode all parse as markdown.
+        setDocFormat(documentFormatForPath(data.mode === 'annotate' && !data.sourceInfo?.startsWith('http') ? data.filePath : undefined));
         if (data.filePath) {
           setImageBaseDir(data.mode === 'annotate-folder' ? data.filePath : data.filePath.replace(/\/[^/]+$/, ''));
           if (data.mode === 'annotate') {
