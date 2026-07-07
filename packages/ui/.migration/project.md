@@ -85,6 +85,15 @@ Strict-consumer gate note: `Viewer.tsx` (gate file) transitively pulls
 - Derived remaining-radix count for packages/ui: **0 wrappers remain on
   Radix** (`grep -rn "@radix-ui" packages/ui` → only historical mentions in
   .migration reports).
+- Browser smoke (Playwright, real compiled binary from this branch): all 6
+  scenarios PASS — plan render, annotate→approve (exercises selection
+  toolbar + CommentPopover + Approve button), settings persistence, review
+  draft-restore + Send Feedback, editor frontmatter, annotate version diff.
+  (05 carries the suite's pre-existing selector-heuristic asterisk.)
+  NOT covered by the suite and still needing the human pass: dropdown menus
+  (header menu, Approve dropdown, OpenInAppButton), tooltips, table/code-file
+  popouts (PopoutDialog), PR selector (SearchableSelect) — checklists in the
+  per-component reports.
 
 ## Intentionally untouched
 
