@@ -91,6 +91,7 @@
         "@pierre/diffs": "1.2.8",
         "@plannotator/webtui": "0.1.0",
         "chokidar": "^5.0.0",
+        "diff": "^8.0.4",
         "parse5": "^7.3.0",
         "turndown": "^7.2.4",
       },
@@ -167,6 +168,16 @@
     "packages/ai": {
       "name": "@plannotator/ai",
       "version": "0.0.1",
+      "dependencies": {
+        "@plannotator/core": "workspace:*",
+      },
+    },
+    "packages/core": {
+      "name": "@plannotator/core",
+      "version": "0.22.0",
+      "devDependencies": {
+        "typescript": "~5.8.2",
+      },
     },
     "packages/editor": {
       "name": "@plannotator/editor",
@@ -234,13 +245,14 @@
       "version": "0.0.1",
       "dependencies": {
         "@joplin/turndown-plugin-gfm": "^1.0.64",
+        "@plannotator/core": "workspace:*",
         "parse5": "^7.3.0",
         "turndown": "^7.2.4",
       },
     },
     "packages/ui": {
       "name": "@plannotator/ui",
-      "version": "0.0.1",
+      "version": "0.22.0",
       "dependencies": {
         "@codemirror/autocomplete": "^6.20.3",
         "@codemirror/commands": "^6.10.3",
@@ -259,10 +271,9 @@
         "@lezer/common": "^1.5.2",
         "@lezer/highlight": "^1.2.3",
         "@pierre/diffs": "1.2.8",
-        "@plannotator/ai": "workspace:*",
         "@plannotator/atomic-editor": "^0.5.0",
+        "@plannotator/core": "workspace:*",
         "@plannotator/markdown-editor": "^0.2.0",
-        "@plannotator/shared": "workspace:*",
         "@plannotator/web-highlighter": "^0.8.1",
         "@radix-ui/react-dialog": "^1.1.15",
         "@radix-ui/react-dropdown-menu": "^2.1.16",
@@ -274,7 +285,8 @@
         "@viz-js/viz": "^3.25.0",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
-        "diff": "^8.0.3",
+        "diff": "^8.0.4",
+        "dompurify": "^3.3.3",
         "highlight.js": "^11.11.1",
         "katex": "^0.16.47",
         "lucide-react": "^1.14.0",
@@ -282,19 +294,27 @@
         "mermaid": "^11.12.2",
         "motion": "^12.38.0",
         "perfect-freehand": "^1.2.2",
-        "react": "^19.2.3",
-        "react-dom": "^19.2.3",
         "tailwind-merge": "^3.6.0",
-        "tailwindcss": "^4.1.18",
-        "tailwindcss-animate": "^1.0.7",
         "unique-username-generator": "^1.5.1",
       },
       "devDependencies": {
         "@happy-dom/global-registrator": "^20.10.1",
+        "@tailwindcss/vite": "^4.1.18",
         "@types/bun": "^1.2.0",
         "@types/react": "^19.2.0",
         "@types/react-dom": "^19.2.0",
+        "react": "^19.2.3",
+        "react-dom": "^19.2.3",
+        "tailwindcss": "^4.1.18",
+        "tailwindcss-animate": "^1.0.7",
         "typescript": "~5.8.2",
+        "vite": "^6.2.0",
+      },
+      "peerDependencies": {
+        "react": "^19.2.3",
+        "react-dom": "^19.2.3",
+        "tailwindcss": "^4.1.18",
+        "tailwindcss-animate": "^1.0.7",
       },
     },
   },
@@ -780,6 +800,8 @@
     "@plannotator/ai": ["@plannotator/ai@workspace:packages/ai"],
 
     "@plannotator/atomic-editor": ["@plannotator/atomic-editor@0.5.0", "", { "peerDependencies": { "@codemirror/autocomplete": "^6.0.0", "@codemirror/commands": "^6.0.0", "@codemirror/lang-cpp": "^6.0.0", "@codemirror/lang-css": "^6.0.0", "@codemirror/lang-go": "^6.0.0", "@codemirror/lang-html": "^6.0.0", "@codemirror/lang-java": "^6.0.0", "@codemirror/lang-javascript": "^6.0.0", "@codemirror/lang-json": "^6.0.0", "@codemirror/lang-markdown": "^6.0.0", "@codemirror/lang-php": "^6.0.0", "@codemirror/lang-python": "^6.0.0", "@codemirror/lang-rust": "^6.0.0", "@codemirror/lang-sql": "^6.0.0", "@codemirror/lang-xml": "^6.0.0", "@codemirror/lang-yaml": "^6.0.0", "@codemirror/language": "^6.0.0", "@codemirror/legacy-modes": "^6.0.0", "@codemirror/search": "^6.0.0", "@codemirror/state": "^6.0.0", "@codemirror/view": "^6.0.0", "@lezer/common": "^1.0.0", "@lezer/highlight": "^1.0.0", "@lezer/markdown": "^1.0.0", "react": "^18.0.0 || ^19.0.0", "react-dom": "^18.0.0 || ^19.0.0" }, "optionalPeers": ["@codemirror/lang-cpp", "@codemirror/lang-css", "@codemirror/lang-go", "@codemirror/lang-html", "@codemirror/lang-java", "@codemirror/lang-javascript", "@codemirror/lang-json", "@codemirror/lang-php", "@codemirror/lang-python", "@codemirror/lang-rust", "@codemirror/lang-sql", "@codemirror/lang-xml", "@codemirror/lang-yaml", "@codemirror/legacy-modes"] }, "sha512-nJfa6CZ3S0Ywg++HxJLZ9AqPrruhrurVAisFFvCIQmyUnyEt270CfNnVoVyUZBGYHPy47mtybtMZJaN9LXpnCg=="],
+
+    "@plannotator/core": ["@plannotator/core@workspace:packages/core"],
 
     "@plannotator/editor": ["@plannotator/editor@workspace:packages/editor"],
 
