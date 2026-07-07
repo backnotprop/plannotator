@@ -165,6 +165,36 @@ describe("handleDocExists", () => {
 		expect(data.markdown).toBe("linked\n");
 		expect(data.sourceSave).toBeUndefined();
 	});
+
+	test("serves an .adoc document raw (no conversion) with source-save metadata", async () => {
+		const root = makeTempDir("plannotator-doc-root-");
+		const adoc = "= Guide\n\nNOTE: native parse\n";
+		const source = writeTempFile(root, "docs/guide.adoc", adoc);
+
+		const res = await getDoc(source, {
+			rootPaths: [root],
+			sourceSaveFilePath: source,
+		});
+		const data = await res.json() as { markdown?: string; rawHtml?: string; isConverted?: boolean; renderAs?: string; sourceSave?: { enabled: boolean } };
+
+		expect(res.status).toBe(200);
+		expect(data.markdown).toBe(adoc);
+		expect(data.rawHtml).toBeUndefined();
+		expect(data.isConverted).toBeFalsy();
+		expect(data.renderAs).not.toBe("html");
+		expect(data.sourceSave?.enabled).toBe(true);
+	});
+
+	test("resolves an .adoc document relative to a base directory", async () => {
+		const root = makeTempDir("plannotator-doc-root-");
+		writeTempFile(root, "docs/linked.adoc", "== Linked\n");
+
+		const res = await getDoc("linked.adoc", { base: join(root, "docs"), rootPaths: [root] });
+		const data = await res.json() as { markdown?: string; filepath?: string };
+
+		expect(res.status).toBe(200);
+		expect(data.markdown).toBe("== Linked\n");
+	});
 });
 
 describe("handleFileBrowserFiles", () => {
@@ -218,5 +248,21 @@ describe("handleFileBrowserFiles", () => {
 		expect(flattenTree(data.tree).sort()).toEqual(["docs/visible.md"]);
 		expect(data.workspaceStatus.totals.files).toBe(0);
 		expect(data.workspaceStatus.files).toEqual({});
+	});
+
+	test("lists .adoc and .asciidoc files alongside markdown", async () => {
+		const root = makeTempDir("plannotator-files-adoc-");
+		writeTempFile(root, "docs/readme.md", "md\n");
+		writeTempFile(root, "docs/guide.adoc", "= Guide\n");
+		writeTempFile(root, "docs/legacy.asciidoc", "= Legacy\n");
+		writeTempFile(root, "docs/ignored.bin", "binary\n");
+
+		const url = new URL("http://localhost/api/reference/files");
+		url.searchParams.set("dirPath", join(root, "docs"));
+		const res = await handleFileBrowserFiles(new Request(url.toString()));
+		const data = await res.json() as { tree: VaultNode[] };
+
+		expect(res.status).toBe(200);
+		expect(flattenTree(data.tree).sort()).toEqual(["guide.adoc", "legacy.asciidoc", "readme.md"]);
 	});
 });
