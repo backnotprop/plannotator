@@ -524,15 +524,17 @@ function AgentTerminalDisplayPopover({
 }) {
   return (
     <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label="Terminal display settings"
-          title="Display settings"
-          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground/80 transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring data-[state=open]:bg-primary/15 data-[state=open]:text-primary"
-        >
-          <SettingsIcon className="h-3.5 w-3.5" />
-        </button>
+      <PopoverTrigger
+        render={
+          <button
+            type="button"
+            aria-label="Terminal display settings"
+            title="Display settings"
+            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground/80 transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring data-[popup-open]:bg-primary/15 data-[popup-open]:text-primary"
+          />
+        }
+      >
+        <SettingsIcon className="h-3.5 w-3.5" />
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={6} className="w-64 p-2.5">
         <div className="space-y-2.5">

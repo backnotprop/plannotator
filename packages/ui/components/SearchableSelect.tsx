@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useCallback, type ReactNode } from 'react';
+import React, { useState, useMemo, useRef, useCallback, type ReactElement, type ReactNode } from 'react';
 import { Popover, PopoverTrigger, PopoverContent } from './Popover';
 
 interface SearchableSelectProps<T extends { id: string }> {
@@ -7,7 +7,7 @@ interface SearchableSelectProps<T extends { id: string }> {
   onSelect: (item: T) => void;
   filterFn: (item: T, query: string) => boolean;
   renderItem: (item: T, state: { isSelected: boolean; isFocused: boolean }) => ReactNode;
-  renderTrigger: (state: { open: boolean }) => ReactNode;
+  renderTrigger: (state: { open: boolean }) => ReactElement;
   headerContent?: ReactNode;
   placeholder?: string;
   emptyMessage?: string;
@@ -85,14 +85,11 @@ export function SearchableSelect<T extends { id: string }>({
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger asChild>{renderTrigger({ open })}</PopoverTrigger>
+      <PopoverTrigger render={renderTrigger({ open })} />
       <PopoverContent
         align={align}
         className={`${width} p-0`}
-        onOpenAutoFocus={(e) => {
-          e.preventDefault();
-          inputRef.current?.focus();
-        }}
+        initialFocus={inputRef}
       >
         {/* Search row */}
         <div className="flex items-center gap-2 border-b border-border/50 px-3 py-2">
