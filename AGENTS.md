@@ -232,13 +232,14 @@ Per-origin choices are persisted in cookies, so a user can override the automati
 ## Annotate Flow
 
 ```
-User runs /plannotator-annotate <file.md | file.html | https://... | folder/>
+User runs /plannotator-annotate <file.md | file.adoc | file.html | https://... | folder/>
         ↓
 Claude Code: plannotator annotate subcommand runs
 OpenCode/Pi: event handler intercepts command
         ↓
 Input type detected:
   .md/.mdx   → file read from disk
+  .adoc/.asciidoc → file read from disk, parsed natively by the AsciiDoc block parser
   .html/.htm → file read, rendered as raw HTML by default (or converted to markdown with --markdown)
   https://   → fetched via Jina Reader (default) or fetch+Turndown (--no-jina)
   folder/    → file browser opened, files converted on demand

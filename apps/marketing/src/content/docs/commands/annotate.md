@@ -1,6 +1,6 @@
 ---
 title: "Annotate"
-description: "The /plannotator-annotate slash command for annotating markdown files, HTML files, URLs, and folders."
+description: "The /plannotator-annotate slash command for annotating markdown files, AsciiDoc files, HTML files, URLs, and folders."
 sidebar:
   order: 12
 section: "Commands"
@@ -13,9 +13,10 @@ The `/plannotator-annotate` command opens files, URLs, or folders in the Plannot
 | Input | Command | What happens |
 |-------|---------|--------------|
 | Markdown file | `plannotator annotate README.md` | Opens the file directly |
+| AsciiDoc file | `plannotator annotate docs/guide.adoc` | Opens the file directly, parsed natively |
 | HTML file | `plannotator annotate docs/guide.html` | Renders the HTML directly |
 | URL | `plannotator annotate https://docs.stripe.com/api` | Fetches the page, converts to markdown, then opens |
-| Folder | `plannotator annotate ./docs/` | Opens a file browser showing all `.md`, `.mdx`, `.html`, and `.htm` files |
+| Folder | `plannotator annotate ./docs/` | Opens a file browser showing all `.md`, `.mdx`, `.adoc`, `.asciidoc`, `.html`, and `.htm` files |
 
 ### Slash command (inside an agent session)
 
@@ -40,7 +41,7 @@ Starts a local server, opens the browser, and blocks until you submit. Formatted
 
 ## Folders
 
-When you pass a folder, Plannotator opens a file browser showing all markdown and HTML files in the directory tree. Click any file to open it in the annotation UI. This is useful for annotating a set of specs, documentation, or your Obsidian vault.
+When you pass a folder, Plannotator opens a file browser showing all markdown, AsciiDoc, and HTML files in the directory tree. Click any file to open it in the annotation UI. This is useful for annotating a set of specs, documentation, or your Obsidian vault.
 
 Build output directories like `_site/`, `public/`, `.docusaurus/`, and `node_modules/` are automatically excluded from the file browser.
 
@@ -79,6 +80,10 @@ Three ways to disable Jina Reader, in priority order:
 3. **Config file:** `~/.plannotator/config.json` with `{ "jina": false }`
 
 If none of these are set, Jina is enabled by default.
+
+## AsciiDoc files
+
+Local `.adoc` and `.asciidoc` files are parsed natively — sections, listings (`[source,lang]` blocks get syntax highlighting), admonitions (`NOTE:`, `[WARNING]`, …), tables, quotes, and lists map onto the same annotatable blocks as markdown, and inline AsciiDoc formatting is converted for display. The file itself is never converted, so direct edits and source-save write the original AsciiDoc back to disk, and feedback line numbers refer to the real source lines.
 
 ## HTML files
 
