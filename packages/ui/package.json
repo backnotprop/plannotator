@@ -47,7 +47,7 @@
     "!test-setup"
   ],
   "dependencies": {
-    "@base-ui/react": "1.6.0",
+    "@base-ui/react": "^1.6.0",
     "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.10.3",
     "@codemirror/lang-javascript": "^6.2.5",

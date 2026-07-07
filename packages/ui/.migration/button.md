@@ -29,6 +29,10 @@ API change `asChild` → `render`.
 - Disabled buttons: Base UI additionally manages `aria-disabled`/focus
   semantics (`focusableWhenDisabled` default `false` = native-like). Visual
   `disabled:*` classes unchanged.
+- Default `type` is now `"button"` (Base UI sets it; a plain `<button>` was
+  implicitly `type="submit"`). Explicit `type="submit"` still overrides. No
+  `<form>` exists in packages/ui or packages/editor — consumer-only delta,
+  listed in HANDOFF item 12.
 
 ## Verify by hand
 

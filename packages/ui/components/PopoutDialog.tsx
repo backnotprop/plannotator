@@ -44,8 +44,19 @@ export const PopoutDialog: React.FC<PopoutDialogProps> = ({
       // via onInteractOutside preventDefault; Base UI expresses it as
       // cancelling the outside-press/focus-out close reason.
       if (eventDetails.reason === 'outside-press' || eventDetails.reason === 'focus-out') {
-        const target = eventDetails.event?.target as Element | null;
-        if (target && ANNOTATION_SELECTORS.some((sel) => target.closest(sel))) {
+        // For focus events the annotation UI may sit on either side of the
+        // event (target = element losing focus, relatedTarget = gaining), so
+        // guard both.
+        const event = eventDetails.event as Event | undefined;
+        const candidates = [
+          event?.target as Element | null,
+          (event as FocusEvent | undefined)?.relatedTarget as Element | null,
+        ];
+        if (
+          candidates.some(
+            (el) => el instanceof Element && ANNOTATION_SELECTORS.some((sel) => el.closest(sel)),
+          )
+        ) {
           eventDetails.cancel();
           return;
         }

@@ -278,12 +278,12 @@ None of these block adoption. They're the honest "here's what we'd polish next" 
 
 ## UI engine: Base UI (0.23.0)
 
-As of `0.23.0`, `@plannotator/ui` is built on **Base UI** (`@base-ui/react@1.6.0`, exact pin) instead of Radix. This follows shadcn/ui making Base UI its default engine (July 2026). The migration was deliberate and whole-package: **zero `@radix-ui/*` packages remain** — no mixed engines. Per-component reports with hand-verification checklists live in `packages/ui/.migration/`.
+As of `0.23.0`, `@plannotator/ui` is built on **Base UI** (`@base-ui/react@^1.6.0` — caret, so your own Base UI install dedupes against ours; two copies would break context across portals) instead of Radix. This follows shadcn/ui making Base UI its default engine (July 2026). The migration was deliberate and whole-package: **zero `@radix-ui/*` packages remain** — no mixed engines. Per-component reports with hand-verification checklists live in `packages/ui/.migration/`.
 
 ### Dependency changes
 
 - Removed dependencies: `@radix-ui/react-dialog`, `react-dropdown-menu`, `react-popover`, `react-slot`, `react-tabs`, `react-tooltip`.
-- Added dependency: `@base-ui/react@1.6.0` (regular dependency — installs transitively, nothing for you to add).
+- Added dependency: `@base-ui/react@^1.6.0` (regular dependency — installs transitively, nothing for you to add).
 - **Peer dependency removed: `tailwindcss-animate`.** The kit's enter/exit animations are now CSS-transition-based (Base UI's `data-starting-style`/`data-ending-style`), so the plugin is no longer used. If your Tailwind config loaded it only for this package, you can drop it. Remaining peers are unchanged: `react`, `react-dom`, `tailwindcss`.
 
 ### Breaking API changes in 0.23.0 (what a consumer must change)
@@ -299,6 +299,7 @@ As of `0.23.0`, `@plannotator/ui` is built on **Base UI** (`@base-ui/react@1.6.0
 9. **Tabs behavior:** arrow keys now move focus WITHOUT activating (Base UI's manual-activation default; pass `<TabsList activateOnFocus>` for the Radix feel), and an uncontrolled `Tabs` activates its first tab by default (Radix activated none).
 10. **Tooltip:** `children` must be a single React element (was loosely typed). Unset-delay defaults shift: open delay 700ms → 600ms, skip-window 300ms → 400ms (irrelevant if you set them via `TooltipProvider`). `TooltipProvider` deliberately KEEPS the Radix-era prop names (`delayDuration`, `skipDelayDuration`, `disableHoverableContent`) and maps them internally — your provider call sites don't change.
 11. **Portals render a wrapper `<div>`** (Radix portals rendered nothing extra). Only matters if you style popups via direct-child selectors on `document.body`.
+12. **`Button` now defaults to `type="button"`** (Base UI's Button primitive). Under Radix it rendered a plain `<button>`, whose implicit type is `submit` — a bare `<Button>` inside a `<form>` no longer submits it. Pass `type="submit"` explicitly (it overrides the default). No in-repo forms exist; this is consumer-only.
 
 Dialog/dropdown enter/exit animations look the same (fade+scale, 150–200ms) but are transitions, not keyframes — the subtle Radix `slide-in-from-*` nudge on menus is gone, matching the shadcn base registry look.
 
