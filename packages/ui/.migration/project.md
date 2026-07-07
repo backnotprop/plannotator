@@ -90,10 +90,15 @@ Strict-consumer gate note: `Viewer.tsx` (gate file) transitively pulls
   toolbar + CommentPopover + Approve button), settings persistence, review
   draft-restore + Send Feedback, editor frontmatter, annotate version diff.
   (05 carries the suite's pre-existing selector-heuristic asterisk.)
-  NOT covered by the suite and still needing the human pass: dropdown menus
-  (header menu, Approve dropdown, OpenInAppButton), tooltips, table/code-file
-  popouts (PopoutDialog), PR selector (SearchableSelect) — checklists in the
-  per-component reports.
+  NOT covered by the suite and hand-verified by a human (2026-07-07, branch
+  binary installed as `plannotator`): ✅ selection toolbar + comment popover
+  in annotate; ✅ table popout — annotating INSIDE the popout keeps it open,
+  Escape/backdrop close it; ✅ tooltips (delay, skip-window, non-sticky);
+  ✅ OpenInAppButton menu in BOTH annotate (doc badges) and review (file
+  header) — hover highlight, app launch, copy actions, clean close, no stray
+  focus ring. Note: the "Options" header menu and Approve dropdown are
+  hand-rolled (ActionMenu, no Radix/Base UI) and were never in migration
+  scope; arrow-key navigation was never a feature there.
 
 ## Intentionally untouched
 
