@@ -12,7 +12,7 @@ import React from 'react';
  * the dropdown segmented controls use w-3.5, the settings tab uses w-3.
  */
 
-interface IconProps {
+export interface IconProps {
   className?: string;
 }
 

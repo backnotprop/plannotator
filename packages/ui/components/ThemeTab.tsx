@@ -1,6 +1,6 @@
 import React from 'react';
-import { useTheme, type Mode } from './ThemeProvider';
-import { SunIcon, MoonIcon, SystemIcon } from './icons/themeIcons';
+import { useTheme } from './ThemeProvider';
+import { THEME_MODES } from './themeModes';
 
 interface ThemeTabProps {
   onPreview?: () => void;
@@ -16,39 +16,22 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
       <div className={compact ? 'flex items-center gap-3 mb-2' : 'space-y-2'}>
         {!compact && <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Mode</label>}
         <div className="flex gap-1">
-          {(['dark', 'light', 'system'] as Mode[]).map(m => {
-            const isActive = mode === m;
-            return (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                  isActive
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-muted text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {m === 'dark' && (
-                  <span className="flex items-center gap-1.5">
-                    <MoonIcon className="w-3 h-3" />
-                    Dark
-                  </span>
-                )}
-                {m === 'light' && (
-                  <span className="flex items-center gap-1.5">
-                    <SunIcon className="w-3 h-3" />
-                    Light
-                  </span>
-                )}
-                {m === 'system' && (
-                  <span className="flex items-center gap-1.5">
-                    <SystemIcon className="w-3 h-3" />
-                    System
-                  </span>
-                )}
-              </button>
-            );
-          })}
+          {THEME_MODES.map(({ id, label, Icon }) => (
+            <button
+              key={id}
+              onClick={() => setMode(id)}
+              className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                mode === id
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <span className="flex items-center gap-1.5">
+                <Icon className="w-3 h-3" />
+                {label}
+              </span>
+            </button>
+          ))}
         </div>
         {compact && (
           <span className="text-[10px] text-muted-foreground/60 ml-auto flex items-center gap-1">

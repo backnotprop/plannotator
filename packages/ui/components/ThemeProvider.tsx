@@ -1,8 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { storage } from '../utils/storage';
 import { BUILT_IN_THEMES, type ThemeInfo } from '../utils/themeRegistry';
-
-export type Mode = 'dark' | 'light' | 'system';
+import type { Mode } from './themeModes';
 
 type ThemeProviderState = {
   // Mode (dark/light/system) — backward-compatible with old "theme" API

@@ -6,7 +6,7 @@ import {
   ActionMenuSectionLabel,
 } from './ActionMenu';
 import { useTheme } from './ThemeProvider';
-import { SunIcon, MoonIcon, SystemIcon } from './icons/themeIcons';
+import { THEME_MODES } from './themeModes';
 import { ReviewAgentsIcon } from './ReviewAgentsIcon';
 import { MenuVersionSection } from './MenuVersionSection';
 import { TextShimmer } from './TextShimmer';
@@ -101,21 +101,21 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
           <div className="px-3 py-2 space-y-1.5">
             <ActionMenuSectionLabel>Theme</ActionMenuSectionLabel>
             <div className="flex items-center gap-1 rounded-lg bg-muted/50 p-0.5">
-              {(['light', 'dark', 'system'] as const).map((mode) => (
+              {THEME_MODES.map(({ id, label, Icon }) => (
                 <button
-                  key={mode}
+                  key={id}
                   onClick={() => {
                     closeMenu();
-                    setTheme(mode);
+                    setTheme(id);
                   }}
                   className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
-                    theme === mode
+                    theme === id
                       ? 'bg-background text-foreground shadow-sm'
                       : 'text-muted-foreground hover:text-foreground'
                   }`}
                 >
-                  {mode === 'light' ? <SunIcon /> : mode === 'dark' ? <MoonIcon /> : <SystemIcon />}
-                  <span className="capitalize">{mode}</span>
+                  <Icon />
+                  <span>{label}</span>
                 </button>
               ))}
             </div>

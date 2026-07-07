@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useTheme } from './ThemeProvider';
+import { THEME_MODES } from './themeModes';
 
 export function ModeToggle() {
   const { theme, setTheme } = useTheme();
@@ -48,17 +49,17 @@ export function ModeToggle() {
 
       {isOpen && (
         <div className="absolute right-0 mt-1 w-32 rounded-lg border border-border bg-popover shadow-xl z-50 overflow-hidden py-1">
-          {(['light', 'dark', 'system'] as const).map((t) => (
+          {THEME_MODES.map(({ id, label }) => (
             <button
-              key={t}
-              onClick={() => { setTheme(t); setIsOpen(false); }}
-              className={`w-full px-3 py-1.5 text-left text-xs capitalize transition-colors ${
-                theme === t
+              key={id}
+              onClick={() => { setTheme(id); setIsOpen(false); }}
+              className={`w-full px-3 py-1.5 text-left text-xs transition-colors ${
+                theme === id
                   ? 'text-primary bg-primary/10 font-medium'
                   : 'text-popover-foreground hover:bg-muted'
               }`}
             >
-              {t}
+              {label}
             </button>
           ))}
         </div>
