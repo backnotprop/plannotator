@@ -376,7 +376,7 @@ const DirSection: React.FC<{
   if (dir.tree.length === 0) {
     return (
       <div className="px-3 py-2 text-[11px] text-muted-foreground">
-        No markdown or text files found
+        No markdown, AsciiDoc, or text files found
       </div>
     );
   }

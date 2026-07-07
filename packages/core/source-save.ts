@@ -1,4 +1,4 @@
-export type SourceSaveLanguage = "markdown" | "mdx" | "text";
+export type SourceSaveLanguage = "markdown" | "mdx" | "text" | "asciidoc";
 
 export type SourceSaveDisabledReason =
 	| "not-annotate-mode"
@@ -93,7 +93,7 @@ export function hasSourceSaveConflictSnapshot(response: SourceSaveResponse): res
 	);
 }
 
-export const SOURCE_SAVE_FILE_REGEX = /\.(md|mdx|txt)$/i;
+export const SOURCE_SAVE_FILE_REGEX = /\.(md|mdx|txt|adoc|asciidoc)$/i;
 
 export function isSourceSaveFilePath(filePath: string): boolean {
 	return SOURCE_SAVE_FILE_REGEX.test(filePath);
@@ -104,6 +104,7 @@ export function getSourceSaveLanguage(filePath: string): SourceSaveLanguage | nu
 	if (lower.endsWith(".mdx")) return "mdx";
 	if (lower.endsWith(".md")) return "markdown";
 	if (lower.endsWith(".txt")) return "text";
+	if (lower.endsWith(".adoc") || lower.endsWith(".asciidoc")) return "asciidoc";
 	return null;
 }
 

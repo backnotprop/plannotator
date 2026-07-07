@@ -22,6 +22,7 @@ import {
   getAnnotateFileFeedbackPrompt,
 } from "@plannotator/shared/prompts";
 import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles } from "@plannotator/shared/resolve-file";
+import { BROWSABLE_DOC_EXTENSIONS } from "@plannotator/shared/document-format";
 import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { parseAnnotateArgs } from "@plannotator/shared/annotate-args";
@@ -211,7 +212,7 @@ export async function handleAnnotateCommand(
   const { filePath, rawFilePath, gate, renderMarkdown: renderMarkdownFlag, noJina } = parseAnnotateArgs(rawArgs);
 
   if (!filePath) {
-    client.app.log({ level: "error", message: "Usage: /plannotator-annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--gate] [--json]" });
+    client.app.log({ level: "error", message: "Usage: /plannotator-annotate <file.md | file.txt | file.adoc | file.html | https://... | folder/> [--markdown] [--no-jina] [--gate] [--json]" });
     return;
   }
 
@@ -252,8 +253,8 @@ export async function handleAnnotateCommand(
     }
 
     if (isFolder) {
-      if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED, /\.(mdx?|txt|html?)$/i)) {
-        client.app.log({ level: "error", message: `No markdown, text, or HTML files found in ${resolvedArg}` });
+      if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED, BROWSABLE_DOC_EXTENSIONS)) {
+        client.app.log({ level: "error", message: `No markdown, text, AsciiDoc, or HTML files found in ${resolvedArg}` });
         return;
       }
       folderPath = resolvedArg;

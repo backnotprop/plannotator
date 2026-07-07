@@ -32,6 +32,7 @@ import {
 	parseChecklist,
 } from "./generated/checklist.js";
 import { hasMarkdownFiles, resolveUserPath } from "./generated/resolve-file.js";
+import { ANNOTATABLE_DOC_EXTENSIONS, BROWSABLE_DOC_EXTENSIONS } from "./generated/document-format.js";
 import { FILE_BROWSER_EXCLUDED } from "./generated/reference-common.js";
 import { htmlToMarkdown } from "./generated/html-to-markdown.js";
 import { urlToMarkdown, isConvertedSource } from "./generated/url-to-markdown.js";
@@ -502,7 +503,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			// (scoped-package-style names).
 			const { filePath, rawFilePath, gate, renderMarkdown: renderMarkdownFlag, noJina } = parseAnnotateArgs(args ?? "");
 			if (!filePath) {
-				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--gate] [--json]", "error");
+				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.txt | file.adoc | file.html | https://... | folder/> [--markdown] [--no-jina] [--gate] [--json]", "error");
 				return;
 			}
 			if (!hasPlanBrowserHtml()) {
@@ -562,8 +563,8 @@ export default function plannotator(pi: ExtensionAPI): void {
 				}
 
 				if (isFolder) {
-					if (!hasMarkdownFiles(absolutePath, FILE_BROWSER_EXCLUDED, /\.(mdx?|txt|html?)$/i)) {
-						ctx.ui.notify(`No markdown, text, or HTML files found in ${absolutePath}`, "error");
+					if (!hasMarkdownFiles(absolutePath, FILE_BROWSER_EXCLUDED, BROWSABLE_DOC_EXTENSIONS)) {
+						ctx.ui.notify(`No markdown, text, AsciiDoc, or HTML files found in ${absolutePath}`, "error");
 						return;
 					}
 					markdown = "";
@@ -583,8 +584,8 @@ export default function plannotator(pi: ExtensionAPI): void {
 					sourceInfo = basename(absolutePath);
 					ctx.ui.notify(`Opening annotation UI for ${filePath}...`, "info");
 				} else {
-					if (!/\.(mdx?|txt)$/i.test(absolutePath)) {
-						ctx.ui.notify("Only .md, .mdx, .txt, .html, .htm files are supported.", "error");
+					if (!ANNOTATABLE_DOC_EXTENSIONS.test(absolutePath)) {
+						ctx.ui.notify("Only .md, .mdx, .txt, .adoc, .asciidoc, .html, .htm files are supported.", "error");
 						return;
 					}
 					markdown = readFileSync(absolutePath, "utf-8");

@@ -94,6 +94,7 @@ Review local changes or remote PRs. Comment on diffs, suggest code. Your comment
 
 ```
 /plannotator-annotate README.md                  # Local markdown file
+/plannotator-annotate docs/guide.adoc            # Local AsciiDoc file (parsed natively)
 /plannotator-annotate src/                       # Browse and annotate files in a folder
 /plannotator-annotate https://docs.rs/…          # Fetch and annotate any URL
 /plannotator-annotate report.html --render-html  # Render HTML as-is instead of converting

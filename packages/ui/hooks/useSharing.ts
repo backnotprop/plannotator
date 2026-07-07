@@ -104,6 +104,8 @@ export function useSharing(
   setRawHtml?: (h: string) => void,
   setShareHtml?: (h: string) => void,
   setRenderAs?: (m: 'markdown' | 'html') => void,
+  docFormat?: 'markdown' | 'asciidoc',
+  setDocFormat?: (f: 'markdown' | 'asciidoc') => void,
 ): UseSharingResult {
   const [isSharedSession, setIsSharedSession] = useState(false);
   const [isLoadingShared, setIsLoadingShared] = useState(true);
@@ -152,6 +154,7 @@ export function useSharing(
             setRawHtml?.('');
             setShareHtml?.('');
           }
+          setDocFormat?.(payload.f === 'adoc' ? 'asciidoc' : 'markdown');
 
           const restoredAnnotations = fromShareable(payload.a, payload.d, payload.s);
           setAnnotations(restoredAnnotations);
@@ -199,6 +202,7 @@ export function useSharing(
           setRawHtml?.('');
           setShareHtml?.('');
         }
+        setDocFormat?.(payload.f === 'adoc' ? 'asciidoc' : 'markdown');
 
         // Convert shareable annotations to full annotations
         const restoredAnnotations = fromShareable(payload.a, payload.d, payload.s);
@@ -237,7 +241,7 @@ export function useSharing(
       setShareLoadError('Failed to load shared plan — an unexpected error occurred.');
       return false;
     }
-  }, [setMarkdown, setAnnotations, setGlobalAttachments, onSharedLoad, pasteApiUrl, setRawHtml, setShareHtml, setRenderAs]);
+  }, [setMarkdown, setAnnotations, setGlobalAttachments, onSharedLoad, pasteApiUrl, setRawHtml, setShareHtml, setRenderAs, setDocFormat]);
 
   // Load from hash on mount
   useEffect(() => {
@@ -258,7 +262,7 @@ export function useSharing(
   // Generate share URL when markdown or annotations change
   const refreshShareUrl = useCallback(async () => {
     try {
-      const url = await generateShareUrl(markdown, annotations, globalAttachments, shareBaseUrl, rawHtml);
+      const url = await generateShareUrl(markdown, annotations, globalAttachments, shareBaseUrl, rawHtml, docFormat);
       setShareUrl(url ?? '');
       setShareUrlSize(url ? formatUrlSize(url) : '');
     } catch (e) {
@@ -266,7 +270,7 @@ export function useSharing(
       setShareUrl('');
       setShareUrlSize('');
     }
-  }, [markdown, annotations, globalAttachments, shareBaseUrl, rawHtml]);
+  }, [markdown, annotations, globalAttachments, shareBaseUrl, rawHtml, docFormat]);
 
   // Auto-refresh share URL when dependencies change
   useEffect(() => {
@@ -306,6 +310,7 @@ export function useSharing(
         globalAttachments,
         { pasteApiUrl, shareBaseUrl },
         htmlForShare,
+        docFormat,
       );
 
       if (result) {
@@ -323,7 +328,7 @@ export function useSharing(
     } finally {
       setIsGeneratingShortUrl(false);
     }
-  }, [markdown, annotations, globalAttachments, shareBaseUrl, pasteApiUrl, rawHtml, resolveRawHtmlForShare]);
+  }, [markdown, annotations, globalAttachments, shareBaseUrl, pasteApiUrl, rawHtml, resolveRawHtmlForShare, docFormat]);
 
   // Import annotations from a teammate's share URL (supports both hash-based and short /p/<id> URLs)
   const importFromShareUrl = useCallback(async (url: string): Promise<ImportResult> => {

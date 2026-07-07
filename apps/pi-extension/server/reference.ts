@@ -40,6 +40,7 @@ import {
 } from "../generated/resolve-file.js";
 import { parseCodePath } from "../generated/code-file.js";
 import { htmlToMarkdown } from "../generated/html-to-markdown.js";
+import { BROWSABLE_DOC_EXTENSIONS } from "../generated/document-format.js";
 import { disabledSourceSave, type SourceFileSnapshot, type SourceSaveCapability } from "../generated/source-save.js";
 import {
 	createSourceSaveCapability,
@@ -213,7 +214,7 @@ function jsonDoc(
 }
 
 /** Recursively walk a directory collecting files by extension, skipping ignored dirs. */
-const FILE_BROWSER_EXTENSIONS = /\.(mdx?|txt|html?)$/i;
+const FILE_BROWSER_EXTENSIONS = BROWSABLE_DOC_EXTENSIONS;
 
 function walkMarkdownFiles(dir: string, root: string, results: string[], extensions: RegExp = FILE_BROWSER_EXTENSIONS): void {
 	let entries: Dirent[];
@@ -261,7 +262,7 @@ export async function handleDocRequest(res: Res, url: URL, options: HandleDocOpt
 	if (
 		resolvedBase &&
 		!isAbsoluteUserPath(requestedPath) &&
-		/\.(mdx?|txt|html?)$/i.test(requestedPath)
+		BROWSABLE_DOC_EXTENSIONS.test(requestedPath)
 	) {
 		const fromBase = resolveUserPath(requestedPath, resolvedBase);
 		if (!isWithinAllowedRoots(fromBase, allowedRoots)) {

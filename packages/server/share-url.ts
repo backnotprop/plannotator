@@ -13,6 +13,9 @@ const DEFAULT_PASTE_API = "https://plannotator-paste.plannotator.workers.dev";
 
 export interface RemoteShareOptions {
   rawHtml?: string;
+  /** Source document format — 'asciidoc' adds the `f: 'adoc'` payload flag so
+   *  the share portal parses with the AsciiDoc block parser. */
+  docFormat?: "markdown" | "asciidoc";
   pasteApiUrl?: string;
   fetchImpl?: typeof fetch;
 }
@@ -39,7 +42,11 @@ export async function generateRemoteShareUrl(
       options.fetchImpl,
     );
   }
-  const hash = await compress({ p: plan, a: [] });
+  const hash = await compress({
+    p: plan,
+    a: [],
+    ...(options.docFormat === "asciidoc" ? { f: "adoc" } : {}),
+  });
   return `${base}/#${hash}`;
 }
 

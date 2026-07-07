@@ -27,6 +27,7 @@ import {
 	warmFileListCache,
 } from "@plannotator/shared/resolve-file";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
+import { BROWSABLE_DOC_EXTENSIONS } from "@plannotator/shared/document-format";
 import { disabledSourceSave, type SourceFileSnapshot, type SourceSaveCapability } from "@plannotator/shared/source-save";
 import {
 	createSourceSaveCapability,
@@ -218,7 +219,7 @@ export async function handleDoc(req: Request, options: HandleDocOptions = {}): P
 	if (
 		resolvedBase &&
 		!isAbsoluteUserPath(requestedPath) &&
-		/\.(mdx?|txt|html?)$/i.test(requestedPath)
+		BROWSABLE_DOC_EXTENSIONS.test(requestedPath)
 	) {
 		const fromBase = resolveUserPath(requestedPath, resolvedBase);
 		if (!isWithinAllowedRoots(fromBase, allowedRoots)) {
@@ -542,7 +543,7 @@ export async function handleObsidianDoc(req: Request): Promise<Response> {
 
 // --- File Browser ---
 
-const FILE_BROWSER_EXTENSIONS = /\.(mdx?|txt|html?)$/i;
+const FILE_BROWSER_EXTENSIONS = BROWSABLE_DOC_EXTENSIONS;
 
 function includeWorkspaceFile(relativePath: string, _change: WorkspaceFileChange): boolean {
 	return FILE_BROWSER_EXTENSIONS.test(relativePath) && !isFileBrowserExcludedPath(relativePath);

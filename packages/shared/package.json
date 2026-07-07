@@ -30,6 +30,7 @@
     "./reference-common": "./reference-common.ts",
     "./favicon": "./favicon.ts",
     "./code-file": "./code-file.ts",
+    "./document-format": "./document-format.ts",
     "./resolve-file": "./resolve-file.ts",
     "./annotate-reference-roots-node": "./annotate-reference-roots-node.ts",
     "./extract-code-paths": "./extract-code-paths.ts",

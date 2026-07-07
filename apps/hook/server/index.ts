@@ -97,6 +97,7 @@ import { createWorktreePool, type WorktreePool, type PoolEntry } from "@plannota
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getCliInstallUrl, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
 import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles } from "@plannotator/shared/resolve-file";
+import { BROWSABLE_DOC_EXTENSIONS, isAsciidocPath } from "@plannotator/shared/document-format";
 import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
 import { statSync, rmSync, realpathSync, existsSync } from "fs";
 import { parseRemoteUrl } from "@plannotator/shared/repo";
@@ -894,7 +895,7 @@ if (args[0] === "sessions") {
 
   const rawFilePath = args[1];
   if (!rawFilePath) {
-    console.error("Usage: plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--gate] [--json] [--hook]");
+    console.error("Usage: plannotator annotate <file.md | file.txt | file.adoc | file.html | https://... | folder/>  [--markdown] [--no-jina] [--gate] [--json] [--hook]");
     process.exit(1);
   }
 
@@ -947,9 +948,9 @@ if (args[0] === "sessions") {
 
     if (folderCandidate !== null) {
       const resolvedArg = resolveUserPath(folderCandidate, projectRoot);
-      // Folder annotation mode (markdown/plain text + HTML files)
-      if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED, /\.(mdx?|txt|html?)$/i)) {
-        console.error(`No markdown, text, or HTML files found in ${resolvedArg}`);
+      // Folder annotation mode (markdown/plain text/AsciiDoc + HTML files)
+      if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED, BROWSABLE_DOC_EXTENSIONS)) {
+        console.error(`No markdown, text, AsciiDoc, or HTML files found in ${resolvedArg}`);
         process.exit(1);
       }
       folderPath = resolvedArg;
@@ -1003,7 +1004,7 @@ if (args[0] === "sessions") {
             const ext = path.extname(resolvedPath).toLowerCase();
             console.error(
               `File type not supported: ${ext}\n` +
-              `Only .md, .mdx, .txt, .html, .htm files are supported.\n` +
+              `Only .md, .mdx, .txt, .adoc, .asciidoc, .html, .htm files are supported.\n` +
               `For code review, use: plannotator review [file]`
             );
           } else {
@@ -1050,7 +1051,9 @@ if (args[0] === "sessions") {
             pasteApiUrl,
           }).catch(() => {});
         } else if (markdown) {
-          await writeRemoteShareLink(markdown, shareBaseUrl, "annotate", "document only").catch(() => {});
+          await writeRemoteShareLink(markdown, shareBaseUrl, "annotate", "document only", {
+            docFormat: !isUrl && isAsciidocPath(absolutePath) ? "asciidoc" : "markdown",
+          }).catch(() => {});
         }
       }
     },
