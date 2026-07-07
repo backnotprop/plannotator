@@ -891,3 +891,20 @@ body:has([data-popout="true"]) [data-sidebar-tabs="true"] {
   filter: brightness(1.2);
   cursor: pointer;
 }
+
+/* Reduced motion: Base UI popups (dialogs, menus, popovers, tooltips) animate
+   via [data-starting-style]/[data-ending-style] transitions — those attributes
+   only exist during the enter/exit phases, so zeroing transitions here makes
+   open/close instant without touching any other transition in the app. Base UI
+   detects the absence of a running transition and unmounts immediately.
+   The doubled .popover-enter selector out-specifies the app-level keyframe
+   rule without !important. */
+@media (prefers-reduced-motion: reduce) {
+  [data-starting-style],
+  [data-ending-style] {
+    transition: none;
+  }
+  .popover-enter.popover-enter {
+    animation: none;
+  }
+}

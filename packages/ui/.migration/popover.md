@@ -55,3 +55,15 @@ Leftover scan clean on all three files (`radix-ui|@radix-ui|asChild`): no matche
   returns focus to trigger.
 - Terminal display settings (annotate agent terminal): gear opens the panel,
   gear gets the active tint while open, click-outside closes.
+
+## Post-QA polish (2026-07-07, second pass)
+
+- Exit + enter now transition-based: the `.popover-enter` mount keyframe (which
+  was only defined in review-editor's CSS — plan-app popovers had NO enter
+  animation) is replaced by `data-[starting-style]`/`data-[ending-style]`
+  opacity/scale at 150ms ease-out, matching the review-editor migration and the
+  shadcn base registry. Popovers now animate identically in both apps.
+- `prefers-reduced-motion: reduce` support added in `theme.css` for ALL Base UI
+  popups (dialog/menu/popover/tooltip, both apps): transitions zeroed during the
+  starting/ending phases → instant open/close; Base UI unmounts immediately when
+  no transition runs. Also covers the review-editor `.popover-enter` keyframe.
