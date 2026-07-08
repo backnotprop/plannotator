@@ -9,7 +9,7 @@ import {
   type ColumnDef,
   type SortingState,
 } from '@tanstack/react-table';
-import { Block } from '../../types';
+import type { Block } from '../../types';
 import { InlineMarkdown } from '../InlineMarkdown';
 import { PopoutDialog } from '../PopoutDialog';
 import { parseTableContent, buildCsvFromRows, buildMarkdownTable } from './TableBlock';

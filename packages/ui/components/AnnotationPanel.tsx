@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Annotation, AnnotationType, Block, type CodeAnnotation, type EditorAnnotation } from '../types';
+import { AnnotationType, type Annotation, type Block, type CodeAnnotation, type EditorAnnotation } from '../types';
 import { isCurrentUser } from '../utils/identity';
 import { ImageThumbnail } from './ImageThumbnail';
 import { EditorAnnotationCard } from './EditorAnnotationCard';
@@ -85,7 +85,6 @@ interface PanelProps {
 export const AnnotationPanel: React.FC<PanelProps> = ({
   isOpen,
   annotations,
-  blocks,
   onSelect,
   onDelete,
   onEdit,

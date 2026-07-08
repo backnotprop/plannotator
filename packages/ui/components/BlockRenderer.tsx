@@ -1,5 +1,5 @@
 import React from "react";
-import { Block } from "../types";
+import type { Block } from "../types";
 import { InlineMarkdown } from "./InlineMarkdown";
 import { ListItemBody } from "./ListItemBody";
 import { CodeBlock } from "./blocks/CodeBlock";

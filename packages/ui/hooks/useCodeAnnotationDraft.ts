@@ -20,11 +20,6 @@ interface DraftData {
   ts: number;
 }
 
-interface MissingDraftData {
-  found?: false;
-  draftGeneration?: number;
-}
-
 function readDraftGeneration(value: unknown): number | null {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
 }
