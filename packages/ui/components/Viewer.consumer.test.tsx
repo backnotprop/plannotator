@@ -10,11 +10,19 @@ import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
 
-import { Viewer } from './Viewer';
-import { CommentPopover } from './CommentPopover';
 import { AnnotationType, type Block } from '../types';
 
 const hasDom = typeof document !== 'undefined';
+
+// Viewer pulls in @plannotator/web-highlighter, whose UMD bundle reads
+// `window` at module-eval time and throws under the default DOM-less
+// `bun test`. Import lazily so this file loads cleanly when DOM tests are
+// skipped; DOM_TESTS=1 supplies a real DOM and the real modules.
+const viewerMod = hasDom ? await import('./Viewer') : null;
+const Viewer = viewerMod?.Viewer as typeof import('./Viewer')['Viewer'];
+const popoverMod = hasDom ? await import('./CommentPopover') : null;
+const CommentPopover =
+  popoverMod?.CommentPopover as typeof import('./CommentPopover')['CommentPopover'];
 
 const blocks: Block[] = [
   { id: 'b1', type: 'paragraph', content: 'hello world', order: 0, startLine: 1 },
