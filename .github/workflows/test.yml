@@ -52,6 +52,7 @@ jobs:
           packages/ui/components/InlineMarkdown.seam.test.tsx
           packages/ui/components/ImageThumbnail.seam.test.tsx
           packages/ui/hooks/useAnnotationHighlighter.test.tsx
+          packages/ui/hooks/annotationRestoreVerify.test.tsx
           packages/ui/hooks/useAnnotationDraft.seam.test.tsx
           packages/ui/hooks/useExternalAnnotations.seam.test.tsx
           packages/ui/hooks/useAIChat.seam.test.tsx
