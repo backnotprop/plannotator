@@ -47,6 +47,7 @@ jobs:
           packages/ui/markdownEditorFidelity.test.tsx
           packages/ui/annotationDraftPersistence.test.tsx
           packages/ui/codeAnnotationDraftPersistence.test.tsx
+          packages/ui/components/AnnotationPanel.props.test.tsx
           packages/ui/components/InlineMarkdown.seam.test.tsx
           packages/ui/components/ImageThumbnail.seam.test.tsx
           packages/ui/hooks/useAnnotationHighlighter.test.tsx
