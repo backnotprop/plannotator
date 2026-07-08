@@ -112,6 +112,15 @@ interface ViewerProps {
   onToggleCheckbox?: (blockId: string, checked: boolean) => void;
   checkboxOverrides?: Map<string, boolean>;
   onAskAI?: CommentAskAIHandler;
+  /** Whether comment popovers offer image attachments. Hosts without an
+   *  uploadTransport pass false so the attach affordance never dead-ends.
+   *  Default true — today's behavior. */
+  allowImages?: boolean;
+  /** View-only mode: suppresses every annotation-creation entry point
+   *  (selection toolbar, comment popovers, quick labels, pinpoint, global
+   *  comment, attachments, checkbox toggles). Existing annotations still
+   *  render and remain selectable. Default false — today's behavior. */
+  readOnly?: boolean;
 }
 
 export interface ViewerHandle {
@@ -191,6 +200,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   onToggleCheckbox,
   checkboxOverrides,
   onAskAI,
+  allowImages = true,
+  readOnly = false,
 }, ref) => {
   const [copied, setCopied] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
@@ -283,6 +294,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     onSelectAnnotation,
     selectedAnnotationId,
     mode,
+    enabled: !readOnly,
   });
 
   // Refs for code block annotation path
@@ -319,7 +331,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     containerRef,
     highlighterRef,
     inputMethod,
-    enabled: !toolbarState && !hookCommentPopover && !viewerCommentPopover && !hookQuickLabelPicker && !codeBlockQuickLabelPicker && !(isPlanDiffActive ?? false),
+    enabled: !readOnly && !toolbarState && !hookCommentPopover && !viewerCommentPopover && !hookQuickLabelPicker && !codeBlockQuickLabelPicker && !(isPlanDiffActive ?? false),
     onCodeBlockClick: handlePinpointCodeBlockClick,
   });
 
@@ -612,7 +624,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           )}
 
           {/* Attachments button */}
-          {onAddGlobalAttachment && onRemoveGlobalAttachment && (
+          {!readOnly && onAddGlobalAttachment && onRemoveGlobalAttachment && (
             <AttachmentsButton
               images={globalAttachments}
               onAdd={onAddGlobalAttachment}
@@ -623,6 +635,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           )}
 
           {/* <span className="md:hidden">Comment</span><span className="hidden md:inline">Global comment</span> button */}
+          {!readOnly && (
           <button
             ref={globalCommentButtonRef}
             onClick={() => {
@@ -641,6 +654,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             {actionsLabelMode === 'full' && <span>Global comment</span>}
             {actionsLabelMode === 'short' && <span>Comment</span>}
           </button>
+          )}
 
           {/* Copy plan/file button */}
           <button
@@ -683,7 +697,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                       orderedIndex={indices[i]}
                       onOpenLinkedDoc={onOpenLinkedDoc}
                       onOpenCodeFile={onOpenCodeFile}
-                      onToggleCheckbox={onToggleCheckbox}
+                      onToggleCheckbox={readOnly ? undefined : onToggleCheckbox}
                       checkboxOverrides={checkboxOverrides}
                       githubRepo={repoInfo?.display}
                       headingAnchorId={headingSlugMap.get(block.id)}
@@ -758,7 +772,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               isHovered={inputMethod !== 'pinpoint' && hoveredCodeBlock?.block.id === group.block.id}
             />
           ) : (
-            <BlockRenderer imageBaseDir={imageBaseDir} onImageClick={(src, alt) => setLightbox({ src, alt })} key={group.block.id} block={group.block} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} onNavigateAnchor={scrollToAnchor} onToggleCheckbox={onToggleCheckbox} checkboxOverrides={checkboxOverrides} githubRepo={repoInfo?.display} headingAnchorId={headingSlugMap.get(group.block.id)} />
+            <BlockRenderer imageBaseDir={imageBaseDir} onImageClick={(src, alt) => setLightbox({ src, alt })} key={group.block.id} block={group.block} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} onNavigateAnchor={scrollToAnchor} onToggleCheckbox={readOnly ? undefined : onToggleCheckbox} checkboxOverrides={checkboxOverrides} githubRepo={repoInfo?.display} headingAnchorId={headingSlugMap.get(group.block.id)} />
           )
         )}
 
@@ -875,6 +889,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               initialText={hookCommentPopover.initialText}
               onSubmit={hookCommentSubmit}
               onClose={hookCommentClose}
+              allowImages={allowImages}
               onAskAI={onAskAI}
               askAIContext={{
                 kind: 'selection',
@@ -892,6 +907,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             initialText={viewerCommentPopover.initialText}
             onSubmit={handleViewerCommentSubmit}
             onClose={handleViewerCommentClose}
+            allowImages={allowImages}
             onAskAI={onAskAI}
             askAIContext={{
               kind: viewerCommentPopover.isGlobal ? 'general' : 'selection',
