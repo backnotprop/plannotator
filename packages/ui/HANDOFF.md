@@ -197,6 +197,11 @@ We deliberately did **not** restructure the exports map in this PR (move-don't-r
 | `components/AttachmentsButton` | Routes through `uploadTransport`. |
 | Seam-backed hooks: `useAnnotationHighlighter`, `useAnnotationDraft`, `useCodeAnnotationDraft`, `useExternalAnnotations`, `useFileBrowser` | Their network access goes through the seams in the catalog above. |
 | `config` (`ConfigStore`) | Persists through `storageBackend`. |
+| `components/TableOfContents` | Pure — renders from `blocks`; pair with `useActiveSection` for scroll-spy. *(Blessed in 0.24.0.)* |
+| `components/ResizeHandle` + `hooks/useResizablePanel` | Layout pair for draggable panel widths; persists the width through the `storageBackend` seam. *(Blessed in 0.24.0.)* |
+| `hooks/useActiveSection` | Scroll-spy over rendered headings; no backend. *(Blessed in 0.24.0.)* |
+| `hooks/useScrollViewport` | Resolves the scrolling element for viewport-aware UI; no backend. *(Blessed in 0.24.0.)* |
+| `utils/annotationHelpers` | Pure annotation utilities (`getAnnotationCountBySection`, `buildTocHierarchy` + `TocItem`). *(Blessed in 0.24.0.)* |
 
 **AI is fully avoidable** — with one precision worth knowing. No AI *UI* is reachable from the supported components: `useAIChat` is imported only by `components/ai/DocumentAIChatPanel` and `useAIProviderConfig`, neither of which any supported component imports, and `CommentPopover`'s Ask-AI affordance exists only behind the optional `onAskAI` prop. `configure.ts` does statically import the `useAIChat` module (it needs `setAITransport`), but if you never use AI the hook is dead code and bundlers eliminate it — verified empirically: a standalone consumer's production bundle importing the full supported surface contains zero `/api/ai` strings. Don't import `components/ai/*` and don't pass `aiTransport`, and you ship no AI code.
 
