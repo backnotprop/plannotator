@@ -262,8 +262,8 @@ describe("Amp Plannotator plugin helpers", () => {
         },
       }),
     ).toEqual([
-      [String.raw`C:\Users\alice\AppData\Local/plannotator/plannotator.exe`],
-      [String.raw`C:\Users\alice/.local/bin/plannotator.exe`],
+      [String.raw`C:\Users\alice\AppData\Local\plannotator\plannotator.exe`],
+      [String.raw`C:\Users\alice\.local\bin\plannotator.exe`],
       ["plannotator"],
     ]);
   });

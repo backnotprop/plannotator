@@ -114,8 +114,7 @@ export function useUpdateCheck(): UpdateInfo | null {
           releaseUrl: release.html_url,
           featureHighlight,
         });
-      } catch (e) {
-        console.debug('Update check failed:', e);
+      } catch {
       }
     };
 

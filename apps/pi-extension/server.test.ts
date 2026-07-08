@@ -1007,6 +1007,37 @@ describe("pi review server", () => {
   }, 20_000);
 });
 
+describe("pi plan archive server", () => {
+  test("serves an empty archived plan as a found plan", async () => {
+    const archiveDir = makeTempDir("plannotator-pi-archive-");
+    const filename = "2026-01-02-empty-approved.md";
+    writeFileSync(join(archiveDir, filename), "", "utf-8");
+    process.env.PLANNOTATOR_PORT = String(await reservePort());
+
+    const server = await startPlanReviewServer({
+      plan: "",
+      origin: "pi",
+      htmlContent: "<!doctype html><html><body>archive</body></html>",
+      mode: "archive",
+      customPlanPath: archiveDir,
+    });
+
+    try {
+      const url = new URL(`${server.url}/api/archive/plan`);
+      url.searchParams.set("filename", filename);
+      url.searchParams.set("customPath", archiveDir);
+      const response = await fetch(url);
+      const payload = await response.json() as { markdown?: string; filepath?: string };
+
+      expect(response.status).toBe(200);
+      expect(payload.markdown).toBe("");
+      expect(payload.filepath).toBe(filename);
+    } finally {
+      server.stop();
+    }
+  });
+});
+
 describe("pi plan server file browser", () => {
   test("filters excluded folders from tree and workspace status", async () => {
     const repo = makeTempDir("plannotator-pi-files-");

@@ -13,6 +13,10 @@ import { join } from "node:path";
 
 const scriptsDir = import.meta.dir;
 
+function readScript(name: string): string {
+  return readFileSync(join(scriptsDir, name), "utf-8").replace(/\r\n?/g, "\n");
+}
+
 // The three always-installed core skills (apps/skills/core/*). Single list so
 // the copy assertions, sidecar checks, and frontmatter checks can't drift.
 const CORE_SKILLS = [
@@ -22,7 +26,7 @@ const CORE_SKILLS = [
 ];
 
 describe("install.sh", () => {
-  const script = readFileSync(join(scriptsDir, "install.sh"), "utf-8");
+  const script = readScript("install.sh");
 
   test("hooks.json heredoc is valid JSON", () => {
     // Extract the JSON between the HOOKS_EOF heredoc markers
@@ -343,7 +347,7 @@ describe("install.sh", () => {
 });
 
 describe("install.ps1", () => {
-  const script = readFileSync(join(scriptsDir, "install.ps1"), "utf-8");
+  const script = readScript("install.ps1");
 
   test("hooks.json has valid structure", () => {
     // PS1 uses @"..."@ (interpolated) with $exePathJson for full exe path.
@@ -368,6 +372,11 @@ describe("install.ps1", () => {
   test("handles both PS 5.1 and PS 7+ checksum response types", () => {
     expect(script).toContain("[byte[]]");
     expect(script).toContain("UTF8.GetString");
+  });
+
+  test("uses only ASCII text so Windows PowerShell can parse UTF-8 without a BOM", () => {
+    expect(script).toContain('Write-Host "Verified build provenance (SLSA)"');
+    expect(script).toMatch(/^[\x00-\x7F]*$/);
   });
 
   test("install.ps1 selects native arm64 binary on ARM64 Windows", () => {
@@ -512,7 +521,7 @@ describe("install.ps1", () => {
 });
 
 describe("install.cmd", () => {
-  const script = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+  const script = readScript("install.cmd");
 
   test("hooks.json echo block produces valid JSON structure", () => {
     // The .cmd file uses echo statements to produce JSON.
@@ -741,8 +750,8 @@ describe("Core Plannotator skills", () => {
 });
 
 describe("install shared behavior", () => {
-  const sh = readFileSync(join(scriptsDir, "install.sh"), "utf-8");
-  const ps = readFileSync(join(scriptsDir, "install.ps1"), "utf-8");
+  const sh = readScript("install.sh");
+  const ps = readScript("install.ps1");
 
   test("install.cmd contains no unix redirect bash-isms", () => {
     // Tripwire: during PR #850 development, three freshly written `>nul`
@@ -750,12 +759,12 @@ describe("install shared behavior", () => {
     // unidentified external tool. In batch, >/dev/null redirects to a literal
     // .\dev\null file. If this trips, something between editor and disk is
     // rewriting cmd syntax.
-    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    const cmdScript = readScript("install.cmd");
     expect(cmdScript).not.toContain("/dev/null");
   });
 
   test("binary-only (minimal) mode exists in all three installers", () => {
-    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    const cmdScript = readScript("install.cmd");
     // Every installer exposes the flag, its --binary-only / -BinaryOnly alias,
     // the explicit opt-out, and the PLANNOTATOR_MINIMAL env-var fallback — so a
     // user gets the same binary-only path whatever host they install from.
@@ -775,7 +784,7 @@ describe("install shared behavior", () => {
   });
 
   test("guided install exists in all three installers with safe automation behavior", () => {
-    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    const cmdScript = readScript("install.cmd");
     // Shared prefs file (same format across platforms) in the data dir.
     expect(sh).toContain('PREFS_FILE="$_config_dir/install-prefs"');
     expect(ps).toContain('Join-Path $configDir "install-prefs"');
@@ -830,7 +839,7 @@ describe("install shared behavior", () => {
   test("all installers respect CODEX_HOME for the Codex home directory", () => {
     // Codex stores config and state under $CODEX_HOME when set, falling back
     // to ~/.codex (developers.openai.com/codex/config-advanced). #852
-    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    const cmdScript = readScript("install.cmd");
     expect(sh).toContain('CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"');
     expect(ps).toContain('if ($env:CODEX_HOME) { $env:CODEX_HOME } else { "$env:USERPROFILE\\.codex" }');
     expect(cmdScript).toContain('if defined CODEX_HOME set "CODEX_DIR=%CODEX_HOME%"');
@@ -842,7 +851,7 @@ describe("install shared behavior", () => {
     // A --version tag predating apps/skills/core must be diagnosed in every
     // installer, not just bash — a silent skip leaves Windows users with no
     // skills and no explanation.
-    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    const cmdScript = readScript("install.cmd");
     expect(sh).toContain("predates the core/extra skill layout");
     expect(ps).toContain("predates the core/extra skill layout");
     expect(cmdScript).toContain("predates the core/extra skill layout");
@@ -892,7 +901,7 @@ describe("install shared behavior", () => {
     //     VERSION with "stray"
     // Same pair of bugs existed in install.cmd. Both scripts now track
     // VERSION_EXPLICIT and dash-check the value after --version.
-    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    const cmdScript = readScript("install.cmd");
 
     // install.sh
     expect(sh).toContain("VERSION_EXPLICIT=0");
@@ -931,7 +940,7 @@ describe("install shared behavior", () => {
     // line order; ps1 took a fixed SkipAttestation-always-wins). No sane
     // user passes both, so the right behavior is to reject the ambiguous
     // combination upfront with a clean "mutually exclusive" error.
-    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    const cmdScript = readScript("install.cmd");
 
     // install.sh — guards in both --verify-attestation and --skip-attestation arms
     expect(sh).toContain("mutually exclusive");
@@ -948,7 +957,7 @@ describe("install shared behavior", () => {
     // curl's output. Every `-o` target in install.cmd must use %RANDOM%.
     // Covers release.json, the binary itself, the checksum sidecar, and
     // the gh attestation output capture.
-    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    const cmdScript = readScript("install.cmd");
     expect(cmdScript).toContain("plannotator-release-%RANDOM%.json");
     expect(cmdScript).toContain("plannotator-%RANDOM%.exe");
     expect(cmdScript).toContain("plannotator-checksum-%RANDOM%.txt");
@@ -968,7 +977,7 @@ describe("install shared behavior", () => {
     //
     // This test uses indexOf to assert the resolution block appears
     // textually BEFORE the download line in each installer.
-    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    const cmdScript = readScript("install.cmd");
 
     // install.sh: resolution before curl -o
     const shResolve = sh.indexOf("verify_attestation=0");
@@ -1001,7 +1010,7 @@ describe("install shared behavior", () => {
     // environment variables ($env:TAG_NUM, $env:MIN_NUM). PowerShell
     // reads env var values as raw strings and never parses them as code;
     // the [version] cast throws on invalid input and catch swallows it.
-    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    const cmdScript = readScript("install.cmd");
     expect(cmdScript).toContain("$env:TAG_NUM");
     expect(cmdScript).toContain("$env:MIN_NUM");
     // The vulnerable interpolation form must be gone.
@@ -1017,7 +1026,7 @@ describe("install shared behavior", () => {
     // from index 1) instead, which is equivalent to stripping the
     // leading `v` because TAG is guaranteed to start with `v` by the
     // upstream normalization.
-    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    const cmdScript = readScript("install.cmd");
     expect(cmdScript).toContain('set "TAG_NUM=!TAG:~1!"');
     expect(cmdScript).toContain('set "MIN_NUM=!MIN_ATTESTED_VERSION:~1!"');
     // The global-substitution form must be gone from the pre-flight block.
@@ -1037,7 +1046,7 @@ describe("install shared behavior", () => {
     // error that points users at --skip-attestation or a stable tag.
     // install.sh handles these correctly via `sort -V` and doesn't need
     // the pre-check.
-    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    const cmdScript = readScript("install.cmd");
     expect(cmdScript).toContain("Pre-release tags");
     expect(cmdScript).toContain('if not "!TAG_NUM!"=="!TAG_NUM:-=!"');
     expect(ps).toContain("Pre-release tags");
@@ -1062,7 +1071,7 @@ describe("install shared behavior", () => {
     // contain the assignment form doesn't false-match and shadow the
     // real declaration. All three current assignments are flush-left
     // at the top of their respective files.
-    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    const cmdScript = readScript("install.cmd");
     const shMatch = sh.match(/^MIN_ATTESTED_VERSION="(v\d+\.\d+\.\d+)"/m);
     const psMatch = ps.match(/^\$minAttestedVersion\s*=\s*"(v\d+\.\d+\.\d+)"/m);
     const cmdMatch = cmdScript.match(/^set "MIN_ATTESTED_VERSION=(v\d+\.\d+\.\d+)"/m);
@@ -1089,7 +1098,7 @@ describe("install shared behavior", () => {
     //
     // The constant is bumped once by the release skill at the first
     // attested release and then left alone as a permanent floor.
-    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    const cmdScript = readScript("install.cmd");
 
     // install.sh
     expect(sh).toContain('MIN_ATTESTED_VERSION="v0.17.2"');
@@ -1106,7 +1115,7 @@ describe("install shared behavior", () => {
   });
 
   test("all installers install sem sidecar as a non-fatal optional dependency", () => {
-    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    const cmdScript = readScript("install.cmd");
 
     expect(sh).toContain('SEM_REPO="Ataraxy-Labs/sem"');
     expect(sh).toContain('SEM_VERSION="v0.8.0"');
@@ -1141,7 +1150,7 @@ describe("install shared behavior", () => {
   });
 
   test("all installers install agent terminal runtime as a non-fatal optional dependency", () => {
-    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    const cmdScript = readScript("install.cmd");
 
     expect(sh).toContain("install_agent_terminal_runtime");
     expect(sh).toContain('"$INSTALL_DIR/plannotator" install-runtime agent-terminal');
@@ -1174,7 +1183,7 @@ describe("install shared behavior", () => {
     // (apps/opencode-plugin/commands, apps/gemini/commands) instead of being
     // emitted by heredocs/echoes. This retires the old `^^!` cmd-escaping
     // regression entirely — the fragile echo lines no longer exist.
-    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    const cmdScript = readScript("install.cmd");
     // install.cmd no longer echoes plannotator command bodies.
     expect(cmdScript).not.toContain("echo ^^!`plannotator");
     expect(cmdScript).not.toContain("echo ^^!{plannotator");
@@ -1191,7 +1200,7 @@ describe("install shared behavior", () => {
     // expanded variable, re-exposing cmd metacharacters (& | > <) in
     // the value before the pipe parses. Must use the safe substring
     // test pattern used elsewhere in the script.
-    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    const cmdScript = readScript("install.cmd");
     expect(cmdScript).toContain('if not "!TAG:~0,1!"=="v"');
     expect(cmdScript).not.toContain("echo !TAG! | findstr");
   });
@@ -1202,7 +1211,7 @@ describe("install shared behavior", () => {
     // misattached asset from a different release would pass; without
     // --signer-workflow an attestation from an unrelated workflow in
     // the same repo would pass. GitHub's own docs recommend both.
-    const cmdScript = readFileSync(join(scriptsDir, "install.cmd"), "utf-8");
+    const cmdScript = readScript("install.cmd");
 
     for (const [name, script] of [["install.sh", sh], ["install.ps1", ps], ["install.cmd", cmdScript]] as const) {
       if (!script.includes("--source-ref")) {

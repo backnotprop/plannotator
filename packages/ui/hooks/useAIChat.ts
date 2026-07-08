@@ -224,6 +224,7 @@ export function useAIChat({
   }, []);
 
   const setSessionId = useCallback((sessionId: string | null) => {
+    sessionIdRef.current = sessionId;
     setThread(prev => ({ ...prev, sessionId }));
   }, []);
 
@@ -486,11 +487,12 @@ export function useAIChat({
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
+      pendingAbortRef.current = postServerAbort();
     }
     setSessionId(null);
     setIsCreatingSession(false);
     setIsStreaming(false);
-  }, [setSessionId]);
+  }, [postServerAbort, setSessionId]);
 
   const resetThread = useCallback(() => {
     sessionEpochRef.current += 1;
@@ -498,12 +500,13 @@ export function useAIChat({
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
+      pendingAbortRef.current = postServerAbort();
     }
     setThread(createThread(threadTitle));
     setIsCreatingSession(false);
     setIsStreaming(false);
     setError(null);
-  }, [threadTitle]);
+  }, [postServerAbort, threadTitle]);
 
   useEffect(() => {
     return () => {

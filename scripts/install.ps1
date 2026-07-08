@@ -32,7 +32,7 @@ if ($Minimal -and $NoMinimal) {
 }
 
 # Binary-only mode. Installs just the plannotator binary and no persistent state
-# elsewhere — no sem sidecar, agent-terminal runtime, skills, hooks, or per-agent
+# elsewhere - no sem sidecar, agent-terminal runtime, skills, hooks, or per-agent
 # config. Precedence: -Minimal / -NoMinimal switch > PLANNOTATOR_MINIMAL env var
 # > default (off). Mirrors install.sh's --minimal / --no-minimal.
 $minimal = $false
@@ -48,13 +48,13 @@ $semVersion = "v0.8.0"
 $installDir = "$env:LOCALAPPDATA\plannotator"
 
 # First plannotator release that carries SLSA build-provenance attestations.
-# See scripts/install.sh for the full explanation — this constant is bumped
+# See scripts/install.sh for the full explanation - this constant is bumped
 # once at the first attested release via the release skill.
 $minAttestedVersion = "v0.17.2"
 
 # Detect architecture. Native ARM64 Windows binaries are built from
 # bun-windows-arm64 (stable since Bun v1.3.10), so ARM64 hosts get a
-# native binary — no Windows x86-64 emulation tax.
+# native binary - no Windows x86-64 emulation tax.
 #
 # PROCESSOR_ARCHITECTURE reports the architecture the current PowerShell
 # process is running under. PROCESSOR_ARCHITEW6432 is set only in 32-bit
@@ -64,7 +64,7 @@ $minAttestedVersion = "v0.17.2"
 if (-not [Environment]::Is64BitOperatingSystem) {
     # Write-Error under $ErrorActionPreference = "Stop" (set at the top
     # of this file) raises a terminating error that exits the process
-    # with code 1. No explicit `exit 1` needed here — it would be
+    # with code 1. No explicit `exit 1` needed here - it would be
     # unreachable. Same applies to every other Write-Error in this file.
     Write-Error "32-bit Windows is not supported"
 }
@@ -218,13 +218,13 @@ if (Test-Path $configPath) {
     try {
         $cfg = Get-Content $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         # Strict check: only a real JSON `true` (parsed as [bool]$true) opts in.
-        # A stringified "true", a number, etc. do not — matches install.sh, which
+        # A stringified "true", a number, etc. do not - matches install.sh, which
         # greps for a literal boolean.
         if ($cfg.verifyAttestation -is [bool] -and $cfg.verifyAttestation) {
             $verifyAttestationResolved = $true
         }
     } catch {
-        # Malformed config — ignore, fall through to other layers.
+        # Malformed config - ignore, fall through to other layers.
     }
 }
 
@@ -250,7 +250,7 @@ if ($SkipAttestation)   { $verifyAttestationResolved = $false }
 # v0.9.0 vs v0.10.0 backwards).
 if ($verifyAttestationResolved) {
     # Pre-release and build-metadata tags (e.g. v0.18.0-rc1) are not
-    # supported by [System.Version] — the cast throws on any `-` suffix.
+    # supported by [System.Version] - the cast throws on any `-` suffix.
     # install.sh handles these correctly via `sort -V`; Windows has no
     # built-in semver comparator, so we detect and reject explicitly
     # with an accurate error rather than surfacing a confusing "could
@@ -312,16 +312,16 @@ if ($verifyAttestationResolved) {
     # MIN_ATTESTED_VERSION pre-flight already rejected older tags. At this
     # point we know the tag is attested and gh should find a bundle.
     if (Get-Command gh -ErrorAction SilentlyContinue) {
-        # Constrain verification to the exact tag + signing workflow — see
+        # Constrain verification to the exact tag + signing workflow - see
         # install.sh comment for rationale.
         $verifyOutput = & gh attestation verify $tmpFile `
             --repo $repo `
             --source-ref "refs/tags/$latestTag" `
             --signer-workflow "backnotprop/plannotator/.github/workflows/release.yml" 2>&1
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "✓ verified build provenance (SLSA)"
+            Write-Host "Verified build provenance (SLSA)"
         } else {
-            # Write to stderr directly — Write-Host goes to PowerShell's
+            # Write to stderr directly - Write-Host goes to PowerShell's
             # Information stream, which is silently dropped when callers
             # redirect stderr for error reporting in CI/CD pipelines.
             #
@@ -365,7 +365,7 @@ function Show-PathAdvice {
 # Binary-only mode stops here (see the $minimal resolution near the top): the
 # binary is installed, so add it to PATH and exit before any sidecar download,
 # agent integration, skill checkout, config write, or cleanup runs. Only the
-# binary and its PATH entry are added — none of the sem sidecar, agent-terminal
+# binary and its PATH entry are added - none of the sem sidecar, agent-terminal
 # runtime, or per-agent skills, hooks, or config.
 if ($minimal) {
     Show-PathAdvice
@@ -477,12 +477,12 @@ function Update-PiExtensionIfPresent {
 # Aggressive cleanup of stale install locations from prior versions.
 # Echo each removal and ignore anything that is already gone.
 
-# NOTE: legacy Claude command cleanup happens AFTER the skill install below —
+# NOTE: legacy Claude command cleanup happens AFTER the skill install below -
 # a command file is only removed once its replacement skill is on disk, so a
 # failed or skipped skill install never leaves users with neither.
 $claudeCommandsDir = if ($env:CLAUDE_CONFIG_DIR) { "$env:CLAUDE_CONFIG_DIR\commands" } else { "$env:USERPROFILE\.claude\commands" }
 
-# NOTE: Codex stale-skill cleanup happens AFTER the skill install below — the
+# NOTE: Codex stale-skill cleanup happens AFTER the skill install below - the
 # core skills are only removed from the Codex home once their replacement
 # exists in ~/.agents/skills, so an old pinned tag never strips Codex users
 # of working skills without a successor.
@@ -490,7 +490,7 @@ $staleCodexSkillsDir = Join-Path $codexDir "skills"
 
 # Old installers (pre core/extra split) ran a wholesale skills copy against a
 # new-layout tag and could leave junk `core`/`extra` directory copies in the
-# Claude skills scope. Never valid skill names — always safe to remove.
+# Claude skills scope. Never valid skill names - always safe to remove.
 $claudeSkillsScope = if ($env:CLAUDE_CONFIG_DIR) { "$env:CLAUDE_CONFIG_DIR\skills" } else { "$env:USERPROFILE\.claude\skills" }
 foreach ($junk in @("core", "extra")) {
     $junkPath = Join-Path $claudeSkillsScope $junk
@@ -502,8 +502,8 @@ foreach ($junk in @("core", "extra")) {
 
 # Extras (compound / setup-goal / visual-explainer) are no longer managed in
 # the Claude or shared-agent skill scopes. Remove previously default-installed
-# copies ONCE per machine — recorded in the migrations ledger under the
-# Plannotator data dir — because copies the user reinstalls via `npx skills
+# copies ONCE per machine - recorded in the migrations ledger under the
+# Plannotator data dir - because copies the user reinstalls via `npx skills
 # add` are byte-identical to ours and can only be told apart by remembering
 # that this cleanup already ran.
 $claudeSkillsDir = if ($env:CLAUDE_CONFIG_DIR) { "$env:CLAUDE_CONFIG_DIR\skills" } else { "$env:USERPROFILE\.claude\skills" }
@@ -543,7 +543,7 @@ if (Test-Path $prefsFile) {
 }
 
 # Extras already on disk (pre-existing or previously npx-installed)? Then the
-# extras question is moot — they still count toward the checkbox list, and we
+# extras question is moot - they still count toward the checkbox list, and we
 # never launch the npx flow over them.
 $extrasPresent = $false
 foreach ($skill in $extraSkillNames) {
@@ -662,10 +662,10 @@ if ($runWizard) {
     Write-Host "=========================================="
     Write-Host ""
     if ($extrasPresent) {
-        Write-Host "Extra skills already installed — keeping them."
+        Write-Host "Extra skills already installed - keeping them."
         $extrasChoice = "yes"
     } elseif ($Extras -or $NoExtras) {
-        # Flag already answered this question — don't ask and then ignore.
+        # Flag already answered this question - don't ask and then ignore.
         $extrasChoice = if ($Extras) { "yes" } else { "no" }
     } else {
         $defaultExtras = if ($savedExtras) { $savedExtras } else { "no" }
@@ -674,7 +674,7 @@ if ($runWizard) {
     $invocableList = $coreSkillNames
     if ($extrasChoice -eq "yes") { $invocableList = $coreSkillNames + $extraSkillNames }
     if ($ModelInvocable) {
-        # Flag already answered this question — don't ask and then ignore.
+        # Flag already answered this question - don't ask and then ignore.
         $invocableChoice = $ModelInvocable
     } else {
         $wantInvocable = Read-YesNo "Make any skills callable by the model (instead of user-invoked only)?" "no"
@@ -693,7 +693,7 @@ if ($ModelInvocable) { $invocableChoice = $ModelInvocable }
 if (-not $extrasChoice) { $extrasChoice = if ($savedExtras) { $savedExtras } else { "no" } }
 if (-not $invocableChoice) { $invocableChoice = if ($savedInvocable) { $savedInvocable } else { "none" } }
 
-# Persist only when the wizard ran or a flag set something — silent re-runs
+# Persist only when the wizard ran or a flag set something - silent re-runs
 # must not clobber saved answers with defaults.
 if ($runWizard -or $Extras -or $NoExtras -or $ModelInvocable) {
     New-Item -ItemType Directory -Force -Path $configDir | Out-Null
@@ -701,14 +701,14 @@ if ($runWizard -or $Extras -or $NoExtras -or $ModelInvocable) {
 }
 
 # Extras install is delegated to the skills CLI (its UI picks the agents).
-# Interactive only — silent runs and CI get the printed command instead.
+# Interactive only - silent runs and CI get the printed command instead.
 # Never runs when the extras already exist.
 if (($extrasChoice -eq "yes") -and (-not $extrasPresent)) {
     if ($canPrompt -and (Get-Command npx -ErrorAction SilentlyContinue)) {
         Write-Host "Launching the skills CLI for the extras (pick your agents in its UI)..."
         npx skills add backnotprop/plannotator/apps/skills/extra
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "skills CLI did not complete — install later with: npx skills add backnotprop/plannotator/apps/skills/extra"
+            Write-Host "skills CLI did not complete - install later with: npx skills add backnotprop/plannotator/apps/skills/extra"
         }
     } else {
         Write-Host "Install the extras with: npx skills add backnotprop/plannotator/apps/skills/extra"
@@ -753,7 +753,7 @@ function Copy-SkillIfPresent {
 
 try {
     git clone --depth 1 --filter=blob:none --sparse "https://github.com/$repo.git" --branch $latestTag "$skillsTmp\repo" 2>$null
-    # git is a native executable — it does not throw under
+    # git is a native executable - it does not throw under
     # $ErrorActionPreference=Stop on non-zero exit. Guard with
     # Test-Path so we only Push-Location if the clone actually
     # produced a repo directory.
@@ -769,10 +769,10 @@ try {
 
             # Claude Code and Codex consume different skill bodies. Claude Code
             # reads apps/skills/claude/* (dynamic-context injection
-            # `!`plannotator … $ARGUMENTS`` + allowed-tools, so /plannotator-*
-            # run with no permission prompt — like the old slash commands).
+            # `!`plannotator ... $ARGUMENTS`` + allowed-tools, so /plannotator-*
+            # run with no permission prompt - like the old slash commands).
             # Codex reads apps/skills/core/* (prose the model follows via its
-            # own shell). The `!`…`` injection is a Claude-Code-only extension,
+            # own shell). The `!`...`` injection is a Claude-Code-only extension,
             # so the two are sourced separately rather than sharing one body.
             # Route each through Copy-SkillIfPresent (which pre-removes the
             # existing target dir) so re-runs replace rather than nest.
@@ -783,7 +783,7 @@ try {
                 }
                 Write-Host "Installed Claude Code skills to $claudeSkillsDir\"
             } else {
-                Write-Host "Tag $latestTag predates the per-agent skill layout — skipping Claude Code skill install"
+                Write-Host "Tag $latestTag predates the per-agent skill layout - skipping Claude Code skill install"
             }
             if ((Test-Path "apps\skills\core") -and (Get-ChildItem "apps\skills\core" -ErrorAction SilentlyContinue)) {
                 New-Item -ItemType Directory -Force -Path $agentsSkillsDir | Out-Null
@@ -792,7 +792,7 @@ try {
                 }
                 Write-Host "Installed shared agent skills to $agentsSkillsDir\"
             } else {
-                Write-Host "Tag $latestTag predates the core/extra skill layout — skipping shared agent skill install"
+                Write-Host "Tag $latestTag predates the core/extra skill layout - skipping shared agent skill install"
             }
 
             # Kiro: hand-maintained skills (origin baked in) + two extras.
@@ -805,7 +805,7 @@ try {
                 # Two extras come from apps/skills/extra (not duplicated into apps/kiro-cli/skills).
                 Copy-SkillIfPresent "apps\skills\extra\plannotator-setup-goal" $kiroSkillsDir
                 Copy-SkillIfPresent "apps\skills\extra\plannotator-visual-explainer" $kiroSkillsDir
-                # Plannotator custom agent — don't clobber a user's existing one.
+                # Plannotator custom agent - don't clobber a user's existing one.
                 $kiroAgentsDir = "$env:USERPROFILE\.kiro\agents"
                 if (-not (Test-Path "$kiroAgentsDir\plannotator.json") -and (Test-Path "apps\kiro-cli\agents\plannotator.json")) {
                     New-Item -ItemType Directory -Force -Path $kiroAgentsDir | Out-Null
@@ -853,12 +853,12 @@ Remove-Item -Recurse -Force $skillsTmp -ErrorAction SilentlyContinue
 
 if ($checkoutFailed) {
     Write-Host "Error: unable to fetch $repo at $latestTag (network or git error)."
-    Write-Host "Something went wrong — run the installer again."
+    Write-Host "Something went wrong - run the installer again."
     exit 1
 }
 
 # Claude Code commands are deprecated in favor of skills. Remove a legacy
-# command file only once its replacement skill is actually on disk — running
+# command file only once its replacement skill is actually on disk - running
 # AFTER the install above guarantees a failed or skipped skill install never
 # leaves users with neither the command nor the skill.
 foreach ($cmd in @("plannotator-review", "plannotator-annotate", "plannotator-last")) {
@@ -879,7 +879,7 @@ foreach ($scope in @($claudeSkillsDir, $agentsSkillsDir, "$env:USERPROFILE\.kiro
         Remove-Item -Recurse -Force $staleArchivePath -ErrorAction SilentlyContinue
     }
 }
-# The /plannotator-archive OpenCode command was removed too — sweep the stub.
+# The /plannotator-archive OpenCode command was removed too - sweep the stub.
 $staleOpencodeArchive = "$env:USERPROFILE\.config\opencode\commands\plannotator-archive.md"
 if (Test-Path $staleOpencodeArchive) {
     Write-Host "Removing stale plannotator-archive command $staleOpencodeArchive"
@@ -1056,13 +1056,13 @@ if ($extrasChoice -ne "yes") {
 }
 
 # Warn if plannotator is configured in both settings.json hooks AND the plugin (causes double execution)
-# Only warn when the plugin is installed — manual-only users won't have overlap
+# Only warn when the plugin is installed - manual-only users won't have overlap
 $claudeSettings = if ($env:CLAUDE_CONFIG_DIR) { "$env:CLAUDE_CONFIG_DIR\settings.json" } else { "$env:USERPROFILE\.claude\settings.json" }
 if ((Test-Path $pluginHooks) -and (Test-Path $claudeSettings)) {
     $settingsContent = Get-Content -Path $claudeSettings -Raw -ErrorAction SilentlyContinue
     if ($settingsContent -match '"command".*plannotator') {
         Write-Host ""
-        Write-Host "⚠️ ⚠️ ⚠️  WARNING: DUPLICATE HOOK DETECTED  ⚠️ ⚠️ ⚠️"
+        Write-Host "!!! WARNING: DUPLICATE HOOK DETECTED !!!"
         Write-Host ""
         Write-Host "  plannotator was found in your settings.json hooks:"
         Write-Host "  $claudeSettings"
@@ -1071,6 +1071,6 @@ if ((Test-Path $pluginHooks) -and (Test-Path $claudeSettings)) {
         Write-Host "  Remove the plannotator hook from settings.json and rely on the"
         Write-Host "  plugin instead (installed automatically via marketplace)."
         Write-Host ""
-        Write-Host "⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️"
+        Write-Host "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
     }
 }
