@@ -3,6 +3,8 @@
 export const FILE_BROWSER_EXCLUDED = [
 	"node_modules/",
 	".git/",
+	".claude/",
+	".agents/",
 	"dist/",
 	"build/",
 	".next/",

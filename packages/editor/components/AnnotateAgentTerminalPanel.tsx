@@ -251,12 +251,8 @@ export const AnnotateAgentTerminalPanel = forwardRef<
     stopRequestedRef.current = true;
     const session = sessionRef.current;
     if (!session) {
-      if (startedAgentId) {
-        closeAfterStopRef.current = closeAfterStop;
-        setStatus("stopping");
-        return;
-      }
       clearTimers();
+      closeAfterStopRef.current = false;
       stopRequestedRef.current = false;
       setStartedAgentId(null);
       setStatus("idle");
@@ -276,7 +272,7 @@ export const AnnotateAgentTerminalPanel = forwardRef<
       sessionRef.current?.pty.kill();
       if (closeAfterStopRef.current) onClose();
     }, 1400));
-  }, [clearTimers, onClose, onSessionActiveChange, onSessionReadyChange, startedAgentId]);
+  }, [clearTimers, onClose, onSessionActiveChange, onSessionReadyChange]);
 
   const sendMessage = useCallback((message: string) => {
     const text = message.trim();
@@ -348,7 +344,12 @@ export const AnnotateAgentTerminalPanel = forwardRef<
               </button>
             </div>
           </div>
-          <div className="min-h-0 flex-1" style={terminalTheme.shellStyle}>
+          <div className="relative min-h-0 flex-1" style={terminalTheme.shellStyle}>
+            {status === "starting" && (
+              <div className="pointer-events-none absolute left-3 top-3 z-10 rounded border border-border/50 bg-card/95 px-2 py-1 text-[11px] text-muted-foreground shadow-sm">
+                Starting terminal...
+              </div>
+            )}
             <WebTuiTerminal
               key={startedAgentId}
               backend={backend}
@@ -357,7 +358,7 @@ export const AnnotateAgentTerminalPanel = forwardRef<
               prompt={null}
               terminalOptions={terminalOptions}
               terminalColorScheme={terminalTheme.colorScheme}
-              terminalGpuAcceleration="auto"
+              terminalGpuAcceleration="off"
               fontZoom={AGENT_TERMINAL_FONT_ZOOM}
               className="h-full border-0"
               onReady={(session) => {

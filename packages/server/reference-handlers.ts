@@ -543,12 +543,34 @@ export async function handleObsidianDoc(req: Request): Promise<Response> {
 // --- File Browser ---
 
 const FILE_BROWSER_EXTENSIONS = /\.(mdx?|txt|html?)$/i;
+const DEFAULT_FILE_BROWSER_MAX_FILES = 5_000;
 
 function includeWorkspaceFile(relativePath: string, _change: WorkspaceFileChange): boolean {
 	return FILE_BROWSER_EXTENSIONS.test(relativePath) && !isFileBrowserExcludedPath(relativePath);
 }
 
-async function walkFileBrowserFiles(dir: string, root: string, files: Set<string>): Promise<void> {
+function getFileBrowserMaxFiles(): number {
+	const value = Number.parseInt(process.env.PLANNOTATOR_FILE_BROWSER_MAX_FILES ?? "", 10);
+	return Number.isFinite(value) && value > 0 ? value : DEFAULT_FILE_BROWSER_MAX_FILES;
+}
+
+type FileBrowserWalkState = {
+	files: Set<string>;
+	limit: number;
+	truncated: boolean;
+};
+
+function addFileBrowserFile(state: FileBrowserWalkState, relativePath: string): void {
+	if (state.files.has(relativePath)) return;
+	if (state.files.size >= state.limit) {
+		state.truncated = true;
+		return;
+	}
+	state.files.add(relativePath);
+}
+
+async function walkFileBrowserFiles(dir: string, root: string, state: FileBrowserWalkState): Promise<void> {
+	if (state.truncated) return;
 	let entries;
 	try {
 		entries = await readdir(dir, { withFileTypes: true });
@@ -557,14 +579,15 @@ async function walkFileBrowserFiles(dir: string, root: string, files: Set<string
 	}
 
 	for (const entry of entries) {
+		if (state.truncated) return;
 		const fullPath = join(dir, entry.name);
 		const relativePath = relative(root, fullPath).replace(/\\/g, "/");
 		if (entry.isDirectory()) {
 			if (isFileBrowserExcludedPath(relativePath)) continue;
-			await walkFileBrowserFiles(fullPath, root, files);
+			await walkFileBrowserFiles(fullPath, root, state);
 		} else if (entry.isFile() && FILE_BROWSER_EXTENSIONS.test(entry.name)) {
 			if (isFileBrowserExcludedPath(relativePath)) continue;
-			files.add(relativePath);
+			addFileBrowserFile(state, relativePath);
 		}
 	}
 }
@@ -586,16 +609,26 @@ export async function handleFileBrowserFiles(req: Request): Promise<Response> {
 	}
 
 	try {
-		const files = new Set<string>();
-		await walkFileBrowserFiles(resolvedDir, resolvedDir, files);
+		const state: FileBrowserWalkState = {
+			files: new Set<string>(),
+			limit: getFileBrowserMaxFiles(),
+			truncated: false,
+		};
+		await walkFileBrowserFiles(resolvedDir, resolvedDir, state);
 		const workspaceStatus = filterWorkspaceStatusForDirectory(await getWorkspaceStatusForDirectory(resolvedDir), resolvedDir, includeWorkspaceFile);
 		for (const match of getWorkspaceStatusRelativePaths(workspaceStatus, resolvedDir, includeWorkspaceFile)) {
-			files.add(match);
+			addFileBrowserFile(state, match);
+			if (state.truncated) break;
 		}
-		const sortedFiles = [...files].sort();
+		const sortedFiles = [...state.files].sort();
 
 		const tree = buildFileTree(sortedFiles);
-		return Response.json({ tree, workspaceStatus });
+		return Response.json({
+			tree,
+			workspaceStatus,
+			truncated: state.truncated,
+			fileLimit: state.limit,
+		});
 	} catch {
 		return Response.json(
 			{ error: "Failed to list directory files" },
