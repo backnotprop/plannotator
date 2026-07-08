@@ -318,9 +318,22 @@ Re-verify your seam contract against `0.23.0` before adopting; the list above is
 
 ---
 
+## Consumer enablement (0.24.0)
+
+Six items accumulated through Workspaces' first three integration slices. All are additive; every default reproduces 0.23.0 behavior.
+
+1. **`AnnotationPanel` host props.** `renderCardFooter?: (annotation) => ReactNode` — a per-card slot at each plan-annotation card's foot (plug reply/resolve UI in; clicks inside the slot don't select the card). `readOnly?: boolean` — hides every mutation affordance (delete/edit on all card kinds); selection and scrolling still work.
+2. **Six more supported imports** (already in the table above, tagged *Blessed in 0.24.0*): `TableOfContents`, `ResizeHandle` + `useResizablePanel`, `useActiveSection`, `useScrollViewport`, `utils/annotationHelpers`. All verified under the strict-consumer gate.
+3. **`Viewer`/`CommentPopover` `allowImages?: boolean`.** Pass `false` when you have no `uploadTransport` — the attach-image affordance disappears instead of dead-ending. (CommentPopover already had the prop; Viewer now exposes and threads it.)
+4. **`Viewer` `readOnly?: boolean`.** View-only users: suppresses every composer entry point (selection toolbar, comment popovers, quick labels, pinpoint, global comment, attachments, checkbox toggles) while existing annotations still render and select.
+5. **Stricter consumer gate.** `tsconfig.strict-consumer.json` now also enforces `verbatimModuleSyntax`, `noUnusedLocals`, `noUnusedParameters` — the shipped source passes them, so you no longer have to relax those flags in your own tsconfig.
+6. **Content-verifying restore (opt-in).** `useAnnotationHighlighter({ verifyRestoredContent: true, onRestoreMismatch })`: a position-based restore that resolves onto the wrong text (document drift) is removed and re-anchored by text search; if the original text is gone entirely, `onRestoreMismatch(annotation, restoredText)` fires and nothing is painted. Default off. If you built a host-side guard for this, you can delete it.
+
+---
+
 ## Publishing & versioning
 
-- `@plannotator/core` and `@plannotator/ui` are versioned **in lockstep with the repo** (`@plannotator/ui` is now `0.23.0`; `@plannotator/core` is untouched by the Base UI migration and remains `0.22.0` until its next change — the ui→core dependency still resolves exactly at pack time).
+- `@plannotator/core` and `@plannotator/ui` are versioned **in lockstep with the repo** (`@plannotator/ui` is now `0.24.0`; `@plannotator/core` remains `0.22.0` until its next change — the ui→core dependency still resolves exactly at pack time).
 - They depend on each other via `workspace:*`. At publish time that must resolve to the **exact** version in the tarball, so publish with a tool that does that resolution (the repo's existing flow uses `bun pm pack` to build the tarball, then `npm publish *.tgz --provenance --access public`). Publish **`core` first, then `ui`**.
 - `styles.css` is built by the `prepack` script (`bun run build:css`) so the published tarball always carries fresh precompiled CSS.
 - There is **no CI publish job for these two packages yet** — first publish is manual from `main` after merge. (Wiring a CI publish job is a follow-up.)

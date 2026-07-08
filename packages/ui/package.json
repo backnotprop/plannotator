@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/ui",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "type": "module",
   "exports": {
     "./components/*": "./components/*.tsx",
