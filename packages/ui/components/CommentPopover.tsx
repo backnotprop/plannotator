@@ -167,17 +167,20 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     anchorEl?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }, [anchorEl]);
 
-  // Focus textarea on mount and mode changes
-  useEffect(() => {
-    const id = setTimeout(() => {
-      const el = textareaRef.current;
-      if (el) {
-        el.focus();
-        el.selectionStart = el.selectionEnd = el.value.length;
-      }
+  // Focus the textarea when it mounts (initial open and popover/dialog switches).
+  // A ref callback rather than a mount effect: in popover mode the textarea only
+  // renders after `position` is measured, and WebKit fires 0ms timers ahead of
+  // that commit, so an effect keyed on mode alone can run before the textarea
+  // exists and never focus it (e.g. in WKWebView hosts like Glimpse).
+  const focusOnMountRef = useCallback((el: HTMLTextAreaElement | null) => {
+    textareaRef.current = el;
+    if (!el) return;
+    setTimeout(() => {
+      if (!el.isConnected) return;
+      el.focus();
+      el.selectionStart = el.selectionEnd = el.value.length;
     }, 0);
-    return () => clearTimeout(id);
-  }, [mode]);
+  }, []);
 
   // Click-outside for popover mode
   useEffect(() => {
@@ -307,7 +310,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           {/* Textarea */}
           <div className="px-4 py-3 flex-1">
             <textarea
-              ref={textareaRef}
+              ref={focusOnMountRef}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -429,7 +432,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       {/* Textarea */}
       <div className="px-3 py-2">
         <textarea
-          ref={textareaRef}
+          ref={focusOnMountRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
