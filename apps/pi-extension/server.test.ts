@@ -243,7 +243,7 @@ async function expectPiReadyBeforeWarm(
 
   const server = await start();
   try {
-    expect(await observePiWarmState(projectRoot)).toBe("ready");
+    expect(await observePiWarmState(process.cwd())).toBe("ready");
     const response = await fetch(`${server.url}/api/plan`);
     expect(response.status).toBe(200);
   } finally {

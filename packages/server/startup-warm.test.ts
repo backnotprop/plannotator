@@ -46,7 +46,11 @@ async function expectReadyBeforeWarm(
 		process.env.PLANNOTATOR_FILE_BROWSER_MAX_FILES = "1";
 
 		server = await start(() => {
-			ordering = observeWarmState(projectRoot);
+			// Observe with the server's OWN cache key: process.cwd() inside onReady
+			// is the realpath (on macOS mkdtemp returns /var/... but cwd resolves to
+			// /private/var/...), and a key mismatch would race a FRESH warm instead
+			// of the server's, making the test pass on any code.
+			ordering = observeWarmState(process.cwd());
 		});
 
 		const observedOrdering = ordering;
