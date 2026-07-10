@@ -13,11 +13,13 @@ import {
   runGitDiff,
   runVcsDiff,
   stageFile,
+  startAnnotateServer,
   startPlanReviewServer,
   startReviewServer,
   unstageFile,
 } from "./server";
 import { WorkspaceReviewSession } from "./generated/review-workspace.js";
+import { warmFileListCache } from "./generated/resolve-file.js";
 
 const tempDirs: string[] = [];
 const originalCwd = process.cwd();
@@ -26,6 +28,7 @@ const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
 const originalPort = process.env.PLANNOTATOR_PORT;
 const originalSemPath = process.env.PLANNOTATOR_SEM_PATH;
 const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
+const originalFileBrowserLimit = process.env.PLANNOTATOR_FILE_BROWSER_MAX_FILES;
 
 function makeTempDir(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -207,10 +210,68 @@ afterEach(() => {
   } else {
     process.env.PLANNOTATOR_DATA_DIR = originalDataDir;
   }
+  if (originalFileBrowserLimit === undefined) {
+    delete process.env.PLANNOTATOR_FILE_BROWSER_MAX_FILES;
+  } else {
+    process.env.PLANNOTATOR_FILE_BROWSER_MAX_FILES = originalFileBrowserLimit;
+  }
 
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+function observePiWarmState(projectRoot: string): Promise<"ready" | "warm"> {
+  const warm = warmFileListCache(projectRoot, "code").then(() => "warm" as const);
+  const ready = new Promise<"ready">((resolve) => {
+    queueMicrotask(() => resolve("ready"));
+  });
+  return Promise.race([warm, ready]);
+}
+
+async function expectPiReadyBeforeWarm(
+  start: () => Promise<{ url: string; stop(): void }>,
+): Promise<void> {
+  const projectRoot = makeTempDir("plannotator-pi-startup-warm-");
+  const dataRoot = makeTempDir("plannotator-pi-startup-data-");
+  writeTempFile(projectRoot, "document.md", "# Test\n");
+  writeTempFile(projectRoot, "source.ts", "export {};\n");
+  process.chdir(projectRoot);
+  process.env.PLANNOTATOR_DATA_DIR = dataRoot;
+  process.env.PLANNOTATOR_FILE_BROWSER_MAX_FILES = "1";
+  process.env.PLANNOTATOR_PORT = String(await reservePort());
+
+  const server = await start();
+  try {
+    expect(await observePiWarmState(projectRoot)).toBe("ready");
+    const response = await fetch(`${server.url}/api/plan`);
+    expect(response.status).toBe(200);
+  } finally {
+    server.stop();
+  }
+}
+
+describe("pi startup file-cache warm", () => {
+  test("plan server binds before its cache warm can settle", async () => {
+    await expectPiReadyBeforeWarm(() =>
+      startPlanReviewServer({
+        plan: "# Test plan",
+        origin: "pi",
+        htmlContent: "<!doctype html><html><body>plan</body></html>",
+      }),
+    );
+  });
+
+  test("annotate server binds before its cache warm can settle", async () => {
+    await expectPiReadyBeforeWarm(() =>
+      startAnnotateServer({
+        markdown: "# Test document",
+        filePath: join(process.cwd(), "document.md"),
+        htmlContent: "<!doctype html><html><body>annotate</body></html>",
+        origin: "pi",
+      }),
+    );
+  });
 });
 
 describe("pi review server", () => {

@@ -135,10 +135,6 @@ export async function startPlannotatorServer(
   const wslFlag = await isWSL();
   const gitUser = detectGitUser();
 
-  // Side-channel pre-warm: kick off the code-file walk now so the
-  // renderer's POST /api/doc/exists lands on warm cache.
-  void warmFileListCache(process.cwd(), "code");
-
   // --- Archive mode setup ---
   let archivePlans: ArchivedPlan[] = [];
   let initialArchivePlan = "";
@@ -613,6 +609,10 @@ export async function startPlannotatorServer(
 
   const port = server.port!;
   const serverUrl = `http://localhost:${port}`;
+
+  // The cache warm must never gate the listening socket. Its async filesystem
+  // walk yields between directories while requests remain serviceable.
+  void warmFileListCache(process.cwd(), "code");
 
   // Notify caller that server is ready
   if (onReady) {

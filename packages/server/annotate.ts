@@ -135,9 +135,6 @@ const RETRY_DELAY_MS = 500;
 export async function startAnnotateServer(
   options: AnnotateServerOptions
 ): Promise<AnnotateServerResult> {
-  // Side-channel pre-warm so /api/doc/exists POSTs land on warm cache.
-  void warmFileListCache(process.cwd(), "code");
-
   const {
     markdown,
     filePath,
@@ -746,6 +743,10 @@ export async function startAnnotateServer(
 
   const port = server.port!;
   const serverUrl = `http://localhost:${port}`;
+
+  // The cache warm must never gate the listening socket. Its async filesystem
+  // walk yields between directories while requests remain serviceable.
+  void warmFileListCache(process.cwd(), "code");
 
   // Notify caller that server is ready
   if (onReady) {

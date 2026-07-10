@@ -24,6 +24,7 @@ import {
 	resolveMarkdownFile,
 	resolveUserPath,
 	isWithinProjectRoot,
+	getFileBrowserMaxFiles,
 	warmFileListCache,
 } from "@plannotator/shared/resolve-file";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
@@ -543,15 +544,9 @@ export async function handleObsidianDoc(req: Request): Promise<Response> {
 // --- File Browser ---
 
 const FILE_BROWSER_EXTENSIONS = /\.(mdx?|txt|html?)$/i;
-const DEFAULT_FILE_BROWSER_MAX_FILES = 5_000;
 
 function includeWorkspaceFile(relativePath: string, _change: WorkspaceFileChange): boolean {
 	return FILE_BROWSER_EXTENSIONS.test(relativePath) && !isFileBrowserExcludedPath(relativePath);
-}
-
-function getFileBrowserMaxFiles(): number {
-	const value = Number.parseInt(process.env.PLANNOTATOR_FILE_BROWSER_MAX_FILES ?? "", 10);
-	return Number.isFinite(value) && value > 0 ? value : DEFAULT_FILE_BROWSER_MAX_FILES;
 }
 
 type FileBrowserWalkState = {

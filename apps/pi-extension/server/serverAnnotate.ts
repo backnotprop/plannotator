@@ -180,8 +180,6 @@ export async function startAnnotateServer(options: {
 	/** Project name for keying per-file version history (powers the annotate version diff). */
 	project?: string;
 }): Promise<AnnotateServerResult> {
-	// Side-channel pre-warm so /api/doc/exists POSTs land on warm cache.
-	void warmFileListCache(process.cwd(), "code");
 	const gitUser = detectGitUser();
 	const sharingEnabled =
 		options.sharingEnabled ?? resolveSharingEnabled(loadConfig());
@@ -650,6 +648,9 @@ export async function startAnnotateServer(options: {
 	agentTerminalCapability = agentTerminal.capability;
 
 	const { port, portSource } = await listenOnPort(server);
+
+	// Mirror the Bun server: bind first, then warm through the async shared walk.
+	void warmFileListCache(process.cwd(), "code");
 
 	return {
 		port,
