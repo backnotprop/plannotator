@@ -332,6 +332,10 @@ class CodexAppServerProcess {
     }
 
     this.proc = proc;
+    // Swallow async EPIPE on stdin — codex may close the pipe mid-write
+    // (e.g. incompatible app-server version). Without this listener the
+    // 'error' event escalates to uncaughtException and kills the host process.
+    proc.stdin?.on("error", () => {});
     proc.once("exit", () => {
       this.handleProcessEnd(new Error("Codex app-server exited unexpectedly"));
     });
