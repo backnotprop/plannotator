@@ -5,7 +5,7 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
+import { isAddressInUseError, isRemoteSession, getServerHostname, getServerPort, getServerPorts } from "./remote";
 
 // Save and restore env between tests
 const savedEnv: Record<string, string | undefined> = {};
@@ -85,6 +85,12 @@ describe("isRemoteSession", () => {
   });
 });
 
+describe("isAddressInUseError", () => {
+  test("recognizes Bun errors by code", () => {
+    expect(isAddressInUseError(Object.assign(new Error("listen failed"), { code: "EADDRINUSE" }))).toBe(true);
+  });
+});
+
 describe("getServerPort", () => {
   test("returns 0 for local session (random port)", () => {
     clearEnv();
@@ -115,6 +121,25 @@ describe("getServerPort", () => {
     process.env.PLANNOTATOR_REMOTE = "1";
     process.env.PLANNOTATOR_PORT = "3000";
     expect(getServerPort()).toBe(3000);
+  });
+
+  test("expands an inclusive port range", () => {
+    clearEnv();
+    process.env.PLANNOTATOR_PORT = "19432-19435";
+    expect(getServerPorts()).toEqual([19432, 19433, 19434, 19435]);
+    expect(getServerPort()).toBe(19432);
+  });
+
+  test("ignores reversed port ranges", () => {
+    clearEnv();
+    process.env.PLANNOTATOR_PORT = "19435-19432";
+    expect(getServerPorts()).toEqual([0]);
+  });
+
+  test("ignores ranges containing random port zero", () => {
+    clearEnv();
+    process.env.PLANNOTATOR_PORT = "0-3";
+    expect(getServerPorts()).toEqual([0]);
   });
 
   test("ignores invalid port (falls back to default)", () => {

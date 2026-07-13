@@ -14,6 +14,13 @@ const DEFAULT_REMOTE_PORT = 19432;
 const LOOPBACK_HOST = "127.0.0.1";
 const NOOP_BROWSER_VALUES = new Set(["true", "false", "none", ":", "0", "1"]);
 
+function isAddressInUseError(err: unknown): boolean {
+	return err instanceof Error && (
+		(err as NodeJS.ErrnoException).code === "EADDRINUSE" ||
+		err.message.includes("EADDRINUSE")
+	);
+}
+
 export function isNoOpBrowserSentinel(value: string | undefined): boolean {
 	if (!value) return false;
 	return NOOP_BROWSER_VALUES.has(value.trim().toLowerCase());
@@ -53,28 +60,48 @@ export function isRemoteSession(): boolean {
 }
 
 /**
- * Get the server port to use.
- * - PLANNOTATOR_PORT env var takes precedence
+ * Get the server ports to try, in order.
+ * - PLANNOTATOR_PORT accepts a fixed port or inclusive range
  * - Remote sessions default to 19432 (for port forwarding)
- * - Local sessions use random port
- * Returns { port, portSource } so caller can notify user if needed.
+ * - Local sessions use a random port
  */
-export function getServerPort(): {
-	port: number;
+export function getServerPorts(): {
+	ports: number[];
 	portSource: "env" | "remote-default" | "random";
 } {
 	const envPort = process.env.PLANNOTATOR_PORT;
 	if (envPort) {
-		const parsed = parseInt(envPort, 10);
-		if (!Number.isNaN(parsed) && parsed >= 0 && parsed < 65536) {
-			return { port: parsed, portSource: "env" };
+		const value = envPort.trim();
+		const range = /^(\d+)-(\d+)$/.exec(value);
+		if (range) {
+			const start = Number(range[1]);
+			const end = Number(range[2]);
+			if (start >= 1 && end < 65536 && start <= end) {
+				return {
+					ports: Array.from({ length: end - start + 1 }, (_, index) => start + index),
+					portSource: "env",
+				};
+			}
+		} else {
+			const parsed = parseInt(value, 10);
+			if (!Number.isNaN(parsed) && parsed >= 0 && parsed < 65536) {
+				return { ports: [parsed], portSource: "env" };
+			}
 		}
 		// Invalid port - fall back silently, caller can check env var themselves
 	}
 	if (isRemoteSession()) {
-		return { port: DEFAULT_REMOTE_PORT, portSource: "remote-default" };
+		return { ports: [DEFAULT_REMOTE_PORT], portSource: "remote-default" };
 	}
-	return { port: 0, portSource: "random" };
+	return { ports: [0], portSource: "random" };
+}
+
+export function getServerPort(): {
+	port: number;
+	portSource: "env" | "remote-default" | "random";
+} {
+	const { ports, portSource } = getServerPorts();
+	return { port: ports[0], portSource };
 }
 
 export function getServerHostname(): string {
@@ -87,14 +114,15 @@ const RETRY_DELAY_MS = 500;
 export async function listenOnPort(
 	server: Server,
 ): Promise<{ port: number; portSource: "env" | "remote-default" | "random" }> {
-	const result = getServerPort();
+	const { ports, portSource } = getServerPorts();
+	const portsToTry = ports.length > 1 ? ports : Array(MAX_RETRIES).fill(ports[0]);
 
-	for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+	for (const [index, port] of portsToTry.entries()) {
 		try {
 			await new Promise<void>((resolve, reject) => {
 				server.once("error", reject);
 				server.listen(
-					result.port,
+					port,
 					getServerHostname(),
 					() => {
 						server.removeListener("error", reject);
@@ -103,21 +131,21 @@ export async function listenOnPort(
 				);
 			});
 			const addr = server.address() as { port: number };
-			return { port: addr.port, portSource: result.portSource };
+			return { port: addr.port, portSource };
 		} catch (err: unknown) {
-			const isAddressInUse =
-				err instanceof Error && err.message.includes("EADDRINUSE");
-			if (isAddressInUse && attempt < MAX_RETRIES) {
-				await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+			const isAddressInUse = isAddressInUseError(err);
+			if (isAddressInUse && index < portsToTry.length - 1) {
+				if (ports.length === 1) {
+					await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+				}
 				continue;
 			}
 			if (isAddressInUse) {
+				const configured = ports.length > 1 ? `${ports[0]}-${ports.at(-1)}` : String(port);
 				const hint = isRemoteSession()
-					? " (set PLANNOTATOR_PORT to use a different port)"
+					? " (set PLANNOTATOR_PORT to use a different port or range)"
 					: "";
-				throw new Error(
-					`Port ${result.port} in use after ${MAX_RETRIES} retries${hint}`,
-				);
+				throw new Error(`Port selection ${configured} exhausted${hint}`);
 			}
 			throw err;
 		}

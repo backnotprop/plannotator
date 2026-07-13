@@ -15,7 +15,7 @@ import {
   type GoalSetupQuestionAnswer,
   type GoalSetupResult,
 } from "@plannotator/shared/goal-setup";
-import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
+import { isAddressInUseError, isRemoteSession, getServerHostname, getServerPorts } from "./remote";
 import { getRepoInfo } from "./repo";
 import {
   handleFavicon,
@@ -80,7 +80,10 @@ export async function startGoalSetupServer(
 ): Promise<GoalSetupServerResult> {
   const { bundle, htmlContent, origin = "claude-code", onReady } = options;
   const isRemote = isRemoteSession();
-  const configuredPort = getServerPort();
+  const configuredPorts = getServerPorts();
+  const portsToTry = configuredPorts.length > 1
+    ? configuredPorts
+    : Array(MAX_RETRIES).fill(configuredPorts[0]);
   const wslFlag = await isWSL();
   const repoInfo = await getRepoInfo();
   const gitUser = detectGitUser();
@@ -105,11 +108,12 @@ export async function startGoalSetupServer(
 
   let server: ReturnType<typeof Bun.serve> | null = null;
 
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+  for (let attempt = 1; attempt <= portsToTry.length; attempt++) {
+    const port = portsToTry[attempt - 1];
     try {
       server = Bun.serve({
         hostname: getServerHostname(),
-        port: configuredPort,
+        port,
         // Bun's default 10s idleTimeout kills long-running requests.
         idleTimeout: 0,
 
@@ -211,21 +215,21 @@ export async function startGoalSetupServer(
 
       break;
     } catch (err: unknown) {
-      const isAddressInUse =
-        err instanceof Error && err.message.includes("EADDRINUSE");
+      const isAddressInUse = isAddressInUseError(err);
 
-      if (isAddressInUse && attempt < MAX_RETRIES) {
-        await Bun.sleep(RETRY_DELAY_MS);
+      if (isAddressInUse && attempt < portsToTry.length) {
+        if (configuredPorts.length === 1) await Bun.sleep(RETRY_DELAY_MS);
         continue;
       }
 
       if (isAddressInUse) {
+        const configured = configuredPorts.length > 1
+          ? `${configuredPorts[0]}-${configuredPorts.at(-1)}`
+          : String(port);
         const hint = isRemote
-          ? " (set PLANNOTATOR_PORT to use different port)"
+          ? " (set PLANNOTATOR_PORT to use a different port or range)"
           : "";
-        throw new Error(
-          `Port ${configuredPort} in use after ${MAX_RETRIES} retries${hint}`
-        );
+        throw new Error(`Port selection ${configured} exhausted${hint}`);
       }
 
       throw err;

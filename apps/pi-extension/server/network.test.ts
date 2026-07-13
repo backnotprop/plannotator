@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { createServer } from "node:http";
 import {
 	getServerHostname,
 	getServerPort,
+	getServerPorts,
 	isNoOpBrowserSentinel,
 	isRemoteSession,
+	listenOnPort,
 	openBrowser,
 } from "./network";
 
@@ -105,6 +108,42 @@ describe("pi port selection", () => {
 		process.env.SSH_TTY = "/dev/pts/0";
 		process.env.PLANNOTATOR_PORT = "9999";
 		expect(getServerPort()).toEqual({ port: 9999, portSource: "env" });
+	});
+
+	test("expands an inclusive port range", () => {
+		clearEnv();
+		process.env.PLANNOTATOR_PORT = "19432-19435";
+		expect(getServerPorts()).toEqual({
+			ports: [19432, 19433, 19434, 19435],
+			portSource: "env",
+		});
+		expect(getServerPort()).toEqual({ port: 19432, portSource: "env" });
+	});
+
+	test("ignores reversed port ranges", () => {
+		clearEnv();
+		process.env.PLANNOTATOR_PORT = "19435-19432";
+		expect(getServerPorts()).toEqual({ ports: [0], portSource: "random" });
+	});
+
+	test("binds the next port when the range start is occupied", async () => {
+		clearEnv();
+		const blocker = createServer();
+		await new Promise<void>((resolve) => blocker.listen(0, "127.0.0.1", resolve));
+		const blockedPort = (blocker.address() as { port: number }).port;
+		expect(blockedPort).toBeLessThan(65535);
+
+		process.env.PLANNOTATOR_PORT = `${blockedPort}-${blockedPort + 1}`;
+		const server = createServer();
+		try {
+			expect(await listenOnPort(server)).toEqual({
+				port: blockedPort + 1,
+				portSource: "env",
+			});
+		} finally {
+			server.close();
+			blocker.close();
+		}
 	});
 });
 
