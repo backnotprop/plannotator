@@ -120,6 +120,11 @@ import {
   type AnnotateAgentTerminalPanelHandle,
 } from './components/AnnotateAgentTerminalPanel';
 import {
+  getSavedAnnotateAgentTerminalSide,
+  saveAnnotateAgentTerminalSide,
+  type AnnotateAgentTerminalSide,
+} from '@plannotator/ui/utils/annotateAgentTerminal';
+import {
   buildAgentTerminalDeliveryRecord,
   buildTerminalAskPrompt,
   isMatchingAgentTerminalDelivery,
@@ -163,6 +168,47 @@ type MessageAnnotationState = {
   linkedDocSession: LinkedDocSessionState;
   codeAnnotations: CodeAnnotation[];
   selectedCodeAnnotationId: string | null;
+};
+
+type AgentTerminalLayoutOptions = {
+  showControls: boolean;
+  isOpen: boolean;
+  isRunning: boolean;
+  isWideMode: boolean;
+  isBelowBreakpoint: boolean;
+  side: AnnotateAgentTerminalSide;
+  isRightPanelOpen: boolean;
+};
+
+const getAgentTerminalLayout = ({
+  showControls,
+  isOpen,
+  isRunning,
+  isWideMode,
+  isBelowBreakpoint,
+  side,
+  isRightPanelOpen,
+}: AgentTerminalLayoutOptions) => {
+  const shouldRender = showControls && (isOpen || isRunning);
+  const isVisible = shouldRender && isOpen && !isWideMode && !isBelowBreakpoint;
+  const isLeft = side === 'left';
+  const isLeftVisible = isVisible && isLeft;
+  const isRightVisible = isVisible && !isLeft;
+  const hiddenPositionClass = isLeft ? 'left-0' : 'right-0';
+  const wrapperClassName = isVisible
+    ? 'flex h-full flex-shrink-0 group/agent-terminal'
+    : `absolute ${hiddenPositionClass} top-0 h-full w-0 overflow-hidden pointer-events-none group/agent-terminal`;
+  const directionClassName = isLeft ? 'flex-row' : 'flex-row-reverse';
+
+  return {
+    shouldRender,
+    isVisible,
+    isLeftVisible,
+    showOnLeft: shouldRender && isLeft,
+    showOnRight: shouldRender && !isLeft,
+    isRightPanelVisible: isRightPanelOpen && !isRightVisible,
+    dockClassName: `${wrapperClassName} ${directionClassName}`,
+  };
 };
 
 const countLinkedDocSessionAnnotations = (session: LinkedDocSessionState): number => {
@@ -399,6 +445,7 @@ const App: React.FC = () => {
   const [projectRoot, setProjectRoot] = useState<string | null>(null);
   const [agentTerminalCapability, setAgentTerminalCapability] = useState<AgentTerminalCapability | null>(null);
   const [isAgentTerminalOpen, setIsAgentTerminalOpen] = useState(false);
+  const [agentTerminalSide, setAgentTerminalSide] = useState<AnnotateAgentTerminalSide>(getSavedAnnotateAgentTerminalSide);
   const [isAgentTerminalRunning, setIsAgentTerminalRunning] = useState(false);
   const [isAgentTerminalReady, setIsAgentTerminalReady] = useState(false);
   const [agentTerminalSessionId, setAgentTerminalSessionId] = useState<number | null>(null);
@@ -434,6 +481,7 @@ const App: React.FC = () => {
   const [showPlanAIAnnouncement, setShowPlanAIAnnouncement] = useState(needsPlanAIAnnouncement);
   const [showLookAndFeelAnnouncement, setShowLookAndFeelAnnouncement] = useState(needsLookAndFeelAnnouncement);
   const isMobile = useIsMobile();
+  const isBelowAgentTerminalBreakpoint = useIsMobile(1024);
 
   const viewerRef = useRef<ViewerHandle>(null);
   // containerRef + scrollViewport both point at the OverlayScrollbars
@@ -477,10 +525,10 @@ const App: React.FC = () => {
     defaultWidth: 360,
     minWidth: 280,
     maxWidth: 640,
-    side: 'left',
+    side: agentTerminalSide,
     onSnapClose: () => setIsAgentTerminalOpen(false),
     // Single click on the handle (no drag) collapses it.
-    onClick: () => hideAgentTerminal(),
+    onClick: () => setIsAgentTerminalOpen(false),
     apply: (w) => document.documentElement.style.setProperty('--agent-terminal-w', `${w}px`),
   });
   const isResizing = panelResize.isDragging || tocResize.isDragging || agentTerminalResize.isDragging;
@@ -538,15 +586,29 @@ const App: React.FC = () => {
     sidebar.toggleTab(tab);
   }, [exitWideMode, wideModeType, sidebar.toggleTab]);
 
+  const hideAgentTerminal = useCallback(() => {
+    setIsAgentTerminalOpen(false);
+  }, []);
+
+  const replaceRightAgentTerminalWithPanel = useCallback((tab: 'annotations' | 'ai') => {
+    hideAgentTerminal();
+    setRightSidebarTab(tab);
+    setIsPanelOpen(true);
+  }, [hideAgentTerminal]);
+
   const handleAnnotationPanelToggle = useCallback(() => {
     if (wideModeType !== null) {
       exitWideMode({ restore: false, panelOpen: true });
       setRightSidebarTab('annotations');
       return;
     }
+    if (agentTerminalSide === 'right' && isAgentTerminalOpen) {
+      replaceRightAgentTerminalWithPanel('annotations');
+      return;
+    }
     setRightSidebarTab('annotations');
     setIsPanelOpen(prev => rightSidebarTab === 'annotations' ? !prev : true);
-  }, [exitWideMode, rightSidebarTab, wideModeType]);
+  }, [agentTerminalSide, exitWideMode, isAgentTerminalOpen, replaceRightAgentTerminalWithPanel, rightSidebarTab, wideModeType]);
 
   const dismissPlanAIAnnouncement = useCallback(() => {
     markPlanAIAnnouncementSeen();
@@ -565,12 +627,17 @@ const App: React.FC = () => {
       setRightSidebarTab('ai');
       return;
     }
+    if (agentTerminalSide === 'right' && isAgentTerminalOpen) {
+      replaceRightAgentTerminalWithPanel('ai');
+      return;
+    }
     setRightSidebarTab('ai');
     setIsPanelOpen(prev => rightSidebarTab === 'ai' ? !prev : true);
-  }, [dismissPlanAIAnnouncement, exitWideMode, rightSidebarTab, wideModeType]);
+  }, [agentTerminalSide, dismissPlanAIAnnouncement, exitWideMode, isAgentTerminalOpen, replaceRightAgentTerminalWithPanel, rightSidebarTab, wideModeType]);
 
-  const hideAgentTerminal = useCallback(() => {
-    setIsAgentTerminalOpen(false);
+  const handleAgentTerminalSideChange = useCallback((side: AnnotateAgentTerminalSide) => {
+    saveAnnotateAgentTerminalSide(side);
+    setAgentTerminalSide(side);
   }, []);
 
   const setAgentTerminalDelivery = useCallback((delivery: AgentTerminalDeliveryRecord | null) => {
@@ -3778,11 +3845,52 @@ const App: React.FC = () => {
     annotateSource !== 'message' &&
     agentTerminalCapability !== null &&
     !goalSetupMode;
-  const shouldRenderAgentTerminal =
-    showAgentTerminalControls &&
-    agentTerminalCapability !== null &&
-    wideModeType === null &&
-    (isAgentTerminalOpen || isAgentTerminalRunning);
+  const {
+    shouldRender: shouldRenderAgentTerminal,
+    isVisible: isAgentTerminalVisible,
+    isLeftVisible: isLeftAgentTerminalVisible,
+    showOnLeft: showAgentTerminalOnLeft,
+    showOnRight: showAgentTerminalOnRight,
+    isRightPanelVisible,
+    dockClassName: agentTerminalDockClassName,
+  } = getAgentTerminalLayout({
+    showControls: showAgentTerminalControls,
+    isOpen: isAgentTerminalOpen,
+    isRunning: isAgentTerminalRunning,
+    isWideMode: wideModeType !== null,
+    isBelowBreakpoint: isBelowAgentTerminalBreakpoint,
+    side: agentTerminalSide,
+    isRightPanelOpen: isPanelOpen,
+  });
+  const agentTerminalPanel = shouldRenderAgentTerminal && agentTerminalCapability ? (
+    <div
+      key="agent-terminal"
+      className={agentTerminalDockClassName}
+      aria-hidden={!isAgentTerminalVisible}
+      inert={!isAgentTerminalVisible}
+    >
+      <AnnotateAgentTerminalPanel
+        ref={agentTerminalRef}
+        capability={agentTerminalCapability}
+        width={`var(--agent-terminal-w, ${agentTerminalResize.width}px)`}
+        side={agentTerminalSide}
+        onSideChange={handleAgentTerminalSideChange}
+        onSessionActiveChange={setIsAgentTerminalRunning}
+        onSessionReadyChange={handleAgentTerminalReadyChange}
+        onClose={hideAgentTerminal}
+      />
+      {isAgentTerminalVisible && (
+        <ResizeHandle
+          {...agentTerminalResize.handleProps}
+          className="hidden lg:block z-[55]"
+          side={agentTerminalSide}
+          hideHoverTrack
+          tooltip={RESIZE_HANDLE_TOOLTIP}
+          onCollapse={hideAgentTerminal}
+        />
+      )}
+    </div>
+  ) : null;
   // Only greet in a normal authoring context — not on a read-only shared session
   // (a viewer would also be able to flip the owner's gridEnabled), nor over the
   // goal-setup / permission-mode flows. Deferred (not marked seen) until then.
@@ -3832,9 +3940,9 @@ const App: React.FC = () => {
           origin={origin}
           isSubmitting={isSubmitting}
           isExiting={isExiting}
-          isPanelOpen={isPanelOpen && rightSidebarTab === 'annotations'}
+          isPanelOpen={isRightPanelVisible && rightSidebarTab === 'annotations'}
           aiAvailable={canUseAskAI}
-          isAIChatOpen={isPanelOpen && rightSidebarTab === 'ai'}
+          isAIChatOpen={isRightPanelVisible && rightSidebarTab === 'ai'}
           aiHasMessages={visibleAIMessages.length > 0}
           hasAnyAnnotations={hasAnyAnnotations || hasDirectEdits || hasSavedFileChanges}
           annotationCount={feedbackAnnotationCount}
@@ -3948,38 +4056,9 @@ const App: React.FC = () => {
         <div data-print-region="content" className={`flex-1 flex overflow-hidden relative z-0 ${isResizing ? 'select-none' : ''}`}>
           {/* Tater sprites — inside content wrapper so z-0 stacking context applies */}
           {taterMode && <TaterSpriteRunning />}
-          {shouldRenderAgentTerminal && agentTerminalCapability && (
-            <div
-              className={
-                isAgentTerminalOpen
-                  ? "contents group/agent-terminal"
-                  : "absolute left-0 top-0 h-full w-0 overflow-hidden pointer-events-none group/agent-terminal"
-              }
-              aria-hidden={!isAgentTerminalOpen}
-              inert={!isAgentTerminalOpen ? true : undefined}
-            >
-              <AnnotateAgentTerminalPanel
-                ref={agentTerminalRef}
-                capability={agentTerminalCapability}
-                width={`var(--agent-terminal-w, ${agentTerminalResize.width}px)`}
-                onSessionActiveChange={setIsAgentTerminalRunning}
-                onSessionReadyChange={handleAgentTerminalReadyChange}
-                onClose={hideAgentTerminal}
-              />
-              {isAgentTerminalOpen && (
-                <ResizeHandle
-                  {...agentTerminalResize.handleProps}
-                  className="hidden lg:block z-[55]"
-                  side="left"
-                  hideHoverTrack
-                  tooltip={RESIZE_HANDLE_TOOLTIP}
-                  onCollapse={hideAgentTerminal}
-                />
-              )}
-            </div>
-          )}
+          {showAgentTerminalOnLeft && agentTerminalPanel}
           {/* Left Sidebar: collapsed tab flags (when sidebar is closed) */}
-          {wideModeType === null && !sidebar.isOpen && !goalSetupMode && !isAgentTerminalOpen && (
+          {wideModeType === null && !sidebar.isOpen && !goalSetupMode && !isLeftAgentTerminalVisible && (
             <SidebarTabs
               activeTab={sidebar.activeTab}
               onToggleTab={toggleSidebarTab}
@@ -4078,7 +4157,7 @@ const App: React.FC = () => {
           {/* Document Area */}
           <OverlayScrollArea
             element="main"
-            className={`flex-1 min-w-0 ${isHtmlSurface ? 'bg-background' : `${gridEnabled ? "bg-grid " : "bg-card "}${!goalSetupMode && !sidebar.isOpen && !isAgentTerminalOpen && wideModeType === null ? 'lg:pl-[30px]' : ''}`}`}
+            className={`flex-1 min-w-0 ${isHtmlSurface ? 'bg-background' : `${gridEnabled ? "bg-grid " : "bg-card "}${!goalSetupMode && !sidebar.isOpen && !isLeftAgentTerminalVisible && wideModeType === null ? 'lg:pl-[30px]' : ''}`}`}
             data-print-region="document"
             onViewportReady={handleViewportReady}
           >
@@ -4400,17 +4479,19 @@ const App: React.FC = () => {
             </div>
           </OverlayScrollArea>
 
+          {showAgentTerminalOnRight && agentTerminalPanel}
+
           {/* Right panel region — `group/sidebar` so the collapse button reveals when
               hovering the whole panel, not just the thin handle. The handle and the
               panel(s) are separate sibling conditionals, so they need a shared hover
               ancestor (`contents` = no layout box). */}
           <div className="contents group/sidebar">
           {/* Resize Handle */}
-          {isPanelOpen && wideModeType === null && !goalSetupMode && (rightSidebarTab === 'annotations' || canUseAskAI) && <ResizeHandle {...panelResize.handleProps} className="hidden md:block z-[55]" side="right" hideHoverTrack tooltip={RESIZE_HANDLE_TOOLTIP} onCollapse={() => setIsPanelOpen(false)} />}
+          {isRightPanelVisible && wideModeType === null && !goalSetupMode && (rightSidebarTab === 'annotations' || canUseAskAI) && <ResizeHandle {...panelResize.handleProps} className="hidden md:block z-[55]" side="right" hideHoverTrack tooltip={RESIZE_HANDLE_TOOLTIP} onCollapse={() => setIsPanelOpen(false)} />}
 
           {/* Annotation Panel */}
           <AnnotationPanel
-            isOpen={isPanelOpen && rightSidebarTab === 'annotations' && wideModeType === null && !goalSetupMode}
+            isOpen={isRightPanelVisible && rightSidebarTab === 'annotations' && wideModeType === null && !goalSetupMode}
             blocks={blocks}
             annotations={allAnnotations}
             selectedId={selectedAnnotationId ?? selectedCodeAnnotationId}
@@ -4438,7 +4519,7 @@ const App: React.FC = () => {
             })) ?? null}
             onOtherFileAnnotationsClick={handleFlashAnnotatedFiles}
           />
-          {isPanelOpen && rightSidebarTab === 'ai' && wideModeType === null && !goalSetupMode && canUseAskAI && (
+          {isRightPanelVisible && rightSidebarTab === 'ai' && wideModeType === null && !goalSetupMode && canUseAskAI && (
             <aside
               data-annotation-panel="true"
               className={`border-l border-border/50 bg-card flex flex-col flex-shrink-0 ${

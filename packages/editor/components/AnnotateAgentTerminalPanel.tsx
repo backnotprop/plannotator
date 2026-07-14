@@ -27,6 +27,7 @@ import {
   resolveAgentTerminalWebSocketUrl,
   resolveAnnotateAgentId,
   saveAnnotateAgentId,
+  type AnnotateAgentTerminalSide,
 } from "@plannotator/ui/utils/annotateAgentTerminal";
 import { getItem, setItem } from "@plannotator/ui/utils/storage";
 import { WebSocketPtyBackend } from "@plannotator/webtui/browser";
@@ -63,6 +64,8 @@ type AgentTerminalDisplaySettings = {
 interface AnnotateAgentTerminalPanelProps {
   capability: AgentTerminalCapability;
   width: number | string;
+  side: AnnotateAgentTerminalSide;
+  onSideChange: (side: AnnotateAgentTerminalSide) => void;
   onSessionActiveChange?: (active: boolean) => void;
   onSessionReadyChange?: (ready: boolean) => void;
   onClose: () => void;
@@ -121,7 +124,15 @@ const AGENT_TERMINAL_FONT_ZOOM = {
 export const AnnotateAgentTerminalPanel = forwardRef<
   AnnotateAgentTerminalPanelHandle,
   AnnotateAgentTerminalPanelProps
->(function AnnotateAgentTerminalPanel({ capability, width, onSessionActiveChange, onSessionReadyChange, onClose }, ref) {
+>(function AnnotateAgentTerminalPanel({
+  capability,
+  width,
+  side,
+  onSideChange,
+  onSessionActiveChange,
+  onSessionReadyChange,
+  onClose,
+}, ref) {
   const agents = capability.enabled ? capability.agents : [];
   const availableAgents = useMemo(
     () => agents.filter((agent) => agent.available),
@@ -222,7 +233,8 @@ export const AnnotateAgentTerminalPanel = forwardRef<
   const resetDisplaySettings = useCallback(() => {
     setDisplaySettings(DEFAULT_DISPLAY_SETTINGS);
     writeDisplaySettings(DEFAULT_DISPLAY_SETTINGS);
-  }, []);
+    onSideChange("left");
+  }, [onSideChange]);
 
   const selectedAgent =
     availableAgents.find((agent) => agent.id === selectedAgentId) ?? null;
@@ -306,10 +318,14 @@ export const AnnotateAgentTerminalPanel = forwardRef<
     setStatus("exited");
   }, [clearTimers, onClose, onSessionActiveChange, onSessionReadyChange]);
 
+  const sideBorderClass = side === "left"
+    ? "border-r border-border"
+    : "border-l border-border/50";
+
   return (
     <aside
       data-annotate-agent-terminal="true"
-      className="hidden lg:flex h-full flex-shrink-0 flex-col border-r border-border bg-card"
+      className={`hidden lg:flex h-full flex-shrink-0 flex-col bg-card ${sideBorderClass}`}
       style={{ width }}
     >
       {!capability.enabled ? (
@@ -330,7 +346,9 @@ export const AnnotateAgentTerminalPanel = forwardRef<
             <div className="flex shrink-0 items-center gap-1">
               <AgentTerminalDisplayPopover
                 settings={displaySettings}
+                side={side}
                 onChange={updateDisplaySettings}
+                onSideChange={onSideChange}
                 onReset={resetDisplaySettings}
               />
               <button
@@ -516,11 +534,15 @@ function formatExit(event: PtyExit): string {
 
 function AgentTerminalDisplayPopover({
   settings,
+  side,
   onChange,
+  onSideChange,
   onReset,
 }: {
   settings: AgentTerminalDisplaySettings;
+  side: AnnotateAgentTerminalSide;
   onChange: (updates: Partial<AgentTerminalDisplaySettings>) => void;
+  onSideChange: (side: AnnotateAgentTerminalSide) => void;
   onReset: () => void;
 }) {
   return (
@@ -550,6 +572,16 @@ function AgentTerminalDisplayPopover({
               <RotateCcw className="h-3.5 w-3.5" />
             </button>
           </div>
+
+          <TerminalDisplaySegmented
+            label="Position"
+            value={side}
+            options={[
+              { value: "left", label: "Left" },
+              { value: "right", label: "Right" },
+            ]}
+            onChange={onSideChange}
+          />
 
           <TerminalDisplayStepper
             label="Font size"
