@@ -7,6 +7,7 @@ import {
 } from '@plannotator/ui/components/ActionMenu';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { SunIcon, MoonIcon, SystemIcon } from '@plannotator/ui/components/icons/themeIcons';
+import { getUnsupportedMode } from '@plannotator/ui/utils/themeRegistry';
 import { MenuVersionSection } from '@plannotator/ui/components/MenuVersionSection';
 import { TextShimmer } from '@plannotator/ui/components/TextShimmer';
 import { modKey } from '@plannotator/ui/utils/platform';
@@ -38,7 +39,12 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
   origin,
   isWSL = false,
 }) => {
-  const { theme, setTheme } = useTheme();
+  const { theme, setTheme, colorTheme } = useTheme();
+  const unsupportedMode = getUnsupportedMode(colorTheme);
+  // When the palette can't render the stored mode, the UI is forced to the
+  // opposite — highlight the mode actually shown instead of the dead one.
+  const highlightedTheme =
+    theme === unsupportedMode ? (unsupportedMode === 'light' ? 'dark' : 'light') : theme;
 
   const showUpdateDot = !!updateInfo?.updateAvailable && !updateInfo.dismissed;
 
@@ -81,14 +87,18 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
               {(['light', 'dark', 'system'] as const).map((mode) => (
                 <button
                   key={mode}
+                  disabled={mode === unsupportedMode}
+                  title={mode === unsupportedMode ? 'Not supported by the current color theme' : undefined}
                   onClick={() => {
                     closeMenu();
                     setTheme(mode);
                   }}
                   className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
-                    theme === mode
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground'
+                    mode === unsupportedMode
+                      ? 'text-muted-foreground opacity-40 cursor-not-allowed'
+                      : highlightedTheme === mode
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
                   }`}
                 >
                   {mode === 'light' ? <SunIcon /> : mode === 'dark' ? <MoonIcon /> : <SystemIcon />}

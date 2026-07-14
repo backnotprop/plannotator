@@ -565,3 +565,16 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     },
   },
 ];
+
+/**
+ * The mode a color theme cannot render, or null if it supports both.
+ * Dark-only palettes silently ignore light mode (and vice versa) in
+ * ThemeProvider — callers use this to disable the incompatible mode
+ * button instead of letting the toggle no-op.
+ */
+export function getUnsupportedMode(themeId: string): 'light' | 'dark' | null {
+  const info = BUILT_IN_THEMES.find(t => t.id === themeId);
+  if (info?.modeSupport === 'dark-only') return 'light';
+  if (info?.modeSupport === 'light-only') return 'dark';
+  return null;
+}

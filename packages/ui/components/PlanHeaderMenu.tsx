@@ -7,6 +7,7 @@ import {
 } from './ActionMenu';
 import { useTheme } from './ThemeProvider';
 import { SunIcon, MoonIcon, SystemIcon } from './icons/themeIcons';
+import { getUnsupportedMode } from '../utils/themeRegistry';
 import { ReviewAgentsIcon } from './ReviewAgentsIcon';
 import { MenuVersionSection } from './MenuVersionSection';
 import { TextShimmer } from './TextShimmer';
@@ -58,7 +59,12 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
   bearConfigured,
   octarineConfigured,
 }) => {
-  const { theme, setTheme } = useTheme();
+  const { theme, setTheme, colorTheme } = useTheme();
+  const unsupportedMode = getUnsupportedMode(colorTheme);
+  // When the palette can't render the stored mode, the UI is forced to the
+  // opposite — highlight the mode actually shown instead of the dead one.
+  const highlightedTheme =
+    theme === unsupportedMode ? (unsupportedMode === 'light' ? 'dark' : 'light') : theme;
 
   const showUpdateDot = !!updateInfo?.updateAvailable && !updateInfo.dismissed;
 
@@ -104,14 +110,18 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
               {(['light', 'dark', 'system'] as const).map((mode) => (
                 <button
                   key={mode}
+                  disabled={mode === unsupportedMode}
+                  title={mode === unsupportedMode ? 'Not supported by the current color theme' : undefined}
                   onClick={() => {
                     closeMenu();
                     setTheme(mode);
                   }}
                   className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
-                    theme === mode
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground'
+                    mode === unsupportedMode
+                      ? 'text-muted-foreground opacity-40 cursor-not-allowed'
+                      : highlightedTheme === mode
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
                   }`}
                 >
                   {mode === 'light' ? <SunIcon /> : mode === 'dark' ? <MoonIcon /> : <SystemIcon />}
