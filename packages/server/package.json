@@ -23,7 +23,8 @@
     "./sessions": "./sessions.ts",
     "./project": "./project.ts",
     "./pr": "./pr.ts",
-    "./html-assets": "./html-assets.ts"
+    "./html-assets": "./html-assets.ts",
+    "./preview-proxy": "./preview-proxy.ts"
   },
   "files": [
     "*.ts",
@@ -34,6 +35,7 @@
     "@pierre/diffs": "1.2.8",
     "@plannotator/ai": "workspace:*",
     "@plannotator/shared": "workspace:*",
+    "@plannotator/ui": "workspace:*",
     "@plannotator/webtui": "0.1.0"
   },
   "peerDependencies": {

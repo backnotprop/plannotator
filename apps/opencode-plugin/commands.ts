@@ -27,7 +27,8 @@ import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { parseAnnotateArgs } from "@plannotator/shared/annotate-args";
 import { parseReviewArgs } from "@plannotator/shared/review-args";
-import { urlToMarkdown, isConvertedSource } from "@plannotator/shared/url-to-markdown";
+import { urlToMarkdown, isConvertedSource, isLoopbackUrl } from "@plannotator/shared/url-to-markdown";
+import { startPreviewProxy } from "@plannotator/server/preview-proxy";
 import { buildLocalWorkspaceReview, type WorkspaceDiffType } from "@plannotator/server/review-workspace";
 import { statSync } from "fs";
 import path from "path";
@@ -227,12 +228,32 @@ export async function handleAnnotateCommand(
   let isFolder = false;
   let sourceInfo: string | undefined;
   let sourceConverted = false;
+  let livePreviewUrl: string | undefined;
+  let previewProxy: { origin: string; stop: () => void } | undefined;
   const agentCwd = directory || process.cwd();
 
   // --- URL annotation ---
   const isUrl = /^https?:\/\//i.test(filePath);
 
-  if (isUrl) {
+  if (isUrl && isLoopbackUrl(filePath)) {
+    // Live design-preview: proxy the dev server so a real-origin iframe can
+    // render its module graph, and inject the annotation bridge.
+    client.app.log({ level: "info", message: `Live preview: proxying ${filePath}...` });
+    try {
+      previewProxy = await startPreviewProxy(filePath);
+    } catch (err) {
+      client.app.log({ level: "error", message: `Failed to start live preview proxy: ${err instanceof Error ? err.message : String(err)}` });
+      return;
+    }
+    // The proxy owns the origin root and forwards every path; carry the
+    // target's path+query onto the proxy origin so the iframe loads the
+    // requested page, not the dev server's default route.
+    const targetUrl = new URL(filePath);
+    livePreviewUrl = previewProxy.origin + targetUrl.pathname + targetUrl.search;
+    markdown = "";
+    absolutePath = filePath;
+    sourceInfo = filePath;
+  } else if (isUrl) {
     const useJina = resolveUseJina(noJina, loadConfig());
     client.app.log({ level: "info", message: `Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}...` });
     try {
@@ -330,6 +351,7 @@ export async function handleAnnotateCommand(
     sourceConverted,
     rawHtml,
     renderHtml: !!rawHtml,
+    livePreviewUrl,
     convertHtml: renderMarkdownFlag,
     sharingEnabled: await getSharingEnabled(),
     shareBaseUrl: getShareBaseUrl(),
@@ -346,6 +368,7 @@ export async function handleAnnotateCommand(
   const result = await server.waitForDecision();
   await Bun.sleep(1500);
   server.stop();
+  previewProxy?.stop();
 
   // Both exit and approve are "no-op for the agent" — skip session injection.
   if (result.exit || result.approved) {

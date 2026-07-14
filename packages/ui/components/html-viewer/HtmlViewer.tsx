@@ -69,6 +69,9 @@ export interface HtmlViewerProps {
   onAskAI?: CommentAskAIHandler;
   /** Accessible iframe title. */
   title?: string;
+  /** Live-preview mode: render <iframe src> at this origin instead of srcDoc.
+   *  The bridge + highlight CSS are injected server-side by the preview proxy. */
+  src?: string;
 }
 
 export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
@@ -92,6 +95,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onToggleDiff,
       onAskAI,
       title = "HTML Plan Viewer",
+      src,
     },
     ref,
   ) => {
@@ -279,18 +283,26 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               </div>
             )}
             <iframe
-            ref={iframeRef}
-            srcDoc={srcdoc}
-            sandbox="allow-scripts"
-            style={{
-              width: "100%",
-              height: fullViewport ? "100%" : `${iframeHeight}px`,
-              border: "none",
-              display: "block",
-              colorScheme: "auto",
-            }}
-            title={title}
-          />
+              ref={iframeRef}
+              {...(src
+                ? { src, sandbox: "allow-scripts allow-same-origin" }
+                : { srcDoc: srcdoc, sandbox: "allow-scripts" })}
+              style={{
+                width: "100%",
+                height: fullViewport ? "100%" : `${iframeHeight}px`,
+                border: "none",
+                display: "block",
+                // Live preview (src): render like a real browser tab — an opaque
+                // white canvas that doesn't inherit the host's color-scheme, so an
+                // unstyled/transparent page shows black-on-white instead of bleeding
+                // through to Plannotator's surface. A page with its own background
+                // paints over this. srcDoc path keeps its theme-following behavior.
+                ...(src
+                  ? { background: "#ffffff", colorScheme: "normal" as const }
+                  : { colorScheme: "auto" as const }),
+              }}
+              title={title}
+            />
           </article>
         </div>
 

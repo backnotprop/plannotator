@@ -88,6 +88,12 @@ export interface AnnotateServerOptions {
   rawHtml?: string;
   /** Render HTML as-is in an iframe. */
   renderHtml?: boolean;
+  /**
+   * Live-preview proxy origin (e.g. "http://localhost:53211"). When set, the
+   * editor renders a live <iframe src> pointed at this origin instead of
+   * markdown/raw-HTML content. Sharing and version history are disabled.
+   */
+  livePreviewUrl?: string;
   /** Session-level force-markdown preference (`--markdown`). Exposed in /api/plan so the
    *  frontend appends `&convert=1` when navigating folder/linked HTML files. */
   convertHtml?: boolean;
@@ -148,6 +154,7 @@ export async function startAnnotateServer(
     gate = false,
     rawHtml,
     renderHtml = false,
+    livePreviewUrl,
     convertHtml = false,
     agentCwd,
     project,
@@ -390,6 +397,7 @@ export async function startAnnotateServer(
               renderAs: displayRawHtml ? 'html' as const : 'markdown' as const,
               ...(displayRawHtml ? { rawHtml: displayRawHtml } : {}),
               ...(diffHtml ? { diffHtml } : {}),
+              ...(livePreviewUrl ? { renderAs: "html" as const, livePreviewUrl } : {}),
               convertHtml,
               ...(annotateHistory
                 ? {

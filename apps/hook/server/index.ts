@@ -92,7 +92,7 @@ import {
 } from "@plannotator/shared/goal-setup";
 import { stripAtPrefix, resolveAtReference } from "@plannotator/shared/at-reference";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
-import { urlToMarkdown, isConvertedSource } from "@plannotator/shared/url-to-markdown";
+import { urlToMarkdown, isConvertedSource, isLoopbackUrl } from "@plannotator/shared/url-to-markdown";
 import { createWorktreePool, type WorktreePool, type PoolEntry } from "@plannotator/shared/worktree-pool";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getCliInstallUrl, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
@@ -925,11 +925,33 @@ if (args[0] === "sessions") {
   let annotateMode: "annotate" | "annotate-folder" = "annotate";
   let sourceInfo: string | undefined;
   let sourceConverted = false;
+  let livePreviewUrl: string | undefined;
+  let previewProxy: { origin: string; stop: () => void } | undefined;
 
   // --- URL annotation ---
   const isUrl = /^https?:\/\//i.test(filePath);
 
-  if (isUrl) {
+  if (isUrl && isLoopbackUrl(filePath)) {
+    // Live design-preview: proxy the dev server so a real-origin iframe can
+    // render its module graph, and inject the annotation bridge.
+    const { startPreviewProxy } = await import("@plannotator/server/preview-proxy");
+    console.error(`Live preview: proxying ${filePath}`);
+    try {
+      previewProxy = await startPreviewProxy(filePath);
+    } catch (err) {
+      console.error(`Failed to start live preview proxy: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+    // The proxy owns the origin root and forwards every path; carry the target's
+    // path+query onto the proxy origin so the iframe loads the requested page,
+    // not the dev server's default route.
+    const targetUrl = new URL(filePath);
+    livePreviewUrl = previewProxy.origin + targetUrl.pathname + targetUrl.search;
+    process.on("exit", () => previewProxy?.stop());
+    markdown = "";
+    absolutePath = filePath;
+    sourceInfo = filePath;
+  } else if (isUrl) {
     const useJina = resolveUseJina(cliNoJina, loadConfig());
     console.error(`Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}`);
     try {
@@ -1047,6 +1069,7 @@ if (args[0] === "sessions") {
     gate: gateFlag,
     rawHtml,
     renderHtml: !!rawHtml,
+    livePreviewUrl,
     convertHtml: renderMarkdownFlag,
     agentCwd: projectRoot,
     project: annotateProject,

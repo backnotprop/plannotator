@@ -523,6 +523,7 @@ export async function startMarkdownAnnotationSession(
 	renderHtml?: boolean,
 	convertHtml?: boolean,
 	recentMessages?: { messageId: string; text: string; timestamp?: string }[],
+	livePreviewUrl?: string,
 ): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>> {
 	if (!ctx.hasUI) {
 		throw new Error("Plannotator annotation browser is unavailable in this session.");
@@ -557,6 +558,7 @@ export async function startMarkdownAnnotationSession(
 		rawHtml,
 		renderHtml,
 		convertHtml,
+		livePreviewUrl,
 		htmlContent: planHtmlContent,
 		sharingEnabled: resolveSharingEnabled(loadConfig()),
 		shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,

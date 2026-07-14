@@ -254,6 +254,12 @@ Input type detected:
                deliberately excluded — it commonly holds secrets and annotate history
                copies file contents; source-code extensions stay with code review)
   .html/.htm → file read, rendered as raw HTML by default (or converted to markdown with --markdown)
+  http://localhost, 127.*, [::1]  → LIVE design preview: a per-session reverse proxy
+             (packages/server/preview-proxy.ts) forwards to the dev server, proxies its HMR
+             websocket, and injects the annotation bridge; the editor renders an <iframe src>
+             at the proxy origin so the real page (Vite ES-module graph and all) loads and is
+             annotated as HTML. Loopback-only. Non-goals: URL sharing, version history, and
+             host-theme token injection are disabled for live sessions.
   https://   → fetched via Jina Reader (default) or fetch+Turndown (--no-jina)
   folder/    → file browser opened, files converted on demand
         ↓
@@ -372,7 +378,7 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 
 | Endpoint              | Method | Purpose                                    |
 | --------------------- | ------ | ------------------------------------------ |
-| `/api/plan`           | GET    | Returns `{ plan, origin, mode: "annotate", filePath, sourceInfo?, gate, renderAs?, rawHtml?, previousPlan?, versionInfo?, diffCurrent?, diffHtml? }`. The last four power the per-file version diff: `previousPlan`/`versionInfo`/`diffCurrent` for the markdown diff, `diffHtml` (the previous→current page rendered with inline `<ins>`/`<del>`) for `--render-html` files. |
+| `/api/plan`           | GET    | Returns `{ plan, origin, mode: "annotate", filePath, sourceInfo?, gate, renderAs?, rawHtml?, livePreviewUrl?, previousPlan?, versionInfo?, diffCurrent?, diffHtml? }`. `livePreviewUrl` (with `renderAs: "html"`) is set for live localhost design previews — the editor renders an `<iframe src>` at that per-session reverse-proxy origin instead of markdown/raw HTML. The last four power the per-file version diff: `previousPlan`/`versionInfo`/`diffCurrent` for the markdown diff, `diffHtml` (the previous→current page rendered with inline `<ins>`/`<del>`) for `--render-html` files. |
 | `/api/plan/version`   | GET    | Fetch a specific stored version of the annotated file (`?v=N`) |
 | `/api/plan/versions`  | GET    | List all stored versions of the annotated file |
 | `/api/feedback`       | POST   | Submit annotations (body: feedback, annotations) |

@@ -175,6 +175,12 @@ export async function startAnnotateServer(options: {
 	gate?: boolean;
 	rawHtml?: string;
 	renderHtml?: boolean;
+	/**
+	 * Live-preview proxy origin (e.g. "http://localhost:53211"). When set, the
+	 * editor renders a live <iframe src> pointed at this origin instead of
+	 * markdown/raw-HTML content. Sharing and version history are disabled.
+	 */
+	livePreviewUrl?: string;
 	convertHtml?: boolean;
 	agentCwd?: string;
 	/** Project name for keying per-file version history (powers the annotate version diff). */
@@ -419,6 +425,7 @@ export async function startAnnotateServer(options: {
 				renderAs: displayRawHtml ? 'html' : 'markdown',
 				...(displayRawHtml ? { rawHtml: displayRawHtml } : {}),
 				...(diffHtml ? { diffHtml } : {}),
+				...(options.livePreviewUrl ? { renderAs: "html" as const, livePreviewUrl: options.livePreviewUrl } : {}),
 				convertHtml: options.convertHtml ?? false,
 				...(annotateHistory
 					? {

@@ -551,24 +551,50 @@ export default function plannotator(pi: ExtensionAPI): void {
 			let sourceInfo: string | undefined;
 			let sourceConverted = false;
 			let isFolder = false;
+			let livePreviewUrl: string | undefined;
+			let previewProxy: { origin: string; stop: () => void } | undefined;
 
 			// --- URL annotation ---
 			const isUrl = /^https?:\/\//i.test(filePath);
 
 			if (isUrl) {
-				const useJina = resolveUseJina(noJina, loadConfig());
-				ctx.ui.notify(`Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}...`, "info");
-				try {
-					const { isConvertedSource, urlToMarkdown } = await import("./generated/url-to-markdown.js");
-					const result = await urlToMarkdown(filePath, { useJina });
-					markdown = result.markdown;
-					sourceConverted = isConvertedSource(result.source);
-				} catch (err) {
-					ctx.ui.notify(`Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}`, "error");
-					return;
+				// Lazy-load the URL helper (keeps the heavy Turndown graph off startup,
+				// matching this file's lazy-import discipline).
+				const { isLoopbackUrl } = await import("./generated/url-to-markdown.js");
+				if (isLoopbackUrl(filePath)) {
+					// Live design-preview: proxy the dev server so a real-origin iframe can
+					// render its module graph, and inject the annotation bridge.
+					const { startPreviewProxy } = await import("./server/previewProxy.js");
+					ctx.ui.notify(`Live preview: proxying ${filePath}...`, "info");
+					try {
+						previewProxy = await startPreviewProxy(filePath);
+					} catch (err) {
+						ctx.ui.notify(`Failed to start live preview proxy: ${err instanceof Error ? err.message : String(err)}`, "error");
+						return;
+					}
+					// The proxy owns the origin root and forwards every path; carry the
+					// target's path+query onto the proxy origin so the iframe loads the
+					// requested page, not the dev server's default route.
+					const targetUrl = new URL(filePath);
+					livePreviewUrl = previewProxy.origin + targetUrl.pathname + targetUrl.search;
+					markdown = "";
+					absolutePath = filePath;
+					sourceInfo = filePath;
+				} else {
+					const useJina = resolveUseJina(noJina, loadConfig());
+					ctx.ui.notify(`Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}...`, "info");
+					try {
+						const { isConvertedSource, urlToMarkdown } = await import("./generated/url-to-markdown.js");
+						const result = await urlToMarkdown(filePath, { useJina });
+						markdown = result.markdown;
+						sourceConverted = isConvertedSource(result.source);
+					} catch (err) {
+						ctx.ui.notify(`Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}`, "error");
+						return;
+					}
+					absolutePath = filePath;
+					sourceInfo = filePath;
 				}
-				absolutePath = filePath;
-				sourceInfo = filePath;
 			} else {
 				// Pick the interpretation of the user input that actually exists:
 				// stripped form first (reference-mode primary), literal as fallback
@@ -644,6 +670,8 @@ export default function plannotator(pi: ExtensionAPI): void {
 					rawHtml,
 					!!rawHtml,
 					renderMarkdownFlag,
+					undefined,
+					livePreviewUrl,
 				);
 				ctx.ui.notify(sessionOpenedMessage("Annotation opened", session.url), "info");
 				void session
@@ -680,8 +708,14 @@ export default function plannotator(pi: ExtensionAPI): void {
 					})
 					.catch((err) => {
 						reportBackgroundError(ctx, "Plannotator annotation session failed", err, origin);
+					})
+					.finally(() => {
+						// Pi is a persistent extension host, so the live-preview proxy
+						// must die with the session (not on process exit).
+						try { previewProxy?.stop(); } catch {}
 					});
 			} catch (err) {
+				try { previewProxy?.stop(); } catch {}
 				ctx.ui.notify(
 					`Failed to start annotation UI: ${getStartupErrorMessage(err)}`,
 					"error",

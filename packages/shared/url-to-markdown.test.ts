@@ -1,5 +1,5 @@
-import { test, expect, mock, beforeEach, afterEach } from "bun:test";
-import { urlToMarkdown } from "./url-to-markdown";
+import { test, expect, mock, beforeEach, afterEach, describe, it } from "bun:test";
+import { urlToMarkdown, isLoopbackUrl } from "./url-to-markdown";
 
 // Track fetch calls to verify headers and URL selection
 let fetchCalls: { url: string; headers: Record<string, string> }[] = [];
@@ -174,4 +174,21 @@ test("raw .md URL: still takes priority over content negotiation", async () => {
 
   expect(result.source).toBe("fetch-raw");
   expect(result.markdown).toBe("# Raw markdown file");
+});
+
+describe("isLoopbackUrl", () => {
+  it("accepts loopback hosts", () => {
+    for (const u of ["http://localhost:5176/x", "http://127.0.0.1:3000", "http://[::1]:8080", "http://0.0.0.0:9"]) {
+      expect(isLoopbackUrl(u)).toBe(true);
+    }
+  });
+  it("rejects LAN and public hosts", () => {
+    for (const u of ["http://192.168.1.10:5176", "http://10.0.0.5", "http://example.com", "http://169.254.1.1"]) {
+      expect(isLoopbackUrl(u)).toBe(false);
+    }
+  });
+  it("rejects non-http(s) and malformed", () => {
+    expect(isLoopbackUrl("file:///etc/passwd")).toBe(false);
+    expect(isLoopbackUrl("not a url")).toBe(false);
+  });
 });

@@ -94,3 +94,15 @@ for f in claude-agent-sdk codex-app-server opencode-sdk command-path pi-sdk pi-s
   src="../../packages/ai/providers/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/ai/providers/%s.ts\n' "$f" | cat - "$src" > "generated/ai/providers/$f.ts"
 done
+
+# Vendor the live-preview injection block from packages/ui/components/html-viewer.
+# These are browser-safe, zero-dependency string constants (highlight CSS + the
+# postMessage bridge) — kept as the single source of truth so the Pi live-preview
+# proxy injects byte-for-byte what the srcdoc client path does. bridge-script has
+# no imports; livePreviewInjection's ./bridge-script import is rewritten to .js.
+printf '// @generated — DO NOT EDIT. Source: packages/ui/components/html-viewer/bridge-script.ts\n' \
+  | cat - "../../packages/ui/components/html-viewer/bridge-script.ts" > "generated/bridge-script.ts"
+printf '// @generated — DO NOT EDIT. Source: packages/ui/components/html-viewer/livePreviewInjection.ts\n' \
+  | cat - "../../packages/ui/components/html-viewer/livePreviewInjection.ts" \
+  | sed 's|from "\./bridge-script"|from "./bridge-script.js"|' \
+  > "generated/livePreviewInjection.ts"

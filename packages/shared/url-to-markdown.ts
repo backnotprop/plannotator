@@ -46,7 +46,7 @@ const PRIVATE_IPV4 = /^(10\.\d{1,3}|192\.168|172\.(1[6-9]|2\d|3[01])|169\.254)\.
 // Bracketed IPv6 private/reserved prefixes (matches WHATWG URL hostname getter output).
 // fc00::/7 covers fc00:: through fdff::, so match [fc or [fd prefix.
 const PRIVATE_IPV6 = /^\[(::1|::ffff:|fe80:|fc[0-9a-f]{2}:|fd[0-9a-f]{2}:)/i;
-function isLocalUrl(url: string): boolean {
+export function isLocalUrl(url: string): boolean {
   try {
     const { hostname } = new URL(url);
     if (
@@ -64,6 +64,28 @@ function isLocalUrl(url: string): boolean {
     // and IPv4-mapped (::ffff:) which embeds private IPv4 in hex notation
     if (PRIVATE_IPV6.test(hostname)) return true;
     return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Strict loopback check for the live-preview proxy allow-decision. Only the
+ * local machine's own loopback interface — NOT LAN/private ranges. Requires an
+ * http(s) URL.
+ */
+export function isLoopbackUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+    const h = u.hostname;
+    return (
+      h === "localhost" ||
+      h === "::1" ||
+      h === "[::1]" ||
+      h === "0.0.0.0" ||
+      /^127\./.test(h)
+    );
   } catch {
     return false;
   }

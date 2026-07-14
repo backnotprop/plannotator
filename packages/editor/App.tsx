@@ -397,6 +397,7 @@ const App: React.FC = () => {
   // card-chromed markdown column. Branch the document-area containers on this.
   const isHtmlSurface = renderAs === 'html';
   const [rawHtml, setRawHtml] = useState('');
+  const [livePreviewUrl, setLivePreviewUrl] = useState<string | null>(null);
   const [htmlDiffHtml, setHtmlDiffHtml] = useState<string | null>(null);
   const [shareHtml, setShareHtml] = useState('');
   // Session-level force-markdown preference (`--markdown`). When set, folder/linked HTML
@@ -2251,7 +2252,7 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; sourceSave?: SourceSaveCapability; gate?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; shareHtml?: string; diffHtml?: string; convertHtml?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string }; recentMessages?: PickerMessage[]; agentTerminal?: AgentTerminalCapability }) => {
+      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; sourceSave?: SourceSaveCapability; gate?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; livePreviewUrl?: string; shareHtml?: string; diffHtml?: string; convertHtml?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string }; recentMessages?: PickerMessage[]; agentTerminal?: AgentTerminalCapability }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
         // Session-level force-markdown preference (--markdown); threaded into folder/linked
@@ -2271,9 +2272,10 @@ const App: React.FC = () => {
           archive.fetchPlans();
           setSharingEnabled(false);
           sidebar.open('archive');
-        } else if (data.renderAs === 'html' && data.rawHtml) {
+        } else if (data.renderAs === 'html' && (data.rawHtml || data.livePreviewUrl)) {
           setRenderAs('html');
-          setRawHtml(data.rawHtml);
+          setRawHtml(data.rawHtml ?? '');
+          setLivePreviewUrl(data.livePreviewUrl ?? null);
           setShareHtml(data.shareHtml ?? '');
           setHtmlDiffHtml(data.diffHtml ?? null);
           setMarkdown('');
@@ -4362,6 +4364,7 @@ const App: React.FC = () => {
                     diffActive={isPlanDiffActive && !!htmlDiffHtml}
                     onToggleDiff={() => setIsPlanDiffActive((v) => !v)}
                     onAskAI={canUseDocumentAskAI ? handleAskAI : undefined}
+                    src={livePreviewUrl ?? undefined}
                   />
                 ) : isEditingMarkdown ? (
                   <MarkdownEditor
