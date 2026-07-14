@@ -50,7 +50,7 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({
       })}
 
       {isOpen && (
-        <div className={panelClassName ?? 'absolute top-full right-0 mt-1 w-56 rounded-lg border border-border bg-popover py-1 shadow-xl z-[70]'}>
+        <div className={panelClassName ?? 'absolute top-full right-0 mt-1 w-64 rounded-lg border border-border bg-popover py-1 shadow-xl z-[70]'}>
           {children({ closeMenu: () => setIsOpen(false) })}
         </div>
       )}
