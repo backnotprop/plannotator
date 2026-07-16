@@ -307,18 +307,60 @@ describe("getAnnotateApprovedPrompt", () => {
 // ─── A4b. Review denied suffix ───────────────────────────────────────────────
 
 describe("getReviewDeniedSuffix", () => {
-  test("every runtime gets the same triage-first default — no agent starts coding off raw review feedback", () => {
+  test("every runtime gets the same verification-only default", () => {
     const runtimes = ["claude-code", "opencode", "pi", "amp", "droid", "codex", "copilot-cli", "gemini-cli", "kiro-cli"] as const;
     for (const runtime of runtimes) {
       expect(getReviewDeniedSuffix(runtime, {})).toBe(DEFAULT_REVIEW_DENIED_SUFFIX);
     }
-    expect(DEFAULT_REVIEW_DENIED_SUFFIX).toContain("Do not change any code until we've discussed");
+  });
+
+  test("requires verdicts backed by code evidence for every incoming finding", () => {
+    expect(DEFAULT_REVIEW_DENIED_SUFFIX).toContain(
+      "Inspect every finding against the actual code",
+    );
+    expect(DEFAULT_REVIEW_DENIED_SUFFIX).toContain(
+      "do not assume automated feedback is correct",
+    );
+    expect(DEFAULT_REVIEW_DENIED_SUFFIX).toContain(
+      "Confirmed / Partly / Not a bug / Intended",
+    );
+    expect(DEFAULT_REVIEW_DENIED_SUFFIX).toContain("with concise code evidence");
+    expect(DEFAULT_REVIEW_DENIED_SUFFIX).toContain(
+      "introduced by the current changes, was pre-existing, or reflects deliberate scope",
+    );
+  });
+
+  test("limits review to submitted findings", () => {
+    expect(DEFAULT_REVIEW_DENIED_SUFFIX).toContain("Review only the incoming findings");
+    expect(DEFAULT_REVIEW_DENIED_SUFFIX).toContain(
+      "Do not independently review the rest of the diff or search for issues that were not submitted",
+    );
+    expect(DEFAULT_REVIEW_DENIED_SUFFIX).not.toMatch(
+      /independently review the current diff yourself|start (?:a|an) (?:independent|new) review|surface what it missed|(?:find|search for) additional findings|actively look for/i,
+    );
+  });
+
+  test("keeps code changes blocked until after discussion", () => {
+    expect(DEFAULT_REVIEW_DENIED_SUFFIX).toContain(
+      "Do not change any code until we have discussed the verdicts and validated findings",
+    );
   });
 
   test("uses configured override", () => {
     expect(getReviewDeniedSuffix("claude-code", {
       prompts: { review: { denied: "\nFix everything." } },
     })).toBe("\nFix everything.");
+  });
+
+  test("runtime-specific override wins over the generic suffix", () => {
+    expect(getReviewDeniedSuffix("pi", {
+      prompts: {
+        review: {
+          denied: "Generic review suffix.",
+          runtimes: { pi: { denied: "Pi review suffix." } },
+        },
+      },
+    })).toBe("Pi review suffix.");
   });
 });
 

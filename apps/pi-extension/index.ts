@@ -462,7 +462,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 								safeNotify(ctx, "Code review closed (no feedback).", "info", origin);
 								return;
 							}
-							// Append the triage-first suffix when the reviewer sent
+							// Append the verification-only suffix when the reviewer sent
 							// annotations to act on (PR mode included). Platform PR actions
 							// (approve/comment posted to the host) come back with an empty
 							// annotation set and a status message — don't tell the agent to

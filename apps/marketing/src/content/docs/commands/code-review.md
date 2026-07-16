@@ -154,7 +154,7 @@ The review agents (Claude, Codex, Code Tour, Guided Review) shell out to externa
 - **Send Feedback** formats your annotations and sends them to the agent
 - **Approve** sends a review-approval prompt to the agent. By default this says no changes were requested, and you can override it in `~/.plannotator/config.json`.
 
-After submission, the agent receives your feedback and can act on it, whether that's fixing issues, explaining decisions, or making the requested changes.
+After submission, the agent receives your feedback. By default, Plannotator tells it to verify each submitted finding against the code, discuss its verdicts before changing code, and not review the rest of the diff for additional issues. You can replace this suffix with `prompts.review.denied` in `~/.plannotator/config.json`.
 
 ### Customizing the approval prompt
 

@@ -877,10 +877,10 @@ if (args[0] === "sessions") {
     console.log(getReviewApprovedPrompt(detectedOrigin));
   } else {
     console.log(result.feedback);
-    // Append the triage-first suffix whenever the reviewer sent annotations to
+    // Append the verification-only suffix whenever the reviewer sent annotations to
     // act on — in PR mode too. Platform PR actions (approve/comment posted to
     // the host) come back with an empty annotation set and a status message;
-    // those must NOT get the "triage and don't change code" instruction.
+    // those must NOT get the "verify findings and don't change code" instruction.
     if (result.annotations.length > 0) {
       console.log(getReviewDeniedSuffix(detectedOrigin));
     }
