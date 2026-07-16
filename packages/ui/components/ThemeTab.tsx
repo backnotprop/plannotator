@@ -1,6 +1,7 @@
 import React from 'react';
 import { useTheme } from './ThemeProvider';
 import { THEME_MODES } from './themeModes';
+import { isThemeModeAvailable } from '../utils/themeRegistry';
 
 interface ThemeTabProps {
   onPreview?: () => void;
@@ -8,7 +9,14 @@ interface ThemeTabProps {
 }
 
 export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
-  const { mode, setMode, colorTheme, setColorTheme, availableThemes, resolvedMode } = useTheme();
+  const {
+    mode,
+    setMode,
+    colorTheme,
+    setColorTheme,
+    availableThemes,
+    preferredMode,
+  } = useTheme();
 
   return (
     <div className={compact ? '' : 'space-y-5'}>
@@ -16,22 +24,29 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
       <div className={compact ? 'flex items-center gap-3 mb-2' : 'space-y-2'}>
         {!compact && <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Mode</label>}
         <div className="flex gap-1">
-          {THEME_MODES.map(({ id, label, Icon }) => (
-            <button
-              key={id}
-              onClick={() => setMode(id)}
-              className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                mode === id
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              <span className="flex items-center gap-1.5">
-                <Icon className="w-3 h-3" />
-                {label}
-              </span>
-            </button>
-          ))}
+          {THEME_MODES.map(({ id, label, Icon }) => {
+            const available = isThemeModeAvailable(colorTheme, id);
+            return (
+              <button
+                key={id}
+                disabled={!available}
+                title={available ? undefined : 'Not supported by the current color theme'}
+                onClick={() => setMode(id)}
+                className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  !available
+                    ? 'cursor-not-allowed bg-muted text-muted-foreground opacity-40'
+                    : mode === id
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <span className="flex items-center gap-1.5">
+                  <Icon className="w-3 h-3" />
+                  {label}
+                </span>
+              </button>
+            );
+          })}
         </div>
         {compact && (
           <span className="text-[10px] text-muted-foreground/60 ml-auto flex items-center gap-1">
@@ -69,10 +84,8 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
         <div className={`grid gap-2 overflow-y-auto pr-1 ${compact ? 'grid-cols-4' : 'grid-cols-3'}`}>
           {availableThemes.map(theme => {
             const isSelected = colorTheme === theme.id;
-            const colors = theme.colors[resolvedMode];
-            const modeUnavailable =
-              (resolvedMode === 'light' && theme.modeSupport === 'dark-only') ||
-              (resolvedMode === 'dark' && theme.modeSupport === 'light-only');
+            const colors = theme.colors[preferredMode];
+            const modeUnavailable = !isThemeModeAvailable(theme.id, preferredMode);
             return (
               <button
                 key={theme.id}
