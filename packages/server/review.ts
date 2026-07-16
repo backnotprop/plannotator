@@ -81,6 +81,7 @@ import {
   composeMarkerReviewPrompt,
   buildMarkerCommand,
   parseMarkerStreamOutput,
+  reduceMarkerStream,
   transformMarkerFindings,
   makeMarkerNonce,
   extractMarkerNonce,
@@ -1117,7 +1118,14 @@ export async function startReviewServer(
         const output = nonce && meta.stdout ? parseMarkerStreamOutput(meta.stdout, markerEngine, nonce) : null;
         if (!output) {
           job.status = "failed";
-          job.error = `${markerEngine.author} review output missing or unparseable (no valid marker JSON).`;
+          const providerError = meta.stdout
+            ? reduceMarkerStream(meta.stdout, markerEngine).providerError
+            : null;
+          job.error = providerError
+            ?? `${markerEngine.author} review output missing or unparseable (no valid marker JSON).`;
+          if (providerError) {
+            console.error(`[${markerEngine.id}-review] Provider error for job ${job.id}: ${providerError}`);
+          }
           return;
         }
 
@@ -1180,7 +1188,7 @@ export async function startReviewServer(
         // current patch only if the snapshot is missing (defensive; should
         // not happen in practice — see agent-jobs.ts's changedFilesSnapshot).
         const changedFiles = meta.changedFilesSnapshot ?? listPatchFiles(currentPatch).map((f) => f.path);
-        const { summary } = await guide.onJobComplete({ job, meta, changedFiles });
+        const { summary, error } = await guide.onJobComplete({ job, meta, changedFiles });
         if (summary) {
           job.summary = summary;
         } else {
@@ -1188,7 +1196,7 @@ export async function startReviewServer(
           // malformed, or fully-invalidated output must not look like a
           // successful card that 404s on /api/guide/:id.
           job.status = "failed";
-          job.error = GUIDE_EMPTY_OUTPUT_ERROR;
+          job.error = error ?? GUIDE_EMPTY_OUTPUT_ERROR;
         }
         return;
       }

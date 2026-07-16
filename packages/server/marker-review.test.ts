@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
   markerOpen,
   markerClose,
@@ -21,6 +22,11 @@ import type { ResolvedReviewProfile } from "@plannotator/shared/review-profiles"
 
 const cursor = MARKER_ENGINES.cursor;
 const opencode = MARKER_ENGINES.opencode;
+const pi = MARKER_ENGINES.pi;
+const piInsufficientCreditsStdout = readFileSync(
+  new URL("./fixtures/pi-insufficient-credits.ndjson", import.meta.url),
+  "utf8",
+);
 
 // A fixed, valid nonce (pn + 12 hex) for deterministic tests.
 const NONCE = "pn0123456789ab";
@@ -266,6 +272,54 @@ describe("reduceMarkerStream: opencode", () => {
   test("survives chunk-joined buffer and malformed lines", () => {
     const stdout = opencodeText("a") + "not json\n" + opencodeText("b");
     expect(reduceMarkerStream(stdout, opencode).canonicalText).toBe("ab");
+  });
+});
+
+describe("reduceMarkerStream: pi", () => {
+  test("extracts a structured provider failure from Pi's exit-0 NDJSON stream", () => {
+    const reduction = reduceMarkerStream(piInsufficientCreditsStdout, pi);
+    expect(reduction.canonicalText).toBe("");
+    expect(reduction.providerError).toBe("Insufficient API credits");
+  });
+
+  test("bounds and redacts provider diagnostics without dumping the NDJSON record", () => {
+    const secret = `sk-${"a".repeat(32)}`;
+    const stdout = ndjson({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [],
+        stopReason: "error",
+        errorMessage: `Insufficient credits\nAuthorization: Bearer ${secret}; ${"x".repeat(700)}`,
+      },
+    });
+
+    const { providerError } = reduceMarkerStream(stdout, pi);
+    expect(providerError).toStartWith("Insufficient credits Authorization: [REDACTED]");
+    expect(providerError).not.toContain(secret);
+    expect(providerError).not.toContain("\n");
+    expect(providerError?.length).toBe(500);
+  });
+
+  test("uses an actionable fallback for an aborted Pi assistant message", () => {
+    const stdout = ndjson({
+      type: "message_end",
+      message: { role: "assistant", content: [], stopReason: "aborted" },
+    });
+    expect(reduceMarkerStream(stdout, pi).providerError).toBe("Pi request aborted");
+  });
+
+  test("clears a transient Pi error after a later successful assistant outcome", () => {
+    const transientErrorPrefix = piInsufficientCreditsStdout
+      .trimEnd()
+      .split("\n")
+      .slice(0, 5)
+      .join("\n");
+    const successfulMessage = ndjson({
+      type: "message_end",
+      message: { role: "assistant", content: [], stopReason: "stop" },
+    });
+    expect(reduceMarkerStream(`${transientErrorPrefix}\n${successfulMessage}`, pi).providerError).toBeNull();
   });
 });
 
