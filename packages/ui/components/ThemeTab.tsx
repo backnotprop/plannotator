@@ -1,7 +1,7 @@
 import React from 'react';
 import { useTheme } from './ThemeProvider';
 import { THEME_MODES } from './themeModes';
-import { isThemeModeAvailable } from '../utils/themeRegistry';
+import { isThemeModeAvailable, resolveThemeMode } from '../utils/themeRegistry';
 
 interface ThemeTabProps {
   onPreview?: () => void;
@@ -84,7 +84,8 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
         <div className={`grid gap-2 overflow-y-auto pr-1 ${compact ? 'grid-cols-4' : 'grid-cols-3'}`}>
           {availableThemes.map(theme => {
             const isSelected = colorTheme === theme.id;
-            const colors = theme.colors[preferredMode];
+            const previewMode = resolveThemeMode(theme.id, preferredMode);
+            const colors = theme.colors[previewMode];
             const modeUnavailable = !isThemeModeAvailable(theme.id, preferredMode);
             return (
               <button

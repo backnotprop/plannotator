@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { resetStorageBackend, setStorageBackend } from '../utils/storage';
+import { BUILT_IN_THEMES } from '../utils/themeRegistry';
 import { THEME_MODES, isThemeMode, parseThemeMode } from './themeModes';
 import { ThemeProvider, useTheme } from './ThemeProvider';
+import { ThemeTab } from './ThemeTab';
 
 const hasDom = typeof document !== 'undefined';
 
@@ -11,6 +13,7 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let currentTheme: ReturnType<typeof useTheme> | null = null;
 let stored = new Map<string, string>();
+let originalMatchMediaDescriptor: PropertyDescriptor | undefined;
 
 function Probe() {
   currentTheme = useTheme();
@@ -63,7 +66,7 @@ function installMatchMedia(initialMatches: boolean) {
   };
 }
 
-async function mountTheme(): Promise<void> {
+async function mountTheme(children?: React.ReactNode): Promise<void> {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
@@ -71,6 +74,7 @@ async function mountTheme(): Promise<void> {
     root!.render(
       <ThemeProvider>
         <Probe />
+        {children}
       </ThemeProvider>,
     );
   });
@@ -98,6 +102,9 @@ describe('theme mode catalog', () => {
 
 describe('ThemeProvider', () => {
   beforeEach(() => {
+    if (hasDom) {
+      originalMatchMediaDescriptor = Object.getOwnPropertyDescriptor(window, 'matchMedia');
+    }
     stored = new Map<string, string>();
     setStorageBackend({
       getItem: key => stored.get(key) ?? null,
@@ -114,6 +121,12 @@ describe('ThemeProvider', () => {
     if (hasDom) {
       await unmountTheme();
       document.documentElement.className = '';
+      if (originalMatchMediaDescriptor) {
+        Object.defineProperty(window, 'matchMedia', originalMatchMediaDescriptor);
+      } else {
+        Reflect.deleteProperty(window, 'matchMedia');
+      }
+      originalMatchMediaDescriptor = undefined;
     }
     resetStorageBackend();
   });
@@ -194,5 +207,26 @@ describe('ThemeProvider', () => {
     expect(themeState().mode).toBe('dark');
     expect(themeState().resolvedMode).toBe('dark');
     expect(stored.get('plannotator-theme')).toBe('dark');
+  });
+
+  test.skipIf(!hasDom)('previews a constrained palette using the mode it actually renders', async () => {
+    stored.set('plannotator-theme', 'system');
+    stored.set('plannotator-color-theme', 'tinacious');
+    installMatchMedia(false);
+
+    await mountTheme(<ThemeTab />);
+    expect(themeState().preferredMode).toBe('dark');
+    expect(themeState().resolvedMode).toBe('light');
+
+    const paletteButton = Array.from(host!.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('Tinacious')
+    );
+    if (!paletteButton) throw new Error('Tinacious palette preview did not render');
+    const swatches = paletteButton.querySelectorAll<HTMLElement>('.rounded-full');
+    const palette = BUILT_IN_THEMES.find(theme => theme.id === 'tinacious');
+    if (!palette) throw new Error('Tinacious palette is not registered');
+
+    expect(swatches[3]?.style.backgroundColor).toBe(palette.colors.light.background);
+    expect(swatches[3]?.style.backgroundColor).not.toBe(palette.colors.dark.background);
   });
 });
