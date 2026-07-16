@@ -60,6 +60,12 @@ interface RunCliResult {
   exitCode: number | null;
 }
 
+export interface DetachedPlanReviewLaunch {
+  url: string;
+  port: number;
+  message: string;
+}
+
 interface CliSpawnConfig {
   command: string;
   args: string[];
@@ -281,6 +287,127 @@ function logReadyFile(client: OpenCodeClient, readyFile: string, readyLabel: str
       // Ignore partial lines while the child process is writing.
     }
   }
+}
+
+export function isOpenChamberRuntime(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(env.OPENCHAMBER_RUNTIME?.trim()) && env.PLANNOTATOR_DETACHED_CHILD !== "1";
+}
+
+export function resolveDetachedPlanReviewPort(
+  env: NodeJS.ProcessEnv = process.env,
+  random: () => number = Math.random,
+): number {
+  const rawPort = env.PLANNOTATOR_PORT?.trim();
+  if (rawPort) {
+    const parsed = Number.parseInt(rawPort, 10);
+    if (Number.isFinite(parsed) && parsed > 0 && parsed < 65_536) {
+      return parsed;
+    }
+  }
+
+  return 19_000 + Math.floor(random() * 20_000);
+}
+
+export function getDetachedPlanReviewUrl(port: number): string {
+  return `http://localhost:${port}`;
+}
+
+export function formatDetachedPlanReviewMessage(url: string): string {
+  return `[Plannotator] Review UI is starting at ${url}
+
+Open this URL in your browser to review the plan. Do not continue implementation yet; Plannotator will send your approval or comments back into this session when you submit the review.`;
+}
+
+export function startDetachedCliPlanReview(input: {
+  client: OpenCodeClient;
+  planContent: string;
+  cwd?: string;
+  timeoutSeconds: number | null;
+  bridge?: OpenCodeBridgeContext;
+  onResult?: (result: OpenCodePlanReviewResult) => void | Promise<void>;
+  onError?: (error: Error) => void | Promise<void>;
+}): DetachedPlanReviewLaunch {
+  const port = resolveDetachedPlanReviewPort();
+  const url = getDetachedPlanReviewUrl(port);
+  const cwd = input.cwd || process.cwd();
+  const payload = JSON.stringify({
+    plan: input.planContent,
+    timeoutSeconds: input.timeoutSeconds,
+    ...buildBridgePayload(input.bridge),
+  });
+  const env = {
+    ...process.env,
+    ...buildCliBridgeEnv(input.bridge),
+    OPENCHAMBER_RUNTIME: "",
+    PLANNOTATOR_DETACHED_CHILD: "1",
+    PLANNOTATOR_SKIP_BROWSER_OPEN: "1",
+    PLANNOTATOR_PORT: String(port),
+    OPENCODE: "1",
+    PLANNOTATOR_ORIGIN: "opencode",
+    PLANNOTATOR_CWD: cwd,
+  };
+
+  const notifyError = (error: Error) => {
+    log(input.client, "error", `[Plannotator] Detached plan review failed: ${error.message}`);
+    void input.onError?.(error);
+  };
+
+  const bin = getPlannotatorBin();
+  const spawnConfig = buildCliSpawnConfig(bin, ["opencode-plan"]);
+  const child = spawn(spawnConfig.command, spawnConfig.args, {
+    cwd,
+    env,
+    shell: spawnConfig.shell,
+    detached: true,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+
+  if (!child.stdin || !child.stdout || !child.stderr) {
+    throw new Error("Failed to open pipes for the detached plannotator CLI process.");
+  }
+
+  let stdout = "";
+  let stderr = "";
+  const stderrForwarder = createCliStderrForwarder(input.client);
+
+  child.stdout.setEncoding("utf-8");
+  child.stderr.setEncoding("utf-8");
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+    stderrForwarder.push(chunk);
+  });
+  child.on("error", (error: NodeJS.ErrnoException) => {
+    const hint = error.code === "ENOENT"
+      ? "Could not find the plannotator CLI. Install it with: curl -fsSL https://plannotator.ai/install.sh | bash"
+      : error.message;
+    notifyError(new Error(hint));
+  });
+  child.stdin.on("error", (error: Error) => {
+    notifyError(new Error(`Failed to write detached plan payload: ${error.message}`));
+  });
+  child.on("close", (exitCode) => {
+    stderrForwarder.flush();
+    if (exitCode !== 0) {
+      notifyError(new Error(stderr.trim() || `Plannotator CLI exited with code ${exitCode}`));
+      return;
+    }
+
+    try {
+      logCliWarnings(input.client, stderr);
+      const result = parseLastJson<OpenCodePlanReviewResult>(stdout);
+      void input.onResult?.(result);
+    } catch (error) {
+      notifyError(error instanceof Error ? error : new Error(String(error)));
+    }
+  });
+
+  child.stdin.end(payload);
+  log(input.client, "info", `[Plannotator] Starting detached plan review: ${url}`);
+
+  return { url, port, message: formatDetachedPlanReviewMessage(url) };
 }
 
 async function runPlannotatorCli(options: RunCliOptions): Promise<RunCliResult> {
