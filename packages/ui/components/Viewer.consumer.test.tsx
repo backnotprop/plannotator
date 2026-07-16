@@ -12,6 +12,12 @@ import { act } from 'react';
 
 import { AnnotationType, type Block } from '../types';
 
+// CI uses this consumer contract as the entry point for the scoped DOM suite.
+// Keep the adjacent public theme/menu contracts in that same DOM run without
+// requiring workflow-only test-path maintenance.
+import './ActionMenu.test';
+import './ThemeProvider.test';
+
 const hasDom = typeof document !== 'undefined';
 
 // Viewer pulls in @plannotator/web-highlighter, whose UMD bundle reads

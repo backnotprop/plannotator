@@ -86,28 +86,6 @@ async function unmountTheme(): Promise<void> {
   currentTheme = null;
 }
 
-beforeEach(() => {
-  stored = new Map<string, string>();
-  setStorageBackend({
-    getItem: key => stored.get(key) ?? null,
-    setItem: (key, value) => {
-      stored.set(key, value);
-    },
-    removeItem: key => {
-      stored.delete(key);
-    },
-  });
-});
-
-afterEach(async () => {
-  if (hasDom) {
-    await unmountTheme();
-    document.documentElement.className = '';
-    document.body.innerHTML = '';
-  }
-  resetStorageBackend();
-});
-
 describe('theme mode catalog', () => {
   test('is the one Light/Dark/System source and parses persisted input', () => {
     expect(THEME_MODES.map(({ id }) => id)).toEqual(['light', 'dark', 'system']);
@@ -119,6 +97,27 @@ describe('theme mode catalog', () => {
 });
 
 describe('ThemeProvider', () => {
+  beforeEach(() => {
+    stored = new Map<string, string>();
+    setStorageBackend({
+      getItem: key => stored.get(key) ?? null,
+      setItem: (key, value) => {
+        stored.set(key, value);
+      },
+      removeItem: key => {
+        stored.delete(key);
+      },
+    });
+  });
+
+  afterEach(async () => {
+    if (hasDom) {
+      await unmountTheme();
+      document.documentElement.className = '';
+    }
+    resetStorageBackend();
+  });
+
   test.skipIf(!hasDom)('persists System and follows live OS changes across reloads', async () => {
     stored.set('plannotator-theme', 'system');
     stored.set('plannotator-color-theme', 'plannotator');

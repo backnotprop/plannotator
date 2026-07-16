@@ -31,14 +31,14 @@ async function renderMenu(panelWidth?: 'default' | 'wide'): Promise<HTMLElement>
   return panel;
 }
 
-afterEach(async () => {
-  if (root) await act(async () => root!.unmount());
-  root = null;
-  host?.remove();
-  host = null;
-});
-
 describe('ActionMenu panel geometry', () => {
+  afterEach(async () => {
+    if (root) await act(async () => root!.unmount());
+    root = null;
+    host?.remove();
+    host = null;
+  });
+
   test.skipIf(!hasDom)('keeps the default width for unrelated consumers', async () => {
     const panel = await renderMenu();
     expect(panel.classList.contains('w-56')).toBe(true);

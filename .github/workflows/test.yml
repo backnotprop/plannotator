@@ -54,8 +54,6 @@ jobs:
           packages/ui/components/sidebar/FileBrowser.test.ts
           packages/editor/editableDocumentsHook.test.tsx
           packages/ui/components/AnnotationPanel.props.test.tsx
-          packages/ui/components/ActionMenu.test.tsx
-          packages/ui/components/ThemeProvider.test.tsx
           packages/ui/components/Viewer.consumer.test.tsx
           packages/ui/components/InlineMarkdown.seam.test.tsx
           packages/ui/components/ImageThumbnail.seam.test.tsx
