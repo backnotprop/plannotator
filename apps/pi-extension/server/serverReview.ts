@@ -103,7 +103,7 @@ import {
 	parseCodexOutput,
 	transformReviewFindings,
 } from "../generated/codex-review.js";
-import { buildAgentReviewUserMessage, buildAgentReviewUserMessageForTarget, type WorkspaceReviewPromptContext } from "../generated/agent-review-message.js";
+import { agentJobLanguageInstruction, buildAgentReviewUserMessage, buildAgentReviewUserMessageForTarget, type WorkspaceReviewPromptContext } from "../generated/agent-review-message.js";
 import {
 	composeClaudeReviewPrompt,
 	buildClaudeCommand,
@@ -992,13 +992,17 @@ export async function startReviewServer(options: {
 			// prompt; strip the default framing prose from the user message so only the
 			// git/PR context remains. The default review keeps today's message verbatim.
 			const isCustomReview = reviewProfile.source === "user";
-			const userMessage = workspacePrompt
+			const baseUserMessage = workspacePrompt
 				? buildAgentReviewUserMessageForTarget({
 						kind: "workspace",
 						patch: currentPatch,
 						workspace: workspacePrompt,
 					}, isCustomReview)
 				: buildAgentReviewUserMessage(currentPatch, currentDiffType as DiffType, userMessageOptions, prMeta, isCustomReview);
+			const languageInstruction = agentJobLanguageInstruction(config?.responseLanguage);
+			const userMessage = languageInstruction
+				? `${languageInstruction}\n\n${baseUserMessage}`
+				: baseUserMessage;
 			const jobLabel = workspacePrompt ? "Workspace Review" : "Code Review";
 
 			if (provider === "codex") {

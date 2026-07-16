@@ -12,6 +12,57 @@ import { AGENT_CONFIG, getAgentAIProviderTypes, type Origin } from '@plannotator
 const PROVIDER_KEY = 'plannotator-ai-provider';
 const MODELS_KEY = 'plannotator-ai-models';
 const PROVIDER_BY_ORIGIN_KEY = 'plannotator-ai-provider-by-origin';
+const RESPONSE_LANGUAGE_KEY = 'plannotator-ai-response-language';
+
+/** Preset languages for the Ask AI response-language setting. Stored value is the English name. */
+export const AI_RESPONSE_LANGUAGES: { value: string; label: string }[] = [
+  { value: 'English', label: 'English' },
+  { value: 'Korean', label: '한국어 (Korean)' },
+  { value: 'Japanese', label: '日本語 (Japanese)' },
+  { value: 'Chinese (Simplified)', label: '简体中文 (Chinese, Simplified)' },
+  { value: 'Chinese (Traditional)', label: '繁體中文 (Chinese, Traditional)' },
+  { value: 'Spanish', label: 'Español (Spanish)' },
+  { value: 'French', label: 'Français (French)' },
+  { value: 'German', label: 'Deutsch (German)' },
+  { value: 'Portuguese (Brazilian)', label: 'Português do Brasil (Portuguese, Brazilian)' },
+  { value: 'Portuguese', label: 'Português (Portuguese)' },
+  { value: 'Italian', label: 'Italiano (Italian)' },
+  { value: 'Dutch', label: 'Nederlands (Dutch)' },
+  { value: 'Russian', label: 'Русский (Russian)' },
+  { value: 'Ukrainian', label: 'Українська (Ukrainian)' },
+  { value: 'Polish', label: 'Polski (Polish)' },
+  { value: 'Czech', label: 'Čeština (Czech)' },
+  { value: 'Turkish', label: 'Türkçe (Turkish)' },
+  { value: 'Arabic', label: 'العربية (Arabic)' },
+  { value: 'Hebrew', label: 'עברית (Hebrew)' },
+  { value: 'Hindi', label: 'हिन्दी (Hindi)' },
+  { value: 'Thai', label: 'ไทย (Thai)' },
+  { value: 'Vietnamese', label: 'Tiếng Việt (Vietnamese)' },
+  { value: 'Indonesian', label: 'Bahasa Indonesia (Indonesian)' },
+  { value: 'Malay', label: 'Bahasa Melayu (Malay)' },
+  { value: 'Swedish', label: 'Svenska (Swedish)' },
+  { value: 'Norwegian', label: 'Norsk (Norwegian)' },
+  { value: 'Danish', label: 'Dansk (Danish)' },
+  { value: 'Finnish', label: 'Suomi (Finnish)' },
+  { value: 'Greek', label: 'Ελληνικά (Greek)' },
+  { value: 'Hungarian', label: 'Magyar (Hungarian)' },
+  { value: 'Romanian', label: 'Română (Romanian)' },
+];
+
+/** Language the AI should respond in (English name, e.g. "Korean"), or null for auto. */
+export function getAIResponseLanguage(): string | null {
+  const value = storage.getItem(RESPONSE_LANGUAGE_KEY)?.trim();
+  return value || null;
+}
+
+export function setAIResponseLanguage(lang: string | null): void {
+  const value = lang?.trim();
+  if (value) {
+    storage.setItem(RESPONSE_LANGUAGE_KEY, value);
+  } else {
+    storage.removeItem(RESPONSE_LANGUAGE_KEY);
+  }
+}
 
 export interface AIProviderModel {
   id: string;

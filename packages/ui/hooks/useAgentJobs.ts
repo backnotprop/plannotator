@@ -12,6 +12,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { AgentJobInfo, AgentJobEvent, AgentCapabilities } from '../types';
+import { getAIResponseLanguage } from '../utils/aiProvider';
 
 const POLL_INTERVAL_MS = 500;
 const STREAM_URL = '/api/agents/jobs/stream';
@@ -31,6 +32,9 @@ export type AgentLaunchParams = {
   /** Pi's unified reasoning level (`--thinking off|minimal|low|medium|high|xhigh`). */
   thinking?: string;
   fastMode?: boolean;
+  /** Language the agent should write its output in (English name, e.g. "Korean").
+   *  Injected automatically from settings by launchJob. */
+  responseLanguage?: string;
   reviewProfileId?: string;
   /** Launches a guide-repair job against a failed guide job's captured output
    *  (see GuideEmptyState's failure-recovery panel). The server resolves a
@@ -267,10 +271,13 @@ export function useAgentJobs(
 
   const launchJob = useCallback(
     async (params: AgentLaunchParams): Promise<AgentJobInfo | null> => {
+      // The response-language setting rides on every launch so guide/tour/review
+      // agents write their output in the user's chosen language.
+      const responseLanguage = getAIResponseLanguage();
       const res = await fetch(JOBS_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params),
+        body: JSON.stringify(responseLanguage ? { responseLanguage, ...params } : params),
       });
       if (!res.ok) {
         throw new Error(await readResponseError(res));

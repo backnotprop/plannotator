@@ -446,6 +446,27 @@ describe("Context builders", () => {
     expect(prompt).toMatch(/messages/i);
     expect(prompt).toMatch(/inspect/i);
   });
+
+  test("responseLanguage appends a language instruction in every mode", () => {
+    const modes: AIContext[] = [
+      { mode: "plan-review", plan: { plan: "# Plan" }, responseLanguage: "Korean" },
+      { mode: "code-review", review: { patch: "+x" }, responseLanguage: "Korean" },
+      { mode: "annotate", annotate: { content: "# Doc", filePath: "/x.md" }, responseLanguage: "Korean" },
+    ];
+    for (const ctx of modes) {
+      expect(buildSystemPrompt(ctx)).toContain("Always respond in Korean");
+      expect(buildForkPreamble(ctx)).toContain("Always respond in Korean");
+    }
+  });
+
+  test("no language instruction when responseLanguage is absent or blank", () => {
+    const plain: AIContext = { mode: "plan-review", plan: { plan: "# Plan" } };
+    const blank: AIContext = { mode: "plan-review", plan: { plan: "# Plan" }, responseLanguage: "  " };
+    for (const ctx of [plain, blank]) {
+      expect(buildSystemPrompt(ctx)).not.toContain("Always respond in");
+      expect(buildForkPreamble(ctx)).not.toContain("Always respond in");
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

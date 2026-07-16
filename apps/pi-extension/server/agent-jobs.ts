@@ -568,7 +568,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 					const KNOWN_JOB_FIELDS = new Set([
 						"provider", "command", "label",
 						"engine", "model", "reasoningEffort", "effort", "thinking", "fastMode",
-						"reviewProfileId", "repairOf",
+						"responseLanguage", "reviewProfileId", "repairOf",
 					]);
 					if (body && typeof body === "object") {
 						const unknown = Object.keys(body).filter((k) => !KNOWN_JOB_FIELDS.has(k));
@@ -631,6 +631,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 						if (typeof body.effort === "string") config.effort = body.effort;
 						if (typeof body.thinking === "string") config.thinking = body.thinking;
 						if (body.fastMode === true) config.fastMode = true;
+						if (typeof body.responseLanguage === "string") config.responseLanguage = body.responseLanguage;
 						if (typeof body.reviewProfileId === "string") config.reviewProfileId = body.reviewProfileId;
 						if (typeof body.repairOf === "string") config.repairOf = body.repairOf;
 						const built = await options.buildCommand(provider, Object.keys(config).length > 0 ? config : undefined);

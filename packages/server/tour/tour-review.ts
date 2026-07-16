@@ -4,7 +4,7 @@ import { mkdir, writeFile, readFile, unlink } from "node:fs/promises";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import type { DiffType } from "../vcs";
 import type { PRMetadata } from "../pr";
-import { buildWorkspacePromptContextLines, getLocalDiffInstruction, type WorkspaceReviewPromptContext } from "../agent-review-message";
+import { agentJobLanguageInstruction, buildWorkspacePromptContextLines, getLocalDiffInstruction, type WorkspaceReviewPromptContext } from "../agent-review-message";
 import type {
   CodeTourOutput,
   TourDiffAnchor,
@@ -566,7 +566,11 @@ export function createTourSession(): TourSession {
       const reasoningEffort = typeof config?.reasoningEffort === "string" && config.reasoningEffort ? config.reasoningEffort : undefined;
       const effort = typeof config?.effort === "string" && config.effort ? config.effort : undefined;
       const fastMode = config?.fastMode === true;
-      const userMessage = buildTourUserMessage(patch, diffType, options, prMetadata);
+      const languageInstruction = agentJobLanguageInstruction(config?.responseLanguage);
+      const baseUserMessage = buildTourUserMessage(patch, diffType, options, prMetadata);
+      const userMessage = languageInstruction
+        ? `${languageInstruction}\n\n${baseUserMessage}`
+        : baseUserMessage;
       const prompt = TOUR_REVIEW_PROMPT + "\n\n---\n\n" + userMessage;
 
       if (engine === "codex") {

@@ -22,14 +22,20 @@ import type { AIContext } from "./types.ts";
  * - That it's operating inside Plannotator (not a general coding session)
  */
 export function buildSystemPrompt(ctx: AIContext): string {
+  let base: string;
   switch (ctx.mode) {
     case "plan-review":
-      return buildPlanReviewPrompt(ctx);
+      base = buildPlanReviewPrompt(ctx);
+      break;
     case "code-review":
-      return buildCodeReviewPrompt();
+      base = buildCodeReviewPrompt();
+      break;
     case "annotate":
-      return buildAnnotatePrompt(ctx);
+      base = buildAnnotatePrompt(ctx);
+      break;
   }
+  const lang = languageInstruction(ctx);
+  return lang ? `${base}\n\n${lang}` : base;
 }
 
 /**
@@ -44,8 +50,11 @@ export function buildForkPreamble(ctx: AIContext): string {
     "The user is now reviewing your work in Plannotator and has a question.",
     "Answer the user's message directly and concisely based on the conversation " +
       "history and the context below. Do not re-review or summarize the work unless they ask.",
-    "",
   ];
+
+  const lang = languageInstruction(ctx);
+  if (lang) lines.push(lang);
+  lines.push("");
 
   switch (ctx.mode) {
     case "plan-review": {
@@ -150,6 +159,16 @@ const ANSWER_DIRECTLY =
   "You are a helpful assistant inside Plannotator. Respond to the user's message directly and concisely. " +
   "The material below is context for what the user is looking at — do NOT review, summarize, or critique it unless the user's message asks you to. " +
   "Only investigate further (read files, run git) if the user's question actually requires it.";
+
+/** Instruction appended when the user picked a response language in settings. */
+function languageInstruction(ctx: AIContext): string | null {
+  const lang = ctx.responseLanguage?.trim();
+  if (!lang) return null;
+  return (
+    `IMPORTANT: Always respond in ${lang}, regardless of the language of the user's message ` +
+    "or the material under review. Keep code, file paths, and technical identifiers as-is."
+  );
+}
 
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;

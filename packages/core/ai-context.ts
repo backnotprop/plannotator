@@ -76,8 +76,10 @@ export interface AnnotateContext {
 
 /**
  * Union of mode-specific contexts, discriminated by `mode`.
+ * `responseLanguage` is the language the AI should respond in
+ * (English name, e.g. "Korean"); omit for auto.
  */
 export type AIContext =
-  | { mode: "plan-review"; plan: PlanContext; parent?: ParentSession }
-  | { mode: "code-review"; review: CodeReviewContext; parent?: ParentSession }
-  | { mode: "annotate"; annotate: AnnotateContext; parent?: ParentSession };
+  | { mode: "plan-review"; plan: PlanContext; parent?: ParentSession; responseLanguage?: string }
+  | { mode: "code-review"; review: CodeReviewContext; parent?: ParentSession; responseLanguage?: string }
+  | { mode: "annotate"; annotate: AnnotateContext; parent?: ParentSession; responseLanguage?: string };

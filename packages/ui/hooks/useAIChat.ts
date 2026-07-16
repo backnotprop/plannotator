@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AIContext } from '@plannotator/core';
 import type { AIQuestion, AIResponse } from '../types';
 import { generateId } from '../utils/generateId';
+import { getAIResponseLanguage } from '../utils/aiProvider';
 
 export interface AIChatEntry {
   question: AIQuestion;
@@ -214,6 +215,10 @@ export function useAIChat({
   const createRequestRef = useRef(0);
   const sessionIdRef = useRef<string | null>(null);
   sessionIdRef.current = thread.sessionId;
+  // Language baked into the current session's system prompt at creation time.
+  // Lets ask() append a per-query instruction ONLY when settings have drifted
+  // from it, instead of duplicating the instruction on every message.
+  const sessionLanguageRef = useRef<string | null>(null);
 
   const updateMessages = useCallback((updater: (messages: AIChatEntry[]) => AIChatEntry[]) => {
     setThread(prev => ({ ...prev, messages: updater(prev.messages) }));
@@ -236,8 +241,11 @@ export function useAIChat({
     const requestId = ++createRequestRef.current;
     setIsCreatingSession(true);
     try {
+      // Read at call time so a settings change applies to the next session.
+      const responseLanguage = getAIResponseLanguage();
+      sessionLanguageRef.current = responseLanguage;
       const res = await aiTransport.session({
-        context,
+        context: responseLanguage ? { ...context, responseLanguage } : context,
         ...(providerId && { providerId }),
         ...(model && { model }),
         ...(reasoningEffort && { reasoningEffort }),
@@ -327,10 +335,15 @@ export function useAIChat({
         throw createAbortError('AI question was superseded');
       }
 
+      // The session's system prompt carries the language chosen at creation
+      // time; append a per-query instruction only when settings have drifted
+      // from it since, so a change still applies to the very next question.
+      const lang = getAIResponseLanguage();
+      const langDrifted = !!lang && lang !== sessionLanguageRef.current;
       const fullPrompt = buildPrompt(params);
       const res = await aiTransport.query({
         sessionId: sid,
-        prompt: fullPrompt,
+        prompt: langDrifted ? `${fullPrompt}\n\n(Respond in ${lang}.)` : fullPrompt,
         ...(params.contextUpdate && { contextUpdate: params.contextUpdate }),
       }, controller.signal);
 

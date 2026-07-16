@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { repairGuideJsonText, validateGuideOutput, parseGuideStreamOutput } from "./guide-review";
+import { repairGuideJsonText, validateGuideOutput, parseGuideStreamOutput, createGuideSession } from "./guide-review";
 
 // Pins the behaviors the PR-993 review rounds fixed. This module previously
 // had NO direct coverage — the repair ladder and validation are pure logic
@@ -148,5 +148,29 @@ describe("parseGuideStreamOutput", () => {
 
   it("returns null on empty stdout", () => {
     expect(parseGuideStreamOutput("")).toBeNull();
+  });
+});
+
+describe("guide buildCommand response language", () => {
+  const baseOpts = {
+    cwd: "/tmp",
+    patch: "diff --git a/src/a.ts b/src/a.ts\n+x",
+    diffType: "uncommitted" as const,
+    changedFiles: [{ path: "src/a.ts", additions: 1, deletions: 0 }],
+  };
+
+  it("prepends the language instruction to the user message when responseLanguage is set", async () => {
+    const session = createGuideSession();
+    const built = await session.buildCommand({
+      ...baseOpts,
+      config: { engine: "claude", responseLanguage: "Korean" },
+    });
+    expect(built.prompt).toContain("in Korean");
+  });
+
+  it("leaves the prompt unchanged when responseLanguage is absent", async () => {
+    const session = createGuideSession();
+    const built = await session.buildCommand({ ...baseOpts, config: { engine: "claude" } });
+    expect(built.prompt).not.toContain("in Korean");
   });
 });

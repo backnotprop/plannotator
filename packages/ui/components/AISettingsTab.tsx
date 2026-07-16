@@ -1,11 +1,14 @@
 import type React from 'react';
 import { getProviderMeta } from './ProviderIcons';
 import {
+  AI_RESPONSE_LANGUAGES,
   getAIProviderSettings,
+  getAIResponseLanguage,
   resolveAIModelForProvider,
   resolveAIProviderSelection,
   saveAIProviderSelection,
   savePreferredModel,
+  setAIResponseLanguage,
   type AIProviderOption,
 } from '../utils/aiProvider';
 import { useState } from 'react';
@@ -46,6 +49,59 @@ export const AISettingsTab: React.FC<AISettingsTabProps> = ({
     savePreferredModel(providerId, modelId);
     setPreferredModels(prev => ({ ...prev, [providerId]: modelId }));
   };
+
+  const [responseLanguage, setResponseLanguage] = useState<string>(() => getAIResponseLanguage() ?? '');
+  const isPresetLanguage = (value: string) =>
+    value === '' || AI_RESPONSE_LANGUAGES.some(l => l.value === value);
+  const [customLanguage, setCustomLanguage] = useState<boolean>(() => !isPresetLanguage(getAIResponseLanguage() ?? ''));
+
+  const handleLanguageSelect = (value: string) => {
+    if (value === '__custom__') {
+      setCustomLanguage(true);
+      return;
+    }
+    setCustomLanguage(false);
+    setResponseLanguage(value);
+    setAIResponseLanguage(value || null);
+  };
+
+  const handleCustomLanguageChange = (value: string) => {
+    setResponseLanguage(value);
+    setAIResponseLanguage(value.trim() || null);
+  };
+
+  const languageSection = (
+    <>
+      <div className="pt-2">
+        <div className="text-sm font-medium">Response Language</div>
+        <div className="text-xs text-muted-foreground">
+          Language the AI should respond in. Applies from your next question.
+        </div>
+      </div>
+      <div className="space-y-2">
+        <select
+          value={customLanguage ? '__custom__' : responseLanguage}
+          onChange={(e) => handleLanguageSelect(e.target.value)}
+          className="w-full text-xs bg-muted rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer"
+        >
+          <option value="">Auto (default)</option>
+          {AI_RESPONSE_LANGUAGES.map(l => (
+            <option key={l.value} value={l.value}>{l.label}</option>
+          ))}
+          <option value="__custom__">Custom…</option>
+        </select>
+        {customLanguage && (
+          <input
+            type="text"
+            value={responseLanguage}
+            onChange={(e) => handleCustomLanguageChange(e.target.value)}
+            placeholder='Language name in English, e.g. "Brazilian Portuguese"'
+            className="w-full text-xs bg-muted rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary/50"
+          />
+        )}
+      </div>
+    </>
+  );
 
   if (providers.length === 0) {
     return (
@@ -140,6 +196,8 @@ export const AISettingsTab: React.FC<AISettingsTabProps> = ({
         Providers are detected from installed CLI tools. No API keys are managed by Plannotator — you must be authenticated with each CLI independently.{' '}
         <a href="https://plannotator.ai/docs/guides/ai-features/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Learn more</a>
       </div>
+
+      {languageSection}
     </>
   );
 };

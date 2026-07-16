@@ -36,6 +36,20 @@ export type AgentReviewTarget =
       workspace: WorkspaceReviewPromptContext;
     };
 
+/**
+ * Instruction appended to agent-job prompts (review / guide / tour) when the
+ * user picked a response language in settings. `responseLanguage` comes from
+ * the client job-launch body, so it's validated here.
+ */
+export function agentJobLanguageInstruction(responseLanguage: unknown): string | null {
+  const lang = typeof responseLanguage === "string" ? responseLanguage.trim() : "";
+  if (!lang) return null;
+  return (
+    `IMPORTANT: Write all natural-language output (titles, overviews, summaries, findings, comments) in ${lang}. ` +
+    "Keep file paths, code identifiers, and JSON/schema keys as-is."
+  );
+}
+
 export interface LocalDiffInstruction {
   target: string;
   inspect: string;

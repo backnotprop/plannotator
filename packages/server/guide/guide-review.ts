@@ -4,7 +4,7 @@ import { mkdir, writeFile, readFile, unlink } from "node:fs/promises";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import type { DiffType } from "../vcs";
 import type { PRMetadata } from "../pr";
-import { buildWorkspacePromptContextLines, getLocalDiffInstruction, type WorkspaceReviewPromptContext } from "../agent-review-message";
+import { agentJobLanguageInstruction, buildWorkspacePromptContextLines, getLocalDiffInstruction, type WorkspaceReviewPromptContext } from "../agent-review-message";
 import {
   MARKER_ENGINES,
   makeMarkerNonce,
@@ -1142,7 +1142,11 @@ export function createGuideSession(): GuideSession {
         return { command, stdinPrompt, prompt: repairPrompt, cwd, label: "Guide Repair", captureStdout: true, engine: "claude", model, effort: "low" };
       }
 
-      const userMessage = buildGuideUserMessage(patch, diffType, options, prMetadata, changedFiles);
+      const languageInstruction = agentJobLanguageInstruction(config?.responseLanguage);
+      const baseUserMessage = buildGuideUserMessage(patch, diffType, options, prMetadata, changedFiles);
+      const userMessage = languageInstruction
+        ? `${languageInstruction}\n\n${baseUserMessage}`
+        : baseUserMessage;
 
       // Marker engines (Cursor, OpenCode, Pi) — none has a schema flag, so the
       // guide contract's marker-delimited JSON block (composeGuideMarkerPrompt)
