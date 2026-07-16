@@ -61,11 +61,18 @@ export function isRemoteSession(): boolean {
  * Get the server ports to try, in order.
  */
 export function getServerPorts(): number[] {
+  return getServerPortConfiguration().ports;
+}
+
+function getServerPortConfiguration(): {
+  ports: number[];
+  isRange: boolean;
+} {
   const envPort = process.env.PLANNOTATOR_PORT;
   if (envPort) {
     const parsed = parsePortSelection(envPort);
     if (parsed) {
-      return parsed;
+      return { ports: parsed.ports, isRange: parsed.kind === "range" };
     }
     console.error(
       `[Plannotator] Warning: Invalid PLANNOTATOR_PORT "${envPort}", using default`
@@ -73,7 +80,10 @@ export function getServerPorts(): number[] {
   }
 
   // Remote sessions use fixed port for port forwarding; local uses random
-  return [isRemoteSession() ? DEFAULT_REMOTE_PORT : 0];
+  return {
+    ports: [isRemoteSession() ? DEFAULT_REMOTE_PORT : 0],
+    isRange: false,
+  };
 }
 
 /**
@@ -92,8 +102,8 @@ export function getServerPort(): number {
 export async function startBunServerOnAvailablePort<TServer>(
   startServer: (port: number) => TServer,
 ): Promise<TServer> {
-  const configuredPorts = getServerPorts();
-  const portsToTry = configuredPorts.length > 1
+  const { ports: configuredPorts, isRange } = getServerPortConfiguration();
+  const portsToTry = isRange
     ? configuredPorts
     : Array(MAX_FIXED_PORT_RETRIES).fill(configuredPorts[0]);
 
@@ -106,15 +116,22 @@ export async function startBunServerOnAvailablePort<TServer>(
       }
 
       if (index < portsToTry.length - 1) {
-        if (configuredPorts.length === 1) {
+        if (!isRange) {
           await Bun.sleep(PORT_RETRY_DELAY_MS);
         }
         continue;
       }
 
-      const configured = configuredPorts.length > 1
-        ? `${configuredPorts[0]}-${configuredPorts.at(-1)}`
-        : String(port);
+      if (!isRange) {
+        const hint = isRemoteSession()
+          ? " (set PLANNOTATOR_PORT to use different port)"
+          : "";
+        throw new Error(
+          `Port ${port} in use after ${MAX_FIXED_PORT_RETRIES} retries${hint}`,
+        );
+      }
+
+      const configured = `${configuredPorts[0]}-${configuredPorts.at(-1)}`;
       const hint = isRemoteSession()
         ? " (set PLANNOTATOR_PORT to use a different port or range)"
         : "";

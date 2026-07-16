@@ -90,14 +90,14 @@ describe("pi remote detection", () => {
 });
 
 describe("pi port selection", () => {
-	test("uses random local port when false overrides SSH", () => {
+	test("PLANNOTATOR_PORT unset preserves the random local default", () => {
 		clearEnv();
 		process.env.PLANNOTATOR_REMOTE = "false";
 		process.env.SSH_TTY = "/dev/pts/0";
 		expect(getServerPort()).toEqual({ port: 0, portSource: "random" });
 	});
 
-	test("uses default remote port when SSH is detected", () => {
+	test("PLANNOTATOR_PORT unset preserves the 19432 remote default", () => {
 		clearEnv();
 		process.env.SSH_CONNECTION = "192.168.1.1 12345 192.168.1.2 22";
 		expect(getServerPort()).toEqual({ port: 19432, portSource: "remote-default" });
@@ -140,6 +140,16 @@ describe("pi port selection", () => {
 		}
 	});
 
+	test("a malformed range follows the existing remote default path", () => {
+		clearEnv();
+		process.env.PLANNOTATOR_REMOTE = "1";
+		process.env.PLANNOTATOR_PORT = "19432-19435garbage";
+		expect(getServerPorts()).toEqual({
+			ports: [19432],
+			portSource: "remote-default",
+		});
+	});
+
 	test("binds the next port when the range start is occupied", async () => {
 		clearEnv();
 		const { start, servers } = await occupyConsecutivePorts(2);
@@ -167,10 +177,25 @@ describe("pi port selection", () => {
 
 		try {
 			await expect(listenOnPort(server)).rejects.toThrow(
-				`Port selection ${start}-${start + 1} exhausted`,
+				new RegExp(`^Port selection ${start}-${start + 1} exhausted$`),
 			);
 		} finally {
 			await Promise.all(servers.map(closeServer));
+		}
+	});
+
+	test("treats a valid one-port range as range syntax", async () => {
+		clearEnv();
+		const { start, servers } = await occupyConsecutivePorts(1);
+		process.env.PLANNOTATOR_PORT = `${start}-${start}`;
+		const server = createServer();
+
+		try {
+			await expect(listenOnPort(server)).rejects.toThrow(
+				new RegExp(`^Port selection ${start}-${start} exhausted$`),
+			);
+		} finally {
+			await closeServer(servers[0]);
 		}
 	});
 
@@ -186,6 +211,25 @@ describe("pi port selection", () => {
 			expect(server.listenerCount("listening")).toBe(0);
 		} finally {
 			await Promise.all(servers.map(closeServer));
+		}
+	});
+});
+
+describe("pi non-range port compatibility", () => {
+	test("an occupied fixed port preserves the existing retry error", async () => {
+		clearEnv();
+		const { start, servers } = await occupyConsecutivePorts(1);
+		process.env.PLANNOTATOR_PORT = String(start);
+		const server = createServer();
+
+		try {
+			await expect(listenOnPort(server)).rejects.toThrow(
+				new RegExp(`^Port ${start} in use after 5 retries$`),
+			);
+			expect(server.listenerCount("error")).toBe(0);
+			expect(server.listenerCount("listening")).toBe(0);
+		} finally {
+			await closeServer(servers[0]);
 		}
 	});
 });

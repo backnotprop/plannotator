@@ -26,6 +26,14 @@ function clearEnv() {
   }
 }
 
+function startTestBunServer(port: number): ReturnType<typeof Bun.serve> {
+  return Bun.serve({
+    hostname: "127.0.0.1",
+    port,
+    fetch: () => new Response("ok"),
+  });
+}
+
 afterEach(() => {
   for (const key of envKeys) {
     if (savedEnv[key] !== undefined) {
@@ -100,12 +108,12 @@ describe("isAddressInUseError", () => {
 });
 
 describe("getServerPort", () => {
-  test("returns 0 for local session (random port)", () => {
+  test("PLANNOTATOR_PORT unset preserves the random local default", () => {
     clearEnv();
     expect(getServerPort()).toBe(0);
   });
 
-  test("returns 19432 for remote session", () => {
+  test("PLANNOTATOR_PORT unset preserves the 19432 remote default", () => {
     clearEnv();
     process.env.PLANNOTATOR_REMOTE = "1";
     expect(getServerPort()).toBe(19432);
@@ -169,6 +177,13 @@ describe("getServerPort", () => {
     }
   });
 
+  test("a malformed range follows the existing remote default path", () => {
+    clearEnv();
+    process.env.PLANNOTATOR_REMOTE = "1";
+    process.env.PLANNOTATOR_PORT = "19432-19435garbage";
+    expect(getServerPorts()).toEqual([19432]);
+  });
+
   test("ignores out-of-range port", () => {
     clearEnv();
     process.env.PLANNOTATOR_PORT = "99999";
@@ -191,11 +206,7 @@ describe("Bun port range binding", () => {
 
     let server: ReturnType<typeof Bun.serve> | undefined;
     try {
-      server = await startBunServerOnAvailablePort((port) => Bun.serve({
-        hostname: "127.0.0.1",
-        port,
-        fetch: () => new Response("ok"),
-      }));
+      server = await startBunServerOnAvailablePort(startTestBunServer);
       expect(server.port).toBe(start + 1);
     } finally {
       server?.stop(true);
@@ -209,13 +220,44 @@ describe("Bun port range binding", () => {
     process.env.PLANNOTATOR_PORT = `${start}-${start + 1}`;
 
     try {
-      await expect(startBunServerOnAvailablePort((port) => Bun.serve({
-        hostname: "127.0.0.1",
-        port,
-        fetch: () => new Response("ok"),
-      }))).rejects.toThrow(`Port selection ${start}-${start + 1} exhausted`);
+      await expect(startBunServerOnAvailablePort(startTestBunServer)).rejects.toThrow(
+        new RegExp(`^Port selection ${start}-${start + 1} exhausted$`),
+      );
     } finally {
       await Promise.all(servers.map(closeServer));
+    }
+  });
+
+  test("treats a valid one-port range as range syntax", async () => {
+    clearEnv();
+    const { start, servers } = await occupyConsecutivePorts(1);
+    process.env.PLANNOTATOR_PORT = `${start}-${start}`;
+
+    try {
+      await expect(startBunServerOnAvailablePort(startTestBunServer)).rejects.toThrow(
+        new RegExp(`^Port selection ${start}-${start} exhausted$`),
+      );
+    } finally {
+      await closeServer(servers[0]);
+    }
+  });
+});
+
+describe("Bun non-range port compatibility", () => {
+  test("an occupied fixed port preserves the existing retry error", async () => {
+    clearEnv();
+    const { start, servers } = await occupyConsecutivePorts(1);
+    process.env.PLANNOTATOR_REMOTE = "1";
+    process.env.PLANNOTATOR_PORT = String(start);
+
+    try {
+      await expect(startBunServerOnAvailablePort(startTestBunServer)).rejects.toThrow(
+        new RegExp(
+          `^Port ${start} in use after 5 retries \\(set PLANNOTATOR_PORT to use different port\\)$`,
+        ),
+      );
+    } finally {
+      await closeServer(servers[0]);
     }
   });
 });

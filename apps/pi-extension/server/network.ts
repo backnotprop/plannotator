@@ -70,18 +70,38 @@ export function getServerPorts(): {
 	ports: number[];
 	portSource: "env" | "remote-default" | "random";
 } {
+	const configuration = getServerPortConfiguration();
+	return {
+		ports: configuration.ports,
+		portSource: configuration.portSource,
+	};
+}
+
+function getServerPortConfiguration(): {
+	ports: number[];
+	portSource: "env" | "remote-default" | "random";
+	isRange: boolean;
+} {
 	const envPort = process.env.PLANNOTATOR_PORT;
 	if (envPort) {
 		const parsed = parsePortSelection(envPort);
 		if (parsed) {
-			return { ports: parsed, portSource: "env" };
+			return {
+				ports: parsed.ports,
+				portSource: "env",
+				isRange: parsed.kind === "range",
+			};
 		}
 		// Invalid port - fall back silently, caller can check env var themselves
 	}
 	if (isRemoteSession()) {
-		return { ports: [DEFAULT_REMOTE_PORT], portSource: "remote-default" };
+		return {
+			ports: [DEFAULT_REMOTE_PORT],
+			portSource: "remote-default",
+			isRange: false,
+		};
 	}
-	return { ports: [0], portSource: "random" };
+	return { ports: [0], portSource: "random", isRange: false };
 }
 
 export function getServerPort(): {
@@ -102,8 +122,8 @@ const RETRY_DELAY_MS = 500;
 export async function listenOnPort(
 	server: Server,
 ): Promise<{ port: number; portSource: "env" | "remote-default" | "random" }> {
-	const { ports, portSource } = getServerPorts();
-	const portsToTry = ports.length > 1 ? ports : Array(MAX_RETRIES).fill(ports[0]);
+	const { ports, portSource, isRange } = getServerPortConfiguration();
+	const portsToTry = isRange ? ports : Array(MAX_RETRIES).fill(ports[0]);
 
 	for (const [index, port] of portsToTry.entries()) {
 		try {
@@ -135,13 +155,20 @@ export async function listenOnPort(
 		} catch (err: unknown) {
 			const isAddressInUse = isAddressInUseError(err);
 			if (isAddressInUse && index < portsToTry.length - 1) {
-				if (ports.length === 1) {
+				if (!isRange) {
 					await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
 				}
 				continue;
 			}
 			if (isAddressInUse) {
-				const configured = ports.length > 1 ? `${ports[0]}-${ports.at(-1)}` : String(port);
+				if (!isRange) {
+					const hint = isRemoteSession()
+						? " (set PLANNOTATOR_PORT to use a different port)"
+						: "";
+					throw new Error(`Port ${port} in use after ${MAX_RETRIES} retries${hint}`);
+				}
+
+				const configured = `${ports[0]}-${ports.at(-1)}`;
 				const hint = isRemoteSession()
 					? " (set PLANNOTATOR_PORT to use a different port or range)"
 					: "";

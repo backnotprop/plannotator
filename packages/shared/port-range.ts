@@ -1,3 +1,8 @@
+/** A whole-string fixed port or inclusive range parsed from configuration. */
+export type ParsedPortSelection =
+  | { readonly kind: "fixed"; readonly ports: [number] }
+  | { readonly kind: "range"; readonly ports: number[] };
+
 /**
  * Parse a fixed TCP port or an inclusive bounded port range.
  *
@@ -5,7 +10,7 @@
  * so both bounds must be between 1 and 65535. Returns null when any part of
  * the trimmed input is malformed or outside those bounds.
  */
-export function parsePortSelection(value: string): number[] | null {
+export function parsePortSelection(value: string): ParsedPortSelection | null {
   const trimmed = value.trim();
   const rangeMatch = /^(\d+)-(\d+)$/.exec(trimmed);
 
@@ -16,7 +21,10 @@ export function parsePortSelection(value: string): number[] | null {
       return null;
     }
 
-    return Array.from({ length: end - start + 1 }, (_, index) => start + index);
+    return {
+      kind: "range",
+      ports: Array.from({ length: end - start + 1 }, (_, index) => start + index),
+    };
   }
 
   if (!/^\d+$/.test(trimmed)) {
@@ -24,5 +32,5 @@ export function parsePortSelection(value: string): number[] | null {
   }
 
   const port = Number(trimmed);
-  return port <= 65535 ? [port] : null;
+  return port <= 65535 ? { kind: "fixed", ports: [port] } : null;
 }
