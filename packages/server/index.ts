@@ -81,7 +81,7 @@ export interface ServerOptions {
   /** Base URL of the paste service API for short URL sharing */
   pasteApiUrl?: string;
   /** Called when server starts with the URL, remote status, and port */
-  onReady?: (url: string, isRemote: boolean, port: number) => void;
+  onReady?: (url: string, isRemote: boolean, port: number) => void | Promise<void>;
   /** OpenCode client for querying available agents (OpenCode only) */
   opencodeClient?: OpencodeClient;
   /** When set to "archive", server runs in read-only archive browser mode */
@@ -107,8 +107,8 @@ export interface ServerResult {
   }>;
   /** Wait for user to close (archive mode only) */
   waitForDone?: () => Promise<void>;
-  /** Stop the server */
-  stop: () => void;
+  /** Stop the server and close active browser connections. */
+  stop: () => Promise<void>;
 }
 
 // --- Server Implementation ---
@@ -587,6 +587,17 @@ export async function startPlannotatorServer(
 
   const port = server.port!;
   const serverUrl = `http://localhost:${port}`;
+  let stopPromise: Promise<void> | undefined;
+  const stop = () => {
+    stopPromise ??= (async () => {
+      try {
+        aiRuntime?.dispose();
+      } finally {
+        await server.stop(true);
+      }
+    })();
+    return stopPromise;
+  };
 
   // The cache warm must never gate the listening socket. Its async filesystem
   // walk yields between directories while requests remain serviceable.
@@ -594,7 +605,12 @@ export async function startPlannotatorServer(
 
   // Notify caller that server is ready
   if (onReady) {
-    onReady(serverUrl, isRemote, port);
+    try {
+      await onReady(serverUrl, isRemote, port);
+    } catch (error) {
+      await stop();
+      throw error;
+    }
   }
 
   return {
@@ -603,9 +619,6 @@ export async function startPlannotatorServer(
     isRemote,
     waitForDecision: () => decisionPromise,
     ...(donePromise && { waitForDone: () => donePromise }),
-    stop: () => {
-      aiRuntime?.dispose();
-      server.stop();
-    },
+    stop,
   };
 }

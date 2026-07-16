@@ -115,6 +115,10 @@ import { detectProjectName } from "@plannotator/server/project";
 import { hostnameOrFallback } from "@plannotator/shared/project";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
+import {
+  waitForPlanReviewCloseDelay,
+  waitForPlanReviewDecision,
+} from "@plannotator/shared/plan-review-lifecycle";
 import { AGENT_CONFIG, type Origin } from "@plannotator/shared/agents";
 import {
   findDroidSessionLogsByAncestorWalk,
@@ -1359,26 +1363,20 @@ if (args[0] === "sessions") {
     label: `plan-${planProject}`,
   });
 
-  const result = timeoutSeconds === null
-    ? await server.waitForDecision()
-    : await new Promise<Awaited<ReturnType<typeof server.waitForDecision>>>((resolve) => {
-        const timeoutId = setTimeout(
-          () =>
-            resolve({
-              approved: false,
-              feedback: `[Plannotator] No response within ${timeoutSeconds} seconds. Port released automatically. Please call submit_plan again.`,
-            }),
-          timeoutSeconds * 1000,
-        );
-
-        server.waitForDecision().then((decision) => {
-          clearTimeout(timeoutId);
-          resolve(decision);
-        });
-      });
-
-  await Bun.sleep(1500);
-  server.stop();
+  let result: Awaited<ReturnType<typeof server.waitForDecision>>;
+  try {
+    result = await waitForPlanReviewDecision({
+      waitForDecision: server.waitForDecision,
+      timeoutMs: timeoutSeconds === null ? null : timeoutSeconds * 1000,
+      timeoutResult: {
+        approved: false,
+        feedback: `[Plannotator] No response within ${timeoutSeconds} seconds. Port released automatically. Please call submit_plan again.`,
+      },
+    });
+    await waitForPlanReviewCloseDelay(1500);
+  } finally {
+    await server.stop();
+  }
 
   console.log(JSON.stringify({
     approved: result.approved,

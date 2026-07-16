@@ -52,6 +52,7 @@ interface RunCliOptions {
   readyLabel: string;
   extraEnv?: Record<string, string | undefined>;
   bridge?: OpenCodeBridgeContext;
+  abortSignal?: AbortSignal;
 }
 
 interface RunCliResult {
@@ -283,7 +284,34 @@ function logReadyFile(client: OpenCodeClient, readyFile: string, readyLabel: str
   }
 }
 
+function getAbortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException("The operation was aborted", "AbortError");
+}
+
+function getErrorCode(error: unknown): string | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const code = Reflect.get(error, "code");
+  return typeof code === "string" ? code : undefined;
+}
+
+function signalChildProcess(
+  child: ReturnType<typeof spawn>,
+  signal: NodeJS.Signals,
+  detached: boolean,
+): void {
+  if (detached && child.pid !== undefined) {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch (error) {
+      if (getErrorCode(error) !== "ESRCH") throw error;
+    }
+  }
+  child.kill(signal);
+}
+
 async function runPlannotatorCli(options: RunCliOptions): Promise<RunCliResult> {
+  options.abortSignal?.throwIfAborted();
   const readyFile = path.join(
     tmpdir(),
     `plannotator-opencode-${process.pid}-${Date.now()}-${randomUUID()}.jsonl`,
@@ -305,59 +333,113 @@ async function runPlannotatorCli(options: RunCliOptions): Promise<RunCliResult> 
   const spawnConfig = buildCliSpawnConfig(bin, options.args);
   log(options.client, "info", `[Plannotator] Starting ${options.readyLabel}...`);
 
-  return await new Promise((resolve, reject) => {
-    const child = spawn(spawnConfig.command, spawnConfig.args, {
-      cwd,
-      env,
-      shell: spawnConfig.shell,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+  const abortSignal = options.abortSignal;
+  const detached = abortSignal !== undefined && process.platform !== "win32";
+  let child: ReturnType<typeof spawn> | undefined;
+  let interval: ReturnType<typeof setInterval> | undefined;
+  let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+  let abortListener: (() => void) | undefined;
+  let stderrForwarder: ReturnType<typeof createCliStderrForwarder> | undefined;
 
-    let stdout = "";
-    let stderr = "";
-    const stderrForwarder = createCliStderrForwarder(options.client, toastedUrls);
-    const interval = setInterval(
-      () => logReadyFile(options.client, readyFile, options.readyLabel, loggedUrls, toastedUrls),
-      250,
-    );
+  try {
+    return await new Promise<RunCliResult>((resolve, reject) => {
+      let stdout = "";
+      let stderr = "";
+      let processError: NodeJS.ErrnoException | undefined;
+      let aborted = false;
 
-    if (!child.stdin || !child.stdout || !child.stderr) {
-      clearInterval(interval);
-      rmSync(readyFile, { force: true });
-      reject(new Error("Failed to open pipes for the plannotator CLI process."));
-      return;
-    }
+      const requestTermination = () => {
+        if (!child || child.exitCode !== null || child.signalCode !== null) return;
+        try {
+          signalChildProcess(child, "SIGTERM", detached);
+        } catch (error) {
+          processError = error instanceof Error ? error : new Error(String(error));
+        }
+        if (forceKillTimer !== undefined) return;
+        forceKillTimer = setTimeout(() => {
+          if (!child || child.exitCode !== null || child.signalCode !== null) return;
+          try {
+            signalChildProcess(child, "SIGKILL", detached);
+          } catch {
+            // The close/error handlers report the original termination failure.
+          }
+        }, 1000);
+      };
 
-    child.stdout.setEncoding("utf-8");
-    child.stderr.setEncoding("utf-8");
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-      stderrForwarder.push(chunk);
-    });
-    child.on("error", (error: NodeJS.ErrnoException) => {
-      clearInterval(interval);
-      stderrForwarder.flush();
-      logReadyFile(options.client, readyFile, options.readyLabel, loggedUrls, toastedUrls);
-      rmSync(readyFile, { force: true });
-      if (error.code === "ENOENT") {
-        reject(new Error("Could not find the plannotator CLI. Install it with: curl -fsSL https://plannotator.ai/install.sh | bash"));
-        return;
+      child = spawn(spawnConfig.command, spawnConfig.args, {
+        cwd,
+        env,
+        shell: spawnConfig.shell,
+        stdio: ["pipe", "pipe", "pipe"],
+        detached,
+      });
+      stderrForwarder = createCliStderrForwarder(options.client, toastedUrls);
+      interval = setInterval(
+        () => logReadyFile(options.client, readyFile, options.readyLabel, loggedUrls, toastedUrls),
+        250,
+      );
+
+      if (!child.stdin || !child.stdout || !child.stderr) {
+        processError = new Error("Failed to open pipes for the plannotator CLI process.");
+        requestTermination();
+      } else {
+        child.stdout.setEncoding("utf-8");
+        child.stderr.setEncoding("utf-8");
+        child.stdout.on("data", (chunk) => {
+          stdout += chunk;
+        });
+        child.stderr.on("data", (chunk) => {
+          stderr += chunk;
+          stderrForwarder?.push(chunk);
+        });
+        child.stdin.once("error", (error: NodeJS.ErrnoException) => {
+          processError ??= error;
+          requestTermination();
+        });
+        child.stdin.end(options.input ?? "");
       }
-      reject(error);
-    });
-    child.on("close", (exitCode) => {
-      clearInterval(interval);
-      stderrForwarder.flush();
-      logReadyFile(options.client, readyFile, options.readyLabel, loggedUrls, toastedUrls);
-      rmSync(readyFile, { force: true });
-      resolve({ stdout, stderr, exitCode });
-    });
 
-    child.stdin.end(options.input ?? "");
-  });
+      child.once("error", (error: NodeJS.ErrnoException) => {
+        processError ??= error;
+        requestTermination();
+      });
+      child.once("close", (exitCode) => {
+        if (aborted && abortSignal) {
+          reject(getAbortReason(abortSignal));
+          return;
+        }
+        if (processError?.code === "ENOENT") {
+          reject(new Error("Could not find the plannotator CLI. Install it with: curl -fsSL https://plannotator.ai/install.sh | bash"));
+          return;
+        }
+        if (processError) {
+          reject(processError);
+          return;
+        }
+        resolve({ stdout, stderr, exitCode });
+      });
+
+      if (abortSignal) {
+        abortListener = () => {
+          aborted = true;
+          requestTermination();
+        };
+        abortSignal.addEventListener("abort", abortListener, { once: true });
+        if (abortSignal.aborted) abortListener();
+      }
+    });
+  } finally {
+    if (interval !== undefined) clearInterval(interval);
+    if (forceKillTimer !== undefined) clearTimeout(forceKillTimer);
+    if (abortSignal && abortListener) abortSignal.removeEventListener("abort", abortListener);
+    stderrForwarder?.flush();
+    try {
+      logReadyFile(options.client, readyFile, options.readyLabel, loggedUrls, toastedUrls);
+    } catch {
+      // Ready metadata is best-effort during child teardown.
+    }
+    rmSync(readyFile, { force: true });
+  }
 }
 
 export function buildAnnotateCliArgs(parsed: ParsedAnnotateArgs): string[] {
@@ -374,6 +456,7 @@ export async function runCliPlanReview(input: {
   planContent: string;
   cwd?: string;
   timeoutSeconds: number | null;
+  abortSignal: AbortSignal;
   bridge?: OpenCodeBridgeContext;
 }): Promise<OpenCodePlanReviewResult> {
   const result = await runPlannotatorCli({
@@ -387,6 +470,7 @@ export async function runCliPlanReview(input: {
     }),
     readyLabel: "plan review",
     bridge: input.bridge,
+    abortSignal: input.abortSignal,
   });
 
   if (result.exitCode !== 0) {

@@ -50,7 +50,7 @@ describe("Bun startup port compatibility", () => {
       });
       expect(openedUrl).toBe(server.url);
     } finally {
-      server.stop();
+      await server.stop();
     }
   });
 
@@ -77,7 +77,34 @@ describe("Bun startup port compatibility", () => {
       expect(server.url).toBe(`http://localhost:${start}`);
       expect(ready).toEqual({ url: server.url, isRemote: false, port: start });
     } finally {
-      server.stop();
+      await server.stop();
     }
+  });
+
+  test("an async ready failure releases the fixed port before startup rejects", async () => {
+    environment.reset();
+    const { start, servers } = await occupyConsecutivePorts(1);
+    await closeServer(servers[0]);
+    process.env.PLANNOTATOR_REMOTE = "0";
+    process.env.PLANNOTATOR_PORT = String(start);
+    process.env.PLANNOTATOR_DATA_DIR = environment.makeTempDir();
+    const readyError = new Error("ready handoff failed");
+
+    await expect(startPlannotatorServer({
+      plan: "# Ready failure cleanup",
+      origin: "codex",
+      htmlContent: "<!doctype html><html><body>plan</body></html>",
+      onReady: async () => {
+        await Promise.resolve();
+        throw readyError;
+      },
+    })).rejects.toBe(readyError);
+
+    const replacement = Bun.serve({
+      hostname: "127.0.0.1",
+      port: start,
+      fetch: () => new Response("reused"),
+    });
+    await replacement.stop(true);
   });
 });
