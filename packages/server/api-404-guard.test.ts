@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { FAVICON_PNG_BYTES } from "../core/favicon";
 // Use a distinct module key so unrelated mock.module() tests cannot replace
 // the real server.
 import { startAnnotateServer as startBunAnnotateServer } from "./annotate.ts?api-404-guard";
@@ -205,6 +206,16 @@ describe("API route 404 guards", () => {
         if (serverCase.knownAIBackendUnavailable) {
           await expectKnownAIBackendUnavailable(server);
         }
+
+        const faviconResponse = await fetch(`${server.url}/favicon.png`);
+        expect(faviconResponse.status).toBe(200);
+        expect(faviconResponse.headers.get("content-type")).toBe("image/png");
+        expect(faviconResponse.headers.get("cache-control")).toBe(
+          "public, max-age=86400",
+        );
+        expect(new Uint8Array(await faviconResponse.arrayBuffer())).toEqual(
+          FAVICON_PNG_BYTES,
+        );
 
         const spaResponse = await fetch(`${server.url}/some/random/path`);
         expect(spaResponse.status).toBe(200);

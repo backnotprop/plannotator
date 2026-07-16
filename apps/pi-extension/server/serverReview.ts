@@ -2313,7 +2313,7 @@ export async function startReviewServer(options: {
 			}
 		} else if (url.pathname === "/api/draft") {
 			await handleDraftRequest(req, res, draftKey);
-		} else if (url.pathname === "/favicon.svg") {
+		} else if (url.pathname === "/favicon.png") {
 			handleFavicon(res);
 		} else if (await editorAnnotations.handle(req, res, url)) {
 			return;

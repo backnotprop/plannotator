@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { FAVICON_SVG } from '@plannotator/core/favicon';
+import { FAVICON_PNG_DATA_URL } from '@plannotator/core/favicon';
 
 interface HooksStatus {
   pfmReminder: { enabled: boolean };
@@ -86,9 +86,10 @@ export const HooksTab: React.FC = () => {
       {/* PFM Reminder Card */}
       <div className="rounded-lg border border-border bg-card p-4 space-y-3">
         <div className="flex items-start gap-3">
-          <div
-            className="w-8 h-8 flex-shrink-0 rounded-md overflow-hidden"
-            dangerouslySetInnerHTML={{ __html: FAVICON_SVG }}
+          <img
+            src={FAVICON_PNG_DATA_URL}
+            alt=""
+            className="w-8 h-8 flex-shrink-0 object-contain"
           />
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
@@ -130,9 +131,10 @@ export const HooksTab: React.FC = () => {
       {/* Compound Improvement Hook Card */}
       <div className="rounded-lg border border-border bg-card p-4 space-y-3">
         <div className="flex items-start gap-3">
-          <div
-            className="w-8 h-8 flex-shrink-0 rounded-md overflow-hidden"
-            dangerouslySetInnerHTML={{ __html: FAVICON_SVG }}
+          <img
+            src={FAVICON_PNG_DATA_URL}
+            alt=""
+            className="w-8 h-8 flex-shrink-0 object-contain"
           />
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">

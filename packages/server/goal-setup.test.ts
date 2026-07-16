@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { FAVICON_PNG_BYTES } from "../core/favicon";
 import { normalizeGoalSetupBundle } from "@plannotator/shared/goal-setup";
 import { startGoalSetupServer, type GoalSetupServerResult } from "./goal-setup";
 
@@ -28,6 +29,12 @@ describe("goal setup server", () => {
     );
     expect(plan.mode).toBe("goal-setup");
     expect(plan.goalSetup.questions[0].id).toBe("scope");
+
+    const faviconResponse = await fetch(`${server.url}/favicon.png`);
+    expect(faviconResponse.headers.get("content-type")).toBe("image/png");
+    expect(new Uint8Array(await faviconResponse.arrayBuffer())).toEqual(
+      FAVICON_PNG_BYTES,
+    );
 
     const decision = server.waitForDecision();
     const submitted = await fetch(`${server.url}/api/goal-setup/submit`, {

@@ -186,7 +186,7 @@ export async function startGoalSetupServer(
             return Response.json({ ok: true });
           }
 
-          if (url.pathname === "/favicon.svg") return handleFavicon();
+          if (url.pathname === "/favicon.png") return handleFavicon();
 
           return new Response(htmlContent, {
             headers: { "Content-Type": "text/html" },

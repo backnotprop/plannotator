@@ -2514,7 +2514,7 @@ export async function startReviewServer(
           }
 
           // Favicon
-          if (url.pathname === "/favicon.svg") return handleFavicon();
+          if (url.pathname === "/favicon.png") return handleFavicon();
 
           // API 404 guard: unknown /api/* routes should return JSON, not HTML
           if (url.pathname.startsWith("/api/")) {

@@ -11,7 +11,7 @@ import { dirname } from "node:path";
 import { openBrowser as openBrowserImpl } from "./browser";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "./draft";
-import { FAVICON_SVG } from "@plannotator/shared/favicon";
+import { FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
 import { saveToObsidian, saveToBear, saveToOctarine } from "./integrations";
 import type { ObsidianConfig, BearConfig, OctarineConfig, IntegrationResult } from "./integrations";
 
@@ -158,8 +158,8 @@ export function handleApiNotFound(path: string): Response {
 
 /** Serve the app favicon. Used by all 3 servers. */
 export function handleFavicon(): Response {
-  return new Response(FAVICON_SVG, {
-    headers: { "Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=86400" },
+  return new Response(FAVICON_PNG_BYTES, {
+    headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" },
   });
 }
 
