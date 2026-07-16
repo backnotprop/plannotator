@@ -44,7 +44,7 @@ import { detectProjectName } from "./project";
 import { loadConfig, saveConfig, detectGitUser, getServerConfig } from "./config";
 import { readImprovementHook, getImprovementHookExpectedPath } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
-import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, type OpencodeClient } from "./shared-handlers";
+import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft } from "./draft";
 import { handleDoc, handleDocExists, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, handleFileBrowserFiles } from "./reference-handlers";
 import { warmFileListCache } from "@plannotator/shared/resolve-file";
@@ -570,10 +570,7 @@ export async function startPlannotatorServer(
 
           // API 404 guard: unknown /api/* routes should return JSON, not HTML
           if (url.pathname.startsWith("/api/")) {
-            return Response.json(
-              { error: "Not found", path: url.pathname },
-              { status: 404 },
-            );
+            return handleApiNotFound(url.pathname);
           }
 
           // Serve embedded HTML for all other routes (SPA)

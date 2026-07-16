@@ -10,7 +10,7 @@ import {
 	handleImageRequest,
 	handleUploadRequest,
 } from "./handlers.js";
-import { html, json, parseBody, requestUrl } from "./helpers.js";
+import { handleApiNotFound, html, json, parseBody, requestUrl } from "./helpers.js";
 
 import { listenOnPort } from "./network.js";
 
@@ -168,6 +168,8 @@ export async function startAnnotateServer(options: {
 				const message = err instanceof Error ? err.message : "Failed to process feedback";
 				json(res, { error: message }, 500);
 			}
+		} else if (url.pathname.startsWith("/api/")) {
+			handleApiNotFound(res, url.pathname);
 		} else {
 			html(res, options.htmlContent);
 		}

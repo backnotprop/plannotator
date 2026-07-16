@@ -23,7 +23,7 @@ import {
 	handleImageRequest,
 	handleUploadRequest,
 } from "./handlers.js";
-import { html, json, parseBody, requestUrl } from "./helpers.js";
+import { handleApiNotFound, html, json, parseBody, requestUrl } from "./helpers.js";
 import { openEditorDiff } from "./ide.js";
 import {
 	type BearConfig,
@@ -473,6 +473,8 @@ export async function startPlanReviewServer(options: {
 			deleteDraft(draftKey);
 			publishDecision({ approved: false, feedback, savedPath });
 			json(res, { ok: true, savedPath });
+		} else if (url.pathname.startsWith("/api/")) {
+			handleApiNotFound(res, url.pathname);
 		} else {
 			html(res, options.htmlContent);
 		}

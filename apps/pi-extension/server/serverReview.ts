@@ -53,7 +53,7 @@ import {
 	handleImageRequest,
 	handleUploadRequest,
 } from "./handlers.js";
-import { html, json, parseBody, requestUrl, toWebRequest } from "./helpers.js";
+import { handleApiNotFound, html, json, parseBody, requestUrl, toWebRequest } from "./helpers.js";
 
 import { isRemoteSession, listenOnPort } from "./network.js";
 import {
@@ -1097,8 +1097,8 @@ export async function startReviewServer(options: {
 			return;
 		} else if (await agentJobs.handle(req, res, url)) {
 			return;
-		} else if (aiEndpoints && url.pathname.startsWith("/api/ai/")) {
-			const handler = aiEndpoints[url.pathname];
+		} else if (url.pathname.startsWith("/api/ai/")) {
+			const handler = aiEndpoints?.[url.pathname];
 			if (handler) {
 				try {
 					const webReq = toWebRequest(req);
@@ -1124,7 +1124,7 @@ export async function startReviewServer(options: {
 				}
 				return;
 			}
-			json(res, { error: "Not found" }, 404);
+			handleApiNotFound(res, url.pathname);
 		} else if (url.pathname === "/api/exit" && req.method === "POST") {
 			deleteDraft(draftKey);
 			resolveDecision({ approved: false, feedback: '', annotations: [], exit: true });
@@ -1144,6 +1144,8 @@ export async function startReviewServer(options: {
 				const message = err instanceof Error ? err.message : "Failed to process feedback";
 				json(res, { error: message }, 500);
 			}
+		} else if (url.pathname.startsWith("/api/")) {
+			handleApiNotFound(res, url.pathname);
 		} else {
 			html(res, options.htmlContent);
 		}

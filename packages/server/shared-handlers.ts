@@ -1,9 +1,9 @@
 /**
  * Shared route handlers used by plan, review, and annotate servers.
  *
- * Eliminates duplication of /api/image, /api/upload, /api/draft, and the
- * server-ready handler across all three server files. Also shares /api/agents
- * for plan + review.
+ * Eliminates duplication of /api/image, /api/upload, /api/draft, unmatched API
+ * responses, and the server-ready handler across all three server files. Also
+ * shares /api/agents for plan + review.
  */
 
 import { mkdirSync } from "fs";
@@ -126,7 +126,10 @@ export function handleDraftDelete(contentKey: string): Response {
   return Response.json({ ok: true });
 }
 
-
+/** Return the shared JSON response for an unmatched API route. */
+export function handleApiNotFound(path: string): Response {
+  return Response.json({ error: "Not found", path }, { status: 404 });
+}
 
 /** Serve the app favicon. Used by all 3 servers. */
 export function handleFavicon(): Response {

@@ -24,7 +24,7 @@ import {
 } from "@plannotator/shared/pr-stack";
 import type { AgentJobInfo } from "@plannotator/shared/agent-jobs";
 import { getRepoInfo } from "./repo";
-import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, type OpencodeClient } from "./shared-handlers";
+import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft } from "./draft";
 import { createEditorAnnotationHandler } from "./editor-annotations";
 import { createExternalAnnotationHandler } from "./external-annotations";
@@ -1140,7 +1140,7 @@ export async function startReviewServer(
           if (aiEndpoints && url.pathname.startsWith("/api/ai/")) {
             const handler = aiEndpoints[url.pathname as keyof AIEndpoints];
             if (handler) return handler(req);
-            return Response.json({ error: "Not found" }, { status: 404 });
+            return handleApiNotFound(url.pathname);
           }
 
           // Favicon
@@ -1148,10 +1148,7 @@ export async function startReviewServer(
 
           // API 404 guard: unknown /api/* routes should return JSON, not HTML
           if (url.pathname.startsWith("/api/")) {
-            return Response.json(
-              { error: "Not found", path: url.pathname },
-              { status: 404 },
-            );
+            return handleApiNotFound(url.pathname);
           }
 
           // Serve embedded HTML for all other routes (SPA)
