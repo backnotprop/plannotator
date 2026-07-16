@@ -31,6 +31,7 @@
     "assistant-message.ts",
     "current-pi-session.ts",
     "plannotator-browser.ts",
+    "plannotator-browser-runtime.ts",
     "plannotator-events.ts",
     "server.ts",
     "tool-scope.ts",

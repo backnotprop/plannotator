@@ -1,9 +1,8 @@
 import { existsSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { createWorktreePool, type WorktreePool } from "./generated/worktree-pool.js";
-import { fileURLToPath } from "node:url";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	prepareLocalReviewDiff,
@@ -39,7 +38,19 @@ import {
 	WorkspaceReviewSession,
 	type WorkspaceDiffType,
 } from "./generated/review-workspace.js";
+import {
+	getPlanBrowserHtml,
+	getReviewBrowserHtml,
+	getStartupErrorMessage,
+	hasPlanBrowserHtml,
+	hasReviewBrowserHtml,
+} from "./plannotator-browser-runtime.js";
 export { getLastAssistantMessageText } from "./assistant-message.js";
+export {
+	getStartupErrorMessage,
+	hasPlanBrowserHtml,
+	hasReviewBrowserHtml,
+} from "./plannotator-browser-runtime.js";
 
 export type AnnotateMode = "annotate" | "annotate-folder" | "annotate-last";
 export interface PlanReviewDecision {
@@ -61,36 +72,8 @@ export interface PlanReviewBrowserSession extends BrowserDecisionSession<PlanRev
 	onDecision: (listener: (result: PlanReviewDecision) => void | Promise<void>) => () => void;
 }
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-let planHtmlContent = "";
-let reviewHtmlContent = "";
-
-try {
-	planHtmlContent = readFileSync(resolve(__dirname, "plannotator.html"), "utf-8");
-} catch {
-	// built assets unavailable
-}
-
-try {
-	reviewHtmlContent = readFileSync(resolve(__dirname, "review-editor.html"), "utf-8");
-} catch {
-	// built assets unavailable
-}
-
 function delay(ms: number): Promise<void> {
 	return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
-}
-
-export function hasPlanBrowserHtml(): boolean {
-	return Boolean(planHtmlContent);
-}
-
-export function hasReviewBrowserHtml(): boolean {
-	return Boolean(reviewHtmlContent);
-}
-
-export function getStartupErrorMessage(err: unknown): string {
-	return err instanceof Error ? err.message : "Unknown error";
 }
 
 async function openBrowserForServer(serverUrl: string, ctx: ExtensionContext): Promise<void> {
@@ -185,7 +168,11 @@ export async function startPlanReviewBrowserSession(
 	ctx: ExtensionContext,
 	planContent: string,
 ): Promise<PlanReviewBrowserSession> {
-	if (!ctx.hasUI || !planHtmlContent) {
+	if (!ctx.hasUI) {
+		throw new Error("Plannotator browser review is unavailable in this session.");
+	}
+	const planHtmlContent = getPlanBrowserHtml();
+	if (!planHtmlContent) {
 		throw new Error("Plannotator browser review is unavailable in this session.");
 	}
 
@@ -242,7 +229,11 @@ export async function startCodeReviewBrowserSession(
 		exit?: boolean;
 	}>
 > {
-	if (!ctx.hasUI || !reviewHtmlContent) {
+	if (!ctx.hasUI) {
+		throw new Error("Plannotator code review browser is unavailable in this session.");
+	}
+	const reviewHtmlContent = getReviewBrowserHtml();
+	if (!reviewHtmlContent) {
 		throw new Error("Plannotator code review browser is unavailable in this session.");
 	}
 
@@ -527,7 +518,11 @@ export async function startMarkdownAnnotationSession(
 	convertHtml?: boolean,
 	recentMessages?: { messageId: string; text: string; timestamp?: string }[],
 ): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>> {
-	if (!ctx.hasUI || !planHtmlContent) {
+	if (!ctx.hasUI) {
+		throw new Error("Plannotator annotation browser is unavailable in this session.");
+	}
+	const planHtmlContent = getPlanBrowserHtml();
+	if (!planHtmlContent) {
 		throw new Error("Plannotator annotation browser is unavailable in this session.");
 	}
 
@@ -603,7 +598,11 @@ export async function openArchiveBrowserAction(
 	ctx: ExtensionContext,
 	customPlanPath?: string,
 ): Promise<{ opened: boolean }> {
-	if (!ctx.hasUI || !planHtmlContent) {
+	if (!ctx.hasUI) {
+		throw new Error("Plannotator archive browser is unavailable in this session.");
+	}
+	const planHtmlContent = getPlanBrowserHtml();
+	if (!planHtmlContent) {
 		throw new Error("Plannotator archive browser is unavailable in this session.");
 	}
 

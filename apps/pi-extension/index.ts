@@ -31,28 +31,9 @@ import {
 	markCompletedSteps,
 	parseChecklist,
 } from "./generated/checklist.js";
-import { hasMarkdownFiles, resolveUserPath } from "./generated/resolve-file.js";
-import { FILE_BROWSER_EXCLUDED } from "./generated/reference-common.js";
-import { htmlToMarkdown } from "./generated/html-to-markdown.js";
-import { urlToMarkdown, isConvertedSource } from "./generated/url-to-markdown.js";
 import { loadConfig, resolveUseJina } from "./generated/config.js";
 import { readImprovementHook } from "./generated/improvement-hooks.js";
 import { composeImproveContext } from "./generated/pfm-reminder.js";
-import {
-	getReviewApprovedPrompt,
-	getReviewDeniedSuffix,
-	getPlanDeniedPrompt,
-	getPlanApprovedPrompt,
-	getPlanApprovedWithNotesPrompt,
-	getPlanAutoApprovedPrompt,
-	getPlanToolName,
-	buildPlanFileRule,
-	getAnnotateFileFeedbackPrompt,
-	getAnnotateMessageFeedbackPrompt,
-} from "./generated/prompts.js";
-import { parseAnnotateArgs } from "./generated/annotate-args.js";
-import { parseReviewArgs } from "./generated/review-args.js";
-import { resolveAtReference } from "./generated/at-reference.js";
 import {
 	hasPlanBrowserHtml,
 	hasReviewBrowserHtml,
@@ -89,6 +70,36 @@ import {
 import { isRemoteSession } from "./server/network.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
+
+type PlannotatorPromptsModule = typeof import("./generated/prompts.js");
+
+let promptsModulePromise: Promise<PlannotatorPromptsModule> | undefined;
+
+function loadPlannotatorPrompts(): Promise<PlannotatorPromptsModule> {
+	if (!promptsModulePromise) {
+		promptsModulePromise = import("./generated/prompts.js").catch((error: unknown) => {
+			promptsModulePromise = undefined;
+			throw error;
+		});
+	}
+	return promptsModulePromise;
+}
+
+async function loadAnnotateCommandModules() {
+	const [annotateArgs, atReference, resolveFile, referenceCommon] = await Promise.all([
+		import("./generated/annotate-args.js"),
+		import("./generated/at-reference.js"),
+		import("./generated/resolve-file.js"),
+		import("./generated/reference-common.js"),
+	]);
+	return {
+		parseAnnotateArgs: annotateArgs.parseAnnotateArgs,
+		resolveAtReference: atReference.resolveAtReference,
+		hasMarkdownFiles: resolveFile.hasMarkdownFiles,
+		resolveUserPath: resolveFile.resolveUserPath,
+		FILE_BROWSER_EXCLUDED: referenceCommon.FILE_BROWSER_EXCLUDED,
+	};
+}
 
 
 type SavedPhaseState = {
@@ -433,6 +444,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			const origin = getPiSessionIdentity(ctx);
 
 			try {
+				const { parseReviewArgs } = await import("./generated/review-args.js");
 				const reviewArgs = parseReviewArgs(args ?? "");
 				const session = await startCodeReviewBrowserSession(ctx, {
 					prUrl: reviewArgs.prUrl,
@@ -442,13 +454,14 @@ export default function plannotator(pi: ExtensionAPI): void {
 				ctx.ui.notify(sessionOpenedMessage("Code review opened", session.url), "info");
 				void session
 					.waitForDecision()
-					.then((result) => {
+					.then(async (result) => {
 						try {
 							if (result.exit) {
 								safeNotify(ctx, "Code review session closed.", "info", origin);
 								return;
 							}
 							if (result.approved) {
+								const { getReviewApprovedPrompt } = await loadPlannotatorPrompts();
 								sendUserMessageWithCurrentSessionFallback(
 									pi,
 									getReviewApprovedPrompt("pi", loadConfig()),
@@ -467,9 +480,11 @@ export default function plannotator(pi: ExtensionAPI): void {
 							// (approve/comment posted to the host) come back with an empty
 							// annotation set and a status message — don't tell the agent to
 							// "address" a platform action.
-							const reviewFeedback = (result.annotations?.length ?? 0) > 0
-								? `${result.feedback}${getReviewDeniedSuffix("pi", loadConfig())}`
-								: result.feedback;
+							let reviewFeedback = result.feedback;
+							if ((result.annotations?.length ?? 0) > 0) {
+								const { getReviewDeniedSuffix } = await loadPlannotatorPrompts();
+								reviewFeedback += getReviewDeniedSuffix("pi", loadConfig());
+							}
 							sendUserMessageWithCurrentSessionFallback(
 								pi,
 								reviewFeedback,
@@ -496,6 +511,13 @@ export default function plannotator(pi: ExtensionAPI): void {
 	pi.registerCommand("plannotator-annotate", {
 		description: "Open markdown file or folder in annotation UI",
 		handler: async (args, ctx) => {
+			const {
+				FILE_BROWSER_EXCLUDED,
+				hasMarkdownFiles,
+				parseAnnotateArgs,
+				resolveAtReference,
+				resolveUserPath,
+			} = await loadAnnotateCommandModules();
 			// Split known annotate flags from the path. --json is silently
 			// accepted (Pi writes back via sendUserMessage, not stdout).
 			// `rawFilePath` keeps any leading `@` for the literal-@ fallback
@@ -529,6 +551,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				const useJina = resolveUseJina(noJina, loadConfig());
 				ctx.ui.notify(`Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}...`, "info");
 				try {
+					const { isConvertedSource, urlToMarkdown } = await import("./generated/url-to-markdown.js");
 					const result = await urlToMarkdown(filePath, { useJina });
 					markdown = result.markdown;
 					sourceConverted = isConvertedSource(result.source);
@@ -577,6 +600,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 						rawHtml = html;
 						markdown = "";
 					} else {
+						const { htmlToMarkdown } = await import("./generated/html-to-markdown.js");
 						markdown = htmlToMarkdown(html);
 						sourceConverted = true;
 					}
@@ -612,7 +636,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				ctx.ui.notify(sessionOpenedMessage("Annotation opened", session.url), "info");
 				void session
 					.waitForDecision()
-					.then((result) => {
+					.then(async (result) => {
 						try {
 							if (result.exit) {
 								safeNotify(ctx, "Annotation session closed.", "info", origin);
@@ -626,6 +650,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 								safeNotify(ctx, "Annotation closed (no feedback).", "info", origin);
 								return;
 							}
+							const { getAnnotateFileFeedbackPrompt } = await loadPlannotatorPrompts();
 							sendUserMessageWithCurrentSessionFallback(
 								pi,
 								getAnnotateFileFeedbackPrompt("pi", loadConfig(), {
@@ -657,6 +682,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 		description: "Annotate the last assistant message",
 		handler: async (args, ctx) => {
 			// Support --gate on /plannotator-last for the Stop-hook review gate.
+			const { parseAnnotateArgs } = await import("./generated/annotate-args.js");
 			const { gate } = parseAnnotateArgs(args ?? "");
 
 			if (!hasPlanBrowserHtml()) {
@@ -686,7 +712,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				ctx.ui.notify(sessionOpenedMessage("Last-message annotation opened", session.url), "info");
 				void session
 					.waitForDecision()
-					.then((result) => {
+					.then(async (result) => {
 						try {
 							if (result.exit) {
 								safeNotify(ctx, "Annotation session closed.", "info", origin);
@@ -705,9 +731,10 @@ export default function plannotator(pi: ExtensionAPI): void {
 							const target = result.selectedMessageId && result.selectedMessageId !== snapshot.entryId
 								? findAssistantMessageByEntryId(ctx, result.selectedMessageId) ?? snapshot
 								: snapshot;
-								const feedback = result.feedbackScope !== "messages" && shouldAnchorLastMessageFeedback(ctx, target.entryId, origin)
+							const feedback = result.feedbackScope !== "messages" && shouldAnchorLastMessageFeedback(ctx, target.entryId, origin)
 									? anchorMessageFeedback(result.feedback, target.text)
 									: result.feedback;
+							const { getAnnotateMessageFeedbackPrompt } = await loadPlannotatorPrompts();
 							sendUserMessageWithCurrentSessionFallback(
 								pi,
 								getAnnotateMessageFeedbackPrompt("pi", loadConfig(), {
@@ -860,6 +887,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				pi.appendEntry("plannotator-execute", { lastSubmittedPath });
 				persistState();
 				justApprovedPlan = true;
+				const { getPlanAutoApprovedPrompt } = await loadPlannotatorPrompts();
 				return {
 					content: [
 						{
@@ -897,6 +925,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 						: "";
 
 				if (result.feedback) {
+					const { getPlanApprovedWithNotesPrompt } = await loadPlannotatorPrompts();
 					return {
 						content: [
 							{
@@ -913,6 +942,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 					};
 				}
 
+				const { getPlanApprovedPrompt } = await loadPlannotatorPrompts();
 				return {
 					content: [
 						{
@@ -931,6 +961,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			// Denied
 			persistState();
 			const feedbackText = result.feedback || "Plan rejected. Please revise.";
+			const { buildPlanFileRule, getPlanDeniedPrompt, getPlanToolName } = await loadPlannotatorPrompts();
 			return {
 				content: [
 					{
