@@ -1,0 +1,508 @@
+/* ═══════════════════════════════════════════════════════════════════
+   V3 Landing: baked.design-inspired sticky left + scrolling right
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Map v3 vars to existing theme tokens from packages/ui/themes ── */
+:root {
+  --v3-bg: var(--background);
+  --v3-fg: var(--foreground);
+  --v3-card: var(--card);
+  --v3-border: var(--border);
+  --v3-muted: var(--muted-foreground);
+  --v3-dim: color-mix(in oklab, var(--foreground) 55%, transparent);
+  --v3-subtle: color-mix(in oklab, var(--foreground) 30%, transparent);
+  --v3-faint: color-mix(in oklab, var(--border) 40%, transparent);
+  --v3-accent: var(--primary);
+  --v3-btn-bg: var(--foreground);
+  --v3-btn-fg: var(--background);
+  --v3-nav-bg: color-mix(in oklab, var(--background) 92%, transparent);
+}
+
+/* ── Root container ── */
+.v3-root {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+@media (min-width: 810px) {
+  .v3-root {
+    padding: 0 24px;
+  }
+}
+
+/* ── Hero split layout ── */
+.v3-hero {
+  display: flex;
+  flex-flow: column;
+  gap: 24px;
+  width: 100%;
+  padding-top: 80px;
+}
+
+@media (min-width: 810px) {
+  .v3-hero {
+    flex-flow: row;
+    align-items: flex-start;
+    gap: 100px;
+    padding-top: 0;
+  }
+}
+
+/* ── Left sticky column ── */
+.v3-left {
+  display: flex;
+  flex-flow: column;
+  align-items: flex-start;
+  gap: 24px;
+  padding-top: 24px;
+  width: 100%;
+  position: relative;
+}
+
+@media (min-width: 810px) {
+  .v3-left {
+    max-width: 350px;
+    flex: 1 0 0;
+    width: 1px;
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+    justify-content: flex-start;
+    padding-top: 100px;
+  }
+}
+
+/* ── Right scrollable column ── */
+.v3-right {
+  display: flex;
+  flex-flow: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 700px;
+  padding: 12px 0 80px;
+  position: relative;
+}
+
+@media (min-width: 810px) {
+  .v3-right {
+    flex: 1 0 0;
+    width: 1px;
+    padding: 100px 0 120px;
+  }
+}
+
+/* ── Cards ── */
+.v3-card {
+  width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--v3-card);
+  border: 1px solid var(--v3-border);
+  transition: background-color 0.3s, border-color 0.3s;
+}
+
+.v3-card-image {
+  width: 100%;
+  display: block;
+}
+
+.v3-card-body {
+  padding: 24px;
+}
+
+@media (min-width: 810px) {
+  .v3-card-body {
+    padding: 32px;
+  }
+}
+
+/* ── Typography ── */
+.v3-heading {
+  font-family: 'Instrument Sans', system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 24px;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--v3-fg);
+}
+
+@media (min-width: 810px) {
+  .v3-heading {
+    font-size: 28px;
+  }
+}
+
+.v3-body {
+  font-size: 14px;
+  line-height: 24px;
+  color: color-mix(in oklab, var(--v3-fg) 65%, transparent);
+}
+
+.v3-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--v3-subtle);
+}
+
+.v3-card-title {
+  font-family: 'Instrument Sans', system-ui, sans-serif;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--v3-fg);
+  line-height: 1.4;
+}
+
+.v3-card-desc {
+  font-size: 14px;
+  line-height: 22px;
+  color: color-mix(in oklab, var(--v3-fg) 60%, transparent);
+}
+
+/* ── CTA button ── */
+.v3-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 40px;
+  border-radius: 4px;
+  background: var(--v3-btn-bg);
+  color: var(--v3-btn-fg);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.15s, background-color 0.3s, color 0.3s;
+}
+
+.v3-btn:hover {
+  opacity: 0.9;
+}
+
+.v3-btn-outline {
+  background: transparent;
+  border: 1px solid var(--v3-border);
+  color: var(--v3-fg);
+}
+
+.v3-btn-outline:hover {
+  background: var(--v3-faint);
+}
+
+.v3-star {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 2px;
+  padding-left: 10px;
+  border-left: 1px solid var(--v3-border);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--v3-fg);
+}
+
+.v3-star svg {
+  color: var(--v3-accent);
+}
+
+/* ── Agent icon row ── */
+.v3-agents {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.v3-agent-icon {
+  width: 20px;
+  height: 20px;
+  opacity: 1;
+}
+
+/* ── Works-with label + agent links ── */
+.v3-works-label {
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.v3-works-label:hover {
+  color: var(--v3-fg);
+}
+
+.v3-agent-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+
+.v3-agent-link:hover {
+  background: var(--v3-faint);
+}
+
+/* ── Divider ── */
+.v3-divider {
+  width: 100%;
+  height: 1px;
+  background: var(--v3-faint);
+}
+
+/* ── Command shimmer ── */
+.v3-cmd {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 500;
+  background: linear-gradient(
+    90deg,
+    #7B5CF5 0%,
+    oklch(0.70 0.22 320) 25%,
+    oklch(0.70 0.20 60) 50%,
+    oklch(0.70 0.22 320) 75%,
+    #7B5CF5 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: v3-shimmer 6s linear infinite;
+}
+
+@keyframes v3-shimmer {
+  0% { background-position: 200% center; }
+  100% { background-position: 0% center; }
+}
+
+.v3-cmd-desc {
+  font-size: 13px;
+  color: color-mix(in oklab, var(--v3-fg) 55%, transparent);
+  line-height: 1.4;
+}
+
+/* ── Feature grid ── */
+.v3-feature-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+}
+
+@media (min-width: 500px) {
+  .v3-feature-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.v3-feature-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--v3-fg);
+}
+
+.v3-feature-desc {
+  font-size: 13px;
+  color: var(--v3-muted);
+  line-height: 1.5;
+  margin-top: 2px;
+}
+
+/* ── Nav ── */
+.v3-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  background: transparent;
+  transition: background-color 0.15s, box-shadow 0.15s;
+}
+
+.v3-nav[data-scrolled="true"] {
+  background: var(--v3-nav-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 1px 0 0 var(--v3-faint);
+}
+
+@media (min-width: 810px) {
+  .v3-nav {
+    display: none;
+  }
+}
+
+/* ── Texture overlay ── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.02;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+
+/* ── Workspaces badge ── */
+.v3-workspaces-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 16px;
+  border-radius: 99px;
+  background:
+    linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(59, 130, 246, 0.04) 100%);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.2),
+    0 0 12px rgba(59, 130, 246, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.v3-workspaces-badge-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: linear-gradient(
+    90deg,
+    #3b82f6 0%,
+    #93c5fd 25%,
+    #60a5fa 50%,
+    #93c5fd 75%,
+    #3b82f6 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: v3-shimmer-blue 6s linear infinite;
+}
+
+.v3-workspaces-link {
+  font-size: inherit;
+  font-weight: inherit;
+  text-transform: none;
+  letter-spacing: normal;
+  background: linear-gradient(
+    90deg,
+    #3b82f6 0%,
+    #93c5fd 25%,
+    #60a5fa 50%,
+    #93c5fd 75%,
+    #3b82f6 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: v3-shimmer-blue 6s linear infinite;
+}
+
+@keyframes v3-shimmer-blue {
+  0% { background-position: 200% center; }
+  100% { background-position: 0% center; }
+}
+
+/* ── Workspaces card gradient ── */
+.v3-workspaces-card {
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.05) 0%, var(--v3-card) 100%);
+}
+
+/* ── Footer ── */
+.v3-footer {
+  border-top: 1px solid var(--v3-faint);
+  padding: 48px 0 64px;
+  transition: border-color 0.3s;
+}
+
+/* ── Theme-aware utility classes ── */
+.v3-text { color: var(--v3-fg); }
+.v3-text-dim { color: var(--v3-dim); }
+.v3-text-muted { color: var(--v3-muted); }
+.v3-text-subtle { color: var(--v3-subtle); }
+.v3-text-faint { color: color-mix(in oklab, var(--v3-fg) 42%, transparent); }
+
+.v3-link {
+  color: var(--v3-muted);
+  transition: color 0.15s;
+}
+.v3-link:hover { color: var(--v3-fg); }
+
+.v3-link-dim {
+  color: color-mix(in oklab, var(--v3-fg) 50%, transparent);
+  transition: color 0.15s;
+}
+.v3-link-dim:hover { color: color-mix(in oklab, var(--v3-fg) 75%, transparent); }
+
+.v3-footer-link {
+  color: color-mix(in oklab, var(--v3-fg) 50%, transparent);
+  transition: color 0.15s;
+  font-size: 14px;
+}
+.v3-footer-link:hover { color: color-mix(in oklab, var(--v3-fg) 70%, transparent); }
+
+.v3-pipe { color: var(--v3-faint); }
+
+.v3-border-t { border-top: 1px solid var(--v3-faint); }
+
+/* ── Theme selector ── */
+.v3-theme-selector {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--v3-border);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  background: var(--v3-card);
+  transition: background-color 0.3s, border-color 0.3s;
+}
+
+.v3-theme-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: none;
+  color: var(--v3-subtle);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.v3-theme-arrow:hover {
+  color: var(--v3-fg);
+  background: var(--v3-faint);
+}
+
+.v3-theme-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--v3-muted);
+  padding: 0 8px;
+  min-width: 110px;
+  text-align: center;
+  user-select: none;
+  transition: color 0.3s;
+}

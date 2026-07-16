@@ -4,6 +4,7 @@ interface Props {
   description?: string;
   ogImage?: string;
   canonicalUrl?: string;
+  themeClass?: string;
 }
 
 const {
@@ -11,6 +12,7 @@ const {
   description = 'Interactive Plan Review: Mark up and refine coding-agent plans in a browser UI, share with your team, and integrate with Claude Code, Codex, OpenCode, and more.',
   ogImage = 'https://plannotator.ai/og-image.webp',
   canonicalUrl,
+  themeClass,
 } = Astro.props;
 
 const canonical = canonicalUrl || Astro.url.href;
@@ -18,7 +20,7 @@ const canonical = canonicalUrl || Astro.url.href;
 import '../styles/global.css';
 ---
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class={themeClass || ''}>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -54,9 +56,12 @@ import '../styles/global.css';
       (function() {
         var root = document.documentElement;
         // Color theme (palette) — marketing uses whatever the user set in the app
-        var colorMatch = document.cookie.match(/(?:^|; )plannotator-color-theme=([^;]*)/);
-        var colorTheme = colorMatch ? decodeURIComponent(colorMatch[1]) : 'plannotator';
-        root.classList.add('theme-' + colorTheme);
+        var hasTheme = /theme-[\w-]+/.test(root.className);
+        if (!hasTheme) {
+          var colorMatch = document.cookie.match(/(?:^|; )plannotator-color-theme=([^;]*)/);
+          var colorTheme = colorMatch ? decodeURIComponent(colorMatch[1]) : 'plannotator';
+          root.classList.add('theme-' + colorTheme);
+        }
         // Mode (dark/light/system)
         var modeMatch = document.cookie.match(/(?:^|; )plannotator-theme=([^;]*)/);
         var mode = modeMatch ? decodeURIComponent(modeMatch[1]) : 'dark';

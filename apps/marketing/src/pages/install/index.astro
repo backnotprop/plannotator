@@ -1,0 +1,548 @@
+---
+import '../../styles/global.css';
+import '../../styles/v3.css';
+---
+<!DOCTYPE html>
+<html lang="en" class="theme-plandromeda">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Install Plannotator</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <meta name="description" content="Install Plannotator for Claude Code, OpenCode, Codex, Copilot CLI, Gemini CLI, Droid, Amp, Kiro, and Pi. One installer covers almost every agent." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <style is:inline>
+      .ins-topnav {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 56px;
+        padding: 0 20px;
+        background: var(--v3-nav-bg);
+        backdrop-filter: blur(8px);
+        border-bottom: 1px solid var(--v3-faint);
+      }
+      .ins-main { max-width: 980px; margin: 0 auto; padding: 64px 20px 96px; }
+      .ins-back {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--v3-subtle);
+        text-decoration: none;
+        margin-bottom: 28px;
+        transition: color 0.15s;
+      }
+      .ins-back:hover { color: var(--v3-fg); }
+      .ins-title {
+        font-family: 'Instrument Sans', system-ui, sans-serif;
+        font-size: 40px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        line-height: 1.08;
+        color: var(--v3-fg);
+      }
+      .ins-sub {
+        margin-top: 16px;
+        max-width: 600px;
+        font-size: 15px;
+        line-height: 1.65;
+        color: var(--v3-dim);
+      }
+      .ins-sub code, .ins-note code, .ins-detail-note code {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.9em;
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: var(--v3-faint);
+        color: var(--v3-fg);
+      }
+
+      .ins-step { margin-top: 56px; }
+      .ins-step-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 18px;
+      }
+      .ins-step-num {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        border-radius: 999px;
+        background: var(--v3-btn-bg);
+        color: var(--v3-btn-fg);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+        font-weight: 600;
+        flex-shrink: 0;
+      }
+      .ins-step-title {
+        font-family: 'Instrument Sans', system-ui, sans-serif;
+        font-size: 19px;
+        font-weight: 600;
+        color: var(--v3-fg);
+      }
+      .ins-step-hint { margin: -6px 0 18px 32px; font-size: 13px; color: var(--v3-dim); }
+
+      /* ── code block ── */
+      .ins-code {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 16px 18px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 14px;
+        line-height: 1.7;
+        background: var(--v3-card);
+        border: 1px solid var(--v3-border);
+        border-radius: 10px;
+        color: var(--v3-fg);
+      }
+      .ins-code code {
+        flex: 1;
+        white-space: pre-wrap;
+        word-break: break-word;
+        user-select: all;
+        cursor: text;
+      }
+      .ins-copy {
+        flex-shrink: 0;
+        padding: 5px;
+        border-radius: 6px;
+        border: 1px solid var(--v3-border);
+        background: transparent;
+        color: var(--v3-subtle);
+        cursor: pointer;
+        transition: color 0.15s, background 0.15s;
+      }
+      .ins-copy:hover { color: var(--v3-fg); background: var(--v3-faint); }
+
+      /* ── Windows disclosure ── */
+      .ins-disclosure { margin-top: 14px; }
+      .ins-disclosure > summary {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        list-style: none;
+        cursor: pointer;
+        font-size: 13px;
+        color: var(--v3-subtle);
+        transition: color 0.15s;
+      }
+      .ins-disclosure > summary::-webkit-details-marker { display: none; }
+      .ins-disclosure > summary:hover { color: var(--v3-fg); }
+      .ins-disclosure > summary .ins-chev { transition: transform 0.2s; }
+      .ins-disclosure[open] > summary .ins-chev { transform: rotate(90deg); }
+      .ins-os { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+      .ins-os-label {
+        display: block;
+        margin-bottom: 6px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--v3-subtle);
+      }
+      .ins-os .ins-code { font-size: 12.5px; padding: 12px 14px; }
+
+      /* ── Agent picker (two pane) ── */
+      .ins-picker { display: flex; gap: 24px; align-items: stretch; }
+      .ins-rail {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        width: 232px;
+        flex-shrink: 0;
+      }
+      .ins-rail-item {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        padding: 10px 12px;
+        border-radius: 9px;
+        border: 1px solid transparent;
+        background: transparent;
+        cursor: pointer;
+        text-align: left;
+        width: 100%;
+        transition: background 0.15s, border-color 0.15s;
+      }
+      .ins-rail-item:hover { background: var(--v3-faint); }
+      .ins-rail-item[aria-selected="true"] {
+        background: var(--v3-card);
+        border-color: var(--v3-border);
+      }
+      .ins-rail-icon { width: 19px; height: 19px; flex-shrink: 0; }
+      .ins-rail-name {
+        flex: 1;
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--v3-fg);
+      }
+      .ins-rail-tag {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 9px;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--v3-subtle);
+      }
+      .ins-rail-tag--auto { color: var(--v3-accent); }
+
+      .ins-detail {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        padding: 28px 30px;
+        background: var(--v3-card);
+        border: 1px solid var(--v3-border);
+        border-radius: 14px;
+      }
+      .ins-detail-head { display: flex; align-items: center; gap: 12px; }
+      .ins-detail-icon { width: 28px; height: 28px; }
+      .ins-detail-name {
+        font-family: 'Instrument Sans', system-ui, sans-serif;
+        font-size: 22px;
+        font-weight: 600;
+        color: var(--v3-fg);
+      }
+      .ins-detail-tag {
+        margin-left: auto;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        padding: 4px 9px;
+        border-radius: 999px;
+        border: 1px solid var(--v3-border);
+        color: var(--v3-subtle);
+      }
+      .ins-detail-tag--auto {
+        color: var(--v3-accent);
+        border-color: color-mix(in oklab, var(--v3-accent) 40%, transparent);
+        background: color-mix(in oklab, var(--v3-accent) 8%, transparent);
+      }
+      .ins-detail-banner {
+        font-size: 13px;
+        line-height: 1.5;
+        color: var(--v3-fg);
+        padding: 11px 14px;
+        border-radius: 9px;
+        border: 1px solid color-mix(in oklab, var(--v3-accent) 30%, transparent);
+        background: color-mix(in oklab, var(--v3-accent) 7%, transparent);
+      }
+      .ins-detail-step { display: flex; flex-direction: column; gap: 7px; }
+      .ins-detail-step-label {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--v3-subtle);
+      }
+      .ins-detail .ins-code { font-size: 13px; padding: 13px 15px; }
+      .ins-detail-auto {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--v3-fg);
+      }
+      .ins-detail-auto svg { color: var(--v3-accent); flex-shrink: 0; }
+      .ins-detail-note { font-size: 14px; line-height: 1.6; color: var(--v3-dim); }
+      .ins-detail-link {
+        margin-top: 2px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+        color: var(--v3-accent);
+        text-decoration: none;
+      }
+      .ins-detail-link:hover { text-decoration: underline; }
+
+      @media (max-width: 720px) {
+        .ins-title { font-size: 32px; }
+        .ins-picker { flex-direction: column; gap: 16px; }
+        .ins-rail {
+          flex-direction: row;
+          width: 100%;
+          overflow-x: auto;
+          gap: 6px;
+          padding-bottom: 4px;
+        }
+        .ins-rail-item { width: auto; flex-shrink: 0; }
+        .ins-rail-name { white-space: nowrap; }
+        .ins-rail-tag { display: none; }
+        .ins-detail { padding: 22px; }
+      }
+
+      .ins-footnote {
+        margin-top: 48px;
+        padding-top: 20px;
+        border-top: 1px solid var(--v3-faint);
+        font-size: 13px;
+        line-height: 1.6;
+        color: var(--v3-dim);
+      }
+      .ins-footnote a { color: var(--v3-accent); text-decoration: none; }
+      .ins-footnote a:hover { text-decoration: underline; }
+    </style>
+  </head>
+  <body class="antialiased overflow-x-hidden font-['Inter',system-ui,sans-serif]">
+
+    <nav class="ins-topnav">
+      <a href="/" class="font-['Instrument_Sans'] text-sm font-semibold tracking-tight v3-text">Plannotator</a>
+      <div class="flex items-center gap-4 text-xs">
+        <a href="/docs/getting-started/installation/" class="v3-link-dim">Docs</a>
+        <a href="https://github.com/backnotprop/plannotator" target="_blank" rel="noopener noreferrer" class="v3-link-dim">GitHub</a>
+      </div>
+    </nav>
+
+    <main class="ins-main">
+      <a href="/" class="ins-back">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5m0 0l7 7m-7-7l7-7"/></svg>
+        Back
+      </a>
+
+      <h1 class="ins-title">Install Plannotator</h1>
+      <p class="ins-sub">
+        One installer drops in the <code>plannotator</code> binary, detects the agents you already have, and wires up hooks, skills, and slash commands. Run it, pick your agent, and you are done.
+      </p>
+
+      <!-- ── Step 1: universal installer ── -->
+      <section class="ins-step">
+        <div class="ins-step-head">
+          <span class="ins-step-num">1</span>
+          <h2 class="ins-step-title">Install the binary</h2>
+        </div>
+
+        <div class="ins-code">
+          <code>curl -fsSL https://plannotator.ai/install.sh | bash</code>
+          <button class="ins-copy" type="button" aria-label="Copy command">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+          </button>
+        </div>
+
+        <details class="ins-disclosure">
+          <summary>
+            <svg class="ins-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
+            On Windows?
+          </summary>
+          <div class="ins-os">
+            <div>
+              <span class="ins-os-label">PowerShell</span>
+              <div class="ins-code">
+                <code>irm https://plannotator.ai/install.ps1 | iex</code>
+                <button class="ins-copy" type="button" aria-label="Copy command">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                </button>
+              </div>
+            </div>
+            <div>
+              <span class="ins-os-label">CMD</span>
+              <div class="ins-code">
+                <code>curl -fsSL https://plannotator.ai/install.cmd -o install.cmd &amp;&amp; install.cmd &amp;&amp; del install.cmd</code>
+                <button class="ins-copy" type="button" aria-label="Copy command">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </details>
+      </section>
+
+      <!-- ── Step 2: agent picker ── -->
+      <section class="ins-step">
+        <div class="ins-step-head">
+          <span class="ins-step-num">2</span>
+          <h2 class="ins-step-title">Pick your agent</h2>
+        </div>
+        <p class="ins-step-hint">Agents tagged <strong style="color:var(--v3-accent)">Auto</strong> are already configured. The rest take one quick step.</p>
+
+        <div class="ins-picker">
+          <nav class="ins-rail" id="ins-rail" role="tablist" aria-label="Select your agent"></nav>
+          <div class="ins-detail" id="ins-detail" role="tabpanel"></div>
+        </div>
+      </section>
+
+      <p class="ins-footnote">
+        Every release ships SHA256 checksums (verified automatically) and optional <a href="/docs/reference/verifying-your-install/">SLSA build provenance</a>. To pin a version or read the long form, see the <a href="/docs/getting-started/installation/">full installation docs</a>.
+      </p>
+    </main>
+
+    <script is:inline>
+      (function() {
+        var INSTALL = 'curl -fsSL https://plannotator.ai/install.sh | bash';
+        var AGENTS = [
+          {
+            id: 'claude', name: 'Claude Code', icon: '/assets/icon-claude.svg', tag: 'Plugin',
+            steps: [{ label: 'Add the plugin', code: '/plugin marketplace add backnotprop/plannotator\n/plugin install plannotator@plannotator' }],
+            note: 'Restart Claude Code so the hooks take effect.',
+            docs: '/docs/getting-started/installation/#claude-code'
+          },
+          {
+            id: 'opencode', name: 'OpenCode', icon: '/assets/icon-opencode-dark.svg', tag: 'Config',
+            steps: [{ label: 'Add to opencode.json', code: '"plugin": ["@plannotator/opencode@latest"]' }],
+            note: 'Restart OpenCode. Plan review is on for the plan agent by default.',
+            docs: '/docs/guides/opencode/'
+          },
+          {
+            id: 'pi', name: 'Pi', icon: '/assets/icon-pi.svg', tag: 'Standalone',
+            banner: 'Pi skips step 1. Install the extension directly.',
+            steps: [{ label: 'Install the extension', code: 'pi install npm:@plannotator/pi-extension' }],
+            note: 'Start Pi with --plan, or toggle mid-session with /plannotator.',
+            docs: '/docs/getting-started/installation/#pi'
+          },
+          {
+            id: 'codex', name: 'Codex', icon: '/assets/icon-codex.png', tag: 'Auto', auto: true,
+            note: 'Plan review enables via the Codex experimental Stop hook (macOS, Linux, WSL). The $plannotator skills are included. Restart Codex after installing.',
+            docs: '/docs/getting-started/installation/#codex'
+          },
+          {
+            id: 'copilot', name: 'Copilot CLI', icon: '/assets/icon-copilot.svg', tag: 'Plugin',
+            steps: [{ label: 'Add the plugin', code: '/plugin marketplace add backnotprop/plannotator\n/plugin install plannotator-copilot@plannotator' }],
+            note: 'Restart. Plan review activates in plan mode (Shift+Tab).',
+            docs: '/docs/getting-started/installation/'
+          },
+          {
+            id: 'droid', name: 'Droid', icon: '/assets/icon-droid.png', tag: 'Plugin',
+            steps: [{ label: 'Add the plugin', code: 'droid plugin marketplace add https://github.com/backnotprop/plannotator\ndroid plugin install plannotator@plannotator' }],
+            note: 'Commands only for now. The Droid planning flow is not intercepted yet.',
+            docs: '/docs/getting-started/installation/#droid'
+          },
+          {
+            id: 'gemini', name: 'Gemini CLI', icon: '/assets/icon-gemini.png', tag: 'Auto', auto: true,
+            note: 'The hook, policy, and slash commands wire up automatically. Requires Gemini CLI 0.36.0 or newer.',
+            docs: '/docs/getting-started/installation/'
+          },
+          {
+            id: 'amp', name: 'Amp', icon: '/assets/icon-amp.svg', tag: 'Plugin',
+            steps: [{ label: 'Copy the plugin file', code: 'cp apps/amp-plugin/plannotator.ts ~/.config/amp/plugins/' }],
+            note: 'Run plugins: reload in Amp. Workflows live in the command palette.',
+            docs: '/docs/getting-started/installation/'
+          },
+          {
+            id: 'kiro', name: 'Kiro CLI', icon: '/assets/icon-kiro.svg', tag: 'Auto', auto: true,
+            steps: [{ label: 'Try it', code: 'kiro-cli chat --agent plannotator' }],
+            note: 'Skills and an example agent install automatically.',
+            docs: '/docs/getting-started/installation/'
+          }
+        ];
+
+        var copyIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+        var checkIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>';
+
+        var rail = document.getElementById('ins-rail');
+        var detail = document.getElementById('ins-detail');
+
+        function el(tag, cls, text) {
+          var n = document.createElement(tag);
+          if (cls) n.className = cls;
+          if (text != null) n.textContent = text;
+          return n;
+        }
+
+        function codeBlock(code) {
+          var block = el('div', 'ins-code');
+          var c = el('code', null, code);
+          block.appendChild(c);
+          var btn = el('button', 'ins-copy');
+          btn.type = 'button';
+          btn.setAttribute('aria-label', 'Copy command');
+          btn.innerHTML = copyIcon;
+          btn.addEventListener('click', function() {
+            navigator.clipboard.writeText(code).then(function() {
+              btn.innerHTML = checkIcon;
+              setTimeout(function() { btn.innerHTML = copyIcon; }, 1500);
+            });
+          });
+          block.appendChild(btn);
+          return block;
+        }
+
+        function render(a) {
+          detail.innerHTML = '';
+
+          var head = el('div', 'ins-detail-head');
+          var icon = el('img', 'ins-detail-icon');
+          icon.src = a.icon; icon.alt = '';
+          head.appendChild(icon);
+          head.appendChild(el('span', 'ins-detail-name', a.name));
+          head.appendChild(el('span', 'ins-detail-tag' + (a.auto ? ' ins-detail-tag--auto' : ''), a.tag));
+          detail.appendChild(head);
+
+          if (a.banner) {
+            detail.appendChild(el('p', 'ins-detail-banner', a.banner));
+          }
+
+          if (a.auto) {
+            var auto = el('div', 'ins-detail-auto');
+            auto.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>';
+            auto.appendChild(document.createTextNode('Configured by the installer'));
+            detail.appendChild(auto);
+          }
+
+          (a.steps || []).forEach(function(step) {
+            var wrap = el('div', 'ins-detail-step');
+            wrap.appendChild(el('span', 'ins-detail-step-label', step.label));
+            wrap.appendChild(codeBlock(step.code));
+            detail.appendChild(wrap);
+          });
+
+          if (a.note) {
+            detail.appendChild(el('p', 'ins-detail-note', a.note));
+          }
+
+          var link = el('a', 'ins-detail-link', 'Full docs →');
+          link.href = a.docs;
+          detail.appendChild(link);
+        }
+
+        AGENTS.forEach(function(a, i) {
+          var btn = el('button', 'ins-rail-item');
+          btn.type = 'button';
+          btn.setAttribute('role', 'tab');
+          btn.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
+          btn.dataset.id = a.id;
+
+          var icon = el('img', 'ins-rail-icon');
+          icon.src = a.icon; icon.alt = '';
+          btn.appendChild(icon);
+          btn.appendChild(el('span', 'ins-rail-name', a.name));
+          btn.appendChild(el('span', 'ins-rail-tag' + (a.auto ? ' ins-rail-tag--auto' : ''), a.tag));
+
+          btn.addEventListener('click', function() {
+            rail.querySelectorAll('.ins-rail-item').forEach(function(x) { x.setAttribute('aria-selected', 'false'); });
+            btn.setAttribute('aria-selected', 'true');
+            render(a);
+            if (history.replaceState) history.replaceState(null, '', '#' + a.id);
+          });
+
+          rail.appendChild(btn);
+        });
+
+        // Honor deep link (e.g. /install/#claude), else default to first agent.
+        var hash = (location.hash || '').replace('#', '');
+        var startIndex = 0;
+        AGENTS.forEach(function(a, i) { if (a.id === hash) startIndex = i; });
+        var startBtn = rail.querySelectorAll('.ins-rail-item')[startIndex];
+        rail.querySelectorAll('.ins-rail-item').forEach(function(x) { x.setAttribute('aria-selected', 'false'); });
+        startBtn.setAttribute('aria-selected', 'true');
+        render(AGENTS[startIndex]);
+      })();
+    </script>
+
+  </body>
+</html>

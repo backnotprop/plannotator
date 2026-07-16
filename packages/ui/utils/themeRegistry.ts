@@ -63,11 +63,11 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     id: 'andromeeda',
     name: 'Andromeeda',
     builtIn: true,
-    modeSupport: 'dark-only',
+    modeSupport: 'both',
     syntaxHighlighting: true,
     colors: {
       dark: { primary: '#00e8c6', secondary: '#373941', accent: '#c74ded', background: '#23262e', foreground: '#d5ced9' },
-      light: { primary: '#00e8c6', secondary: '#373941', accent: '#c74ded', background: '#23262e', foreground: '#d5ced9' },
+      light: { primary: 'oklch(0.50 0.25 280)', secondary: 'oklch(0.50 0.18 180)', accent: 'oklch(0.60 0.22 50)', background: 'oklch(0.97 0.005 260)', foreground: 'oklch(0.18 0.02 260)' },
     },
   },
   {

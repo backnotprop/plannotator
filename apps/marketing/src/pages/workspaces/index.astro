@@ -24,196 +24,80 @@ const teamSizes = [
 <Base
   title="Plannotator Workspaces · Get notified"
   description="Plannotator Workspaces is the hosted team layer for collaborating on agent plans, specs, code reviews, and verification standards. Plannotator core stays free and open source."
+  themeClass="theme-plandromeda"
 >
   <Fragment slot="head">
-    <!-- Page-scoped theme tokens. The page is now system-responsive: it
-         follows whatever theme the global Nav toggle has applied (Base.astro
-         adds `.light` on <html> for light/system+light, otherwise dark).
-         Light mode keeps the cleaner palette we previously force-pinned.
-         Dark mode gets a near-neutral, very-dark-gray palette specific to
-         this page — distinct from the standard plannotator dark theme used
-         everywhere else on the site. -->
-    <style>
-      /* Dark mode (default — applied when `.light` is NOT on <html>).
-         Uses the Plandromeda palette: Andromeda's soft darkness with
-         Plannotator's blue hue (oklch hue 260). */
-      .ws-page-scope {
-        --background: oklch(0.22 0.02 260);
-        --foreground: #d5ced9;
-        --card: oklch(0.26 0.025 260);
-        --card-foreground: #d5ced9;
-        --popover: oklch(0.27 0.025 260);
-        --popover-foreground: #d5ced9;
-        --primary: oklch(0.75 0.18 280);
-        --primary-foreground: oklch(0.22 0.02 260);
-        --secondary: oklch(0.65 0.15 180);
-        --secondary-foreground: oklch(0.22 0.02 260);
-        --muted: oklch(0.30 0.025 260);
-        --muted-foreground: #7a7686;
-        --accent: #c74ded;
-        --accent-foreground: oklch(0.22 0.02 260);
-        --destructive: #fc644d;
-        --destructive-foreground: oklch(0.22 0.02 260);
-        --border: oklch(0.34 0.025 260);
-        --input: oklch(0.30 0.025 260);
-        --ring: oklch(0.75 0.18 280);
-        --success: #96e072;
-        --success-foreground: oklch(0.22 0.02 260);
-        --warning: #ffe66d;
-        --warning-foreground: oklch(0.22 0.02 260);
-        --code-bg: oklch(0.27 0.025 260);
-        color-scheme: dark;
-      }
-
-      /* Light mode (applied when Base.astro / Nav toggle sets `.light`). */
-      :global(html.light) .ws-page-scope {
-        --background: oklch(0.97 0.005 260);
-        --foreground: oklch(0.18 0.02 260);
-        --card: oklch(1 0 0);
-        --card-foreground: oklch(0.18 0.02 260);
-        --popover: oklch(1 0 0);
-        --popover-foreground: oklch(0.18 0.02 260);
-        --primary: oklch(0.50 0.25 280);
-        --primary-foreground: oklch(1 0 0);
-        --secondary: oklch(0.50 0.18 180);
-        --secondary-foreground: oklch(1 0 0);
-        --muted: oklch(0.92 0.01 260);
-        --muted-foreground: oklch(0.40 0.02 260);
-        --accent: oklch(0.60 0.22 50);
-        --accent-foreground: oklch(0.18 0.02 260);
-        --destructive: oklch(0.50 0.25 25);
-        --destructive-foreground: oklch(1 0 0);
-        --border: oklch(0.88 0.01 260);
-        --input: oklch(0.92 0.01 260);
-        --ring: oklch(0.50 0.25 280);
-        --success: oklch(0.45 0.20 150);
-        --success-foreground: oklch(1 0 0);
-        --warning: oklch(0.55 0.18 85);
-        --warning-foreground: oklch(0.18 0.02 260);
-        --code-bg: oklch(0.92 0.01 260);
-        color-scheme: light;
-      }
-    </style>
   </Fragment>
 
-  <div class="ws-page-scope min-h-screen bg-background text-foreground">
-    <Nav />
+  <div class="ws-page-scope min-h-screen bg-background text-foreground font-['Inter',system-ui,sans-serif]">
 
-    <!-- Two independent flex columns so the hero (top of left column) and
-         the form (top of right column) are true sibling-aligned blocks.
-         Each column flows on its own — info content stacks under hero on
-         the left, banners stack under form on the right.
-         On mobile the columns collapse via `display: contents`, exposing
-         their children to the parent flex flow so we can reorder to:
-         hero → form → info → banners (form lifted ahead of info). -->
-    <main class="ws-main">
-      <div class="ws-col-left">
-        <header class="ws-hero">
-          <p class="ws-eyebrow">Plannotator Workspaces · Waitlist</p>
-          <h1 class="ws-page-title">From review surfaces to standards your agents learn from.</h1>
-        </header>
+    <div class="ws-root">
+      <div class="ws-split">
 
-        <section class="ws-info">
-          <div class="ws-phases">
-          <div class="ws-phase">
-            <span class="ws-when">Today</span>
-            <span class="ws-what">You review agent artifacts (docs/specs) and code.</span>
+        <!-- LEFT — sticky, like v3 landing -->
+        <div class="ws-left">
+          <a href="/" class="ws-logo">Plannotator</a>
+
+          <div class="ws-left-content">
+            <p class="ws-eyebrow"><span class="ws-eyebrow-shimmer">Workspaces · Waitlist</span></p>
+            <h1 class="ws-page-title">From review surfaces to standards your agents learn from.</h1>
+            <p class="ws-body">
+              The hosted team layer for agent plans, code reviews, and verification standards. The local plugin stays free & open source.
+            </p>
           </div>
-          <div class="ws-phase">
-            <span class="ws-when">Next</span>
-            <span class="ws-what">Artifacts and reviews become facts, requirements, and testable standards. Versioned and accessible to your agents and teammates.</span>
+
+          <div class="ws-phases-compact">
+            <div class="ws-phase-item">
+              <span class="ws-phase-when">Today</span>
+              <span class="ws-phase-what">You review agent artifacts and code.</span>
+            </div>
+            <div class="ws-phase-item">
+              <span class="ws-phase-when">Next</span>
+              <span class="ws-phase-what">Artifacts become versioned standards accessible to agents and teammates.</span>
+            </div>
+            <div class="ws-phase-item">
+              <span class="ws-phase-when">Compound</span>
+              <span class="ws-phase-what">Standards get checked before and after code lands. Enhanced gating for PRs and releases.</span>
+            </div>
           </div>
-          <div class="ws-phase">
-            <span class="ws-when">Compound</span>
-            <span class="ws-what">Those standards get checked before and after code lands. Additionally, Workspaces will offer enhanced gating for PRs and releases; achieving higher quality and faster verification.</span>
+
+          <div class="ws-left-links">
+            <a href="/">Home</a>
+            <a href="/docs/getting-started/installation/">Docs</a>
+            <a href="https://github.com/backnotprop/plannotator" target="_blank" rel="noopener noreferrer">GitHub</a>
           </div>
         </div>
 
-        <p class="ws-intro">Plannotator Workspaces will offer:</p>
-
-        <ul class="ws-points">
-          <li>
-            <strong>Collaborative knowledge base for agent artifacts.</strong>
-            Share plans, specs, explainers, and reviews with your team
-            (and agents) in markdown or HTML, before and after agents
-            code.
-          </li>
-          <li>
-            <strong>Artifacts and annotations become standards.</strong>
-            Capture team artifacts and review comments as reusable
-            expectations for future agent work.
-          </li>
-          <li class="ws-points-feat">
-            <strong>
-              Manage golden standards.<span class="ws-star">✱</span>
-            </strong>
-            Workspaces extracts verification facts (simple, sourced claims
-            about your system) from specs and reviews, and accumulates
-            them into a golden set of rules your agents can rely on.
-          </li>
-          <li>
-            <strong>Feed standards back into agents.</strong>
-            Send accumulated team knowledge into planning and review
-            agents. Access rules from your own agents, or run them as
-            CI/CD-gated agents inside Workspaces.
-          </li>
-          <li>
-            <strong>Connect to CI/CD.</strong>
-            PR explainers with attached plans and review context, plus
-            verification against your team's standards.
-            </li>
-          </ul>
-        </section>
-      </div>
-
-      <div class="ws-col-right">
+        <!-- RIGHT — scrollable cards, like v3 landing -->
+        <div class="ws-right">
         <form class="ws-form-card" id="signup-form" novalidate>
           <header class="ws-form-head">
             <h2 class="ws-form-title">Get notified</h2>
           </header>
 
           <div class="ws-form-body">
-            <!-- Honeypot — invisible to humans, attractive to bots. -->
             <div class="ws-honeypot" aria-hidden="true">
-              <label>
-                Website
-                <input type="text" name="website" tabindex="-1" autocomplete="off" />
-              </label>
+              <label>Website<input type="text" name="website" tabindex="-1" autocomplete="off" /></label>
+            </div>
+
+            <div class="ws-field">
+              <label class="ws-label">Email</label>
+              <input type="email" name="email" placeholder="jane@company.com" autocomplete="email" maxlength="320" />
             </div>
 
             <div class="ws-row-2">
               <div class="ws-field">
-                <label class="ws-label">Email</label>
-                <input type="email" name="email" placeholder="jane@company.com" autocomplete="email" maxlength="320" />
-              </div>
-              <div class="ws-field">
-                <label class="ws-label">
-                  Company <span class="ws-opt">optional</span>
-                </label>
+                <label class="ws-label">Company <span class="ws-opt">optional</span></label>
                 <input type="text" name="company" placeholder="Acme Inc." autocomplete="organization" maxlength="160" />
               </div>
-            </div>
-
-            <div class="ws-field">
-              <label class="ws-label">
-                Team size <span class="ws-opt">engineers + adjacent</span>
-              </label>
-              <div class="ws-pills" data-field="teamSize" data-single="1">
-                {teamSizes.map((t) => (
-                  <button type="button" class="ws-pill" data-v={t.slug}>{t.label}</button>
-                ))}
+              <div class="ws-field">
+                <label class="ws-label">Team size</label>
+                <div class="ws-pills" data-field="teamSize" data-single="1">
+                  {teamSizes.map((t) => (
+                    <button type="button" class="ws-pill" data-v={t.slug}>{t.label}</button>
+                  ))}
+                </div>
               </div>
-            </div>
-
-            <div class="ws-field">
-              <label class="ws-label">
-                Anything else? <span class="ws-opt">optional</span>
-              </label>
-              <textarea
-                name="note"
-                placeholder="Wishes, blockers, or how you'd like to use Workspaces."
-                maxlength="1000"
-              ></textarea>
             </div>
 
             <div
@@ -228,13 +112,8 @@ const teamSizes = [
                   <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
               </span>
-              <span>I've contributed to or maintain the Plannotator OSS core.</span>
+              <span>OSS contributor: <span class="ws-accent">lifetime free access</span></span>
             </div>
-
-            <p class="ws-contrib-note">
-              ↑ Early contributors and meaningful early supporters receive
-              <span class="ws-accent">lifetime free access</span> to Workspaces.
-            </p>
 
             <div class="ws-form-foot">
               <button type="submit" class="ws-submit">
@@ -286,24 +165,57 @@ const teamSizes = [
           </div>
         </form>
 
-        <aside class="ws-banners">
-          <div class="ws-commit-card">
+        <!-- Offerings card -->
+        <div class="ws-card">
+          <div class="ws-card-body">
+            <p class="ws-card-label">What you get</p>
+            <div class="ws-offerings">
+              <div>
+                <p class="ws-offering-title">Collaborative knowledge base<span class="ws-star">✱</span></p>
+                <p class="ws-offering-desc">Share plans, specs, and reviews with your team and agents.</p>
+              </div>
+              <div>
+                <p class="ws-offering-title">Annotations become standards</p>
+                <p class="ws-offering-desc">Capture review comments as reusable expectations for future work.</p>
+              </div>
+              <div>
+                <p class="ws-offering-title">Golden standards<span class="ws-star">✱</span></p>
+                <p class="ws-offering-desc">Extract verification facts from specs and reviews into rules your agents rely on.</p>
+              </div>
+              <div>
+                <p class="ws-offering-title">Feed back into agents</p>
+                <p class="ws-offering-desc">Send accumulated knowledge into planning and review agents.</p>
+              </div>
+              <div>
+                <p class="ws-offering-title">CI/CD integration</p>
+                <p class="ws-offering-desc">PR explainers, plan context, and verification against standards.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Open source card -->
+        <div class="ws-card">
+          <div class="ws-card-body">
             <span class="ws-commit-tag">[ open source ]</span>
             <p class="ws-commit-msg">
               Plannotator core stays <em>free and open source</em>, always.
-              Workspaces is the hosted layer for teams and power users.
+              Workspaces is the hosted layer for teams.
             </p>
           </div>
+        </div>
 
-          <div class="ws-oss-note">
-            <span class="ws-oss-note-label">↳ OSS contributors</span>
-            Early contributors and meaningful early supporters will receive
-            <span class="ws-accent">lifetime free access</span>. Flag yourself
-            in the form and we'll cross-reference with the contributor list.
-          </div>
-        </aside>
+        <!-- OSS contributor card -->
+        <div class="ws-oss-note">
+          <span class="ws-oss-note-label">↳ OSS contributors</span>
+          Early contributors receive
+          <span class="ws-accent">lifetime free access</span>. Flag yourself
+          in the form above.
+        </div>
+
+        </div>
       </div>
-    </main>
+    </div>
   </div>
 
   {turnstileSitekey && (
@@ -587,11 +499,206 @@ const teamSizes = [
     })();
   </script>
 
+  <script is:inline>
+    (function() {
+      var nav = document.getElementById('ws-nav');
+      if (!nav) return;
+      window.addEventListener('scroll', function() {
+        nav.dataset.scrolled = window.scrollY > 20 ? 'true' : 'false';
+      }, { passive: true });
+    })();
+  </script>
+
   <style>
-    /* All tokens (--background, --foreground, --primary, --card, --border,
-       --muted, --muted-foreground, --secondary, --destructive, --radius,
-       --font-mono) come from packages/ui/theme.css and the marketing site
-       loads Instrument Sans / Inter / JetBrains Mono in Base.astro. */
+    /* ── V3-aligned styles ── */
+    .ws-page-scope {
+      --radius: 0.75rem;
+    }
+    .ws-page-scope::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9999;
+      opacity: 0.02;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      background-repeat: repeat;
+      background-size: 256px 256px;
+    }
+
+    /* ── V3-style split layout ── */
+    .ws-root {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 16px;
+    }
+    @media (min-width: 810px) {
+      .ws-root { padding: 0 24px; }
+    }
+
+    .ws-split {
+      display: flex;
+      flex-flow: column;
+      gap: 24px;
+      width: 100%;
+      padding-top: 60px;
+    }
+    @media (min-width: 810px) {
+      .ws-split {
+        flex-flow: row;
+        align-items: flex-start;
+        gap: 100px;
+        padding-top: 0;
+      }
+    }
+
+    .ws-left {
+      display: flex;
+      flex-flow: column;
+      align-items: flex-start;
+      gap: 24px;
+      padding-top: 24px;
+      width: 100%;
+    }
+    @media (min-width: 810px) {
+      .ws-left {
+        max-width: 350px;
+        flex: 1 0 0;
+        width: 1px;
+        position: sticky;
+        top: 0;
+        height: 100dvh;
+        justify-content: flex-start;
+        padding-top: 80px;
+      }
+    }
+
+    .ws-right {
+      display: flex;
+      flex-flow: column;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      max-width: 480px;
+      padding: 12px 0 80px;
+    }
+    @media (min-width: 810px) {
+      .ws-right {
+        flex: 1 0 0;
+        width: 1px;
+        padding: 80px 0 120px;
+      }
+    }
+
+    /* ── Logo ── */
+    .ws-logo {
+      font-family: 'Instrument Sans', system-ui, sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--foreground);
+      text-decoration: none;
+    }
+
+    /* ── Left content ── */
+    .ws-left-content {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .ws-body {
+      font-size: 14px;
+      line-height: 22px;
+      color: color-mix(in oklab, var(--foreground) 60%, transparent);
+    }
+
+    /* ── Phases compact ── */
+    .ws-phases-compact {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      width: 100%;
+      border-top: 1px solid color-mix(in oklab, var(--border) 50%, transparent);
+    }
+    .ws-phase-item {
+      display: flex;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px dashed color-mix(in oklab, var(--border) 40%, transparent);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .ws-phase-when {
+      font-family: 'Instrument Sans', system-ui, sans-serif;
+      font-weight: 600;
+      color: var(--secondary);
+      min-width: 72px;
+      flex-shrink: 0;
+      font-size: 13px;
+    }
+    .ws-phase-what {
+      color: color-mix(in oklab, var(--foreground) 55%, transparent);
+    }
+
+    /* ── Left links ── */
+    .ws-left-links {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 12px;
+    }
+    .ws-left-links a {
+      color: color-mix(in oklab, var(--foreground) 40%, transparent);
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+    .ws-left-links a:hover {
+      color: color-mix(in oklab, var(--foreground) 70%, transparent);
+    }
+
+    /* ── V3-style cards ── */
+    .ws-card {
+      width: 100%;
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--card);
+      border: 1px solid var(--border);
+    }
+    .ws-card-body {
+      padding: 24px;
+    }
+    @media (min-width: 810px) {
+      .ws-card-body { padding: 32px; }
+    }
+    .ws-card-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: color-mix(in oklab, var(--foreground) 30%, transparent);
+      margin-bottom: 16px;
+    }
+
+    /* ── Offerings list ── */
+    .ws-offerings {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .ws-offering-title {
+      font-family: 'Instrument Sans', system-ui, sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--foreground);
+    }
+    .ws-offering-desc {
+      font-size: 13px;
+      color: color-mix(in oklab, var(--foreground) 50%, transparent);
+      line-height: 1.4;
+      margin-top: 1px;
+    }
 
     /* ── Two independent column flow ──
        Each column flows on its own — left column has hero on top with
@@ -608,11 +715,11 @@ const teamSizes = [
        Top padding stays at 80px on every breakpoint so the .ws-eyebrow
        always clears the 48px fixed Nav with comfortable breathing room. */
     .ws-main {
-      max-width: 1200px;
+      max-width: 1060px;
       margin: 0 auto;
-      padding: 80px 40px;
+      padding: 80px 24px;
       display: flex;
-      gap: 80px;
+      gap: 60px;
       align-items: stretch;
     }
     .ws-col-left {
@@ -626,7 +733,7 @@ const teamSizes = [
       gap: 32px;
     }
     .ws-col-right {
-      flex: 0 0 520px;
+      flex: 0 0 440px;
       min-width: 0;
       display: flex;
       flex-direction: column;
@@ -666,26 +773,45 @@ const teamSizes = [
       .ws-main { padding: 80px 20px 56px; }
     }
 
-    /* ── Hero block ── */
-    .ws-hero {
-      max-width: 760px;
-    }
+    /* ── Eyebrow shimmer ── */
     .ws-eyebrow {
-      font-family: var(--font-mono);
-      font-size: 0.9375rem;
-      letter-spacing: 0.06em;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
       text-transform: uppercase;
-      color: var(--primary);
-      margin: 0 0 16px;
+      margin: 0;
+    }
+    .ws-eyebrow-shimmer {
+      background: linear-gradient(
+        90deg,
+        #3b82f6 0%,
+        #93c5fd 25%,
+        #60a5fa 50%,
+        #93c5fd 75%,
+        #3b82f6 100%
+      );
+      background-size: 200% 100%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      animation: ws-shimmer-blue 6s linear infinite;
+    }
+    @keyframes ws-shimmer-blue {
+      0% { background-position: 0% center; }
+      100% { background-position: 200% center; }
     }
     .ws-page-title {
       font-family: 'Instrument Sans', system-ui, sans-serif;
-      font-size: clamp(20px, 2.4vw, 26px);
+      font-size: 24px;
       font-weight: 600;
-      line-height: 1.18;
-      letter-spacing: -0.012em;
+      line-height: 1.15;
+      letter-spacing: -0.02em;
       color: var(--foreground);
       margin: 0;
+    }
+    @media (min-width: 810px) {
+      .ws-page-title { font-size: 28px; }
     }
 
     /* ── Phases (Today / Next / Compound) ── */
@@ -705,16 +831,16 @@ const teamSizes = [
     .ws-phase:first-child .ws-what { border-top: none; padding-top: 2px; }
     .ws-when {
       font-family: 'Instrument Sans', system-ui, sans-serif;
-      font-size: 0.9375rem;
+      font-size: 14px;
       font-weight: 600;
       color: var(--secondary);
       letter-spacing: -0.005em;
       padding-left: 14px;
     }
     .ws-what {
-      font-size: 0.875rem;
-      line-height: 1.55;
-      color: oklch(from var(--foreground) l c h / 0.85);
+      font-size: 14px;
+      line-height: 22px;
+      color: color-mix(in oklab, var(--foreground) 60%, transparent);
     }
     @media (max-width: 700px) {
       .ws-phases { grid-template-columns: 92px 1fr; }
@@ -727,8 +853,8 @@ const teamSizes = [
       margin: 24px 0 14px;
       color: var(--foreground);
       font-weight: 600;
-      font-size: 1.0625rem;
-      letter-spacing: -0.008em;
+      font-size: 16px;
+      letter-spacing: -0.02em;
       max-width: 540px;
     }
 
@@ -743,10 +869,10 @@ const teamSizes = [
     .ws-points li {
       position: relative;
       padding: 14px 0 14px 20px;
-      border-bottom: 1px solid oklch(from var(--border) l c h / 0.5);
-      font-size: 0.875rem;
-      line-height: 1.55;
-      color: oklch(from var(--foreground) l c h / 0.78);
+      border-bottom: 1px solid color-mix(in oklab, var(--border) 50%, transparent);
+      font-size: 14px;
+      line-height: 22px;
+      color: color-mix(in oklab, var(--foreground) 60%, transparent);
     }
     .ws-points li::before {
       content: "·";
@@ -763,8 +889,8 @@ const teamSizes = [
       font-family: 'Instrument Sans', system-ui, sans-serif;
       color: var(--foreground);
       font-weight: 600;
-      font-size: 0.9375rem;
-      letter-spacing: -0.005em;
+      font-size: 14px;
+      letter-spacing: -0.01em;
       margin-bottom: 2px;
     }
     .ws-points-feat {
@@ -795,30 +921,26 @@ const teamSizes = [
        Wears the "branded stamp" treatment (was on commit-card): primary
        background, primary-foreground text, offset-stack shadow. */
     .ws-oss-note {
-      padding: 16px 18px;
-      background: var(--primary);
-      color: var(--primary-foreground);
-      border: 1px solid var(--primary);
-      border-radius: var(--radius);
-      font-family: var(--font-mono);
-      font-size: 0.8125rem;
+      width: 100%;
+      padding: 24px;
+      background: linear-gradient(135deg, color-mix(in oklab, var(--primary) 12%, var(--card)), var(--card));
+      color: color-mix(in oklab, var(--foreground) 65%, transparent);
+      border: 1px solid color-mix(in oklab, var(--primary) 20%, var(--border));
+      border-radius: 12px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
       line-height: 1.55;
       letter-spacing: 0.01em;
-      max-width: 540px;
-      box-shadow:
-        10px 12px 0 -1px var(--muted),
-        11px 13px 0 -1px oklch(from var(--border) l c h / 0.5);
     }
-    @media (max-width: 980px) {
-      .ws-oss-note {
-        box-shadow: 0 1px 0 oklch(from var(--border) l c h / 0.6);
-      }
+    @media (min-width: 810px) {
+      .ws-oss-note { padding: 32px; }
     }
     .ws-oss-note-label {
       display: block;
-      font-size: 0.6875rem;
-      color: oklch(from var(--primary-foreground) l c h / 0.7);
-      letter-spacing: 0.08em;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--primary);
+      letter-spacing: 0.05em;
       text-transform: uppercase;
       margin-bottom: 6px;
     }
@@ -827,35 +949,34 @@ const teamSizes = [
        text color with extra weight for emphasis instead. */
     .ws-accent { color: var(--primary); }
     .ws-oss-note .ws-accent {
-      color: var(--primary-foreground);
+      color: var(--primary);
       font-weight: 700;
     }
 
     /* ── Form card ── */
     .ws-form-card {
+      width: 100%;
       background: var(--card);
       border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 28px 32px 24px;
+      border-radius: 12px;
+      padding: 24px;
       position: relative;
-      box-shadow:
-        10px 12px 0 -1px var(--muted),
-        11px 13px 0 -1px oklch(from var(--border) l c h / 0.5);
+      overflow: hidden;
     }
-    @media (max-width: 980px) {
-      .ws-form-card { box-shadow: 0 1px 0 oklch(from var(--border) l c h / 0.6); }
+    @media (min-width: 810px) {
+      .ws-form-card { padding: 32px; }
     }
 
     .ws-form-head {
-      padding-bottom: 16px;
-      margin-bottom: 22px;
-      border-bottom: 1px solid var(--border);
+      padding-bottom: 12px;
+      margin-bottom: 16px;
+      border-bottom: 1px solid color-mix(in oklab, var(--border) 50%, transparent);
     }
     .ws-form-title {
       font-family: 'Instrument Sans', system-ui, sans-serif;
       font-weight: 600;
-      font-size: 1rem;
-      letter-spacing: -0.008em;
+      font-size: 16px;
+      letter-spacing: -0.02em;
       margin: 0;
       color: var(--foreground);
     }
@@ -878,13 +999,13 @@ const teamSizes = [
     .ws-field {
       display: flex;
       flex-direction: column;
-      margin-bottom: 14px;
+      margin-bottom: 10px;
     }
     .ws-label {
-      font-family: var(--font-mono);
-      font-size: 0.625rem;
-      color: var(--muted-foreground);
-      letter-spacing: 0.06em;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: color-mix(in oklab, var(--foreground) 30%, transparent);
+      letter-spacing: 0.05em;
       text-transform: uppercase;
       margin-bottom: 6px;
       display: flex;
@@ -894,8 +1015,8 @@ const teamSizes = [
     .ws-opt {
       text-transform: none;
       letter-spacing: 0;
-      color: oklch(from var(--muted-foreground) l c h / 0.7);
-      font-size: 0.625rem;
+      color: color-mix(in oklab, var(--foreground) 25%, transparent);
+      font-size: 11px;
       font-weight: 400;
     }
 
@@ -905,16 +1026,16 @@ const teamSizes = [
       background: var(--background);
       border: 1px solid var(--border);
       border-radius: 4px;
-      padding: 9px 11px;
+      padding: 8px 10px;
       font-family: inherit;
-      font-size: 0.875rem;
+      font-size: 13px;
       color: var(--foreground);
       outline: none;
       transition: border-color 120ms ease, box-shadow 120ms ease;
     }
     .ws-field input::placeholder,
     .ws-field textarea::placeholder {
-      color: oklch(from var(--muted-foreground) l c h / 0.55);
+      color: color-mix(in oklab, var(--foreground) 25%, transparent);
     }
     .ws-field input:focus,
     .ws-field textarea:focus {
@@ -943,11 +1064,11 @@ const teamSizes = [
     .ws-pill {
       border: 1px solid var(--border);
       background: var(--background);
-      color: oklch(from var(--foreground) l c h / 0.85);
-      padding: 7px 12px;
-      border-radius: 9999px;
+      color: color-mix(in oklab, var(--foreground) 65%, transparent);
+      padding: 5px 10px;
+      border-radius: 6px;
       font-family: inherit;
-      font-size: 0.8125rem;
+      font-size: 13px;
       cursor: pointer;
       user-select: none;
       transition: border-color 120ms ease, background 120ms ease, color 120ms ease, transform 100ms ease;
@@ -977,8 +1098,8 @@ const teamSizes = [
       border: 1px solid var(--border);
       border-radius: 4px;
       cursor: pointer;
-      font-size: 0.8125rem;
-      color: oklch(from var(--foreground) l c h / 0.85);
+      font-size: 13px;
+      color: color-mix(in oklab, var(--foreground) 65%, transparent);
       line-height: 1.45;
       user-select: none;
       margin-bottom: 6px;
@@ -1014,9 +1135,9 @@ const teamSizes = [
     }
 
     .ws-contrib-note {
-      font-family: var(--font-mono);
-      font-size: 0.625rem;
-      color: oklch(from var(--muted-foreground) l c h / 0.85);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: color-mix(in oklab, var(--foreground) 35%, transparent);
       line-height: 1.5;
       letter-spacing: 0.02em;
       padding: 4px 14px 0;
@@ -1045,13 +1166,14 @@ const teamSizes = [
       align-items: center;
       justify-content: center;
       gap: 8px;
-      padding: 12px 20px;
-      background: var(--primary);
-      color: var(--primary-foreground);
-      border: 1px solid var(--primary);
+      height: 40px;
+      padding: 0 18px;
+      background: var(--foreground);
+      color: var(--background);
+      border: 1px solid var(--foreground);
       border-radius: 4px;
       font-family: inherit;
-      font-size: 0.9375rem;
+      font-size: 13px;
       font-weight: 600;
       letter-spacing: -0.005em;
       cursor: pointer;
@@ -1173,28 +1295,24 @@ const teamSizes = [
        contributors stamp above). bg-card on a thin border, foreground text
        with primary highlights — sits quietly under the form. */
     .ws-commit-card {
-      max-width: 560px;
-      background: var(--card);
-      color: oklch(from var(--foreground) l c h / 0.85);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 22px 26px 24px;
+      /* now inside .ws-card, no standalone styling needed */
     }
     .ws-commit-tag {
       display: block;
-      font-family: var(--font-mono);
-      font-size: 0.6875rem;
-      letter-spacing: 0.08em;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.05em;
       text-transform: uppercase;
       color: var(--primary);
       margin-bottom: 12px;
     }
     .ws-commit-msg {
       font-family: 'Instrument Sans', system-ui, sans-serif;
-      font-size: 1.0625rem;
+      font-size: 14px;
       font-weight: 600;
-      line-height: 1.3;
-      letter-spacing: -0.012em;
+      line-height: 1.4;
+      letter-spacing: -0.01em;
       color: var(--foreground);
       margin: 0;
     }
