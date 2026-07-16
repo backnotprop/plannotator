@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, type Dirent } from "node:fs";
+import { existsSync, readdirSync, realpathSync, statSync, type Dirent } from "node:fs";
 import { basename, relative, resolve } from "node:path";
 
 import {
@@ -159,10 +159,34 @@ function hasVcsMarker(dirPath: string): boolean {
   return VCS_MARKERS.some((marker) => existsSync(resolve(dirPath, marker)));
 }
 
-function collectWorkspaceRepos(root: string, current: string, results: string[]): void {
+function resolveDirectoryRealPath(path: string): string | null {
+  try {
+    if (!statSync(path).isDirectory()) return null;
+    return realpathSync(path);
+  } catch {
+    return null;
+  }
+}
+
+function compareDirentsByName(a: Dirent, b: Dirent): number {
+  if (a.name < b.name) return -1;
+  if (a.name > b.name) return 1;
+  return 0;
+}
+
+function collectWorkspaceRepos(
+  root: string,
+  current: string,
+  visitedRealPaths: Set<string>,
+  results: string[],
+): void {
+  const realPath = resolveDirectoryRealPath(current);
+  if (!realPath || visitedRealPaths.has(realPath)) return;
+  visitedRealPaths.add(realPath);
+
   let entries: Dirent[];
   try {
-    entries = readdirSync(current, { withFileTypes: true });
+    entries = readdirSync(current, { withFileTypes: true }).sort(compareDirentsByName);
   } catch {
     return;
   }
@@ -173,16 +197,24 @@ function collectWorkspaceRepos(root: string, current: string, results: string[])
   }
 
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
     if (SKIP_DIRS.has(entry.name)) continue;
-    collectWorkspaceRepos(root, resolve(current, entry.name), results);
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+    collectWorkspaceRepos(root, resolve(current, entry.name), visitedRealPaths, results);
   }
 }
 
+/**
+ * Discovers the first Git or JJ repository below each workspace path.
+ *
+ * Directory symlinks and junctions are followed while their logical paths are
+ * retained for labels and file routing. Each canonical directory is traversed
+ * at most once, so cycles and duplicate aliases cannot duplicate repositories.
+ * Unreadable, broken, and non-directory entries are ignored.
+ */
 export function discoverWorkspaceRepoPaths(root: string): string[] {
   const resolvedRoot = resolve(root);
   const results: string[] = [];
-  collectWorkspaceRepos(resolvedRoot, resolvedRoot, results);
+  collectWorkspaceRepos(resolvedRoot, resolvedRoot, new Set<string>(), results);
   return results.sort();
 }
 

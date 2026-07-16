@@ -6,7 +6,16 @@
  */
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -49,6 +58,10 @@ function initRepo(dir: string, initialBranch = "main"): void {
   writeFileSync(join(dir, "README.md"), "# Test\n", "utf-8");
   git(dir, ["add", "README.md"]);
   git(dir, ["commit", "-m", "initial"]);
+}
+
+function linkDirectory(target: string, path: string): void {
+  symlinkSync(resolve(target), path, process.platform === "win32" ? "junction" : "dir");
 }
 
 function makeMockSem(dir: string, options: {
@@ -578,6 +591,105 @@ describe("review-workspace", () => {
       expect(repos).toContain(backendApi);
       expect(repos).not.toContain(root);
       expect(repos).not.toContain(backend); // backend itself is not a repo
+    });
+
+    it("uses a symlinked Git repo's logical workspace path end to end", async () => {
+      const root = makeTempDir("plannotator-workspace-symlink-git-");
+      const targetRoot = makeTempDir("plannotator-workspace-symlink-git-target-");
+      const targetRepo = join(targetRoot, "backend-service");
+      const alias = join(root, "backend");
+      mkdirSync(targetRepo, { recursive: true });
+      initRepo(targetRepo);
+      writeFileSync(join(targetRepo, "README.md"), "# Changed through alias\n", "utf-8");
+      linkDirectory(targetRepo, alias);
+
+      const workspace = await buildLocalWorkspaceReview(root);
+
+      expect(workspace.repos).toHaveLength(1);
+      expect(workspace.repos[0]).toMatchObject({ cwd: alias, label: "backend", selected: true });
+      expect(workspace.rawPatch).toContain("diff --git a/backend/README.md b/backend/README.md");
+    });
+
+    it("discovers a symlinked JJ repo using its logical workspace path", () => {
+      const root = makeTempDir("plannotator-workspace-symlink-jj-");
+      const targetRoot = makeTempDir("plannotator-workspace-symlink-jj-target-");
+      const targetRepo = join(targetRoot, "jj-service");
+      const alias = join(root, "frontend");
+      mkdirSync(join(targetRepo, ".jj"), { recursive: true });
+      linkDirectory(targetRepo, alias);
+
+      expect(discoverWorkspaceRepoPaths(root)).toEqual([alias]);
+    });
+
+    it("discovers repos nested below a symlinked directory", () => {
+      const root = makeTempDir("plannotator-workspace-symlink-nested-");
+      const targetRoot = makeTempDir("plannotator-workspace-symlink-nested-target-");
+      const targetRepo = join(targetRoot, "services", "api");
+      const alias = join(root, "projects");
+      mkdirSync(targetRepo, { recursive: true });
+      initRepo(targetRepo);
+      linkDirectory(targetRoot, alias);
+
+      expect(discoverWorkspaceRepoPaths(root)).toEqual([join(alias, "services", "api")]);
+    });
+
+    it("does not recurse forever through a directory-link cycle", () => {
+      const root = makeTempDir("plannotator-workspace-symlink-cycle-");
+      const container = join(root, "packages");
+      const repo = join(container, "api");
+      mkdirSync(repo, { recursive: true });
+      initRepo(repo);
+      linkDirectory(root, join(container, "back-to-root"));
+
+      expect(discoverWorkspaceRepoPaths(root)).toEqual([repo]);
+    });
+
+    it("ignores broken directory links", () => {
+      const root = makeTempDir("plannotator-workspace-symlink-broken-");
+      const targetRoot = makeTempDir("plannotator-workspace-symlink-broken-target-");
+      const brokenTarget = join(targetRoot, "removed");
+      mkdirSync(brokenTarget, { recursive: true });
+      linkDirectory(brokenTarget, join(root, "broken"));
+      rmSync(brokenTarget, { recursive: true });
+
+      expect(discoverWorkspaceRepoPaths(root)).toEqual([]);
+    });
+
+    it.skipIf(process.platform === "win32")("ignores symlinks to files", () => {
+      const root = makeTempDir("plannotator-workspace-symlink-file-");
+      const targetRoot = makeTempDir("plannotator-workspace-symlink-file-target-");
+      const targetFile = join(targetRoot, "README.md");
+      writeFileSync(targetFile, "not a directory\n", "utf-8");
+      symlinkSync(targetFile, join(root, "linked-file"), "file");
+
+      expect(discoverWorkspaceRepoPaths(root)).toEqual([]);
+    });
+
+    it("chooses the first logical alias deterministically for duplicate targets", () => {
+      const root = makeTempDir("plannotator-workspace-symlink-duplicates-");
+      const targetRoot = makeTempDir("plannotator-workspace-symlink-duplicates-target-");
+      const targetRepo = join(targetRoot, "service");
+      const alphaAlias = join(root, "alpha");
+      mkdirSync(targetRepo, { recursive: true });
+      initRepo(targetRepo);
+      linkDirectory(targetRepo, join(root, "zeta"));
+      linkDirectory(targetRepo, alphaAlias);
+
+      expect(discoverWorkspaceRepoPaths(root)).toEqual([alphaAlias]);
+    });
+
+    it("does not follow a directory link whose logical name is skipped", () => {
+      const root = makeTempDir("plannotator-workspace-symlink-skip-");
+      const targetRoot = makeTempDir("plannotator-workspace-symlink-skip-target-");
+      const targetRepo = join(targetRoot, "dependency-repo");
+      const realRepo = join(root, "app");
+      mkdirSync(targetRepo, { recursive: true });
+      mkdirSync(realRepo, { recursive: true });
+      initRepo(targetRepo);
+      initRepo(realRepo);
+      linkDirectory(targetRepo, join(root, "node_modules"));
+
+      expect(discoverWorkspaceRepoPaths(root)).toEqual([realRepo]);
     });
 
     it("stops recursion at git repo boundaries (does not discover nested repos inside other repos)", () => {

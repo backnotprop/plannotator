@@ -1,6 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,6 +43,10 @@ function makeTempDir(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   tempDirs.push(dir);
   return dir;
+}
+
+function linkDirectory(target: string, path: string): void {
+  symlinkSync(target, path, process.platform === "win32" ? "junction" : "dir");
 }
 
 function writeTempFile(root: string, relativePath: string, content = "x"): string {
@@ -665,11 +678,12 @@ describe("pi review server", () => {
   test("workspace mode maps prefixed paths to child repos", async () => {
     const homeDir = makeTempDir("plannotator-pi-home-");
     const root = makeTempDir("plannotator-pi-workspace-");
+    const apiTarget = makeTempDir("plannotator-pi-workspace-api-");
     const apiDir = join(root, "api");
     const semDir = makeTempDir("plannotator-pi-workspace-switch-sem-");
     const cwdLogPath = join(semDir, "cwd-log");
     const inputLogPath = join(semDir, "input.patch");
-    mkdirSync(apiDir, { recursive: true });
+    linkDirectory(apiTarget, apiDir);
     process.env.HOME = homeDir;
     process.env.PLANNOTATOR_PORT = String(await reservePort());
     process.env.PLANNOTATOR_SEM_PATH = makeMockSem(semDir, { runCwdLogPath: cwdLogPath, inputLogPath });
